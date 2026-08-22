@@ -45,6 +45,17 @@
 | CMP-001–004 | PR-003, PR-004, PR-006, PR-008, PR-013, PR-014, PR-016 | Supported browser/API/version compatibility and provider-neutral contracts |
 | RELSE-001–005 | PR-002 through PR-016 | Version, changelog, migration/rollback, immutable-artifact and release-evidence controls |
 
+### 2.2 CORE implementation ownership
+
+| CORE requirement | Accountable planned PRs | Minimum evidence |
+|---|---|---|
+| WOS-CORE-001, WOS-CORE-006–007 | PR-003 | Configuration-driven brand/terminology, production/demo separation and prohibited-term scans |
+| WOS-CORE-002 | PR-004 | Organization/legal-entity ownership, setup and cross-scope evidence |
+| WOS-CORE-003 | PR-006 | Modular-monolith boundaries, versioned API and compatibility evidence |
+| WOS-CORE-004 | PR-004, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012 | Effective-date overlap, historical-version resolution, immutable-history and controlled-correction evidence across workforce, engagement, policy and commercial domains |
+| WOS-CORE-005 | PR-006, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-014 | Common mutation/audit contract and module-specific actor, active-role, source, entity, reason and material before/after evidence |
+| WOS-CORE-008 | PR-010, PR-011, PR-012, PR-013 | Decimal-safe rate/amount behavior, deterministic vectors, immutable snapshots/batches and report/control-total reconciliation |
+
 ## 3. Planned pull-request sequence
 
 ### PR-001 — WOS-00 Governing blueprint
@@ -131,7 +142,7 @@
 - Guided setup/readiness page and API.
 - Worker-master ownership fields, configurable worker types and dependency-aware worker lifecycle controls.
 
-**Requirements:** WOS-ORG-001 through WOS-ORG-010, WOS-CORE-002, WOS-IAM-005, WOS-WKF-001, WOS-WKF-002, WOS-WKF-006.
+**Requirements:** WOS-ORG-001 through WOS-ORG-010, WOS-CORE-002, WOS-CORE-004, WOS-IAM-005, WOS-WKF-001, WOS-WKF-002, WOS-WKF-006.
 
 **Mandatory evidence:**
 
@@ -140,6 +151,7 @@
 - Out-of-scope organization attempts denied.
 - Guided setup states are server derived.
 - Imported workers retain identity and relationships; worker-type and lifecycle dependency tests cover active assignments, approvals, work and ownership.
+- Effective-dated organization, worker and calendar history resolves to the correct prior version after later changes.
 
 ### PR-005 — WOS-03 CI/CD, migration harness and production profiles
 
@@ -174,9 +186,10 @@
 - Extract identity/access, organization/configuration and audit/platform seams from large shared files.
 - `/api/v1` foundation and error contract.
 - Request correlation and operation IDs.
+- Common production-mutation/audit contract.
 - Compatibility adapters for unchanged UI flows.
 
-**Requirements:** WOS-CORE-003, WOS-GOV-001 through WOS-GOV-004, WOS-NFR-MNT-001 through WOS-NFR-MNT-008.
+**Requirements:** WOS-CORE-003, WOS-CORE-005, WOS-GOV-001 through WOS-GOV-004, WOS-NFR-MNT-001 through WOS-NFR-MNT-008.
 
 **Mandatory evidence:**
 
@@ -184,6 +197,7 @@
 - API contract tests for v1 foundation.
 - No authorization regression.
 - Measurable reduction or bounded-growth rule for central files.
+- Common mutation evidence captures actor, active role, source, entity, action, reason and material before/after values without sensitive-data leakage.
 
 ### PR-007 — WOS-04 Contracts, engagement models and project hierarchy
 
@@ -198,7 +212,7 @@
 - Project/workstream relationship and lifecycle guardrails.
 - Migration of current clients/projects into default engagement records.
 
-**Requirements:** WOS-CLI-001, WOS-CLI-002, WOS-CTR-001 through WOS-CTR-003, WOS-ENG-001 through WOS-ENG-005.
+**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CLI-001, WOS-CLI-002, WOS-CTR-001 through WOS-CTR-003, WOS-ENG-001 through WOS-ENG-005.
 
 **Mandatory evidence:**
 
@@ -206,6 +220,7 @@
 - Engagement-specific validation tests.
 - Dependency-safe closure tests.
 - Scoped browser journeys for admin, manager and operational roles.
+- Contract/engagement/project effective versions and all production mutations preserve historical and audit evidence.
 
 ### PR-008 — WOS-04 Flexible work capture and assignment validation
 
@@ -223,7 +238,7 @@
 - Compatibility migration for current timesheets.
 - Effective capacity profiles, skills/certifications, single-count leave/holiday availability, workforce self-service and scoped directory/hierarchy views.
 
-**Requirements:** WOS-TIM-001 through WOS-TIM-012, WOS-RES-001 through WOS-RES-009, WOS-WKF-003 through WOS-WKF-005, WOS-WKF-007, WOS-WKF-008.
+**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-TIM-001 through WOS-TIM-012, WOS-RES-001 through WOS-RES-009, WOS-WKF-003 through WOS-WKF-005, WOS-WKF-007, WOS-WKF-008.
 
 **Mandatory evidence:**
 
@@ -232,6 +247,7 @@
 - Daily and weekly browser journeys.
 - Historical imported timesheets remain readable.
 - Capacity/skills/availability calculations, leave single-count rules, worker self-service and cross-scope workforce views have positive and negative API/browser evidence.
+- Assignment/capacity/work corrections create versioned history and complete mutation audit rather than rewriting accepted evidence.
 
 ### PR-009 — WOS-05 Approval and policy engine
 
@@ -248,7 +264,7 @@
 - Bulk decision safety.
 - Integration with timesheets, leave and assignment changes.
 
-**Requirements:** WOS-APR-001 through WOS-APR-008, WOS-ORG-009.
+**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-APR-001 through WOS-APR-008, WOS-ORG-009.
 
 **Mandatory evidence:**
 
@@ -256,6 +272,7 @@
 - Delegation cannot broaden data scope.
 - Locked periods reject all write paths including imports.
 - Multi-role browser and API evidence.
+- Effective-dated policies resolve historically and every decision, delegation, escalation, reassignment and reopen transition is traceably audited.
 
 ### PR-010 — WOS-06 Rate cards, cost rates and commercial terms
 
@@ -271,7 +288,7 @@
 - Rate-resolution service and evidence.
 - Commercial change audit and approval hooks.
 
-**Requirements:** WOS-COM-001 through WOS-COM-005, WOS-COM-014, WOS-COM-015.
+**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CORE-008, WOS-COM-001 through WOS-COM-005, WOS-COM-014, WOS-COM-015.
 
 **Mandatory evidence:**
 
@@ -279,6 +296,7 @@
 - Cost visibility negative tests.
 - Decimal and rounding tests.
 - Historical rate resolution remains stable after later edits.
+- Commercial-term mutations retain authorized reason, approval reference and material before/after evidence.
 
 ### PR-011 — WOS-06 Commercial calculation and project margin engine
 
@@ -298,7 +316,7 @@
 - Budget versus actual and estimate at completion.
 - PO consumption and thresholds.
 
-**Requirements:** WOS-COM-006 through WOS-COM-013.
+**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CORE-008, WOS-COM-006 through WOS-COM-013.
 
 **Mandatory evidence:**
 
@@ -307,6 +325,7 @@
 - Reconciliation to source work/terms/rates.
 - Currency and rounding edge cases.
 - Snapshot immutability and controlled recalculation evidence.
+- Calculation/recalculation/finalization jobs preserve operation ID, source versions, actor or system identity and audit evidence.
 - Owner Gate C working-product review.
 
 ### PR-012 — WOS-06 Invoice readiness
@@ -324,7 +343,7 @@
 - No-double-billing constraints.
 - Versioned CSV/API-ready export.
 
-**Requirements:** WOS-INV-001 through WOS-INV-008.
+**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CORE-008, WOS-INV-001 through WOS-INV-008.
 
 **Mandatory evidence:**
 
@@ -333,6 +352,7 @@
 - Batch state/approval tests.
 - Export traceability and audit.
 - Reversal/correction test paths.
+- Finalized source versions and batch lines remain immutable; every transition and adjustment is traceably audited.
 
 ### PR-013 — WOS-07 Reporting, leakage control and adapter contracts
 
@@ -349,7 +369,7 @@
 - Worklog import and finance-export adapter contracts.
 - Integration health and idempotency patterns.
 
-**Requirements:** WOS-RPT-001 through WOS-RPT-007, WOS-INT-001 through WOS-INT-006.
+**Requirements:** WOS-CORE-005, WOS-CORE-008, WOS-RPT-001 through WOS-RPT-007, WOS-INT-001 through WOS-INT-006.
 
 **Mandatory evidence:**
 
@@ -357,6 +377,7 @@
 - Leakage scenarios have deterministic fixtures.
 - Out-of-scope report/export tests.
 - Adapter mock contract tests.
+- Report/export operations are audited with actor, scope, filters, as-of/version and control totals.
 
 ### PR-014 — WOS-08 Identity, session and security hardening
 
@@ -372,7 +393,7 @@
 - Permission/access-review export.
 - Threat-model-driven fixes and security tests.
 
-**Requirements:** WOS-IAM-001 through WOS-IAM-010 and applicable WOS-NFR-SEC requirements.
+**Requirements:** WOS-CORE-005, WOS-IAM-001 through WOS-IAM-010 and applicable WOS-NFR-SEC requirements.
 
 **Mandatory evidence:**
 
@@ -381,6 +402,7 @@
 - Disabled user/session invalidation.
 - Security headers and identity configuration evidence.
 - No secrets in build/logs.
+- Identity, session, role, permission and access-review mutations are traceably audited without exposing tokens or secrets.
 
 ### PR-015 — WOS-08 Observability, recovery and release operations
 
