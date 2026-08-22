@@ -4,14 +4,14 @@
 
 ## Outcome
 
-Scoped operational and commercial read models explain workforce, utilization, delivery, revenue, margin, invoice readiness, data quality and leakage with control totals and auditable exports.
+Scoped operational and commercial read models explain workforce, utilization, delivery, billable value, optional non-statutory operational earned-management revenue, margin, invoice readiness, data quality and leakage with control totals and auditable exports.
 
 ## Report groups
 
 - Operational dashboard: active workforce, capacity, staffing risk, pending work/approvals and data confidence.
 - Planned, actual and forecast utilization with explicit denominators/inclusion/as-of date.
-- Budget versus actual, revenue, cost, gross margin, PO consumption, fixed-fee/retainer consumption and EAC.
-- Approved-unbilled and invoice-ready reconciliation.
+- Budget versus actual, billable value, operational earned-management revenue only where an authorized effective-dated policy is active, cost, gross margin, PO consumption, fixed-fee/retainer consumption and EAC.
+- Approved-unbilled and invoice-ready reconciliation across T&M snapshots, milestones, fixed-fee schedule events, retainer events, managed-service events and approved adjustments.
 - Data-quality and integration-health reports.
 
 ## Revenue-leakage controls
@@ -22,7 +22,7 @@ Each signal has entity, severity, reason, owner, suggested action, as-of date an
 
 ## Read models and reconciliation
 
-Reports query authoritative records/snapshots and publish control totals. Commercial reports reconcile to snapshot and invoice-ready line/batch totals. Materialized views/jobs may improve performance but retain refresh time/version and cannot become an untraceable alternative source of truth.
+Reports query authoritative records/snapshots and publish control totals. Operational earned-management metrics identify the active policy/version and never claim statutory recognition. Commercial reports reconcile source eligibility to the approved-unbilled register and then to invoice-ready line/batch totals. Materialized views/jobs may improve performance but retain refresh time/version and cannot become an untraceable alternative source of truth.
 
 ## Scope and exports
 

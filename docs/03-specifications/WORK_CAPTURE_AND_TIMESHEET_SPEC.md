@@ -14,7 +14,7 @@ A work entry contains worker, date, engagement/project, optional task/ticket/mil
 
 - Weekly grid and daily entry are v1 modes.
 - Configurable increments, daily/weekly limits, overtime, deadlines and grace periods.
-- Categories distinguish billable client, non-billable client, internal, pre-sales, training, administration and buyer-defined work.
+- Categories distinguish billable client, non-billable client, internal, pre-sales, training, administration and buyer-defined work. Leave/absence may appear as read-only availability/calendar context but is not a productive work entry, is never billable and needs no client engagement/project.
 - Future dates, assignment/contract dates and period states are server validated.
 - Imported and manual entries use deterministic duplicate/source keys.
 
@@ -26,7 +26,7 @@ Submission validates all entries atomically and creates the required approval. R
 
 ## Utilization
 
-Actual utilization uses approved work and configured inclusion rules divided by effective available capacity. Draft, rejected or otherwise excluded categories do not silently count.
+Actual utilization uses approved productive work and configured inclusion rules divided by effective available capacity. Approved leave/holidays reduce availability exactly once and never enter the numerator; Draft, rejected, absence-reference or otherwise excluded categories do not silently count.
 
 ## Authorization and audit
 

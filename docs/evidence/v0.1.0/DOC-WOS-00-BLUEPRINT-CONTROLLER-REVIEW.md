@@ -4,13 +4,13 @@
 **Issue:** #2  
 **Pull request:** #1  
 **Branch:** `controller/wos-00-blueprint`  
-**Status:** Controller document-pack review complete; independent Codex review and owner Gate B pending
+**Status:** Controller document-pack review and first independent Codex/Sol review complete; findings corrected, moved-head re-review and owner Gate B pending
 
 ## Outcome reviewed
 
 The PR contains the governing product requirements, programme controls, architecture overview and eight ADRs, product/feature specifications, quality/security/release controls, repository templates, Codex execution playbook, source-provenance policy, implementation roadmap, risk register and buyer-handover checklist.
 
-Application source, reference Git history, credentials, real company/customer data and owner-only pricing/IP-sale strategy remain excluded.
+Application source, reference Git history, credentials, real company/customer data and transaction-specific pricing/licensing/assignment strategy remain excluded.
 
 ## Controller checks
 
@@ -40,6 +40,12 @@ Application source, reference Git history, credentials, real company/customer da
 4. Normalized classic GitHub issue-template front matter.
 5. Added explicit Markdown/LF repository attributes.
 
+## Independent review findings and controller disposition
+
+Independent Codex/Sol review 5000738492 at head 492715dc8a40de6431365b6e52378d317721f617 identified five P1 and two P2 findings. The correction pass assigned workforce and all NFR families, defined cross-model approved-unbilled eligibility, introduced fail-closed non-statutory operational earned-management policy semantics, removed owner-only commercialization defaults, made the forbidden-term boundary reproducible, removed the undefined Gate A claim, clarified leave single-count semantics and added the clean-source merge boundary.
+
+These corrections require a fresh independent review at the moved head before Gate B.
+
 ## Open gates
 
 - DOC-WOS-00-002: fresh independent Codex review against the exact final PR head.
@@ -49,4 +55,4 @@ Application source, reference Git history, credentials, real company/customer da
 
 ## Deferred owner decisions
 
-Final commercial name/trademark, external licensing or exclusive assignment terms, buyer-specific RPO/RTO/support targets and first-buyer financial policies remain correctly deferred and do not block the technical blueprint.
+Final commercial name/trademark, transaction-specific legal/commercial terms, buyer-specific RPO/RTO/support targets and first-buyer approval/operational earned-management policy choices remain external or deferred and do not block the technical blueprint.

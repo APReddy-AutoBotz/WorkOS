@@ -1,6 +1,6 @@
 # WorkOS Commercial Productization Programme Charter
 
-**Document status:** Gate A programme execution baseline; full blueprint acceptance pending Gate B  
+**Document status:** Programme initiation approved on 2026-08-22; governing blueprint acceptance pending Gate B  
 **Programme code:** WOS  
 **Product working name:** WorkOS  
 **Repository:** `APReddy-AutoBotz/WorkOS`  
@@ -153,7 +153,7 @@ Deferred capabilities may be prepared through extension points but must not dela
 - The commercial repository must exclude company-only presentations, screenshots, credentials, domains, data and confidential operating material.
 - `PROVENANCE.md` records the declared permission basis and exact technical baseline.
 - Proprietary WorkOS code, buyer-specific customizations and third-party/open-source components must be clearly distinguished.
-- Pricing, negotiation floors and owner-only commercial strategy must remain outside the deliverable product repository.
+- Transaction-specific pricing, valuation and legal/commercial strategy must remain outside the deliverable product repository.
 
 ## 9. Delivery governance
 
@@ -187,6 +187,14 @@ The controller may decide routine technical implementation matters within approv
 - A commercial calculation policy that materially changes buyer financial results.
 - IP, exclusivity, licensing or sale terms.
 - Production credentials, customer data or deployment approval.
+
+### 9.4 Controlled approval gates
+
+The owner's 2026-08-22 programme-initiation approval authorized the private repository strategy, controller operation and WOS-00 blueprint creation. It is contextual authority, not a product acceptance gate and does not authorize source import.
+
+- **Gate B — Blueprint acceptance:** required before importing the application source or starting WOS-01 implementation.
+- **Gate C — Commercial-engine acceptance:** required after deterministic revenue/margin/invoice-readiness evidence and before treating the commercial engine as accepted.
+- **Gate D — v1 release acceptance:** required before declaring/tagging the sellable WorkOS v1.0 release.
 
 ## 10. Weighted programme plan
 

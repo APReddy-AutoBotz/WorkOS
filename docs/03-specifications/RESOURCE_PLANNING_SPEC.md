@@ -8,7 +8,7 @@ Authorized planners understand effective capacity, availability, demand, assignm
 
 ## Workforce and capacity
 
-Workers include type/status, organization structure, manager, dates, utilization eligibility and effective capacity profiles. Working calendars, holidays and approved leave reduce availability. Skills/certifications support deterministic filtering and demand matching.
+Workers include type/status, organization structure, manager, dates, utilization eligibility and effective capacity profiles. Working calendars, holidays and approved leave reduce availability exactly once; absence is not productive/billable work and is excluded from the actual-utilization numerator. Skills/certifications support deterministic filtering and demand matching.
 
 ## Demand and assignment
 
@@ -36,7 +36,7 @@ Planners receive organization/legal-entity and relationship scope. Worker person
 
 Positive:
 
-- Calculate part-time/leave-adjusted capacity and overlapping assignments.
+- Calculate part-time/leave-adjusted capacity and overlapping assignments while proving leave is not double counted or treated as productive work.
 - Show future roll-off, bench and demand gaps for a scoped manager.
 - Approve a material assignment change and preserve prior version.
 

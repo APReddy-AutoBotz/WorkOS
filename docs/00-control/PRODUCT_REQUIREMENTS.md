@@ -71,7 +71,7 @@ The buyer must be able to configure user-facing labels for at least employee/res
 
 ### WOS-CORE-007 — No company-specific runtime dependencies
 
-No runtime feature, seed, template, notification or document delivered with the product may require Boundaryless names, assets, domains, roles, data or operating conventions.
+No runtime feature, seed, template, notification or buyer-delivered document may require reference-company names, assets, domains, roles, data or operating conventions.
 
 ### WOS-CORE-008 — Deterministic financial behavior
 
@@ -181,7 +181,7 @@ Workers may have skills, proficiency, certifications and availability notes for 
 
 ### WOS-WKF-005 — Leave and absence impact
 
-Approved leave and configured holidays must reduce availability according to calendar and capacity rules.
+Approved leave and configured holidays must reduce availability exactly once according to calendar and capacity rules. Leave/absence is an availability reference, not productive or billable work: it must not require a client engagement/project, enter the actual-utilization numerator, create commercial value or reduce capacity a second time through a work-entry calculation.
 
 ### WOS-WKF-006 — Workforce lifecycle guardrails
 
@@ -291,7 +291,7 @@ The buyer must be able to enable weekly grid and daily-entry modes. A timer may 
 
 ### WOS-TIM-002 — Work categories
 
-Work categories must distinguish billable client work, non-billable client work, internal delivery, pre-sales, training, leave/absence reference, administration and buyer-defined categories.
+Work categories must distinguish billable client work, non-billable client work, internal delivery, pre-sales, training, administration and buyer-defined categories. A leave/absence reference may be displayed for calendar/availability context, but it is not a productive work entry, is never billable and does not require a client engagement/project.
 
 ### WOS-TIM-003 — Entry dimensions
 
@@ -411,7 +411,9 @@ Managed-service engagements must support service units, tickets, shifts or other
 
 ### WOS-COM-011 — Revenue and cost snapshots
 
-The system must produce period snapshots for approved work, billable value, recognized/earned revenue where configured, cost, gross margin and margin percentage.
+The system must produce versioned period snapshots for approved work, billable value, cost, gross margin and margin percentage. WorkOS may additionally calculate **operational earned-management revenue** for planning and project-control purposes; this is not statutory IFRS/GAAP revenue recognition and is not a general-ledger posting.
+
+The neutral default must fail closed: no non-T&M operational earned-management revenue snapshot may be created until an authorized, effective-dated policy is explicitly selected. Supported policy profiles must cover at least T&M approved eligible value, fixed-fee time-elapsed, fixed-fee progress/effort, milestone acceptance, retainer service-period/base/overage and managed-service accepted-unit/period-charge. Each active policy must define source evidence, timing, inputs, exclusions, effective dates, currency/FX, rounding, version, approval owner and correction behavior. Billing eligibility and invoice readiness remain independent from the earned-management policy.
 
 ### WOS-COM-012 — Estimate at completion
 
@@ -433,7 +435,16 @@ Cost rates, individual compensation-derived data and margin details must be sepa
 
 ### WOS-INV-001 — Approved-unbilled register
 
-Finance-authorized users must see approved billable work or milestones not yet included in an invoice-ready batch.
+Finance-authorized users must see every approved, billing-eligible source not already included in an active or finalized invoice-ready batch. Eligible source types are:
+
+- Approved T&M work calculation snapshots.
+- Accepted and billing-eligible milestone events.
+- Approved or contractually due fixed-fee billing-schedule events.
+- Approved retainer base, period and overage events.
+- Approved managed-service period-charge or accepted-unit events.
+- Approved commercial adjustments, credits, discounts, write-offs or corrections that are invoice eligible.
+
+Every register row must preserve source type and version, organization/legal entity, client/contract/engagement, approval or eligibility evidence, currency, eligible date, amount, calculation/policy evidence where applicable, and active/final batch state. Operational earned-management revenue does not by itself make a source invoice eligible.
 
 ### WOS-INV-002 — Invoice-ready batches
 
@@ -441,7 +452,7 @@ Users must create controlled invoice-ready batches by client, legal entity, enga
 
 ### WOS-INV-003 — Batch line traceability
 
-Every batch line must trace to approved work, milestone, retainer schedule or adjustment and preserve its commercial calculation evidence.
+Every batch line must trace to one versioned eligible source from WOS-INV-001—including T&M snapshot, milestone, fixed-fee schedule, retainer event, managed-service event or approved adjustment—and preserve approval/eligibility and commercial-calculation evidence.
 
 ### WOS-INV-004 — Adjustments
 

@@ -39,7 +39,7 @@ Common conditions include:
 
 ## Positioning boundaries
 
-WorkOS is not a payroll engine, full HRMS, CRM, task tracker, statutory invoice issuer, general ledger or autonomous AI approval/calculation system. Integration contracts allow those systems to remain systems of record where appropriate.
+WorkOS is not a payroll engine, full HRMS, CRM, task tracker, statutory invoice issuer, statutory revenue-recognition/accounting engine, general ledger or autonomous AI approval/calculation system. Integration contracts allow those systems to remain systems of record where appropriate.
 
 ## Working-name policy
 

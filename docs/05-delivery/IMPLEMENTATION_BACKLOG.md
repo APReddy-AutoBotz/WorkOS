@@ -29,6 +29,22 @@
 | WOS-08 | 8% | v0.9.0 | Enterprise security, observability, recovery and deployment |
 | WOS-09 | 4% | v1.0.0 | Production-like acceptance and buyer handover |
 
+### 2.1 NFR implementation ownership
+
+| NFR family | Accountable planned PRs | Minimum evidence |
+|---|---|---|
+| SEC-001–014 | PR-003, PR-005, PR-006, PR-009, PR-010, PR-012, PR-013, PR-014, PR-016 | Threat boundaries, secure defaults, negative authorization, secret/dependency and security-review evidence |
+| PRV-001–006 | PR-004, PR-008, PR-010, PR-012, PR-013, PR-014, PR-016 | Data minimization, field-level scope, retention/anonymization and privacy export evidence |
+| REL-001–009 | PR-005, PR-006, PR-008, PR-009, PR-011, PR-012, PR-013, PR-015, PR-016 | Fail-closed, transaction/idempotency, recovery and exact-head reliability evidence |
+| PERF-001–008 | PR-006, PR-008, PR-011, PR-012, PR-013, PR-015, PR-016 | Pagination/query review, bounded jobs/exports and Standard-profile performance evidence |
+| DAT-001–008 | PR-004, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-016 | Ownership, temporal, precision, snapshot, constraint and control-total evidence |
+| MNT-001–008 | PR-002 through PR-016 | Bounded modules/files, typed contracts, documentation and maintainability evidence in every affected PR |
+| DPL-001–007 | PR-003, PR-005, PR-015, PR-016 | Portable container/environment, explicit migration and production deployment evidence |
+| OBS-001–006 | PR-005, PR-006, PR-009, PR-011, PR-012, PR-013, PR-015, PR-016 | Correlation, safe structured logs, job/integration health and alert evidence |
+| UX-001–006 | PR-003, PR-004, PR-008, PR-009, PR-012, PR-013, PR-016 | Accessibility, responsive role journeys, terminology/locale and understandable errors |
+| CMP-001–004 | PR-003, PR-004, PR-006, PR-008, PR-013, PR-014, PR-016 | Supported browser/API/version compatibility and provider-neutral contracts |
+| RELSE-001–005 | PR-002 through PR-016 | Version, changelog, migration/rollback, immutable-artifact and release-evidence controls |
+
 ## 3. Planned pull-request sequence
 
 ### PR-001 — WOS-00 Governing blueprint
@@ -74,7 +90,9 @@
 - Exact source commit verified.
 - Imported-file allow/exclude manifest.
 - `npm ci`, type/lint, build and existing regression suite results.
-- No write or PR against `Boundaryless-WorkOS`.
+- No write or pull request against the pinned reference repository.
+
+**Merge boundary:** PR-002 may not merge to `main` while prohibited company-specific runtime branding, data or operational references remain. The imported runtime must be neutralized inside PR-002, or PR-003 must remain stacked on PR-002 and only the combined clean, configuration-driven state may merge.
 
 ### PR-003 — WOS-01 Neutral branding and product configuration foundation
 
@@ -111,8 +129,9 @@
 - Organization-scoped identifiers and access context.
 - Working calendar and period configuration foundations.
 - Guided setup/readiness page and API.
+- Worker-master ownership fields, configurable worker types and dependency-aware worker lifecycle controls.
 
-**Requirements:** WOS-ORG-001 through WOS-ORG-010, WOS-CORE-002, WOS-IAM-005.
+**Requirements:** WOS-ORG-001 through WOS-ORG-010, WOS-CORE-002, WOS-IAM-005, WOS-WKF-001, WOS-WKF-002, WOS-WKF-006.
 
 **Mandatory evidence:**
 
@@ -120,6 +139,7 @@
 - Existing records assigned to a default organization without loss.
 - Out-of-scope organization attempts denied.
 - Guided setup states are server derived.
+- Imported workers retain identity and relationships; worker-type and lifecycle dependency tests cover active assignments, approvals, work and ownership.
 
 ### PR-005 — WOS-03 CI/CD, migration harness and production profiles
 
@@ -201,8 +221,9 @@
 - Assignment/contract/period validation.
 - Correction/reopen history and duplicate protection.
 - Compatibility migration for current timesheets.
+- Effective capacity profiles, skills/certifications, single-count leave/holiday availability, workforce self-service and scoped directory/hierarchy views.
 
-**Requirements:** WOS-TIM-001 through WOS-TIM-012, WOS-RES-001 through WOS-RES-009.
+**Requirements:** WOS-TIM-001 through WOS-TIM-012, WOS-RES-001 through WOS-RES-009, WOS-WKF-003 through WOS-WKF-005, WOS-WKF-007, WOS-WKF-008.
 
 **Mandatory evidence:**
 
@@ -210,6 +231,7 @@
 - Work outside assignment/contract/period blocked or routed as configured.
 - Daily and weekly browser journeys.
 - Historical imported timesheets remain readable.
+- Capacity/skills/availability calculations, leave single-count rules, worker self-service and cross-scope workforce views have positive and negative API/browser evidence.
 
 ### PR-009 — WOS-05 Approval and policy engine
 
@@ -261,7 +283,7 @@
 ### PR-011 — WOS-06 Commercial calculation and project margin engine
 
 **Branch:** `codex/wos-06-commercial-engine`  
-**Outcome:** Calculate reconciled revenue, cost and margin across supported engagement models.
+**Outcome:** Calculate reconciled billable value, cost, margin and explicitly configured operational earned-management revenue across supported engagement models.
 
 **Includes:**
 
@@ -272,6 +294,7 @@
 - Retainer consumption/overage.
 - Managed-service quantity foundation.
 - Revenue/cost/margin snapshots.
+- Effective-dated operational earned-management policy profiles that fail closed for non-T&M models until an authorized policy is selected; billing eligibility remains independent.
 - Budget versus actual and estimate at completion.
 - PO consumption and thresholds.
 
@@ -279,7 +302,8 @@
 
 **Mandatory evidence:**
 
-- Golden financial test vectors for every engagement type.
+- Golden financial test vectors for every engagement type, including policy-disabled and each enabled earned-management profile.
+- Evidence that operational earned-management metrics are non-statutory and cannot run for non-T&M models without an authorized effective-dated policy.
 - Reconciliation to source work/terms/rates.
 - Currency and rounding edge cases.
 - Snapshot immutability and controlled recalculation evidence.
@@ -292,7 +316,7 @@
 
 **Includes:**
 
-- Approved-unbilled register.
+- Approved-unbilled register covering approved T&M snapshots, accepted billing-eligible milestones, approved/due fixed-fee schedule events, approved retainer base/period/overage events, approved managed-service period/unit events and approved adjustments.
 - Invoice-ready batch and line model.
 - Adjustments, discounts, credits and write-offs.
 - Evidence links and control totals.
@@ -304,7 +328,8 @@
 
 **Mandatory evidence:**
 
-- Duplicate inclusion prevention.
+- Duplicate inclusion prevention across every eligible source type.
+- Register-to-batch reconciliation by source version, approval/eligibility evidence, currency, eligible date and amount.
 - Batch state/approval tests.
 - Export traceability and audit.
 - Reversal/correction test paths.

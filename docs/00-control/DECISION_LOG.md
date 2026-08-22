@@ -28,18 +28,19 @@
 | WOS-DEC-019 | 2026-08-22 | Use controlled versioned migrations with fresh-install and upgrade evidence | Accepted | ADR-008 |
 | WOS-DEC-020 | 2026-08-22 | Use GitHub as the authoritative implementation/release record and Codex as a bounded implementation agent | Accepted | Codex execution playbook |
 | WOS-DEC-021 | 2026-08-22 | Prefer appropriate Sol models in Codex, using the strongest reasoning option for architecture/security/migrations/financial work | Accepted execution policy | AGENTS and execution playbook |
-| WOS-DEC-022 | 2026-08-22 | Keep owner-only pricing, negotiation and IP-sale strategy outside the product repository | Accepted | Provenance/risk controls |
+| WOS-DEC-022 | 2026-08-22 | Keep transaction-specific pricing, valuation, licensing, assignment and negotiation strategy outside the product repository | Accepted | Provenance/risk controls |
+| WOS-DEC-023 | 2026-08-22 | Treat operational earned-management revenue as a non-statutory management metric; non-T&M calculation fails closed until an authorized effective-dated policy is selected, independently of billing eligibility | Accepted | WOS-COM-011 and commercial specification |
 
 ## 2. Deferred owner decisions
 
 | ID | Decision required | Required by | Default until decided |
 |---|---|---|---|
 | WOS-DEC-P01 | Final commercial product name, trademark and domain | Before commercial launch/material branding investment | Continue using configurable temporary name `WorkOS` |
-| WOS-DEC-P02 | Exclusive IP sale versus perpetual non-exclusive source licence for a specific buyer | Before proposal/contract | Retain reusable core IP; do not assume exclusivity |
+| WOS-DEC-P02 | Transaction-specific licensing, assignment, ownership and commercialization terms | Before proposal/contract | No product-repository default; decide through external legal/commercial approval |
 | WOS-DEC-P03 | Exact legal form and wording of commercialization permission | Before external licensing/assignment | Product build may proceed; external sale remains gated |
 | WOS-DEC-P04 | Buyer-specific availability, RPO/RTO and support SLA | Buyer contract/deployment | Use Standard-profile targets in NFRs |
 | WOS-DEC-P05 | Final production hosting reference architectures to support commercially | Before v0.9.0 | Provide portable container/PostgreSQL baseline and at least one tested cloud path |
-| WOS-DEC-P06 | First buyer's exact approval and revenue-recognition policies | Commercial-engine UAT | Implement configurable policies and documented neutral defaults |
+| WOS-DEC-P06 | First buyer's approval and operational earned-management policy choices | Commercial-engine UAT | Billing eligibility remains independent; non-T&M earned-management calculation stays disabled until an authorized effective-dated policy is configured |
 
 ## 3. Decision procedure
 

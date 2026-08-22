@@ -78,16 +78,17 @@ Current high-priority controls:
 
 - Preserve the reference repository unchanged.
 - Import only the pinned authorized source commit after Gate B.
+- Do not merge an imported runtime to `main` while prohibited company-specific branding/data remains; neutralize it in PR-002 or merge only the combined clean stacked PR-003 state.
 - Keep owner-only pricing and deal strategy outside the product repository.
 - Treat WorkOS as a temporary working name pending trademark/brand decision.
 - Use deterministic server-authoritative financial calculations.
 
 ## 7. Next controller actions
 
-1. Run/review the WOS-00 documentation inventory, references, prohibited-term, credential-like and ID consistency checks.
-2. Request a fresh independent Codex review against the exact PR #1 head using the strongest appropriate Sol review model.
-3. Resolve blocking findings and recheck the moved head.
-4. Present the completed blueprint and unresolved owner decisions for Gate B approval.
+1. Materialize and inspect all findings from independent review `5000738492`.
+2. Run a fresh independent Codex/Sol review against the moved correction head.
+3. Resolve any remaining blocking findings and recheck the exact head.
+4. Present the completed blueprint and unresolved external decisions for Gate B approval.
 5. Merge and tag v0.1.0 only after approval and accepted evidence.
 6. Start WOS-01 issue #3 only after the Gate B record exists.
 
