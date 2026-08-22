@@ -11,33 +11,66 @@ Scoped operational and commercial read models explain workforce, utilization, de
 - Operational dashboard: active workforce, capacity, staffing risk, pending work/approvals and data confidence.
 - Planned, actual and forecast utilization with explicit denominators/inclusion/as-of date.
 - Budget versus actual, billable value, operational earned-management revenue only where an authorized effective-dated policy is active, cost, gross margin, PO consumption, fixed-fee/retainer consumption and EAC.
-- Approved-unbilled and invoice-ready reconciliation across T&M snapshots, milestones, fixed-fee schedule events, retainer events, managed-service events and approved adjustments.
+- Billing-eligibility, approved-unbilled and invoice-ready reconciliation for T&M, milestone, fixed-fee, retainer, managed-service and approved-adjustment sources.
 - Data-quality and integration-health reports.
 
 ## Revenue-leakage controls
 
-Deterministic signals include missing/late timesheets, unapproved work, approved-unbilled work, date-policy exceptions, missing/conflicting rates, PO risk, fixed-fee overrun, retainer expiry/overconsumption, low margin and duplicate/anomalous billing eligibility.
+Deterministic signals include missing/late timesheets, unapproved work, source evidence that has not produced a required billing-eligibility event, eligible events missing an approved-unbilled item, approved-unbilled items not batched within policy, date-policy exceptions, missing/conflicting rates, PO risk, fixed-fee overrun, retainer expiry/overconsumption, low margin and duplicate/anomalous billing eligibility.
 
-Each signal has entity, severity, reason, owner, suggested action, as-of date and source evidence. Signals do not autonomously change finance or approval state.
+Each signal has entity, severity, reason, owner, suggested action, as-of date and source evidence. Signals do not autonomously create eligibility events, register items, invoice-ready lines or finance/approval state.
 
 ## Read models and reconciliation
 
-Reports query authoritative records/snapshots and publish control totals. Operational earned-management metrics identify the active policy/version and never claim statutory recognition. Commercial reports reconcile source eligibility to the approved-unbilled register and then to invoice-ready line/batch totals. Materialized views/jobs may improve performance but retain refresh time/version and cannot become an untraceable alternative source of truth.
+Reports query authoritative records and versioned commercial evidence. Operational earned-management metrics identify the active policy/version and never claim statutory recognition or billing authority.
+
+Commercial reconciliation follows only this lineage:
+
+```text
+versioned source evidence
+→ billing-eligibility-event version
+→ approved-unbilled-item version
+→ invoice-ready line
+→ active/finalized batch
+→ finance export/confirmation
+```
+
+Reports publish separate control totals and exception counts at every boundary. A raw source or calculation snapshot appearing in an invoice-ready total without an event and register item is a blocking data-quality/control failure.
+
+The approved-unbilled register report contains only approved-unbilled-item versions and includes source type/version, event version, organization/legal entity, approval or contractual-due evidence, eligible date, currency, amount, reversal/supersession state and active/final batch state. It does not treat raw T&M snapshots, milestones, schedules, retainer/managed-service events or adjustments as alternative register rows.
+
+Materialized views/jobs may improve performance but retain refresh time/version and cannot become an untraceable alternative source of truth.
 
 ## Scope and exports
 
 Server-side permission and organization/entity scope apply before aggregation and drilldown. Export uses the same scoped query, records filters/as-of/version, output hash/reference and audit event. Cost/margin columns require separate permissions.
 
+Finance exports originate only from approved or finalized invoice-ready batch lines and preserve approved-unbilled-item and billing-eligibility-event lineage and control totals.
+
 ## Integration contracts
 
-Versioned worklog-import and finance-export adapters use idempotency, mapping evidence and failure isolation. Health shows provider mode/readiness, mapping gaps and failures without secrets.
+Versioned worklog-import and finance-export adapters use idempotency, mapping evidence and failure isolation. Health shows provider mode/readiness, mapping gaps, lineage/control-total failures and delivery failures without secrets.
 
 ## Acceptance cases
 
-Positive: role-scoped dashboard/drilldown, utilization denominator explanation, commercial reconciliation and audited CSV/API export.
+Positive cases include:
 
-Negative: employee cannot infer another worker/client/cost/margin via totals, filters, exports or error messages; stale read-model totals fail reconciliation; failed adapter delivery does not claim export confirmation.
+- Role-scoped dashboard and drilldown.
+- Utilization denominator explanation.
+- Source-type-specific billing-eligibility reporting.
+- Source → event → register → batch line/batch/export control-total reconciliation.
+- Audited CSV/API export from approved/finalized batch lines.
+- Reversal/supersession reporting without rewriting prior totals.
+
+Negative cases include:
+
+- Employee cannot infer another worker/client/cost/margin via totals, filters, exports or error messages.
+- A raw source/snapshot cannot appear directly in approved-unbilled or invoice-ready totals.
+- Duplicate eligibility event/register item or multiple active/final batch inclusion is flagged.
+- A reversed/superseded register item is excluded from current eligible totals while history remains visible to authorized roles.
+- Stale read-model totals fail reconciliation.
+- Failed adapter delivery does not claim export confirmation.
 
 ## Migration and rollback
 
-Imported legacy reports remain compatibility views until control totals and role journeys match. Report changes are versioned; rollback restores prior read model without rewriting authoritative snapshots.
+Imported legacy reports remain compatibility views until control totals and role journeys match. Compatibility reports must not expose a direct raw-source-to-batch interpretation. Report changes are versioned; rollback restores the prior read model without rewriting authoritative snapshots, eligibility events, register items or finalized batch evidence.
