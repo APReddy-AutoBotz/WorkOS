@@ -1,0 +1,47 @@
+name: WOS-00 Review Materializer
+
+on:
+  push:
+    branches:
+      - controller/wos-00-blueprint
+    paths:
+      - scripts/materialize-wos00-review.mjs
+      - .github/workflows/wos00-materialize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: controller/wos-00-blueprint
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply review resolutions
+        run: node scripts/materialize-wos00-review.mjs
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          git status --short
+
+      - name: Commit corrected blueprint
+        env:
+          BRANCH: controller/wos-00-blueprint
+        run: |
+          git config user.name "workos-controller[bot]"
+          git config user.email "workos-controller[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "docs: resolve WOS-00 independent review findings"
+          git push origin "HEAD:${BRANCH}"
