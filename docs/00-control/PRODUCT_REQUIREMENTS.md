@@ -464,7 +464,24 @@ Invoice-ready batches must include or link to approved timesheet/work evidence a
 
 ### WOS-INV-006 — Batch states
 
-Batches must support Draft, Under Review, Approved, Exported, Billed/Confirmed and Cancelled states with valid transitions.
+Invoice-ready batches must use the canonical states `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`.
+
+State occupancy is authoritative:
+
+- Open/active occupying states: `Draft`, `Under Review`, `Approved`.
+- Final occupying states: `Exported`, `Billed/Confirmed`.
+- Non-occupying terminal state: `Cancelled`, only when cancellation occurs before successful export or billing confirmation.
+
+Minimum allowed transitions are:
+
+- `Draft` → `Under Review` or `Cancelled`.
+- `Under Review` → `Draft`, `Approved` or `Cancelled`.
+- `Approved` → `Exported` or `Cancelled`.
+- `Exported` → `Billed/Confirmed`.
+
+`Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`. A failed export must leave the batch in `Approved`; only provider acceptance of the exact versioned payload and matching control totals may transition it to `Exported`.
+
+Cancellation is allowed only from `Draft`, `Under Review` or a pre-export `Approved` batch. It requires protected authority, reason and audit evidence, preserves prior membership/history, and releases register-item occupancy atomically. A released item becomes available again only when its underlying eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible.
 
 ### WOS-INV-007 — Export and integration
 
@@ -472,7 +489,9 @@ The product must provide controlled CSV and API-ready exports for accounting/bil
 
 ### WOS-INV-008 — No double billing
 
-The server must prevent an eligibility-event version or its one-to-one approved-unbilled item from being included in multiple active/finalized invoice-ready batches unless an authorized, versioned reversal/correction exists. Reversed or superseded evidence cannot be reused as a new batchable object.
+The server must prevent an eligibility-event version or its one-to-one approved-unbilled item from being included in more than one occupying invoice-ready batch. Occupying batches include open/active `Draft`, `Under Review` and `Approved` batches and final `Exported` and `Billed/Confirmed` batches.
+
+Only a valid pre-export transition to `Cancelled` releases occupancy, and the release must be atomic with cancellation. Exported or billed evidence remains occupying permanently. Corrections after export or billing must use authorized versioned reversal/superseding eligibility events, approved-unbilled items and correction lines/batches rather than reusing the original lineage. Reversed, superseded or stale event/register versions cannot be newly batched.
 
 ## 14. Reporting and control requirements
 
