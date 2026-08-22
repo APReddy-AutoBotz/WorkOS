@@ -24,7 +24,7 @@ Quality and evidence:      0%
 Buyer handover readiness:  0%
 ```
 
-`main` still contains only the clean initial WorkOS baseline. The complete WOS-00 documentation pack is assembled in Draft PR #1 but earns no accepted progress until review, Gate B approval and merge.
+`main` still contains only the clean initial WorkOS baseline. The complete WOS-00 documentation pack is assembled in Draft PR #1 but earns no accepted progress until final exact-head review, Gate B approval and merge.
 
 ## 3. Active work
 
@@ -35,17 +35,17 @@ Buyer handover readiness:  0%
 | Branch | `controller/wos-00-blueprint` |
 | Pull request | Draft PR #1 |
 | Base | `main@d8995e809f714bbb4517a49715a4eab5c4306580` |
-| Exact head | Use live PR #1 metadata; exact SHA is recorded again in the completion/review comment before merge |
-| State | Controller review and independent-review gate |
-| Current activity | Full product, architecture, ADR, feature-specification, quality, delivery and repository-governance pack assembled |
+| Exact head | Use live PR #1 metadata; the final reviewed SHA is recorded in the completion comment before Gate B/merge |
+| State | Final independent-review gate |
+| Current activity | Full blueprint assembled; first-review five P1/two P2 and second-review two P1 findings corrected |
 | Application source | Not imported; WOS-01 remains blocked |
-| Acceptance blocker | Documentation checks, fresh independent Codex review and owner Gate B approval |
+| Acceptance blocker | Final independent exact-head review and owner Gate B approval |
 
 ## 4. Workstream status
 
 | Workstream | Weight | State | Accepted weight | Notes |
 |---|---:|---|---:|---|
-| WOS-00 | 8% | In review | 0% | Full blueprint pack assembled in PR #1; acceptance pending |
+| WOS-00 | 8% | Final review | 0% | Full blueprint and two review-resolution rounds in PR #1; acceptance pending |
 | WOS-01 | 10% | Not started | 0% | Issue #3; source bootstrap blocked by Gate B |
 | WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup foundation |
 | WOS-03 | 10% | Not started | 0% | Issue #5; modular platform and CI/migrations |
@@ -61,7 +61,7 @@ Buyer handover readiness:  0%
 
 | Release | State | Exit criteria status |
 |---|---|---|
-| v0.1.0 | In review | Blueprint checks, independent review and Gate B pending |
+| v0.1.0 | Final review | Final exact-head review and Gate B pending |
 | v0.2.0 | Not started | Clean source and neutral configurable brand |
 | v0.4.0 | Not started | Organization and platform foundation |
 | v0.5.0 | Not started | Flexible engagements, work capture and policy engine |
@@ -79,18 +79,21 @@ Current high-priority controls:
 - Preserve the reference repository unchanged.
 - Import only the pinned authorized source commit after Gate B.
 - Do not merge an imported runtime to `main` while prohibited company-specific branding/data remains; neutralize it in PR-002 or merge only the combined clean stacked PR-003 state.
-- Keep owner-only pricing and deal strategy outside the product repository.
+- Keep transaction-specific pricing, valuation, licensing, assignment and negotiation strategy outside the product repository.
 - Treat WorkOS as a temporary working name pending trademark/brand decision.
 - Use deterministic server-authoritative financial calculations.
+- Keep operational earned-management reporting independent from source-specific billing eligibility.
 
-## 7. Next controller actions
+## 7. Review history and next controller actions
 
-1. Materialize and inspect all findings from independent review `5000738492`.
-2. Run a fresh independent Codex/Sol review against the moved correction head.
-3. Resolve any remaining blocking findings and recheck the exact head.
-4. Present the completed blueprint and unresolved external decisions for Gate B approval.
-5. Merge and tag v0.1.0 only after approval and accepted evidence.
-6. Start WOS-01 issue #3 only after the Gate B record exists.
+1. First independent Codex/Sol review at `492715dc8a40de6431365b6e52378d317721f617`: five P1 and two P2 findings.
+2. Second independent Codex/Sol review at `c2e3dbb74bc7c78a8f946222497850ac0c49ac78`: two P1 findings.
+3. Both review rounds are resolved in branch documents and live issues; evidence is recorded in `DOC-WOS-00-002-REVIEW-RESOLUTION.md`.
+4. Run one final independent Codex/Sol review against the exact moved head.
+5. Resolve any remaining blocking finding and recheck the exact head.
+6. Present the completed blueprint and unresolved external decisions for Gate B approval.
+7. Merge and tag v0.1.0 only after approval and accepted evidence.
+8. Start WOS-01 issue #3 only after the Gate B record exists.
 
 ## 8. Status update template
 
