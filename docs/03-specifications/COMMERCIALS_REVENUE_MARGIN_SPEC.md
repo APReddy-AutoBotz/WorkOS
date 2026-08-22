@@ -50,7 +50,7 @@ Every eligibility event records source type and immutable source version, organi
 
 ## Approved-unbilled register
 
-The only batchable object is a versioned `approved_unbilled_item`. Exactly one register item is created for one billing-eligibility-event version. The register item retains the complete event lineage and active/final batch state.
+The only batchable object is a versioned `approved_unbilled_item`. Exactly one register item is created for one billing-eligibility-event version. The register item retains the complete event lineage and current/historical batch membership state.
 
 A raw work entry, commercial snapshot, milestone, fixed-fee schedule, retainer event, managed-service event or adjustment may be displayed as evidence, but it cannot be selected or submitted directly as an invoice-ready line.
 
@@ -58,15 +58,38 @@ A raw work entry, commercial snapshot, milestone, fixed-fee schedule, retainer e
 
 Finance users query the approved-unbilled register and create batches by client, legal entity, engagement, period and currency. Every invoice-ready line references exactly one approved-unbilled-item version and, through it, exactly one billing-eligibility-event version and source version.
 
-States are Draft, Under Review, Approved, Exported, Billed/Confirmed and Cancelled. Finalization preserves source → event → register → line → batch control totals and immutable evidence.
+### Canonical batch states and occupancy
 
-Database constraints, transactional locking and idempotency prevent an eligibility-event version or approved-unbilled item from appearing in more than one active or finalized batch. An authorized correction creates a versioned reversal or superseding eligibility event/register item and never reuses or mutates the prior lineage.
+The canonical states are `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`.
+
+- **Open/active occupying:** `Draft`, `Under Review`, `Approved`.
+- **Final occupying:** `Exported`, `Billed/Confirmed`.
+- **Non-occupying terminal:** `Cancelled`, only for a batch cancelled before any successful export or downstream billing confirmation.
+
+An approved-unbilled item is excluded from the available register while its line belongs to any open/active or final occupying batch. Constraints, transactional locking and idempotency enforce the exclusion under concurrent operations.
+
+Minimum transitions are:
+
+```text
+Draft → Under Review | Cancelled
+Under Review → Draft | Approved | Cancelled
+Approved → Exported | Cancelled
+Exported → Billed/Confirmed
+```
+
+`Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`. A failed provider export leaves the batch `Approved` and records a failed delivery attempt; the same idempotency identity is retried. Only accepted export payload/control totals transition the batch to `Exported`.
+
+A pre-export cancellation from `Draft`, `Under Review` or `Approved` requires reason, authority and audit. The atomic cancellation preserves historical line membership and releases current occupancy. The item returns to the available register only if its eligibility event is still current, unreversed, unsuperseded, in scope and otherwise valid.
+
+After `Exported` or `Billed/Confirmed`, corrections use a versioned reversal or superseding eligibility event, corresponding approved-unbilled item and correction batch. The original source/event/register/line/batch lineage remains occupied and immutable.
+
+Finalization preserves source → event → register → line → batch control totals and immutable evidence.
 
 WorkOS exports invoice-ready data; it does not issue statutory invoices or post a ledger.
 
 ## Authorization and confidentiality
 
-Billing access, cost-rate access, margin access, commercial-term maintenance, eligibility-event creation, batch preparation and final approval are distinct permissions. Every query and export is scoped. Sensitive values are excluded from logs and broad DTOs.
+Billing access, cost-rate access, margin access, commercial-term maintenance, eligibility-event creation, batch preparation, cancellation, final approval, export and billing confirmation are distinct permissions. Every query and export is scoped. Sensitive values are excluded from logs and broad DTOs.
 
 ## Acceptance and golden vectors
 
@@ -76,8 +99,11 @@ Positive vectors cover:
 - Every enabled operational earned-management profile and policy-disabled fail-closed cases.
 - T&M, milestone, fixed-fee, retainer, managed-service and adjustment eligibility-event creation.
 - One-to-one eligibility-event/register-item creation.
-- Source → event → register → line → batch control-total reconciliation.
-- Versioned reversals/supersessions and valid correction flows.
+- Source → event → register → line → batch/export control-total reconciliation.
+- Valid Draft/Under Review/Approved occupancy and pre-export cancellation/release.
+- Idempotent failed-export retry that remains `Approved` until provider acceptance.
+- `Approved → Exported → Billed/Confirmed` final occupancy.
+- Versioned reversals/supersessions and valid correction flows after export/confirmation.
 - Budget/EAC and finalized batch/export totals.
 
 Negative vectors cover:
@@ -86,14 +112,19 @@ Negative vectors cover:
 - Unauthorized cost/margin or eligibility-event access.
 - Raw source or calculation-snapshot direct-batch bypass.
 - Source lacking approval, acceptance or contractual-due evidence.
-- Duplicate event/register creation or reuse in another active/final batch.
+- Duplicate event/register creation or reuse in another Draft, Under Review, Approved, Exported or Billed/Confirmed batch.
+- Cancellation after Exported or Billed/Confirmed.
 - Reversed/superseded/stale register item.
-- Locked period, out-of-scope batch, duplicate adjustment and failed control-total reconciliation.
+- Locked period, out-of-scope batch, duplicate adjustment, invalid transition and failed control-total reconciliation.
 
 ## Recalculation, correction and audit
 
-Controlled recalculation creates a new snapshot version and reason. Credits/write-offs/discounts are approved versioned source records; invoice eligibility then creates their event/register lineage. Finalization and export preserve control totals and evidence.
+Controlled recalculation creates a new snapshot version and reason. Credits/write-offs/discounts are approved versioned source records; invoice eligibility then creates their event/register lineage. Cancellation, finalization, export, confirmation and correction preserve control totals and evidence.
+
+## Gate C acceptance boundary
+
+The product-owner Gate C review occurs only after PR-010, PR-011 and PR-012 are complete and exact-head evidence proves commercial terms, deterministic calculations, source-specific eligibility, the approved-unbilled register, batch occupancy/release states, export lineage, correction paths, authorization and reconciliation. PR-011 calculation-engine evidence alone cannot satisfy Gate C.
 
 ## Migration and rollback
 
-Commercial tables are additive and feature gated. Seeded vectors and neutral defaults are synthetic. Before finalization use rollback/disable; after snapshots, eligibility events, register items or batches exist, use forward corrections and preserve evidence.
+Commercial tables are additive and feature gated. Seeded vectors and neutral defaults are synthetic. Before export/final occupancy use controlled cancellation/disable where valid; after snapshots, eligibility events, register items, Exported/Billed/Confirmed batches or downstream confirmations exist, use forward corrections and preserve evidence.
