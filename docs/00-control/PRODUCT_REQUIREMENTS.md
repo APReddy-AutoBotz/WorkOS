@@ -435,7 +435,7 @@ Cost rates, individual compensation-derived data and margin details must be sepa
 
 ### WOS-INV-001 — Approved-unbilled register
 
-Finance-authorized users must see every approved, billing-eligible source not already included in an active or finalized invoice-ready batch. Eligible source types are:
+Finance-authorized users must see every versioned `APPROVED_UNBILLED_ITEM` not already included in an active or finalized invoice-ready batch. Each item must be created from exactly one versioned `BILLING_ELIGIBILITY_EVENT`; the event's eligible source evidence may be:
 
 - Approved T&M work calculation snapshots.
 - Accepted and billing-eligible milestone events.
@@ -444,7 +444,7 @@ Finance-authorized users must see every approved, billing-eligible source not al
 - Approved managed-service period-charge or accepted-unit events.
 - Approved commercial adjustments, credits, discounts, write-offs or corrections that are invoice eligible.
 
-Every register row must preserve source type and version, organization/legal entity, client/contract/engagement, approval or eligibility evidence, currency, eligible date, amount, calculation/policy evidence where applicable, and active/final batch state. Operational earned-management revenue does not by itself make a source invoice eligible.
+Raw source evidence—including a T&M snapshot—must never be linked directly to an invoice-ready line. Every eligibility event and register item must preserve source type and version, organization/legal entity, client/contract/engagement, approval or contractual-due evidence, eligible date, currency, amount, calculation/policy evidence where applicable, reversal/supersession links, and active/final batch state. Operational earned-management revenue does not by itself make a source invoice eligible.
 
 ### WOS-INV-002 — Invoice-ready batches
 
@@ -452,7 +452,7 @@ Users must create controlled invoice-ready batches by client, legal entity, enga
 
 ### WOS-INV-003 — Batch line traceability
 
-Every batch line must trace to one versioned eligible source from WOS-INV-001—including T&M snapshot, milestone, fixed-fee schedule, retainer event, managed-service event or approved adjustment—and preserve approval/eligibility and commercial-calculation evidence.
+Every batch line must trace to exactly one versioned `APPROVED_UNBILLED_ITEM` and, through it, exactly one versioned `BILLING_ELIGIBILITY_EVENT`. T&M snapshots, milestones, fixed-fee schedules, retainer events, managed-service events and approved adjustments are source evidence for the event and may not be linked directly to a batch line. The complete chain must preserve the fields required by WOS-INV-001.
 
 ### WOS-INV-004 — Adjustments
 
@@ -468,11 +468,11 @@ Batches must support Draft, Under Review, Approved, Exported, Billed/Confirmed a
 
 ### WOS-INV-007 — Export and integration
 
-The product must provide controlled CSV and API-ready exports for accounting/billing systems. WorkOS v1 is not required to issue statutory invoices or post to a general ledger.
+The product must provide controlled CSV and API-ready exports for accounting/billing systems. Exports must originate only from approved or finalized batch lines and preserve line-to-register-item-to-eligibility-event-version traceability. WorkOS v1 is not required to issue statutory invoices or post to a general ledger.
 
 ### WOS-INV-008 — No double billing
 
-The server must prevent the same eligible source line from being included in multiple active/finalized invoice-ready batches unless an authorized reversal/correction exists.
+The server must prevent an eligibility-event version or its one-to-one approved-unbilled item from being included in multiple active/finalized invoice-ready batches unless an authorized, versioned reversal/correction exists. Reversed or superseded evidence cannot be reused as a new batchable object.
 
 ## 14. Reporting and control requirements
 
