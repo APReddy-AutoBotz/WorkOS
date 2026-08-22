@@ -4,12 +4,14 @@
 **Issue:** #2  
 **Pull request:** #1  
 **First reviewed head:** `492715dc8a40de6431365b6e52378d317721f617`  
-**First independent review ID:** `5000738492`  
+**First independent review ID:** `PRR_kwDOUAv8Lc8AAAABKhE2vA`  
 **Second reviewed head:** `c2e3dbb74bc7c78a8f946222497850ac0c49ac78`  
 **Second independent review ID:** `PRR_kwDOUAv8Lc8AAAABKhJrmQ`  
 **Third reviewed head:** `1f36b49461b86516b5855dbf9930a75f234b58e1`  
 **Third independent review ID:** `PRR_kwDOUAv8Lc8AAAABKhMTmA`  
-**Status:** First-review five P1/two P2, second-review two P1 and third-review one P1 findings corrected; clean final independent exact-head re-review pending
+**Fourth reviewed head:** `9fc70babdf7c4d5c72f9d18a54f8c2318c903b3b`  
+**Fourth independent review ID:** `PRR_kwDOUAv8Lc8AAAABKhNcnA`  
+**Status:** First-review five P1/two P2, second-review two P1, third-review one P1 and fourth-review one P1 findings corrected; clean final independent exact-head re-review pending
 
 ## First-review resolution map
 
@@ -36,17 +38,38 @@
 |---|---|---|
 | `DOMAIN_MODEL.md` retained a stale direct calculation-snapshot-to-invoice-ready-line edge despite the corrected governing architecture | P1 | Removed the stale edge and introduced explicit versioned `BILLING_ELIGIBILITY_EVENT` and `APPROVED_UNBILLED_ITEM` relationships. Calculation snapshots are valuation evidence only; T&M, milestone, fixed-fee, retainer, managed-service and adjustment sources must create a source-specific eligibility-event version before entering the approved-unbilled register or an invoice-ready batch. Reversal/supersession and no-active/final-batch uniqueness are explicit. Corrected in commit `310e6e226099cd317b62222c1ce9440647a77d1f`. |
 
+## Fourth-review resolution map
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| Authoritative and derived documents still allowed a raw source or T&M calculation snapshot to satisfy invoice-line traceability without mandating the event → register → line boundary | P1 | The only batchable object is now a versioned `APPROVED_UNBILLED_ITEM` created one-to-one from a versioned `BILLING_ELIGIBILITY_EVENT`. `WOS-INV-001`, `WOS-INV-003`, `WOS-INV-007` and `WOS-INV-008`, data/API/integration architecture, commercial/reporting specifications, test strategy, PR-012 backlog and traceability all reject direct raw-source/snapshot line creation. Every line traces through one register item to one event/source version; active/final uniqueness, idempotency, reversal/supersession and control-total reconciliation are explicit. Correction sequence: `58e71fdfee898b4319e4156ca0bfec2ad471aef6`, `f2aa104d18e29eaa6bc52bd63538e4b61cbb051d`, `9a13accdcbe66b54110bcbd38714057dd9613ac6`, `d92920946019111309ffa85960a7dfc1bcc88539`, `027a2d261988135e527c2cf079c4737bf37ebc31`, `27be988d20f5f89cbd071e27a6add80ff293a63a`, `fbf50dac67c29574c10bd440a0a7112d92db3935`, `8486da8556d61a0504bfd1ed94da06a18dbf0487` and `059959ffe0bbbfd79cc1c0a9af941962c0a1ad9c`. |
+
 ## Supplemental controller corrections
 
 - Leave/absence is an availability reference, never productive/billable work, and cannot reduce capacity twice.
 - PR-002 cannot merge a prohibited company-specific runtime; cleanup occurs within PR-002 or only the clean stacked PR-003 state merges.
 - Operational earned-management revenue is non-statutory reporting/management evidence and never grants billing authority.
 - Every production mutation receives an explicit common and module-specific traceability/audit owner.
-- The domain model now matches the source-specific billing-eligibility architecture and cannot be read as granting invoice authority to every calculation snapshot.
+- The commercial model consistently separates valuation snapshots, billing eligibility, approved-unbilled registration, invoice-ready batching and downstream finance export.
+- Raw T&M snapshots, milestones, fixed-fee schedules, retainer/managed-service events and adjustments remain read-only source evidence; none is an alternative batchable object.
+
+## Controller verification after fourth-review correction
+
+| Check | Result | Evidence / limitation |
+|---|---|---|
+| Authoritative invoice requirement boundary | PASS | WOS-INV-001/003/007/008 require event → approved-unbilled item → line/batch lineage |
+| All six source families represented | PASS | T&M, milestone, fixed fee, retainer, managed service and approved adjustment are present in requirements/specifications/backlog/tests |
+| Direct-bypass rejection specified | PASS | API, commercial specification, PR-012 and mandatory negative vectors reject raw-source/snapshot line creation |
+| One-to-one event/register and active/final uniqueness | PASS | Data/domain/API architecture and PR-012 evidence require one current lineage and concurrency/idempotency controls |
+| Reversal/supersession history | PASS | Corrections create versioned reversal/superseding events/register items; prior evidence is not rewritten |
+| Report/export reconciliation | PASS | Reporting/integration contracts reconcile source → event → register → line → batch → export |
+| Canonical product requirement count | Structurally preserved | No requirement heading was added or removed; final independent review must rerun the automated count |
+| Application tests | SKIP | WOS-00 intentionally contains no application source |
+| Shell/documentation-safe checks | NOT RUN by controller connector | Mandatory in the clean final Codex/Sol review against the exact moved head |
 
 ## Open gates
 
-- Fresh clean independent Codex/Sol re-review at the exact moved PR head after the third-review correction.
+- Fresh clean independent Codex/Sol re-review at the exact final PR head after the fourth-review correction.
 - Resolution of any remaining blocking finding.
 - Product-owner Gate B approval.
-- Exact-head squash merge and v0.1.0 baseline.
+- Exact-head squash merge and `v0.1.0` baseline.
