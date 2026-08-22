@@ -1,0 +1,144 @@
+# WorkOS Requirements Traceability
+
+**Status:** Blueprint mapping; PR/test/evidence columns are populated as implementation proceeds.  
+**Authoritative requirements:** `PRODUCT_REQUIREMENTS.md` and `NON_FUNCTIONAL_REQUIREMENTS.md`
+
+## 1. Traceability rules
+
+Every accepted requirement must link to:
+
+1. Governing requirement ID.
+2. Work package and GitHub issue/task.
+3. Pull request and exact accepted commit.
+4. Automated test(s).
+5. Manual/browser/migration/security evidence where applicable.
+6. Release containing the accepted capability.
+
+A requirement cannot be marked accepted based only on a PR description or implementation-agent summary.
+
+## 2. Domain-to-workstream mapping
+
+| Requirement range | Primary workstream/PR | Required evidence class | Current state |
+|---|---|---|---|
+| WOS-CORE-001–008 | WOS-00, PR-003, PR-004, PR-006, PR-011 | Configuration, architecture, authorization, calculation and forbidden-term evidence | Blueprint |
+| WOS-ORG-001–010 | PR-004 | Fresh/upgrade migrations, organization-scope negative tests, guided-setup browser evidence | Not started |
+| WOS-IAM-001–010 | PR-003, PR-004, PR-006, PR-014 | Identity/session, permission matrix, row-scope and negative security evidence | Not started |
+| WOS-WKF-001–008 | PR-002, PR-004, PR-008 | Workforce migration, capacity/availability tests and role browser journeys | Not started |
+| WOS-CLI-001–002 | PR-007 | Client hierarchy, scope and lifecycle tests | Not started |
+| WOS-CTR-001–003 | PR-007, PR-010 | Contract/PO effective-date and lifecycle tests | Not started |
+| WOS-ENG-001–005 | PR-007 | Engagement-model validation and migration/browser evidence | Not started |
+| WOS-RES-001–009 | PR-004, PR-008, PR-009 | Assignment, capacity, over-allocation, approval and history tests | Not started |
+| WOS-TIM-001–012 | PR-008, PR-009 | Daily/weekly work capture, policy, correction, duplicate and locked-period tests | Not started |
+| WOS-APR-001–008 | PR-009 | Approval state machine, delegation scope, SLA, bulk decision and period-lock evidence | Not started |
+| WOS-COM-001–015 | PR-010, PR-011 | Golden financial vectors, confidentiality negative tests, snapshot/reconciliation evidence | Not started |
+| WOS-INV-001–008 | PR-012 | Batch state, source traceability, no-double-billing, reversal and export evidence | Not started |
+| WOS-RPT-001–007 | PR-013 | Scoped report, leakage scenario, data-quality and reconciliation tests | Not started |
+| WOS-INT-001–006 | PR-013, PR-014 | Adapter contracts, idempotency, failure isolation and integration-health evidence | Not started |
+| WOS-GOV-001–005 | PR-002, PR-005, PR-006, PR-016 | Append-only audit, provenance, export and release traceability evidence | Not started |
+| WOS-OPS-001–010 | PR-003, PR-005, PR-015, PR-016 | Build/container, startup, migration, backup/restore, monitoring and handover evidence | Not started |
+| WOS-NFR-* | All affected work packages, consolidated PR-016 | Automated quality, security, performance, recovery and release evidence | Blueprint |
+
+## 3. Work-package traceability
+
+| Work package | Requirement groups | GitHub issue | Pull request | Exact accepted commit | Release | Status |
+|---|---|---|---|---|---|---|
+| WOS-00 | Programme/architecture/NFR/control artifacts | Pending | PR-001 pending | Pending | v0.1.0 | Active branch |
+| WOS-01A | Source provenance/bootstrap | WOS issue pending | PR-002 | Pending | v0.2.0 | Not started |
+| WOS-01B | Neutral branding/configuration | WOS issue pending | PR-003 | Pending | v0.2.0 | Not started |
+| WOS-02 | Organization/setup | WOS issue pending | PR-004 | Pending | v0.4.0 | Not started |
+| WOS-03A | CI/migration/deployment foundation | WOS issue pending | PR-005 | Pending | v0.4.0 | Not started |
+| WOS-03B | Modular/API foundation | WOS issue pending | PR-006 | Pending | v0.4.0 | Not started |
+| WOS-04A | Contracts/engagements | WOS issue pending | PR-007 | Pending | v0.5.0 | Not started |
+| WOS-04B | Assignments/work capture | WOS issue pending | PR-008 | Pending | v0.5.0 | Not started |
+| WOS-05 | Approval/policy engine | WOS issue pending | PR-009 | Pending | v0.5.0 | Not started |
+| WOS-06A | Rates/costs/terms | WOS issue pending | PR-010 | Pending | v0.7.0 | Not started |
+| WOS-06B | Commercial engine | WOS issue pending | PR-011 | Pending | v0.7.0 | Not started |
+| WOS-06C | Invoice readiness | WOS issue pending | PR-012 | Pending | v0.7.0 | Not started |
+| WOS-07 | Reports/leakage/adapters | WOS issue pending | PR-013 | Pending | v0.8.0 | Not started |
+| WOS-08A | Security/identity | WOS issue pending | PR-014 | Pending | v0.9.0 | Not started |
+| WOS-08B | Operations/recovery/performance | WOS issue pending | PR-015 | Pending | v0.9.0 | Not started |
+| WOS-09 | v1 acceptance/handover | WOS issue pending | PR-016 | Pending | v1.0.0 | Not started |
+
+## 4. Evidence taxonomy
+
+Use stable evidence IDs:
+
+| Prefix | Evidence type |
+|---|---|
+| `UT-` | Unit/domain test |
+| `API-` | API/contract test |
+| `AUTH-` | Authorization/negative-scope test |
+| `MIG-` | Fresh/upgrade migration evidence |
+| `BWR-` | Browser role journey |
+| `FIN-` | Financial golden vector/reconciliation |
+| `SEC-` | Security scan/review/threat-model evidence |
+| `PERF-` | Performance/load evidence |
+| `OPS-` | Deployment, monitoring, backup/restore evidence |
+| `DOC-` | Documentation/provenance/consistency evidence |
+| `UAT-` | Production-like user acceptance evidence |
+
+Evidence files should live under a versioned release-evidence structure once implementation begins, for example:
+
+```text
+docs/evidence/
+  v0.2.0/
+  v0.4.0/
+  v0.5.0/
+  v0.7.0/
+  v0.9.0/
+  v1.0.0/
+```
+
+Generated evidence containing secrets, personal data or bulky transient artifacts must not be committed. Store a safe summary and reference the controlled external evidence location where needed.
+
+## 5. Requirement acceptance states
+
+| State | Meaning |
+|---|---|
+| Blueprint | Requirement defined and mapped, no implementation accepted |
+| In progress | Active branch/PR exists; no accepted credit |
+| Engineering ready | Implementation/tests merged, but environment/UAT/release evidence remains |
+| Accepted | All defined evidence and approvals are complete at an exact commit |
+| Deferred | Explicitly removed from current release with rationale |
+| Rejected | Decision made not to implement; requirement/decision record updated |
+
+## 6. PR traceability template
+
+Every implementation PR body must include:
+
+```markdown
+## Requirements
+- WOS-...
+
+## Evidence
+- UT-...
+- API-...
+- AUTH-...
+- MIG-...
+- BWR-...
+
+## Exact-head acceptance
+- Head SHA: ...
+- Required checks: ...
+- Known limitations: ...
+```
+
+## 7. v1 acceptance summary
+
+To be completed by PR-016:
+
+```text
+Total v1 requirements:
+Accepted:
+Deferred by approved scope:
+Open blocking:
+Open non-blocking:
+Exact release commit:
+Release tag:
+Security disposition:
+Migration evidence:
+Commercial reconciliation:
+Restore rehearsal:
+Buyer UAT:
+Owner Gate D approval:
+```
