@@ -68,7 +68,8 @@ If documents conflict, stop and report the conflict. Do not silently choose the 
 ## 7. Commercial and financial rules
 
 - Support multiple engagement models without hardcoding T&M assumptions into shared entities.
-- Separate work evidence, approval, billability, revenue recognition and invoicing readiness.
+- Separate work evidence, approval, billability, operational earned-management valuation and invoice readiness. WorkOS must not present its management metric as statutory accounting recognition.
+- Non-T&M operational earned-management metrics must fail closed until an authorized, effective-dated policy profile is selected; billing eligibility remains an independent decision.
 - Use deterministic decimal-safe rules for currency and rate calculations.
 - Record the source and effective date of every rate or cost used in a calculation.
 - Make rounding rules explicit and tested.
