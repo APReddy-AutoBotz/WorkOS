@@ -326,7 +326,8 @@
 - Currency and rounding edge cases.
 - Snapshot immutability and controlled recalculation evidence.
 - Calculation/recalculation/finalization jobs preserve operation ID, source versions, actor or system identity and audit evidence.
-- Owner Gate C working-product review.
+
+**Gate boundary:** PR-011 establishes calculation and project-margin engineering readiness only. It cannot satisfy product-owner Gate C without the source-specific billing-eligibility, approved-unbilled, invoice-ready lifecycle and export evidence delivered and independently accepted in PR-012.
 
 ### PR-012 — WOS-06 Invoice readiness
 
@@ -342,7 +343,9 @@
 - Direct raw-source/snapshot-to-line rejection at domain, API, import and compatibility boundaries.
 - Adjustments, discounts, credits and write-offs through approved versioned source → event → register lineage.
 - Evidence links and source → event → register → line → batch control totals.
-- State machine and approval integration.
+- Canonical batch state machine: `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed`, `Cancelled`.
+- Open/final occupancy, pre-export cancellation and atomic occupancy release rules.
+- Approval integration.
 - Database constraints, locking and idempotency preventing repeated active/final inclusion.
 - Versioned reversal/supersession and correction paths.
 - Versioned CSV/API-ready export only from approved/finalized batch lines.
@@ -356,11 +359,17 @@
 - One source version to one current eligibility-event/register-item evidence, including idempotent retry behavior.
 - Register-to-batch reconciliation by source/event/register version, organization/legal entity, approval/eligibility evidence, currency, eligible date and amount.
 - Active/final inclusion uniqueness under concurrent requests across every eligible source type.
-- Batch state/approval tests and locked-period enforcement.
-- Authorized reversal/supersession/correction paths that preserve prior evidence and exclude stale/reversed items from new batches.
+- Batch state and transition tests for `Draft → Under Review | Cancelled`, `Under Review → Draft | Approved | Cancelled`, `Approved → Exported | Cancelled`, and `Exported → Billed/Confirmed`.
+- Proof that `Cancelled` and `Billed/Confirmed` are terminal, `Exported` cannot be cancelled, and a failed export remains `Approved`.
+- Cancellation authorization/reason/audit, preserved membership history and atomic occupancy release tests.
+- Proof that a released register item is selectable again only while its eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible.
+- Locked-period enforcement.
+- Authorized reversal/supersession/correction paths that preserve prior exported/billed evidence and exclude stale/reversed items from new batches.
 - API and browser proof that only approved-unbilled items can be selected for a line.
 - Export traceability from approved/finalized batch line through register/event to source and audit.
 - Finalized event/register/source versions and batch lines remain immutable; every transition and adjustment is traceably audited.
+
+**Gate C:** Product-owner Gate C occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Gate C evidence must cover effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch lifecycle, export lineage, reversals/corrections, authorization and control-total reconciliation. Gate C is an additional owner acceptance gate and never substitutes for PR-012 engineering evidence.
 
 ### PR-013 — WOS-07 Reporting, leakage control and adapter contracts
 
