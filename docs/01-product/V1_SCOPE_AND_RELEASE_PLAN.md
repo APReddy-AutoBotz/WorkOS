@@ -33,10 +33,11 @@ A buyer can deploy an isolated WorkOS environment, configure organization and te
 |---|---|---|
 | v0.1.0 | WOS-00 | Accepted blueprint; no runnable product claim |
 | v0.2.0 | WOS-01 | Clean source baseline and neutral configurable brand |
-| v0.4.0 | WOS-02 to WOS-03 | Organization/platform foundation |
+| v0.4.0 | WOS-02 to WOS-03 | Organization and platform foundation |
 | v0.5.0 | WOS-04 to WOS-05 | Flexible engagements, work capture and policy |
 | v0.7.0 | WOS-06 | Commercial engine and invoice readiness |
-| v0.9.0 | WOS-07 to WOS-08 | Enterprise release candidate |
+| v0.8.0 | WOS-07 | Reporting, leakage controls and integration contracts |
+| v0.9.0 | WOS-08 | Enterprise security/operations release candidate |
 | v1.0.0 | WOS-09 | Production-like acceptance and buyer handover |
 
 ## Release-gate model

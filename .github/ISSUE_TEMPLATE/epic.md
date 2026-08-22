@@ -1,9 +1,9 @@
 ---
 name: WorkOS epic
-title: "WOS-XX — "
 about: Define one outcome-based WorkOS workstream
-labels: []
-assignees: []
+title: "WOS-XX — "
+labels: ""
+assignees: ""
 ---
 
 ## Outcome

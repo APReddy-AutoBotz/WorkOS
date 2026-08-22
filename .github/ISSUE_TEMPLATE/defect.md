@@ -1,8 +1,9 @@
 ---
 name: Defect
 about: Report a reproducible WorkOS defect
-labels: []
-assignees: []
+title: ""
+labels: ""
+assignees: ""
 ---
 
 ## Defect summary

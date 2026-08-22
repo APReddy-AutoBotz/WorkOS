@@ -24,46 +24,50 @@ Quality and evidence:      0%
 Buyer handover readiness:  0%
 ```
 
-The repository currently contains only its initial README on `main`. The governing blueprint is active on branch `controller/wos-00-blueprint` and does not count as accepted until review and merge.
+`main` still contains only the clean initial WorkOS baseline. The complete WOS-00 documentation pack is assembled in Draft PR #1 but earns no accepted progress until review, Gate B approval and merge.
 
 ## 3. Active work
 
 | Field | Current value |
 |---|---|
 | Workstream | WOS-00 — Governing blueprint |
+| GitHub issue | #2 |
 | Branch | `controller/wos-00-blueprint` |
-| Pull request | Pending creation |
+| Pull request | Draft PR #1 |
 | Base | `main@d8995e809f714bbb4517a49715a4eab5c4306580` |
-| State | In progress |
-| Current activity | Charter, product requirements, architecture, NFRs, backlog, Codex controls, provenance, risk and traceability |
-| Acceptance blocker | Independent Codex consistency review and owner Gate B approval |
+| Exact head | Use live PR #1 metadata; exact SHA is recorded again in the completion/review comment before merge |
+| State | Controller review and independent-review gate |
+| Current activity | Full product, architecture, ADR, feature-specification, quality, delivery and repository-governance pack assembled |
+| Application source | Not imported; WOS-01 remains blocked |
+| Acceptance blocker | Documentation checks, fresh independent Codex review and owner Gate B approval |
 
 ## 4. Workstream status
 
 | Workstream | Weight | State | Accepted weight | Notes |
 |---|---:|---|---:|---|
-| WOS-00 | 8% | Active | 0% | Blueprint branch under construction |
-| WOS-01 | 10% | Not started | 0% | Source bootstrap blocked by Gate B |
-| WOS-02 | 10% | Not started | 0% | Organization/setup foundation |
-| WOS-03 | 10% | Not started | 0% | Modular platform and CI/migrations |
-| WOS-04 | 16% | Not started | 0% | Engagements and work capture |
-| WOS-05 | 8% | Not started | 0% | Approval/policy engine |
-| WOS-06 | 20% | Not started | 0% | Commercial and invoice-readiness engine |
-| WOS-07 | 6% | Not started | 0% | Reporting/leakage/integrations |
-| WOS-08 | 8% | Not started | 0% | Security/operations hardening |
-| WOS-09 | 4% | Not started | 0% | Release acceptance and handover |
+| WOS-00 | 8% | In review | 0% | Full blueprint pack assembled in PR #1; acceptance pending |
+| WOS-01 | 10% | Not started | 0% | Issue #3; source bootstrap blocked by Gate B |
+| WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup foundation |
+| WOS-03 | 10% | Not started | 0% | Issue #5; modular platform and CI/migrations |
+| WOS-04 | 16% | Not started | 0% | Issue #6; engagements and work capture |
+| WOS-05 | 8% | Not started | 0% | Issue #7; approval/policy engine |
+| WOS-06 | 20% | Not started | 0% | Issue #8; commercial and invoice-readiness engine |
+| WOS-07 | 6% | Not started | 0% | Issue #9; reporting/leakage/integrations |
+| WOS-08 | 8% | Not started | 0% | Issue #10; security/operations hardening |
+| WOS-09 | 4% | Not started | 0% | Issue #11; release acceptance and handover |
 | **Total** | **100%** |  | **0%** |  |
 
 ## 5. Release status
 
 | Release | State | Exit criteria status |
 |---|---|---|
-| v0.1.0 | Active | Governing blueprint, review and Gate B pending |
+| v0.1.0 | In review | Blueprint checks, independent review and Gate B pending |
 | v0.2.0 | Not started | Clean source and neutral configurable brand |
-| v0.4.0 | Not started | Organization, engagement and platform foundation |
-| v0.5.0 | Not started | Flexible work capture and policy engine |
-| v0.7.0 | Not started | Commercial/revenue/margin engine |
-| v0.9.0 | Not started | Enterprise release candidate |
+| v0.4.0 | Not started | Organization and platform foundation |
+| v0.5.0 | Not started | Flexible engagements, work capture and policy engine |
+| v0.7.0 | Not started | Commercial/revenue/margin and invoice-readiness engine |
+| v0.8.0 | Not started | Reporting, leakage controls and integration contracts |
+| v0.9.0 | Not started | Enterprise security/operations release candidate |
 | v1.0.0 | Not started | Sellable buyer-owned release |
 
 ## 6. Current risks and decisions
@@ -80,12 +84,12 @@ Current high-priority controls:
 
 ## 7. Next controller actions
 
-1. Complete the WOS-00 document set and repository templates.
-2. Open Draft PR-001.
-3. Invoke an independent Codex consistency/coverage review using the WorkOS environment and an appropriate high-reasoning Sol model where selection is available.
-4. Resolve review findings at the exact PR head.
-5. Present the blueprint for owner Gate B approval.
-6. Merge and tag v0.1.0 only after approval and green evidence.
+1. Run/review the WOS-00 documentation inventory, references, prohibited-term, credential-like and ID consistency checks.
+2. Request a fresh independent Codex review against the exact PR #1 head using the strongest appropriate Sol review model.
+3. Resolve blocking findings and recheck the moved head.
+4. Present the completed blueprint and unresolved owner decisions for Gate B approval.
+5. Merge and tag v0.1.0 only after approval and accepted evidence.
+6. Start WOS-01 issue #3 only after the Gate B record exists.
 
 ## 8. Status update template
 

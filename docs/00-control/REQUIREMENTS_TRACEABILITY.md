@@ -40,26 +40,36 @@ A requirement cannot be marked accepted based only on a PR description or implem
 
 ## 3. Work-package traceability
 
+PR identifiers after PR #1 are planned sequence identifiers until the GitHub PR is opened.
+
 | Work package | Requirement groups | GitHub issue | Pull request | Exact accepted commit | Release | Status |
 |---|---|---|---|---|---|---|
-| WOS-00 | Programme/architecture/NFR/control artifacts | Pending | PR-001 pending | Pending | v0.1.0 | Active branch |
-| WOS-01A | Source provenance/bootstrap | WOS issue pending | PR-002 | Pending | v0.2.0 | Not started |
-| WOS-01B | Neutral branding/configuration | WOS issue pending | PR-003 | Pending | v0.2.0 | Not started |
-| WOS-02 | Organization/setup | WOS issue pending | PR-004 | Pending | v0.4.0 | Not started |
-| WOS-03A | CI/migration/deployment foundation | WOS issue pending | PR-005 | Pending | v0.4.0 | Not started |
-| WOS-03B | Modular/API foundation | WOS issue pending | PR-006 | Pending | v0.4.0 | Not started |
-| WOS-04A | Contracts/engagements | WOS issue pending | PR-007 | Pending | v0.5.0 | Not started |
-| WOS-04B | Assignments/work capture | WOS issue pending | PR-008 | Pending | v0.5.0 | Not started |
-| WOS-05 | Approval/policy engine | WOS issue pending | PR-009 | Pending | v0.5.0 | Not started |
-| WOS-06A | Rates/costs/terms | WOS issue pending | PR-010 | Pending | v0.7.0 | Not started |
-| WOS-06B | Commercial engine | WOS issue pending | PR-011 | Pending | v0.7.0 | Not started |
-| WOS-06C | Invoice readiness | WOS issue pending | PR-012 | Pending | v0.7.0 | Not started |
-| WOS-07 | Reports/leakage/adapters | WOS issue pending | PR-013 | Pending | v0.8.0 | Not started |
-| WOS-08A | Security/identity | WOS issue pending | PR-014 | Pending | v0.9.0 | Not started |
-| WOS-08B | Operations/recovery/performance | WOS issue pending | PR-015 | Pending | v0.9.0 | Not started |
-| WOS-09 | v1 acceptance/handover | WOS issue pending | PR-016 | Pending | v1.0.0 | Not started |
+| WOS-00 | Programme/architecture/NFR/control artifacts | #2 | PR #1 | Pending Gate B/merge | v0.1.0 | In review |
+| WOS-01A | Source provenance/bootstrap | #3 | Planned PR-002 | Pending | v0.2.0 | Blocked by Gate B |
+| WOS-01B | Neutral branding/configuration | #3 | Planned PR-003 | Pending | v0.2.0 | Not started |
+| WOS-02 | Organization/setup | #4 | Planned PR-004 | Pending | v0.4.0 | Not started |
+| WOS-03A | CI/migration/deployment foundation | #5 | Planned PR-005 | Pending | v0.4.0 | Not started |
+| WOS-03B | Modular/API foundation | #5 | Planned PR-006 | Pending | v0.4.0 | Not started |
+| WOS-04A | Contracts/engagements | #6 | Planned PR-007 | Pending | v0.5.0 | Not started |
+| WOS-04B | Assignments/work capture | #6 | Planned PR-008 | Pending | v0.5.0 | Not started |
+| WOS-05 | Approval/policy engine | #7 | Planned PR-009 | Pending | v0.5.0 | Not started |
+| WOS-06A | Rates/costs/terms | #8 | Planned PR-010 | Pending | v0.7.0 | Not started |
+| WOS-06B | Commercial engine | #8 | Planned PR-011 | Pending | v0.7.0 | Not started |
+| WOS-06C | Invoice readiness | #8 | Planned PR-012 | Pending | v0.7.0 | Not started |
+| WOS-07 | Reports/leakage/adapters | #9 | Planned PR-013 | Pending | v0.8.0 | Not started |
+| WOS-08A | Security/identity | #10 | Planned PR-014 | Pending | v0.9.0 | Not started |
+| WOS-08B | Operations/recovery/performance | #10 | Planned PR-015 | Pending | v0.9.0 | Not started |
+| WOS-09 | v1 acceptance/handover | #11 | Planned PR-016 | Pending | v1.0.0 | Not started |
 
-## 4. Evidence taxonomy
+## 4. WOS-00 documentation evidence
+
+| Evidence ID | Evidence | Status |
+|---|---|---|
+| DOC-WOS-00-001 | Required-file inventory and controller cross-document review | Active in PR #1 |
+| DOC-WOS-00-002 | Independent Codex blueprint review at exact PR head | Pending |
+| DOC-WOS-00-003 | Owner Gate B decision | Pending |
+
+## 5. Evidence taxonomy
 
 Use stable evidence IDs:
 
@@ -85,13 +95,14 @@ docs/evidence/
   v0.4.0/
   v0.5.0/
   v0.7.0/
+  v0.8.0/
   v0.9.0/
   v1.0.0/
 ```
 
 Generated evidence containing secrets, personal data or bulky transient artifacts must not be committed. Store a safe summary and reference the controlled external evidence location where needed.
 
-## 5. Requirement acceptance states
+## 6. Requirement acceptance states
 
 | State | Meaning |
 |---|---|
@@ -102,7 +113,7 @@ Generated evidence containing secrets, personal data or bulky transient artifact
 | Deferred | Explicitly removed from current release with rationale |
 | Rejected | Decision made not to implement; requirement/decision record updated |
 
-## 6. PR traceability template
+## 7. PR traceability template
 
 Every implementation PR body must include:
 
@@ -123,7 +134,7 @@ Every implementation PR body must include:
 - Known limitations: ...
 ```
 
-## 7. v1 acceptance summary
+## 8. v1 acceptance summary
 
 To be completed by PR-016:
 

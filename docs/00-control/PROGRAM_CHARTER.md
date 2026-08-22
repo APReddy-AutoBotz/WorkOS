@@ -1,6 +1,6 @@
 # WorkOS Commercial Productization Programme Charter
 
-**Document status:** Approved execution baseline  
+**Document status:** Gate A programme execution baseline; full blueprint acceptance pending Gate B  
 **Programme code:** WOS  
 **Product working name:** WorkOS  
 **Repository:** `APReddy-AutoBotz/WorkOS`  
@@ -212,10 +212,11 @@ Progress is earned only after the applicable acceptance gates are merged.
 |---|---|
 | v0.1.0 | Governing blueprint and controlled commercial repository baseline |
 | v0.2.0 | Neutral WorkOS runtime and configuration-driven branding |
-| v0.4.0 | Organization and engagement foundation |
-| v0.5.0 | Flexible work capture and approval policies |
-| v0.7.0 | Commercial, revenue and margin engine |
-| v0.9.0 | Enterprise release candidate with production-like evidence |
+| v0.4.0 | Organization and platform foundation |
+| v0.5.0 | Flexible engagements, work capture and approval policies |
+| v0.7.0 | Commercial, revenue, margin and invoice-readiness engine |
+| v0.8.0 | Reporting, leakage controls and integration contracts |
+| v0.9.0 | Enterprise security/operations release candidate with production-like evidence |
 | v1.0.0 | Sellable buyer-owned product and handover package |
 
 ## 12. Programme success criteria

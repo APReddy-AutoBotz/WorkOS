@@ -1,8 +1,9 @@
 ---
 name: Architecture decision
 about: Propose a material WorkOS architecture decision
-labels: []
-assignees: []
+title: "ADR — "
+labels: ""
+assignees: ""
 ---
 
 ## Decision title
