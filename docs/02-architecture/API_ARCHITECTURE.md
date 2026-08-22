@@ -49,9 +49,9 @@ The server exposes distinct commands and queries for:
 2. Creating a versioned `billing_eligibility_event` from exactly one supported source version.
 3. Creating or querying the corresponding one-to-one `approved_unbilled_item`.
 4. Adding that approved-unbilled item to an invoice-ready batch.
-5. Finalizing, reversing, superseding and exporting controlled batch evidence.
+5. Reviewing, approving, cancelling before export, exporting, confirming billing and creating reversal/superseding correction evidence.
 
-A batch-line command accepts only a server-resolved `approvedUnbilledItemId` plus allowed presentation/adjustment metadata. It must reject requests that try to supply a raw work-entry ID, calculation-snapshot ID, milestone ID, fixed-fee schedule ID, retainer/managed-service event ID, adjustment ID, client-calculated amount, currency, organization or approval status as the direct batch source.
+A batch-line command accepts only a server-resolved `approvedUnbilledItemId` plus allowed presentation metadata. It must reject requests that try to supply a raw work-entry ID, calculation-snapshot ID, milestone ID, fixed-fee schedule ID, retainer/managed-service event ID, adjustment ID, client-calculated amount, currency, organization or approval status as the direct batch source.
 
 Every accepted command revalidates:
 
@@ -60,16 +60,50 @@ Every accepted command revalidates:
 - Source-specific approval or contractual-due/acceptance evidence.
 - Eligible date, currency, amount, calculation/policy and rounding evidence.
 - Reversal/supersession state.
-- Absence from every other active or finalized batch.
+- Absence from every other occupying batch membership.
 - Optimistic concurrency and idempotency key.
 
-The API returns stable conflict codes for direct-source bypass, stale event/register version, already-batched item, reversed/superseded item, invalid batch scope/currency and control-total mismatch.
+## Invoice-ready batch state contract
+
+Canonical states are `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`.
+
+The API and database use these exact occupancy classes:
+
+- **Open/active occupying:** `Draft`, `Under Review`, `Approved`.
+- **Final occupying:** `Exported`, `Billed/Confirmed`.
+- **Non-occupying terminal:** `Cancelled`, only when cancelled before a successful export or billing confirmation.
+
+Minimum accepted transitions are:
+
+```text
+Draft → Under Review | Cancelled
+Under Review → Draft | Approved | Cancelled
+Approved → Exported | Cancelled
+Exported → Billed/Confirmed
+```
+
+`Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`. Export/billing corrections create versioned reversal or superseding billing-eligibility events, approved-unbilled items and correction batch lines rather than releasing or reusing the original lineage.
+
+A failed export leaves the batch in `Approved` and records a failed integration attempt; an idempotent retry may continue. The state becomes `Exported` only after the configured provider accepts the exact versioned export payload and control totals.
+
+A cancellation command is accepted only from `Draft`, `Under Review` or pre-export `Approved`, requires reason and applicable approval authority, and atomically records cancellation plus occupancy release. It returns an item to the available approved-unbilled register only when the underlying eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible. Historical line/membership evidence remains immutable.
+
+The API returns stable conflict codes for:
+
+- Direct-source/snapshot bypass.
+- Stale event/register/batch version.
+- Already occupied by another open/active or final batch.
+- Cancellation after export or billing confirmation.
+- Reversed/superseded source or register item.
+- Invalid transition.
+- Invalid batch scope/currency.
+- Control-total mismatch.
 
 Invoice-ready lines expose traceability to exactly one approved-unbilled item and through it exactly one billing-eligibility-event version. Raw source evidence may be included as read-only lineage; it is never accepted as an alternative batchable object.
 
 ## Integration contracts
 
-Inbound adapters map external identifiers to controlled domain records and retain source/idempotency evidence. Outbound finance exports use versioned schemas, approved/finalized invoice-ready batch lines, event/register lineage, control totals and export audit.
+Inbound adapters map external identifiers to controlled domain records and retain source/idempotency evidence. Outbound finance exports use versioned schemas, `Approved` batches, event/register lineage, control totals and export audit; only accepted exports transition to `Exported`.
 
 ## Observability
 
@@ -77,4 +111,4 @@ Every request receives a correlation ID. Structured logs record safe route, stat
 
 ## Compatibility and deprecation
 
-Compatibility routes have an owner, migration plan, tests and removal release. A compatibility endpoint must not recreate a raw-source-to-batch shortcut. Breaking changes require versioned contracts and release notes.
+Compatibility routes have an owner, migration plan, tests and removal release. A compatibility endpoint must not recreate a raw-source-to-batch shortcut or weaken occupancy state semantics. Breaking changes require versioned contracts and release notes.
