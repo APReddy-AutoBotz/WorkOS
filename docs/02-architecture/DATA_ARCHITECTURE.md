@@ -70,19 +70,51 @@ Every event and register item retains:
 - Calculation, rate, policy and rounding evidence where applicable.
 - Event version and status.
 - Reversal-of or supersedes relationship where applicable.
-- Active/final batch inclusion state and audit identity.
+- Batch membership version/state and audit identity.
 
 `approved_unbilled_items` has a one-to-one relationship with the applicable billing-eligibility-event version. `invoice_ready_lines` reference `approved_unbilled_item_id`; they do not reference a raw work entry, milestone, schedule, retainer event, managed-service event, adjustment or calculation snapshot as the batchable source.
 
-Database constraints, transactional locking and idempotency prevent one eligibility-event version or approved-unbilled item from belonging to more than one active or finalized batch. An authorized correction creates a versioned reversal or superseding eligibility event and a corresponding register item; it never rewrites or reuses the prior event/register lineage.
+## Invoice-ready batch occupancy semantics
 
-Batch and export control totals reconcile source evidence to billing-eligibility events, approved-unbilled items, invoice-ready lines and finalized batches.
+The canonical batch states are:
+
+- `Draft`
+- `Under Review`
+- `Approved`
+- `Exported`
+- `Billed/Confirmed`
+- `Cancelled`
+
+For no-double-billing control, the exact state sets are:
+
+- **Open/active occupying states:** `Draft`, `Under Review`, `Approved`.
+- **Final occupying states:** `Exported`, `Billed/Confirmed`.
+- **Non-occupying terminal state:** `Cancelled`, but only when cancellation occurred before any successful export or downstream billed confirmation.
+
+A versioned approved-unbilled item is unavailable for another batch while any membership for that item is in an open/active or final occupying state. Database constraints, transactional locking and idempotency enforce this invariant under concurrent requests.
+
+The minimum valid transition set is:
+
+```text
+Draft → Under Review | Cancelled
+Under Review → Draft | Approved | Cancelled
+Approved → Exported | Cancelled
+Exported → Billed/Confirmed
+```
+
+`Cancelled` and `Billed/Confirmed` are terminal batch states. `Exported` cannot transition to `Cancelled`; an exported or billed/confirmed item remains historically occupied and any correction must use an authorized versioned reversal or superseding billing-eligibility event, approved-unbilled item and correction batch. A failed external export does not set `Exported`; the batch remains `Approved` and retries use the same idempotency identity.
+
+Cancellation from `Draft`, `Under Review` or pre-export `Approved` releases current occupancy only after an atomic cancellation transaction records reason, actor, approval policy where required and preserved membership history. The approved-unbilled item may then return to the available register only if its eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible. Cancellation never deletes or rewrites event/register/line history.
+
+An authorized correction creates a versioned reversal or superseding eligibility event and a corresponding register item; it never rewrites or reuses the prior event/register lineage.
+
+Batch and export control totals reconcile source evidence to billing-eligibility events, approved-unbilled items, invoice-ready lines and final occupying batches.
 
 ## Audit and provenance
 
 Audit records are append-only for normal application identities and capture actor, active role, source, entity, action, timestamp, reason and material before/after values. Imports retain source identifiers, batch, row outcome and duplicate/idempotency keys.
 
-Billing-eligibility creation, register insertion/removal state, reversal/supersession, batch inclusion, finalization and export are production-relevant mutations and retain complete source-to-event-to-register-to-line audit evidence.
+Billing-eligibility creation, register insertion, batch reservation/release, cancellation, reversal/supersession, finalization and export are production-relevant mutations and retain complete source-to-event-to-register-to-line audit evidence.
 
 ## Retention and deletion
 
