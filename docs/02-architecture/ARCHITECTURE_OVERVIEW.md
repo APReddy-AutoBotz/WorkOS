@@ -242,7 +242,7 @@ The existing code may be migrated incrementally. A work package must not move co
 - Budgets and approved changes.
 - Currency and exchange-rate inputs.
 - T&M, fixed-fee, milestone, retainer and managed-service calculations.
-- Revenue, cost, margin and estimate-at-completion snapshots.
+- Billable-value, optional non-statutory operational earned-management revenue, cost, margin and estimate-at-completion snapshots.
 
 ### 5.10 Invoice readiness
 
@@ -336,16 +336,16 @@ Effective-dated records should use explicit start/end dates, non-overlap constra
 
 Approved period/commercial calculations must persist:
 
-- Source work or milestone reference.
+- Source work, milestone, schedule, retainer, managed-service or adjustment reference as applicable.
 - Quantity and unit.
-- Billing-rate source and value.
+- Billing-rate source and value where applicable.
 - Cost-rate source and value.
 - Currency and exchange-rate source.
 - Rounding rule.
-- Revenue, cost and margin outputs.
+- Billable value, operational earned-management revenue where configured, cost and margin outputs.
 - Calculation version and timestamp.
 
-Changing a rate card must not rewrite prior snapshots. Controlled recalculation must create a new version and audit evidence.
+Changing a rate card must not rewrite prior snapshots. Controlled recalculation must create a new version and audit evidence. A calculation snapshot is valuation/reporting evidence; it is not, by itself, authority to create an invoice-ready line.
 
 ## 8. API architecture
 
@@ -396,24 +396,27 @@ UI hiding is never a security boundary.
 
 ## 10. Commercial calculation architecture
 
-### 10.1 Calculation service
+### 10.1 Calculation and billing-eligibility services
 
-Commercial calculations must be isolated behind a server-side application service with explicit inputs and versioned outputs.
+Commercial valuation and invoice readiness are separate server-authoritative decisions. The calculation service uses explicit inputs and produces versioned snapshots for reporting and reconciliation. The invoice-readiness service accepts only a source-specific approved billing-eligibility record.
 
 ```mermaid
 flowchart LR
-    Source[Approved Work / Milestone / Retainer Schedule]
+    ValuationSource[Approved Work / Accepted Milestone / Schedule / Retainer / Managed-Service Event]
+    BillingEvent[Approved Billing Source Event or Adjustment]
     Terms[Contract and Engagement Terms]
     Rate[Resolved Billing Rate]
     Cost[Resolved Cost Rate]
     FX[Currency / Exchange Rate]
-    Policy[Rounding / Caps / Exclusions]
+    Policy[Rounding / Caps / Exclusions / Earned-Management Policy]
     Engine[Commercial Calculation Engine]
     Snapshot[Immutable Calculation Snapshot]
-    Reporting[Revenue and Margin Reporting]
+    Reporting[Billable Value / Operational Earned-Management / Cost / Margin Reporting]
+    Eligibility[Source-Specific Billing-Eligibility Gate]
+    Unbilled[Approved-Unbilled Register]
     Invoice[Invoice-Ready Line]
 
-    Source --> Engine
+    ValuationSource --> Engine
     Terms --> Engine
     Rate --> Engine
     Cost --> Engine
@@ -421,8 +424,14 @@ flowchart LR
     Policy --> Engine
     Engine --> Snapshot
     Snapshot --> Reporting
-    Snapshot --> Invoice
+
+    BillingEvent --> Eligibility
+    Snapshot -->|Approved T&M or applicable valuation evidence only| Eligibility
+    Eligibility --> Unbilled
+    Unbilled --> Invoice
 ```
+
+Operational earned-management revenue is a non-statutory management metric and never grants billing authority. For T&M, an approved eligible calculation snapshot may be the billing source. Milestone, fixed-fee, retainer, managed-service and adjustment lines require their own approved/contractually due source event, version and eligibility evidence before entering the approved-unbilled register. The gate records source type/version, approval or eligibility evidence, organization/legal entity, client/contract/engagement, currency, eligible date, amount and current active/final batch state.
 
 ### 10.2 Precision
 
@@ -516,7 +525,8 @@ Testing must include:
 - Migration fresh-install and upgrade tests.
 - Integration adapter contract tests.
 - Browser journeys by high-risk role.
-- Reconciliation tests for commercial reports and invoice-ready totals.
+- Reconciliation tests for commercial reports, approved-unbilled sources and invoice-ready totals.
+- Tests proving operational earned-management snapshots cannot bypass source-specific billing eligibility.
 - Production-mode startup/build tests.
 - Backup/restore rehearsal.
 
@@ -530,7 +540,7 @@ The application and job runner must emit structured events with correlation iden
 - Import/export operations.
 - Integration attempts and failures.
 - Commercial calculation/finalization jobs.
-- Invoice-ready batch operations.
+- Approved-unbilled eligibility and invoice-ready batch operations.
 - Migration and startup readiness.
 
 Logs must not expose passwords, tokens, private keys or unrestricted personal/financial values.
@@ -558,5 +568,6 @@ The architecture baseline is accepted when:
 - The source-bootstrap work package can map every imported area to a target module.
 - The proposed ownership, authorization and effective-date rules can be represented in PostgreSQL.
 - The commercial calculation model has deterministic testable inputs/outputs.
+- Invoice readiness is gated by explicit source-specific billing eligibility and cannot be inferred from operational earned-management valuation alone.
 - Deployment and migration policies do not depend on hidden manual steps.
 - No target decision requires modifying the original repository.
