@@ -331,28 +331,36 @@
 ### PR-012 — WOS-06 Invoice readiness
 
 **Branch:** `codex/wos-06-invoice-readiness`  
-**Outcome:** Convert approved eligible work/commercial events into controlled invoice-ready batches without becoming a statutory invoicing system.
+**Outcome:** Convert source-specific approved or contractually due commercial evidence into versioned billing-eligibility events, one-to-one approved-unbilled register items and controlled invoice-ready batches without becoming a statutory invoicing system.
 
 **Includes:**
 
-- Approved-unbilled register covering approved T&M snapshots, accepted billing-eligible milestones, approved/due fixed-fee schedule events, approved retainer base/period/overage events, approved managed-service period/unit events and approved adjustments.
-- Invoice-ready batch and line model.
-- Adjustments, discounts, credits and write-offs.
-- Evidence links and control totals.
+- Source-specific eligibility evaluation for approved T&M snapshots, accepted milestones, approved/due fixed-fee schedule versions, approved retainer base/period/overage events, approved managed-service period/unit events and approved adjustments.
+- Versioned billing-eligibility-event aggregate retaining source type/version, organization/legal entity, approval or contractual-due evidence, eligible date, currency, amount, calculation/policy evidence, reversal/supersession and batch state.
+- One-to-one versioned approved-unbilled-item register; the register item is the only batchable object.
+- Invoice-ready batch and line model in which every line references exactly one approved-unbilled-item version and through it exactly one eligibility-event/source version.
+- Direct raw-source/snapshot-to-line rejection at domain, API, import and compatibility boundaries.
+- Adjustments, discounts, credits and write-offs through approved versioned source → event → register lineage.
+- Evidence links and source → event → register → line → batch control totals.
 - State machine and approval integration.
-- No-double-billing constraints.
-- Versioned CSV/API-ready export.
+- Database constraints, locking and idempotency preventing repeated active/final inclusion.
+- Versioned reversal/supersession and correction paths.
+- Versioned CSV/API-ready export only from approved/finalized batch lines.
 
 **Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CORE-008, WOS-INV-001 through WOS-INV-008.
 
 **Mandatory evidence:**
 
-- Duplicate inclusion prevention across every eligible source type.
-- Register-to-batch reconciliation by source version, approval/eligibility evidence, currency, eligible date and amount.
-- Batch state/approval tests.
-- Export traceability and audit.
-- Reversal/correction test paths.
-- Finalized source versions and batch lines remain immutable; every transition and adjustment is traceably audited.
+- Fresh-install and supported-upgrade migration tests for event/register/line relationships and constraints.
+- Direct-bypass negative tests for raw work, snapshots, milestones, schedules, retainer/managed-service events and adjustments.
+- One source version to one current eligibility-event/register-item evidence, including idempotent retry behavior.
+- Register-to-batch reconciliation by source/event/register version, organization/legal entity, approval/eligibility evidence, currency, eligible date and amount.
+- Active/final inclusion uniqueness under concurrent requests across every eligible source type.
+- Batch state/approval tests and locked-period enforcement.
+- Authorized reversal/supersession/correction paths that preserve prior evidence and exclude stale/reversed items from new batches.
+- API and browser proof that only approved-unbilled items can be selected for a line.
+- Export traceability from approved/finalized batch line through register/event to source and audit.
+- Finalized event/register/source versions and batch lines remain immutable; every transition and adjustment is traceably audited.
 
 ### PR-013 — WOS-07 Reporting, leakage control and adapter contracts
 
@@ -373,10 +381,11 @@
 
 **Mandatory evidence:**
 
-- Report totals reconcile to snapshots/batches.
+- Report totals reconcile to snapshots, eligibility events, approved-unbilled register items and batches.
 - Leakage scenarios have deterministic fixtures.
 - Out-of-scope report/export tests.
 - Adapter mock contract tests.
+- Finance exports reject incomplete event/register lineage and originate only from approved/finalized batch lines.
 - Report/export operations are audited with actor, scope, filters, as-of/version and control totals.
 
 ### PR-014 — WOS-08 Identity, session and security hardening
