@@ -60,14 +60,16 @@ The buyer or deployment owner confirms:
 - Destructive/unreconciled migration.
 - Authorization or cost/margin leakage.
 - Financial golden-vector or reconciliation difference.
+- Direct raw-source/snapshot-to-invoice-line bypass or incomplete event/register lineage.
+- Ambiguous or untested invoice-batch occupancy/release semantics.
 - Production demo fallback/shared credentials.
 - Missing rollback/recovery path for high-risk change.
 - Incomplete provenance or prohibited source/data.
 
 ## Approval gates
 
-- Gate B: blueprint approval before source bootstrap.
-- Gate C: working commercial-engine review.
-- Gate D: final v1 release and buyer-handover approval.
+- **Gate B:** blueprint approval before source bootstrap.
+- **Gate C:** complete WOS-06 commercial-engine acceptance only after PR-010, PR-011 and PR-012 are merged and exact-head evidence proves effective-dated terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, invoice-ready batch states, export lineage, reversals/corrections, authorization and control-total reconciliation. PR-011 alone cannot satisfy Gate C.
+- **Gate D:** final v1 release and buyer-handover approval.
 
 Acceptance is recorded against a commit/tag and artifact; later changes require renewed evidence.
