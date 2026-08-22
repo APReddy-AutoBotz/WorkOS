@@ -20,7 +20,12 @@ A requirement cannot be marked accepted based only on a PR description or implem
 
 | Requirement range | Primary workstream/PR | Required evidence class | Current state |
 |---|---|---|---|
-| WOS-CORE-001–008 | WOS-00, PR-003, PR-004, PR-006, PR-011 | Configuration, architecture, authorization, calculation and forbidden-term evidence | Blueprint |
+| WOS-CORE-001, WOS-CORE-006–007 | PR-003 | Configuration-driven branding/terminology, production/demo separation and forbidden-term evidence | Blueprint |
+| WOS-CORE-002 | PR-004 | Organization/legal-entity ownership, setup and cross-scope evidence | Blueprint |
+| WOS-CORE-003 | PR-006 | Modular-monolith boundary, versioned API and compatibility evidence | Blueprint |
+| WOS-CORE-004 | PR-004, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012 | Effective-date overlap, historical-version resolution, immutable-history and controlled-correction evidence across workforce, engagement, policy and commercial domains | Blueprint |
+| WOS-CORE-005 | PR-006, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-014 | Common mutation/audit contract plus module-specific actor, active-role, source, entity, reason and before/after evidence for every production mutation | Blueprint |
+| WOS-CORE-008 | PR-010, PR-011, PR-012, PR-013 | Decimal-safe rate/amount rules, deterministic financial vectors, snapshot/batch immutability and report/control-total reconciliation | Blueprint |
 | WOS-ORG-001–010 | PR-004 | Fresh/upgrade migrations, organization-scope negative tests, guided-setup browser evidence | Not started |
 | WOS-IAM-001–010 | PR-003, PR-004, PR-006, PR-014 | Identity/session, permission matrix, row-scope and negative security evidence | Not started |
 | WOS-WKF-001–002, WOS-WKF-006 | PR-004 | Worker-master/type migration, relationship/lifecycle dependency tests and scoped administration journeys | Not started |
@@ -77,7 +82,7 @@ PR identifiers after PR #1 are planned sequence identifiers until the GitHub PR 
 | Evidence ID | Evidence | Status |
 |---|---|---|
 | DOC-WOS-00-001 | Required-file inventory and controller cross-document review | Active in PR #1 |
-| DOC-WOS-00-002 | First independent Codex/Sol review and review-resolution mapping | First review complete; corrected-head re-review pending |
+| DOC-WOS-00-002 | Independent Codex/Sol review and review-resolution mapping | Two review rounds complete; final corrected-head re-review pending |
 | DOC-WOS-00-003 | Owner Gate B decision | Pending |
 
 ## 5. Evidence taxonomy
