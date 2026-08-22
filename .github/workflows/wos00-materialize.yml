@@ -38,6 +38,24 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Repair temporary materializer quoting and evidence allowlist
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/materialize-wos00-review.mjs')
+          s = p.read_text()
+          s = s.replace(
+              'Independent Codex/Sol review `5000738492` at head `492715dc8a40de6431365b6e52378d317721f617` identified',
+              'Independent Codex/Sol review 5000738492 at head 492715dc8a40de6431365b6e52378d317721f617 identified',
+          )
+          s = s.replace(
+              "const gateA = allMarkdown.filter((file) => read(file).includes('Gate A'));",
+              "const gateA = allMarkdown.filter((file) => !file.startsWith('docs/evidence/') && !file.startsWith('docs/tasks/') && read(file).includes('Gate A'));",
+          )
+          p.write_text(s)
+          PY
+          node --check scripts/materialize-wos00-review.mjs
+
       - name: Apply review resolutions
         run: node scripts/materialize-wos00-review.mjs
 
