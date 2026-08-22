@@ -68,6 +68,9 @@ The commercial engine maintains versioned deterministic fixtures for:
 - Source-specific billing eligibility for T&M, milestone, fixed-fee, retainer, managed-service and approved adjustments.
 - One billing-eligibility-event version to one approved-unbilled-item version.
 - Source → event → register → invoice-ready line → batch → export reconciliation.
+- Canonical batch states, occupancy classes and allowed transitions.
+- Pre-export cancellation and atomic occupancy release.
+- Export acceptance, failed-export behavior and billed confirmation.
 - Versioned reversals/supersessions and authorized correction flows.
 - No-double-billing and active/final batch uniqueness.
 
@@ -85,6 +88,12 @@ The PR-012 and release matrices must prove:
 6. Client-supplied organization, currency, amount, approval state, source version or calculation evidence cannot override server-authoritative values.
 7. Finalization fails on event/register/line control-total mismatch.
 8. Export fails or remains unconfirmed when its lines are not from an approved/finalized batch with complete source → event → register lineage.
+9. Any batch transition outside `Draft → Under Review | Cancelled`, `Under Review → Draft | Approved | Cancelled`, `Approved → Exported | Cancelled`, and `Exported → Billed/Confirmed` is rejected.
+10. `Cancelled` and `Billed/Confirmed` are terminal and `Exported` cannot be cancelled.
+11. A failed export leaves the batch `Approved`, keeps its register items occupied, and does not record an accepted export version.
+12. Cancellation from an unauthorized state, without protected authority/reason/audit, or with a non-atomic occupancy release is rejected.
+13. A register item released by valid pre-export cancellation is not selectable again unless its eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible.
+14. Exported or billed source lineage remains occupying; later correction attempts that reuse the original event/register item are rejected and must use versioned reversal/superseding events, register items and correction batches.
 
 Availability fixtures prove that approved leave/holidays reduce the denominator exactly once, never enter the productive/billable numerator and do not require a client engagement or project.
 
@@ -97,14 +106,14 @@ At minimum before v1:
 - Resource manager planning/assignment.
 - Engagement manager project/work approval.
 - Commercial manager contracts/rates/budgets and source-specific eligibility evidence.
-- Finance analyst billing-eligibility, approved-unbilled and batch flow without raw-source selection.
+- Finance analyst billing-eligibility, approved-unbilled and complete batch lifecycle without raw-source selection.
 - Approver delegation/decision/lock behavior.
 - Worker self-service and correction.
 - Auditor read-only event/register/batch lineage evidence.
 
 ## Test data
 
-Use synthetic organization, worker, client and commercial data. Fixtures intentionally include multiple legal entities, currencies, worker types, engagement models, overlapping effective dates, reversals/supersessions, already-batched register items and out-of-scope relationships.
+Use synthetic organization, worker, client and commercial data. Fixtures intentionally include multiple legal entities, currencies, worker types, engagement models, overlapping effective dates, reversals/supersessions, cancelled/failed-export/exported/billed batches, already-batched register items and out-of-scope relationships.
 
 ## PR and release expectations
 
