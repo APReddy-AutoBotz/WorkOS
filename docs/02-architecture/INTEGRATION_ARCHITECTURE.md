@@ -106,21 +106,21 @@ Notification policy is resolved server-side from the canonical event matrix in `
 
 ### Canonical v1 event matrix
 
-| Event/template key | Default relationship recipients | Class |
-|---|---|---|
-| `work_period.submission_due` | Affected worker | `ACTION_REQUIRED` |
-| `work_period.submission_overdue` | Affected worker plus scoped manager or escalation owner | `CONTROL_MANDATORY` |
-| `approval.action_required` | Current-stage approver(s) | `ACTION_REQUIRED` |
-| `approval.rejected_or_correction_required` | Requester plus affected worker where distinct | `ACTION_REQUIRED` |
-| `approval.completed` | Requester plus affected worker where distinct | `INFORMATIONAL` |
-| `approval.overdue_or_escalated` | Current approver(s) plus escalation target | `CONTROL_MANDATORY` |
-| `assignment.created_or_materially_changed` | Affected worker plus scoped resource/engagement manager where distinct | `ACTION_REQUIRED` |
-| `commercial.approval_required` | Current commercial approver(s) | `ACTION_REQUIRED` |
-| `commercial.risk_threshold_breached` | Engagement owner plus scoped commercial manager plus finance/billing owner | `CONTROL_MANDATORY` |
-| `invoice_batch.action_required` | Batch owner plus current finance approver(s) | `ACTION_REQUIRED` |
-| `invoice_batch.export_failed` | Batch owner plus finance/billing owner plus integration administrator | `OPERATIONAL_CRITICAL` |
-| `invoice_batch.exported_or_billed_confirmed` | Batch owner plus finance/billing owner | `INFORMATIONAL` |
-| `integration.delivery_failed_or_degraded` | Integration administrator plus operations owner | `OPERATIONAL_CRITICAL` |
+| Event/template key | Trigger boundary | Default relationship recipients | Class |
+|---|---|---|---|
+| `work_period.submission_due` | Submission reminder threshold | Affected worker | `ACTION_REQUIRED` |
+| `work_period.submission_overdue` | Deadline/grace elapsed without accepted submission | Affected worker plus scoped manager or escalation owner | `CONTROL_MANDATORY` |
+| `approval.action_required` | A valid generic approval stage becomes pending, including commercial and invoice-batch approvals | Current-stage approver(s) | `ACTION_REQUIRED` |
+| `approval.rejected_or_correction_required` | Generic approval rejection/correction decision | Requester plus affected worker where distinct | `ACTION_REQUIRED` |
+| `approval.completed` | Final approval | Requester plus affected worker where distinct | `INFORMATIONAL` |
+| `approval.overdue_or_escalated` | Approval due threshold or escalation | Current approver(s) plus escalation target | `CONTROL_MANDATORY` |
+| `assignment.created_or_materially_changed` | Assignment becomes effective or approved material change takes effect | Affected worker plus scoped resource/engagement manager where distinct | `ACTION_REQUIRED` |
+| `commercial.approval_required` | Proposed commercial change is policy-blocked before submission because the requester/change owner must create, complete or submit the generic approval request; never emitted for a pending generic approval stage | Requester plus commercial change owner where distinct | `ACTION_REQUIRED` |
+| `commercial.risk_threshold_breached` | PO, fixed-fee, retainer or margin threshold | Engagement owner plus scoped commercial manager plus finance/billing owner | `CONTROL_MANDATORY` |
+| `invoice_batch.action_required` | Batch-owner pre-submission evidence, reconciliation, validation or export-preparation remediation while no generic approval stage is pending; generic approval rejection uses `approval.rejected_or_correction_required` | Batch owner plus finance preparer where distinct | `ACTION_REQUIRED` |
+| `invoice_batch.export_failed` | Provider delivery or CSV generation fails | Batch owner plus finance/billing owner plus integration administrator | `OPERATIONAL_CRITICAL` |
+| `invoice_batch.exported_or_billed_confirmed` | Accepted export or billing confirmation | Batch owner plus finance/billing owner | `INFORMATIONAL` |
+| `integration.delivery_failed_or_degraded` | Provider failed/degraded threshold | Integration administrator plus operations owner | `OPERATIONAL_CRITICAL` |
 
 The canonical event key is also the canonical template key; the selected template version is stored with each notification. Recipient relationships are resolved from authoritative organization, assignment, engagement, approval, commercial, batch and operations records—not from client-supplied addresses or role labels.
 
@@ -138,13 +138,13 @@ Every notification stores:
 
 A retry cannot create duplicate in-app records or delivery evidence for the same notification/channel/idempotency identity. Users cannot redirect another user's protected notification, remove a mandatory recipient or override a mandatory class. Buyers may add events/recipients or require external channels, but a protected policy change cannot violate the minimum matrix. Client recipients remain out of scope until a client-portal requirement is approved.
 
-The generic approval engine emits the shared `approval.*` events for work, leave, assignment, commercial and invoice-batch approvals. Domain modules must not create competing approval event keys or duplicate notification records for the same approval transition.
+The generic approval engine emits the shared `approval.*` events for work, leave, assignment, commercial and invoice-batch approvals. A source version/triggering operation may create at most one action-required notification. When a generic approval stage becomes pending, `approval.action_required` is the only action-request event; `commercial.approval_required` and `invoice_batch.action_required` are mutually exclusive pre-stage/domain-remediation events and cannot fire for the same pending-stage transition. Domain modules must not create competing approval event keys or duplicate notification records.
 
 Templates and payloads cannot expose secrets, unrestricted personal data, cost rates or margin to unauthorized recipients.
 
 ## Identity
 
-OIDC is the production identity target, with Microsoft Entra supported through configuration. Identity links and group/role mappings are controlled domain records; the provider does not bypass WorkOS permission and row-scope policy. Production identity failure is fail-closed and cannot activate WorkOS local authentication.
+OIDC is required for every production deployment, with Microsoft Entra supported through configuration. Identity links and group/role mappings are controlled domain records; the provider does not bypass WorkOS permission and row-scope policy. Missing, invalid or unavailable required production OIDC fails startup/readiness and authentication closed and cannot activate WorkOS local authentication.
 
 ## Reliability
 
