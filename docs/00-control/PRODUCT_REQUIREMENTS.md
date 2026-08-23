@@ -123,7 +123,7 @@ A new installation must provide a guided setup status that covers organization, 
 
 ### WOS-IAM-001 — Identity providers
 
-WorkOS must support local controlled accounts for non-production/demo use and OIDC-based enterprise identity, including Microsoft Entra as a supported configuration.
+WorkOS must support local controlled accounts for non-production/demo use and OIDC-based enterprise identity, including Microsoft Entra as a supported configuration. Production OIDC unavailability must fail closed and must not activate WorkOS local authentication.
 
 ### WOS-IAM-002 — Named production accounts
 
@@ -479,19 +479,32 @@ Minimum allowed transitions are:
 - `Approved` → `Exported` or `Cancelled`.
 - `Exported` → `Billed/Confirmed`.
 
-`Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`. A failed export must leave the batch in `Approved`; only provider acceptance of the exact versioned payload and matching control totals may transition it to `Exported`.
+`Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`.
+
+An initial provider or CSV export may originate only from an `Approved` batch. A failed provider delivery or CSV-artifact generation must leave the batch `Approved`, keep its register items occupied and record the failed operation. The single `Approved → Exported` transition occurs only when either:
+
+1. A configured finance provider accepts the exact immutable versioned payload and matching control totals; or
+2. WorkOS atomically creates and records an immutable, versioned CSV artifact, validates matching control totals and makes that exact artifact available for controlled retrieval.
+
+The accepted CSV operation must record export-operation ID, idempotency key, immutable artifact ID/version, checksum, schema version, line count, control totals, generated timestamp, authorized actor and the complete source → event → register → line → batch lineage. A repeated request with the same idempotency key must return the same accepted artifact or provider-operation result; it must not regenerate content, duplicate delivery or reapply the transition. Idempotency-key reuse with a different payload or artifact identity must be rejected.
+
+`Exported` and `Billed/Confirmed` batches may support only authorized, idempotent retrieval/redownload of the already accepted artifact and downstream-status confirmation. They must not initiate another downstream delivery or transition to `Exported` again.
 
 Cancellation is allowed only from `Draft`, `Under Review` or a pre-export `Approved` batch. It requires protected authority, reason and audit evidence, preserves prior membership/history, and releases register-item occupancy atomically. A released item becomes available again only when its underlying eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible.
 
 ### WOS-INV-007 — Export and integration
 
-The product must provide controlled CSV and API-ready exports for accounting/billing systems. Exports must originate only from approved or finalized batch lines and preserve line-to-register-item-to-eligibility-event-version traceability. WorkOS v1 is not required to issue statutory invoices or post to a general ledger.
+The product must provide controlled CSV and API-ready exports for accounting/billing systems. Initial export or delivery must originate only from an `Approved` batch and preserve line-to-register-item-to-eligibility-event-version traceability.
+
+Provider delivery is accepted only when the exact immutable versioned payload and matching control totals are accepted downstream. CSV delivery is accepted only when WorkOS atomically records the immutable artifact and required operation, checksum, schema, line-count, total, timestamp and actor evidence defined by WOS-INV-006. Final-state retrieval/redownload and status confirmation must be idempotent and must not duplicate downstream delivery. Corrected content must use versioned reversal/supersession lineage and a new correction batch or artifact rather than overwriting accepted evidence.
+
+WorkOS v1 is not required to issue statutory invoices or post to a general ledger.
 
 ### WOS-INV-008 — No double billing
 
 The server must prevent an eligibility-event version or its one-to-one approved-unbilled item from being included in more than one occupying invoice-ready batch. Occupying batches include open/active `Draft`, `Under Review` and `Approved` batches and final `Exported` and `Billed/Confirmed` batches.
 
-Only a valid pre-export transition to `Cancelled` releases occupancy, and the release must be atomic with cancellation. Exported or billed evidence remains occupying permanently. Corrections after export or billing must use authorized versioned reversal/superseding eligibility events, approved-unbilled items and correction lines/batches rather than reusing the original lineage. Reversed, superseded or stale event/register versions cannot be newly batched.
+Only a valid pre-export transition to `Cancelled` releases occupancy, and the release must be atomic with cancellation. Exported or billed evidence remains occupying permanently. Corrections after export or billing must use authorized versioned reversal/superseding eligibility events, approved-unbilled items and correction lines/batches rather than reusing the original lineage. Accepted provider payload and CSV artifact evidence must not be overwritten. Reversed, superseded or stale event/register versions cannot be newly batched.
 
 ## 14. Reporting and control requirements
 
@@ -542,7 +555,7 @@ Identity, email, collaboration, worklog and finance integrations must use explic
 
 ### WOS-INT-002 — Notification channels
 
-The product must support in-app notifications and adapter-ready email/collaboration notifications with templates, preferences and delivery evidence.
+The product must support in-app notifications and provider-neutral email/collaboration notifications with versioned templates, locale-aware rendering, recipient authorization, user/channel preferences, mandatory-control recipient policy, delivery-attempt evidence, retry/backoff, idempotency, failure isolation and sanitized operational visibility.
 
 ### WOS-INT-003 — Idempotency
 
@@ -558,7 +571,7 @@ External delivery or integration failure must not silently roll back an otherwis
 
 ### WOS-INT-006 — Outbound financial interface
 
-Invoice-ready and commercial exports must provide stable versioned contracts suitable for downstream accounting adapters.
+Invoice-ready and commercial exports must provide stable versioned contracts suitable for downstream accounting adapters. Initial finance delivery is `Approved`-only; final-state operations are idempotent retrieval/status confirmation and cannot create duplicate delivery.
 
 ## 16. Governance and audit requirements
 
@@ -590,7 +603,7 @@ The release must provide a reproducible production build and container/deploymen
 
 ### WOS-OPS-002 — Environment validation
 
-Production startup must validate required configuration and fail closed on missing/unsafe secrets or database settings.
+Production startup must validate required configuration and fail closed on missing/unsafe secrets, database settings or required OIDC identity configuration. A production deployment must reject an enabled WorkOS local-auth provider.
 
 ### WOS-OPS-003 — Migration execution
 
@@ -618,7 +631,7 @@ Releases must be versioned, tagged and accompanied by changelog, migration notes
 
 ### WOS-OPS-009 — Demo/production separation
 
-Demo data, shortcuts and fallback storage must not be available in production unless explicitly enabled in a non-production deployment profile.
+Demo data, shortcuts, fallback storage and local authentication must not be available in production unless explicitly enabled in a non-production deployment profile.
 
 ### WOS-OPS-010 — Buyer handover
 
