@@ -77,19 +77,32 @@ Approved → Exported | Cancelled
 Exported → Billed/Confirmed
 ```
 
-`Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`. A failed provider export leaves the batch `Approved` and records a failed delivery attempt; the same idempotency identity is retried. Only accepted export payload/control totals transition the batch to `Exported`.
+`Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`.
+
+### Export acceptance
+
+An initial export or delivery may originate only from an `Approved` batch. A failed provider delivery or CSV-artifact generation leaves the batch `Approved`, retains occupancy and records the failed operation.
+
+The single `Approved → Exported` transition occurs only when either:
+
+1. A configured provider accepts the exact immutable versioned payload and matching control totals; or
+2. WorkOS atomically creates and records an immutable, versioned CSV artifact, validates matching control totals and makes that exact artifact available for controlled retrieval.
+
+The CSV acceptance record contains export-operation ID, idempotency key, immutable artifact ID/version, checksum, schema version, line count, control totals, generated timestamp, authorized actor and source → event → register → line → batch lineage.
+
+Repeated requests with the same idempotency key return the same accepted artifact or provider-operation result. They must not regenerate content, duplicate downstream delivery or reapply the transition. `Exported` and `Billed/Confirmed` batches may support idempotent retrieval/redownload or downstream-status confirmation of the already accepted artifact, but cannot initiate another delivery or become `Exported` again.
 
 A pre-export cancellation from `Draft`, `Under Review` or `Approved` requires reason, authority and audit. The atomic cancellation preserves historical line membership and releases current occupancy. The item returns to the available register only if its eligibility event is still current, unreversed, unsuperseded, in scope and otherwise valid.
 
-After `Exported` or `Billed/Confirmed`, corrections use a versioned reversal or superseding eligibility event, corresponding approved-unbilled item and correction batch. The original source/event/register/line/batch lineage remains occupied and immutable.
+After `Exported` or `Billed/Confirmed`, corrections use a versioned reversal or superseding eligibility event, corresponding approved-unbilled item and correction batch. The original source/event/register/line/batch/export lineage remains occupied and immutable. Accepted CSV artifacts and provider payload evidence are never overwritten.
 
-Finalization preserves source → event → register → line → batch control totals and immutable evidence.
+Finalization preserves source → event → register → line → batch → export control totals and immutable evidence.
 
 WorkOS exports invoice-ready data; it does not issue statutory invoices or post a ledger.
 
 ## Authorization and confidentiality
 
-Billing access, cost-rate access, margin access, commercial-term maintenance, eligibility-event creation, batch preparation, cancellation, final approval, export and billing confirmation are distinct permissions. Every query and export is scoped. Sensitive values are excluded from logs and broad DTOs.
+Billing access, cost-rate access, margin access, commercial-term maintenance, eligibility-event creation, batch preparation, cancellation, final approval, initial export, final-artifact retrieval and billing confirmation are distinct permissions. Every query and export is scoped. Sensitive values are excluded from logs and broad DTOs.
 
 ## Acceptance and golden vectors
 
@@ -101,30 +114,37 @@ Positive vectors cover:
 - One-to-one eligibility-event/register-item creation.
 - Source → event → register → line → batch/export control-total reconciliation.
 - Valid Draft/Under Review/Approved occupancy and pre-export cancellation/release.
-- Idempotent failed-export retry that remains `Approved` until provider acceptance.
+- Idempotent failed-provider retry that remains `Approved` until acceptance.
+- Successful CSV acceptance with immutable artifact/version/checksum/schema/line-count/control-total evidence.
+- Repeated CSV/provider request with the same idempotency identity returning the same accepted result without duplicate delivery or re-transition.
 - `Approved → Exported → Billed/Confirmed` final occupancy.
+- Idempotent retrieval/redownload or status confirmation from final states without new delivery.
 - Versioned reversals/supersessions and valid correction flows after export/confirmation.
 - Budget/EAC and finalized batch/export totals.
 
 Negative vectors cover:
 
 - Missing/conflicting rate, expired PO, invalid FX and stale term version.
-- Unauthorized cost/margin or eligibility-event access.
+- Unauthorized cost/margin, eligibility-event, initial-export or final-artifact access.
 - Raw source or calculation-snapshot direct-batch bypass.
 - Source lacking approval, acceptance or contractual-due evidence.
 - Duplicate event/register creation or reuse in another Draft, Under Review, Approved, Exported or Billed/Confirmed batch.
+- Initial export request from any state other than `Approved`.
+- Duplicate downstream delivery or second `Exported` transition from `Exported` or `Billed/Confirmed`.
+- Idempotency-key reuse with different payload/artifact identity.
+- CSV artifact missing checksum, schema version, line count, control totals, actor or immutable version.
 - Cancellation after Exported or Billed/Confirmed.
 - Reversed/superseded/stale register item.
 - Locked period, out-of-scope batch, duplicate adjustment, invalid transition and failed control-total reconciliation.
 
 ## Recalculation, correction and audit
 
-Controlled recalculation creates a new snapshot version and reason. Credits/write-offs/discounts are approved versioned source records; invoice eligibility then creates their event/register lineage. Cancellation, finalization, export, confirmation and correction preserve control totals and evidence.
+Controlled recalculation creates a new snapshot version and reason. Credits/write-offs/discounts are approved versioned source records; invoice eligibility then creates their event/register lineage. Cancellation, finalization, provider/CSV export acceptance, retrieval, confirmation and correction preserve control totals and evidence.
 
 ## Gate C acceptance boundary
 
-The product-owner Gate C review occurs only after PR-010, PR-011 and PR-012 are complete and exact-head evidence proves commercial terms, deterministic calculations, source-specific eligibility, the approved-unbilled register, batch occupancy/release states, export lineage, correction paths, authorization and reconciliation. PR-011 calculation-engine evidence alone cannot satisfy Gate C.
+The product-owner Gate C review occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Evidence must prove commercial terms, deterministic calculations, source-specific eligibility, the approved-unbilled register, complete batch occupancy/release states, provider and CSV export acceptance, immutable export lineage, correction paths, authorization and reconciliation. PR-011 calculation-engine evidence alone cannot satisfy Gate C, and Gate C cannot substitute for PR-012 engineering acceptance.
 
 ## Migration and rollback
 
-Commercial tables are additive and feature gated. Seeded vectors and neutral defaults are synthetic. Before export/final occupancy use controlled cancellation/disable where valid; after snapshots, eligibility events, register items, Exported/Billed/Confirmed batches or downstream confirmations exist, use forward corrections and preserve evidence.
+Commercial tables are additive and feature gated. Seeded vectors and neutral defaults are synthetic. Before export/final occupancy use controlled cancellation/disable where valid; after snapshots, eligibility events, register items, accepted export artifacts, Exported/Billed/Confirmed batches or downstream confirmations exist, use forward corrections and preserve evidence.
