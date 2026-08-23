@@ -3,7 +3,7 @@
 **Workstream:** WOS-00  
 **Issue:** #2  
 **Pull request:** #1  
-**Status:** Eight independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
+**Status:** Nine independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
 
 ## 1. Reviewed heads and review IDs
 
@@ -17,6 +17,7 @@
 | 6 | `7124709e4f6682ded0321c58d22a6851a5e32b9d` | `PRR_kwDOUAv8Lc8AAAABKhU3Ng`, `PRR_kwDOUAv8Lc8AAAABKhVa0Q` | Four P1, two P2 |
 | 7 | `76f05c9da71d21b1f774afc91e13dad4323d6358` | `PRR_kwDOUAv8Lc8AAAABKh3paA` | Two P1 |
 | 8 | `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` | `PRR_kwDOUAv8Lc8AAAABKh6Tsg` | Two P1 |
+| 9 | `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` | `PRR_kwDOUAv8Lc8AAAABKh-0NA` | One P1, one P2 |
 
 ## 2. Resolution map by review round
 
@@ -73,15 +74,22 @@
 
 | Finding | Severity | Resolution |
 |---|---|---|
-| Release acceptance did not explicitly require independent PR-012 engineering acceptance before Gate C | P1 | `RELEASE_ACCEPTANCE_CRITERIA.md` now states that PR-010/011/012 must be merged and PR-012 engineering acceptance must be independently proven at an exact head before Gate C. Gate C is additional owner acceptance and cannot substitute for engineering evidence. |
-| WOS-INT-002 lacked an executable minimum notification event/template/default-recipient matrix | P1 | Added four authoritative policy classes and thirteen canonical event/template keys with triggers, default relationship recipients, preference/mandatory behavior, evidence fields, protected extension rules and deterministic tests. Aligned integration architecture, approval specification, PR-013 backlog, test strategy, traceability and issue #9. |
+| Release acceptance did not explicitly require independent PR-012 engineering acceptance before Gate C | P1 | `RELEASE_ACCEPTANCE_CRITERIA.md` requires PR-010/011/012 merged and PR-012 engineering acceptance independently proven at an exact head before Gate C. Gate C is additional owner acceptance and cannot substitute for engineering evidence. |
+| WOS-INT-002 lacked an executable notification event/template/default-recipient matrix | P1 | Added four policy classes and thirteen canonical event/template keys with triggers, default relationship recipients, preference/mandatory behavior, evidence fields, protected extensions and deterministic tests. |
 
 ### Round 8
 
 | Finding | Severity | Resolution |
 |---|---|---|
-| Reporting specification allowed a new finance export from “approved or finalized” batch lines | P1 | `REPORTING_AND_ANALYTICS_SPEC.md` now permits initial provider/CSV delivery only from an `Approved` batch. `Exported` and `Billed/Confirmed` support only authorized idempotent retrieval/redownload of the accepted immutable artifact or downstream-status confirmation; they cannot initiate another delivery, create a second accepted export operation or transition again. Positive and negative acceptance cases enforce the distinction. |
-| Security architecture made production OIDC optional through “where configured” wording | P1 | `SECURITY_ARCHITECTURE.md` now requires configured OIDC and named accounts for every production deployment. Missing, invalid or unavailable required OIDC fails startup/readiness and authentication closed. WorkOS local authentication and shared/demo identities are limited to approved non-production/demo profiles and cannot become a production fallback. |
+| Reporting specification allowed a new finance export from “approved or finalized” batch lines | P1 | Initial provider/CSV delivery is now `Approved`-only. `Exported` and `Billed/Confirmed` support only idempotent retrieval/redownload of the accepted artifact or downstream-status confirmation and cannot create another delivery. |
+| Security architecture made production OIDC optional through “where configured” wording | P1 | `SECURITY_ARCHITECTURE.md` now requires configured OIDC and named accounts for every production deployment; missing, invalid or unavailable OIDC fails closed; local/shared demo authentication is non-production/demo only. |
+
+### Round 9
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| Security/privacy and NFR quality baselines still made production OIDC optional | P1 | `SECURITY_PRIVACY_COMPLIANCE.md` and `NON_FUNCTIONAL_REQUIREMENTS.md` now require named accounts and configured OIDC for every production deployment. Missing, invalid or unavailable OIDC fails startup/readiness and authentication closed. WorkOS local credentials and shared/demo identities are restricted to approved non-production/demo profiles, must be disabled or absent in production and cannot become a production fallback. Production OIDC is marked mandatory in the environment schema and exact release evidence. |
+| Controller evidence still reported only the first review and pending Gate B | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` is now an explicitly current consolidated controller record. It links this detailed review authority, records nine independent rounds, records all historical P1/P2 findings as corrected, records Gate B as approved and leaves only the clean moved-head review and exact-head merge open. |
 
 ## 3. Canonical notification policy added in Round 7
 
@@ -117,18 +125,19 @@ Every event has a canonical/template key, version, source entity/version and ope
 - Operational earned-management revenue is non-statutory and never grants billing authority.
 - Commercial lineage is source → eligibility event → approved-unbilled item → line/batch → accepted provider/CSV export.
 - Initial export is `Approved`-only; failures remain `Approved`; final states are retrieval/status only.
-- Production OIDC is mandatory and fail-closed for every production deployment; WorkOS local authentication is non-production/demo only.
+- Production OIDC is mandatory and fail-closed in architecture, security/privacy and NFR quality baselines; WorkOS local/shared authentication is non-production/demo only.
 - PR-013 owns complete notification delivery; PR-014 owns production identity/security evidence.
 
-## 5. Controller verification after Round 8
+## 5. Controller verification after Round 9
 
 | Check | Controller result | Limitation |
 |---|---|---|
 | Gate C prerequisite | PASS | Clean independent rerun required at final head |
 | Approved-only initial finance delivery | PASS | Runtime evidence belongs to PR-012/013 |
 | Final-state retrieval/status-only semantics | PASS | Runtime idempotency evidence belongs to PR-012/013 |
-| Mandatory production OIDC | PASS | Production startup/readiness evidence belongs to PR-014 |
-| No production local-auth fallback | PASS | Security negative evidence belongs to PR-014 |
+| Mandatory production OIDC across governing and quality documents | PASS | Production startup/readiness evidence belongs to PR-014 |
+| No production local/shared authentication fallback | PASS | Security negative evidence belongs to PR-014 |
+| Current controller evidence/Gate B state | PASS | Clean final review/merge remain open |
 | Four notification policy classes | PASS | Implementation evidence belongs to PR-013 |
 | Thirteen canonical event/template rows | PASS | Independent count/consistency rerun required |
 | Requirement/NFR counts | Pending independent rerun | Must confirm 126/81 at exact head |
