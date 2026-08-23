@@ -24,7 +24,7 @@
 | WOS-DEC-015 | 2026-08-22 | Build invoice readiness and exports, but not statutory invoicing or general-ledger posting in v1 | Accepted | V1 scope; sales positioning constraint |
 | WOS-DEC-016 | 2026-08-22 | Defer payroll, full CRM, native mobile, client portal, expense management, shared SaaS and advanced AI from v1 | Accepted | Programme charter |
 | WOS-DEC-017 | 2026-08-22 | Use versioned feature flags plus evidence-based release gates | Accepted | ADR-006 |
-| WOS-DEC-018 | 2026-08-22 | Move production identity toward OIDC/Entra and revocable sessions | Accepted | ADR-007 |
+| WOS-DEC-018 | 2026-08-22 | Require configured OIDC, named production accounts and revocable sessions for every production deployment; missing, invalid or unavailable required OIDC fails closed, and WorkOS local credentials/shared demo identities are restricted to approved non-production/demo profiles with no production fallback | Accepted | ADR-007; WOS-IAM-001–002; WOS-NFR-SEC-001–003 |
 | WOS-DEC-019 | 2026-08-22 | Use controlled versioned migrations with fresh-install and upgrade evidence | Accepted | ADR-008 |
 | WOS-DEC-020 | 2026-08-22 | Use GitHub as the authoritative implementation/release record and Codex as a bounded implementation agent | Accepted | Codex execution playbook |
 | WOS-DEC-021 | 2026-08-22 | Prefer appropriate Sol models in Codex, using the strongest reasoning option for architecture/security/migrations/financial work | Accepted execution policy | AGENTS and execution playbook |
