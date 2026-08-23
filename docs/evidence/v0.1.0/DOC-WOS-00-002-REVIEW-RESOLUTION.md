@@ -13,7 +13,9 @@
 **Fourth independent review ID:** `PRR_kwDOUAv8Lc8AAAABKhNcnA`  
 **Fifth reviewed head:** `649db270e8d43af152076e1f99e07c7204c575fc`  
 **Fifth independent review ID:** `PRR_kwDOUAv8Lc8AAAABKhROXA`  
-**Status:** Five independent review rounds completed; all historical P1/P2 findings corrected; one clean final exact-head re-review remains pending
+**Sixth reviewed head:** `7124709e4f6682ded0321c58d22a6851a5e32b9d`  
+**Sixth independent review IDs:** `PRR_kwDOUAv8Lc8AAAABKhU3Ng`, `PRR_kwDOUAv8Lc8AAAABKhVa0Q`  
+**Status:** Six independent review rounds completed; all historical P1/P2 findings corrected; one clean final exact-head re-review remains pending
 
 ## First-review resolution map
 
@@ -38,20 +40,31 @@
 
 | Finding | Severity | Resolution |
 |---|---|---|
-| `DOMAIN_MODEL.md` retained a stale direct calculation-snapshot-to-invoice-ready-line edge despite the corrected governing architecture | P1 | Removed the stale edge and introduced explicit versioned `BILLING_ELIGIBILITY_EVENT` and `APPROVED_UNBILLED_ITEM` relationships. Calculation snapshots are valuation evidence only; T&M, milestone, fixed-fee, retainer, managed-service and adjustment sources must create a source-specific eligibility-event version before entering the approved-unbilled register or an invoice-ready batch. Reversal/supersession and no-active/final-batch uniqueness are explicit. Corrected in commit `310e6e226099cd317b62222c1ce9440647a77d1f`. |
+| `DOMAIN_MODEL.md` retained a stale direct calculation-snapshot-to-invoice-ready-line edge despite the corrected governing architecture | P1 | Removed the stale edge and introduced explicit versioned `BILLING_ELIGIBILITY_EVENT` and `APPROVED_UNBILLED_ITEM` relationships. Calculation snapshots are valuation evidence only; all supported source families must create a source-specific eligibility-event version before entering the approved-unbilled register or an invoice-ready batch. Reversal/supersession and no-active/final-batch uniqueness are explicit. |
 
 ## Fourth-review resolution map
 
 | Finding | Severity | Resolution |
 |---|---|---|
-| Authoritative and derived documents still allowed a raw source or T&M calculation snapshot to satisfy invoice-line traceability without mandating the event → register → line boundary | P1 | The only batchable object is now a versioned `APPROVED_UNBILLED_ITEM` created one-to-one from a versioned `BILLING_ELIGIBILITY_EVENT`. `WOS-INV-001`, `WOS-INV-003`, `WOS-INV-007` and `WOS-INV-008`, data/API/integration architecture, commercial/reporting specifications, test strategy, PR-012 backlog and traceability all reject direct raw-source/snapshot line creation. Every line traces through one register item to one event/source version; active/final uniqueness, idempotency, reversal/supersession and control-total reconciliation are explicit. Correction sequence: `58e71fdfee898b4319e4156ca0bfec2ad471aef6`, `f2aa104d18e29eaa6bc52bd63538e4b61cbb051d`, `9a13accdcbe66b54110bcbd38714057dd9613ac6`, `d92920946019111309ffa85960a7dfc1bcc88539`, `027a2d261988135e527c2cf079c4737bf37ebc31`, `27be988d20f5f89cbd071e27a6add80ff293a63a`, `fbf50dac67c29574c10bd440a0a7112d92db3935`, `8486da8556d61a0504bfd1ed94da06a18dbf0487` and `059959ffe0bbbfd79cc1c0a9af941962c0a1ad9c`. |
+| Authoritative and derived documents still allowed a raw source or T&M calculation snapshot to satisfy invoice-line traceability without mandating the event → register → line boundary | P1 | Made the versioned approved-unbilled item the only batchable object, created one-to-one from a versioned billing-eligibility event. Requirements, architecture, specifications, tests, PR-012 backlog and traceability reject direct raw-source/snapshot line creation and require source → event → register → line → batch → export lineage. |
 
 ## Fifth-review resolution map
 
 | Finding | Severity | Resolution |
 |---|---|---|
-| Product-owner Gate C was still listed as PR-011 evidence before invoice-readiness PR-012 | P1 | Removed Gate C from PR-011 and made its boundary explicit: PR-011 establishes calculation/margin engineering readiness only. Gate C is now placed after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Required Gate C evidence covers effective-dated terms, deterministic calculations, source-specific eligibility, approved-unbilled registration, complete batch lifecycle, export lineage, corrections, authorization and reconciliation. Corrected in commit `64a9e9a0f834a73c90928c9f64327c0d93694c9a`. |
-| Authoritative WOS-INV-006/008 lacked exact state, occupancy, cancellation, export-failure and versioned-correction semantics | P1 | Defined canonical states and allowed transitions; open/active and final occupying classes; terminal states; failed export remaining `Approved`; pre-export cancellation with protected reason/audit and atomic occupancy release; eligibility revalidation after release; permanent occupancy for exported/billed lineage; and versioned reversal/superseding correction paths. Product requirements were corrected in commit `8e13bd105731713cd7af81a7c1ec86f1bc5f05c4`; backlog and test ownership were aligned in `64a9e9a0f834a73c90928c9f64327c0d93694c9a` and `9daf6e93c80c98c4e4ace4bf0b4590a9f696d046`. |
+| Product-owner Gate C was still listed as PR-011 evidence before invoice-readiness PR-012 | P1 | Removed Gate C from PR-011. Gate C now occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Gate C is additional owner acceptance and does not replace engineering evidence. |
+| Authoritative WOS-INV-006/008 lacked exact state, occupancy, cancellation, export-failure and versioned-correction semantics | P1 | Defined canonical states, occupying classes, allowed transitions, terminal behavior, failed-export handling, pre-export cancellation with atomic occupancy release, eligibility revalidation and permanent occupancy of exported/billed lineage. Corrections use versioned reversal/superseding records. |
+
+## Sixth-review resolution map
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| Delivery playbook still described Gate C as a calculation/margin milestone | P1 | `CODEX_EXECUTION_PLAYBOOK.md` now states that Gate C follows complete PR-010/011/012 delivery and independently proven PR-012 acceptance, including terms, calculations, billing eligibility, approved-unbilled, complete batch lifecycle, provider/CSV export lineage, corrections, authorization and reconciliation. PR-011 alone cannot satisfy Gate C. |
+| Initial finance export wording allowed approved or finalized batches | P2 | Requirements, API, integration, commercial specification, backlog and tests now permit initial delivery only from `Approved`. `Exported` and `Billed/Confirmed` support only idempotent retrieval/redownload or status confirmation of the already accepted artifact, never duplicate delivery or re-transition. |
+| Traceability reported only four/five review rounds | P2 | `REQUIREMENTS_TRACEABILITY.md`, this evidence record and `IMPLEMENTATION_STATUS.md` now record all six completed review rounds and the clean final review gate. |
+| CSV export had no acceptance semantics without a provider | P1 | An `Approved` batch becomes `Exported` through CSV only after atomic creation and recording of an immutable versioned artifact with operation/idempotency ID, artifact ID/version, checksum, schema version, line count, control totals, timestamp, actor and complete lineage. Failure remains `Approved`; same-key retries return the same artifact. |
+| WOS-INT-001/002 notification delivery lacked a concrete implementation owner | P1 | PR-013 and issue #9 own in-app notifications, email/collaboration adapters, versioned templates, preferences, mandatory recipients, scoped recipient resolution, delivery attempts/evidence, retries, idempotency, failure isolation, sanitized health and positive/negative security tests. |
+| ADR-007 permitted production local-auth fallback | P1 | Production OIDC now fails closed. WorkOS local accounts remain non-production/demo only. Emergency recovery must be an external named, separately approved and audited infrastructure/IdP process that preserves WorkOS role, permission, data-scope and session controls. |
 
 ## Supplemental controller corrections
 
@@ -59,32 +72,34 @@
 - PR-002 cannot merge a prohibited company-specific runtime; cleanup occurs within PR-002 or only the clean stacked PR-003 state merges.
 - Operational earned-management revenue is non-statutory reporting/management evidence and never grants billing authority.
 - Every production mutation receives an explicit common and module-specific traceability/audit owner.
-- The commercial model consistently separates valuation snapshots, billing eligibility, approved-unbilled registration, invoice-ready batching and downstream finance export.
+- The commercial model separates valuation snapshots, billing eligibility, approved-unbilled registration, invoice-ready batching and downstream finance export.
 - Raw T&M snapshots, milestones, fixed-fee schedules, retainer/managed-service events and adjustments remain read-only source evidence; none is an alternative batchable object.
-- Gate C follows complete WOS-06 delivery and cannot be satisfied by PR-011 alone or substitute for PR-012 engineering acceptance.
 - Canonical invoice-batch states and occupancy semantics are authoritative in WOS-INV-006/008 and test-owned by PR-012.
+- Initial provider/CSV delivery is `Approved`-only; accepted final artifacts are immutable and final states are retrieval/status-only.
+- Gate C follows complete WOS-06 delivery and cannot be satisfied by PR-011 alone or substitute for PR-012 engineering acceptance.
+- Notification delivery is implemented and evidenced in PR-013; production identity fail-closed behavior is implemented and evidenced in PR-014.
 
-## Controller verification after fifth-review correction
+## Controller verification after sixth-review correction
 
 | Check | Result | Evidence / limitation |
 |---|---|---|
-| Gate C sequence | PASS | PR-011 explicitly cannot satisfy Gate C; Gate C follows complete PR-010/011/012 delivery and independent PR-012 engineering acceptance |
-| Authoritative batch state model | PASS | WOS-INV-006 defines exact states, occupancy classes, transitions, terminal behavior, export acceptance/failure and cancellation |
-| Authoritative no-double-billing occupancy | PASS | WOS-INV-008 applies uniqueness to open/active and final occupying batches and requires versioned corrections |
-| Source-specific invoice boundary | PASS | WOS-INV-001/003/007/008 require event → approved-unbilled item → line/batch lineage |
-| All six source families represented | PASS | T&M, milestone, fixed fee, retainer, managed service and approved adjustment are present in requirements/specifications/backlog/tests |
-| Direct-bypass rejection specified | PASS | API, commercial specification, PR-012 and mandatory negative vectors reject raw-source/snapshot line creation |
-| Batch lifecycle negative vectors | PASS | Test strategy covers invalid transitions, terminal states, failed export, cancellation, eligibility revalidation and correction lineage |
+| Gate C sequence | PASS | Playbook, backlog, commercial spec and release controls require complete PR-010/011/012 engineering acceptance before Gate C |
+| Approved-only initial export | PASS | Requirements, API, integration, commercial spec and PR-012 reject initial delivery from non-Approved states |
+| CSV acceptance and idempotency | PASS | Immutable artifact metadata, atomic transition, failure behavior and same-key retrieval are defined and test-owned |
+| Final-state duplicate-delivery prevention | PASS | Exported/Billed states permit retrieval/status only and cannot initiate delivery or re-transition |
+| Notification implementation ownership | PASS | PR-013/issue #9/traceability include complete notification scope and evidence |
+| Production identity fail-closed | PASS | ADR-007, requirements, backlog and tests prohibit production local-auth fallback |
+| Requirement/NFR counts | Pending independent rerun | Clean final review must confirm 126 product IDs and 81 NFR IDs |
 | Application tests | SKIP | WOS-00 intentionally contains no application source |
 | Shell/documentation-safe checks | NOT RUN by controller connector | Mandatory in the clean final Codex/Sol review against the exact moved head |
 
-## Publication note
+## Publication notes
 
-The bounded Codex correction task produced local commit `6f4e521d8499320ab656d29c195518ff8db082cd` but could not publish it because its task checkout lacked usable GitHub push transport. The implementation controller independently materialized and reviewed the corrections through the connected GitHub controller interface. The unpublished local commit is not acceptance evidence.
+Codex correction tasks produced local commits that could not be pushed because the task checkout lacked usable GitHub transport. The implementation controller independently materialized and reviewed the approved documentation changes through the connected GitHub controller interface. Unpublished local commits are not acceptance evidence; only the live GitHub PR head is used for final review and Gate B.
 
 ## Open gates
 
-- Fresh clean independent Codex/Sol re-review at the exact final PR head after the fifth-review corrections.
+- Fresh clean independent Codex/Sol re-review at the exact final PR head after sixth-review corrections.
 - Resolution of any remaining blocking finding.
 - Product-owner Gate B approval.
 - Exact-head squash merge and `v0.1.0` baseline.
