@@ -174,14 +174,17 @@
 - Source → versioned billing-eligibility event → one-to-one approved-unbilled item → line/batch lineage.
 - Approved-unbilled item as the only batchable object; direct raw-source/snapshot bypass rejection.
 - Canonical `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed`, `Cancelled` states.
-- Open/final occupancy, pre-export cancellation and atomic release.
+- Database-unique current occupancy per approved-unbilled-item ID/version, rejecting same-batch, cross-batch and concurrent duplicates with no orphan line, duplicate amount or control-total drift.
+- Same-key identical retry returns the existing membership; same-key changed-input and different-key duplicates conflict; bulk, import and compatibility routes cannot bypass occupancy.
+- Partial-billing, presentation-splitting and multiple-line reuse are prohibited; separately billable portions require distinct authorized/versioned event/item versions with reconciled source totals.
+- Immutable historical membership, valid pre-export cancellation with atomic current-occupancy release, controlled re-batching as a new membership version, and permanent `Exported`/`Billed/Confirmed` occupancy.
 - Initial provider/CSV delivery only from `Approved`.
 - Provider acceptance or atomic immutable CSV-artifact acceptance as the single `Approved → Exported` transition.
 - Failed delivery/generation remains `Approved`; idempotent retry returns the same accepted result.
 - Final-state retrieval/status only; no duplicate delivery or re-transition.
 - Versioned reversals/supersessions/correction batches and immutable accepted evidence.
 
-**Mandatory evidence:** Fresh/upgrade migrations; direct-bypass negatives; event/register one-to-one and idempotency; concurrent no-double-billing; all state transitions and terminal rules; provider and CSV acceptance metadata/control totals; same-key/different-payload tests; cancellation/eligibility revalidation; locked periods; corrections; API/browser selection; source-to-export reconciliation and audit.
+**Mandatory evidence:** Fresh/upgrade migrations for the database-unique current-occupancy invariant; direct-bypass negatives; event/register one-to-one; duplicate same-batch and cross-batch insertion; concurrent same-item requests proving one accepted membership, deterministic conflicts and no orphan line, duplicate amount or control-total drift; same-key identical retry, same-key changed-input conflict and different-key duplicate conflict; bulk/import/compatibility-route enforcement; split/partial-line rejection and separately authorized portion reconciliation; valid cancellation release and controlled re-batching with immutable history; permanent final occupancy; versioned post-export/billing corrections; all state transitions and terminal rules; provider and CSV acceptance metadata/control totals; locked periods; API/browser selection; source-to-export reconciliation and audit.
 
 **Gate C:** Product-owner Gate C occurs only after PR-010, PR-011 and PR-012 are merged **and PR-012 engineering acceptance is independently proven at an exact head before Gate C**. Evidence covers terms, deterministic calculations, source-specific eligibility, approved-unbilled, complete provider/CSV batch lifecycle, corrections, authorization and reconciliation. Gate C is additional owner acceptance and never substitutes for PR-012 engineering evidence.
 
