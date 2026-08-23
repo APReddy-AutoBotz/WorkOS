@@ -3,7 +3,7 @@
 **Workstream:** WOS-00  
 **Issue:** #2  
 **Pull request:** #1  
-**Status:** Eleven independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
+**Status:** Thirteen independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
 
 ## 1. Reviewed heads and review IDs
 
@@ -20,6 +20,8 @@
 | 9 | `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` | `PRR_kwDOUAv8Lc8AAAABKh-0NA` | One P1, one P2 |
 | 10 | `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` | `PRR_kwDOUAv8Lc8AAAABKh_5pA` | Three P2 |
 | 11 | `cd45de9181858d722e2974e92d6aaa53ba04ec17` | `PRR_kwDOUAv8Lc8AAAABKiBoBw` | Two P1, one P2 |
+| 12 | `a023ebef80fad7aea354f3759801a430de18cb6e` | Review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`; actionable thread `PRRT_kwDOUAv8Lc6bdgWF` | One P1 |
+| 13 | `86484cde78f1350a4a0a3f55f368f2e919353663` | `PRR_kwDOUAv8Lc8AAAABKiIDxA` | One P1, one P2 |
 
 ## 2. Resolution map by review round
 
@@ -109,6 +111,21 @@
 | Commercial and invoice-batch domain events overlapped `approval.action_required`, allowing two action-required notifications for one pending approval transition | P1 | WOS-INT-002 now defines mutually exclusive trigger boundaries. `approval.action_required` is the sole action-request event whenever a valid generic stage is pending. `commercial.approval_required` is only a pre-submission requester/change-owner prompt. `invoice_batch.action_required` is only non-approval batch-owner remediation. One source/version/operation may create at most one action-required event. Integration architecture, approval specification, test strategy, PR-009/013 backlog and issue #9 are aligned with positive/negative exclusivity and replay-idempotency evidence. |
 | Accepted OIDC decision retained transitional wording in the decision log | P2 | WOS-DEC-018 now records the adopted requirement for configured OIDC, named production accounts and revocable sessions in every production deployment; missing, invalid or unavailable OIDC fails closed and WorkOS local/shared demo identities remain approved non-production/demo only with no production fallback. |
 
+### Round 12
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| No-double-billing controls did not reject duplicate lines for one approved-unbilled-item version within the same batch or under concurrent commands | P1 | WOS-INV-003/008 and derived architecture, commercial, reporting, test and PR-012 controls require a database-unique current-occupancy record per approved-unbilled-item ID/version. Same-batch, cross-batch and concurrent duplicates fail; same-key retry returns the existing membership; valid cancellation releases occupancy atomically; final occupancy remains permanent; and split/partial billing requires distinct upstream event/item versions with reconciled totals. |
+
+The GitHub review/timeline identifier `PRR_kwDOUAv8Lc8AAAABKiJB1g` and actionable thread `PRRT_kwDOUAv8Lc6bdgWF` refer to the same Round-12 finding and are retained together to avoid conflicting evidence.
+
+### Round 13
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| PR-012 acceptance did not explicitly require all Round-12 occupancy vectors | P1 | `TEST_STRATEGY.md`, PR-012 backlog evidence and traceability now explicitly require same-batch, cross-batch and concurrent duplicate rejection; database-unique occupancy with no orphan line, duplicate amount or control-total drift; same-key replay and changed/different-key conflicts; bulk/import/compatibility-route enforcement; split-line rejection; cancellation/re-batching; permanent final occupancy; and versioned corrections. |
+| Review evidence stopped at Round 11 after the Round-12 correction | P2 | This resolution authority, consolidated controller review, implementation status and traceability now record Rounds 12 and 13 consistently and retain the fresh clean exact-head re-review requirement. |
+
 ## 3. Canonical notification policy and exclusivity
 
 Policy classes:
@@ -148,13 +165,13 @@ Approval-event boundaries are authoritative:
 - Leave/absence is availability-only and cannot become productive/billable work or reduce capacity twice.
 - PR-002 cannot merge a prohibited company-specific runtime; cleanup occurs in PR-002 or only the combined clean PR-003 state may merge.
 - Operational earned-management revenue is non-statutory, policy-gated and never grants billing authority.
-- Commercial lineage is source → eligibility event → approved-unbilled item → line/batch → accepted provider/CSV export.
+- Commercial lineage is source → eligibility event → approved-unbilled item → database-unique current occupancy → line/batch → accepted provider/CSV export.
 - Initial export is `Approved`-only; failures remain `Approved`; final states are retrieval/status only.
 - Production OIDC is mandatory and fail-closed in charter, decision log, architecture, security/privacy and NFR quality baselines; WorkOS local/shared authentication is non-production/demo only.
 - Gate B is approved but source import and WOS-01 remain blocked until clean review and blueprint merge.
 - PR-013 owns complete notification delivery; PR-014 owns production identity/security evidence.
 
-## 5. Controller verification after Round 11
+## 5. Controller verification after Round 13
 
 | Check | Controller result | Limitation |
 |---|---|---|
@@ -162,12 +179,13 @@ Approval-event boundaries are authoritative:
 | Gate C prerequisite | PASS | Runtime/product acceptance occurs in WOS-06 |
 | Fixed-fee earned-management wording | PASS | Runtime vectors/evidence belong to PR-011 |
 | Billing eligibility independent from earned-management | PASS | Runtime evidence belongs to PR-011/012 |
+| Database-unique current line occupancy and PR-012 vectors | PASS | Runtime/migration/concurrency evidence belongs to PR-012 |
 | Approval-event exclusivity | PASS | Implementation and replay evidence belongs to PR-009/013 |
 | Thirteen canonical event/template rows | PASS | Independent count/consistency rerun required |
 | Approved-only initial finance delivery | PASS | Runtime evidence belongs to PR-012/013 |
 | Final-state retrieval/status-only semantics | PASS | Runtime idempotency evidence belongs to PR-012/013 |
 | Mandatory production OIDC across governing, architecture and quality documents | PASS | Production startup/readiness evidence belongs to PR-014 |
-| Current controller evidence and eleven-round history | PASS | Clean final review/merge remain open |
+| Current controller evidence and thirteen-round history | PASS | Clean final review/merge remain open |
 | Requirement/NFR counts | Pending independent rerun | Must confirm 126/81 at exact head |
 | Application tests | SKIP | WOS-00 intentionally has no application source |
 | Shell/documentation-safe checks | NOT RUN by controller connector | Mandatory in clean final Codex/Sol review |
