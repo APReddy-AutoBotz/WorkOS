@@ -395,7 +395,7 @@ For T&M work, approved billable quantity multiplied by the resolved billing rate
 
 ### WOS-COM-007 — Fixed-fee control
 
-Fixed-fee engagements must track contract value, billing schedule, recognized/earned value policy, consumed effort/cost and margin risk without treating all approved hours as directly invoiceable.
+Fixed-fee engagements must track contract value, billing schedule, consumed effort/cost and margin risk. They may calculate non-statutory operational earned-management revenue only when an authorized, effective-dated policy selected under WOS-COM-011 is active; the calculation must fail closed when that policy is absent. Approved hours must not be treated as automatically invoiceable, and operational earned-management revenue must remain independent from billing eligibility and invoice readiness.
 
 ### WOS-COM-008 — Milestone control
 
@@ -570,14 +570,14 @@ The following is the minimum mandatory v1 event, template and default-recipient 
 |---|---|---|---|
 | `work_period.submission_due` | Configured submission reminder threshold is reached | Affected worker | `ACTION_REQUIRED` |
 | `work_period.submission_overdue` | Deadline or grace period elapses without an accepted submission | Affected worker plus scoped manager or configured escalation owner | `CONTROL_MANDATORY` |
-| `approval.action_required` | An approval stage becomes pending | Current-stage approver or approvers | `ACTION_REQUIRED` |
-| `approval.rejected_or_correction_required` | A rejection or correction-required decision is recorded | Requester plus affected worker where distinct | `ACTION_REQUIRED` |
+| `approval.action_required` | A valid generic approval stage becomes pending, including work, leave, assignment, commercial and invoice-batch approvals | Current-stage approver or approvers | `ACTION_REQUIRED` |
+| `approval.rejected_or_correction_required` | A rejection or correction-required decision is recorded by the generic approval engine | Requester plus affected worker where distinct | `ACTION_REQUIRED` |
 | `approval.completed` | Final approval is recorded | Requester plus affected worker where distinct | `INFORMATIONAL` |
 | `approval.overdue_or_escalated` | Approval due threshold is exceeded or escalation is created | Current approver or approvers plus configured escalation target | `CONTROL_MANDATORY` |
 | `assignment.created_or_materially_changed` | Assignment becomes effective or an approved material change takes effect | Affected worker plus scoped resource or engagement manager where distinct | `ACTION_REQUIRED` |
-| `commercial.approval_required` | Rate, budget, PO, contract term or commercial-policy change awaits approval | Current commercial approver or approvers | `ACTION_REQUIRED` |
+| `commercial.approval_required` | A proposed rate, budget, PO, contract-term or commercial-policy change is policy-blocked before submission because the requester/change owner must create, complete or submit the generic approval request; this event is not emitted when a generic approval stage is pending | Requester plus commercial change owner where distinct | `ACTION_REQUIRED` |
 | `commercial.risk_threshold_breached` | PO expiry/exhaustion, fixed-fee overrun, retainer overconsumption/expiry or margin threshold is breached | Engagement owner plus scoped commercial manager plus finance/billing owner | `CONTROL_MANDATORY` |
-| `invoice_batch.action_required` | Batch review, approval or correction is required | Batch owner plus current finance approver or approvers | `ACTION_REQUIRED` |
+| `invoice_batch.action_required` | The batch owner must resolve a pre-submission evidence, reconciliation, validation or export-preparation deficiency while no generic approval stage is pending; approval rejection/correction decisions use `approval.rejected_or_correction_required` instead | Batch owner plus finance preparer where distinct | `ACTION_REQUIRED` |
 | `invoice_batch.export_failed` | Provider delivery or CSV-artifact generation fails | Batch owner plus finance/billing owner plus integration administrator | `OPERATIONAL_CRITICAL` |
 | `invoice_batch.exported_or_billed_confirmed` | Accepted provider/CSV export or downstream billing confirmation is recorded | Batch owner plus finance/billing owner | `INFORMATIONAL` |
 | `integration.delivery_failed_or_degraded` | Configured provider reaches a failed or degraded threshold | Integration administrator plus operations owner | `OPERATIONAL_CRITICAL` |
@@ -593,7 +593,7 @@ Every notification created from the matrix must retain:
 - Notification/channel/idempotency identity.
 - Delivery attempt, retry/backoff, accepted/failed result and correlation evidence.
 
-The generic approval engine must emit the shared `approval.*` keys for work, leave, assignment, commercial and invoice-batch approvals; domain modules must not create incompatible duplicate approval-event keys. Client recipients are not part of v1 because the client portal is deferred. Buyers may add events or recipients and may require external channels, but they cannot remove a default mandatory recipient or downgrade `CONTROL_MANDATORY` or `OPERATIONAL_CRITICAL` without a protected policy change that still satisfies this requirement.
+The generic approval engine must emit the shared `approval.*` keys for work, leave, assignment, commercial and invoice-batch approvals. A single source transition or triggering operation may create at most one action-required notification event. When a generic approval stage is pending, only `approval.action_required` may be emitted for the action request; `commercial.approval_required` and `invoice_batch.action_required` must not be emitted for that same transition. Domain modules must not create incompatible duplicate approval-event keys or a second action-required notification for the same source/version/operation. Client recipients are not part of v1 because the client portal is deferred. Buyers may add events or recipients and may require external channels, but they cannot remove a default mandatory recipient or downgrade `CONTROL_MANDATORY` or `OPERATIONAL_CRITICAL` without a protected policy change that still satisfies this requirement.
 
 ### WOS-INT-003 — Idempotency
 
