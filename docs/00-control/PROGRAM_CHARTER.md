@@ -1,6 +1,6 @@
 # WorkOS Commercial Productization Programme Charter
 
-**Document status:** Programme-initiation baseline; full blueprint acceptance pending Gate B  
+**Document status:** Programme-initiation baseline; product-owner Gate B approved 2026-08-23; clean exact-head review and merge pending  
 **Programme code:** WOS  
 **Product working name:** WorkOS  
 **Repository:** `APReddy-AutoBotz/WorkOS`  
@@ -74,7 +74,7 @@ It is not positioned as a generic employee tracker, payroll/full HRMS, full ERP/
 ### 5.4 Enterprise delivery
 
 - Organization-ready data boundaries.
-- Strong authorization, production identity and audit.
+- Strong authorization, mandatory production identity and audit.
 - Versioned migrations and reproducible deployment.
 - CI/CD, tests, security scans and release evidence.
 - Backup, restore, monitoring, notifications and operational handover.
@@ -109,7 +109,7 @@ It is not positioned as a generic employee tracker, payroll/full HRMS, full ERP/
 - Rate cards, cost rates, budgets, POs and margin controls.
 - Billing-eligibility events, approved-unbilled register, invoice-ready batches and provider/CSV exports.
 - Operational, utilization, commercial, notification and governance reporting.
-- OIDC/Entra-ready identity and provider-neutral notification/worklog/finance adapters.
+- Mandatory configured production OIDC identity, including Microsoft Entra as a supported configuration, plus provider-neutral notification/worklog/finance adapters.
 - Audit, data quality, imports/exports and operations runbooks.
 - Dockerized/cloud-deployable buyer-owned packaging.
 
@@ -166,7 +166,7 @@ Owner approval is required for final commercial name/trademark, material positio
 
 The owner's 2026-08-22 programme-initiation approval authorized the private repository strategy, controller operation and WOS-00 blueprint creation. It is contextual authority, not product acceptance and does not authorize source import.
 
-- **Gate B — Blueprint acceptance:** required before importing application source or starting WOS-01.
+- **Gate B — Blueprint acceptance:** approved by the product owner on 2026-08-23 and recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`. The approval authorizes the controller to complete non-material review corrections, obtain a clean exact-head review, merge the blueprint, establish `v0.1.0` and begin WOS-01 after merge. It does not waive clean-review, provenance, resolved-thread or exact-head merge controls; source import and WOS-01 remain blocked until the approved blueprint is clean-reviewed and merged.
 - **Gate C — Complete WOS-06 product-owner acceptance:** occurs only after PR-010, PR-011 and PR-012 are merged **and PR-012 engineering acceptance is independently proven at an exact head before the Gate C decision**. Evidence must cover effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch and provider/CSV export lifecycle, reversals/corrections, authorization and control-total reconciliation. PR-011 alone cannot satisfy Gate C. Gate C is additional owner acceptance and never substitutes for PR-012 engineering evidence.
 - **Gate D — v1 release acceptance:** required before declaring/tagging the sellable WorkOS v1.0 release and handover.
 
