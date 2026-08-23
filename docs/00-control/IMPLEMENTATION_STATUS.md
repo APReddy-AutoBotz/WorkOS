@@ -36,7 +36,7 @@ Buyer handover readiness:  0%
 | Base | `main@d8995e809f714bbb4517a49715a4eab5c4306580` |
 | Exact head | Use live PR #1 metadata; final reviewed SHA is recorded before merge |
 | State | Clean final independent exact-head re-review gate |
-| Current activity | Nine independent review rounds completed; all historical P1/P2 findings corrected |
+| Current activity | Ten independent review rounds completed; all historical P1/P2 findings corrected |
 | Product-owner Gate B | Approved 2026-08-23; clean-review and exact-head merge controls remain mandatory |
 | Application source | Not imported; WOS-01 remains blocked until WOS-00 merge |
 | Acceptance blocker | Clean exact-head independent review and controlled merge |
@@ -45,7 +45,7 @@ Buyer handover readiness:  0%
 
 | Workstream | Weight | State | Accepted weight | Notes |
 |---|---:|---|---:|---|
-| WOS-00 | 8% | Final re-review | 0% | Nine review-resolution rounds complete in PR #1; clean review/merge pending |
+| WOS-00 | 8% | Final re-review | 0% | Ten review-resolution rounds complete in PR #1; clean review/merge pending |
 | WOS-01 | 10% | Not started | 0% | Issue #3; source bootstrap authorized after WOS-00 merge |
 | WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup |
 | WOS-03 | 10% | Not started | 0% | Issue #5; modular platform and CI/migrations |
@@ -86,8 +86,9 @@ Buyer handover readiness:  0%
 - Implement PR-013 against four notification policy classes and thirteen canonical event/template/default-recipient rows.
 - Use shared canonical `approval.*` events across work, leave, assignment, commercial and batch approvals.
 - Enforce notification scope, mandatory recipients, preference rules, idempotency, safe failure and no v1 client recipients.
-- Require configured OIDC and named accounts for every production deployment across product, architecture and quality baselines; missing, invalid or unavailable OIDC fails closed.
+- Require configured OIDC and named accounts for every production deployment across programme, product, architecture and quality baselines; missing, invalid or unavailable OIDC fails closed.
 - WorkOS local credentials and shared/demo identities are restricted to approved non-production/demo profiles, must be disabled or absent in production and cannot be a production fallback.
+- Gate B is approved, but source import and WOS-01 remain blocked until the clean exact-head review and WOS-00 merge.
 - Leave/absence is availability-only and cannot become productive/billable work or reduce capacity twice.
 
 ## 7. Review history
@@ -101,12 +102,13 @@ Buyer handover readiness:  0%
 7. `76f05c9da71d21b1f774afc91e13dad4323d6358`, review `PRR_kwDOUAv8Lc8AAAABKh3paA`: two P1 covering Gate C prerequisite and mandatory notification matrix.
 8. `b30ec6f921262602edcab9e9d96a2dbb1c8571b2`, review `PRR_kwDOUAv8Lc8AAAABKh6Tsg`: two P1 covering Approved-only reporting/export semantics and mandatory production OIDC architecture wording.
 9. `be42c047f6bcf2d4aa3476a7368bea04ebff1e70`, review `PRR_kwDOUAv8Lc8AAAABKh-0NA`: one P1 and one P2 covering mandatory production OIDC in quality baselines and stale controller evidence.
+10. `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8`, review `PRR_kwDOUAv8Lc8AAAABKh_5pA`: three P2 covering authoritative Gate B state, complete ten-round evidence representation and mandatory production OIDC in the architecture ADR summary.
 
-All nine rounds are corrected in branch documents. `DOC-WOS-00-002-REVIEW-RESOLUTION.md` is the resolution authority.
+All ten rounds are corrected in branch documents. `DOC-WOS-00-002-REVIEW-RESOLUTION.md` is the resolution authority.
 
 ## 8. Next controller actions
 
-1. Resolve the two Round-9 inline review threads against the published corrections.
+1. Resolve the three Round-10 inline review threads against the published corrections.
 2. Request one clean independent Codex/Sol review of the exact moved GitHub head.
 3. Resolve any new blocking finding and re-review any moved head.
 4. Squash-merge PR #1 under the recorded Gate B authority.
