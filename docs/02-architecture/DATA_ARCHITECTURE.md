@@ -72,7 +72,26 @@ Every event and register item retains:
 - Reversal-of or supersedes relationship where applicable.
 - Batch membership version/state and audit identity.
 
-`approved_unbilled_items` has a one-to-one relationship with the applicable billing-eligibility-event version. `invoice_ready_lines` reference `approved_unbilled_item_id`; they do not reference a raw work entry, milestone, schedule, retainer event, managed-service event, adjustment or calculation snapshot as the batchable source.
+`approved_unbilled_items` has a one-to-one relationship with the applicable billing-eligibility-event version. `invoice_ready_lines` reference `approved_unbilled_item_id` and its immutable version; they do not reference a raw work entry, milestone, schedule, retainer event, managed-service event, adjustment or calculation snapshot as the batchable source.
+
+WorkOS v1 does not split one approved-unbilled-item version across multiple invoice-ready lines. A separately billable portion must originate upstream as a distinct authorized/versioned billing-eligibility event and approved-unbilled item, and all portions must reconcile to the source and control totals.
+
+## Current line-occupancy invariant
+
+PostgreSQL enforces at most one current occupying invoice-ready line/membership for each `(approved_unbilled_item_id, approved_unbilled_item_version)`.
+
+The `invoice_ready_current_occupancy` control contains:
+
+- `approved_unbilled_item_id` and immutable item version as the database-unique key.
+- Current invoice-ready line ID/version and batch ID/version.
+- Acquisition operation/idempotency identity, actor and timestamp.
+- Current occupying class and audit/correlation identity.
+
+The occupancy row is acquired in the same transaction that inserts the invoice-ready line and batch membership. Database uniqueness, not a parent-batch query alone, rejects a second insertion into the same batch, another occupying batch or a concurrent transaction. Historical invoice-ready lines and memberships are append-only evidence and are not the uniqueness mechanism.
+
+An identical retry using the same idempotency key and canonical payload returns the already-created line/membership and occupancy result. Reuse of the key with changed input is rejected. A different key or concurrent request for the same item version while occupancy exists returns a stable conflict and cannot create another line.
+
+A valid pre-export cancellation deletes/releases the current occupancy row only within the same transaction that records the authorized cancellation, reason, actor and immutable membership history. The item can be re-batched through a new line/membership version only when its eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible. `Exported` and `Billed/Confirmed` occupancy rows are permanent and cannot be released. Corrections use new reversal/superseding events, approved-unbilled items and correction lines/batches.
 
 ## Invoice-ready batch occupancy semantics
 
@@ -91,7 +110,7 @@ For no-double-billing control, the exact state sets are:
 - **Final occupying states:** `Exported`, `Billed/Confirmed`.
 - **Non-occupying terminal state:** `Cancelled`, but only when cancellation occurred before any successful export or downstream billed confirmation.
 
-A versioned approved-unbilled item is unavailable for another batch while any membership for that item is in an open/active or final occupying state. Database constraints, transactional locking and idempotency enforce this invariant under concurrent requests.
+A versioned approved-unbilled item is unavailable for any additional invoice-ready line while its database current-occupancy row exists. This covers duplicate membership twice in one batch as well as membership in another occupying batch.
 
 The minimum valid transition set is:
 
@@ -102,19 +121,19 @@ Approved → Exported | Cancelled
 Exported → Billed/Confirmed
 ```
 
-`Cancelled` and `Billed/Confirmed` are terminal batch states. `Exported` cannot transition to `Cancelled`; an exported or billed/confirmed item remains historically occupied and any correction must use an authorized versioned reversal or superseding billing-eligibility event, approved-unbilled item and correction batch. A failed external export does not set `Exported`; the batch remains `Approved` and retries use the same idempotency identity.
+`Cancelled` and `Billed/Confirmed` are terminal batch states. `Exported` cannot transition to `Cancelled`; an exported or billed/confirmed item remains historically and currently occupied, and any correction must use an authorized versioned reversal or superseding billing-eligibility event, approved-unbilled item and correction batch. A failed external export does not set `Exported`; the batch remains `Approved` and retries use the same idempotency identity.
 
 Cancellation from `Draft`, `Under Review` or pre-export `Approved` releases current occupancy only after an atomic cancellation transaction records reason, actor, approval policy where required and preserved membership history. The approved-unbilled item may then return to the available register only if its eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible. Cancellation never deletes or rewrites event/register/line history.
 
 An authorized correction creates a versioned reversal or superseding eligibility event and a corresponding register item; it never rewrites or reuses the prior event/register lineage.
 
-Batch and export control totals reconcile source evidence to billing-eligibility events, approved-unbilled items, invoice-ready lines and final occupying batches.
+Batch and export control totals reconcile source evidence to billing-eligibility events, approved-unbilled items, unique current occupancy, invoice-ready lines and final occupying batches.
 
 ## Audit and provenance
 
 Audit records are append-only for normal application identities and capture actor, active role, source, entity, action, timestamp, reason and material before/after values. Imports retain source identifiers, batch, row outcome and duplicate/idempotency keys.
 
-Billing-eligibility creation, register insertion, batch reservation/release, cancellation, reversal/supersession, finalization and export are production-relevant mutations and retain complete source-to-event-to-register-to-line audit evidence.
+Billing-eligibility creation, register insertion, occupancy acquisition/release, batch reservation, cancellation, reversal/supersession, finalization and export are production-relevant mutations and retain complete source-to-event-to-register-to-line audit evidence.
 
 ## Retention and deletion
 
@@ -123,6 +142,8 @@ Retention is buyer-configurable within legal/policy constraints. Deactivation, a
 ## Migration expectations
 
 Every migration has an ordered identifier, checksum/ledger posture, fresh-install test, supported upgrade test, data-conversion plan and rollback or roll-forward guidance. Application startup is not the only production migration mechanism.
+
+The invoice-readiness migration creates the database-unique current-occupancy control, backfills it only from valid occupying memberships, rejects ambiguous duplicates for controlled remediation and proves the constraint before enabling line creation.
 
 ## Backup and recovery
 
