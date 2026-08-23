@@ -56,6 +56,8 @@ Each schema PR supplies:
 
 For invoice-readiness migrations, evidence also proves the one-to-one event/register relationship, source-version retention, reversal/supersession integrity, accepted export-artifact history and active/final batch uniqueness.
 
+For notification migrations, evidence proves stable canonical event/template keys, versioned templates, notification/channel idempotency identities, recipient relationship provenance and no duplicate event generation after replay or upgrade.
+
 ## Financial golden vectors
 
 The commercial engine maintains versioned deterministic fixtures for:
@@ -102,19 +104,56 @@ The PR-012 and release matrices must prove:
 18. A register item released by valid pre-export cancellation is not selectable again unless its eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible.
 19. Exported or billed source lineage remains occupying; later correction attempts that reuse the original event/register item or overwrite the accepted artifact are rejected and must use versioned reversal/superseding events, register items and correction batches.
 
+## Mandatory notification event matrix
+
+PR-013 and the release matrix must execute at least one positive and one negative deterministic vector for every canonical WOS-INT-002 row:
+
+| Event/template key | Required positive evidence | Required negative evidence |
+|---|---|---|
+| `work_period.submission_due` | Affected worker receives one in-app `ACTION_REQUIRED` record at the configured threshold | Preference cannot suppress in-app; another worker cannot be substituted |
+| `work_period.submission_overdue` | Worker plus scoped manager/escalation owner receive `CONTROL_MANDATORY` records after deadline/grace | Worker preference cannot remove either mandatory relationship recipient; out-of-scope manager denied |
+| `approval.action_required` | Current-stage approver(s) receive one shared approval event when the stage becomes pending | Stale/non-current/delegation-out-of-scope recipient denied; replay does not duplicate |
+| `approval.rejected_or_correction_required` | Requester and distinct affected worker receive the canonical event | Caller cannot redirect recipients or downgrade in-app delivery |
+| `approval.completed` | Requester and distinct affected worker receive `INFORMATIONAL` using channel preferences | Duplicate final-decision replay does not duplicate; unrelated user denied |
+| `approval.overdue_or_escalated` | Current approvers plus escalation target receive `CONTROL_MANDATORY` | Preferences cannot suppress mandatory recipients; duplicate scheduler run is idempotent |
+| `assignment.created_or_materially_changed` | Affected worker plus scoped resource/engagement manager receive one event | Non-material draft change or out-of-scope manager does not receive it |
+| `commercial.approval_required` | Current commercial approvers receive `ACTION_REQUIRED` | Operational project user without commercial relationship cannot be added |
+| `commercial.risk_threshold_breached` | Engagement owner, commercial manager and finance/billing owner receive `CONTROL_MANDATORY` | Preferences cannot suppress required recipients; threshold replay does not duplicate |
+| `invoice_batch.action_required` | Batch owner and current finance approvers receive `ACTION_REQUIRED` | Raw source owner or out-of-scope finance user cannot be injected |
+| `invoice_batch.export_failed` | Batch owner, finance/billing owner and integration administrator receive `OPERATIONAL_CRITICAL` plus configured alert route | No opt-out; failure retry does not create duplicate accepted notification/channel evidence |
+| `invoice_batch.exported_or_billed_confirmed` | Batch owner and finance/billing owner receive one `INFORMATIONAL` event per accepted transition | Artifact redownload/status retry does not create another event |
+| `integration.delivery_failed_or_degraded` | Integration administrator and operations owner receive `OPERATIONAL_CRITICAL` plus alert route | No opt-out; provider-health retry cannot duplicate the same threshold event |
+
+For every row the fixture must independently specify and assert:
+
+1. Canonical event key and selected versioned template key/version.
+2. Triggering source entity ID/version and operation ID.
+3. Organization/legal-entity and row/data-scope context.
+4. Default server-resolved recipient relationship and reason.
+5. Policy class and channel preference/mandatory decision.
+6. Locale, approved variables and sanitized payload.
+7. Notification/channel/idempotency identity.
+8. Attempt number, retry/backoff, accepted or failed result and correlation evidence.
+
 ## Mandatory notification and integration vectors
 
-PR-013 and the release matrix must prove:
+In addition to the row-by-row matrix, PR-013 and the release matrix must prove:
 
 1. In-app notification creation and separately recorded email/collaboration delivery attempts use one notification/channel/idempotency identity.
 2. Versioned templates render approved, locale-aware, channel-safe content; unknown variables or unsafe active content fail closed.
-3. User preferences are honored except where an authorized mandatory-control notification policy applies.
-4. Recipient resolution respects named identity, active role, organization/legal-entity and entity/relationship scope.
-5. An unauthorized user cannot redirect another user's notification, change protected recipients or inspect another recipient's delivery evidence.
-6. Provider retry/backoff is idempotent and cannot duplicate in-app records or accepted delivery evidence.
-7. Optional provider failure does not roll back the valid core transaction; failure state, next retry and operational owner remain visible.
-8. Templates, logs, provider responses and health surfaces do not expose secrets, unrestricted personal data, cost rates or margin.
-9. Finance adapter initial delivery accepts only `Approved` batches with complete event/register lineage; final-state operations are retrieval/status-only and idempotent.
+3. `ACTION_REQUIRED` never allows suppression of in-app for default recipients.
+4. `CONTROL_MANDATORY` and `OPERATIONAL_CRITICAL` recipients cannot opt out or be removed by user preference; buyer policy may add required external channels.
+5. `INFORMATIONAL` may be disabled, digested or channel-selected by recipient preference.
+6. A buyer may add events/recipients or require channels, but a protected policy change cannot remove a default mandatory recipient or downgrade a mandatory class below the governing requirement.
+7. A no-recipient resolution for a mandatory event fails visibly, creates operational evidence and does not silently mark delivery successful.
+8. Recipient resolution respects named identity, active role, organization/legal-entity and entity/relationship scope.
+9. An unauthorized user cannot redirect another user's notification, change protected recipients or inspect another recipient's delivery evidence.
+10. The generic approval engine emits the same `approval.*` keys for work, leave, assignment, commercial and invoice-batch approvals; domain modules cannot create incompatible duplicate keys.
+11. Event replay, scheduler retry and provider retry/backoff are idempotent and cannot duplicate domain-event, in-app or accepted channel-delivery evidence.
+12. Optional provider failure does not roll back the valid core transaction; failure state, next retry and operational owner remain visible.
+13. Templates, logs, provider responses and health surfaces do not expose secrets, unrestricted personal data, cost rates or margin.
+14. No v1 event resolves a client recipient because the client portal is deferred.
+15. Finance adapter initial delivery accepts only `Approved` batches with complete event/register lineage; final-state operations are retrieval/status-only and idempotent.
 
 ## Mandatory production identity vectors
 
@@ -140,13 +179,14 @@ At minimum before v1:
 - Finance analyst billing-eligibility, approved-unbilled, CSV/provider export and complete batch lifecycle without raw-source selection.
 - Approver delegation/decision/lock behavior.
 - Worker self-service and correction.
-- Recipient notification center, preferences and delivery evidence within scope.
+- Recipient notification center, preferences, mandatory indicators and delivery evidence within scope.
 - Integration administrator notification/finance adapter health without secret disclosure.
+- Operations owner operational-critical alert and retry evidence.
 - Auditor read-only event/register/batch/export/notification lineage evidence.
 
 ## Test data
 
-Use synthetic organization, worker, client and commercial data. Fixtures intentionally include multiple legal entities, currencies, worker types, engagement models, overlapping effective dates, reversals/supersessions, cancelled/failed-export/exported/billed batches, immutable CSV artifacts, already-batched register items, notification preferences/delivery failures and out-of-scope relationships.
+Use synthetic organization, worker, client and commercial data. Fixtures intentionally include multiple legal entities, currencies, worker types, engagement models, overlapping effective dates, reversals/supersessions, cancelled/failed-export/exported/billed batches, immutable CSV artifacts, already-batched register items, all four notification policy classes, all thirteen canonical notification events, preference combinations, provider delivery failures and out-of-scope relationships.
 
 ## PR and release expectations
 
