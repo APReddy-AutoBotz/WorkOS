@@ -163,7 +163,7 @@ Codex must not:
 - Use AI as the authoritative financial calculator or approver.
 - Weaken tests or controls to obtain green results.
 - Claim a skipped environment-dependent test passed.
-- silently invent commercial policy where requirements are materially ambiguous.
+- Silently invent commercial policy where requirements are materially ambiguous.
 
 ## 8. Pull-request lifecycle
 
@@ -287,9 +287,11 @@ Commercial tasks require a golden-vector pack containing, as applicable:
 - Currency precision and rounding.
 - Negative adjustments/credits.
 - Snapshot stability after rate changes.
+- Source-specific billing eligibility and approved-unbilled registration.
+- Invoice-ready batch lifecycle, export acceptance and correction lineage.
 - Report and invoice-ready reconciliation.
 
-The controller must review calculation formulas and stored evidence, not only UI totals.
+The controller must review calculation formulas and stored evidence, not only UI totals. PR-011 establishes commercial-calculation and project-margin engineering readiness only; it cannot satisfy Gate C without PR-012 invoice-readiness engineering acceptance.
 
 ## 12. Security control
 
@@ -333,9 +335,9 @@ Routine implementation proceeds from approved requirements without repeated owne
 
 Owner review is mandatory at:
 
-- Gate B — blueprint acceptance before source import/product implementation.
-- Gate C — working commercial calculation/margin milestone.
-- Gate D — v1 release and buyer handover.
+- **Gate B — blueprint acceptance:** required before source import or product implementation.
+- **Gate C — complete WOS-06 commercial acceptance:** occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Gate C evidence covers effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch lifecycle, CSV/provider export lineage, reversal/correction controls, authorization and control-total reconciliation. PR-011 alone cannot satisfy Gate C, and Gate C never substitutes for PR-012 engineering acceptance.
+- **Gate D — v1 release and buyer handover:** required before the v1 release declaration and handover.
 
 Additional escalation occurs only for material product, legal, security, destructive-data or financial-policy decisions.
 
