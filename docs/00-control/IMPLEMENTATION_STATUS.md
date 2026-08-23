@@ -36,7 +36,7 @@ Buyer handover readiness:  0%
 | Base | `main@d8995e809f714bbb4517a49715a4eab5c4306580` |
 | Exact head | Use live PR #1 metadata; final reviewed SHA is recorded before merge |
 | State | Clean final independent exact-head re-review gate |
-| Current activity | Eleven independent review rounds completed; all historical P1/P2 findings corrected |
+| Current activity | Thirteen independent review rounds completed; all historical P1/P2 findings corrected |
 | Product-owner Gate B | Approved 2026-08-23; clean-review and exact-head merge controls remain mandatory |
 | Application source | Not imported; WOS-01 remains blocked until WOS-00 merge |
 | Acceptance blocker | Clean exact-head independent review and controlled merge |
@@ -45,7 +45,7 @@ Buyer handover readiness:  0%
 
 | Workstream | Weight | State | Accepted weight | Notes |
 |---|---:|---|---:|---|
-| WOS-00 | 8% | Final re-review | 0% | Eleven review-resolution rounds complete in PR #1; clean review/merge pending |
+| WOS-00 | 8% | Final re-review | 0% | Thirteen review-resolution rounds complete in PR #1; clean review/merge pending |
 | WOS-01 | 10% | Not started | 0% | Issue #3; source bootstrap authorized after WOS-00 merge |
 | WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup |
 | WOS-03 | 10% | Not started | 0% | Issue #5; modular platform and CI/migrations |
@@ -106,12 +106,14 @@ Buyer handover readiness:  0%
 9. `be42c047f6bcf2d4aa3476a7368bea04ebff1e70`, review `PRR_kwDOUAv8Lc8AAAABKh-0NA`: one P1 and one P2 covering mandatory production OIDC in quality baselines and stale controller evidence.
 10. `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8`, review `PRR_kwDOUAv8Lc8AAAABKh_5pA`: three P2 covering authoritative Gate B state, complete review evidence representation and mandatory production OIDC in the architecture ADR summary.
 11. `cd45de9181858d722e2974e92d6aaa53ba04ec17`, review `PRR_kwDOUAv8Lc8AAAABKiBoBw`: two P1 and one P2 covering fixed-fee statutory-recognition ambiguity, overlapping approval notification events and transitional OIDC decision-log wording.
+12. `a023ebef80fad7aea354f3759801a430de18cb6e`, review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`, actionable thread `PRRT_kwDOUAv8Lc6bdgWF`: one P1 covering database-enforced unique current line occupancy.
+13. `86484cde78f1350a4a0a3f55f368f2e919353663`, review `PRR_kwDOUAv8Lc8AAAABKiIDxA`: one P1 and one P2 covering explicit PR-012 Round-12 vectors/ownership and stale Round-12 evidence.
 
-All eleven rounds are corrected in branch documents. `DOC-WOS-00-002-REVIEW-RESOLUTION.md` is the resolution authority.
+All thirteen rounds are corrected in branch documents. `DOC-WOS-00-002-REVIEW-RESOLUTION.md` is the resolution authority.
 
 ## 8. Next controller actions
 
-1. Resolve the three Round-11 inline review threads against the published corrections.
+1. Resolve the two Round-13 inline review threads against the published corrections.
 2. Request one clean independent Codex/Sol review of the exact moved GitHub head.
 3. Resolve any new blocking finding and re-review any moved head.
 4. Squash-merge PR #1 under the recorded Gate B authority.
