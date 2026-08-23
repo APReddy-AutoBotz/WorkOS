@@ -69,7 +69,7 @@ The buyer or deployment owner confirms:
 ## Approval gates
 
 - **Gate B:** blueprint approval before source bootstrap.
-- **Gate C:** complete WOS-06 commercial-engine acceptance only after PR-010, PR-011 and PR-012 are merged and exact-head evidence proves effective-dated terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, invoice-ready batch states, export lineage, reversals/corrections, authorization and control-total reconciliation. PR-011 alone cannot satisfy Gate C.
+- **Gate C:** complete WOS-06 product-owner acceptance only after PR-010, PR-011 and PR-012 are merged **and PR-012 engineering acceptance has been independently proven at an exact head before the Gate C decision**. Gate C evidence must cover effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch and provider/CSV export lifecycle, reversals/corrections, authorization and control-total reconciliation. PR-011 alone cannot satisfy Gate C. Gate C is additional product-owner acceptance and never substitutes for PR-012 engineering evidence.
 - **Gate D:** final v1 release and buyer-handover approval.
 
 Acceptance is recorded against a commit/tag and artifact; later changes require renewed evidence.
