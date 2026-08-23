@@ -88,22 +88,29 @@ The PR-012 and release matrices must prove:
 1. Direct submission of a raw work entry, calculation snapshot, milestone, fixed-fee schedule, retainer/managed-service event or adjustment as an invoice-ready line is rejected.
 2. A source without required approval, acceptance or contractual-due evidence cannot create a billing-eligibility event.
 3. One source version cannot create duplicate current eligibility events or approved-unbilled items outside the defined reversal/supersession model.
-4. An approved-unbilled item already in an active or finalized batch cannot be inserted into another active/finalized batch.
-5. A reversed, superseded or stale event/register version cannot be newly batched.
-6. Client-supplied organization, currency, amount, approval state, source version or calculation evidence cannot override server-authoritative values.
-7. Finalization fails on event/register/line control-total mismatch.
-8. An initial finance export from any state other than `Approved` is rejected.
-9. Provider rejection, timeout or failed CSV generation leaves the batch `Approved`, keeps register items occupied and does not record an accepted export version.
-10. Provider acceptance transitions `Approved → Exported` only for the exact immutable versioned payload and matching control totals.
-11. CSV acceptance transitions `Approved → Exported` only after atomic creation/recording of an immutable artifact with operation/idempotency ID, artifact version, checksum, schema version, line count, control totals, timestamp and authorized actor.
-12. Repeating an accepted provider or CSV request with the same idempotency identity returns the same result; it does not duplicate delivery, regenerate content or re-transition the batch.
-13. Idempotency-key reuse with a different payload or artifact identity is rejected.
-14. `Exported` and `Billed/Confirmed` permit only authorized idempotent retrieval/redownload or status confirmation; they cannot initiate new downstream delivery.
-15. Any batch transition outside `Draft → Under Review | Cancelled`, `Under Review → Draft | Approved | Cancelled`, `Approved → Exported | Cancelled`, and `Exported → Billed/Confirmed` is rejected.
-16. `Cancelled` and `Billed/Confirmed` are terminal and `Exported` cannot be cancelled.
-17. Cancellation from an unauthorized state, without protected authority/reason/audit, or with a non-atomic occupancy release is rejected.
-18. A register item released by valid pre-export cancellation is not selectable again unless its eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible.
-19. Exported or billed source lineage remains occupying; later correction attempts that reuse the original event/register item or overwrite the accepted artifact are rejected and must use versioned reversal/superseding events, register items and correction batches.
+4. A second insertion of the same approved-unbilled-item ID/version into the same batch is rejected.
+5. Insertion of the same approved-unbilled-item ID/version into another occupying batch is rejected.
+6. Concurrent same-item requests against the database-unique current-occupancy invariant yield one accepted membership and deterministic conflicts, with no orphan line, duplicate amount or control-total drift.
+7. An identical retry with the same idempotency key returns the existing line/membership result; same-key reuse with changed input and a different-key duplicate both conflict.
+8. Bulk, import and compatibility routes cannot bypass the current-occupancy invariant.
+9. Partial-billing, presentation-splitting or multiple-line reuse of one approved-unbilled-item version is rejected; separately billable portions require distinct authorized/versioned eligibility events and approved-unbilled items with reconciled source totals.
+10. Valid pre-export cancellation atomically releases only current occupancy; controlled re-batching creates a new line/membership version while preserving immutable history and revalidating eligibility.
+11. `Exported` and `Billed/Confirmed` occupancy remains permanent; post-export/billing corrections use new reversal/superseding event, register-item and correction-line/batch versions.
+12. A reversed, superseded or stale event/register version cannot be newly batched.
+13. Client-supplied organization, currency, amount, approval state, source version or calculation evidence cannot override server-authoritative values.
+14. Finalization fails on event/register/line control-total mismatch.
+15. An initial finance export from any state other than `Approved` is rejected.
+16. Provider rejection, timeout or failed CSV generation leaves the batch `Approved`, keeps register items occupied and does not record an accepted export version.
+17. Provider acceptance transitions `Approved → Exported` only for the exact immutable versioned payload and matching control totals.
+18. CSV acceptance transitions `Approved → Exported` only after atomic creation/recording of an immutable artifact with operation/idempotency ID, artifact version, checksum, schema version, line count, control totals, timestamp and authorized actor.
+19. Repeating an accepted provider or CSV request with the same idempotency identity returns the same result; it does not duplicate delivery, regenerate content or re-transition the batch.
+20. Idempotency-key reuse with a different payload or artifact identity is rejected.
+21. `Exported` and `Billed/Confirmed` permit only authorized idempotent retrieval/redownload or status confirmation; they cannot initiate new downstream delivery.
+22. Any batch transition outside `Draft → Under Review | Cancelled`, `Under Review → Draft | Approved | Cancelled`, `Approved → Exported | Cancelled`, and `Exported → Billed/Confirmed` is rejected.
+23. `Cancelled` and `Billed/Confirmed` are terminal and `Exported` cannot be cancelled.
+24. Cancellation from an unauthorized state, without protected authority/reason/audit, or with a non-atomic occupancy release is rejected.
+25. A register item released by valid pre-export cancellation is not selectable again unless its eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible.
+26. Exported or billed source lineage remains occupying; later correction attempts that reuse the original event/register item or overwrite the accepted artifact are rejected and must use versioned reversal/superseding events, register items and correction batches.
 
 ## Mandatory notification event matrix
 
