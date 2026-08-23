@@ -1,0 +1,717 @@
+# WorkOS Product Requirements
+
+**Authority:** This document is the single authoritative source for WorkOS product scope and product-level acceptance.  
+**Status:** v1 blueprint baseline  
+**Requirement format:** `WOS-<DOMAIN>-<NUMBER>`  
+**Target release:** WorkOS v1.0
+
+## 1. Product statement
+
+WorkOS is a buyer-owned professional-services operations platform for organizations that manage people, clients, engagements, project capacity, work evidence, approvals, utilization, revenue and margin.
+
+The product must support organizations whose delivery and reporting models differ from the original reference implementation. It must therefore separate stable domain concepts from configurable labels, policies and commercial models.
+
+## 2. Product outcomes
+
+WorkOS must enable a buyer to:
+
+1. Establish an organization, legal entities, business units, calendars, currencies, roles and terminology without modifying source code.
+2. Manage employees/resources, clients, contracts, engagements, projects and assignments as controlled master data.
+3. Capture work through configurable daily or weekly flows and govern submission, correction and approval.
+4. Calculate planned, actual and forecast utilization using explicit capacity and availability rules.
+5. Manage billing rates, cost rates, budgets, purchase orders, fixed-fee/retainer consumption, revenue and gross margin.
+6. Prepare controlled invoice-ready work and identify revenue leakage.
+7. Enforce role, permission, organization and row/data-scope authorization.
+8. Provide immutable operational and commercial audit evidence.
+9. Deploy as an isolated buyer-owned application and database with repeatable setup, migration, backup, restore and monitoring.
+
+## 3. Personas and primary jobs
+
+| Persona | Primary jobs |
+|---|---|
+| Organization Administrator | Configure organization, identity, roles, terminology, integrations and release settings |
+| HR / People Operations | Maintain workforce records, employment capacity, calendars and leave inputs |
+| Resource Manager / Delivery Lead | Plan capacity, allocate resources, manage bench/roll-off and resolve staffing risk |
+| Engagement / Project Manager | Maintain engagements/projects, budgets, assignments, work approval and delivery forecasts |
+| Account / Commercial Manager | Maintain contracts, purchase orders, rate cards, billing schedules and client commercial controls |
+| Finance / Billing Analyst | Review approved-unbilled work, prepare invoice-ready batches, reconcile revenue and export billing data |
+| Team Lead / Approver | Review scoped work, leave or other approval items and delegate authority when permitted |
+| Employee / Contractor | View assignments, enter work, submit timesheets, correct rejected entries and view personal utilization |
+| Executive / Practice Leader | Review capacity, utilization, client concentration, revenue, margin, risk and data confidence |
+| Auditor / Control Owner | Review immutable audit evidence, access changes, commercial changes, exports and policy exceptions |
+| Integration Administrator | Configure and monitor identity, notification and external-system adapters |
+
+User-facing role names may be configured. Internal canonical role/permission concepts must remain stable for authorization and migrations.
+
+## 4. Cross-cutting product rules
+
+### WOS-CORE-001 — Configuration before customization
+
+Organization branding, terminology, calendars, currencies, hierarchy labels, work categories, approval policies and feature enablement must be managed through controlled configuration rather than feature-code edits.
+
+### WOS-CORE-002 — Isolated buyer deployment
+
+WorkOS v1 must support one isolated application and database per buyer. The data model must nevertheless include organization/legal-entity ownership boundaries where required to prevent future structural lock-in.
+
+### WOS-CORE-003 — Server authority
+
+Permissions, row scope, commercial calculations, approval transitions, period locks, audit identity and final report totals must be calculated or validated on the server.
+
+### WOS-CORE-004 — Effective-dated truth
+
+Rates, costs, assignments, contracts, calendars and other time-sensitive terms must use effective dates. Historical approved and financial results must not silently change when future terms are edited.
+
+### WOS-CORE-005 — Traceable state changes
+
+Every production-relevant mutation must identify actor, active role, source, timestamp, entity, reason where applicable, and material before/after values.
+
+### WOS-CORE-006 — Configurable terminology
+
+The buyer must be able to configure user-facing labels for at least employee/resource, manager, team lead, business unit, region, engagement, project and timesheet/worklog without changing domain keys or API contracts.
+
+### WOS-CORE-007 — No company-specific runtime dependencies
+
+No runtime feature, seed, template, notification or buyer-delivered document may require reference-company names, assets, domains, roles, data or operating conventions.
+
+### WOS-CORE-008 — Deterministic financial behavior
+
+All financial calculations must be deterministic, decimal safe, explicit about currency and rounding, and testable without generative AI.
+
+## 5. Organization and configuration requirements
+
+### WOS-ORG-001 — Organization profile
+
+Administrators must maintain organization name, legal name, product display name, support contact, default locale, default time zone, base currency, fiscal-year start and default week-start day.
+
+### WOS-ORG-002 — Legal entities
+
+The product must support one or more legal entities with legal name, registration/tax identifiers as optional fields, reporting currency, address, status and effective dates.
+
+### WOS-ORG-003 — Business structure
+
+The product must support configurable business units, departments, cost centres, practices, locations and regions, with active/inactive status and dependency-safe retirement.
+
+### WOS-ORG-004 — Organizational hierarchy
+
+The buyer must be able to represent reporting-manager and operational-ownership relationships without relying on one hardcoded leadership title.
+
+### WOS-ORG-005 — Brand configuration
+
+Administrators must configure product name, organization name, logo, compact mark, favicon, primary/secondary accent tokens and email/report branding through a centralized configuration surface.
+
+### WOS-ORG-006 — Terminology configuration
+
+Administrators must configure approved singular/plural labels and help text for defined user-facing domain terms. Changes must not alter canonical data keys.
+
+### WOS-ORG-007 — Feature configuration
+
+Administrators must enable or disable optional modules by environment and record the release owner, evidence and activation timestamp.
+
+### WOS-ORG-008 — Working calendars
+
+The product must support calendars by country, legal entity or worker group, including work week, daily standard hours, public/company holidays and effective dates.
+
+### WOS-ORG-009 — Period configuration
+
+The product must support weekly, monthly and fiscal reporting periods and distinguish open, submission-closed, approval-closed and financially locked states.
+
+### WOS-ORG-010 — Guided setup
+
+A new installation must provide a guided setup status that covers organization, legal entity, calendars, roles, identity, initial users, imports, commercial defaults, notifications and production-readiness checks.
+
+## 6. Identity, roles and access requirements
+
+### WOS-IAM-001 — Identity providers
+
+WorkOS must support local controlled accounts for non-production/demo use and OIDC-based enterprise identity, including Microsoft Entra as a supported configuration. Production OIDC unavailability must fail closed and must not activate WorkOS local authentication.
+
+### WOS-IAM-002 — Named production accounts
+
+Production operation must use named user identities. Shared demo accounts must be disabled or absent in production mode.
+
+### WOS-IAM-003 — Active role
+
+A multi-role user must select or be assigned an active role for the session. Assigned roles alone must not authorize an action outside the selected active role.
+
+### WOS-IAM-004 — Permission registry
+
+The platform must maintain a stable permission registry with role templates and controlled user-specific exceptions.
+
+### WOS-IAM-005 — Data scope
+
+Authorization must combine identity, active role, permission and data scope. Data scope must cover organization/legal entity and relevant employee, team, engagement, client and project relationships.
+
+### WOS-IAM-006 — Protected permissions
+
+Security administration, audit administration and permission-management capabilities must have protected guardrails that cannot be accidentally removed from every administrator.
+
+### WOS-IAM-007 — Access review
+
+Administrators must be able to export or review role permissions, user exceptions and effective access for governance review.
+
+### WOS-IAM-008 — Session operations
+
+Production sessions must be revocable, time limited and securely cookie/token managed. Session lifetime must be configurable and changes auditable.
+
+### WOS-IAM-009 — Account lifecycle
+
+The product must support joiner, mover, leaver and disabled-account states, with dependency-aware effects on assignments, approvals and login access.
+
+### WOS-IAM-010 — Negative authorization evidence
+
+Every protected module must include tests proving unauthorized roles and out-of-scope identities are denied at API and data levels.
+
+## 7. Workforce and availability requirements
+
+### WOS-WKF-001 — Workforce master
+
+The workforce master must support employee/resource code, name, email, worker type, employment/contract status, role/designation, organization structure, location, manager, start/end dates, standard capacity and utilization eligibility.
+
+### WOS-WKF-002 — Worker types
+
+The product must distinguish at least employee, contractor, fixed-term worker, intern and external resource, with configurable user-facing labels.
+
+### WOS-WKF-003 — Capacity profiles
+
+Capacity must support weekly hours, part-time percentage, effective dates, working calendar and utilization eligibility.
+
+### WOS-WKF-004 — Skills and capabilities
+
+Workers may have skills, proficiency, certifications and availability notes for planning and reporting. Skill matching is deterministic in v1; AI suggestions are optional and non-authoritative.
+
+### WOS-WKF-005 — Leave and absence impact
+
+Approved leave and configured holidays must reduce availability exactly once according to calendar and capacity rules. Leave/absence is an availability reference, not productive or billable work: it must not require a client engagement/project, enter the actual-utilization numerator, create commercial value or reduce capacity a second time through a work-entry calculation.
+
+### WOS-WKF-006 — Workforce lifecycle guardrails
+
+Exiting or disabling a worker must identify active assignments, open approvals, unsubmitted work and ownership dependencies before completion.
+
+### WOS-WKF-007 — Self-service view
+
+A worker must be able to see personal profile, capacity, assignments, current work status, leave/availability where enabled, utilization and action items within authorized scope.
+
+### WOS-WKF-008 — Organization views
+
+Authorized users must view directory and hierarchy information according to active-role data scope, not through global client-side filtering alone.
+
+## 8. Client, contract and engagement requirements
+
+### WOS-CLI-001 — Client master
+
+The client master must support code, legal/display name, industry, status, account owner, billing contacts, currency defaults and organization ownership.
+
+### WOS-CLI-002 — Client hierarchy
+
+The product should support parent/client account relationships and multiple billing entities or business units without requiring duplicate uncontrolled client records.
+
+### WOS-CTR-001 — Contract master
+
+A contract must support client, legal entity, contract/SOW number, effective dates, status, currency, commercial model, value, billing terms, purchase-order linkage and documents/links metadata.
+
+### WOS-CTR-002 — Purchase orders
+
+Purchase orders must support identifier, currency, value, effective dates, consumed/committed value, remaining value, status and warning thresholds.
+
+### WOS-CTR-003 — Contract versioning
+
+Material contract changes must be versioned or effective dated and audited. Historical approved work must retain the commercial terms applicable at the work date.
+
+### WOS-ENG-001 — Engagement models
+
+Engagements must support at least:
+
+- Time and materials.
+- Fixed fee.
+- Milestone based.
+- Retainer.
+- Managed service.
+- Internal/non-client initiative.
+- Pre-sales/non-billable initiative.
+
+### WOS-ENG-002 — Engagement structure
+
+An engagement must link client, contract, legal entity, owner, commercial model, dates, status, currency, budget and one or more projects/workstreams.
+
+### WOS-ENG-003 — Project/workstream master
+
+Projects/workstreams must support code, name, engagement, manager, dates, status, billability policy, budget allocation and closure controls.
+
+### WOS-ENG-004 — Dependency-safe closure
+
+Closing a contract, engagement or project must identify open assignments, draft/submitted work, pending approvals, unbilled approved work and commercial balances.
+
+### WOS-ENG-005 — Internal engagements
+
+Internal and pre-sales work must use the same controlled work-capture model while remaining non-billable and attributable to cost centres or business units.
+
+## 9. Resource planning and assignment requirements
+
+### WOS-RES-001 — Assignment model
+
+An assignment must link worker, engagement/project, role, allocation percentage or planned hours, date range, billability, cost/revenue treatment, status and comments.
+
+### WOS-RES-002 — Date guardrails
+
+Assignment dates must remain within the applicable engagement/project dates unless a controlled exception is approved and audited.
+
+### WOS-RES-003 — Over-allocation policy
+
+The buyer must configure warning and blocking thresholds for overlapping capacity. The system must calculate overlap server-side.
+
+### WOS-RES-004 — Planned utilization
+
+Planned utilization must derive from effective assignments and applicable worker capacity for the selected period.
+
+### WOS-RES-005 — Forecast utilization
+
+Forecast utilization must support configurable horizons and include future approved/planned assignments according to status rules.
+
+### WOS-RES-006 — Bench and roll-off
+
+Authorized users must identify bench, underutilization, overload, upcoming roll-off and unstaffed demand using configurable thresholds.
+
+### WOS-RES-007 — Demand records
+
+The product should support unfilled demand/role requirements with dates, skill/role, capacity and status so planning is not limited to already assigned workers.
+
+### WOS-RES-008 — Assignment approval
+
+The buyer may require assignment creation or material changes to follow configurable approval rules.
+
+### WOS-RES-009 — Historical integrity
+
+Ending or editing an assignment must not rewrite approved work evidence or historical financial snapshots.
+
+## 10. Work capture and timesheet requirements
+
+### WOS-TIM-001 — Work-capture modes
+
+The buyer must be able to enable weekly grid and daily-entry modes. A timer may be added as an optional v1 extension but must create reviewable work records rather than directly approved time.
+
+### WOS-TIM-002 — Work categories
+
+Work categories must distinguish billable client work, non-billable client work, internal delivery, pre-sales, training, administration and buyer-defined categories. A leave/absence reference may be displayed for calendar/availability context, but it is not a productive work entry, is never billable and does not require a client engagement/project.
+
+### WOS-TIM-003 — Entry dimensions
+
+A work entry must support worker, date, engagement/project, optional task/ticket/milestone reference, category, hours/quantity, billability, comment, evidence link and source.
+
+### WOS-TIM-004 — Assignment validation
+
+The system must validate whether work is permitted against the selected engagement/project, assignment, contract dates and period state. Exceptions must follow policy and be auditable.
+
+### WOS-TIM-005 — Entry increments and limits
+
+The buyer must configure minimum time increments, daily/weekly maximums, overtime rules and comment/evidence requirements.
+
+### WOS-TIM-006 — States
+
+Timesheets/work periods must support Draft, Submitted, Approved, Rejected, Reopened/Correction Required and Locked states as applicable.
+
+### WOS-TIM-007 — Submission deadlines
+
+Submission deadlines and grace periods must be configurable by worker group, legal entity or period policy.
+
+### WOS-TIM-008 — Rejection and correction
+
+Rejected work must include a reason visible to the worker. Corrected submissions must preserve the prior submitted/approved history.
+
+### WOS-TIM-009 — Future and locked periods
+
+Future work and locked-period edits must be blocked unless explicitly allowed by policy and authorized exception.
+
+### WOS-TIM-010 — Actual utilization
+
+Actual utilization must use approved work according to configured inclusion rules divided by applicable available capacity for the period.
+
+### WOS-TIM-011 — Worklog import
+
+The product must provide adapter-ready import contracts for external worklogs such as Jira, Azure DevOps, ServiceNow or CSV without making those integrations mandatory for v1.
+
+### WOS-TIM-012 — Duplicate prevention
+
+The server must prevent or flag duplicate imported and manually entered work according to deterministic keys and source identifiers.
+
+## 11. Approval and policy requirements
+
+### WOS-APR-001 — Generic approval record
+
+The platform must maintain a generic approval record that can link to timesheets, leave, assignments, budget changes, commercial changes and invoice-ready batches.
+
+### WOS-APR-002 — Approval routing
+
+Approval routing must be configurable using entity type, organization, engagement/project, worker, amount/value threshold, active role and sequence.
+
+### WOS-APR-003 — Multi-step approvals
+
+The platform must support single-step and ordered multi-step approvals where required by policy.
+
+### WOS-APR-004 — Delegation
+
+Authorized approvers must create time-bound delegations. The delegate must receive no broader data scope than the delegated authority.
+
+### WOS-APR-005 — SLA and escalation
+
+Approval policies may define due dates, reminders and escalation targets. Overdue items must be reportable.
+
+### WOS-APR-006 — Decision integrity
+
+Only pending/current-stage approvals may be decided. Rejection comments must be required where configured.
+
+### WOS-APR-007 — Period locking
+
+Approved work and finalized commercial periods must be lockable. Reopening must require authorized reason and audit evidence.
+
+### WOS-APR-008 — Bulk decisions
+
+Authorized approvers may perform bulk approval only when every selected item independently passes permission, scope and policy validation.
+
+## 12. Commercial, revenue and margin requirements
+
+### WOS-COM-001 — Billing rate cards
+
+The product must support effective-dated billing rates by one or more dimensions, including client, contract, engagement, project, role, worker, location or grade, with deterministic precedence rules.
+
+### WOS-COM-002 — Cost rates
+
+The product must support confidential effective-dated cost rates and optionally burden/overhead components. Cost visibility must be permission controlled.
+
+### WOS-COM-003 — Rate resolution evidence
+
+Every calculated commercial line must record the rate/cost source, effective period, currency and resolution rule used.
+
+### WOS-COM-004 — Currency and rounding
+
+The product must support engagement currency, organization/base currency and configured exchange-rate inputs. Rounding must be explicit by amount type and currency precision.
+
+### WOS-COM-005 — Budgets
+
+Engagements/projects must support budgeted hours/units, revenue, cost and expenses as applicable, with approved change history.
+
+### WOS-COM-006 — T&M calculation
+
+For T&M work, approved billable quantity multiplied by the resolved billing rate must produce billable value, subject to configured rounding, caps and exclusions.
+
+### WOS-COM-007 — Fixed-fee control
+
+Fixed-fee engagements must track contract value, billing schedule, consumed effort/cost and margin risk. They may calculate non-statutory operational earned-management revenue only when an authorized, effective-dated policy selected under WOS-COM-011 is active; the calculation must fail closed when that policy is absent. Approved hours must not be treated as automatically invoiceable, and operational earned-management revenue must remain independent from billing eligibility and invoice readiness.
+
+### WOS-COM-008 — Milestone control
+
+Milestones must support value, due date, acceptance status, billing eligibility, evidence and approval.
+
+### WOS-COM-009 — Retainer control
+
+Retainers must support period, contracted value/capacity, consumption, rollover/expiry policy and overage handling.
+
+### WOS-COM-010 — Managed-service control
+
+Managed-service engagements must support service units, tickets, shifts or other configured quantity dimensions while retaining optional time/cost evidence.
+
+### WOS-COM-011 — Revenue and cost snapshots
+
+The system must produce versioned period snapshots for approved work, billable value, cost, gross margin and margin percentage. WorkOS may additionally calculate **operational earned-management revenue** for planning and project-control purposes; this is not statutory IFRS/GAAP revenue recognition and is not a general-ledger posting.
+
+The neutral default must fail closed: no non-T&M operational earned-management revenue snapshot may be created until an authorized, effective-dated policy is explicitly selected. Supported policy profiles must cover at least T&M approved eligible value, fixed-fee time-elapsed, fixed-fee progress/effort, milestone acceptance, retainer service-period/base/overage and managed-service accepted-unit/period-charge. Each active policy must define source evidence, timing, inputs, exclusions, effective dates, currency/FX, rounding, version, approval owner and correction behavior. Billing eligibility and invoice readiness remain independent from the earned-management policy.
+
+### WOS-COM-012 — Estimate at completion
+
+Authorized users must review budget, actuals, remaining forecast and estimate-at-completion for hours, revenue, cost and margin.
+
+### WOS-COM-013 — Purchase-order consumption
+
+The system must calculate committed/consumed purchase-order value and warn or block activity according to thresholds and policy.
+
+### WOS-COM-014 — Commercial change approval
+
+Changes to rates, budgets, contract values, PO limits and billing schedules must be auditable and may require configured approval.
+
+### WOS-COM-015 — Confidentiality
+
+Cost rates, individual compensation-derived data and margin details must be separately permission controlled from operational project access.
+
+## 13. Invoice-readiness requirements
+
+### WOS-INV-001 — Approved-unbilled register
+
+Finance-authorized users must see every versioned `APPROVED_UNBILLED_ITEM` that has no current occupying invoice-ready line/membership. Each item must be created from exactly one versioned `BILLING_ELIGIBILITY_EVENT`; the event's eligible source evidence may be:
+
+- Approved T&M work calculation snapshots.
+- Accepted and billing-eligible milestone events.
+- Approved or contractually due fixed-fee billing-schedule events.
+- Approved retainer base, period and overage events.
+- Approved managed-service period-charge or accepted-unit events.
+- Approved commercial adjustments, credits, discounts, write-offs or corrections that are invoice eligible.
+
+Raw source evidence—including a T&M snapshot—must never be linked directly to an invoice-ready line. Every eligibility event and register item must preserve source type and version, organization/legal entity, client/contract/engagement, approval or contractual-due evidence, eligible date, currency, amount, calculation/policy evidence where applicable, reversal/supersession links, and current/final occupancy state. Operational earned-management revenue does not by itself make a source invoice eligible.
+
+### WOS-INV-002 — Invoice-ready batches
+
+Users must create controlled invoice-ready batches by client, legal entity, engagement, period and currency.
+
+### WOS-INV-003 — Batch line traceability and cardinality
+
+Every batch line must trace to exactly one versioned `APPROVED_UNBILLED_ITEM` and, through it, exactly one versioned `BILLING_ELIGIBILITY_EVENT`. T&M snapshots, milestones, fixed-fee schedules, retainer events, managed-service events and approved adjustments are source evidence for the event and may not be linked directly to a batch line. The complete chain must preserve the fields required by WOS-INV-001.
+
+WorkOS v1 does not support splitting one approved-unbilled-item version across multiple invoice-ready lines. At most one current occupying invoice-ready line/membership may exist for an approved-unbilled-item ID/version, whether an attempted duplicate targets the same batch, another occupying batch or a concurrent request. The invariant must be enforced by a database-unique current-occupancy control acquired in the same transaction as line/membership creation; an application query against batch state alone is insufficient.
+
+An identical same-key retry must return the existing line/membership result. A changed payload, different key or concurrent duplicate for the same item version must fail with a stable conflict. Any separately billable portion must originate upstream as a separately authorized/versioned eligibility event and approved-unbilled item whose control totals reconcile to the source; presentation metadata cannot create a partial-line bypass.
+
+### WOS-INV-004 — Adjustments
+
+Authorized users may add controlled discounts, credits, write-offs or corrections with reason, approval policy and audit.
+
+### WOS-INV-005 — Supporting evidence
+
+Invoice-ready batches must include or link to approved timesheet/work evidence and client-required references where configured.
+
+### WOS-INV-006 — Batch states
+
+Invoice-ready batches must use the canonical states `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`.
+
+State occupancy is authoritative:
+
+- Open/active occupying states: `Draft`, `Under Review`, `Approved`.
+- Final occupying states: `Exported`, `Billed/Confirmed`.
+- Non-occupying terminal state: `Cancelled`, only when cancellation occurs before successful export or billing confirmation.
+
+Minimum allowed transitions are:
+
+- `Draft` → `Under Review` or `Cancelled`.
+- `Under Review` → `Draft`, `Approved` or `Cancelled`.
+- `Approved` → `Exported` or `Cancelled`.
+- `Exported` → `Billed/Confirmed`.
+
+`Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`.
+
+An initial provider or CSV export may originate only from an `Approved` batch. A failed provider delivery or CSV-artifact generation must leave the batch `Approved`, keep its current-occupancy records and register items occupied and record the failed operation. The single `Approved → Exported` transition occurs only when either:
+
+1. A configured finance provider accepts the exact immutable versioned payload and matching control totals; or
+2. WorkOS atomically creates and records an immutable, versioned CSV artifact, validates matching control totals and makes that exact artifact available for controlled retrieval.
+
+The accepted CSV operation must record export-operation ID, idempotency key, immutable artifact ID/version, checksum, schema version, line count, control totals, generated timestamp, authorized actor and the complete source → event → register → line → batch lineage. A repeated request with the same idempotency key must return the same accepted artifact or provider-operation result; it must not regenerate content, duplicate delivery or reapply the transition. Idempotency-key reuse with a different payload or artifact identity must be rejected.
+
+`Exported` and `Billed/Confirmed` batches may support only authorized, idempotent retrieval/redownload of the already accepted artifact and downstream-status confirmation. They must not initiate another downstream delivery or transition to `Exported` again.
+
+Cancellation is allowed only from `Draft`, `Under Review` or a pre-export `Approved` batch. It requires protected authority, reason and audit evidence, preserves prior immutable line/membership history, and releases the database current-occupancy record atomically with cancellation. A released item becomes available again only when its underlying eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible. Re-batching creates a new line/membership version and reacquires current occupancy; it never rewrites or reactivates the cancelled line.
+
+### WOS-INV-007 — Export and integration
+
+The product must provide controlled CSV and API-ready exports for accounting/billing systems. Initial export or delivery must originate only from an `Approved` batch and preserve line-to-register-item-to-eligibility-event-version traceability.
+
+Provider delivery is accepted only when the exact immutable versioned payload and matching control totals are accepted downstream. CSV delivery is accepted only when WorkOS atomically records the immutable artifact and required operation, checksum, schema, line-count, total, timestamp and actor evidence defined by WOS-INV-006. Final-state retrieval/redownload and status confirmation must be idempotent and must not duplicate downstream delivery. Corrected content must use versioned reversal/supersession lineage and a new correction batch or artifact rather than overwriting accepted evidence.
+
+WorkOS v1 is not required to issue statutory invoices or post to a general ledger.
+
+### WOS-INV-008 — No double billing and unique current line occupancy
+
+The server and database must prevent an eligibility-event version or its one-to-one approved-unbilled-item version from having more than one current occupying invoice-ready line/membership. This prohibits duplicate insertion twice into the same batch, insertion into another occupying batch and concurrent duplicate acquisition.
+
+The database must enforce a unique current-occupancy record keyed by approved-unbilled-item ID/version and linked to the current line and batch. The occupancy record is acquired transactionally with line/membership creation. Same-key identical retry returns the existing result; key reuse with changed input, a different key or a concurrent request while occupancy exists must return a stable conflict. No compatibility, bulk, presentation-splitting or partial-billing path may bypass this invariant.
+
+Occupying batches include open/active `Draft`, `Under Review` and `Approved` batches and final `Exported` and `Billed/Confirmed` batches. Historical invoice-ready lines and memberships remain immutable evidence and do not themselves determine current availability.
+
+Only a valid pre-export transition to `Cancelled` releases the database current-occupancy record, and the release must be atomic with cancellation while preserving line/membership history. A released item can be re-batched through a new line/membership version only if its eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible.
+
+Exported or billed evidence remains occupying permanently. Corrections after export or billing must use authorized versioned reversal/superseding eligibility events, approved-unbilled items and correction lines/batches rather than reusing the original lineage. Accepted provider payload and CSV artifact evidence must not be overwritten. Reversed, superseded or stale event/register versions cannot be newly batched.
+
+Any separately billable portion must originate upstream as a distinct authorized/versioned eligibility event and approved-unbilled item with reconciled source and control totals.
+
+## 14. Reporting and control requirements
+
+### WOS-RPT-001 — Operational dashboard
+
+Authorized users must review active workforce, capacity, utilization, staffing risk, pending work/approvals and data confidence within their scope.
+
+### WOS-RPT-002 — Utilization reporting
+
+Reports must provide planned, actual and forecast utilization with explicit denominator, inclusion rules and scoped drilldown.
+
+### WOS-RPT-003 — Commercial reporting
+
+Reports must provide budget versus actual, approved-unbilled, revenue, cost, gross margin, PO consumption, fixed-fee/retainer consumption and estimate-at-completion.
+
+### WOS-RPT-004 — Revenue-leakage signals
+
+The product must identify at least:
+
+- Missing or late timesheets.
+- Submitted but unapproved work.
+- Approved but unbilled work.
+- Work outside assignment/contract dates.
+- Missing or conflicting rates.
+- PO threshold or expiry risk.
+- Fixed-fee effort/cost overrun.
+- Retainer overconsumption or expiry.
+- Margin below threshold.
+- Duplicate or anomalous billing eligibility.
+
+### WOS-RPT-005 — Data-quality reporting
+
+The system must report missing, inconsistent or unsafe master-data and commercial-data conditions with owner and suggested action.
+
+### WOS-RPT-006 — Export governance
+
+Report exports must obey server-side permission and scope, record audit evidence and identify filters/as-of date.
+
+### WOS-RPT-007 — Reconciliation
+
+Commercial reports must reconcile to invoice-ready and period snapshot records through defined control totals.
+
+## 15. Integration and notification requirements
+
+### WOS-INT-001 — Adapter architecture
+
+Identity, email, collaboration, worklog and finance integrations must use explicit provider adapters with mock/test implementations.
+
+### WOS-INT-002 — Notification channels
+
+The product must support in-app notifications and provider-neutral email/collaboration notifications with versioned templates, locale-aware rendering, recipient authorization, user/channel preferences, mandatory-control recipient policy, delivery-attempt evidence, retry/backoff, idempotency, failure isolation and sanitized operational visibility.
+
+Notification delivery uses four authoritative policy classes:
+
+- `ACTION_REQUIRED`: default recipients cannot suppress in-app delivery. Email/collaboration follows buyer policy and recipient preference unless the buyer marks a channel required.
+- `CONTROL_MANDATORY`: required recipients and in-app delivery cannot be suppressed by recipient preferences. Buyer policy may require one or more external channels.
+- `INFORMATIONAL`: recipient preferences may disable, digest or select channels.
+- `OPERATIONAL_CRITICAL`: mandatory in-app delivery to configured operational owners plus the configured alert route; no recipient opt-out.
+
+The following is the minimum mandatory v1 event, template and default-recipient matrix. The canonical event key is also the canonical template key; every active template is separately versioned.
+
+| Canonical event/template key | Trigger | Default required recipient relationships | Policy class |
+|---|---|---|---|
+| `work_period.submission_due` | Configured submission reminder threshold is reached | Affected worker | `ACTION_REQUIRED` |
+| `work_period.submission_overdue` | Deadline or grace period elapses without an accepted submission | Affected worker plus scoped manager or configured escalation owner | `CONTROL_MANDATORY` |
+| `approval.action_required` | A valid generic approval stage becomes pending, including work, leave, assignment, commercial and invoice-batch approvals | Current-stage approver or approvers | `ACTION_REQUIRED` |
+| `approval.rejected_or_correction_required` | A rejection or correction-required decision is recorded by the generic approval engine | Requester plus affected worker where distinct | `ACTION_REQUIRED` |
+| `approval.completed` | Final approval is recorded | Requester plus affected worker where distinct | `INFORMATIONAL` |
+| `approval.overdue_or_escalated` | Approval due threshold is exceeded or escalation is created | Current approver or approvers plus configured escalation target | `CONTROL_MANDATORY` |
+| `assignment.created_or_materially_changed` | Assignment becomes effective or an approved material change takes effect | Affected worker plus scoped resource or engagement manager where distinct | `ACTION_REQUIRED` |
+| `commercial.approval_required` | A proposed rate, budget, PO, contract-term or commercial-policy change is policy-blocked before submission because the requester/change owner must create, complete or submit the generic approval request; this event is not emitted when a generic approval stage is pending | Requester plus commercial change owner where distinct | `ACTION_REQUIRED` |
+| `commercial.risk_threshold_breached` | PO expiry/exhaustion, fixed-fee overrun, retainer overconsumption/expiry or margin threshold is breached | Engagement owner plus scoped commercial manager plus finance/billing owner | `CONTROL_MANDATORY` |
+| `invoice_batch.action_required` | The batch owner must resolve a pre-submission evidence, reconciliation, validation or export-preparation deficiency while no generic approval stage is pending; approval rejection/correction decisions use `approval.rejected_or_correction_required` instead | Batch owner plus finance preparer where distinct | `ACTION_REQUIRED` |
+| `invoice_batch.export_failed` | Provider delivery or CSV-artifact generation fails | Batch owner plus finance/billing owner plus integration administrator | `OPERATIONAL_CRITICAL` |
+| `invoice_batch.exported_or_billed_confirmed` | Accepted provider/CSV export or downstream billing confirmation is recorded | Batch owner plus finance/billing owner | `INFORMATIONAL` |
+| `integration.delivery_failed_or_degraded` | Configured provider reaches a failed or degraded threshold | Integration administrator plus operations owner | `OPERATIONAL_CRITICAL` |
+
+Every notification created from the matrix must retain:
+
+- Canonical event key and versioned template key/version.
+- Source entity ID/version and triggering operation ID.
+- Organization/legal-entity and row/data-scope context.
+- Server-resolved recipient relationship and recipient reason.
+- Policy class and per-channel preference/mandatory decision.
+- Locale, approved template variables and sanitized payload evidence.
+- Notification/channel/idempotency identity.
+- Delivery attempt, retry/backoff, accepted/failed result and correlation evidence.
+
+The generic approval engine must emit the shared `approval.*` keys for work, leave, assignment, commercial and invoice-batch approvals. A single source transition or triggering operation may create at most one action-required notification event. When a generic approval stage is pending, only `approval.action_required` may be emitted for the action request; `commercial.approval_required` and `invoice_batch.action_required` must not be emitted for that same transition. Domain modules must not create incompatible duplicate approval-event keys or a second action-required notification for the same source/version/operation. Client recipients are not part of v1 because the client portal is deferred. Buyers may add events or recipients and may require external channels, but they cannot remove a default mandatory recipient or downgrade `CONTROL_MANDATORY` or `OPERATIONAL_CRITICAL` without a protected policy change that still satisfies this requirement.
+
+### WOS-INT-003 — Idempotency
+
+Inbound integrations and webhook-style operations must support idempotency or duplicate detection.
+
+### WOS-INT-004 — Integration health
+
+Administrators must see configured provider, credential readiness without exposing secrets, recent failures and relevant mapping gaps.
+
+### WOS-INT-005 — Failure isolation
+
+External delivery or integration failure must not silently roll back an otherwise valid core transaction unless the business policy explicitly requires atomic behavior.
+
+### WOS-INT-006 — Outbound financial interface
+
+Invoice-ready and commercial exports must provide stable versioned contracts suitable for downstream accounting adapters. Initial finance delivery is `Approved`-only; final-state operations are idempotent retrieval/status confirmation and cannot create duplicate delivery.
+
+## 16. Governance and audit requirements
+
+### WOS-GOV-001 — Immutable audit posture
+
+Audit records must be append-only for normal application users. Corrections must create new evidence rather than rewriting history.
+
+### WOS-GOV-002 — Audit coverage
+
+Audit must cover authentication events, role/permission changes, master data, assignments, timesheets, approvals, rates, costs, budgets, POs, commercial calculations, invoice-ready batches, imports, exports, settings and integration operations.
+
+### WOS-GOV-003 — Retention policy
+
+Audit and operational retention must be configurable and documented. Deletion/anonymization must respect legal and buyer policy constraints.
+
+### WOS-GOV-004 — Data provenance
+
+Imported and integrated records must retain source, source identifier, import/batch reference and processing result where applicable.
+
+### WOS-GOV-005 — Release traceability
+
+The product repository must link requirements to implementation issues, pull requests, tests and release evidence.
+
+## 17. Operations and deployment requirements
+
+### WOS-OPS-001 — Reproducible deployment
+
+The release must provide a reproducible production build and container/deployment configuration for one isolated buyer environment.
+
+### WOS-OPS-002 — Environment validation
+
+Production startup must validate required configuration and fail closed on missing/unsafe secrets, database settings or required OIDC identity configuration. A production deployment must reject an enabled WorkOS local-auth provider.
+
+### WOS-OPS-003 — Migration execution
+
+Migrations must run through a controlled command or release step with fresh-install and prior-version upgrade evidence. Application startup must not be the only safe migration mechanism.
+
+### WOS-OPS-004 — Health endpoints
+
+The product must expose liveness and readiness/health information without disclosing secrets.
+
+### WOS-OPS-005 — Backup and restore
+
+The release must include buyer-owned backup/restore instructions and a tested restore rehearsal.
+
+### WOS-OPS-006 — Monitoring
+
+The product must provide structured logs, operational health signals and documented alert ownership.
+
+### WOS-OPS-007 — CI/CD
+
+CI must run build, type/lint, tests, migration validation, secret scanning and dependency/security checks as configured before merge/release.
+
+### WOS-OPS-008 — Release artifacts
+
+Releases must be versioned, tagged and accompanied by changelog, migration notes, known limitations, test evidence and rollback guidance.
+
+### WOS-OPS-009 — Demo/production separation
+
+Demo data, shortcuts, fallback storage and local authentication must not be available in production unless explicitly enabled in a non-production deployment profile.
+
+### WOS-OPS-010 — Buyer handover
+
+The v1 package must include deployment, credential, data import, role UAT, security, backup, monitoring, support and acceptance checklists.
+
+## 18. Deferred requirements
+
+The following are deliberately deferred unless promoted through an approved scope change:
+
+- Shared multi-tenant SaaS control plane.
+- Native mobile apps.
+- Payroll processing.
+- Statutory invoice generation and general-ledger posting.
+- Complete CRM/sales pipeline.
+- Full expense-management module.
+- Full SCIM lifecycle provisioning.
+- Autonomous AI approval or financial decisions.
+- Broad connector marketplace.
+
+## 19. Definition of product acceptance
+
+A requirement may be marked accepted only when:
+
+1. The implementation and data model are merged.
+2. Positive and negative automated tests pass.
+3. Applicable migration paths pass.
+4. Applicable role/browser journeys pass.
+5. Audit and authorization behavior is proven.
+6. Documentation and traceability are updated.
+7. Known limitations are recorded.
+8. The exact accepted commit is identified.
+
+Statements such as “implemented,” “code complete” or “tests should pass” are not acceptance evidence without the corresponding executable results.

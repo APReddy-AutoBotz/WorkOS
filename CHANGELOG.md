@@ -1,0 +1,30 @@
+# Changelog
+
+All notable WorkOS changes will be recorded here. The project follows semantic versioning once application source is imported.
+
+## [Unreleased]
+
+### Added
+
+- WOS-00 programme charter, authoritative requirements and architecture baseline.
+- Repository governance and AI-agent operating controls.
+- Product, architecture, specification, quality and delivery documentation pack.
+- Source-provenance and commercial-repository separation rules.
+
+### Not yet included
+
+- Application source.
+- Runtime branding/configuration implementation.
+- Database migrations.
+- Production deployment artifacts.
+
+## [0.1.0] — Planned
+
+The `v0.1.0` milestone will represent the accepted governing blueprint and controlled commercial repository baseline. It will not represent a runnable product.
+
+## Changelog rules
+
+- Use `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` and `Security` headings as applicable.
+- Reference governing requirement IDs and PRs in release notes.
+- Include migration and rollback implications.
+- Do not claim a capability is released until its acceptance evidence is merged.

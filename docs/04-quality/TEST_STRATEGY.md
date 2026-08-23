@@ -1,0 +1,204 @@
+# WorkOS Test Strategy
+
+## Purpose
+
+Testing proves product requirements, security boundaries, historical integrity and buyer-operable release behavior. Agent statements and code review are not substitutes for executable evidence.
+
+## Evidence classification
+
+Every check is reported as:
+
+- `PASS` — executed successfully against the declared exact head.
+- `FAIL` — executed and did not meet acceptance.
+- `SKIP` — intentionally skipped under an approved rule with reason.
+- `NOT RUN` — not executed; normally blocks acceptance when applicable.
+
+## Test layers
+
+| Layer | Primary evidence |
+|---|---|
+| Domain/unit | State machines, policy, capacity, rate precedence, currency/rounding, billing eligibility, notification policy and calculation vectors |
+| API/contract | Schema validation, stable errors, pagination, concurrency, idempotency, direct-bypass rejection and export/notification contracts |
+| Authorization | Active role, permission, organization/legal-entity and row/data-scope positive/negative cases |
+| Database/migration | Constraints, fresh install, supported upgrades, backfills, control totals and rollback/roll-forward |
+| Integration contract | Worklog, notification, collaboration and finance mock adapters; mapping, idempotency, retries, failure isolation, lineage and sanitized events |
+| Browser journeys | Real role workflows and protected deep links on production-like configuration |
+| Financial reconciliation | Source, snapshot, billing-event, approved-unbilled, invoice-ready and export control totals |
+| Performance | Standard buyer profile, high-risk queries/jobs and reviewed regressions |
+| Security | Secret/dependency scans, threat cases, identity fail-closed, headers/session/input/logging checks and finding disposition |
+| Recovery/operations | Build/startup, health, backup/restore, monitoring and deployment rollback |
+
+## Required authorization matrix
+
+For every protected module, test:
+
+1. Authorized active role in scope succeeds.
+2. Same user with an assigned but inactive role is denied.
+3. Role with permission but wrong organization/legal entity is denied.
+4. Correct organization but unrelated entity/worker/client/project is denied.
+5. UI hiding and direct API/deep-link behavior agree.
+6. Export/report totals do not leak restricted rows or cost/margin values.
+7. Delegation does not broaden original authority.
+8. Billing access, eligibility-event creation, batch preparation, batch approval, initial export, final-artifact retrieval and billing confirmation remain separately permission controlled.
+9. Notification recipient resolution, mandatory recipients, preferences, templates and delivery evidence remain server scoped and cannot be redirected by an unauthorized user.
+
+## Migration strategy
+
+Each schema PR supplies:
+
+- Empty-database migration.
+- Upgrade from the latest supported release fixture.
+- Representative legacy/anomalous data cases.
+- Pre/post record counts and control totals.
+- Constraint/index verification.
+- Repeat/ledger behavior.
+- Rollback or roll-forward evidence.
+
+For invoice-readiness migrations, evidence also proves the one-to-one event/register relationship, source-version retention, reversal/supersession integrity, accepted export-artifact history and active/final batch uniqueness.
+
+For notification migrations, evidence proves stable canonical event/template keys, versioned templates, notification/channel idempotency identities, recipient relationship provenance and no duplicate event generation after replay or upgrade.
+
+## Financial golden vectors
+
+The commercial engine maintains versioned deterministic fixtures for:
+
+- Rate precedence and effective dates.
+- Decimal precision, currency/FX and rounding.
+- T&M caps and exclusions.
+- Fixed fee, milestone, retainer and managed-service calculations.
+- Fixed-fee operational earned-management calculations that fail closed without an authorized effective-dated policy, remain explicitly non-statutory and never grant billing eligibility or invoice readiness.
+- Budgets, POs and EAC.
+- Every operational earned-management policy profile and policy-disabled fail-closed behavior.
+- Source-specific billing eligibility for T&M, milestone, fixed-fee, retainer, managed-service and approved adjustments.
+- One billing-eligibility-event version to one approved-unbilled-item version.
+- Source → event → register → invoice-ready line → batch → export reconciliation.
+- Canonical batch states, occupancy classes and allowed transitions.
+- Pre-export cancellation and atomic occupancy release.
+- Provider acceptance, CSV-artifact acceptance, failed-export behavior and billed confirmation.
+- Idempotent retrieval/redownload and status confirmation for accepted final artifacts.
+- Versioned reversals/supersessions and authorized correction flows.
+- No-double-billing and active/final batch uniqueness.
+
+Expected values are independently specified and not generated by the implementation under test.
+
+## Mandatory invoice-readiness negative vectors
+
+The PR-012 and release matrices must prove:
+
+1. Direct submission of a raw work entry, calculation snapshot, milestone, fixed-fee schedule, retainer/managed-service event or adjustment as an invoice-ready line is rejected.
+2. A source without required approval, acceptance or contractual-due evidence cannot create a billing-eligibility event.
+3. One source version cannot create duplicate current eligibility events or approved-unbilled items outside the defined reversal/supersession model.
+4. A second insertion of the same approved-unbilled-item ID/version into the same batch is rejected.
+5. Insertion of the same approved-unbilled-item ID/version into another occupying batch is rejected.
+6. Concurrent same-item requests against the database-unique current-occupancy invariant yield one accepted membership and deterministic conflicts, with no orphan line, duplicate amount or control-total drift.
+7. An identical retry with the same idempotency key returns the existing line/membership result; same-key reuse with changed input and a different-key duplicate both conflict.
+8. Bulk, import and compatibility routes cannot bypass the current-occupancy invariant.
+9. Partial-billing, presentation-splitting or multiple-line reuse of one approved-unbilled-item version is rejected; separately billable portions require distinct authorized/versioned eligibility events and approved-unbilled items with reconciled source totals.
+10. Valid pre-export cancellation atomically releases only current occupancy; controlled re-batching creates a new line/membership version while preserving immutable history and revalidating eligibility.
+11. `Exported` and `Billed/Confirmed` occupancy remains permanent; post-export/billing corrections use new reversal/superseding event, register-item and correction-line/batch versions.
+12. A reversed, superseded or stale event/register version cannot be newly batched.
+13. Client-supplied organization, currency, amount, approval state, source version or calculation evidence cannot override server-authoritative values.
+14. Finalization fails on event/register/line control-total mismatch.
+15. An initial finance export from any state other than `Approved` is rejected.
+16. Provider rejection, timeout or failed CSV generation leaves the batch `Approved`, keeps register items occupied and does not record an accepted export version.
+17. Provider acceptance transitions `Approved → Exported` only for the exact immutable versioned payload and matching control totals.
+18. CSV acceptance transitions `Approved → Exported` only after atomic creation/recording of an immutable artifact with operation/idempotency ID, artifact version, checksum, schema version, line count, control totals, timestamp and authorized actor.
+19. Repeating an accepted provider or CSV request with the same idempotency identity returns the same result; it does not duplicate delivery, regenerate content or re-transition the batch.
+20. Idempotency-key reuse with a different payload or artifact identity is rejected.
+21. `Exported` and `Billed/Confirmed` permit only authorized idempotent retrieval/redownload or status confirmation; they cannot initiate new downstream delivery.
+22. Any batch transition outside `Draft → Under Review | Cancelled`, `Under Review → Draft | Approved | Cancelled`, `Approved → Exported | Cancelled`, and `Exported → Billed/Confirmed` is rejected.
+23. `Cancelled` and `Billed/Confirmed` are terminal and `Exported` cannot be cancelled.
+24. Cancellation from an unauthorized state, without protected authority/reason/audit, or with a non-atomic occupancy release is rejected.
+25. A register item released by valid pre-export cancellation is not selectable again unless its eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible.
+26. Exported or billed source lineage remains occupying; later correction attempts that reuse the original event/register item or overwrite the accepted artifact are rejected and must use versioned reversal/superseding events, register items and correction batches.
+
+## Mandatory notification event matrix
+
+PR-013 and the release matrix must execute at least one positive and one negative deterministic vector for every canonical WOS-INT-002 row:
+
+| Event/template key | Required positive evidence | Required negative evidence |
+|---|---|---|
+| `work_period.submission_due` | Affected worker receives one in-app `ACTION_REQUIRED` record at the configured threshold | Preference cannot suppress in-app; another worker cannot be substituted |
+| `work_period.submission_overdue` | Worker plus scoped manager/escalation owner receive `CONTROL_MANDATORY` records after deadline/grace | Worker preference cannot remove either mandatory relationship recipient; out-of-scope manager denied |
+| `approval.action_required` | Current-stage approver(s) receive one shared approval event when any valid generic stage becomes pending, including commercial and invoice-batch approvals | Stale/non-current/delegation-out-of-scope recipient denied; replay does not duplicate; domain-action key cannot also fire for the same pending-stage operation |
+| `approval.rejected_or_correction_required` | Requester and distinct affected worker receive the canonical generic-approval event | Caller cannot redirect recipients or downgrade in-app delivery; invoice-batch domain action cannot also fire for the same rejection/correction decision |
+| `approval.completed` | Requester and distinct affected worker receive `INFORMATIONAL` using channel preferences | Duplicate final-decision replay does not duplicate; unrelated user denied |
+| `approval.overdue_or_escalated` | Current approvers plus escalation target receive `CONTROL_MANDATORY` | Preferences cannot suppress mandatory recipients; duplicate scheduler run is idempotent |
+| `assignment.created_or_materially_changed` | Affected worker plus scoped resource/engagement manager receive one event | Non-material draft change or out-of-scope manager does not receive it |
+| `commercial.approval_required` | A policy-blocked commercial draft notifies the requester/change owner to create, complete or submit the generic approval request before any stage is pending | It is not sent to approvers and cannot fire once `approval.action_required` exists for the same source/version/operation |
+| `commercial.risk_threshold_breached` | Engagement owner, commercial manager and finance/billing owner receive `CONTROL_MANDATORY` | Preferences cannot suppress required recipients; threshold replay does not duplicate |
+| `invoice_batch.action_required` | Batch owner/finance preparer receives `ACTION_REQUIRED` for pre-submission evidence, reconciliation, validation or export-preparation remediation while no generic approval stage is pending | It cannot fire for a pending approval stage or for a generic approval rejection/correction decision; raw source owner/out-of-scope finance user cannot be injected |
+| `invoice_batch.export_failed` | Batch owner, finance/billing owner and integration administrator receive `OPERATIONAL_CRITICAL` plus configured alert route | No opt-out; failure retry does not create duplicate accepted notification/channel evidence |
+| `invoice_batch.exported_or_billed_confirmed` | Batch owner and finance/billing owner receive one `INFORMATIONAL` event per accepted transition | Artifact redownload/status retry does not create another event |
+| `integration.delivery_failed_or_degraded` | Integration administrator and operations owner receive `OPERATIONAL_CRITICAL` plus alert route | No opt-out; provider-health retry cannot duplicate the same threshold event |
+
+For every row the fixture must independently specify and assert:
+
+1. Canonical event key and selected versioned template key/version.
+2. Triggering source entity ID/version and operation ID.
+3. Organization/legal-entity and row/data-scope context.
+4. Default server-resolved recipient relationship and reason.
+5. Policy class and channel preference/mandatory decision.
+6. Locale, approved variables and sanitized payload.
+7. Notification/channel/idempotency identity.
+8. Attempt number, retry/backoff, accepted or failed result and correlation evidence.
+
+## Mandatory notification and integration vectors
+
+In addition to the row-by-row matrix, PR-013 and the release matrix must prove:
+
+1. In-app notification creation and separately recorded email/collaboration delivery attempts use one notification/channel/idempotency identity.
+2. Versioned templates render approved, locale-aware, channel-safe content; unknown variables or unsafe active content fail closed.
+3. `ACTION_REQUIRED` never allows suppression of in-app for default recipients.
+4. `CONTROL_MANDATORY` and `OPERATIONAL_CRITICAL` recipients cannot opt out or be removed by user preference; buyer policy may add required external channels.
+5. `INFORMATIONAL` may be disabled, digested or channel-selected by recipient preference.
+6. A buyer may add events/recipients or require channels, but a protected policy change cannot remove a default mandatory recipient or downgrade a mandatory class below the governing requirement.
+7. A no-recipient resolution for a mandatory event fails visibly, creates operational evidence and does not silently mark delivery successful.
+8. Recipient resolution respects named identity, active role, organization/legal-entity and entity/relationship scope.
+9. An unauthorized user cannot redirect another user's notification, change protected recipients or inspect another recipient's delivery evidence.
+10. The generic approval engine emits the same `approval.*` keys for work, leave, assignment, commercial and invoice-batch approvals; domain modules cannot create incompatible duplicate keys.
+11. A source entity/version and triggering operation can create at most one action-required notification. When a generic approval stage is pending, only `approval.action_required` is emitted; `commercial.approval_required` and `invoice_batch.action_required` are rejected for that same transition.
+12. `commercial.approval_required` is proved only before generic approval submission and resolves requester/change-owner recipients, never current approvers.
+13. `invoice_batch.action_required` is proved only for non-approval batch-owner remediation and never for a pending generic approval stage or an approval rejection/correction decision.
+14. Event replay, scheduler retry and provider retry/backoff are idempotent and cannot duplicate domain-event, in-app or accepted channel-delivery evidence.
+15. Optional provider failure does not roll back the valid core transaction; failure state, next retry and operational owner remain visible.
+16. Templates, logs, provider responses and health surfaces do not expose secrets, unrestricted personal data, cost rates or margin.
+17. No v1 event resolves a client recipient because the client portal is deferred.
+18. Finance adapter initial delivery accepts only `Approved` batches with complete event/register lineage; final-state operations are retrieval/status-only and idempotent.
+
+## Mandatory production identity vectors
+
+PR-014 and the release matrix must prove:
+
+1. Local WorkOS accounts work only in approved non-production/demo profiles.
+2. Production startup/readiness rejects an enabled local provider or missing/unsafe required OIDC configuration.
+3. Production OIDC outage or validation failure fails closed and does not activate local authentication through configuration, owner action or fallback code.
+4. Any external infrastructure/IdP break-glass process uses a named identity, separate approval and audit and still passes WorkOS active-role, permission, data-scope and session controls.
+5. Disabled users and revoked sessions lose access without waiting for a local fallback path.
+
+Availability fixtures prove that approved leave/holidays reduce the denominator exactly once, never enter the productive/billable numerator and do not require a client engagement or project.
+
+## Browser role journeys
+
+At minimum before v1:
+
+- Organization administrator setup/permissions.
+- People operations workforce lifecycle.
+- Resource manager planning/assignment.
+- Engagement manager project/work approval.
+- Commercial manager contracts/rates/budgets and source-specific eligibility evidence.
+- Finance analyst billing-eligibility, approved-unbilled, CSV/provider export and complete batch lifecycle without raw-source selection.
+- Approver delegation/decision/lock behavior.
+- Worker self-service and correction.
+- Recipient notification center, preferences, mandatory indicators and delivery evidence within scope.
+- Integration administrator notification/finance adapter health without secret disclosure.
+- Operations owner operational-critical alert and retry evidence.
+- Auditor read-only event/register/batch/export/notification lineage evidence.
+
+## Test data
+
+Use synthetic organization, worker, client and commercial data. Fixtures intentionally include multiple legal entities, currencies, worker types, engagement models, overlapping effective dates, reversals/supersessions, cancelled/failed-export/exported/billed batches, immutable CSV artifacts, already-batched register items, all four notification policy classes, all thirteen canonical notification events, mutually exclusive pre-submission versus pending-approval transitions, preference combinations, provider delivery failures and out-of-scope relationships.
+
+## PR and release expectations
+
+Affected tests run in the implementation PR. The release candidate reruns the full matrix at one exact head and immutable artifact. Flaky or skipped high-risk tests are release blockers until disposition is approved and documented.
