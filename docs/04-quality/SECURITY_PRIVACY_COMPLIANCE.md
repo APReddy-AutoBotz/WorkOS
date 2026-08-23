@@ -14,7 +14,9 @@ This baseline defines product controls and buyer responsibilities for a buyer-ow
 
 ## Identity and authorization
 
-Production uses named accounts and OIDC where configured. Sessions are time limited and revocable. Effective access combines identity, active role, permission, organization/legal entity, row/data scope and business state. Protected administration permissions cannot be removed from all administrators accidentally.
+Every production deployment requires named accounts and configured OIDC. Missing, invalid or unavailable required OIDC configuration must fail startup/readiness and authentication closed. WorkOS local authentication and shared/demo identities are permitted only in approved non-production/demo profiles and must be disabled or absent in production; they cannot be activated as a production fallback.
+
+Sessions are time limited and revocable. Effective access combines identity, active role, permission, organization/legal entity, row/data scope and business state. Protected administration permissions cannot be removed from all administrators accidentally.
 
 ## Application security
 
@@ -62,4 +64,4 @@ Retention settings are documented and buyer-approved. Purge/anonymization must a
 
 ## Release evidence
 
-Before v1 release: threat model, negative authorization suite, secret/dependency scan, vulnerability findings/disposition, production identity/session checks, sensitive logging review, backup/restore evidence and buyer security checklist.
+Before v1 release: threat model, negative authorization suite, secret/dependency scan, vulnerability findings/disposition, production identity/session checks, fail-closed evidence for missing/invalid/unavailable required OIDC, proof that production rejects WorkOS local/shared demo authentication, sensitive logging review, backup/restore evidence and buyer security checklist.
