@@ -58,6 +58,23 @@ A raw work entry, commercial snapshot, milestone, fixed-fee schedule, retainer e
 
 Finance users query the approved-unbilled register and create batches by client, legal entity, engagement, period and currency. Every invoice-ready line references exactly one approved-unbilled-item version and, through it, exactly one billing-eligibility-event version and source version.
 
+WorkOS v1 does not split one approved-unbilled-item version across multiple invoice-ready lines. A separately billable portion must originate upstream as a distinct authorized/versioned eligibility event and approved-unbilled item with reconciled source and control totals.
+
+### Unique current line occupancy
+
+For each approved-unbilled-item ID/version, PostgreSQL permits at most one current occupying invoice-ready line/membership. A database-unique current-occupancy record is acquired in the same transaction as line/membership creation and points to the current line and batch.
+
+The control rejects:
+
+- A duplicate line inserted twice into the same batch.
+- The same item version inserted into another open/active or final batch.
+- Concurrent duplicate acquisition under different requests.
+- Presentation splitting or partial billing that reuses the same item version.
+
+An identical retry with the same idempotency key and canonical request returns the existing line/membership result. Reusing that key with changed input, using a different key while occupancy exists or racing a concurrent request returns a stable conflict.
+
+Historical line/membership records are immutable and remain available for audit and reconciliation. They do not replace the current-occupancy control.
+
 ### Canonical batch states and occupancy
 
 The canonical states are `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`.
@@ -66,7 +83,7 @@ The canonical states are `Draft`, `Under Review`, `Approved`, `Exported`, `Bille
 - **Final occupying:** `Exported`, `Billed/Confirmed`.
 - **Non-occupying terminal:** `Cancelled`, only for a batch cancelled before any successful export or downstream billing confirmation.
 
-An approved-unbilled item is excluded from the available register while its line belongs to any open/active or final occupying batch. Constraints, transactional locking and idempotency enforce the exclusion under concurrent operations.
+An approved-unbilled item is excluded from the available register while its database current-occupancy record exists. Database uniqueness, transactional locking and idempotency enforce the exclusion under same-batch, cross-batch and concurrent operations.
 
 Minimum transitions are:
 
@@ -81,7 +98,7 @@ Exported → Billed/Confirmed
 
 ### Export acceptance
 
-An initial export or delivery may originate only from an `Approved` batch. A failed provider delivery or CSV-artifact generation leaves the batch `Approved`, retains occupancy and records the failed operation.
+An initial export or delivery may originate only from an `Approved` batch. A failed provider delivery or CSV-artifact generation leaves the batch `Approved`, retains current occupancy and records the failed operation.
 
 The single `Approved → Exported` transition occurs only when either:
 
@@ -92,11 +109,11 @@ The CSV acceptance record contains export-operation ID, idempotency key, immutab
 
 Repeated requests with the same idempotency key return the same accepted artifact or provider-operation result. They must not regenerate content, duplicate downstream delivery or reapply the transition. `Exported` and `Billed/Confirmed` batches may support idempotent retrieval/redownload or downstream-status confirmation of the already accepted artifact, but cannot initiate another delivery or become `Exported` again.
 
-A pre-export cancellation from `Draft`, `Under Review` or `Approved` requires reason, authority and audit. The atomic cancellation preserves historical line membership and releases current occupancy. The item returns to the available register only if its eligibility event is still current, unreversed, unsuperseded, in scope and otherwise valid.
+A pre-export cancellation from `Draft`, `Under Review` or `Approved` requires reason, authority and audit. The atomic cancellation preserves historical line/membership evidence and releases the database current-occupancy record. The item returns to the available register only if its eligibility event is still current, unreversed, unsuperseded, in scope and otherwise valid. Re-batching creates a new line/membership version and reacquires occupancy; it never rewrites or reactivates the cancelled line.
 
-After `Exported` or `Billed/Confirmed`, corrections use a versioned reversal or superseding eligibility event, corresponding approved-unbilled item and correction batch. The original source/event/register/line/batch/export lineage remains occupied and immutable. Accepted CSV artifacts and provider payload evidence are never overwritten.
+After `Exported` or `Billed/Confirmed`, occupancy remains permanent. Corrections use a versioned reversal or superseding eligibility event, corresponding approved-unbilled item and correction batch. The original source/event/register/line/batch/export lineage remains occupied and immutable. Accepted CSV artifacts and provider payload evidence are never overwritten.
 
-Finalization preserves source → event → register → line → batch → export control totals and immutable evidence.
+Finalization preserves source → event → register → unique current occupancy → line → batch → export control totals and immutable evidence.
 
 WorkOS exports invoice-ready data; it does not issue statutory invoices or post a ledger.
 
@@ -112,12 +129,14 @@ Positive vectors cover:
 - Every enabled operational earned-management profile and policy-disabled fail-closed cases.
 - T&M, milestone, fixed-fee, retainer, managed-service and adjustment eligibility-event creation.
 - One-to-one eligibility-event/register-item creation.
-- Source → event → register → line → batch/export control-total reconciliation.
-- Valid Draft/Under Review/Approved occupancy and pre-export cancellation/release.
+- One approved-unbilled-item version producing exactly one current line/membership.
+- Same-key identical retry returning the existing line/membership result.
+- Source → event → register → occupancy → line → batch/export control-total reconciliation.
+- Valid Draft/Under Review/Approved occupancy and pre-export cancellation/release followed by controlled re-batching through a new line version.
 - Idempotent failed-provider retry that remains `Approved` until acceptance.
 - Successful CSV acceptance with immutable artifact/version/checksum/schema/line-count/control-total evidence.
 - Repeated CSV/provider request with the same idempotency identity returning the same accepted result without duplicate delivery or re-transition.
-- `Approved → Exported → Billed/Confirmed` final occupancy.
+- `Approved → Exported → Billed/Confirmed` permanent occupancy.
 - Idempotent retrieval/redownload or status confirmation from final states without new delivery.
 - Versioned reversals/supersessions and valid correction flows after export/confirmation.
 - Budget/EAC and finalized batch/export totals.
@@ -128,7 +147,13 @@ Negative vectors cover:
 - Unauthorized cost/margin, eligibility-event, initial-export or final-artifact access.
 - Raw source or calculation-snapshot direct-batch bypass.
 - Source lacking approval, acceptance or contractual-due evidence.
-- Duplicate event/register creation or reuse in another Draft, Under Review, Approved, Exported or Billed/Confirmed batch.
+- Duplicate event/register creation.
+- Duplicate item insertion twice into the same batch.
+- Duplicate item insertion across two occupying batches.
+- Concurrent duplicate current-occupancy acquisition.
+- Different-key duplicate request while occupancy exists.
+- Idempotency-key reuse with a changed line request.
+- Partial-billing or presentation-splitting attempt that reuses one approved-unbilled-item version.
 - Initial export request from any state other than `Approved`.
 - Duplicate downstream delivery or second `Exported` transition from `Exported` or `Billed/Confirmed`.
 - Idempotency-key reuse with different payload/artifact identity.
@@ -139,12 +164,12 @@ Negative vectors cover:
 
 ## Recalculation, correction and audit
 
-Controlled recalculation creates a new snapshot version and reason. Credits/write-offs/discounts are approved versioned source records; invoice eligibility then creates their event/register lineage. Cancellation, finalization, provider/CSV export acceptance, retrieval, confirmation and correction preserve control totals and evidence.
+Controlled recalculation creates a new snapshot version and reason. Credits/write-offs/discounts are approved versioned source records; invoice eligibility then creates their event/register lineage. Occupancy acquisition/release, cancellation, finalization, provider/CSV export acceptance, retrieval, confirmation and correction preserve control totals and evidence.
 
 ## Gate C acceptance boundary
 
-The product-owner Gate C review occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Evidence must prove commercial terms, deterministic calculations, source-specific eligibility, the approved-unbilled register, complete batch occupancy/release states, provider and CSV export acceptance, immutable export lineage, correction paths, authorization and reconciliation. PR-011 calculation-engine evidence alone cannot satisfy Gate C, and Gate C cannot substitute for PR-012 engineering acceptance.
+The product-owner Gate C review occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Evidence must prove commercial terms, deterministic calculations, source-specific eligibility, the approved-unbilled register, database-enforced unique current line occupancy, complete batch occupancy/release states, provider and CSV export acceptance, immutable export lineage, correction paths, authorization and reconciliation. PR-011 calculation-engine evidence alone cannot satisfy Gate C, and Gate C cannot substitute for PR-012 engineering acceptance.
 
 ## Migration and rollback
 
-Commercial tables are additive and feature gated. Seeded vectors and neutral defaults are synthetic. Before export/final occupancy use controlled cancellation/disable where valid; after snapshots, eligibility events, register items, accepted export artifacts, Exported/Billed/Confirmed batches or downstream confirmations exist, use forward corrections and preserve evidence.
+Commercial tables are additive and feature gated. Seeded vectors and neutral defaults are synthetic. The invoice-readiness migration creates and validates the database-unique current-occupancy control and detects ambiguous duplicates before enabling line creation. Before export/final occupancy use controlled cancellation/disable where valid; after snapshots, eligibility events, register items, accepted export artifacts, Exported/Billed/Confirmed batches or downstream confirmations exist, use forward corrections and preserve evidence.
