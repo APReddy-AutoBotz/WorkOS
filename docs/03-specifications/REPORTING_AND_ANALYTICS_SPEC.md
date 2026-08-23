@@ -45,7 +45,7 @@ Materialized views/jobs may improve performance but retain refresh time/version 
 
 Server-side permission and organization/entity scope apply before aggregation and drilldown. Export uses the same scoped query, records filters/as-of/version, output hash/reference and audit event. Cost/margin columns require separate permissions.
 
-Finance exports originate only from approved or finalized invoice-ready batch lines and preserve approved-unbilled-item and billing-eligibility-event lineage and control totals.
+Initial finance delivery may originate only from an `Approved` invoice-ready batch. The exported lines preserve approved-unbilled-item and billing-eligibility-event lineage and matching control totals. `Exported` and `Billed/Confirmed` batches permit only authorized, idempotent retrieval/redownload of the already accepted immutable artifact or downstream-status confirmation; they cannot initiate a new provider/CSV delivery, create a second accepted export operation or transition to `Exported` again.
 
 ## Integration contracts
 
@@ -59,7 +59,7 @@ Positive cases include:
 - Utilization denominator explanation.
 - Source-type-specific billing-eligibility reporting.
 - Source → event → register → batch line/batch/export control-total reconciliation.
-- Audited CSV/API export from approved/finalized batch lines.
+- Audited initial CSV/API export from `Approved` batch lines and idempotent final-state artifact retrieval/status confirmation without duplicate delivery.
 - Reversal/supersession reporting without rewriting prior totals.
 
 Negative cases include:
@@ -69,6 +69,8 @@ Negative cases include:
 - Duplicate eligibility event/register item or multiple active/final batch inclusion is flagged.
 - A reversed/superseded register item is excluded from current eligible totals while history remains visible to authorized roles.
 - Stale read-model totals fail reconciliation.
+- Initial finance delivery from any state other than `Approved` is rejected.
+- `Exported` or `Billed/Confirmed` retrieval/status operations cannot create another delivery or accepted export operation.
 - Failed adapter delivery does not claim export confirmation.
 
 ## Migration and rollback
