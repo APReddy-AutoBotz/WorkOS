@@ -3,7 +3,7 @@
 **Workstream:** WOS-00  
 **Issue:** #2  
 **Pull request:** #1  
-**Status:** Ten independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
+**Status:** Eleven independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
 
 ## 1. Reviewed heads and review IDs
 
@@ -19,6 +19,7 @@
 | 8 | `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` | `PRR_kwDOUAv8Lc8AAAABKh6Tsg` | Two P1 |
 | 9 | `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` | `PRR_kwDOUAv8Lc8AAAABKh-0NA` | One P1, one P2 |
 | 10 | `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` | `PRR_kwDOUAv8Lc8AAAABKh_5pA` | Three P2 |
+| 11 | `cd45de9181858d722e2974e92d6aaa53ba04ec17` | `PRR_kwDOUAv8Lc8AAAABKiBoBw` | Two P1, one P2 |
 
 ## 2. Resolution map by review round
 
@@ -90,17 +91,25 @@
 | Finding | Severity | Resolution |
 |---|---|---|
 | Security/privacy and NFR quality baselines still made production OIDC optional | P1 | `SECURITY_PRIVACY_COMPLIANCE.md` and `NON_FUNCTIONAL_REQUIREMENTS.md` now require named accounts and configured OIDC for every production deployment. Missing, invalid or unavailable OIDC fails startup/readiness and authentication closed. WorkOS local credentials and shared/demo identities are restricted to approved non-production/demo profiles, must be disabled or absent in production and cannot become a production fallback. Production OIDC is marked mandatory in the environment schema and exact release evidence. |
-| Controller evidence still reported only the first review and pending Gate B | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` is now an explicitly current consolidated controller record. It links this detailed review authority, records nine independent rounds, records all historical P1/P2 findings as corrected, records Gate B as approved and leaves only the clean moved-head review and exact-head merge open. |
+| Controller evidence still reported only the first review and pending Gate B | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` became the current consolidated controller record, linked this detailed review authority, recorded the review history and Gate B approval, and left only the moved-head review and merge open. |
 
 ### Round 10
 
 | Finding | Severity | Resolution |
 |---|---|---|
-| Authoritative programme charter still described Gate B as pending | P2 | `PROGRAM_CHARTER.md` now records the product owner's 2026-08-23 Gate B approval, links `DOC-WOS-00-003`, and states that source import/WOS-01 remain blocked until the clean exact-head review and blueprint merge. The approval does not waive provenance, resolved-thread or exact-head controls. |
-| Current controller evidence said only Rounds 1–8 were represented in this resolution authority | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` now states that all ten review rounds are enumerated and resolved here, records the tenth-review findings, and leaves only the clean moved-head review and merge open. |
-| Architecture ADR summary said “move toward OIDC” | P2 | `ARCHITECTURE_OVERVIEW.md` now states the adopted ADR-007 decision: configured OIDC, named accounts and revocable sessions are required for every production deployment; WorkOS local/shared demo authentication is restricted to approved non-production/demo profiles with no production fallback. Module, deployment and test wording are aligned. |
+| Authoritative programme charter still described Gate B as pending | P2 | `PROGRAM_CHARTER.md` records the product owner's 2026-08-23 Gate B approval, links `DOC-WOS-00-003`, and preserves the clean-review, source-import and merge controls. |
+| Current controller evidence understated the represented review rounds | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` now points to this complete review authority and records the current round count. |
+| Architecture ADR summary said “move toward OIDC” | P2 | `ARCHITECTURE_OVERVIEW.md` states the adopted ADR-007 decision: configured OIDC, named accounts and revocable sessions are required for every production deployment; WorkOS local/shared demo authentication is non-production/demo only with no fallback. |
 
-## 3. Canonical notification policy added in Round 7
+### Round 11
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| WOS-COM-007 used “recognized/earned value” wording that could authorize statutory revenue-recognition behavior | P1 | WOS-COM-007 now requires fixed-fee tracking of contract value, billing schedule, effort/cost and margin risk, permits only explicitly **non-statutory operational earned-management revenue** under an authorized effective-dated WOS-COM-011 policy, fails closed when no policy is active, and keeps approved hours, billing eligibility and invoice readiness independent. PR-011 scope and financial golden vectors carry the same boundary. |
+| Commercial and invoice-batch domain events overlapped `approval.action_required`, allowing two action-required notifications for one pending approval transition | P1 | WOS-INT-002 now defines mutually exclusive trigger boundaries. `approval.action_required` is the sole action-request event whenever a valid generic stage is pending. `commercial.approval_required` is only a pre-submission requester/change-owner prompt. `invoice_batch.action_required` is only non-approval batch-owner remediation. One source/version/operation may create at most one action-required event. Integration architecture, approval specification, test strategy, PR-009/013 backlog and issue #9 are aligned with positive/negative exclusivity and replay-idempotency evidence. |
+| Accepted OIDC decision retained transitional wording in the decision log | P2 | WOS-DEC-018 now records the adopted requirement for configured OIDC, named production accounts and revocable sessions in every production deployment; missing, invalid or unavailable OIDC fails closed and WorkOS local/shared demo identities remain approved non-production/demo only with no production fallback. |
+
+## 3. Canonical notification policy and exclusivity
 
 Policy classes:
 
@@ -127,30 +136,38 @@ Canonical event/template keys:
 
 Every event has a canonical/template key, version, source entity/version and operation, organization/legal-entity scope, server-resolved recipient relationship/reason, policy class, channel decision, locale/approved variables, idempotency identity and delivery-attempt/correlation evidence. Client recipients remain out of v1 scope. Protected buyer extensions cannot remove a mandatory recipient or downgrade a mandatory class below the governing requirement.
 
+Approval-event boundaries are authoritative:
+
+- A pending generic stage emits only `approval.action_required` to current-stage approvers.
+- `commercial.approval_required` occurs only before generic approval submission and resolves the requester/change owner, never current approvers.
+- `invoice_batch.action_required` occurs only for non-approval pre-submission/remediation work and never for pending approval or generic rejection/correction.
+- A source entity/version and triggering operation may create at most one action-required notification event.
+
 ## 4. Cross-cutting corrections retained
 
 - Leave/absence is availability-only and cannot become productive/billable work or reduce capacity twice.
 - PR-002 cannot merge a prohibited company-specific runtime; cleanup occurs in PR-002 or only the combined clean PR-003 state may merge.
-- Operational earned-management revenue is non-statutory and never grants billing authority.
+- Operational earned-management revenue is non-statutory, policy-gated and never grants billing authority.
 - Commercial lineage is source → eligibility event → approved-unbilled item → line/batch → accepted provider/CSV export.
 - Initial export is `Approved`-only; failures remain `Approved`; final states are retrieval/status only.
-- Production OIDC is mandatory and fail-closed in charter, architecture, security/privacy and NFR quality baselines; WorkOS local/shared authentication is non-production/demo only.
+- Production OIDC is mandatory and fail-closed in charter, decision log, architecture, security/privacy and NFR quality baselines; WorkOS local/shared authentication is non-production/demo only.
 - Gate B is approved but source import and WOS-01 remain blocked until clean review and blueprint merge.
 - PR-013 owns complete notification delivery; PR-014 owns production identity/security evidence.
 
-## 5. Controller verification after Round 10
+## 5. Controller verification after Round 11
 
 | Check | Controller result | Limitation |
 |---|---|---|
 | Gate B state and continuing blockers | PASS | Clean independent rerun required at final head |
 | Gate C prerequisite | PASS | Runtime/product acceptance occurs in WOS-06 |
+| Fixed-fee earned-management wording | PASS | Runtime vectors/evidence belong to PR-011 |
+| Billing eligibility independent from earned-management | PASS | Runtime evidence belongs to PR-011/012 |
+| Approval-event exclusivity | PASS | Implementation and replay evidence belongs to PR-009/013 |
+| Thirteen canonical event/template rows | PASS | Independent count/consistency rerun required |
 | Approved-only initial finance delivery | PASS | Runtime evidence belongs to PR-012/013 |
 | Final-state retrieval/status-only semantics | PASS | Runtime idempotency evidence belongs to PR-012/013 |
 | Mandatory production OIDC across governing, architecture and quality documents | PASS | Production startup/readiness evidence belongs to PR-014 |
-| No production local/shared authentication fallback | PASS | Security negative evidence belongs to PR-014 |
-| Current controller evidence and ten-round history | PASS | Clean final review/merge remain open |
-| Four notification policy classes | PASS | Implementation evidence belongs to PR-013 |
-| Thirteen canonical event/template rows | PASS | Independent count/consistency rerun required |
+| Current controller evidence and eleven-round history | PASS | Clean final review/merge remain open |
 | Requirement/NFR counts | Pending independent rerun | Must confirm 126/81 at exact head |
 | Application tests | SKIP | WOS-00 intentionally has no application source |
 | Shell/documentation-safe checks | NOT RUN by controller connector | Mandatory in clean final Codex/Sol review |
