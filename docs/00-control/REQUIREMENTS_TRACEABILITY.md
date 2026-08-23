@@ -27,7 +27,7 @@ A requirement cannot be marked accepted from a PR description or implementation-
 | WOS-CORE-005 | PR-006 through PR-014 | Common and module-specific production-mutation/audit evidence | Blueprint |
 | WOS-CORE-008 | PR-010 through PR-013 | Decimal-safe deterministic calculations, immutable evidence and reconciliation | Blueprint |
 | WOS-ORG-001–010 | PR-004 | Fresh/upgrade migrations, organization-scope negatives and guided-setup journeys | Not started |
-| WOS-IAM-001–010 | PR-003, 004, 006, 014 | Mandatory production OIDC, fail-closed startup/authentication, no-local-fallback, identity/session and authorization evidence | Not started |
+| WOS-IAM-001–010 | PR-003, 004, 006, 014 | Mandatory configured production OIDC/named accounts, fail-closed startup/authentication for missing/invalid/unavailable identity configuration, non-production/demo-only local/shared identities, session and authorization evidence | Not started |
 | WOS-WKF-001–002, 006 | PR-004 | Worker migration, relationship/lifecycle dependencies and scoped administration | Not started |
 | WOS-WKF-003–005, 007–008 | PR-008 | Capacity, skills, single-count leave, self-service and scoped workforce views | Not started |
 | WOS-CLI-001–002 | PR-007 | Client hierarchy, scope and lifecycle | Not started |
@@ -41,14 +41,14 @@ A requirement cannot be marked accepted from a PR description or implementation-
 | WOS-RPT-001–007 | PR-013 | Scoped reports, leakage/data quality, Approved-only initial finance export, final-state retrieval/status controls and snapshot/event/register/batch/export reconciliation | Not started |
 | WOS-INT-001–006 | PR-013, 014 | Thirteen canonical notification events/templates, four policy classes, default relationship recipients, preferences/mandatory decisions, in-app/email/collaboration delivery evidence, idempotency/failure isolation/health, worklog/finance adapters and production identity evidence | Not started |
 | WOS-GOV-001–005 | PR-002, 005, 006, 016 | Append-only audit, provenance, export and release traceability | Not started |
-| WOS-OPS-001–010 | PR-003, 005, 015, 016 | Build/container, mandatory production OIDC startup validation, migration, recovery, monitoring and handover | Not started |
-| WOS-NFR-SEC-001–014 | PR-003, 005, 006, 009, 010, 012, 013, 014, 016 | Threat, mandatory production identity, authorization, secure configuration and scan evidence | Blueprint |
+| WOS-OPS-001–010 | PR-003, 005, 015, 016 | Build/container, mandatory production OIDC environment/startup validation, migration, recovery, monitoring and handover | Not started |
+| WOS-NFR-SEC-001–014 | PR-003, 005, 006, 009, 010, 012, 013, 014, 016 | Threat, mandatory configured production OIDC, no production local/shared fallback, authorization, secure configuration and scan evidence | Blueprint |
 | WOS-NFR-PRV-001–006 | PR-004, 008, 010, 012, 013, 014, 016 | Minimization, sensitive-field scope, retention/anonymization and privacy export | Blueprint |
 | WOS-NFR-REL-001–009 | PR-005, 006, 008, 009, 011, 012, 013, 015, 016 | Fail-closed, transaction/idempotency, recovery and exact-head reliability | Blueprint |
 | WOS-NFR-PERF-001–008 | PR-006, 008, 011, 012, 013, 015, 016 | Pagination/query review, bounded jobs/exports and Standard-profile performance | Blueprint |
 | WOS-NFR-DAT-001–008 | PR-004, 007–013, 016 | Ownership, temporal integrity, precision, constraints, lineage and reconciliation | Blueprint |
 | WOS-NFR-MNT-001–008 | PR-002 through PR-016 | Modules, typed contracts, complexity, documentation and maintainability | Blueprint |
-| WOS-NFR-DPL-001–007 | PR-003, 005, 015, 016 | Container/environment portability, migration and deployment | Blueprint |
+| WOS-NFR-DPL-001–007 | PR-003, 005, 015, 016 | Container/environment portability, mandatory production identity configuration, migration and deployment | Blueprint |
 | WOS-NFR-OBS-001–006 | PR-005, 006, 009, 011, 012, 013, 015, 016 | Correlation, logs, job/integration/notification health and alerts | Blueprint |
 | WOS-NFR-UX-001–006 | PR-003, 004, 008, 009, 012, 013, 016 | Accessibility, responsive journeys, terminology/locale and errors | Blueprint |
 | WOS-NFR-CMP-001–004 | PR-003, 004, 006, 008, 013, 014, 016 | Browser/API/version compatibility and provider-neutral contracts | Blueprint |
@@ -60,7 +60,7 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Work package | Requirement groups | Issue | PR | Accepted commit | Release | Status |
 |---|---|---|---|---|---|---|
-| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Eight review rounds corrected; Gate B approved; clean exact-head review pending |
+| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Nine review rounds corrected; Gate B approved; clean exact-head review pending |
 | WOS-01A | Source provenance/bootstrap | #3 | Planned PR-002 | Pending | v0.2.0 | Authorized after WOS-00 merge |
 | WOS-01B | Neutral branding/configuration | #3 | Planned PR-003 | Pending | v0.2.0 | Not started |
 | WOS-02 | Organization/setup | #4 | Planned PR-004 | Pending | v0.4.0 | Not started |
@@ -81,8 +81,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Evidence ID | Evidence | Status |
 |---|---|---|
-| DOC-WOS-00-001 | Required-file inventory and controller cross-document review | Complete in PR #1 |
-| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Eight review rounds completed/corrected; clean exact-head re-review pending |
+| DOC-WOS-00-001 | Current consolidated controller cross-document review | Complete/current in PR #1; nine rounds and Gate B state recorded |
+| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Nine review rounds completed/corrected; clean exact-head re-review pending |
 | DOC-WOS-00-003 | Product-owner Gate B decision | Approved 2026-08-23; exact final head binds after clean review |
 
 ### Review history represented by DOC-WOS-00-002
@@ -94,7 +94,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 5. `649db270e8d43af152076e1f99e07c7204c575fc` — two P1.
 6. `7124709e4f6682ded0321c58d22a6851a5e32b9d` — four P1, two P2.
 7. `76f05c9da71d21b1f774afc91e13dad4323d6358` / review `PRR_kwDOUAv8Lc8AAAABKh3paA` — two P1: Gate C prerequisite and mandatory notification matrix.
-8. `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` / review `PRR_kwDOUAv8Lc8AAAABKh6Tsg` — two P1: Approved-only reporting/export semantics and mandatory production OIDC.
+8. `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` / review `PRR_kwDOUAv8Lc8AAAABKh6Tsg` — two P1: Approved-only reporting/export semantics and mandatory production OIDC architecture wording.
+9. `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` / review `PRR_kwDOUAv8Lc8AAAABKh-0NA` — one P1 and one P2: mandatory production OIDC in quality baselines and stale controller evidence.
 
 All listed findings are corrected in the active branch. The next evidence must be a clean independent review of the exact moved head.
 
@@ -153,7 +154,7 @@ Every implementation PR includes requirement IDs, evidence IDs, exact head, requ
 
 - Production startup/readiness rejects missing, invalid or unavailable required OIDC configuration.
 - Production authentication remains fail-closed and cannot enable WorkOS local authentication.
-- Local/shared demo identities operate only in approved non-production/demo profiles.
+- Local credentials and shared/demo identities operate only in approved non-production/demo profiles and are disabled or absent in production.
 - Disabled users and revoked sessions lose access through the mandatory production identity path.
 
 ## 8. v1 acceptance summary
