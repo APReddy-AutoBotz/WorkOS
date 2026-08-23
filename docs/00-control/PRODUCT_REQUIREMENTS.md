@@ -557,6 +557,44 @@ Identity, email, collaboration, worklog and finance integrations must use explic
 
 The product must support in-app notifications and provider-neutral email/collaboration notifications with versioned templates, locale-aware rendering, recipient authorization, user/channel preferences, mandatory-control recipient policy, delivery-attempt evidence, retry/backoff, idempotency, failure isolation and sanitized operational visibility.
 
+Notification delivery uses four authoritative policy classes:
+
+- `ACTION_REQUIRED`: default recipients cannot suppress in-app delivery. Email/collaboration follows buyer policy and recipient preference unless the buyer marks a channel required.
+- `CONTROL_MANDATORY`: required recipients and in-app delivery cannot be suppressed by recipient preferences. Buyer policy may require one or more external channels.
+- `INFORMATIONAL`: recipient preferences may disable, digest or select channels.
+- `OPERATIONAL_CRITICAL`: mandatory in-app delivery to configured operational owners plus the configured alert route; no recipient opt-out.
+
+The following is the minimum mandatory v1 event, template and default-recipient matrix. The canonical event key is also the canonical template key; every active template is separately versioned.
+
+| Canonical event/template key | Trigger | Default required recipient relationships | Policy class |
+|---|---|---|---|
+| `work_period.submission_due` | Configured submission reminder threshold is reached | Affected worker | `ACTION_REQUIRED` |
+| `work_period.submission_overdue` | Deadline or grace period elapses without an accepted submission | Affected worker plus scoped manager or configured escalation owner | `CONTROL_MANDATORY` |
+| `approval.action_required` | An approval stage becomes pending | Current-stage approver or approvers | `ACTION_REQUIRED` |
+| `approval.rejected_or_correction_required` | A rejection or correction-required decision is recorded | Requester plus affected worker where distinct | `ACTION_REQUIRED` |
+| `approval.completed` | Final approval is recorded | Requester plus affected worker where distinct | `INFORMATIONAL` |
+| `approval.overdue_or_escalated` | Approval due threshold is exceeded or escalation is created | Current approver or approvers plus configured escalation target | `CONTROL_MANDATORY` |
+| `assignment.created_or_materially_changed` | Assignment becomes effective or an approved material change takes effect | Affected worker plus scoped resource or engagement manager where distinct | `ACTION_REQUIRED` |
+| `commercial.approval_required` | Rate, budget, PO, contract term or commercial-policy change awaits approval | Current commercial approver or approvers | `ACTION_REQUIRED` |
+| `commercial.risk_threshold_breached` | PO expiry/exhaustion, fixed-fee overrun, retainer overconsumption/expiry or margin threshold is breached | Engagement owner plus scoped commercial manager plus finance/billing owner | `CONTROL_MANDATORY` |
+| `invoice_batch.action_required` | Batch review, approval or correction is required | Batch owner plus current finance approver or approvers | `ACTION_REQUIRED` |
+| `invoice_batch.export_failed` | Provider delivery or CSV-artifact generation fails | Batch owner plus finance/billing owner plus integration administrator | `OPERATIONAL_CRITICAL` |
+| `invoice_batch.exported_or_billed_confirmed` | Accepted provider/CSV export or downstream billing confirmation is recorded | Batch owner plus finance/billing owner | `INFORMATIONAL` |
+| `integration.delivery_failed_or_degraded` | Configured provider reaches a failed or degraded threshold | Integration administrator plus operations owner | `OPERATIONAL_CRITICAL` |
+
+Every notification created from the matrix must retain:
+
+- Canonical event key and versioned template key/version.
+- Source entity ID/version and triggering operation ID.
+- Organization/legal-entity and row/data-scope context.
+- Server-resolved recipient relationship and recipient reason.
+- Policy class and per-channel preference/mandatory decision.
+- Locale, approved template variables and sanitized payload evidence.
+- Notification/channel/idempotency identity.
+- Delivery attempt, retry/backoff, accepted/failed result and correlation evidence.
+
+The generic approval engine must emit the shared `approval.*` keys for work, leave, assignment, commercial and invoice-batch approvals; domain modules must not create incompatible duplicate approval-event keys. Client recipients are not part of v1 because the client portal is deferred. Buyers may add events or recipients and may require external channels, but they cannot remove a default mandatory recipient or downgrade `CONTROL_MANDATORY` or `OPERATIONAL_CRITICAL` without a protected policy change that still satisfies this requirement.
+
 ### WOS-INT-003 — Idempotency
 
 Inbound integrations and webhook-style operations must support idempotency or duplicate detection.
