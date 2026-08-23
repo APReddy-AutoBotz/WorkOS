@@ -95,17 +95,52 @@ Export success does not claim downstream statutory invoicing unless a configured
 
 WorkOS v1 includes an in-app notification channel plus provider-neutral email and collaboration adapters. A core domain event creates a scoped notification record and one or more authorized delivery attempts; optional external delivery failure does not undo the already valid core transaction.
 
-Notification configuration covers:
+### Policy classes
 
-- Versioned templates and locale-aware rendering.
-- Recipient resolution from active identity, role, relationship and organization/legal-entity scope.
-- User/channel preferences subject to mandatory-control notification policy.
-- In-app, email and collaboration channel eligibility.
-- Idempotency keys, retries, backoff and final delivery evidence.
-- Sanitized provider response, correlation and operational health.
-- Sensitive-data minimization and channel-specific payload policy.
+Notification policy is resolved server-side from the canonical event matrix in `WOS-INT-002`:
 
-A retry cannot create duplicate in-app records or delivery evidence for the same notification/channel/idempotency identity. Users cannot redirect another user's protected notification or override mandatory recipients. Templates and payloads cannot expose secrets, unrestricted personal data, cost rates or margin to unauthorized recipients.
+- `ACTION_REQUIRED`: in-app is mandatory for every default recipient; external channels follow buyer policy and recipient preferences unless the buyer requires a channel.
+- `CONTROL_MANDATORY`: required recipients and in-app cannot be suppressed by recipient preferences; buyer policy may require external channels.
+- `INFORMATIONAL`: recipient preferences may disable, digest or choose channels.
+- `OPERATIONAL_CRITICAL`: in-app to configured operational owners plus the configured operational alert route; no recipient opt-out.
+
+### Canonical v1 event matrix
+
+| Event/template key | Default relationship recipients | Class |
+|---|---|---|
+| `work_period.submission_due` | Affected worker | `ACTION_REQUIRED` |
+| `work_period.submission_overdue` | Affected worker plus scoped manager or escalation owner | `CONTROL_MANDATORY` |
+| `approval.action_required` | Current-stage approver(s) | `ACTION_REQUIRED` |
+| `approval.rejected_or_correction_required` | Requester plus affected worker where distinct | `ACTION_REQUIRED` |
+| `approval.completed` | Requester plus affected worker where distinct | `INFORMATIONAL` |
+| `approval.overdue_or_escalated` | Current approver(s) plus escalation target | `CONTROL_MANDATORY` |
+| `assignment.created_or_materially_changed` | Affected worker plus scoped resource/engagement manager where distinct | `ACTION_REQUIRED` |
+| `commercial.approval_required` | Current commercial approver(s) | `ACTION_REQUIRED` |
+| `commercial.risk_threshold_breached` | Engagement owner plus scoped commercial manager plus finance/billing owner | `CONTROL_MANDATORY` |
+| `invoice_batch.action_required` | Batch owner plus current finance approver(s) | `ACTION_REQUIRED` |
+| `invoice_batch.export_failed` | Batch owner plus finance/billing owner plus integration administrator | `OPERATIONAL_CRITICAL` |
+| `invoice_batch.exported_or_billed_confirmed` | Batch owner plus finance/billing owner | `INFORMATIONAL` |
+| `integration.delivery_failed_or_degraded` | Integration administrator plus operations owner | `OPERATIONAL_CRITICAL` |
+
+The canonical event key is also the canonical template key; the selected template version is stored with each notification. Recipient relationships are resolved from authoritative organization, assignment, engagement, approval, commercial, batch and operations records—not from client-supplied addresses or role labels.
+
+### Notification evidence
+
+Every notification stores:
+
+- Event key, source entity/version and triggering operation.
+- Organization/legal-entity and row/data-scope context.
+- Recipient identity, resolved relationship and recipient reason.
+- Template key/version, locale and approved variables.
+- Policy class and channel preference/mandatory decision.
+- Notification/channel/idempotency identity.
+- Attempt number, retry/backoff, provider, accepted/failed status, sanitized response and correlation ID.
+
+A retry cannot create duplicate in-app records or delivery evidence for the same notification/channel/idempotency identity. Users cannot redirect another user's protected notification, remove a mandatory recipient or override a mandatory class. Buyers may add events/recipients or require external channels, but a protected policy change cannot violate the minimum matrix. Client recipients remain out of scope until a client-portal requirement is approved.
+
+The generic approval engine emits the shared `approval.*` events for work, leave, assignment, commercial and invoice-batch approvals. Domain modules must not create competing approval event keys or duplicate notification records for the same approval transition.
+
+Templates and payloads cannot expose secrets, unrestricted personal data, cost rates or margin to unauthorized recipients.
 
 ## Identity
 
@@ -117,4 +152,4 @@ Adapters define timeout, retry, backoff and idempotency behavior. Retries cannot
 
 ## Health and operations
 
-Provider health reports mode, configuration readiness, mapping gaps, recent success/failure and last checked time without displaying secrets. Finance integration health reports unresolved control-total or confirmation failures without exposing restricted line values. Notification health reports template, preference, queue/retry and delivery failures using sanitized metadata. Buyers assign an operational owner and alert path before production activation.
+Provider health reports mode, configuration readiness, mapping gaps, recent success/failure and last checked time without displaying secrets. Finance integration health reports unresolved control-total or confirmation failures without exposing restricted line values. Notification health reports event/template, recipient relationship, policy class, preference decision, queue/retry and delivery failures using sanitized metadata. Buyers assign an operational owner and alert path before production activation.
