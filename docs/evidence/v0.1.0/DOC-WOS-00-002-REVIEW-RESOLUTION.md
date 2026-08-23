@@ -3,7 +3,7 @@
 **Workstream:** WOS-00  
 **Issue:** #2  
 **Pull request:** #1  
-**Status:** Nine independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
+**Status:** Ten independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
 
 ## 1. Reviewed heads and review IDs
 
@@ -18,6 +18,7 @@
 | 7 | `76f05c9da71d21b1f774afc91e13dad4323d6358` | `PRR_kwDOUAv8Lc8AAAABKh3paA` | Two P1 |
 | 8 | `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` | `PRR_kwDOUAv8Lc8AAAABKh6Tsg` | Two P1 |
 | 9 | `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` | `PRR_kwDOUAv8Lc8AAAABKh-0NA` | One P1, one P2 |
+| 10 | `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` | `PRR_kwDOUAv8Lc8AAAABKh_5pA` | Three P2 |
 
 ## 2. Resolution map by review round
 
@@ -91,6 +92,14 @@
 | Security/privacy and NFR quality baselines still made production OIDC optional | P1 | `SECURITY_PRIVACY_COMPLIANCE.md` and `NON_FUNCTIONAL_REQUIREMENTS.md` now require named accounts and configured OIDC for every production deployment. Missing, invalid or unavailable OIDC fails startup/readiness and authentication closed. WorkOS local credentials and shared/demo identities are restricted to approved non-production/demo profiles, must be disabled or absent in production and cannot become a production fallback. Production OIDC is marked mandatory in the environment schema and exact release evidence. |
 | Controller evidence still reported only the first review and pending Gate B | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` is now an explicitly current consolidated controller record. It links this detailed review authority, records nine independent rounds, records all historical P1/P2 findings as corrected, records Gate B as approved and leaves only the clean moved-head review and exact-head merge open. |
 
+### Round 10
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| Authoritative programme charter still described Gate B as pending | P2 | `PROGRAM_CHARTER.md` now records the product owner's 2026-08-23 Gate B approval, links `DOC-WOS-00-003`, and states that source import/WOS-01 remain blocked until the clean exact-head review and blueprint merge. The approval does not waive provenance, resolved-thread or exact-head controls. |
+| Current controller evidence said only Rounds 1–8 were represented in this resolution authority | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` now states that all ten review rounds are enumerated and resolved here, records the tenth-review findings, and leaves only the clean moved-head review and merge open. |
+| Architecture ADR summary said “move toward OIDC” | P2 | `ARCHITECTURE_OVERVIEW.md` now states the adopted ADR-007 decision: configured OIDC, named accounts and revocable sessions are required for every production deployment; WorkOS local/shared demo authentication is restricted to approved non-production/demo profiles with no production fallback. Module, deployment and test wording are aligned. |
+
 ## 3. Canonical notification policy added in Round 7
 
 Policy classes:
@@ -125,19 +134,21 @@ Every event has a canonical/template key, version, source entity/version and ope
 - Operational earned-management revenue is non-statutory and never grants billing authority.
 - Commercial lineage is source → eligibility event → approved-unbilled item → line/batch → accepted provider/CSV export.
 - Initial export is `Approved`-only; failures remain `Approved`; final states are retrieval/status only.
-- Production OIDC is mandatory and fail-closed in architecture, security/privacy and NFR quality baselines; WorkOS local/shared authentication is non-production/demo only.
+- Production OIDC is mandatory and fail-closed in charter, architecture, security/privacy and NFR quality baselines; WorkOS local/shared authentication is non-production/demo only.
+- Gate B is approved but source import and WOS-01 remain blocked until clean review and blueprint merge.
 - PR-013 owns complete notification delivery; PR-014 owns production identity/security evidence.
 
-## 5. Controller verification after Round 9
+## 5. Controller verification after Round 10
 
 | Check | Controller result | Limitation |
 |---|---|---|
-| Gate C prerequisite | PASS | Clean independent rerun required at final head |
+| Gate B state and continuing blockers | PASS | Clean independent rerun required at final head |
+| Gate C prerequisite | PASS | Runtime/product acceptance occurs in WOS-06 |
 | Approved-only initial finance delivery | PASS | Runtime evidence belongs to PR-012/013 |
 | Final-state retrieval/status-only semantics | PASS | Runtime idempotency evidence belongs to PR-012/013 |
-| Mandatory production OIDC across governing and quality documents | PASS | Production startup/readiness evidence belongs to PR-014 |
+| Mandatory production OIDC across governing, architecture and quality documents | PASS | Production startup/readiness evidence belongs to PR-014 |
 | No production local/shared authentication fallback | PASS | Security negative evidence belongs to PR-014 |
-| Current controller evidence/Gate B state | PASS | Clean final review/merge remain open |
+| Current controller evidence and ten-round history | PASS | Clean final review/merge remain open |
 | Four notification policy classes | PASS | Implementation evidence belongs to PR-013 |
 | Thirteen canonical event/template rows | PASS | Independent count/consistency rerun required |
 | Requirement/NFR counts | Pending independent rerun | Must confirm 126/81 at exact head |
