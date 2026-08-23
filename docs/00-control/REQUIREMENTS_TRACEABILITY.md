@@ -60,7 +60,7 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Work package | Requirement groups | Issue | PR | Accepted commit | Release | Status |
 |---|---|---|---|---|---|---|
-| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Nine review rounds corrected; Gate B approved; clean exact-head review pending |
+| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Ten review rounds corrected; Gate B approved; clean exact-head review pending |
 | WOS-01A | Source provenance/bootstrap | #3 | Planned PR-002 | Pending | v0.2.0 | Authorized after WOS-00 merge |
 | WOS-01B | Neutral branding/configuration | #3 | Planned PR-003 | Pending | v0.2.0 | Not started |
 | WOS-02 | Organization/setup | #4 | Planned PR-004 | Pending | v0.4.0 | Not started |
@@ -81,8 +81,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Evidence ID | Evidence | Status |
 |---|---|---|
-| DOC-WOS-00-001 | Current consolidated controller cross-document review | Complete/current in PR #1; nine rounds and Gate B state recorded |
-| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Nine review rounds completed/corrected; clean exact-head re-review pending |
+| DOC-WOS-00-001 | Current consolidated controller cross-document review | Complete/current in PR #1; ten rounds and Gate B state recorded |
+| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Ten review rounds completed/corrected; clean exact-head re-review pending |
 | DOC-WOS-00-003 | Product-owner Gate B decision | Approved 2026-08-23; exact final head binds after clean review |
 
 ### Review history represented by DOC-WOS-00-002
@@ -96,6 +96,7 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 7. `76f05c9da71d21b1f774afc91e13dad4323d6358` / review `PRR_kwDOUAv8Lc8AAAABKh3paA` — two P1: Gate C prerequisite and mandatory notification matrix.
 8. `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` / review `PRR_kwDOUAv8Lc8AAAABKh6Tsg` — two P1: Approved-only reporting/export semantics and mandatory production OIDC architecture wording.
 9. `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` / review `PRR_kwDOUAv8Lc8AAAABKh-0NA` — one P1 and one P2: mandatory production OIDC in quality baselines and stale controller evidence.
+10. `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` / review `PRR_kwDOUAv8Lc8AAAABKh_5pA` — three P2: authoritative Gate B state, complete ten-round evidence representation and mandatory production OIDC in the architecture ADR summary.
 
 All listed findings are corrected in the active branch. The next evidence must be a clean independent review of the exact moved head.
 
