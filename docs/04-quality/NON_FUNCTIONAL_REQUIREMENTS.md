@@ -20,11 +20,11 @@ Profiles guide test fixtures and deployment sizing; they are not licensing limit
 
 ### WOS-NFR-SEC-001 — Fail-closed production mode
 
-Production startup must fail when required database, session, identity or other mandatory secure configuration is missing or unsafe. Production must not silently fall back to browser-local or seeded demo data.
+Production startup and readiness must fail when required database, session, OIDC identity or other mandatory secure configuration is missing, invalid or unsafe. Unavailable required production OIDC must keep authentication and readiness fail-closed. Production must not silently fall back to WorkOS local authentication, browser-local storage, seeded/shared demo identities or demo data.
 
 ### WOS-NFR-SEC-002 — Authentication
 
-Production authentication must use named accounts and support OIDC. Local credentials, when enabled, must use modern password hashing, configurable password policy, secure reset handling and brute-force protection.
+Every production deployment must use named accounts and configured OIDC. WorkOS local credentials and shared/demo identities may be enabled only in approved non-production/demo profiles; they must be disabled or absent in production and cannot be activated as a production fallback. Where local credentials are permitted in a non-production/demo profile, they must use modern password hashing, configurable password policy, secure reset handling and brute-force protection.
 
 ### WOS-NFR-SEC-003 — Session protection
 
@@ -108,7 +108,7 @@ The product and standard deployment guidance must support a monthly availability
 
 ### WOS-NFR-REL-002 — Health distinction
 
-The application must distinguish liveness from readiness. A process may be live while unready due to database or migration state.
+The application must distinguish liveness from readiness. A process may be live while unready due to database, migration or required identity configuration state.
 
 ### WOS-NFR-REL-003 — Transaction integrity
 
@@ -252,7 +252,7 @@ A documented local/CI profile must run the application and PostgreSQL in product
 
 ### WOS-NFR-DPL-003 — Environment schema
 
-Environment configuration must be validated at startup and documented by purpose, sensitivity, required/optional status and allowed values.
+Environment configuration must be validated at startup and documented by purpose, sensitivity, required/optional status and allowed values. Production OIDC configuration must be marked mandatory.
 
 ### WOS-NFR-DPL-004 — Controlled migrations
 
