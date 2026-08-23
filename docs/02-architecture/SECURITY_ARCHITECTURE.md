@@ -20,8 +20,8 @@ Every protected action combines identity, active role, permission, organization/
 
 ## Identity and sessions
 
-- Production uses named accounts and OIDC where configured.
-- Local/shared demo identities are disabled or absent in production.
+- Every production deployment requires named accounts and configured OIDC. Missing, invalid or unavailable required OIDC configuration fails startup/readiness and authentication closed.
+- WorkOS local authentication and shared/demo identities are limited to approved non-production/demo profiles, are disabled or absent in production and cannot be activated as a production fallback.
 - Sessions are time limited, securely cookie/token managed and revocable in the target state.
 - Disabled/leaver identities lose new access immediately and active sessions are revoked according to policy.
 - Authentication and role-switch events are audited.
@@ -45,4 +45,4 @@ Security-relevant events include login failures, session/role changes, permissio
 
 ## Verification
 
-Each protected module includes positive and negative authorization tests, cross-organization scope tests, direct API tests and browser journeys. Security review and vulnerability disposition are release gates; buyer-specific penetration testing remains part of deployment acceptance.
+Each protected module includes positive and negative authorization tests, cross-organization scope tests, direct API tests and browser journeys. Production-mode tests prove that missing, invalid or unavailable required OIDC configuration fails closed and never enables local authentication. Security review and vulnerability disposition are release gates; buyer-specific penetration testing remains part of deployment acceptance.
