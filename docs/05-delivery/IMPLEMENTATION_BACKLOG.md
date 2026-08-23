@@ -7,12 +7,12 @@
 
 ## 1. Backlog control rules
 
-- Work packages are executed in dependency order unless the controller records a safe parallelization decision.
-- One work package may span more than one pull request only when the split reduces review or migration risk.
-- Schema, authentication, authorization and financial-engine changes are serialized unless an explicit non-overlap assessment exists.
-- A work package earns its programme weight only when code, tests, documentation, migration evidence and acceptance evidence are merged.
-- Codex task completion, commit count and lines changed are not progress measures.
-- No feature implementation begins until the governing blueprint PR is accepted.
+- Work packages run in dependency order unless the controller records a safe non-overlap decision.
+- Schema, identity, authorization, approval and commercial-engine changes are serialized by default.
+- Every package includes applicable schema, server, UI, authorization, audit, tests, migration, operations and documentation evidence.
+- Codex completion messages, commit count and changed-line count are not acceptance evidence.
+- No feature implementation or source import begins before WOS-00 Gate B approval and merge.
+- A package receives programme credit only after exact-head acceptance and merge.
 
 ## 2. Programme map
 
@@ -25,511 +25,248 @@
 | WOS-04 | 16% | v0.5.0 | Engagement models and flexible work capture |
 | WOS-05 | 8% | v0.5.0 | Policy engine, approvals, delegation and period locking |
 | WOS-06 | 20% | v0.7.0 | Rates, costs, budgets, revenue, margin and invoice readiness |
-| WOS-07 | 6% | v0.8.0 | Reporting, leakage controls, notifications and integration framework |
+| WOS-07 | 6% | v0.8.0 | Reporting, leakage controls, notifications and integrations |
 | WOS-08 | 8% | v0.9.0 | Enterprise security, observability, recovery and deployment |
 | WOS-09 | 4% | v1.0.0 | Production-like acceptance and buyer handover |
 
-### 2.1 NFR implementation ownership
+## 3. Cross-cutting implementation ownership
 
-| NFR family | Accountable planned PRs | Minimum evidence |
+### 3.1 CORE ownership
+
+| Requirement | Accountable planned PRs | Minimum evidence |
 |---|---|---|
-| SEC-001–014 | PR-003, PR-005, PR-006, PR-009, PR-010, PR-012, PR-013, PR-014, PR-016 | Threat boundaries, secure defaults, negative authorization, secret/dependency and security-review evidence |
-| PRV-001–006 | PR-004, PR-008, PR-010, PR-012, PR-013, PR-014, PR-016 | Data minimization, field-level scope, retention/anonymization and privacy export evidence |
-| REL-001–009 | PR-005, PR-006, PR-008, PR-009, PR-011, PR-012, PR-013, PR-015, PR-016 | Fail-closed, transaction/idempotency, recovery and exact-head reliability evidence |
-| PERF-001–008 | PR-006, PR-008, PR-011, PR-012, PR-013, PR-015, PR-016 | Pagination/query review, bounded jobs/exports and Standard-profile performance evidence |
-| DAT-001–008 | PR-004, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-016 | Ownership, temporal, precision, snapshot, constraint and control-total evidence |
-| MNT-001–008 | PR-002 through PR-016 | Bounded modules/files, typed contracts, documentation and maintainability evidence in every affected PR |
-| DPL-001–007 | PR-003, PR-005, PR-015, PR-016 | Portable container/environment, explicit migration and production deployment evidence |
-| OBS-001–006 | PR-005, PR-006, PR-009, PR-011, PR-012, PR-013, PR-015, PR-016 | Correlation, safe structured logs, job/integration/notification health and alert evidence |
-| UX-001–006 | PR-003, PR-004, PR-008, PR-009, PR-012, PR-013, PR-016 | Accessibility, responsive role journeys, terminology/locale and understandable errors |
-| CMP-001–004 | PR-003, PR-004, PR-006, PR-008, PR-013, PR-014, PR-016 | Supported browser/API/version compatibility and provider-neutral contracts |
-| RELSE-001–005 | PR-002 through PR-016 | Version, changelog, migration/rollback, immutable-artifact and release-evidence controls |
-
-### 2.2 CORE implementation ownership
-
-| CORE requirement | Accountable planned PRs | Minimum evidence |
-|---|---|---|
-| WOS-CORE-001, WOS-CORE-006–007 | PR-003 | Configuration-driven brand/terminology, production/demo separation and prohibited-term scans |
-| WOS-CORE-002 | PR-004 | Organization/legal-entity ownership, setup and cross-scope evidence |
+| WOS-CORE-001, 006–007 | PR-003 | Configurable branding/terminology, demo-production separation and forbidden-term evidence |
+| WOS-CORE-002 | PR-004 | Organization/legal-entity ownership, setup and cross-scope denial |
 | WOS-CORE-003 | PR-006 | Modular-monolith boundaries, versioned API and compatibility evidence |
-| WOS-CORE-004 | PR-004, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012 | Effective-date overlap, historical-version resolution, immutable-history and controlled-correction evidence across workforce, engagement, policy and commercial domains |
-| WOS-CORE-005 | PR-006, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-014 | Common mutation/audit contract and module-specific actor, active-role, source, entity, reason and material before/after evidence |
-| WOS-CORE-008 | PR-010, PR-011, PR-012, PR-013 | Decimal-safe rate/amount behavior, deterministic vectors, immutable snapshots/batches and report/control-total reconciliation |
+| WOS-CORE-004 | PR-004, 007–012 | Effective-date, historical-version and controlled-correction evidence across affected domains |
+| WOS-CORE-005 | PR-006 through PR-014 | Common mutation/audit contract and module-specific actor, role, source, entity, reason and before/after evidence |
+| WOS-CORE-008 | PR-010 through PR-013 | Decimal-safe deterministic calculations, immutable evidence and control-total reconciliation |
 
-## 3. Planned pull-request sequence
+### 3.2 NFR ownership
 
-### PR-001 — WOS-00 Governing blueprint
+| Family | Accountable planned PRs | Minimum evidence |
+|---|---|---|
+| SEC-001–014 | PR-003, 005, 006, 009, 010, 012, 013, 014, 016 | Threat boundaries, secure defaults, negative authorization and scan evidence |
+| PRV-001–006 | PR-004, 008, 010, 012, 013, 014, 016 | Data minimization, sensitive-field scope, retention/anonymization and export evidence |
+| REL-001–009 | PR-005, 006, 008, 009, 011, 012, 013, 015, 016 | Fail-closed, transaction/idempotency, recovery and exact-head reliability evidence |
+| PERF-001–008 | PR-006, 008, 011, 012, 013, 015, 016 | Query/index review, bounded jobs/exports and Standard-profile evidence |
+| DAT-001–008 | PR-004, 007–013, 016 | Ownership, temporal integrity, precision, constraints, snapshots, lineage and reconciliation |
+| MNT-001–008 | PR-002 through PR-016 | Bounded modules/files, typed contracts, documentation and maintainability evidence |
+| DPL-001–007 | PR-003, 005, 015, 016 | Portable container/environment, migration and deployment evidence |
+| OBS-001–006 | PR-005, 006, 009, 011, 012, 013, 015, 016 | Correlation, safe logs, job/integration/notification health and alerts |
+| UX-001–006 | PR-003, 004, 008, 009, 012, 013, 016 | Accessibility, responsive role journeys, terminology/locale and errors |
+| CMP-001–004 | PR-003, 004, 006, 008, 013, 014, 016 | Browser/API/version compatibility and provider-neutral contracts |
+| RELSE-001–005 | PR-002 through PR-016 | Version, changelog, migration/rollback, artifact and release evidence |
+
+## 4. Planned pull-request sequence
+
+### PR-001 — WOS-00 governing blueprint
 
 **Branch:** `controller/wos-00-blueprint`  
-**Outcome:** Establish the authoritative charter, requirements, architecture, quality gates, provenance, execution playbook, backlog, risk and traceability system.
+**Outcome:** Establish the authoritative product, architecture, quality, provenance, delivery, risk and traceability system.
 
-**Includes:**
+**Acceptance:** Complete required document inventory; unique/mapped requirements and NFRs; eight valid ADRs; no source import or sensitive content; all blocking independent-review findings resolved; product-owner Gate B recorded before merge.
 
-- Root `AGENTS.md`.
-- Programme charter.
-- Product requirements.
-- Architecture overview and initial ADRs.
-- Non-functional requirements.
-- Backlog, controller process, risk register, status and traceability templates.
-- README and repository-governance baseline.
-
-**Acceptance:**
-
-- Documents use consistent requirement/work-package IDs.
-- No product implementation or reference source import.
-- Codex performs an independent consistency review.
-- Controller resolves material review findings.
-- Owner Gate B approval is recorded before product implementation.
-
-### PR-002 — WOS-01 Authorized source bootstrap
+### PR-002 — WOS-01 authorized source bootstrap
 
 **Branch:** `codex/wos-01-authorized-source-bootstrap`  
-**Outcome:** Import a clean source snapshot from the pinned reference commit and restore its build/test baseline in WorkOS without importing Git history.
-
-**Includes:**
-
-- Copy approved application source from `f2de1d85126f5d64f0e2e21b085b0303ca1d8417`.
-- Exclude `.git`, leadership/demo presentations, screenshots, generated presentations and company-only artifacts.
-- Add `PROVENANCE.md`, import manifest and checksum/evidence.
-- Rename package/service internals only where necessary to build safely.
-- Establish a forbidden-file/secret scan.
+**Outcome:** Import only approved source files from `f2de1d85126f5d64f0e2e21b085b0303ca1d8417` without Git history.
 
 **Requirements:** WOS-CORE-007, WOS-GOV-005, WOS-OPS-007, WOS-OPS-009.
 
-**Mandatory evidence:**
+**Scope/evidence:** Verified source SHA; explicit include/exclude manifest and checksums; no presentations/screenshots/company-only artifacts; forbidden-file/secret scan; locked install, type/lint, build and inherited regressions; no write to the reference repository.
 
-- Exact source commit verified.
-- Imported-file allow/exclude manifest.
-- `npm ci`, type/lint, build and existing regression suite results.
-- No write or pull request against the pinned reference repository.
+**Merge boundary:** PR-002 cannot merge while prohibited company-specific runtime branding/data remains. Cleanup occurs in PR-002, or PR-003 remains stacked and only the combined clean state may merge.
 
-**Merge boundary:** PR-002 may not merge to `main` while prohibited company-specific runtime branding, data or operational references remain. The imported runtime must be neutralized inside PR-002, or PR-003 must remain stacked on PR-002 and only the combined clean, configuration-driven state may merge.
-
-### PR-003 — WOS-01 Neutral branding and product configuration foundation
+### PR-003 — WOS-01 neutral branding and configuration foundation
 
 **Branch:** `codex/wos-01-neutral-branding-config`  
-**Outcome:** Remove runtime company-specific identity and make product/organization branding centrally configurable.
+**Outcome:** Centralize product/organization branding and eliminate runtime company-specific dependencies.
 
-**Includes:**
+**Requirements:** WOS-CORE-001, 006–007; WOS-ORG-001, 005–006; WOS-OPS-009.
 
-- Product configuration service/provider.
-- Product name, organization name, logos, favicon, accent tokens, support contact and email/report display configuration.
-- Neutral WorkOS seed and notification copy.
-- Replace old asset names, cookie prefixes, password prefixes and service names.
-- Forbidden-term CI guard.
-- Demo/production copy separation.
+**Scope/evidence:** Product configuration service; neutral assets, seeds and notifications; configurable name/logo/favicon/colours/support identity; safe cookie/service/password prefixes; demo-production separation; repository and built-artifact forbidden-term scans; login/navigation/notification browser evidence.
 
-**Requirements:** WOS-CORE-001, WOS-CORE-006, WOS-CORE-007, WOS-ORG-001, WOS-ORG-005, WOS-ORG-006, WOS-OPS-009.
-
-**Mandatory evidence:**
-
-- Repository and built-artifact scan for prohibited terms.
-- Browser evidence for login, navigation and notification branding.
-- Production build contains no company logo/domain.
-
-### PR-004 — WOS-02 Organization and setup foundation
+### PR-004 — WOS-02 organization and setup foundation
 
 **Branch:** `codex/wos-02-organization-setup`  
-**Outcome:** Introduce organization/legal-entity ownership, configurable hierarchy/catalogs and guided setup status.
+**Outcome:** Add organization/legal-entity ownership, configurable structures, calendars, periods and guided setup.
 
-**Includes:**
+**Requirements:** WOS-CORE-002, 004; WOS-ORG-001–010; WOS-IAM-005; WOS-WKF-001–002, 006.
 
-- Organization and legal-entity schema.
-- Business units, cost centres, practices, locations and configurable regions.
-- Default-organization migration for imported data.
-- Organization-scoped identifiers and access context.
-- Working calendar and period configuration foundations.
-- Guided setup/readiness page and API.
-- Worker-master ownership fields, configurable worker types and dependency-aware worker lifecycle controls.
+**Scope/evidence:** Organization/legal entity/business structures; default-organization migration; scoped identifiers; calendars/periods; worker master/type/lifecycle; server-derived setup readiness; fresh/upgrade migrations; cross-scope negatives; effective-history and worker-dependency journeys.
 
-**Requirements:** WOS-ORG-001 through WOS-ORG-010, WOS-CORE-002, WOS-CORE-004, WOS-IAM-005, WOS-WKF-001, WOS-WKF-002, WOS-WKF-006.
-
-**Mandatory evidence:**
-
-- Fresh install and upgrade from PR-003.
-- Existing records assigned to a default organization without loss.
-- Out-of-scope organization attempts denied.
-- Guided setup states are server derived.
-- Imported workers retain identity and relationships; worker-type and lifecycle dependency tests cover active assignments, approvals, work and ownership.
-- Effective-dated organization, worker and calendar history resolves to the correct prior version after later changes.
-
-### PR-005 — WOS-03 CI/CD, migration harness and production profiles
+### PR-005 — WOS-03 CI/CD, migrations and production profiles
 
 **Branch:** `codex/wos-03-ci-migration-platform`  
-**Outcome:** Establish repeatable engineering and release gates before deeper product expansion.
+**Outcome:** Establish reproducible engineering and deployment gates.
 
-**Includes:**
+**Requirements:** WOS-OPS-001–009 and applicable DPL/RELSE NFRs.
 
-- GitHub Actions for locked install, type/lint, build, tests, migration tests, secret scan and dependency scan.
-- Production Dockerfile and local production-like Compose profile.
-- Environment schema validation.
-- Explicit migration command and migration ledger checks.
-- Liveness/readiness and build metadata.
+**Scope/evidence:** GitHub Actions; locked install, type/lint, build, tests, migration, secret/dependency scans; production Dockerfile/Compose; environment validation; explicit migration command/ledger; health/build metadata; fresh/upgrade and fail-closed production startup evidence.
 
-**Requirements:** WOS-OPS-001 through WOS-OPS-009; applicable WOS-NFR-DPL and WOS-NFR-RELSE requirements.
-
-**Mandatory evidence:**
-
-- Green clean-run CI.
-- Fresh database install and upgrade from previous head.
-- Production mode fails closed on unsafe config.
-- Container health verification.
-
-### PR-006 — WOS-03 Modular extraction and versioned API foundation
+### PR-006 — WOS-03 modular and API foundation
 
 **Branch:** `codex/wos-03-modular-api-foundation`  
 **Outcome:** Create enforceable module/API seams without a big-bang rewrite.
 
-**Includes:**
+**Requirements:** WOS-CORE-003, 005; WOS-GOV-001–004; MNT NFRs.
 
-- Module directories and shared domain/application conventions.
-- Extract identity/access, organization/configuration and audit/platform seams from large shared files.
-- `/api/v1` foundation and error contract.
-- Request correlation and operation IDs.
-- Common production-mutation/audit contract.
-- Compatibility adapters for unchanged UI flows.
+**Scope/evidence:** Domain/application module conventions; identity/organization/audit seams; `/api/v1` and stable errors; correlation/operation IDs; common mutation/audit contract; compatibility adapters; API/authorization regression evidence and bounded central-file growth.
 
-**Requirements:** WOS-CORE-003, WOS-CORE-005, WOS-GOV-001 through WOS-GOV-004, WOS-NFR-MNT-001 through WOS-NFR-MNT-008.
-
-**Mandatory evidence:**
-
-- Existing high-risk user journeys remain green.
-- API contract tests for v1 foundation.
-- No authorization regression.
-- Measurable reduction or bounded-growth rule for central files.
-- Common mutation evidence captures actor, active role, source, entity, action, reason and material before/after values without sensitive-data leakage.
-
-### PR-007 — WOS-04 Contracts, engagement models and project hierarchy
+### PR-007 — WOS-04 contracts and engagement models
 
 **Branch:** `codex/wos-04-engagement-models`  
-**Outcome:** Expand the domain from company-specific projects to reusable client, contract, engagement and workstream models.
+**Outcome:** Model reusable client, contract, engagement and project/workstream structures.
 
-**Includes:**
+**Requirements:** WOS-CORE-004–005; WOS-CLI-001–002; WOS-CTR-001–003; WOS-ENG-001–005.
 
-- Client hierarchy and billing entities.
-- Contracts/SOWs and purchase-order foundation.
-- Engagement types: T&M, fixed fee, milestone, retainer, managed service, internal and pre-sales.
-- Project/workstream relationship and lifecycle guardrails.
-- Migration of current clients/projects into default engagement records.
+**Scope/evidence:** Client hierarchy; contracts/SOWs; POs; T&M, fixed-fee, milestone, retainer, managed-service, internal and pre-sales engagements; project lifecycle; current-data migration; effective versions, dependency-safe closure, authorization and browser evidence.
 
-**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CLI-001, WOS-CLI-002, WOS-CTR-001 through WOS-CTR-003, WOS-ENG-001 through WOS-ENG-005.
-
-**Mandatory evidence:**
-
-- Fresh/upgrade migration tests.
-- Engagement-specific validation tests.
-- Dependency-safe closure tests.
-- Scoped browser journeys for admin, manager and operational roles.
-- Contract/engagement/project effective versions and all production mutations preserve historical and audit evidence.
-
-### PR-008 — WOS-04 Flexible work capture and assignment validation
+### PR-008 — WOS-04 flexible work capture and resource planning
 
 **Branch:** `codex/wos-04-flexible-work-capture`  
-**Outcome:** Support different buyer timesheet/worklog models while retaining governed utilization evidence.
+**Outcome:** Support configurable daily/weekly work evidence and reusable capacity/assignment planning.
 
-**Includes:**
+**Requirements:** WOS-CORE-004–005; WOS-TIM-001–012; WOS-RES-001–009; WOS-WKF-003–005, 007–008.
 
-- Configurable daily and weekly entry modes.
-- Work categories and billability policy.
-- Task/ticket/milestone reference fields and source identifiers.
-- Entry increments, limits, evidence/comment requirements and deadlines.
-- Assignment/contract/period validation.
-- Correction/reopen history and duplicate protection.
-- Compatibility migration for current timesheets.
-- Effective capacity profiles, skills/certifications, single-count leave/holiday availability, workforce self-service and scoped directory/hierarchy views.
+**Scope/evidence:** Work modes/categories/references; assignment/contract/period policy; increments/limits/deadlines/evidence; correction/reopen history; duplicate protection; capacity/skills; leave single-count availability; self-service and scoped hierarchy; migrations, API/browser and historical-integrity evidence.
 
-**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-TIM-001 through WOS-TIM-012, WOS-RES-001 through WOS-RES-009, WOS-WKF-003 through WOS-WKF-005, WOS-WKF-007, WOS-WKF-008.
-
-**Mandatory evidence:**
-
-- Positive and negative policy tests.
-- Work outside assignment/contract/period blocked or routed as configured.
-- Daily and weekly browser journeys.
-- Historical imported timesheets remain readable.
-- Capacity/skills/availability calculations, leave single-count rules, worker self-service and cross-scope workforce views have positive and negative API/browser evidence.
-- Assignment/capacity/work corrections create versioned history and complete mutation audit rather than rewriting accepted evidence.
-
-### PR-009 — WOS-05 Approval and policy engine
+### PR-009 — WOS-05 approval and policy engine
 
 **Branch:** `codex/wos-05-approval-policy-engine`  
-**Outcome:** Make approval routing, delegation, escalation and period locking configurable and reusable across domains.
+**Outcome:** Reusable routing, stages, delegation, SLA/escalation and period locking.
 
-**Includes:**
+**Requirements:** WOS-CORE-004–005; WOS-APR-001–008; WOS-ORG-009.
 
-- Approval-policy/routing schema.
-- Single- and multi-stage approvals.
-- Delegation scope restrictions.
-- SLA, reminders and escalation records.
-- Period lock/reopen controls.
-- Bulk decision safety.
-- Integration with timesheets, leave and assignment changes.
+**Scope/evidence:** Approval state machine; effective-dated policy; multi-stage routing; delegation; escalation/reminders; bulk decisions; period locks/reopen; integration with work/leave/assignment/commercial/batch approvals; canonical shared `approval.*` notification events; negative scope/idempotency/browser evidence.
 
-**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-APR-001 through WOS-APR-008, WOS-ORG-009.
-
-**Mandatory evidence:**
-
-- Approval state-machine tests.
-- Delegation cannot broaden data scope.
-- Locked periods reject all write paths including imports.
-- Multi-role browser and API evidence.
-- Effective-dated policies resolve historically and every decision, delegation, escalation, reassignment and reopen transition is traceably audited.
-
-### PR-010 — WOS-06 Rate cards, cost rates and commercial terms
+### PR-010 — WOS-06 rates, costs and commercial terms
 
 **Branch:** `codex/wos-06-rates-costs-terms`  
-**Outcome:** Introduce secure, effective-dated commercial master data and deterministic rate resolution.
+**Outcome:** Secure, effective-dated commercial master data and deterministic rate resolution.
 
-**Includes:**
+**Requirements:** WOS-CORE-004–005, 008; WOS-COM-001–005, 014–015.
 
-- Billing rate cards and precedence rules.
-- Confidential cost rates and overhead components.
-- Currency precision and exchange-rate input foundation.
-- Effective-date overlap controls.
-- Rate-resolution service and evidence.
-- Commercial change audit and approval hooks.
+**Scope/evidence:** Billing rate cards and precedence; confidential cost rates/overhead; currency/FX/rounding; budgets/POs; effective overlap controls; resolution evidence; commercial approval/audit; historical stability and confidentiality negatives.
 
-**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CORE-008, WOS-COM-001 through WOS-COM-005, WOS-COM-014, WOS-COM-015.
-
-**Mandatory evidence:**
-
-- Rate precedence/effective-date test vectors.
-- Cost visibility negative tests.
-- Decimal and rounding tests.
-- Historical rate resolution remains stable after later edits.
-- Commercial-term mutations retain authorized reason, approval reference and material before/after evidence.
-
-### PR-011 — WOS-06 Commercial calculation and project margin engine
+### PR-011 — WOS-06 commercial calculation and margin engine
 
 **Branch:** `codex/wos-06-commercial-engine`  
-**Outcome:** Calculate reconciled billable value, cost, margin and explicitly configured operational earned-management revenue across supported engagement models.
+**Outcome:** Calculate billable value, cost, margin, EAC and explicitly configured non-statutory operational earned-management metrics.
 
-**Includes:**
+**Requirements:** WOS-CORE-004–005, 008; WOS-COM-006–013.
 
-- Calculation engine/version.
-- T&M billable value.
-- Fixed-fee effort/cost consumption.
-- Milestone eligibility/value.
-- Retainer consumption/overage.
-- Managed-service quantity foundation.
-- Revenue/cost/margin snapshots.
-- Effective-dated operational earned-management policy profiles that fail closed for non-T&M models until an authorized policy is selected; billing eligibility remains independent.
-- Budget versus actual and estimate at completion.
-- PO consumption and thresholds.
+**Scope/evidence:** T&M, fixed-fee, milestone, retainer and managed-service calculations; versioned snapshots; fail-closed non-T&M policy selection; budgets/POs/EAC; deterministic golden vectors; currency/rounding; reconciliation; immutability and controlled recalculation.
 
-**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CORE-008, WOS-COM-006 through WOS-COM-013.
+**Gate boundary:** PR-011 establishes calculation/margin engineering readiness only. It cannot satisfy Gate C.
 
-**Mandatory evidence:**
-
-- Golden financial test vectors for every engagement type, including policy-disabled and each enabled earned-management profile.
-- Evidence that operational earned-management metrics are non-statutory and cannot run for non-T&M models without an authorized effective-dated policy.
-- Reconciliation to source work/terms/rates.
-- Currency and rounding edge cases.
-- Snapshot immutability and controlled recalculation evidence.
-- Calculation/recalculation/finalization jobs preserve operation ID, source versions, actor or system identity and audit evidence.
-
-**Gate boundary:** PR-011 establishes calculation and project-margin engineering readiness only. It cannot satisfy product-owner Gate C without the source-specific billing-eligibility, approved-unbilled, invoice-ready lifecycle and export evidence delivered and independently accepted in PR-012.
-
-### PR-012 — WOS-06 Invoice readiness
+### PR-012 — WOS-06 invoice readiness
 
 **Branch:** `codex/wos-06-invoice-readiness`  
-**Outcome:** Convert source-specific approved or contractually due commercial evidence into versioned billing-eligibility events, one-to-one approved-unbilled register items and controlled invoice-ready batches without becoming a statutory invoicing system.
+**Outcome:** Convert source-specific eligible evidence into versioned billing events, one-to-one approved-unbilled items and controlled batches/exports.
 
-**Includes:**
+**Requirements:** WOS-CORE-004–005, 008; WOS-INV-001–008.
 
-- Source-specific eligibility evaluation for approved T&M snapshots, accepted milestones, approved/due fixed-fee schedule versions, approved retainer base/period/overage events, approved managed-service period/unit events and approved adjustments.
-- Versioned billing-eligibility-event aggregate retaining source type/version, organization/legal entity, approval or contractual-due evidence, eligible date, currency, amount, calculation/policy evidence, reversal/supersession and batch state.
-- One-to-one versioned approved-unbilled-item register; the register item is the only batchable object.
-- Invoice-ready batch and line model in which every line references exactly one approved-unbilled-item version and through it exactly one eligibility-event/source version.
-- Direct raw-source/snapshot-to-line rejection at domain, API, import and compatibility boundaries.
-- Adjustments, discounts, credits and write-offs through approved versioned source → event → register lineage.
-- Evidence links and source → event → register → line → batch control totals.
-- Canonical batch state machine: `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed`, `Cancelled`.
-- Open/final occupancy, pre-export cancellation and atomic occupancy release rules.
-- Approval integration.
-- Database constraints, locking and idempotency preventing repeated active/final inclusion.
-- Versioned reversal/supersession and correction paths.
-- Initial provider or CSV export only from an `Approved` batch.
-- Provider acceptance of the exact immutable versioned payload/control totals as one valid `Approved → Exported` path.
-- Atomic creation and recording of an immutable versioned CSV artifact—with operation/idempotency ID, artifact ID/version, checksum, schema, line count, control totals, timestamp, actor and lineage—as the other valid `Approved → Exported` path.
-- Idempotent final-state retrieval/redownload and status confirmation without duplicate delivery or re-transition.
+**Scope:**
 
-**Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CORE-008, WOS-INV-001 through WOS-INV-008.
+- T&M, milestone, fixed-fee, retainer, managed-service and adjustment eligibility.
+- Source → versioned billing-eligibility event → one-to-one approved-unbilled item → line/batch lineage.
+- Approved-unbilled item as the only batchable object; direct raw-source/snapshot bypass rejection.
+- Canonical `Draft`, `Under Review`, `Approved`, `Exported`, `Billed/Confirmed`, `Cancelled` states.
+- Open/final occupancy, pre-export cancellation and atomic release.
+- Initial provider/CSV delivery only from `Approved`.
+- Provider acceptance or atomic immutable CSV-artifact acceptance as the single `Approved → Exported` transition.
+- Failed delivery/generation remains `Approved`; idempotent retry returns the same accepted result.
+- Final-state retrieval/status only; no duplicate delivery or re-transition.
+- Versioned reversals/supersessions/correction batches and immutable accepted evidence.
 
-**Mandatory evidence:**
+**Mandatory evidence:** Fresh/upgrade migrations; direct-bypass negatives; event/register one-to-one and idempotency; concurrent no-double-billing; all state transitions and terminal rules; provider and CSV acceptance metadata/control totals; same-key/different-payload tests; cancellation/eligibility revalidation; locked periods; corrections; API/browser selection; source-to-export reconciliation and audit.
 
-- Fresh-install and supported-upgrade migration tests for event/register/line relationships and constraints.
-- Direct-bypass negative tests for raw work, snapshots, milestones, schedules, retainer/managed-service events and adjustments.
-- One source version to one current eligibility-event/register-item evidence, including idempotent retry behavior.
-- Register-to-batch reconciliation by source/event/register version, organization/legal entity, approval/eligibility evidence, currency, eligible date and amount.
-- Active/final inclusion uniqueness under concurrent requests across every eligible source type.
-- Batch state and transition tests for `Draft → Under Review | Cancelled`, `Under Review → Draft | Approved | Cancelled`, `Approved → Exported | Cancelled`, and `Exported → Billed/Confirmed`.
-- Proof that `Cancelled` and `Billed/Confirmed` are terminal, `Exported` cannot be cancelled, and a failed provider or CSV export remains `Approved`.
-- Provider acceptance proof for the exact immutable payload/control totals.
-- CSV acceptance proof for the required immutable artifact metadata and atomic `Approved → Exported` transition.
-- Same-key retries return the same accepted provider/CSV result and cannot duplicate delivery, regenerate content or reapply the transition.
-- Different-payload reuse of an idempotency key is rejected.
-- Exported/Billed retrieval or status operations are idempotent and cannot initiate a new delivery.
-- Cancellation authorization/reason/audit, preserved membership history and atomic occupancy release tests.
-- Proof that a released register item is selectable again only while its eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible.
-- Locked-period enforcement.
-- Authorized reversal/supersession/correction paths that preserve prior exported/billed evidence and accepted artifacts and exclude stale/reversed items from new batches.
-- API and browser proof that only approved-unbilled items can be selected for a line.
-- Export traceability from accepted provider/CSV artifact through batch line, register/event and source to audit.
-- Finalized event/register/source versions, batch lines and accepted export artifacts remain immutable; every transition and adjustment is traceably audited.
+**Gate C:** Product-owner Gate C occurs only after PR-010, PR-011 and PR-012 are merged **and PR-012 engineering acceptance is independently proven at an exact head before Gate C**. Evidence covers terms, deterministic calculations, source-specific eligibility, approved-unbilled, complete provider/CSV batch lifecycle, corrections, authorization and reconciliation. Gate C is additional owner acceptance and never substitutes for PR-012 engineering evidence.
 
-**Gate C:** Product-owner Gate C occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Gate C evidence must cover effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch lifecycle, provider and CSV export lineage, reversals/corrections, authorization and control-total reconciliation. Gate C is an additional owner acceptance gate and never substitutes for PR-012 engineering evidence.
-
-### PR-013 — WOS-07 Reporting, leakage, notifications and integration adapters
+### PR-013 — WOS-07 reporting, leakage, notifications and adapters
 
 **Branch:** `codex/wos-07-reporting-leakage-integrations`  
-**Outcome:** Deliver buyer-facing operational/commercial insight, governed notifications and stable extension interfaces.
+**Outcome:** Deliver scoped insight, deterministic leakage controls, governed notifications and provider-neutral integrations.
 
-**Includes:**
+**Requirements:** WOS-CORE-005, 008; WOS-RPT-001–007; WOS-INT-001–006.
 
-- Operational, utilization and commercial report projections.
-- Revenue-leakage signal engine.
-- Data-quality expansion.
-- Report reconciliation/control totals.
-- Controlled exports.
-- In-app notification center and records.
-- Versioned notification templates and locale-aware rendering.
-- User/channel preferences and mandatory-control notification policy.
-- Email and collaboration provider adapters.
-- Scoped recipient resolution, delivery attempts/evidence, retries, idempotency and failure isolation.
-- Sanitized notification/integration health and operational visibility.
-- Worklog import and finance-export adapter contracts.
-- Finance provider initial delivery only from `Approved` batches; final-state retrieval/status is idempotent and cannot duplicate delivery.
-- Integration health and mapping/idempotency patterns.
+**Scope:**
 
-**Requirements:** WOS-CORE-005, WOS-CORE-008, WOS-RPT-001 through WOS-RPT-007, WOS-INT-001 through WOS-INT-006.
+- Operational, utilization and commercial reports, leakage signals, data quality and reconciliation.
+- Controlled report exports and worklog/finance adapter contracts.
+- In-app notification centre and provider-neutral email/collaboration adapters.
+- Versioned, locale-aware, channel-safe templates.
+- Four authoritative policy classes: `ACTION_REQUIRED`, `CONTROL_MANDATORY`, `INFORMATIONAL`, `OPERATIONAL_CRITICAL`.
+- Complete canonical WOS-INT-002 matrix of thirteen event/template keys and default relationship recipients:
+  - `work_period.submission_due`
+  - `work_period.submission_overdue`
+  - `approval.action_required`
+  - `approval.rejected_or_correction_required`
+  - `approval.completed`
+  - `approval.overdue_or_escalated`
+  - `assignment.created_or_materially_changed`
+  - `commercial.approval_required`
+  - `commercial.risk_threshold_breached`
+  - `invoice_batch.action_required`
+  - `invoice_batch.export_failed`
+  - `invoice_batch.exported_or_billed_confirmed`
+  - `integration.delivery_failed_or_degraded`
+- Server-resolved recipient relationships/reasons, preferences/mandatory decisions, event/template/source versions, delivery attempts, retries/backoff, idempotency, failure isolation, correlation and sanitized health.
+- Shared approval events supplied once by PR-009 for work, leave, assignment, commercial and batch approvals.
+- No client recipients in v1; protected extension cannot remove a default mandatory recipient or downgrade a mandatory class.
+- Finance initial delivery `Approved`-only; final-state retrieval/status idempotent and non-duplicating.
 
 **Mandatory evidence:**
 
-- Report totals reconcile to snapshots, eligibility events, approved-unbilled register items and batches.
-- Leakage scenarios have deterministic fixtures.
-- Out-of-scope report/export tests.
-- In-app notification positive and negative role journeys.
-- Template variable/schema, locale and channel-safety tests.
-- Preference and mandatory-recipient policy tests.
-- Recipient authorization/data-scope and redirection negative tests.
-- Email/collaboration mock adapter contract tests.
-- Notification retry/idempotency/no-duplicate-delivery evidence.
-- Provider failure does not roll back a valid core transaction and remains operationally visible.
-- Notification templates, logs, health and provider evidence do not expose secrets or unauthorized personal/cost/margin data.
-- Worklog and finance adapter mock contract tests.
-- Finance initial delivery rejects any batch state other than `Approved` and requires complete event/register lineage.
-- Final-state finance retrieval/status operations are idempotent and cannot initiate duplicate delivery.
-- Integration-health and mapping-gap evidence is sanitized and scoped.
-- Report/export/notification operations are audited with actor, scope, filters or recipient/template/channel identity, as-of/version and control totals where applicable.
+- Report/snapshot/event/register/batch/export control-total reconciliation and out-of-scope negatives.
+- Positive and negative deterministic tests for every canonical event, template version, trigger, recipient relationship and policy class.
+- Preference behavior for all four classes and mandatory override/no-opt-out evidence.
+- Visible failure when a mandatory event resolves no recipient.
+- Recipient scope/redirection negatives and no client recipient.
+- Shared approval-event reuse with no incompatible duplicate keys.
+- Event/in-app/channel idempotency and no-duplicate delivery across replay, scheduler and provider retry.
+- Safe provider failure without core-transaction rollback; retry/owner/health evidence.
+- Template variables, locale, sanitization and no secret/personal/cost/margin leakage.
+- Email/collaboration/worklog/finance mock adapter contracts and scoped operational health.
+- Audit evidence including event, template, source, recipient reason, class, channel decision, operation and correlation.
 
-### PR-014 — WOS-08 Identity, session and security hardening
+### PR-014 — WOS-08 identity, session and security hardening
 
 **Branch:** `codex/wos-08-security-identity`  
-**Outcome:** Establish enterprise-ready identity/session controls and close high-risk application-security gaps.
+**Outcome:** Enterprise identity/session controls and high-risk application-security closure.
 
-**Includes:**
+**Requirements:** WOS-CORE-005; WOS-IAM-001–010; applicable SEC NFRs.
 
-- OIDC/Entra production path and local-account restrictions.
-- Production OIDC fail-closed behavior with no WorkOS local-auth fallback.
-- Revocable sessions and account lifecycle enforcement.
-- Persistent/distributed login throttling design suitable for deployment profile.
-- CSRF/CORS/security-header posture.
-- Permission/access-review export.
-- Externally controlled named/audited IdP or infrastructure break-glass guidance that preserves WorkOS authorization and sessions.
-- Threat-model-driven fixes and security tests.
+**Scope/evidence:** OIDC/Entra production path; local accounts non-production/demo only; production OIDC fail-closed with no WorkOS local-auth fallback; externally governed named/audited IdP/infrastructure break-glass preserving WorkOS scope/session controls; revocable sessions; account lifecycle; throttling; CSRF/CORS/headers; access review; threat model, negative authorization, disabled-user/session and no-secret evidence.
 
-**Requirements:** WOS-CORE-005, WOS-IAM-001 through WOS-IAM-010 and applicable WOS-NFR-SEC requirements.
-
-**Mandatory evidence:**
-
-- Threat model.
-- Negative authorization suite.
-- Disabled user/session invalidation.
-- Production rejects local authentication and does not activate it when OIDC is unavailable.
-- Break-glass evidence proves named external identity, separate approval/audit and preserved WorkOS active-role, permission, data-scope and session controls.
-- Security headers and identity configuration evidence.
-- No secrets in build/logs.
-- Identity, session, role, permission and access-review mutations are traceably audited without exposing tokens or secrets.
-
-### PR-015 — WOS-08 Observability, recovery and release operations
+### PR-015 — WOS-08 observability, recovery and release operations
 
 **Branch:** `codex/wos-08-operations-hardening`  
-**Outcome:** Make WorkOS supportable and recoverable as a buyer-owned enterprise deployment.
+**Outcome:** Supportable and recoverable buyer-owned deployment.
 
-**Includes:**
+**Requirements:** WOS-OPS-004–010 and applicable reliability/performance/observability NFRs.
 
-- Structured logs, metrics and job/integration failure signals.
-- Backup and restore scripts/runbooks.
-- Restore rehearsal automation/evidence.
-- Alert/monitoring configuration guidance.
-- Release metadata, changelog and migration/rollback notes.
-- Performance test harness and Standard-profile baseline.
+**Scope/evidence:** Structured logs/metrics; job/integration/notification failure signals; backup/restore scripts and rehearsal; monitoring/alerts; release metadata and migration/rollback notes; Standard-profile performance; runbook consistency.
 
-**Requirements:** WOS-OPS-004 through WOS-OPS-010 and applicable reliability/performance/observability NFRs.
-
-**Mandatory evidence:**
-
-- Production-like restore rehearsal.
-- Health/monitoring evidence.
-- Standard-profile performance report.
-- Runbook consistency tests.
-
-### PR-016 — WOS-09 v1 release acceptance and buyer handover
+### PR-016 — WOS-09 v1 release acceptance and handover
 
 **Branch:** `controller/wos-09-v1-release-acceptance`  
-**Outcome:** Produce an independently reviewed, production-like, sellable WorkOS v1 release package.
-
-**Includes:**
-
-- Full requirements traceability.
-- Role/browser UAT across operational, commercial, finance and admin personas.
-- Fresh install and supported upgrade evidence.
-- Commercial reconciliation and invoice-readiness evidence.
-- Security review and finding disposition.
-- Backup/restore and monitoring evidence.
-- Buyer handover checklist and release notes.
-- Version/tag `v1.0.0` after owner approval.
+**Outcome:** Independently reviewed, production-like, sellable WorkOS v1 package.
 
 **Requirements:** All accepted v1 requirements.
 
-**Mandatory evidence:**
+**Scope/evidence:** Full traceability; multi-role UAT; fresh/upgrade; commercial/invoice/notification/identity reconciliation; security disposition; restore/monitoring; buyer handover; exact-head green matrix; no blockers; product-owner Gate D; version/tag `v1.0.0`.
 
-- Exact-head green acceptance matrix.
-- No unresolved release-blocking findings.
-- Owner Gate D approval.
+## 5. Codex model policy
 
-## 4. Codex model policy
+Use the strongest available Sol reasoning model for architecture, security, migrations and commercial calculations; an appropriate Sol model for bounded implementation/tests/docs; and a fresh independent Sol review pass before acceptance. Model choice never replaces evidence.
 
-Where Codex exposes model selection:
+## 6. Definition of ready
 
-- Use the strongest available **Sol** reasoning model for architecture, data migrations, authorization, security and financial calculation tasks.
-- Use an appropriate Sol model for bounded implementation, tests and documentation consistency work.
-- Do not reduce reasoning quality merely to shorten execution time for high-risk tasks.
-- Independent review must use a fresh review pass and must not rely only on the implementing task's self-assessment.
+A package is ready when requirements, dependencies, scope/exclusions, migration/rollback, acceptance evidence and owner decisions are known.
 
-Model selection does not replace bounded task specifications, automated tests or controller review.
+## 7. Definition of done
 
-## 5. Definition of ready for a work package
-
-A package is ready when:
-
-- Governing requirement IDs are identified.
-- Dependencies are merged and stable.
-- Scope and explicit exclusions are written.
-- Migration and rollback expectations are known.
-- Acceptance tests and evidence are defined.
-- No unresolved owner decision blocks correct behavior.
-
-## 6. Definition of done for a work package
-
-A package is done only when:
-
-- Code and schema are merged.
-- Required tests and CI are green at the exact head.
-- Positive and negative authorization evidence exists.
-- Fresh/upgrade migration evidence exists where applicable.
-- Browser evidence exists where applicable.
-- Audit, operations and rollback behavior are documented.
-- Requirements traceability and implementation status are updated.
-- The controller has reviewed the actual diff and evidence.
-- Any required owner gate is recorded.
+A package is done only when code/schema, applicable tests, authorization, migration, browser, audit, operations, rollback, documentation and traceability evidence are merged at the exact accepted head and any owner gate is recorded.
