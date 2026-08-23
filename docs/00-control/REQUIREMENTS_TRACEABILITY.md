@@ -27,7 +27,7 @@ A requirement cannot be marked accepted based only on a PR description or implem
 | WOS-CORE-005 | PR-006, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-014 | Common mutation/audit contract plus module-specific actor, active-role, source, entity, reason and before/after evidence for every production mutation | Blueprint |
 | WOS-CORE-008 | PR-010, PR-011, PR-012, PR-013 | Decimal-safe rate/amount rules, deterministic financial vectors, snapshot/event/register/batch immutability and report/control-total reconciliation | Blueprint |
 | WOS-ORG-001–010 | PR-004 | Fresh/upgrade migrations, organization-scope negative tests, guided-setup browser evidence | Not started |
-| WOS-IAM-001–010 | PR-003, PR-004, PR-006, PR-014 | Identity/session, permission matrix, row-scope and negative security evidence | Not started |
+| WOS-IAM-001–010 | PR-003, PR-004, PR-006, PR-014 | Identity/session, production OIDC fail-closed, no-local-fallback, permission matrix, row-scope and negative security evidence | Not started |
 | WOS-WKF-001–002, WOS-WKF-006 | PR-004 | Worker-master/type migration, relationship/lifecycle dependency tests and scoped administration journeys | Not started |
 | WOS-WKF-003–005, WOS-WKF-007–008 | PR-008 | Capacity, skills, single-count leave/holiday availability, self-service and scoped workforce browser/API evidence | Not started |
 | WOS-CLI-001–002 | PR-007 | Client hierarchy, scope and lifecycle tests | Not started |
@@ -37,9 +37,9 @@ A requirement cannot be marked accepted based only on a PR description or implem
 | WOS-TIM-001–012 | PR-008, PR-009 | Daily/weekly work capture, policy, correction, duplicate and locked-period tests | Not started |
 | WOS-APR-001–008 | PR-009 | Approval state machine, delegation scope, SLA, bulk decision and period-lock evidence | Not started |
 | WOS-COM-001–015 | PR-010, PR-011 | Golden financial vectors, confidentiality negative tests, snapshot/reconciliation evidence | Not started |
-| WOS-INV-001–008 | PR-012 | Source-family eligibility-event creation, one-to-one approved-unbilled register, raw-source/snapshot direct-bypass rejection, source/event/register version traceability, active/final batch uniqueness, reversal/supersession, batch state, export lineage and source → event → register → line → batch control-total reconciliation | Not started |
+| WOS-INV-001–008 | PR-012 | Source-family eligibility-event creation, one-to-one approved-unbilled register, raw-source/snapshot direct-bypass rejection, source/event/register version traceability, active/final batch uniqueness, provider/CSV export acceptance, immutable artifact/idempotency evidence, reversal/supersession, batch state and source → event → register → line → batch → export reconciliation | Not started |
 | WOS-RPT-001–007 | PR-013 | Scoped reports, leakage scenarios, data quality and snapshot/event/register/batch/export reconciliation | Not started |
-| WOS-INT-001–006 | PR-013, PR-014 | Adapter contracts, idempotency, failure isolation, finance-export lineage and integration-health evidence | Not started |
+| WOS-INT-001–006 | PR-013, PR-014 | In-app notifications; email/collaboration provider adapters; versioned templates/preferences; recipient authorization; delivery attempts/evidence; retry/idempotency/failure isolation; worklog and finance adapter contracts; finance-export lineage; integration health; and production identity-provider evidence | Not started |
 | WOS-GOV-001–005 | PR-002, PR-005, PR-006, PR-016 | Append-only audit, provenance, export and release traceability evidence | Not started |
 | WOS-OPS-001–010 | PR-003, PR-005, PR-015, PR-016 | Build/container, startup, migration, backup/restore, monitoring and handover evidence | Not started |
 | WOS-NFR-SEC-001–014 | PR-003, PR-005, PR-006, PR-009, PR-010, PR-012, PR-013, PR-014, PR-016 | Threat-boundary, authentication/authorization, secure-configuration, secret/dependency and negative-security evidence | Blueprint |
@@ -49,7 +49,7 @@ A requirement cannot be marked accepted based only on a PR description or implem
 | WOS-NFR-DAT-001–008 | PR-004, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-016 | Ownership, temporal integrity, precision, constraints, snapshots, billing-event/register lineage and reconciliation evidence | Blueprint |
 | WOS-NFR-MNT-001–008 | PR-002 through PR-016 | Module boundaries, typed contracts, complexity controls, documentation and maintainability evidence in every affected PR | Blueprint |
 | WOS-NFR-DPL-001–007 | PR-003, PR-005, PR-015, PR-016 | Container/environment portability, explicit migration and production deployment evidence | Blueprint |
-| WOS-NFR-OBS-001–006 | PR-005, PR-006, PR-009, PR-011, PR-012, PR-013, PR-015, PR-016 | Correlation, structured logging, job/integration health, audit-safe monitoring and alert evidence | Blueprint |
+| WOS-NFR-OBS-001–006 | PR-005, PR-006, PR-009, PR-011, PR-012, PR-013, PR-015, PR-016 | Correlation, structured logging, job/integration/notification health, audit-safe monitoring and alert evidence | Blueprint |
 | WOS-NFR-UX-001–006 | PR-003, PR-004, PR-008, PR-009, PR-012, PR-013, PR-016 | Accessibility, responsive role journeys, terminology/locale and understandable error evidence | Blueprint |
 | WOS-NFR-CMP-001–004 | PR-003, PR-004, PR-006, PR-008, PR-013, PR-014, PR-016 | Browser/API/version compatibility and provider-neutral integration evidence | Blueprint |
 | WOS-NFR-RELSE-001–005 | PR-002 through PR-016 | Version, changelog, migration/rollback, exact-artifact and release-evidence controls | Blueprint |
@@ -60,7 +60,7 @@ PR identifiers after PR #1 are planned sequence identifiers until the GitHub PR 
 
 | Work package | Requirement groups | GitHub issue | Pull request | Exact accepted commit | Release | Status |
 |---|---|---|---|---|---|---|
-| WOS-00 | Programme/architecture/NFR/control artifacts | #2 | PR #1 | Pending Gate B/merge | v0.1.0 | Final exact-head review pending |
+| WOS-00 | Programme/architecture/NFR/control artifacts | #2 | PR #1 | Pending Gate B/merge | v0.1.0 | Clean exact-head re-review pending |
 | WOS-01A | Source provenance/bootstrap | #3 | Planned PR-002 | Pending | v0.2.0 | Blocked by Gate B |
 | WOS-01B | Neutral branding/configuration | #3 | Planned PR-003 | Pending | v0.2.0 | Not started |
 | WOS-02 | Organization/setup | #4 | Planned PR-004 | Pending | v0.4.0 | Not started |
@@ -72,7 +72,7 @@ PR identifiers after PR #1 are planned sequence identifiers until the GitHub PR 
 | WOS-06A | Rates/costs/terms | #8 | Planned PR-010 | Pending | v0.7.0 | Not started |
 | WOS-06B | Commercial engine | #8 | Planned PR-011 | Pending | v0.7.0 | Not started |
 | WOS-06C | Source-specific billing eligibility, approved-unbilled register and invoice readiness | #8 | Planned PR-012 | Pending | v0.7.0 | Not started |
-| WOS-07 | Reports/leakage/adapters | #9 | Planned PR-013 | Pending | v0.8.0 | Not started |
+| WOS-07 | Reports, leakage, notifications and integration adapters | #9 | Planned PR-013 | Pending | v0.8.0 | Not started |
 | WOS-08A | Security/identity | #10 | Planned PR-014 | Pending | v0.9.0 | Not started |
 | WOS-08B | Operations/recovery/performance | #10 | Planned PR-015 | Pending | v0.9.0 | Not started |
 | WOS-09 | v1 acceptance/handover | #11 | Planned PR-016 | Pending | v1.0.0 | Not started |
@@ -82,7 +82,7 @@ PR identifiers after PR #1 are planned sequence identifiers until the GitHub PR 
 | Evidence ID | Evidence | Status |
 |---|---|---|
 | DOC-WOS-00-001 | Required-file inventory and controller cross-document review | Complete in PR #1 |
-| DOC-WOS-00-002 | Independent Codex/Sol reviews and review-resolution mapping | Four review rounds completed and corrected; clean exact-head re-review pending |
+| DOC-WOS-00-002 | Independent Codex/Sol reviews and review-resolution mapping | Six review rounds completed and corrected; clean exact-head re-review pending |
 | DOC-WOS-00-003 | Owner Gate B decision | Pending |
 
 ## 5. Evidence taxonomy
@@ -156,8 +156,18 @@ For PR-012, the evidence section must include identifiers for:
 - Direct raw-source/snapshot-to-line bypass rejection.
 - One-to-one event/register creation and idempotency.
 - Active/final batch uniqueness and concurrency.
+- Provider and CSV-artifact export acceptance, failed-operation behavior and final-state idempotent retrieval.
 - Versioned reversals/supersessions.
 - Source → event → register → line → batch/export control-total reconciliation.
+
+For PR-013, the evidence section must include identifiers for:
+
+- In-app notification creation and scoped recipient resolution.
+- Versioned template rendering and channel preferences.
+- Email/collaboration adapter contracts and sanitized provider evidence.
+- Retry/idempotency, failure isolation and no-duplicate delivery.
+- Notification authorization and sensitive-data negative tests.
+- Worklog and finance adapter contracts, including Approved-only initial finance delivery and final-state retrieval/status idempotency.
 
 ## 8. v1 acceptance summary
 
