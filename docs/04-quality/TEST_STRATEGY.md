@@ -66,6 +66,7 @@ The commercial engine maintains versioned deterministic fixtures for:
 - Decimal precision, currency/FX and rounding.
 - T&M caps and exclusions.
 - Fixed fee, milestone, retainer and managed-service calculations.
+- Fixed-fee operational earned-management calculations that fail closed without an authorized effective-dated policy, remain explicitly non-statutory and never grant billing eligibility or invoice readiness.
 - Budgets, POs and EAC.
 - Every operational earned-management policy profile and policy-disabled fail-closed behavior.
 - Source-specific billing eligibility for T&M, milestone, fixed-fee, retainer, managed-service and approved adjustments.
@@ -112,14 +113,14 @@ PR-013 and the release matrix must execute at least one positive and one negativ
 |---|---|---|
 | `work_period.submission_due` | Affected worker receives one in-app `ACTION_REQUIRED` record at the configured threshold | Preference cannot suppress in-app; another worker cannot be substituted |
 | `work_period.submission_overdue` | Worker plus scoped manager/escalation owner receive `CONTROL_MANDATORY` records after deadline/grace | Worker preference cannot remove either mandatory relationship recipient; out-of-scope manager denied |
-| `approval.action_required` | Current-stage approver(s) receive one shared approval event when the stage becomes pending | Stale/non-current/delegation-out-of-scope recipient denied; replay does not duplicate |
-| `approval.rejected_or_correction_required` | Requester and distinct affected worker receive the canonical event | Caller cannot redirect recipients or downgrade in-app delivery |
+| `approval.action_required` | Current-stage approver(s) receive one shared approval event when any valid generic stage becomes pending, including commercial and invoice-batch approvals | Stale/non-current/delegation-out-of-scope recipient denied; replay does not duplicate; domain-action key cannot also fire for the same pending-stage operation |
+| `approval.rejected_or_correction_required` | Requester and distinct affected worker receive the canonical generic-approval event | Caller cannot redirect recipients or downgrade in-app delivery; invoice-batch domain action cannot also fire for the same rejection/correction decision |
 | `approval.completed` | Requester and distinct affected worker receive `INFORMATIONAL` using channel preferences | Duplicate final-decision replay does not duplicate; unrelated user denied |
 | `approval.overdue_or_escalated` | Current approvers plus escalation target receive `CONTROL_MANDATORY` | Preferences cannot suppress mandatory recipients; duplicate scheduler run is idempotent |
 | `assignment.created_or_materially_changed` | Affected worker plus scoped resource/engagement manager receive one event | Non-material draft change or out-of-scope manager does not receive it |
-| `commercial.approval_required` | Current commercial approvers receive `ACTION_REQUIRED` | Operational project user without commercial relationship cannot be added |
+| `commercial.approval_required` | A policy-blocked commercial draft notifies the requester/change owner to create, complete or submit the generic approval request before any stage is pending | It is not sent to approvers and cannot fire once `approval.action_required` exists for the same source/version/operation |
 | `commercial.risk_threshold_breached` | Engagement owner, commercial manager and finance/billing owner receive `CONTROL_MANDATORY` | Preferences cannot suppress required recipients; threshold replay does not duplicate |
-| `invoice_batch.action_required` | Batch owner and current finance approvers receive `ACTION_REQUIRED` | Raw source owner or out-of-scope finance user cannot be injected |
+| `invoice_batch.action_required` | Batch owner/finance preparer receives `ACTION_REQUIRED` for pre-submission evidence, reconciliation, validation or export-preparation remediation while no generic approval stage is pending | It cannot fire for a pending approval stage or for a generic approval rejection/correction decision; raw source owner/out-of-scope finance user cannot be injected |
 | `invoice_batch.export_failed` | Batch owner, finance/billing owner and integration administrator receive `OPERATIONAL_CRITICAL` plus configured alert route | No opt-out; failure retry does not create duplicate accepted notification/channel evidence |
 | `invoice_batch.exported_or_billed_confirmed` | Batch owner and finance/billing owner receive one `INFORMATIONAL` event per accepted transition | Artifact redownload/status retry does not create another event |
 | `integration.delivery_failed_or_degraded` | Integration administrator and operations owner receive `OPERATIONAL_CRITICAL` plus alert route | No opt-out; provider-health retry cannot duplicate the same threshold event |
@@ -149,11 +150,14 @@ In addition to the row-by-row matrix, PR-013 and the release matrix must prove:
 8. Recipient resolution respects named identity, active role, organization/legal-entity and entity/relationship scope.
 9. An unauthorized user cannot redirect another user's notification, change protected recipients or inspect another recipient's delivery evidence.
 10. The generic approval engine emits the same `approval.*` keys for work, leave, assignment, commercial and invoice-batch approvals; domain modules cannot create incompatible duplicate keys.
-11. Event replay, scheduler retry and provider retry/backoff are idempotent and cannot duplicate domain-event, in-app or accepted channel-delivery evidence.
-12. Optional provider failure does not roll back the valid core transaction; failure state, next retry and operational owner remain visible.
-13. Templates, logs, provider responses and health surfaces do not expose secrets, unrestricted personal data, cost rates or margin.
-14. No v1 event resolves a client recipient because the client portal is deferred.
-15. Finance adapter initial delivery accepts only `Approved` batches with complete event/register lineage; final-state operations are retrieval/status-only and idempotent.
+11. A source entity/version and triggering operation can create at most one action-required notification. When a generic approval stage is pending, only `approval.action_required` is emitted; `commercial.approval_required` and `invoice_batch.action_required` are rejected for that same transition.
+12. `commercial.approval_required` is proved only before generic approval submission and resolves requester/change-owner recipients, never current approvers.
+13. `invoice_batch.action_required` is proved only for non-approval batch-owner remediation and never for a pending generic approval stage or an approval rejection/correction decision.
+14. Event replay, scheduler retry and provider retry/backoff are idempotent and cannot duplicate domain-event, in-app or accepted channel-delivery evidence.
+15. Optional provider failure does not roll back the valid core transaction; failure state, next retry and operational owner remain visible.
+16. Templates, logs, provider responses and health surfaces do not expose secrets, unrestricted personal data, cost rates or margin.
+17. No v1 event resolves a client recipient because the client portal is deferred.
+18. Finance adapter initial delivery accepts only `Approved` batches with complete event/register lineage; final-state operations are retrieval/status-only and idempotent.
 
 ## Mandatory production identity vectors
 
@@ -186,7 +190,7 @@ At minimum before v1:
 
 ## Test data
 
-Use synthetic organization, worker, client and commercial data. Fixtures intentionally include multiple legal entities, currencies, worker types, engagement models, overlapping effective dates, reversals/supersessions, cancelled/failed-export/exported/billed batches, immutable CSV artifacts, already-batched register items, all four notification policy classes, all thirteen canonical notification events, preference combinations, provider delivery failures and out-of-scope relationships.
+Use synthetic organization, worker, client and commercial data. Fixtures intentionally include multiple legal entities, currencies, worker types, engagement models, overlapping effective dates, reversals/supersessions, cancelled/failed-export/exported/billed batches, immutable CSV artifacts, already-batched register items, all four notification policy classes, all thirteen canonical notification events, mutually exclusive pre-submission versus pending-approval transitions, preference combinations, provider delivery failures and out-of-scope relationships.
 
 ## PR and release expectations
 
