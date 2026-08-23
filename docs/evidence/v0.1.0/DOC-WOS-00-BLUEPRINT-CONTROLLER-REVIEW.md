@@ -5,7 +5,7 @@
 **Pull request:** #1  
 **Branch:** `controller/wos-00-blueprint`  
 **Evidence posture:** Current consolidated controller record; review history is detailed in `DOC-WOS-00-002-REVIEW-RESOLUTION.md`  
-**Status:** Controller review complete; nine independent Codex/Sol review rounds completed and all historical P1/P2 findings corrected; product-owner Gate B approved; clean final exact-head re-review and merge pending
+**Status:** Controller review complete; ten independent Codex/Sol review rounds completed and all historical P1/P2 findings corrected; product-owner Gate B approved; clean final exact-head re-review and merge pending
 
 ## Outcome reviewed
 
@@ -53,13 +53,24 @@ Application source, reference Git history, credentials, real company/customer da
 14. Required independently proven PR-012 engineering acceptance before Gate C.
 15. Aligned reporting/analytics with Approved-only initial export and final-state retrieval/status-only behavior.
 16. Required OIDC unconditionally across production architecture, security/privacy and NFR quality baselines.
+17. Recorded approved Gate B consistently in the authoritative programme charter without waiving clean-review or merge controls.
+18. Replaced transitional ADR-007 summary wording with the adopted mandatory production OIDC and revocable-session decision.
+19. Aligned this current controller record with all ten review rounds represented by `DOC-WOS-00-002`.
 
 ## Independent review history and disposition
 
-Nine independent review rounds have occurred. Rounds 1–8 and their findings are enumerated in `DOC-WOS-00-002-REVIEW-RESOLUTION.md`. The ninth review at exact head `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` identified:
+Ten independent review rounds have occurred. All ten rounds and their findings are enumerated and resolved in `DOC-WOS-00-002-REVIEW-RESOLUTION.md`.
+
+The ninth review at exact head `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` identified:
 
 - **P1:** `SECURITY_PRIVACY_COMPLIANCE.md` and `NON_FUNCTIONAL_REQUIREMENTS.md` retained wording that made production OIDC optional. Corrected by requiring configured OIDC/named accounts for every production deployment, fail-closed behavior for missing/invalid/unavailable OIDC, and non-production/demo-only local/shared identities.
 - **P2:** This controller record was stale and incorrectly reported only the first review and pending Gate B. Corrected by making this a current consolidated controller record, linking the detailed review-resolution authority, recording nine review rounds and recording Gate B as approved.
+
+The tenth review at exact head `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` identified three P2 consistency defects:
+
+- The programme charter still described Gate B as pending. Corrected by recording the 2026-08-23 approval and preserving the clean-review/merge blockers.
+- This controller record said only Rounds 1–8 were enumerated in `DOC-WOS-00-002`. Corrected to state that all ten rounds are represented there.
+- The architecture ADR summary said “move toward OIDC.” Corrected to state the adopted requirement for configured OIDC and named, revocable sessions in every production deployment, with local/shared demo authentication restricted to non-production/demo profiles.
 
 A fresh independent review of the moved exact GitHub head is mandatory before merge.
 
@@ -69,7 +80,7 @@ A fresh independent review of the moved exact GitHub head is mandatory before me
 
 ## Open gates
 
-- Fresh clean independent Codex/Sol review against the exact final GitHub head after ninth-review corrections.
+- Fresh clean independent Codex/Sol review against the exact final GitHub head after tenth-review corrections.
 - Resolution of any new blocking review finding.
 - Exact-head squash merge and `v0.1.0` release baseline.
 
