@@ -5,7 +5,7 @@
 **Pull request:** #1  
 **Branch:** `controller/wos-00-blueprint`  
 **Evidence posture:** Current consolidated controller record; review history is detailed in `DOC-WOS-00-002-REVIEW-RESOLUTION.md`  
-**Status:** Controller review complete; eleven independent Codex/Sol review rounds completed and all historical P1/P2 findings corrected; product-owner Gate B approved; clean final exact-head re-review and merge pending
+**Status:** Controller review complete; thirteen independent Codex/Sol review rounds completed and all historical P1/P2 findings corrected; product-owner Gate B approved; clean final exact-head re-review and merge pending
 
 ## Outcome reviewed
 
@@ -24,7 +24,8 @@ Application source, reference Git history, credentials, real company/customer da
 | Workstream and issue mapping | PASS | Issues #2 through #11 are mapped; future PR numbers are marked planned |
 | Gate sequencing | PASS | Gate B is approved but does not waive clean-review controls; Gate C follows merged PR-010/011/012 and independently proven PR-012 engineering acceptance; Gate D governs v1 release |
 | Commercial terminology and policy | PASS | Fixed-fee control uses only non-statutory operational earned-management revenue under an authorized effective-dated policy, fails closed without it and remains independent from billing eligibility |
-| Commercial lineage | PASS | Source → eligibility event → approved-unbilled item → invoice-ready line/batch → accepted provider/CSV export; raw-source bypass is prohibited |
+| Commercial lineage | PASS | Source → eligibility event → approved-unbilled item → database-unique current occupancy → invoice-ready line/batch → accepted provider/CSV export; raw-source and split-line bypasses are prohibited |
+| PR-012 occupancy evidence ownership | PASS | Same-batch, cross-batch and concurrent duplication; idempotency conflicts; route bypasses; cancellation/re-batching; permanent final occupancy and versioned corrections are mandatory in test strategy, backlog and traceability |
 | Export-state consistency | PASS | Initial delivery is `Approved`-only; `Exported`/`Billed/Confirmed` are idempotent retrieval/status-only states |
 | Production identity consistency | PASS | Every production deployment requires configured OIDC/named accounts; missing, invalid or unavailable OIDC fails closed; local/shared demo authentication is non-production/demo only |
 | Notification scope and exclusivity | PASS | Four policy classes and thirteen canonical event/template/default-recipient rows are owned by PR-013; pending generic approvals use only `approval.action_required`, while domain action keys are mutually exclusive pre-stage/remediation events |
@@ -56,13 +57,14 @@ Application source, reference Git history, credentials, real company/customer da
 16. Required OIDC unconditionally across production architecture, security/privacy and NFR quality baselines.
 17. Recorded approved Gate B consistently in the authoritative programme charter without waiving clean-review or merge controls.
 18. Replaced transitional ADR-007 summary and decision-log wording with the adopted mandatory production OIDC and revocable-session decision.
-19. Aligned this current controller record with all eleven review rounds represented by `DOC-WOS-00-002`.
+19. Aligned this current controller record with all thirteen review rounds represented by `DOC-WOS-00-002`.
 20. Removed “recognized/earned value” wording from fixed-fee control and required policy-gated non-statutory operational earned-management behavior.
 21. Defined mutually exclusive notification-trigger boundaries so one pending approval transition cannot create both a generic and domain-specific action-required event.
+22. Made database-unique current line occupancy and the complete Round-12 positive/negative vector matrix mandatory PR-012 engineering evidence.
 
 ## Independent review history and disposition
 
-Eleven independent review rounds have occurred. All eleven rounds and their findings are enumerated and resolved in `DOC-WOS-00-002-REVIEW-RESOLUTION.md`.
+Thirteen independent review rounds have occurred. All thirteen rounds and their findings are enumerated and resolved in `DOC-WOS-00-002-REVIEW-RESOLUTION.md`.
 
 The ninth review at exact head `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` identified:
 
@@ -81,6 +83,13 @@ The eleventh review at exact head `cd45de9181858d722e2974e92d6aaa53ba04ec17` ide
 - **P1:** Commercial and invoice-batch action events overlapped `approval.action_required`. Corrected by making the generic pending-stage event exclusive, defining `commercial.approval_required` as a pre-submission requester/change-owner event, defining `invoice_batch.action_required` as non-approval batch-owner remediation, and requiring one action-required event per source/version/operation across requirements, architecture, approval spec, tests, backlog and issue #9.
 - **P2:** WOS-DEC-018 retained transitional OIDC wording. Corrected to record mandatory configured production OIDC/named accounts/revocable sessions and fail-closed/no-local-fallback behavior.
 
+The twelfth review at exact head `a023ebef80fad7aea354f3759801a430de18cb6e` identified one P1: unique current line occupancy did not cover same-batch or concurrent duplicates. Corrected with a database-enforced current-occupancy invariant. The GitHub review/timeline identifier `PRR_kwDOUAv8Lc8AAAABKiJB1g` and actionable thread `PRRT_kwDOUAv8Lc6bdgWF` identify the same finding.
+
+The thirteenth review at exact head `86484cde78f1350a4a0a3f55f368f2e919353663`, review `PRR_kwDOUAv8Lc8AAAABKiIDxA`, identified one P1 and one P2:
+
+- **P1:** PR-012 acceptance omitted explicit Round-12 vectors. Corrected across test strategy, backlog and traceability.
+- **P2:** Review evidence stopped at Round 11. Corrected across the detailed and consolidated evidence, implementation status and traceability.
+
 A fresh independent review of the moved exact GitHub head is mandatory before merge.
 
 ## Gate B record
@@ -89,7 +98,7 @@ A fresh independent review of the moved exact GitHub head is mandatory before me
 
 ## Open gates
 
-- Fresh clean independent Codex/Sol review against the exact final GitHub head after eleventh-review corrections.
+- Fresh clean independent Codex/Sol review against the exact final GitHub head after Round-13 corrections.
 - Resolution of any new blocking review finding.
 - Exact-head squash merge and `v0.1.0` release baseline.
 
