@@ -33,7 +33,9 @@ erDiagram
     ENGAGEMENT ||--o{ BILLING_ELIGIBILITY_EVENT : schedules
     APPROVED_ADJUSTMENT ||--|| BILLING_ELIGIBILITY_EVENT : authorizes
     BILLING_ELIGIBILITY_EVENT ||--o| APPROVED_UNBILLED_ITEM : registers
-    APPROVED_UNBILLED_ITEM ||--o{ INVOICE_READY_LINE : supplies
+    APPROVED_UNBILLED_ITEM ||--o{ INVOICE_READY_LINE : has_history
+    APPROVED_UNBILLED_ITEM ||--o| CURRENT_LINE_OCCUPANCY : holds
+    INVOICE_READY_LINE ||--o| CURRENT_LINE_OCCUPANCY : is_current
     INVOICE_READY_BATCH ||--o{ INVOICE_READY_LINE : contains
 ```
 
@@ -50,7 +52,7 @@ erDiagram
 - Rate card, cost rate and budget.
 - Calculation snapshot.
 - Versioned billing-eligibility event and approved-unbilled register.
-- Invoice-ready batch.
+- Invoice-ready batch and current line-occupancy control.
 - Audit and integration operation records.
 
 ## Identity and ownership
@@ -76,11 +78,19 @@ Supported event sources are:
 - A managed-service accepted-unit or approved fixed-period charge event.
 - An approved commercial adjustment.
 
-Each approved-unbilled item references exactly one eligibility-event version. Every invoice-ready line traces through that register item to the same event version. An event version cannot be included in more than one active or finalized invoice-ready batch; corrections use explicit reversal or superseding event versions rather than rewriting prior evidence. Operational earned-management snapshots remain separate and never create billing eligibility by themselves.
+Each approved-unbilled item references exactly one eligibility-event version. Every invoice-ready line traces through that register item to the same event version.
+
+WorkOS v1 does not split one approved-unbilled-item version across multiple invoice-ready lines. At most one current occupying line/membership may exist for an approved-unbilled-item ID/version, whether a duplicate attempt targets the same batch, another batch or a concurrent request. A database-enforced `CURRENT_LINE_OCCUPANCY` record, uniquely keyed by approved-unbilled-item ID/version, points to the current invoice-ready line and batch; the invariant is not inferred only from parent batch state.
+
+Historical line/membership versions remain immutable. A valid pre-export cancellation releases the current occupancy atomically while preserving the cancelled line and membership history. The item may be re-batched through a new line/membership version only when its eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible. `Exported` and `Billed/Confirmed` occupancy is permanent. Corrections use explicit reversal or superseding event/item versions and new correction lines/batches rather than rewriting or reusing prior evidence.
+
+An identical same-key retry returns the existing current line/membership result. A different idempotency key, changed payload or concurrent duplicate for the same item version receives a stable conflict. Partial billing or presentation splitting cannot bypass the invariant; separately billable portions must originate upstream as distinct authorized/versioned eligibility events and approved-unbilled items with reconciled control totals.
+
+Operational earned-management snapshots remain separate and never create billing eligibility by themselves.
 
 ## Historical truth
 
-Approved work history, approval decisions, calculation snapshots, billing-eligibility events, approved-unbilled records and finalized batch lines are not rewritten by later master-data changes. Corrections produce new versions, reversals or superseding evidence.
+Approved work history, approval decisions, calculation snapshots, billing-eligibility events, approved-unbilled records, invoice-ready line/membership history, occupancy changes and finalized batch lines are not rewritten by later master-data changes. Corrections produce new versions, reversals or superseding evidence.
 
 ## Lifecycle guardrails
 
@@ -92,5 +102,6 @@ Closing or retiring a worker, client, contract, engagement or project checks dep
 - Approval is separate from commercial valuation.
 - Commercial valuation is separate from billing eligibility.
 - Billing eligibility is separate from approved-unbilled registration and invoice-ready batching.
+- Current invoice-ready occupancy is database-enforced separately from immutable line/membership history.
 - Invoice readiness is separate from statutory invoicing/ledger posting.
 - Cost-rate confidentiality is separate from ordinary project visibility.
