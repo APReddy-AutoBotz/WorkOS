@@ -1,242 +1,206 @@
 # WorkOS Commercial Productization Programme Charter
 
-**Document status:** Programme initiation approved on 2026-08-22; governing blueprint acceptance pending Gate B  
+**Document status:** Programme-initiation baseline; full blueprint acceptance pending Gate B  
 **Programme code:** WOS  
 **Product working name:** WorkOS  
 **Repository:** `APReddy-AutoBotz/WorkOS`  
 **Reference source baseline:** `APReddy-AutoBotz/Boundaryless-WorkOS@f2de1d85126f5d64f0e2e21b085b0303ca1d8417`  
 **Programme owner:** AP  
-**Implementation controller:** ChatGPT operating through governed GitHub and Codex workflows  
+**Implementation controller:** ChatGPT through governed GitHub and Codex workflows  
 **Initial target:** WorkOS v1.0 buyer-owned enterprise release
 
 ## 1. Purpose
 
 The programme converts an authorized company-oriented workforce application into a commercially reusable, buyer-owned professional-services operations platform.
 
-The work is not a visual rename and is not a greenfield rewrite. It will preserve proven capabilities from the authorized baseline while removing company-specific assumptions, introducing configuration-driven organization and terminology controls, supporting multiple engagement and work-capture models, adding commercial and profitability controls, and packaging the system for repeatable enterprise deployment and handover.
+The work is not a visual rename and is not a greenfield rewrite. It preserves proven capabilities while removing company-specific assumptions, introducing configuration-driven organization and terminology, supporting multiple engagement/work-capture models, adding commercial/margin controls, and packaging repeatable enterprise deployment and handover.
 
 ## 2. Product mission
 
-WorkOS will give project-based service organizations one controlled operational layer for:
+WorkOS provides one controlled operational layer for:
 
 - People, capacity and availability.
 - Clients, contracts, engagements and projects.
 - Assignments, work evidence and timesheets.
-- Approvals, policy enforcement and audit.
+- Approvals, notifications, policy and audit.
 - Utilization and resource planning.
 - Rates, costs, budgets, revenue and gross margin.
-- Invoice-ready work and revenue-leakage control.
-- Reporting, governance and buyer-owned deployment.
+- Billing eligibility, approved-unbilled work and invoice readiness.
+- Reporting, leakage control, integrations and buyer-owned operations.
 
 ## 3. Target customer profile
 
-WorkOS v1 is designed primarily for organizations with approximately 25 to 500 project-based workers, including:
+WorkOS v1 primarily targets organizations with approximately 25–500 project-based workers, including IT/software services, AI/automation consultancies, engineering/design firms, agencies, management/specialist consulting, managed/knowledge services, CRO/clinical/regulatory services and internal transformation groups.
 
-- IT and software-services companies.
-- AI, automation and transformation consultancies.
-- Engineering and design service providers.
-- Digital, creative and marketing agencies.
-- Management and specialist consulting firms.
-- Managed-service and knowledge-service providers.
-- CRO, clinical, regulatory and related professional-service organizations.
-- Internal shared-service or transformation groups that manage multiple demand owners.
-
-The primary buying conditions are:
+Typical buying conditions:
 
 - Multiple clients or internal demand owners.
-- Hourly, fixed-fee, retainer, milestone or managed-service work.
-- Spreadsheet-led or disconnected capacity, timesheet and project-financial controls.
-- A preference for a buyer-owned application, database and source code rather than dependence on a shared SaaS tenancy.
+- T&M, fixed-fee, retainer, milestone or managed-service work.
+- Spreadsheet-led/disconnected capacity, timesheet and project-financial control.
+- Preference for buyer-owned application, database, configuration and source rather than shared SaaS dependence.
 
-## 4. Product positioning
+## 4. Positioning
 
-> WorkOS is a buyer-owned professional-services operations platform that connects workforce capacity, client engagements, work capture, approvals, utilization, revenue and project margin.
+> WorkOS is a buyer-owned professional-services operations platform connecting workforce capacity, client engagements, work capture, approvals, utilization, revenue and project margin.
 
-WorkOS must not be positioned as:
-
-- A generic employee tracker.
-- A payroll or full HRMS replacement.
-- A full ERP or general ledger.
-- A broad CRM.
-- A task-management or Kanban product.
-- An AI-first assistant without deterministic operational controls.
+It is not positioned as a generic employee tracker, payroll/full HRMS, full ERP/general ledger, broad CRM, task-management product or AI-first system without deterministic controls.
 
 ## 5. Programme outcomes
 
 ### 5.1 Commercial foundation
 
-- A clean private repository and product history.
-- No company-specific branding, confidential artifacts or runtime terminology.
-- Centralized product, organization and terminology configuration.
-- Clear product licensing, provenance and third-party notices.
-- Repeatable setup and buyer onboarding.
+- Clean private repository and independent product history.
+- No company-specific runtime branding, data or confidential artifacts.
+- Central product/organization/terminology configuration.
+- Clear provenance, third-party notices and reusable setup.
 
 ### 5.2 Flexible operating model
 
-- Configurable organization and management hierarchy.
-- Multiple engagement and commercial models.
-- Flexible work-capture and timesheet policies.
-- Role- and policy-based approval routing.
-- Buyer-configurable calendars, periods, currencies and terminology.
+- Configurable organization and hierarchy.
+- Multiple engagement/commercial models.
+- Flexible work-capture/timesheet policies.
+- Role/policy-based approvals and governed notifications.
+- Configurable calendars, periods, currencies and terminology.
 
 ### 5.3 Revenue and margin control
 
-- Effective-dated billing and cost rates.
-- Budgets, purchase orders and commercial limits.
-- T&M, fixed-fee, milestone and retainer calculations.
-- Approved-unbilled and invoice-ready work registers.
-- Project revenue, cost, margin and estimate-at-completion reporting.
-- Revenue-leakage and commercial-risk signals.
+- Effective-dated billing/cost rates.
+- Budgets, POs and commercial limits.
+- T&M, fixed-fee, milestone, retainer and managed-service calculations.
+- Source-specific billing eligibility and approved-unbilled register.
+- Invoice-ready batches, provider/CSV export evidence and leakage signals.
+- Revenue, cost, margin and estimate-at-completion reporting.
 
 ### 5.4 Enterprise delivery
 
 - Organization-ready data boundaries.
-- Strong authorization and audit controls.
+- Strong authorization, production identity and audit.
 - Versioned migrations and reproducible deployment.
-- CI/CD, testing, security scans and release evidence.
-- Backup, restore, monitoring and operational handover.
-- One isolated deployment and database per buyer for v1.
+- CI/CD, tests, security scans and release evidence.
+- Backup, restore, monitoring, notifications and operational handover.
+- One isolated application/database per buyer for v1.
 
-## 6. Programme principles
+## 6. Principles
 
-1. **Reuse proven capability, redesign assumptions.** Reuse stable code and tests where suitable, but do not preserve company-specific domain constraints merely because they already exist.
-2. **Configuration before customization.** A buyer should change branding, terminology, calendars, policies and catalogs without editing feature code.
-3. **Deterministic core, optional intelligence.** Permissions, calculations, approvals, period locks and audit remain server-authoritative. AI is optional and assistive.
-4. **Modular monolith before microservices.** Improve module boundaries without creating unnecessary distributed-system complexity.
-5. **Buyer-owned by default.** Each buyer receives an isolated deployment, database and configuration.
-6. **Evidence-based completion.** A capability is complete only when code, tests, documentation, migration evidence and acceptance evidence agree.
-7. **Security and audit by construction.** Authorization and traceability are part of each feature, not post-release additions.
-8. **No silent historical recalculation.** Commercial terms and effective-dated rates preserve historical truth.
-9. **Minimal owner dependency.** Governing specifications provide defaults so routine implementation proceeds without repeated owner questions.
-10. **Controlled scope.** Product-adjacent features that do not materially strengthen the v1 buying case remain deferred.
+1. **Reuse proven capability, redesign assumptions.**
+2. **Configuration before customization.**
+3. **Deterministic core, optional intelligence.**
+4. **Modular monolith before microservices.**
+5. **Buyer-owned by default.**
+6. **Evidence-based completion.**
+7. **Security, notification scope and audit by construction.**
+8. **No silent historical recalculation.**
+9. **Minimal owner dependency for routine implementation.**
+10. **Controlled scope focused on the v1 buying case.**
 
-## 7. Scope boundaries
+## 7. Scope
 
 ### 7.1 WorkOS v1 in scope
 
 - Organization, legal entity, business unit, location and cost-centre configuration.
 - Branding and terminology configuration.
-- Employee/resource records and identity linkage.
-- Clients, contracts, statements of work, engagements and projects.
-- Assignments and resource planning.
-- Worklogs, weekly/daily timesheets and configurable work categories.
+- Workforce records, capacity, availability, skills and identity linkage.
+- Clients, contracts/SOWs, POs, engagements and projects.
+- Assignments, demand and resource planning.
+- Daily/weekly work capture and configurable categories/policies.
 - Leave-adjusted capacity and availability.
-- Approval routing, delegation, escalation and period locking.
-- T&M, fixed-fee, milestone, retainer, managed-service and internal engagement models.
-- Rate cards, cost rates, budgets, purchase orders and margin controls.
-- Invoice-ready work registers and export/integration interfaces.
-- Operational, utilization, commercial and governance reporting.
-- OIDC/Entra-ready identity, notifications and integration adapters.
-- Audit, data quality, import/export and operational runbooks.
-- Dockerized and cloud-deployable buyer-owned packaging.
+- Approval routing, delegation, escalation, canonical notifications and period locking.
+- T&M, fixed-fee, milestone, retainer, managed-service and internal engagements.
+- Rate cards, cost rates, budgets, POs and margin controls.
+- Billing-eligibility events, approved-unbilled register, invoice-ready batches and provider/CSV exports.
+- Operational, utilization, commercial, notification and governance reporting.
+- OIDC/Entra-ready identity and provider-neutral notification/worklog/finance adapters.
+- Audit, data quality, imports/exports and operations runbooks.
+- Dockerized/cloud-deployable buyer-owned packaging.
 
-### 7.2 Explicitly deferred from v1
+### 7.2 Explicitly deferred
 
 - Shared multi-tenant SaaS operation.
-- Payroll and statutory payroll processing.
-- Full accounting, general ledger or tax engine.
-- Complete CRM and sales pipeline management.
+- Payroll/statutory payroll.
+- Statutory invoice generation, tax engine and general-ledger posting.
+- Complete CRM/sales pipeline.
 - Native mobile applications.
-- Full client portal.
+- Full client portal and client recipients.
 - Expense reimbursement.
 - Full SCIM provisioning.
-- Large marketplace of native third-party connectors.
-- Autonomous AI approval or financial decision-making.
-- Advanced generative-AI assistant beyond optional BYOK foundations.
+- Broad native connector marketplace.
+- Autonomous AI approval or financial decisions.
+- Advanced generative-AI assistant beyond optional foundations.
 
-Deferred capabilities may be prepared through extension points but must not delay v1.
+Deferred extension points must not delay v1.
 
 ## 8. Repository and IP boundary
 
-- The original `Boundaryless-WorkOS` repository remains unchanged.
-- WorkOS receives a clean authorized snapshot, not the original Git history.
-- The commercial repository must exclude company-only presentations, screenshots, credentials, domains, data and confidential operating material.
+- The reference repository remains unchanged.
+- WorkOS receives a clean authorized snapshot, not its Git history.
+- Company-only presentations, screenshots, credentials, domains, data and confidential operations are excluded.
 - `PROVENANCE.md` records the declared permission basis and exact technical baseline.
-- Proprietary WorkOS code, buyer-specific customizations and third-party/open-source components must be clearly distinguished.
-- Transaction-specific pricing, valuation and legal/commercial strategy must remain outside the deliverable product repository.
+- Product core, generic enhancements, buyer configuration/data, buyer-specific commissioned code and third-party components remain distinguishable.
+- Transaction-specific pricing, valuation, licensing, assignment and negotiation strategy remains outside the deliverable repository.
 
 ## 9. Delivery governance
 
 ### 9.1 Governing artifacts
 
-- `PRODUCT_REQUIREMENTS.md` is the authoritative product scope.
-- Architecture decisions are recorded as ADRs.
-- `IMPLEMENTATION_BACKLOG.md` controls work-package sequence and acceptance.
-- `IMPLEMENTATION_STATUS.md` records weighted progress against accepted capability.
-- `REQUIREMENTS_TRACEABILITY.md` links requirements to issues, pull requests, tests and evidence.
-- `RISK_REGISTER.md` records material programme risk and mitigation.
+- `PRODUCT_REQUIREMENTS.md` — authoritative product scope.
+- ADRs — architecture decisions.
+- `IMPLEMENTATION_BACKLOG.md` — work-package order and acceptance.
+- `IMPLEMENTATION_STATUS.md` — weighted accepted progress.
+- `REQUIREMENTS_TRACEABILITY.md` — requirements, PRs, tests and evidence.
+- `RISK_REGISTER.md` — material risk and controls.
 
 ### 9.2 Pull-request policy
 
 - No implementation directly on `main`.
-- One substantial outcome per branch and Draft PR.
-- Required code, schema, tests, documents and evidence travel together.
-- Exact-head review is required before merge.
-- Squash merge is the default.
-- Codex-generated work must be independently inspected; agent statements are not acceptance evidence.
+- One substantial outcome per branch/Draft PR.
+- Required code, schema, tests, docs and evidence travel together.
+- Exact-head review before merge.
+- Squash merge by default.
+- Codex work is independently inspected; agent statements are not acceptance evidence.
 
-### 9.3 Escalation policy
+### 9.3 Escalation
 
-The controller may decide routine technical implementation matters within approved requirements. Owner approval is required for:
-
-- Final commercial product name and trademark decision.
-- Material product-positioning change.
-- Scope growth greater than approximately 10 percent of the approved programme.
-- Destructive migration or irreversible data conversion.
-- A security risk that materially changes release suitability.
-- A commercial calculation policy that materially changes buyer financial results.
-- IP, exclusivity, licensing or sale terms.
-- Production credentials, customer data or deployment approval.
+Owner approval is required for final commercial name/trademark, material positioning change, >10% scope growth, destructive/irreversible data conversion, material security-release risk, buyer-result-changing financial policy, IP/licensing/sale terms and production credentials/customer data/deployment approval.
 
 ### 9.4 Controlled approval gates
 
-The owner's 2026-08-22 programme-initiation approval authorized the private repository strategy, controller operation and WOS-00 blueprint creation. It is contextual authority, not a product acceptance gate and does not authorize source import.
+The owner's 2026-08-22 programme-initiation approval authorized the private repository strategy, controller operation and WOS-00 blueprint creation. It is contextual authority, not product acceptance and does not authorize source import.
 
-- **Gate B — Blueprint acceptance:** required before importing the application source or starting WOS-01 implementation.
-- **Gate C — Commercial-engine acceptance:** required after deterministic revenue/margin/invoice-readiness evidence and before treating the commercial engine as accepted.
-- **Gate D — v1 release acceptance:** required before declaring/tagging the sellable WorkOS v1.0 release.
+- **Gate B — Blueprint acceptance:** required before importing application source or starting WOS-01.
+- **Gate C — Complete WOS-06 product-owner acceptance:** occurs only after PR-010, PR-011 and PR-012 are merged **and PR-012 engineering acceptance is independently proven at an exact head before the Gate C decision**. Evidence must cover effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch and provider/CSV export lifecycle, reversals/corrections, authorization and control-total reconciliation. PR-011 alone cannot satisfy Gate C. Gate C is additional owner acceptance and never substitutes for PR-012 engineering evidence.
+- **Gate D — v1 release acceptance:** required before declaring/tagging the sellable WorkOS v1.0 release and handover.
 
 ## 10. Weighted programme plan
 
 | Workstream | Outcome | Weight |
 |---|---|---:|
-| WOS-00 | Baseline, charter, requirements, architecture and control system | 8% |
-| WOS-01 | Clean commercial source baseline and neutral configuration-driven brand | 10% |
-| WOS-02 | Organization, legal entity, terminology and guided setup | 10% |
-| WOS-03 | Modular architecture, API boundaries, CI/CD and migration harness | 10% |
-| WOS-04 | Engagement models and flexible work capture | 16% |
-| WOS-05 | Policy engine, approvals, delegation and period locking | 8% |
-| WOS-06 | Rates, costs, budgets, revenue, margin and invoice readiness | 20% |
-| WOS-07 | Reporting, leakage controls and integration framework | 6% |
-| WOS-08 | Enterprise security, observability, backup and deployment hardening | 8% |
-| WOS-09 | Production-like UAT, release evidence and buyer handover | 4% |
+| WOS-00 | Blueprint and control system | 8% |
+| WOS-01 | Clean source and configurable brand | 10% |
+| WOS-02 | Organization/legal entity/setup | 10% |
+| WOS-03 | Modular platform, API, CI/migrations | 10% |
+| WOS-04 | Engagements and flexible work capture | 16% |
+| WOS-05 | Approvals, notifications and locks | 8% |
+| WOS-06 | Commercial and invoice readiness | 20% |
+| WOS-07 | Reporting, leakage, notifications and integrations | 6% |
+| WOS-08 | Security, observability, recovery and deployment | 8% |
+| WOS-09 | UAT, release evidence and handover | 4% |
 | **Total** |  | **100%** |
 
-Progress is earned only after the applicable acceptance gates are merged.
+Progress is earned only after applicable evidence/gates merge.
 
 ## 11. Release roadmap
 
 | Release | Exit meaning |
 |---|---|
-| v0.1.0 | Governing blueprint and controlled commercial repository baseline |
-| v0.2.0 | Neutral WorkOS runtime and configuration-driven branding |
-| v0.4.0 | Organization and platform foundation |
-| v0.5.0 | Flexible engagements, work capture and approval policies |
-| v0.7.0 | Commercial, revenue, margin and invoice-readiness engine |
-| v0.8.0 | Reporting, leakage controls and integration contracts |
-| v0.9.0 | Enterprise security/operations release candidate with production-like evidence |
-| v1.0.0 | Sellable buyer-owned product and handover package |
+| v0.1.0 | Accepted governing blueprint |
+| v0.2.0 | Neutral runtime/configurable branding |
+| v0.4.0 | Organization/platform foundation |
+| v0.5.0 | Engagements, work capture and policy |
+| v0.7.0 | Commercial and invoice-readiness engine |
+| v0.8.0 | Reporting, leakage, notifications and integrations |
+| v0.9.0 | Enterprise security/operations release candidate |
+| v1.0.0 | Sellable buyer-owned product/handover |
 
-## 12. Programme success criteria
+## 12. Success criteria
 
-WorkOS v1 is successful when:
-
-- A new buyer can deploy an isolated environment without changing feature code.
-- Branding, terminology, calendars, roles and policies are configurable.
-- Multiple engagement models produce reconciled work, revenue, cost and margin outcomes.
-- Organization and role boundaries prevent unauthorized cross-scope access.
-- Fresh installation, upgrade, backup and restore are demonstrably repeatable.
-- High-risk role journeys pass in production-like browser UAT.
-- The release contains complete provenance, security, operations and buyer-handover evidence.
-- No prohibited company-specific runtime references remain.
-- The product can be demonstrated and commercially evaluated without requiring the original repository.
+WorkOS v1 succeeds when a buyer can deploy without feature-code changes; configure brand, terminology, calendars, roles and policies; support all engagement models; produce reconciled work/revenue/cost/margin/invoice results; enforce scope and notification recipients; repeat installation/upgrade/restore; pass role UAT; provide provenance/security/operations/handover evidence; contain no prohibited runtime references; and operate independently from the reference repository.
