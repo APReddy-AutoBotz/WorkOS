@@ -6,11 +6,10 @@
 
 ## 1. Status rules
 
-- **Accepted progress** is earned only by merged code/documents and required evidence on `main`.
-- Work on an open branch or PR is reported as **active**, not accepted.
-- Percentages are weighted by workstream, not by file, issue, commit or lines changed.
-- A workstream receives its full weight only after its definition of done is satisfied.
-- Partial accepted credit may be recorded only for independently accepted sub-outcomes defined in the backlog.
+- Accepted progress is earned only by merged code/documents and required evidence on `main`.
+- Open branch/PR work is active, not accepted.
+- Percentages are weighted by workstream, not files, commits or lines.
+- A workstream earns weight only after its definition of done and exact-head gates pass.
 
 ## 2. Executive status
 
@@ -24,92 +23,93 @@ Quality and evidence:      0%
 Buyer handover readiness:  0%
 ```
 
-`main` still contains only the clean initial WorkOS baseline. The complete WOS-00 documentation pack is assembled in Draft PR #1 but earns no accepted progress until a clean final exact-head re-review, Gate B approval and merge.
+`main` still contains only the clean initial WorkOS baseline. WOS-00 is complete in Draft PR #1 from a construction perspective but earns no accepted progress until a clean final exact-head review, product-owner Gate B and merge.
 
 ## 3. Active work
 
 | Field | Current value |
 |---|---|
 | Workstream | WOS-00 — Governing blueprint |
-| GitHub issue | #2 |
+| Issue | #2 |
 | Branch | `controller/wos-00-blueprint` |
 | Pull request | Draft PR #1 |
 | Base | `main@d8995e809f714bbb4517a49715a4eab5c4306580` |
-| Exact head | Use live PR #1 metadata; the final reviewed SHA is recorded in the clean-review completion comment before Gate B/merge |
+| Exact head | Use live PR #1 metadata; final reviewed SHA is recorded before Gate B/merge |
 | State | Clean final independent exact-head re-review gate |
-| Current activity | Full blueprint assembled; six independent review rounds completed and all historical P1/P2 findings corrected |
+| Current activity | Seven independent review rounds completed; all historical P1/P2 findings corrected |
 | Application source | Not imported; WOS-01 remains blocked |
-| Acceptance blocker | Clean independent exact-head re-review and product-owner Gate B approval |
+| Acceptance blocker | Clean exact-head independent review and product-owner Gate B |
 
 ## 4. Workstream status
 
 | Workstream | Weight | State | Accepted weight | Notes |
 |---|---:|---|---:|---|
-| WOS-00 | 8% | Final re-review | 0% | Full blueprint and six review-resolution rounds in PR #1; acceptance pending |
+| WOS-00 | 8% | Final re-review | 0% | Seven review-resolution rounds complete in PR #1; acceptance pending |
 | WOS-01 | 10% | Not started | 0% | Issue #3; source bootstrap blocked by Gate B |
-| WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup foundation |
+| WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup |
 | WOS-03 | 10% | Not started | 0% | Issue #5; modular platform and CI/migrations |
-| WOS-04 | 16% | Not started | 0% | Issue #6; engagements and work capture |
+| WOS-04 | 16% | Not started | 0% | Issue #6; engagements/work capture |
 | WOS-05 | 8% | Not started | 0% | Issue #7; approval/policy engine |
-| WOS-06 | 20% | Not started | 0% | Issue #8; commercial and invoice-readiness engine |
+| WOS-06 | 20% | Not started | 0% | Issue #8; commercial/invoice readiness |
 | WOS-07 | 6% | Not started | 0% | Issue #9; reporting/leakage/notifications/integrations |
-| WOS-08 | 8% | Not started | 0% | Issue #10; security/operations hardening |
-| WOS-09 | 4% | Not started | 0% | Issue #11; release acceptance and handover |
+| WOS-08 | 8% | Not started | 0% | Issue #10; security/operations |
+| WOS-09 | 4% | Not started | 0% | Issue #11; release/handover |
 | **Total** | **100%** |  | **0%** |  |
 
 ## 5. Release status
 
-| Release | State | Exit criteria status |
+| Release | State | Exit criteria |
 |---|---|---|
 | v0.1.0 | Final re-review | Clean exact-head review and Gate B pending |
 | v0.2.0 | Not started | Clean source and neutral configurable brand |
 | v0.4.0 | Not started | Organization and platform foundation |
-| v0.5.0 | Not started | Flexible engagements, work capture and policy engine |
-| v0.7.0 | Not started | Commercial/revenue/margin and invoice-readiness engine |
-| v0.8.0 | Not started | Reporting, leakage, notifications and integration contracts |
+| v0.5.0 | Not started | Engagements, work capture and policy engine |
+| v0.7.0 | Not started | Commercial and invoice-readiness engine |
+| v0.8.0 | Not started | Reports, leakage, notifications and integrations |
 | v0.9.0 | Not started | Enterprise security/operations release candidate |
 | v1.0.0 | Not started | Sellable buyer-owned release |
 
-## 6. Current risks and decisions
-
-See `RISK_REGISTER.md` and `DECISION_LOG.md` for the authoritative records.
-
-Current high-priority controls:
+## 6. Active controls
 
 - Preserve the reference repository unchanged.
 - Import only the pinned authorized source commit after Gate B.
-- Do not merge an imported runtime to `main` while prohibited company-specific branding/data remains; neutralize it in PR-002 or merge only the combined clean stacked PR-003 state.
+- Do not merge company-branded imported runtime content; neutralize in PR-002 or merge only the combined clean PR-003 state.
 - Keep transaction-specific pricing, valuation, licensing, assignment and negotiation strategy outside the product repository.
-- Treat WorkOS as a temporary working name pending trademark/brand decision.
-- Use deterministic server-authoritative financial calculations.
-- Keep operational earned-management reporting independent from source-specific billing eligibility.
-- Treat a calculation snapshot as valuation evidence only.
-- Require every invoice-ready line to reference exactly one versioned approved-unbilled item and, through it, exactly one versioned source-specific billing-eligibility event.
-- Reject direct raw work/snapshot/milestone/schedule/retainer/managed-service/adjustment-to-line paths and preserve one-active/final-batch uniqueness with versioned reversals/supersessions.
-- Use canonical invoice-batch states and occupancy semantics from WOS-INV-006/008; failed provider/CSV export remains `Approved`, valid pre-export cancellation releases occupancy atomically, and exported/billed lineage is never reused.
-- Initial provider or CSV delivery is permitted only from `Approved`; accepted artifacts are immutable and final states support retrieval/status confirmation only.
-- Product-owner Gate C follows complete PR-010/011/012 engineering acceptance and cannot be satisfied by PR-011 alone.
-- PR-013 owns in-app, email and collaboration notifications with scoped recipient resolution, preferences, templates, idempotency, failure isolation and delivery evidence.
-- Production OIDC failure is fail-closed; WorkOS local authentication remains non-production/demo only and cannot be activated as a production fallback.
+- Treat WorkOS as a temporary configurable name.
+- Keep financial calculations deterministic and server authoritative.
+- Separate valuation, source-specific billing eligibility, approved-unbilled registration, batching and export.
+- Make the approved-unbilled item the only batchable object.
+- Use canonical batch states/occupancy; failed provider/CSV export remains `Approved`; final states are retrieval/status only.
+- Require PR-012 engineering acceptance independently proven at an exact head before product-owner Gate C. PR-011 alone cannot satisfy Gate C and Gate C cannot replace engineering evidence.
+- Implement PR-013 against four notification policy classes and thirteen canonical event/template/default-recipient rows.
+- Use shared canonical `approval.*` events across work, leave, assignment, commercial and batch approvals.
+- Enforce notification scope, mandatory recipients, preference rules, idempotency, safe failure and no v1 client recipients.
+- Production OIDC is fail-closed; WorkOS local authentication is non-production/demo only.
+- Leave/absence is availability-only and cannot become productive/billable work or reduce capacity twice.
 
-## 7. Review history and next controller actions
+## 7. Review history
 
-1. First independent Codex/Sol review at `492715dc8a40de6431365b6e52378d317721f617`: five P1 and two P2 findings.
-2. Second independent Codex/Sol review at `c2e3dbb74bc7c78a8f946222497850ac0c49ac78`: two P1 findings.
-3. Third independent Codex/Sol review at `1f36b49461b86516b5855dbf9930a75f234b58e1`: one P1 stale domain-model edge.
-4. Fourth independent Codex/Sol review at `9fc70babdf7c4d5c72f9d18a54f8c2318c903b3b`: one P1 authoritative/derived raw-source-to-line bypass ambiguity.
-5. Fifth independent Codex/Sol review at `649db270e8d43af152076e1f99e07c7204c575fc`: two P1 findings covering Gate C sequencing and authoritative invoice-batch state/occupancy semantics.
-6. Sixth independent Codex/Sol reviews at `7124709e4f6682ded0321c58d22a6851a5e32b9d`: four P1 and two P2 findings covering Gate C playbook wording, Approved-only export, CSV acceptance, notification ownership, production local-auth fallback and traceability history.
-7. All six review rounds are corrected in branch documents; evidence is recorded in `DOC-WOS-00-002-REVIEW-RESOLUTION.md`.
-8. Run one clean final independent Codex/Sol re-review against the exact moved head.
-9. Resolve any remaining blocking finding and recheck the exact head.
-10. Present the completed blueprint and unresolved external decisions for Gate B approval.
-11. Merge and tag v0.1.0 only after approval and accepted evidence.
-12. Start WOS-01 issue #3 only after the Gate B record exists.
+1. `492715dc8a40de6431365b6e52378d317721f617`: five P1, two P2.
+2. `c2e3dbb74bc7c78a8f946222497850ac0c49ac78`: two P1.
+3. `1f36b49461b86516b5855dbf9930a75f234b58e1`: one P1.
+4. `9fc70babdf7c4d5c72f9d18a54f8c2318c903b3b`: one P1.
+5. `649db270e8d43af152076e1f99e07c7204c575fc`: two P1.
+6. `7124709e4f6682ded0321c58d22a6851a5e32b9d`: four P1, two P2.
+7. `76f05c9da71d21b1f774afc91e13dad4323d6358`, review `PRR_kwDOUAv8Lc8AAAABKh3paA`: two P1 covering Gate C prerequisite and mandatory notification matrix.
 
-## 8. Status update template
+All seven rounds are corrected in branch documents. `DOC-WOS-00-002-REVIEW-RESOLUTION.md` is the resolution authority.
 
-Use this structure for future updates:
+## 8. Next controller actions
+
+1. Update issue #9 and PR metadata to the Round-7 blueprint.
+2. Resolve the two Round-7 inline review threads.
+3. Request one clean independent Codex/Sol review of the exact moved GitHub head.
+4. Resolve any new blocking finding and re-review a moved head.
+5. Present the exact-head Gate B package to the product owner.
+6. After explicit Gate B: squash-merge PR #1, establish/tag v0.1.0 and update status/traceability.
+7. Start WOS-01 issue #3 only after Gate B and merge.
+
+## 9. Status update template
 
 ```text
 Overall accepted readiness: XX%
