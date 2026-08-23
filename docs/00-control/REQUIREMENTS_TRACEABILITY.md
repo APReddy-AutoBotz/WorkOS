@@ -35,11 +35,11 @@ A requirement cannot be marked accepted from a PR description or implementation-
 | WOS-ENG-001–005 | PR-007 | Engagement validation, migration and browser evidence | Not started |
 | WOS-RES-001–009 | PR-004, 008, 009 | Assignment, capacity, over-allocation, approval and history | Not started |
 | WOS-TIM-001–012 | PR-008, 009 | Daily/weekly capture, policy, correction, duplicate and lock evidence | Not started |
-| WOS-APR-001–008 | PR-009 | State machine, delegation, SLA, bulk decisions, locks and shared approval notification events | Not started |
-| WOS-COM-001–015 | PR-010, 011 | Financial vectors, confidentiality, snapshots and reconciliation | Not started |
+| WOS-APR-001–008 | PR-009 | State machine, delegation, SLA, bulk decisions, locks, shared approval notification events and one-action-event-per-transition evidence | Not started |
+| WOS-COM-001–015 | PR-010, 011 | Financial vectors, confidentiality, snapshots, fixed-fee non-statutory earned-management fail-closed behavior and reconciliation | Not started |
 | WOS-INV-001–008 | PR-012 | Source eligibility, one-to-one approved-unbilled register, direct-bypass rejection, occupancy, Approved-only provider/CSV acceptance, final-state retrieval/status idempotency, corrections and source-to-export reconciliation | Not started |
 | WOS-RPT-001–007 | PR-013 | Scoped reports, leakage/data quality, Approved-only initial finance export, final-state retrieval/status controls and snapshot/event/register/batch/export reconciliation | Not started |
-| WOS-INT-001–006 | PR-013, 014 | Thirteen canonical notification events/templates, four policy classes, default relationship recipients, preferences/mandatory decisions, in-app/email/collaboration delivery evidence, idempotency/failure isolation/health, worklog/finance adapters and production identity evidence | Not started |
+| WOS-INT-001–006 | PR-013, 014 | Thirteen canonical notification events/templates, four policy classes, mutually exclusive generic-pending versus pre-submission/domain-remediation triggers, default relationship recipients, preferences/mandatory decisions, in-app/email/collaboration delivery evidence, idempotency/failure isolation/health, worklog/finance adapters and production identity evidence | Not started |
 | WOS-GOV-001–005 | PR-002, 005, 006, 016 | Append-only audit, provenance, export and release traceability | Not started |
 | WOS-OPS-001–010 | PR-003, 005, 015, 016 | Build/container, mandatory production OIDC environment/startup validation, migration, recovery, monitoring and handover | Not started |
 | WOS-NFR-SEC-001–014 | PR-003, 005, 006, 009, 010, 012, 013, 014, 016 | Threat, mandatory configured production OIDC, no production local/shared fallback, authorization, secure configuration and scan evidence | Blueprint |
@@ -60,7 +60,7 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Work package | Requirement groups | Issue | PR | Accepted commit | Release | Status |
 |---|---|---|---|---|---|---|
-| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Ten review rounds corrected; Gate B approved; clean exact-head review pending |
+| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Eleven review rounds corrected; Gate B approved; clean exact-head review pending |
 | WOS-01A | Source provenance/bootstrap | #3 | Planned PR-002 | Pending | v0.2.0 | Authorized after WOS-00 merge |
 | WOS-01B | Neutral branding/configuration | #3 | Planned PR-003 | Pending | v0.2.0 | Not started |
 | WOS-02 | Organization/setup | #4 | Planned PR-004 | Pending | v0.4.0 | Not started |
@@ -81,8 +81,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Evidence ID | Evidence | Status |
 |---|---|---|
-| DOC-WOS-00-001 | Current consolidated controller cross-document review | Complete/current in PR #1; ten rounds and Gate B state recorded |
-| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Ten review rounds completed/corrected; clean exact-head re-review pending |
+| DOC-WOS-00-001 | Current consolidated controller cross-document review | Complete/current in PR #1; eleven rounds and Gate B state recorded |
+| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Eleven review rounds completed/corrected; clean exact-head re-review pending |
 | DOC-WOS-00-003 | Product-owner Gate B decision | Approved 2026-08-23; exact final head binds after clean review |
 
 ### Review history represented by DOC-WOS-00-002
@@ -96,7 +96,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 7. `76f05c9da71d21b1f774afc91e13dad4323d6358` / review `PRR_kwDOUAv8Lc8AAAABKh3paA` — two P1: Gate C prerequisite and mandatory notification matrix.
 8. `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` / review `PRR_kwDOUAv8Lc8AAAABKh6Tsg` — two P1: Approved-only reporting/export semantics and mandatory production OIDC architecture wording.
 9. `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` / review `PRR_kwDOUAv8Lc8AAAABKh-0NA` — one P1 and one P2: mandatory production OIDC in quality baselines and stale controller evidence.
-10. `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` / review `PRR_kwDOUAv8Lc8AAAABKh_5pA` — three P2: authoritative Gate B state, complete ten-round evidence representation and mandatory production OIDC in the architecture ADR summary.
+10. `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` / review `PRR_kwDOUAv8Lc8AAAABKh_5pA` — three P2: authoritative Gate B state, complete review evidence representation and mandatory production OIDC in the architecture ADR summary.
+11. `cd45de9181858d722e2974e92d6aaa53ba04ec17` / review `PRR_kwDOUAv8Lc8AAAABKiBoBw` — two P1 and one P2: fixed-fee statutory-recognition ambiguity, overlapping approval action events and accepted OIDC decision wording.
 
 All listed findings are corrected in the active branch. The next evidence must be a clean independent review of the exact moved head.
 
@@ -133,6 +134,12 @@ Evidence lives under versioned `docs/evidence/v<release>/` paths. Secrets, perso
 
 Every implementation PR includes requirement IDs, evidence IDs, exact head, required checks and limitations.
 
+### PR-011 evidence minimum
+
+- Fixed-fee and every non-T&M operational earned-management policy profile is explicitly non-statutory, effective-dated and fail-closed when no authorized policy is selected.
+- Operational earned-management results never create billing eligibility or invoice readiness and do not treat approved hours as automatically invoiceable.
+- Deterministic financial golden vectors independently specify policy inputs, timing, currency/FX, rounding, version and correction behavior.
+
 ### PR-012 evidence minimum
 
 - Source-family eligibility vectors and direct raw-source bypass rejection.
@@ -147,7 +154,9 @@ Every implementation PR includes requirement IDs, evidence IDs, exact head, requ
 - In-app mandatory behavior; preference rules; mandatory override/no-opt-out; visible no-recipient failure.
 - Recipient scope/redirection negatives and no v1 client recipient.
 - Shared `approval.*` event reuse across work, leave, assignment, commercial and batch approvals.
-- Domain-event, in-app and channel idempotency with no duplicate delivery.
+- Transition evidence that `commercial.approval_required` fires only before generic submission to requester/change owner and that a pending generic stage fires only `approval.action_required`.
+- Transition evidence that `invoice_batch.action_required` fires only for non-approval batch-owner remediation and never for pending approval or generic rejection/correction.
+- One source entity/version/operation cannot create more than one action-required notification; replay remains idempotent across event, in-app and channel delivery.
 - Versioned locale/template-variable safety and sanitized provider/health evidence.
 - Email/collaboration/worklog/finance adapter contracts, including Approved-only initial finance export and final-state retrieval/status-only behavior.
 
