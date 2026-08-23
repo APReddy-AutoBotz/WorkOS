@@ -29,7 +29,7 @@ Authorization runs before data is returned or mutated. UI state and request-supp
 
 ## Commands and queries
 
-Commands change state and must enforce validation, policy, concurrency and audit. Queries return scoped read models optimized for workspaces and reports. Long-running imports, exports or snapshots return operation/batch status rather than holding an unsafe request open.
+Commands change state and must enforce validation, policy, concurrency and audit. Queries return scoped read models optimized for workspaces and reports. Long-running imports, exports, notifications or snapshots return operation/batch status rather than holding an unsafe request open.
 
 ## State transitions
 
@@ -84,7 +84,14 @@ Exported → Billed/Confirmed
 
 `Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`. Export/billing corrections create versioned reversal or superseding billing-eligibility events, approved-unbilled items and correction batch lines rather than releasing or reusing the original lineage.
 
-A failed export leaves the batch in `Approved` and records a failed integration attempt; an idempotent retry may continue. The state becomes `Exported` only after the configured provider accepts the exact versioned export payload and control totals.
+A failed export or artifact-generation attempt leaves the batch in `Approved`, keeps its register items occupied and records a failed operation. The state becomes `Exported` only through one of these accepted paths:
+
+1. A configured finance provider accepts the exact immutable versioned payload and matching control totals.
+2. WorkOS atomically creates and records an immutable versioned CSV export artifact, validates its control totals, and makes that exact artifact available for controlled retrieval.
+
+A CSV acceptance record contains export-operation ID, idempotency key, immutable artifact ID/version, checksum, schema version, line count, control totals, generated timestamp and authorized actor. Repeating the same idempotency key returns the same accepted artifact and operation result; it does not regenerate content or reapply `Approved → Exported`. Corrected content requires versioned reversal/supersession lineage and a new correction batch or export artifact.
+
+An initial delivery/export command is accepted only for an `Approved` batch. `Exported` and `Billed/Confirmed` batches may expose idempotent retrieval/redownload of their already accepted artifact and status confirmation, but they cannot initiate a second downstream delivery or transition to `Exported` again.
 
 A cancellation command is accepted only from `Draft`, `Under Review` or pre-export `Approved`, requires reason and applicable approval authority, and atomically records cancellation plus occupancy release. It returns an item to the available approved-unbilled register only when the underlying eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible. Historical line/membership evidence remains immutable.
 
@@ -93,17 +100,22 @@ The API returns stable conflict codes for:
 - Direct-source/snapshot bypass.
 - Stale event/register/batch version.
 - Already occupied by another open/active or final batch.
+- Initial export from any state other than `Approved`.
+- Duplicate downstream delivery from `Exported` or `Billed/Confirmed`.
 - Cancellation after export or billing confirmation.
 - Reversed/superseded source or register item.
 - Invalid transition.
 - Invalid batch scope/currency.
 - Control-total mismatch.
+- Idempotency-key reuse with a different payload or artifact version.
 
 Invoice-ready lines expose traceability to exactly one approved-unbilled item and through it exactly one billing-eligibility-event version. Raw source evidence may be included as read-only lineage; it is never accepted as an alternative batchable object.
 
-## Integration contracts
+## Integration and notification contracts
 
-Inbound adapters map external identifiers to controlled domain records and retain source/idempotency evidence. Outbound finance exports use versioned schemas, `Approved` batches, event/register lineage, control totals and export audit; only accepted exports transition to `Exported`.
+Inbound adapters map external identifiers to controlled domain records and retain source/idempotency evidence. Initial outbound finance delivery originates only from an `Approved` batch. Provider acceptance or atomic CSV-artifact acceptance performs the single `Approved → Exported` transition. Final-state endpoints support only idempotent retrieval/redownload and status confirmation of the already accepted artifact.
+
+Notification commands create scoped notification records and delivery attempts separately from the core transaction. Requests resolve recipient scope, template version, preferences, channel eligibility and sanitized payload server-side. Provider retries use idempotency keys and cannot create duplicate in-app, email or collaboration delivery evidence.
 
 ## Observability
 
@@ -111,4 +123,4 @@ Every request receives a correlation ID. Structured logs record safe route, stat
 
 ## Compatibility and deprecation
 
-Compatibility routes have an owner, migration plan, tests and removal release. A compatibility endpoint must not recreate a raw-source-to-batch shortcut or weaken occupancy state semantics. Breaking changes require versioned contracts and release notes.
+Compatibility routes have an owner, migration plan, tests and removal release. A compatibility endpoint must not recreate a raw-source-to-batch shortcut, duplicate final-state export or weaken occupancy state semantics. Breaking changes require versioned contracts and release notes.
