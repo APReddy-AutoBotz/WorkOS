@@ -173,7 +173,7 @@ The existing code may be migrated incrementally. A work package must not move co
 
 ### 5.1 Identity and access
 
-- OIDC/local identity adapters.
+- Mandatory production OIDC adapter plus a non-production/demo-only local identity adapter.
 - Users, roles and active-role sessions.
 - Permission registry and role templates.
 - User-specific exceptions.
@@ -493,10 +493,11 @@ flowchart TB
 - Local/demo Docker Compose.
 - Explicit migration command/release step.
 - Environment schema validation.
+- Configured OIDC and named accounts required for every production deployment; missing, invalid or unavailable OIDC must fail startup, readiness and authentication closed.
 - Liveness and readiness checks.
 - Structured log output.
 - Buyer-owned database and secrets.
-- No production demo fallback.
+- No production demo or WorkOS local-authentication fallback.
 - Version and build metadata visible through a safe endpoint or admin surface.
 
 ## 13. Migration strategy from the reference implementation
@@ -527,7 +528,7 @@ Testing must include:
 - Browser journeys by high-risk role.
 - Reconciliation tests for commercial reports, approved-unbilled sources and invoice-ready totals.
 - Tests proving operational earned-management snapshots cannot bypass source-specific billing eligibility.
-- Production-mode startup/build tests.
+- Production-mode startup/build tests, including mandatory OIDC fail-closed and no-local-fallback evidence.
 - Backup/restore rehearsal.
 
 ## 15. Observability
@@ -547,7 +548,7 @@ Logs must not expose passwords, tokens, private keys or unrestricted personal/fi
 
 ## 16. Initial architecture decisions
 
-The following decisions are adopted for the v1 blueprint and will be formalized as ADRs:
+The following decisions are adopted for the v1 blueprint and formalized by the listed ADRs:
 
 | ADR | Decision |
 |---|---|
@@ -557,7 +558,7 @@ The following decisions are adopted for the v1 blueprint and will be formalized 
 | ADR-004 | Add organization/legal-entity-ready ownership boundaries |
 | ADR-005 | Keep permissions and commercial calculations server authoritative |
 | ADR-006 | Use feature flags plus evidence-based release gates |
-| ADR-007 | Move toward OIDC and revocable production sessions |
+| ADR-007 | Require configured OIDC, named accounts and revocable sessions for every production deployment; restrict WorkOS local/shared demo authentication to approved non-production/demo profiles with no production fallback |
 | ADR-008 | Use controlled versioned migrations with fresh/upgrade evidence |
 
 ## 17. Architecture acceptance gates
