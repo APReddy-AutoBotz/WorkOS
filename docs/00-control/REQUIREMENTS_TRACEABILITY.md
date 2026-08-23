@@ -37,7 +37,7 @@ A requirement cannot be marked accepted from a PR description or implementation-
 | WOS-TIM-001–012 | PR-008, 009 | Daily/weekly capture, policy, correction, duplicate and lock evidence | Not started |
 | WOS-APR-001–008 | PR-009 | State machine, delegation, SLA, bulk decisions, locks, shared approval notification events and one-action-event-per-transition evidence | Not started |
 | WOS-COM-001–015 | PR-010, 011 | Financial vectors, confidentiality, snapshots, fixed-fee non-statutory earned-management fail-closed behavior and reconciliation | Not started |
-| WOS-INV-001–008 | PR-012 | Source eligibility, one-to-one approved-unbilled register, direct-bypass rejection, occupancy, Approved-only provider/CSV acceptance, final-state retrieval/status idempotency, corrections and source-to-export reconciliation | Not started |
+| WOS-INV-001–008 | PR-012 | Source eligibility, one-to-one approved-unbilled register, direct-bypass rejection, database-unique current occupancy with same-batch/cross-batch/concurrent/idempotency/route/split-line vectors, cancellation/re-batching, permanent final occupancy, Approved-only provider/CSV acceptance, corrections and source-to-export reconciliation | Not started |
 | WOS-RPT-001–007 | PR-013 | Scoped reports, leakage/data quality, Approved-only initial finance export, final-state retrieval/status controls and snapshot/event/register/batch/export reconciliation | Not started |
 | WOS-INT-001–006 | PR-013, 014 | Thirteen canonical notification events/templates, four policy classes, mutually exclusive generic-pending versus pre-submission/domain-remediation triggers, default relationship recipients, preferences/mandatory decisions, in-app/email/collaboration delivery evidence, idempotency/failure isolation/health, worklog/finance adapters and production identity evidence | Not started |
 | WOS-GOV-001–005 | PR-002, 005, 006, 016 | Append-only audit, provenance, export and release traceability | Not started |
@@ -60,7 +60,7 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Work package | Requirement groups | Issue | PR | Accepted commit | Release | Status |
 |---|---|---|---|---|---|---|
-| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Eleven review rounds corrected; Gate B approved; clean exact-head review pending |
+| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Thirteen review rounds corrected; Gate B approved; clean exact-head review pending |
 | WOS-01A | Source provenance/bootstrap | #3 | Planned PR-002 | Pending | v0.2.0 | Authorized after WOS-00 merge |
 | WOS-01B | Neutral branding/configuration | #3 | Planned PR-003 | Pending | v0.2.0 | Not started |
 | WOS-02 | Organization/setup | #4 | Planned PR-004 | Pending | v0.4.0 | Not started |
@@ -81,8 +81,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Evidence ID | Evidence | Status |
 |---|---|---|
-| DOC-WOS-00-001 | Current consolidated controller cross-document review | Complete/current in PR #1; eleven rounds and Gate B state recorded |
-| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Eleven review rounds completed/corrected; clean exact-head re-review pending |
+| DOC-WOS-00-001 | Current consolidated controller cross-document review | Complete/current in PR #1; thirteen rounds and Gate B state recorded |
+| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Thirteen review rounds completed/corrected; clean exact-head re-review pending |
 | DOC-WOS-00-003 | Product-owner Gate B decision | Approved 2026-08-23; exact final head binds after clean review |
 
 ### Review history represented by DOC-WOS-00-002
@@ -98,6 +98,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 9. `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` / review `PRR_kwDOUAv8Lc8AAAABKh-0NA` — one P1 and one P2: mandatory production OIDC in quality baselines and stale controller evidence.
 10. `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` / review `PRR_kwDOUAv8Lc8AAAABKh_5pA` — three P2: authoritative Gate B state, complete review evidence representation and mandatory production OIDC in the architecture ADR summary.
 11. `cd45de9181858d722e2974e92d6aaa53ba04ec17` / review `PRR_kwDOUAv8Lc8AAAABKiBoBw` — two P1 and one P2: fixed-fee statutory-recognition ambiguity, overlapping approval action events and accepted OIDC decision wording.
+12. `a023ebef80fad7aea354f3759801a430de18cb6e` / review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`, actionable thread `PRRT_kwDOUAv8Lc6bdgWF` — one P1: unique current line occupancy for each approved-unbilled-item version.
+13. `86484cde78f1350a4a0a3f55f368f2e919353663` / review `PRR_kwDOUAv8Lc8AAAABKiIDxA` — one P1 and one P2: explicit PR-012 occupancy vectors/ownership and stale Round-12 evidence.
 
 All listed findings are corrected in the active branch. The next evidence must be a clean independent review of the exact moved head.
 
@@ -143,7 +145,10 @@ Every implementation PR includes requirement IDs, evidence IDs, exact head, requ
 ### PR-012 evidence minimum
 
 - Source-family eligibility vectors and direct raw-source bypass rejection.
-- One-to-one event/register creation, idempotency and active/final concurrency.
+- One-to-one event/register creation and database-unique current occupancy: same-batch, cross-batch and concurrent duplicate rejection with no orphan line, duplicate amount or control-total drift.
+- Same-key identical retry returns the existing membership; same-key changed-input and different-key duplicates conflict; bulk, import and compatibility routes cannot bypass occupancy.
+- Partial-billing/presentation-splitting reuse is rejected; separately billable portions require distinct authorized/versioned event/item versions and reconciled source totals.
+- Valid pre-export cancellation releases only current occupancy atomically; controlled re-batching creates a new immutable membership version; final occupancy is permanent and corrections use reversal/superseding lineage.
 - Provider and immutable CSV-artifact acceptance; failed-operation and final-state retrieval semantics.
 - Reversals/supersessions and source → event → register → line → batch/export reconciliation.
 
