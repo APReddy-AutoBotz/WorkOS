@@ -3,7 +3,7 @@
 **Workstream:** WOS-00  
 **Issue:** #2  
 **Pull request:** #1  
-**Status:** Seven independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
+**Status:** Eight independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
 
 ## 1. Reviewed heads and review IDs
 
@@ -16,6 +16,7 @@
 | 5 | `649db270e8d43af152076e1f99e07c7204c575fc` | `PRR_kwDOUAv8Lc8AAAABKhROXA` | Two P1 |
 | 6 | `7124709e4f6682ded0321c58d22a6851a5e32b9d` | `PRR_kwDOUAv8Lc8AAAABKhU3Ng`, `PRR_kwDOUAv8Lc8AAAABKhVa0Q` | Four P1, two P2 |
 | 7 | `76f05c9da71d21b1f774afc91e13dad4323d6358` | `PRR_kwDOUAv8Lc8AAAABKh3paA` | Two P1 |
+| 8 | `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` | `PRR_kwDOUAv8Lc8AAAABKh6Tsg` | Two P1 |
 
 ## 2. Resolution map by review round
 
@@ -75,6 +76,13 @@
 | Release acceptance did not explicitly require independent PR-012 engineering acceptance before Gate C | P1 | `RELEASE_ACCEPTANCE_CRITERIA.md` now states that PR-010/011/012 must be merged and PR-012 engineering acceptance must be independently proven at an exact head before Gate C. Gate C is additional owner acceptance and cannot substitute for engineering evidence. |
 | WOS-INT-002 lacked an executable minimum notification event/template/default-recipient matrix | P1 | Added four authoritative policy classes and thirteen canonical event/template keys with triggers, default relationship recipients, preference/mandatory behavior, evidence fields, protected extension rules and deterministic tests. Aligned integration architecture, approval specification, PR-013 backlog, test strategy, traceability and issue #9. |
 
+### Round 8
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| Reporting specification allowed a new finance export from “approved or finalized” batch lines | P1 | `REPORTING_AND_ANALYTICS_SPEC.md` now permits initial provider/CSV delivery only from an `Approved` batch. `Exported` and `Billed/Confirmed` support only authorized idempotent retrieval/redownload of the accepted immutable artifact or downstream-status confirmation; they cannot initiate another delivery, create a second accepted export operation or transition again. Positive and negative acceptance cases enforce the distinction. |
+| Security architecture made production OIDC optional through “where configured” wording | P1 | `SECURITY_ARCHITECTURE.md` now requires configured OIDC and named accounts for every production deployment. Missing, invalid or unavailable required OIDC fails startup/readiness and authentication closed. WorkOS local authentication and shared/demo identities are limited to approved non-production/demo profiles and cannot become a production fallback. |
+
 ## 3. Canonical notification policy added in Round 7
 
 Policy classes:
@@ -100,7 +108,7 @@ Canonical event/template keys:
 12. `invoice_batch.exported_or_billed_confirmed`
 13. `integration.delivery_failed_or_degraded`
 
-Every event now has a canonical/template key, version, source entity/version and operation, organization/legal-entity scope, server-resolved recipient relationship/reason, policy class, channel decision, locale/approved variables, idempotency identity and delivery-attempt/correlation evidence. Client recipients remain out of v1 scope. Protected buyer extensions cannot remove a mandatory recipient or downgrade a mandatory class below the governing requirement.
+Every event has a canonical/template key, version, source entity/version and operation, organization/legal-entity scope, server-resolved recipient relationship/reason, policy class, channel decision, locale/approved variables, idempotency identity and delivery-attempt/correlation evidence. Client recipients remain out of v1 scope. Protected buyer extensions cannot remove a mandatory recipient or downgrade a mandatory class below the governing requirement.
 
 ## 4. Cross-cutting corrections retained
 
@@ -109,29 +117,34 @@ Every event now has a canonical/template key, version, source entity/version and
 - Operational earned-management revenue is non-statutory and never grants billing authority.
 - Commercial lineage is source → eligibility event → approved-unbilled item → line/batch → accepted provider/CSV export.
 - Initial export is `Approved`-only; failures remain `Approved`; final states are retrieval/status only.
-- Production OIDC failure is fail-closed; WorkOS local authentication is non-production/demo only.
+- Production OIDC is mandatory and fail-closed for every production deployment; WorkOS local authentication is non-production/demo only.
 - PR-013 owns complete notification delivery; PR-014 owns production identity/security evidence.
 
-## 5. Controller verification after Round 7
+## 5. Controller verification after Round 8
 
 | Check | Controller result | Limitation |
 |---|---|---|
 | Gate C prerequisite | PASS | Clean independent rerun required at final head |
+| Approved-only initial finance delivery | PASS | Runtime evidence belongs to PR-012/013 |
+| Final-state retrieval/status-only semantics | PASS | Runtime idempotency evidence belongs to PR-012/013 |
+| Mandatory production OIDC | PASS | Production startup/readiness evidence belongs to PR-014 |
+| No production local-auth fallback | PASS | Security negative evidence belongs to PR-014 |
 | Four notification policy classes | PASS | Implementation evidence belongs to PR-013 |
 | Thirteen canonical event/template rows | PASS | Independent count/consistency rerun required |
-| Default recipient relationships and mandatory/preference rules | PASS | Runtime tests belong to PR-013 |
-| Shared approval event keys | PASS | Runtime idempotency tests belong to PR-009/013 |
 | Requirement/NFR counts | Pending independent rerun | Must confirm 126/81 at exact head |
 | Application tests | SKIP | WOS-00 intentionally has no application source |
 | Shell/documentation-safe checks | NOT RUN by controller connector | Mandatory in clean final Codex/Sol review |
 
 ## 6. Publication note
 
-Codex produced a local Round-7 correction commit `0411133df924afd5dfcff9f416b9774378d2f45c` but could not push through its task checkout because GitHub transport returned `403`. The implementation controller independently materialized and reviewed the approved changes through the connected GitHub controller interface. The Codex-local SHA is not acceptance evidence; only the live PR head reviewed in GitHub counts.
+Codex correction tasks sometimes produced local commits that could not be pushed through their task checkout. The implementation controller materialized the approved corrections through the connected GitHub controller interface. Local Codex SHAs are not acceptance evidence; only the exact live GitHub PR head reviewed in GitHub counts.
 
-## 7. Open gates
+## 7. Gate B state
+
+Product-owner Gate B approval is recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`. It authorizes the controller to complete non-material review corrections, obtain the clean final exact-head review, squash-merge PR #1, establish `v0.1.0` and begin WOS-01. The approval does not waive the clean-review or exact-head merge controls.
+
+## 8. Open gates
 
 - Fresh clean independent Codex/Sol review at the exact moved GitHub head.
 - Resolution of any remaining blocking finding.
-- Product-owner Gate B approval.
 - Exact-head squash merge and `v0.1.0` baseline.
