@@ -435,7 +435,7 @@ Cost rates, individual compensation-derived data and margin details must be sepa
 
 ### WOS-INV-001 — Approved-unbilled register
 
-Finance-authorized users must see every versioned `APPROVED_UNBILLED_ITEM` not already included in an active or finalized invoice-ready batch. Each item must be created from exactly one versioned `BILLING_ELIGIBILITY_EVENT`; the event's eligible source evidence may be:
+Finance-authorized users must see every versioned `APPROVED_UNBILLED_ITEM` that has no current occupying invoice-ready line/membership. Each item must be created from exactly one versioned `BILLING_ELIGIBILITY_EVENT`; the event's eligible source evidence may be:
 
 - Approved T&M work calculation snapshots.
 - Accepted and billing-eligible milestone events.
@@ -444,15 +444,19 @@ Finance-authorized users must see every versioned `APPROVED_UNBILLED_ITEM` not a
 - Approved managed-service period-charge or accepted-unit events.
 - Approved commercial adjustments, credits, discounts, write-offs or corrections that are invoice eligible.
 
-Raw source evidence—including a T&M snapshot—must never be linked directly to an invoice-ready line. Every eligibility event and register item must preserve source type and version, organization/legal entity, client/contract/engagement, approval or contractual-due evidence, eligible date, currency, amount, calculation/policy evidence where applicable, reversal/supersession links, and active/final batch state. Operational earned-management revenue does not by itself make a source invoice eligible.
+Raw source evidence—including a T&M snapshot—must never be linked directly to an invoice-ready line. Every eligibility event and register item must preserve source type and version, organization/legal entity, client/contract/engagement, approval or contractual-due evidence, eligible date, currency, amount, calculation/policy evidence where applicable, reversal/supersession links, and current/final occupancy state. Operational earned-management revenue does not by itself make a source invoice eligible.
 
 ### WOS-INV-002 — Invoice-ready batches
 
 Users must create controlled invoice-ready batches by client, legal entity, engagement, period and currency.
 
-### WOS-INV-003 — Batch line traceability
+### WOS-INV-003 — Batch line traceability and cardinality
 
 Every batch line must trace to exactly one versioned `APPROVED_UNBILLED_ITEM` and, through it, exactly one versioned `BILLING_ELIGIBILITY_EVENT`. T&M snapshots, milestones, fixed-fee schedules, retainer events, managed-service events and approved adjustments are source evidence for the event and may not be linked directly to a batch line. The complete chain must preserve the fields required by WOS-INV-001.
+
+WorkOS v1 does not support splitting one approved-unbilled-item version across multiple invoice-ready lines. At most one current occupying invoice-ready line/membership may exist for an approved-unbilled-item ID/version, whether an attempted duplicate targets the same batch, another occupying batch or a concurrent request. The invariant must be enforced by a database-unique current-occupancy control acquired in the same transaction as line/membership creation; an application query against batch state alone is insufficient.
+
+An identical same-key retry must return the existing line/membership result. A changed payload, different key or concurrent duplicate for the same item version must fail with a stable conflict. Any separately billable portion must originate upstream as a separately authorized/versioned eligibility event and approved-unbilled item whose control totals reconcile to the source; presentation metadata cannot create a partial-line bypass.
 
 ### WOS-INV-004 — Adjustments
 
@@ -481,7 +485,7 @@ Minimum allowed transitions are:
 
 `Cancelled` and `Billed/Confirmed` are terminal. `Exported` cannot transition to `Cancelled`.
 
-An initial provider or CSV export may originate only from an `Approved` batch. A failed provider delivery or CSV-artifact generation must leave the batch `Approved`, keep its register items occupied and record the failed operation. The single `Approved → Exported` transition occurs only when either:
+An initial provider or CSV export may originate only from an `Approved` batch. A failed provider delivery or CSV-artifact generation must leave the batch `Approved`, keep its current-occupancy records and register items occupied and record the failed operation. The single `Approved → Exported` transition occurs only when either:
 
 1. A configured finance provider accepts the exact immutable versioned payload and matching control totals; or
 2. WorkOS atomically creates and records an immutable, versioned CSV artifact, validates matching control totals and makes that exact artifact available for controlled retrieval.
@@ -490,7 +494,7 @@ The accepted CSV operation must record export-operation ID, idempotency key, imm
 
 `Exported` and `Billed/Confirmed` batches may support only authorized, idempotent retrieval/redownload of the already accepted artifact and downstream-status confirmation. They must not initiate another downstream delivery or transition to `Exported` again.
 
-Cancellation is allowed only from `Draft`, `Under Review` or a pre-export `Approved` batch. It requires protected authority, reason and audit evidence, preserves prior membership/history, and releases register-item occupancy atomically. A released item becomes available again only when its underlying eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible.
+Cancellation is allowed only from `Draft`, `Under Review` or a pre-export `Approved` batch. It requires protected authority, reason and audit evidence, preserves prior immutable line/membership history, and releases the database current-occupancy record atomically with cancellation. A released item becomes available again only when its underlying eligibility-event version remains current, unreversed, unsuperseded, in scope and otherwise eligible. Re-batching creates a new line/membership version and reacquires current occupancy; it never rewrites or reactivates the cancelled line.
 
 ### WOS-INV-007 — Export and integration
 
@@ -500,11 +504,19 @@ Provider delivery is accepted only when the exact immutable versioned payload an
 
 WorkOS v1 is not required to issue statutory invoices or post to a general ledger.
 
-### WOS-INV-008 — No double billing
+### WOS-INV-008 — No double billing and unique current line occupancy
 
-The server must prevent an eligibility-event version or its one-to-one approved-unbilled item from being included in more than one occupying invoice-ready batch. Occupying batches include open/active `Draft`, `Under Review` and `Approved` batches and final `Exported` and `Billed/Confirmed` batches.
+The server and database must prevent an eligibility-event version or its one-to-one approved-unbilled-item version from having more than one current occupying invoice-ready line/membership. This prohibits duplicate insertion twice into the same batch, insertion into another occupying batch and concurrent duplicate acquisition.
 
-Only a valid pre-export transition to `Cancelled` releases occupancy, and the release must be atomic with cancellation. Exported or billed evidence remains occupying permanently. Corrections after export or billing must use authorized versioned reversal/superseding eligibility events, approved-unbilled items and correction lines/batches rather than reusing the original lineage. Accepted provider payload and CSV artifact evidence must not be overwritten. Reversed, superseded or stale event/register versions cannot be newly batched.
+The database must enforce a unique current-occupancy record keyed by approved-unbilled-item ID/version and linked to the current line and batch. The occupancy record is acquired transactionally with line/membership creation. Same-key identical retry returns the existing result; key reuse with changed input, a different key or a concurrent request while occupancy exists must return a stable conflict. No compatibility, bulk, presentation-splitting or partial-billing path may bypass this invariant.
+
+Occupying batches include open/active `Draft`, `Under Review` and `Approved` batches and final `Exported` and `Billed/Confirmed` batches. Historical invoice-ready lines and memberships remain immutable evidence and do not themselves determine current availability.
+
+Only a valid pre-export transition to `Cancelled` releases the database current-occupancy record, and the release must be atomic with cancellation while preserving line/membership history. A released item can be re-batched through a new line/membership version only if its eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible.
+
+Exported or billed evidence remains occupying permanently. Corrections after export or billing must use authorized versioned reversal/superseding eligibility events, approved-unbilled items and correction lines/batches rather than reusing the original lineage. Accepted provider payload and CSV artifact evidence must not be overwritten. Reversed, superseded or stale event/register versions cannot be newly batched.
+
+Any separately billable portion must originate upstream as a distinct authorized/versioned eligibility event and approved-unbilled item with reconciled source and control totals.
 
 ## 14. Reporting and control requirements
 
