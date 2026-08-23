@@ -139,7 +139,7 @@
 
 **Requirements:** WOS-CORE-004–005; WOS-APR-001–008; WOS-ORG-009.
 
-**Scope/evidence:** Approval state machine; effective-dated policy; multi-stage routing; delegation; escalation/reminders; bulk decisions; period locks/reopen; integration with work/leave/assignment/commercial/batch approvals; canonical shared `approval.*` notification events; negative scope/idempotency/browser evidence.
+**Scope/evidence:** Approval state machine; effective-dated policy; multi-stage routing; delegation; escalation/reminders; bulk decisions; period locks/reopen; integration with work/leave/assignment/commercial/batch approvals; canonical shared `approval.*` notification events; mutually exclusive pending-stage versus pre-submission/domain-remediation events; negative scope/idempotency/browser evidence.
 
 ### PR-010 — WOS-06 rates, costs and commercial terms
 
@@ -157,7 +157,7 @@
 
 **Requirements:** WOS-CORE-004–005, 008; WOS-COM-006–013.
 
-**Scope/evidence:** T&M, fixed-fee, milestone, retainer and managed-service calculations; versioned snapshots; fail-closed non-T&M policy selection; budgets/POs/EAC; deterministic golden vectors; currency/rounding; reconciliation; immutability and controlled recalculation.
+**Scope/evidence:** T&M, fixed-fee, milestone, retainer and managed-service calculations; versioned snapshots; fail-closed non-T&M policy selection; fixed-fee operational earned-management calculations that are explicitly non-statutory and independent from billing eligibility/invoice readiness; budgets/POs/EAC; deterministic golden vectors; currency/rounding; reconciliation; immutability and controlled recalculation.
 
 **Gate boundary:** PR-011 establishes calculation/margin engineering readiness only. It cannot satisfy Gate C.
 
@@ -213,6 +213,10 @@
   - `invoice_batch.export_failed`
   - `invoice_batch.exported_or_billed_confirmed`
   - `integration.delivery_failed_or_degraded`
+- `approval.action_required` is the exclusive action-request event whenever a valid generic stage is pending, including commercial and invoice-batch approvals.
+- `commercial.approval_required` is restricted to a pre-submission requester/change-owner prompt to create, complete or submit the generic approval request; it is never sent to approvers and never emitted for a pending stage.
+- `invoice_batch.action_required` is restricted to batch-owner pre-submission evidence, reconciliation, validation or export-preparation remediation while no generic stage is pending; generic approval rejection/correction uses `approval.rejected_or_correction_required`.
+- One source entity/version and triggering operation may create at most one action-required event; domain modules cannot duplicate the generic approval event.
 - Server-resolved recipient relationships/reasons, preferences/mandatory decisions, event/template/source versions, delivery attempts, retries/backoff, idempotency, failure isolation, correlation and sanitized health.
 - Shared approval events supplied once by PR-009 for work, leave, assignment, commercial and batch approvals.
 - No client recipients in v1; protected extension cannot remove a default mandatory recipient or downgrade a mandatory class.
@@ -226,6 +230,8 @@
 - Visible failure when a mandatory event resolves no recipient.
 - Recipient scope/redirection negatives and no client recipient.
 - Shared approval-event reuse with no incompatible duplicate keys.
+- Explicit transition vectors proving `commercial.approval_required` before submission, `approval.action_required` after a stage becomes pending, and never both for the same source/version/operation.
+- Explicit transition vectors proving `invoice_batch.action_required` only for non-approval batch-owner remediation, never for a pending stage or generic approval rejection/correction.
 - Event/in-app/channel idempotency and no-duplicate delivery across replay, scheduler and provider retry.
 - Safe provider failure without core-transaction rollback; retry/owner/health evidence.
 - Template variables, locale, sanitization and no secret/personal/cost/margin leakage.
