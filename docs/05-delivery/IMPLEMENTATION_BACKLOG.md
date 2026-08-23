@@ -25,7 +25,7 @@
 | WOS-04 | 16% | v0.5.0 | Engagement models and flexible work capture |
 | WOS-05 | 8% | v0.5.0 | Policy engine, approvals, delegation and period locking |
 | WOS-06 | 20% | v0.7.0 | Rates, costs, budgets, revenue, margin and invoice readiness |
-| WOS-07 | 6% | v0.8.0 | Reporting, leakage controls and integration framework |
+| WOS-07 | 6% | v0.8.0 | Reporting, leakage controls, notifications and integration framework |
 | WOS-08 | 8% | v0.9.0 | Enterprise security, observability, recovery and deployment |
 | WOS-09 | 4% | v1.0.0 | Production-like acceptance and buyer handover |
 
@@ -40,7 +40,7 @@
 | DAT-001–008 | PR-004, PR-007, PR-008, PR-009, PR-010, PR-011, PR-012, PR-013, PR-016 | Ownership, temporal, precision, snapshot, constraint and control-total evidence |
 | MNT-001–008 | PR-002 through PR-016 | Bounded modules/files, typed contracts, documentation and maintainability evidence in every affected PR |
 | DPL-001–007 | PR-003, PR-005, PR-015, PR-016 | Portable container/environment, explicit migration and production deployment evidence |
-| OBS-001–006 | PR-005, PR-006, PR-009, PR-011, PR-012, PR-013, PR-015, PR-016 | Correlation, safe structured logs, job/integration health and alert evidence |
+| OBS-001–006 | PR-005, PR-006, PR-009, PR-011, PR-012, PR-013, PR-015, PR-016 | Correlation, safe structured logs, job/integration/notification health and alert evidence |
 | UX-001–006 | PR-003, PR-004, PR-008, PR-009, PR-012, PR-013, PR-016 | Accessibility, responsive role journeys, terminology/locale and understandable errors |
 | CMP-001–004 | PR-003, PR-004, PR-006, PR-008, PR-013, PR-014, PR-016 | Supported browser/API/version compatibility and provider-neutral contracts |
 | RELSE-001–005 | PR-002 through PR-016 | Version, changelog, migration/rollback, immutable-artifact and release-evidence controls |
@@ -348,7 +348,10 @@
 - Approval integration.
 - Database constraints, locking and idempotency preventing repeated active/final inclusion.
 - Versioned reversal/supersession and correction paths.
-- Versioned CSV/API-ready export only from approved/finalized batch lines.
+- Initial provider or CSV export only from an `Approved` batch.
+- Provider acceptance of the exact immutable versioned payload/control totals as one valid `Approved → Exported` path.
+- Atomic creation and recording of an immutable versioned CSV artifact—with operation/idempotency ID, artifact ID/version, checksum, schema, line count, control totals, timestamp, actor and lineage—as the other valid `Approved → Exported` path.
+- Idempotent final-state retrieval/redownload and status confirmation without duplicate delivery or re-transition.
 
 **Requirements:** WOS-CORE-004, WOS-CORE-005, WOS-CORE-008, WOS-INV-001 through WOS-INV-008.
 
@@ -360,21 +363,26 @@
 - Register-to-batch reconciliation by source/event/register version, organization/legal entity, approval/eligibility evidence, currency, eligible date and amount.
 - Active/final inclusion uniqueness under concurrent requests across every eligible source type.
 - Batch state and transition tests for `Draft → Under Review | Cancelled`, `Under Review → Draft | Approved | Cancelled`, `Approved → Exported | Cancelled`, and `Exported → Billed/Confirmed`.
-- Proof that `Cancelled` and `Billed/Confirmed` are terminal, `Exported` cannot be cancelled, and a failed export remains `Approved`.
+- Proof that `Cancelled` and `Billed/Confirmed` are terminal, `Exported` cannot be cancelled, and a failed provider or CSV export remains `Approved`.
+- Provider acceptance proof for the exact immutable payload/control totals.
+- CSV acceptance proof for the required immutable artifact metadata and atomic `Approved → Exported` transition.
+- Same-key retries return the same accepted provider/CSV result and cannot duplicate delivery, regenerate content or reapply the transition.
+- Different-payload reuse of an idempotency key is rejected.
+- Exported/Billed retrieval or status operations are idempotent and cannot initiate a new delivery.
 - Cancellation authorization/reason/audit, preserved membership history and atomic occupancy release tests.
 - Proof that a released register item is selectable again only while its eligibility event remains current, unreversed, unsuperseded, in scope and otherwise eligible.
 - Locked-period enforcement.
-- Authorized reversal/supersession/correction paths that preserve prior exported/billed evidence and exclude stale/reversed items from new batches.
+- Authorized reversal/supersession/correction paths that preserve prior exported/billed evidence and accepted artifacts and exclude stale/reversed items from new batches.
 - API and browser proof that only approved-unbilled items can be selected for a line.
-- Export traceability from approved/finalized batch line through register/event to source and audit.
-- Finalized event/register/source versions and batch lines remain immutable; every transition and adjustment is traceably audited.
+- Export traceability from accepted provider/CSV artifact through batch line, register/event and source to audit.
+- Finalized event/register/source versions, batch lines and accepted export artifacts remain immutable; every transition and adjustment is traceably audited.
 
-**Gate C:** Product-owner Gate C occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Gate C evidence must cover effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch lifecycle, export lineage, reversals/corrections, authorization and control-total reconciliation. Gate C is an additional owner acceptance gate and never substitutes for PR-012 engineering evidence.
+**Gate C:** Product-owner Gate C occurs only after PR-010, PR-011 and PR-012 are merged and PR-012 engineering acceptance is independently proven at an exact head. Gate C evidence must cover effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch lifecycle, provider and CSV export lineage, reversals/corrections, authorization and control-total reconciliation. Gate C is an additional owner acceptance gate and never substitutes for PR-012 engineering evidence.
 
-### PR-013 — WOS-07 Reporting, leakage control and adapter contracts
+### PR-013 — WOS-07 Reporting, leakage, notifications and integration adapters
 
 **Branch:** `codex/wos-07-reporting-leakage-integrations`  
-**Outcome:** Deliver buyer-facing operational/commercial insight and stable extension interfaces.
+**Outcome:** Deliver buyer-facing operational/commercial insight, governed notifications and stable extension interfaces.
 
 **Includes:**
 
@@ -383,8 +391,15 @@
 - Data-quality expansion.
 - Report reconciliation/control totals.
 - Controlled exports.
+- In-app notification center and records.
+- Versioned notification templates and locale-aware rendering.
+- User/channel preferences and mandatory-control notification policy.
+- Email and collaboration provider adapters.
+- Scoped recipient resolution, delivery attempts/evidence, retries, idempotency and failure isolation.
+- Sanitized notification/integration health and operational visibility.
 - Worklog import and finance-export adapter contracts.
-- Integration health and idempotency patterns.
+- Finance provider initial delivery only from `Approved` batches; final-state retrieval/status is idempotent and cannot duplicate delivery.
+- Integration health and mapping/idempotency patterns.
 
 **Requirements:** WOS-CORE-005, WOS-CORE-008, WOS-RPT-001 through WOS-RPT-007, WOS-INT-001 through WOS-INT-006.
 
@@ -393,9 +408,19 @@
 - Report totals reconcile to snapshots, eligibility events, approved-unbilled register items and batches.
 - Leakage scenarios have deterministic fixtures.
 - Out-of-scope report/export tests.
-- Adapter mock contract tests.
-- Finance exports reject incomplete event/register lineage and originate only from approved/finalized batch lines.
-- Report/export operations are audited with actor, scope, filters, as-of/version and control totals.
+- In-app notification positive and negative role journeys.
+- Template variable/schema, locale and channel-safety tests.
+- Preference and mandatory-recipient policy tests.
+- Recipient authorization/data-scope and redirection negative tests.
+- Email/collaboration mock adapter contract tests.
+- Notification retry/idempotency/no-duplicate-delivery evidence.
+- Provider failure does not roll back a valid core transaction and remains operationally visible.
+- Notification templates, logs, health and provider evidence do not expose secrets or unauthorized personal/cost/margin data.
+- Worklog and finance adapter mock contract tests.
+- Finance initial delivery rejects any batch state other than `Approved` and requires complete event/register lineage.
+- Final-state finance retrieval/status operations are idempotent and cannot initiate duplicate delivery.
+- Integration-health and mapping-gap evidence is sanitized and scoped.
+- Report/export/notification operations are audited with actor, scope, filters or recipient/template/channel identity, as-of/version and control totals where applicable.
 
 ### PR-014 — WOS-08 Identity, session and security hardening
 
@@ -405,10 +430,12 @@
 **Includes:**
 
 - OIDC/Entra production path and local-account restrictions.
+- Production OIDC fail-closed behavior with no WorkOS local-auth fallback.
 - Revocable sessions and account lifecycle enforcement.
 - Persistent/distributed login throttling design suitable for deployment profile.
 - CSRF/CORS/security-header posture.
 - Permission/access-review export.
+- Externally controlled named/audited IdP or infrastructure break-glass guidance that preserves WorkOS authorization and sessions.
 - Threat-model-driven fixes and security tests.
 
 **Requirements:** WOS-CORE-005, WOS-IAM-001 through WOS-IAM-010 and applicable WOS-NFR-SEC requirements.
@@ -418,6 +445,8 @@
 - Threat model.
 - Negative authorization suite.
 - Disabled user/session invalidation.
+- Production rejects local authentication and does not activate it when OIDC is unavailable.
+- Break-glass evidence proves named external identity, separate approval/audit and preserved WorkOS active-role, permission, data-scope and session controls.
 - Security headers and identity configuration evidence.
 - No secrets in build/logs.
 - Identity, session, role, permission and access-review mutations are traceably audited without exposing tokens or secrets.
