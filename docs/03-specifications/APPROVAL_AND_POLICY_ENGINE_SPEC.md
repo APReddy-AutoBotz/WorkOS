@@ -21,11 +21,13 @@ stateDiagram-v2
     Pending --> Rejected: reject
     Pending --> Cancelled: source cancelled
     Pending --> Pending: advance stage
-    Approved --> Reopened: protected reopen
+    Approved --> Reopened: protected reopen for eligible non-invoice source only
     Reopened --> Pending: resubmit
 ```
 
 Only the current pending stage can be decided. Bulk operations independently validate every item and fail safely with per-item outcomes.
+
+Generic `Approved → Reopened` is available only when the governing source-type state machine defines a valid atomic transition back to a correctable state. **Invoice-ready batches are excluded:** once an invoice batch reaches `Approved`, its approval instance is final for that batch version and cannot be generically reopened. A stale, concurrent or replayed reopen attempt for an `Approved`, `Exported`, `Billed/Confirmed` or `Cancelled` invoice batch returns a stable conflict without changing approval, batch, occupancy or export state.
 
 ## Delegation
 
@@ -33,7 +35,7 @@ Delegations are time-bound, role/entity scoped and cannot exceed the delegator's
 
 ## Period policy
 
-Periods progress through Open, Submission Closed, Approval Closed and Financially Locked. Protected reopen requires reason, authority and audit; it does not erase prior decisions or snapshots.
+Periods progress through Open, Submission Closed, Approval Closed and Financially Locked. Protected reopen requires reason, authority and audit; it does not erase prior decisions or snapshots and remains subject to the source-type state machine.
 
 ## Canonical approval notification events
 
@@ -42,7 +44,7 @@ The approval engine, not individual domain modules, emits the shared versioned `
 | Event/template key | Trigger | Default relationship recipients | Policy class |
 |---|---|---|---|
 | `approval.action_required` | A valid generic approval stage becomes pending | Current-stage approver or approvers | `ACTION_REQUIRED` |
-| `approval.rejected_or_correction_required` | Rejection or correction-required decision | Requester plus affected worker where distinct | `ACTION_REQUIRED` |
+| `approval.rejected_or_correction_required` | Rejection or correction-required decision | Requester; affected worker where applicable; commercial change owner for commercial sources; invoice-batch owner and finance preparer where applicable. Resolve from authoritative scoped relationships, deduplicate identities and retain all applicable recipient reasons or deterministic precedence. | `ACTION_REQUIRED` |
 | `approval.completed` | Final approval | Requester plus affected worker where distinct | `INFORMATIONAL` |
 | `approval.overdue_or_escalated` | Due threshold exceeded or escalation created | Current approver or approvers plus configured escalation target | `CONTROL_MANDATORY` |
 
@@ -55,11 +57,11 @@ Domain modules may emit their own canonical action event only outside a pending 
 - `commercial.approval_required` is a **pre-submission requester/change-owner event**. It may be emitted only when a proposed rate, budget, PO, contract-term or commercial-policy mutation is policy-blocked because the requester/change owner must create, complete or submit the generic approval request. It is never emitted for approvers and never emitted when a valid generic approval stage is pending.
 - `invoice_batch.action_required` is a **batch-owner remediation event**. It may be emitted only for pre-submission evidence, reconciliation, validation or export-preparation deficiencies while no generic approval stage is pending. A generic approval rejection or correction-required decision uses `approval.rejected_or_correction_required`, not `invoice_batch.action_required`.
 
-For one source entity/version and triggering operation, at most one action-required notification event may be created. If a generic approval stage becomes pending, `approval.action_required` is the exclusive action-request event and suppresses the two domain-action events for that transition.
+For one source entity/version and triggering operation, at most one action-required notification event may be created. If a generic approval stage becomes pending, `approval.action_required` is the exclusive action-request event and suppresses the two domain-action events for that transition. If a generic rejection/correction decision is recorded, `approval.rejected_or_correction_required` is the exclusive action-required event for that decision and suppresses both domain-action events.
 
 Domain modules may provide approved template variables and source links, but must not create competing event keys such as separate timesheet-, leave-, assignment-, commercial- or batch-specific versions of the same approval transition. Domain-specific non-approval events remain separate, for example `assignment.created_or_materially_changed`, `commercial.risk_threshold_breached` and `invoice_batch.export_failed`.
 
-Recipient resolution is server-authoritative. The engine resolves current approvers, requester, affected worker and escalation target from the approval instance, policy, delegation and organization/legal-entity/entity relationship at the triggering version. Client-supplied recipients, role labels or addresses are never authoritative.
+Recipient resolution is server-authoritative. The engine resolves current approvers, requester, affected worker, commercial change owner, invoice-batch owner, finance preparer and escalation target from the approval instance, source type, governing source contract, policy, delegation and organization/legal-entity/entity relationship at the triggering version. Client-supplied recipients, role labels or addresses are never authoritative. A missing, stale or out-of-scope mandatory source-owner relationship fails closed visibly; callers cannot redirect or omit protected recipients. Identity deduplication preserves all applicable recipient reasons or the approved deterministic precedence.
 
 ## Authorization and audit
 
@@ -76,8 +78,10 @@ Positive:
 - One `approval.action_required` event is emitted when a stage becomes pending and is delivered to the current-stage approvers.
 - A policy-blocked commercial draft emits `commercial.approval_required` to the requester/change owner before submission, then emits only `approval.action_required` after the generic stage becomes pending.
 - A batch evidence/reconciliation deficiency emits `invoice_batch.action_required` to the batch owner before submission, then emits only `approval.action_required` after the generic stage becomes pending.
-- Rejection, completion and escalation emit the canonical shared event key once with the required relationship recipients and policy class.
+- Generic rejection/correction reaches the requester plus every applicable affected-worker/commercial-owner/invoice-batch-owner/finance-preparer relationship after identity deduplication, preserving recipient reasons.
+- Completion and escalation emit the canonical shared event key once with the required relationship recipients and policy class.
 - SLA reminders/escalations are idempotent and reportable.
+- Invoice-batch correction/rejection remains possible while the batch is `Draft` or `Under Review`; final approval atomically leaves no pending stage and moves the batch to `Approved`.
 
 Negative:
 
@@ -86,9 +90,11 @@ Negative:
 - Changing a policy does not rewrite prior approval history.
 - Retrying the same transition cannot emit duplicate approval events or accepted deliveries.
 - A pending commercial or invoice-batch approval cannot also emit its domain-specific action-required event for the same operation.
-- An approval rejection/correction cannot also emit `invoice_batch.action_required` for the same decision.
+- An approval rejection/correction cannot also emit `commercial.approval_required` or `invoice_batch.action_required` for the same decision.
 - A domain module cannot replace a canonical `approval.*` key with an incompatible domain-specific key.
 - A caller cannot redirect a notification, suppress a mandatory recipient or broaden recipient scope.
+- Missing, stale, out-of-scope or partially enqueued mandatory source-owner recipients fail closed visibly.
+- Generic reopen of an invoice batch in `Approved`, `Exported`, `Billed/Confirmed` or `Cancelled` is rejected without mutating batch, approval, occupancy or export state.
 
 ## Migration and rollback
 
