@@ -1,6 +1,6 @@
 # WorkOS Implementation Status
 
-**Status date:** 2026-08-24  
+**Status date:** 2026-08-25  
 **Status authority:** Accepted capability on `main`, with active corrective work shown separately  
 **Current target:** Corrected WOS-00 governing baseline before WOS-01 source bootstrap
 
@@ -37,20 +37,21 @@ PR #1 was squash-merged to `main@880b3dc244bf516c4e535fb68e455e6153aec395`, but 
 | Pull request | Draft PR #14 |
 | Base | `main@880b3dc244bf516c4e535fb68e455e6153aec395` |
 | Historical merged PR | PR #1, merged head `e8e05e0f17e78e7ef19a35c078601ebda5881a45` |
-| Exact corrective head | Use live PR #14 metadata; exact reviewed SHA must be recorded before merge |
-| State | Four P2 follow-up corrections active after reviews `PRR_kwDOUAv8Lc8AAAABKlyssg` and `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` |
-| Current activity | Correct stale primary traceability, atomic protected-recipient persistence, executable verification evidence and corrective-hold rollback truth |
+| Exact corrective head | Use live PR #14 metadata; every moved head requires a fresh independent exact-head review before acceptance |
+| Latest independently reviewed head | `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` via review `PRR_kwDOUAv8Lc8AAAABKqRg4w` |
+| State | Two P2 authority/traceability findings from the latest review are under controller convergence; no clean final review is claimed |
+| Current activity | Align the WOS-01A primary traceability row to the complete five-part dependency law and replace stale implementation-status/review scope; then require one fresh independent review of the resulting published head |
 | Product-owner Gate B | Approved; bounded WOS-00F correction authorized |
 | WOS-01A | Draft PR #12 is dependency-blocked and earns no implementation credit |
 | Application source | Not accepted/imported into `main`; reference repository remains read-only |
-| Acceptance blocker | Resolve all PR #14 P2 threads, fresh clean exact-head independent review, controlled merge and corrected baseline recording |
+| Acceptance blocker | Fresh clean exact-head independent review of the moved PR #14 head, controlled merge and corrected baseline recording; WOS-01A additionally requires explicit controller reauthorization and PR #12 recreate/rebase |
 
 ## 4. Workstream status
 
 | Workstream | Weight | State | Accepted weight | Notes |
 |---|---:|---|---:|---|
 | WOS-00 | 8% | Corrective hold | 0% | PR #1 merged, then Round-14 defects triggered WOS-00F PR #14 |
-| WOS-01 | 10% | Dependency-blocked | 0% | Issue #3 / Draft PR #12; no source-bootstrap acceptance before corrected WOS-00 baseline |
+| WOS-01 | 10% | Dependency-blocked | 0% | Issue #3 / Draft PR #12; no source-bootstrap acceptance before corrected WOS-00 baseline and full five-part reauthorization gate |
 | WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup |
 | WOS-03 | 10% | Not started | 0% | Issue #5; modular platform and CI/migrations |
 | WOS-04 | 16% | Not started | 0% | Issue #6; engagements/work capture |
@@ -66,7 +67,7 @@ PR #1 was squash-merged to `main@880b3dc244bf516c4e535fb68e455e6153aec395`, but 
 | Release | State | Exit criteria |
 |---|---|---|
 | v0.1.0 | Corrective hold | Gate B approved; WOS-00F PR #14 must be clean-reviewed/merged and corrected exact `main` baseline recorded |
-| v0.2.0 | Blocked | WOS-01 clean source and neutral configurable brand after corrected v0.1.0 baseline |
+| v0.2.0 | Blocked | WOS-01 clean source and neutral configurable brand after corrected v0.1.0 baseline plus explicit controller reauthorization/recreate-or-rebase gate |
 | v0.4.0 | Not started | Organization and platform foundation |
 | v0.5.0 | Not started | Engagements, work capture and policy engine |
 | v0.7.0 | Not started | Commercial and invoice-readiness engine |
@@ -78,7 +79,7 @@ PR #1 was squash-merged to `main@880b3dc244bf516c4e535fb68e455e6153aec395`, but 
 
 - Preserve the authorized reference source unchanged and read-only.
 - Do not resume, rebase, merge or award credit to WOS-01A PR #12 until WOS-00F is clean-reviewed and merged, the corrected `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases PR #12 from that baseline.
-- Import only the pinned authorized source commit after the corrected WOS-00 baseline is accepted.
+- Import only the pinned authorized source commit after the corrected WOS-00 baseline is accepted and the complete WOS-01A resume gate is satisfied.
 - Do not merge company-branded imported runtime content; neutralize it in the controlled WOS-01 boundary before any clean-source merge.
 - Keep transaction-specific pricing, valuation, licensing, assignment and negotiation strategy outside the product repository.
 - Treat WorkOS as a temporary configurable name.
@@ -112,24 +113,27 @@ PR #1 was squash-merged to `main@880b3dc244bf516c4e535fb68e455e6153aec395`, but 
 11. `cd45de9181858d722e2974e92d6aaa53ba04ec17`, review `PRR_kwDOUAv8Lc8AAAABKiBoBw`: two P1, one P2.
 12. `a023ebef80fad7aea354f3759801a430de18cb6e`, review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`: one P1.
 13. `86484cde78f1350a4a0a3f55f368f2e919353663`, review `PRR_kwDOUAv8Lc8AAAABKiIDxA`: one P1, one P2.
-14. Post-merge review of PR #1 head `e8e05e0f17e78e7ef19a35c078601ebda5881a45`: one P1 (`PRRT_kwDOUAv8Lc6beCXL`) and one P2 (`PRRT_kwDOUAv8Lc6beCXQ`), triggering WOS-00F.
-15. Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of WOS-00F head `039789b7860d38115c7dfbd39dd26c0a36314a6a`: three P2 covering canonical recipient matrices, issue ownership and stale implementation status; those findings were corrected and resolved.
-16. Review `PRR_kwDOUAv8Lc8AAAABKlyssg` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf`: P2 `PRRT_kwDOUAv8Lc6bneWi` for stale primary traceability and P2 `PRRT_kwDOUAv8Lc6bneWu` for missing atomic protected-recipient persistence.
-17. Review `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of the same exact head: P2 `PRRT_kwDOUAv8Lc6bnl_f` for missing actual verification outcomes and P2 `PRRT_kwDOUAv8Lc6bnl_i` for rollback wording that did not preserve the corrective hold.
-18. Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264`: three P2 findings covering stale WOS-01 authorization, a forbidden-term evidence contradiction and unsupported Mermaid-validation PASS evidence. This convergence corrects those findings but does not claim a clean final review.
+14. Post-merge review of PR #1 head `e8e05e0f17e78e7ef19a35c078601ebda5881a45`, review `PRR_kwDOUAv8Lc8AAAABKiPf2w`: one P1 (`PRRT_kwDOUAv8Lc6beCXL`) and one P2 (`PRRT_kwDOUAv8Lc6beCXQ`), triggering WOS-00F.
+15. Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of WOS-00F head `039789b7860d38115c7dfbd39dd26c0a36314a6a`: three P2 covering canonical recipient matrices, issue ownership and stale implementation status; corrected.
+16. Review `PRR_kwDOUAv8Lc8AAAABKlyssg` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf`: P2 `PRRT_kwDOUAv8Lc6bneWi` for stale primary traceability and P2 `PRRT_kwDOUAv8Lc6bneWu` for missing atomic protected-recipient persistence; corrected.
+17. Review `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of the same exact head: P2 `PRRT_kwDOUAv8Lc6bnl_f` for missing actual verification outcomes and P2 `PRRT_kwDOUAv8Lc6bnl_i` for rollback wording that did not preserve the corrective hold; corrected.
+18. Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264`: three P2 findings covering stale WOS-01 authorization, a forbidden-term evidence contradiction and unsupported Mermaid-validation PASS evidence; corrected.
+19. Review `PRR_kwDOUAv8Lc8AAAABKnm5YA` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264`: two P2 findings covering missing corrected-main baseline recording in backlog authority and incomplete A–I adversarial evidence; corrected.
+20. Review `PRR_kwDOUAv8Lc8AAAABKpzHEw` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed`: two P2 current-authority findings; corrected.
+21. Review `PRR_kwDOUAv8Lc8AAAABKp-K9w` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed`: one P2 current-authority finding; corrected.
+22. Review `PRR_kwDOUAv8Lc8AAAABKqRg4w` of exact head `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6`: two P2 findings — `PRRT_kwDOUAv8Lc6bx0dl` for the incomplete primary WOS-01A traceability gate and `PRRT_kwDOUAv8Lc6bx0du` for stale implementation-status/review scope. This controller convergence addresses both but does not claim a clean final review.
 
 The detailed resolution authority is `docs/evidence/v0.1.0/DOC-WOS-00-002-REVIEW-RESOLUTION.md` plus the WOS-00F correction report. No clean final WOS-00F review is claimed yet.
 
 ## 8. Next controller actions
 
-1. Publish the bounded Round-18 follow-up convergence on Draft PR #14 and verify the exact moved head.
-2. Resolve the current P2 review threads only after the published content is verified.
-3. Align live issues #2/#3/#7/#8/#9/#13 to their correct workstream ownership and corrective/dependency state.
-4. Request a fresh independent Codex/Sol review of the exact PR #14 head.
-5. Resolve any new P0/P1/P2 finding and re-review any moved head.
-6. If clean, mark PR #14 ready, re-read the head and squash-merge with `expected_head_sha`.
-7. Record the corrected exact `main` baseline; close issue #13 and return issue #2 to completed only after merge verification.
-8. Only then recreate/rebase and explicitly unblock the WOS-01 source-bootstrap work from the corrected baseline.
+1. Verify the authority/traceability convergence is fully published on the existing Draft PR #14 branch and re-read the exact moved head.
+2. Revalidate the two Round-22 P2 threads against that published head; resolve them only when the corrected content is present and the threads are outdated or demonstrably addressed.
+3. Request exactly one fresh independent Codex/Sol review of the exact moved PR #14 head against the frozen WOS-00F A–I closure matrix.
+4. Any new P0/P1/P2 blocks Ready/merge and must be corrected on the same PR followed by another exact-head review.
+5. If the fresh review is clean, mark PR #14 ready only under repository-defined authority, re-read the head and squash-merge with an expected-head guard.
+6. Record the corrected exact `main` baseline; close issue #13 and return issue #2 to completed only after merge verification.
+7. Only after the corrected baseline is recorded may the controller explicitly reauthorize WOS-01A; PR #12 must then be recreated or rebased from that corrected baseline before source import resumes.
 
 ## 9. Status update template
 
