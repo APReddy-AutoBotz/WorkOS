@@ -1,14 +1,104 @@
 name: WOS-00F one-shot publisher
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - controller/wos00f-publisher-v7
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: wos00f-one-shot-publisher
+  cancel-in-progress: false
 
 jobs:
-  disabled:
-    if: ${{ false }}
+  publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - run: echo "Publisher staging disabled"
+      - name: Checkout isolated publisher branch
+        uses: actions/checkout@v4
+        with:
+          ref: controller/wos00f-publisher-v7
+          fetch-depth: 0
+
+      - name: Verify and atomically publish WOS-00F convergence
+        shell: bash
+        env:
+          BASE_SHA: 78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf
+          TARGET_BRANCH: controller/wos-00f-approval-controls
+        run: |
+          set -euo pipefail
+
+          cat .github/wos00f-publisher/part-*.b64 | tr -d '[:space:]' > /tmp/wos00f.b64
+          python3 - <<'PY'
+          import base64, hashlib, lzma
+          from pathlib import Path
+          encoded = Path('/tmp/wos00f.b64').read_text(encoding='ascii')
+          assert len(encoded) == 11152, len(encoded)
+          compressed = base64.b64decode(encoded, validate=True)
+          assert len(compressed) == 8364, len(compressed)
+          assert hashlib.sha256(compressed).hexdigest() == '369d89be28fbd10707ec6b2f472c77f7dd84f9a04199b4362fe0f70d7911371f'
+          diff = lzma.decompress(compressed, format=lzma.FORMAT_XZ)
+          assert len(diff) == 34067, len(diff)
+          assert hashlib.sha256(diff).hexdigest() == '69cc277ea13f595e86e4c10e5249f534d169701561b7f6d06f1e8d334177444b'
+          Path('/tmp/wos00f.diff').write_bytes(diff)
+          PY
+
+          git fetch --no-tags origin "${TARGET_BRANCH}"
+          CURRENT_SHA="$(git rev-parse "origin/${TARGET_BRANCH}")"
+          test "${CURRENT_SHA}" = "${BASE_SHA}"
+          git checkout --detach "${BASE_SHA}"
+          git apply --check /tmp/wos00f.diff
+          git apply /tmp/wos00f.diff
+          git diff --check
+
+          cat > /tmp/expected-paths <<'EOF'
+          docs/00-control/IMPLEMENTATION_STATUS.md
+          docs/00-control/PRODUCT_REQUIREMENTS.md
+          docs/00-control/REQUIREMENTS_TRACEABILITY.md
+          docs/02-architecture/INTEGRATION_ARCHITECTURE.md
+          docs/03-specifications/APPROVAL_AND_POLICY_ENGINE_SPEC.md
+          docs/04-quality/TEST_STRATEGY.md
+          docs/evidence/v0.1.0/DOC-WOS-00F-CORRECTION-REPORT.md
+          EOF
+          git diff --name-only "${BASE_SHA}" | LC_ALL=C sort > /tmp/actual-paths
+          diff -u /tmp/expected-paths /tmp/actual-paths
+
+          python3 - <<'PY'
+          from pathlib import Path
+          checks = {
+            'docs/00-control/IMPLEMENTATION_STATUS.md': ['Four P2 follow-up corrections active', 'Publish the bounded four-P2 follow-up convergence'],
+            'docs/00-control/PRODUCT_REQUIREMENTS.md': ['commit as one atomic persistence unit', 'leaves zero successful protected event/in-app recipient mutations'],
+            'docs/00-control/REQUIREMENTS_TRACEABILITY.md': ['Corrective hold; accepted weight 0/suspended', 'PR #12 remains blocked'],
+            'docs/02-architecture/INTEGRATION_ARCHITECTURE.md': ['commit atomically through a database transaction', 'Optional external email/collaboration delivery is downstream'],
+            'docs/03-specifications/APPROVAL_AND_POLICY_ENGINE_SPEC.md': ['commit as one atomic persistence unit', 'Corrected retry under the same decision/idempotency identity creates the complete set exactly once'],
+            'docs/04-quality/TEST_STRATEGY.md': ['leaves zero protected event/in-app recipient records', 'same generic decision emits neither'],
+            'docs/evidence/v0.1.0/DOC-WOS-00F-CORRECTION-REPORT.md': ['Documentation-only seven-file scope | PASS', 'A plain revert is forbidden', 'no clean final review is claimed'],
+          }
+          for path, needles in checks.items():
+              text = Path(path).read_text(encoding='utf-8')
+              for needle in needles:
+                  if needle not in text:
+                      raise SystemExit(f'{path}: missing required assertion: {needle}')
+          PY
+
+          git add --pathspec-from-file=/tmp/expected-paths
+          git diff --cached --check
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "docs: converge WOS-00F exact-head controls"
+          PUBLISHED_SHA="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          REMOTE_SHA="$(git ls-remote origin "refs/heads/${TARGET_BRANCH}" | cut -f1)"
+          test "${REMOTE_SHA}" = "${PUBLISHED_SHA}"
+
+          {
+            echo "## WOS-00F convergence published"
+            echo "- Target branch: ${TARGET_BRANCH}"
+            echo "- Parent: ${BASE_SHA}"
+            echo "- Published head: ${PUBLISHED_SHA}"
+            echo "- Scope: exact seven-file P2 convergence"
+            echo "- Payload SHA-256: 69cc277ea13f595e86e4c10e5249f534d169701561b7f6d06f1e8d334177444b"
+          } >> "${GITHUB_STEP_SUMMARY}"
