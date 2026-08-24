@@ -286,4 +286,4 @@ A package is done only when code/schema, applicable tests, authorization, migrat
 - **PR-012:** implement the canonical batch transitions, atomic approval/occupancy invariants, protected cancellation/replacement, failed-export behavior, reversal/supersession and correction-batch evidence. It owns API/database/browser agreement.
 - **PR-013:** implement bounded server-side source-owner resolution, scope validation, deduplication/reasons, fail-closed protected delivery, idempotency and same-decision event exclusivity.
 
-These assignments are retained while `main@880b3dc244bf516c4e535fb68e455e6153aec395` is under WOS-00F corrective hold. WOS-01A PR #12 is not ready to resume until publication, clean exact-head review and merge.
+These assignments are retained while `main@880b3dc244bf516c4e535fb68e455e6153aec395` is under WOS-00F corrective hold. WOS-01A PR #12 is not ready to resume until PR #14 is published, clean-reviewed and merged, the corrected exact `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases PR #12 from that corrected baseline.

@@ -196,7 +196,7 @@ Codex correction tasks sometimes produced local commits that could not be pushed
 
 ## 7. Gate B state
 
-Product-owner Gate B approval is recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`. It authorizes the controller to complete non-material review corrections, obtain the clean final exact-head review, squash-merge PR #1, establish `v0.1.0` and begin WOS-01. The approval does not waive the clean-review or exact-head merge controls.
+Product-owner Gate B approval is recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`. Its historical authorization to begin WOS-01 after PR #1 merged is superseded by the WOS-00F corrective hold. Gate B remains approved, but WOS-01A may resume only after PR #14 is clean-reviewed and merged, the corrected exact `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases PR #12. The approval does not waive clean-review or exact-head merge controls.
 
 ## 8. Open gates
 
@@ -207,3 +207,5 @@ Product-owner Gate B approval is recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`
 ## 9. Round 14 post-merge correction
 
 The independent post-merge review of WOS-00 head `e8e05e0f17e78e7ef19a35c078601ebda5881a45` reported P1 `PRRT_kwDOUAv8Lc6beCXL` (generic invoice-batch reopen conflicted with the canonical lifecycle) and P2 `PRRT_kwDOUAv8Lc6beCXQ` (generic rejection/correction omitted applicable source owners). PR #1 had already merged when these findings were published. WOS-00F corrects the governing approval specification, architecture, deterministic vectors, implementation ownership and release gates. The merged `main@880b3dc244bf516c4e535fb68e455e6153aec395` is therefore under corrective hold rather than a final clean baseline; PR #12 remains blocked. Original threads remain unresolved until the correction reaches `main`.
+
+Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` of WOS-00F head `c6185a7f5b39dda71c4198c305263e65e85f8264` reported three P2 findings: stale WOS-01 authorization, a forbidden-term evidence contradiction and unsupported Mermaid-validation PASS evidence. The bounded follow-up supersedes the historical authorization and corrects the evidence classifications; it does not claim a clean final review.

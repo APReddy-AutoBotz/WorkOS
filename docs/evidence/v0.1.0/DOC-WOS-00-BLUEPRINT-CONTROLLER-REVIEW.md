@@ -94,7 +94,7 @@ A fresh independent review of the moved exact GitHub head is mandatory before me
 
 ## Gate B record
 
-`DOC-WOS-00-003-GATE-B-APPROVAL.md` records the product owner's 2026-08-23 approval. It authorizes non-material review corrections, clean exact-head review, squash merge, `v0.1.0` baseline and WOS-01 start after merge. It does not waive engineering, provenance, review-thread or exact-head controls.
+`DOC-WOS-00-003-GATE-B-APPROVAL.md` records the product owner's 2026-08-23 approval. Gate B remains approved, but WOS-00F corrective hold supersedes its historical WOS-01-after-merge trigger. WOS-01A remains blocked until PR #14 is clean-reviewed and merged, the corrected exact `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases PR #12. This dependency supersession does not waive engineering, provenance, review-thread or exact-head controls.
 
 ## Open gates
 
@@ -108,4 +108,4 @@ Final commercial name/trademark, transaction-specific legal/commercial terms, bu
 
 ## Post-merge controller disposition
 
-Round 14 found one P1 invoice-batch reopen conflict and one P2 missing source-owner recipient rule after PR #1 merged. Draft PR #14 is the bounded WOS-00F correction. The previous baseline is under corrective hold, no tag is moved or overwritten, and WOS-01A PR #12 remains blocked pending publication, an independent exact-head review and merge. No live issue or original-thread state is changed before branch publication.
+Round 14 found one P1 invoice-batch reopen conflict and one P2 missing source-owner recipient rule after PR #1 merged. Draft PR #14 is the bounded WOS-00F correction. The previous baseline is under corrective hold, no tag is moved or overwritten, and WOS-01A PR #12 remains blocked pending publication, an independent clean exact-head review, merge, corrected-baseline recording and explicit controller reauthorization. Round-18 review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` found three P2 evidence/authority inconsistencies at `c6185a7f5b39dda71c4198c305263e65e85f8264`; their correction does not itself claim a clean review. No live issue or original-thread state is changed before branch publication.

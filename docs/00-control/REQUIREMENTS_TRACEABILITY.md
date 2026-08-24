@@ -106,8 +106,9 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 15. Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of WOS-00F head `039789b7860d38115c7dfbd39dd26c0a36314a6a` — three P2 consistency findings, subsequently corrected and resolved.
 16. Review `PRR_kwDOUAv8Lc8AAAABKlyssg` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` — active P2 `PRRT_kwDOUAv8Lc6bneWi` (stale primary traceability) and P2 `PRRT_kwDOUAv8Lc6bneWu` (atomic protected-recipient creation).
 17. Review `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of the same exact head — active P2 `PRRT_kwDOUAv8Lc6bnl_f` (actual verification outcomes) and P2 `PRRT_kwDOUAv8Lc6bnl_i` (rollback must preserve the corrective hold).
+18. Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264` — three P2 findings: stale WOS-01 authorization, forbidden-term scan contradiction and Mermaid-validation overclaim. The follow-up corrects them without claiming a clean final review.
 
-This correction addresses the four active findings but does not claim a clean final review. The next acceptance evidence must be a fresh clean independent review of the exact moved PR #14 head.
+The WOS-00F corrective hold supersedes every historical authorization to begin WOS-01 after PR #1 merged. PR #12 remains blocked until PR #14 is clean-reviewed and merged, the corrected exact `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases it. This correction addresses the active findings but does not claim a clean final review; the next acceptance evidence must be a fresh clean independent review of the exact moved PR #14 head.
 
 ## 5. Evidence taxonomy
 

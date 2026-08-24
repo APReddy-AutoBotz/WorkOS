@@ -15,10 +15,11 @@ This documentation-only correction addresses the WOS approval, invoice and integ
 | ADR-001–008 structure | PASS | Repository Python ADR validator confirmed all eight ADRs contain status and decision content. |
 | Relative Markdown links | PASS | Repository Python relative-link validator resolved all documentation-relative targets. |
 | Issue-template front matter | PASS | Repository Python validator accepted all three issue templates. |
-| Mermaid/Markdown fences | PASS | Repository Python fence validator accepted all 11 Mermaid blocks. |
-| Forbidden terms / owner-only strategy / credential-like values | PASS | Added-line `rg` scans reported no prohibited introduced value. |
-| Documentation-only seven-file scope | PASS | `git diff --name-only 78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` matched the seven authorized paths and introduced no application, dependency, migration, helper or workflow file. |
-| Focused lifecycle, notification, atomicity and A–H adversarial assertions | PASS | Focused Python/`rg` assertions confirmed approval finality, occupancy, bounded authorization, atomic zero-partial recipient state, corrected retry, external-channel isolation, event exclusivity, corrective hold and PR #12 block. |
+| Mermaid-aware validation | NOT RUN | Eleven Mermaid blocks were extracted, but `npx --yes -p @mermaid-js/mermaid-cli mmdc` could not obtain the parser because the package registry returned HTTP 403. Markdown fence balancing is not Mermaid validation and no Mermaid PASS is claimed. |
+| Forbidden-term allowlist | PASS | Repository-wide allowlist validation found the reference-company term only in `AGENTS.md`, `PROVENANCE.md`, `docs/00-control/PROGRAM_CHARTER.md`, `docs/00-control/DECISION_LOG.md`, `docs/tasks/WOS-00-BLUEPRINT-COMPLETION.md` and `docs/tasks/WOS-00F-POST-MERGE-APPROVAL-CONTROLS.md`; the non-allowlisted status literal was removed. |
+| Owner-only strategy / credential-like values | PASS | Added-line `rg` scans reported no prohibited introduced value. |
+| Documentation-only eight-file scope | PASS | `git diff --name-only c6185a7f5b39dda71c4198c305263e65e85f8264` matched the eight authorized authority/evidence paths and introduced no application, dependency, migration, helper or workflow file. |
+| Focused lifecycle, notification, atomicity and A–I adversarial assertions | PASS | Focused Python/`rg` assertions confirmed approval finality, occupancy, bounded authorization, atomic zero-partial recipient state, corrected retry, external-channel isolation, event exclusivity, corrective-hold supersession, baseline-recording prerequisite and retained authority/evidence consistency. |
 | Whitespace integrity | PASS | `git diff --check`. |
 | Application build/runtime/API/migration/browser | SKIP / NOT RUN | Documentation/control-only diff contains no runnable artifact, schema, dependency or deployment change. |
 
@@ -45,6 +46,8 @@ Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of head `039789b7860d38115c7dfbd39dd26c0a363
 3. `IMPLEMENTATION_STATUS.md` retained stale pre-merge PR #1 actions and WOS-01 authorization language.
 
 The convergence pass directly updates the canonical product, integration, approval and test matrices; fixes this issue ownership map; and replaces the primary status authority with the actual PR #14 corrective-hold state. Reviews `PRR_kwDOUAv8Lc8AAAABKlyssg` and `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` then identified four active P2s: `PRRT_kwDOUAv8Lc6bneWi`, `PRRT_kwDOUAv8Lc6bneWu`, `PRRT_kwDOUAv8Lc6bnl_f` and `PRRT_kwDOUAv8Lc6bnl_i`. This follow-up corrects stale primary traceability, atomic protected-recipient persistence, executable verification outcomes and rollback truth. PR #14 remains Draft, PR #12 remains blocked, and no clean final review is claimed by these edits themselves.
+
+Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264` then identified three P2s: stale WOS-01 authorization, a forbidden-term scan contradiction and Mermaid validation overclaim. This Round-18 convergence supersedes the historical authorization, removes the non-allowlisted status literal, classifies genuine Mermaid validation as `NOT RUN`, and extends the retained adversarial pass through matrix A–I. It does not claim a clean final review.
 
 ## Security and rollback
 
