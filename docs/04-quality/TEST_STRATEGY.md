@@ -202,3 +202,9 @@ Use synthetic organization, worker, client and commercial data. Fixtures intenti
 ## PR and release expectations
 
 Affected tests run in the implementation PR. The release candidate reruns the full matrix at one exact head and immutable artifact. Flaky or skipped high-risk tests are release blockers until disposition is approved and documented.
+
+## WOS-00F deterministic vectors
+
+PR-009/PR-012 lifecycle vectors cover correction/rejection in `Draft` and `Under Review`; atomic final approval into `Approved` with no pending approval; stable no-write generic-reopen conflicts for `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`; authorized pre-export cancellation with immutable history, atomic occupancy release and replacement/new approval; failed export retaining `Approved`; and post-export reversal/supersession with a new correction batch/approval. Concurrent approve/correct/reopen and stale/replayed requests must never create pending approval on an exportable/final batch or duplicate/release the wrong occupancy. API, database and browser-role observations must agree, including unauthorized negative cases.
+
+PR-009/PR-013 notification vectors cover distinct requester/commercial owner; distinct requester/batch owner/finance preparer; one identity holding multiple relationships with one record and all reasons or deterministic precedence; affected worker inclusion; mandatory stale/out-of-scope relationship failure; attempted caller redirect/omission; partial protected enqueue failure; retry/replay without duplicate record or delivery evidence; and absence of `commercial.approval_required` and `invoice_batch.action_required` for the same generic decision. Resolution tests use bounded source-type fixtures and prove no unrelated relationship fanout.

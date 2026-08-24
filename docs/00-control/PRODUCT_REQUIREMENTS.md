@@ -715,3 +715,11 @@ A requirement may be marked accepted only when:
 8. The exact accepted commit is identified.
 
 Statements such as “implemented,” “code complete” or “tests should pass” are not acceptance evidence without the corresponding executable results.
+
+## WOS-00F approval-control clarification
+
+Invoice-batch approval is final for its batch version. Correction or rejection may return only a `Draft` or `Under Review` batch to its valid correctable state. Final approval atomically enters `Approved` with no pending approval. A generic reopen must be rejected for `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled` batches without changing approval, batch, occupancy or export state.
+
+Before successful export, material correction of an approved batch requires protected cancellation with reason and audit, atomic occupancy release, and a replacement batch with a new approval. Failed export leaves the batch approved. After export, correction uses versioned reversal or supersession, still-eligible approved-unbilled items, and a new correction batch and approval. Original approval, membership and lineage remain immutable; `Cancelled` is terminal.
+
+The canonical `approval.rejected_or_correction_required` notification has bounded, source-type-specific, deduplicated recipients resolved from authoritative server relationships: requester, affected worker where applicable, commercial change owner for commercial sources, and invoice-batch owner and finance preparer where applicable. Mandatory stale or out-of-scope relationships fail closed and visibly; callers cannot redirect or omit recipients. The event is mutually exclusive for the same decision with `commercial.approval_required` and `invoice_batch.action_required`, and replay is idempotent.

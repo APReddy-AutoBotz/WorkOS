@@ -191,3 +191,7 @@ Restore rehearsal:
 Buyer UAT:
 Owner Gate D approval:
 ```
+
+## WOS-00F corrective traceability
+
+The WOS approval, invoice and integration requirement families are clarified by WOS-00F. PR-009 owns generic approval finality, stable conflicts and authorization evidence; PR-012 owns invoice-batch cancellation/replacement, reversal/supersession, occupancy and export evidence; PR-013 owns bounded server-side recipient resolution, deduplication, delivery idempotency and event exclusivity. Round-14 evidence is recorded in the WOS-00 review resolution and correction report. PR #12 remains blocked while the merged baseline is under corrective hold.

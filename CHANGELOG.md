@@ -22,6 +22,17 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 The `v0.1.0` milestone will represent the accepted governing blueprint and controlled commercial repository baseline. It will not represent a runnable product.
 
+## Unreleased — WOS-00F corrective hold
+
+### Fixed
+
+- Corrected invoice-batch approval finality and the protected replacement and post-export correction paths.
+- Corrected rejection/correction notification ownership so mandatory source owners are resolved by the server.
+
+### Security
+
+- Reopen, recipient redirection and stale relationship inputs now fail closed in the governing contracts. The merged WOS-00 baseline remains under corrective hold and WOS-01A remains blocked until this correction is independently reviewed and merged.
+
 ## Changelog rules
 
 - Use `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` and `Security` headings as applicable.

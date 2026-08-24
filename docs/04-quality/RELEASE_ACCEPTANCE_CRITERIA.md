@@ -73,3 +73,7 @@ The buyer or deployment owner confirms:
 - **Gate D:** final v1 release and buyer-handover approval.
 
 Acceptance is recorded against a commit/tag and artifact; later changes require renewed evidence.
+
+## WOS-00F release hold
+
+The merged WOS-00 baseline is not clean while Round-14 P1/P2 remains unmerged. Release evidence must prove invoice-batch approval finality, forbidden reopen states, protected cancellation/replacement, forward-only post-export correction, immutable history, occupancy correctness, failed-export behavior, bounded authoritative recipient resolution, fail-closed relationship failures, caller non-redirection, deduplication/idempotency and same-decision event exclusivity. PR-009, PR-012 and PR-013 must retain their assigned executable evidence. WOS-01A remains blocked until an exact-head clean review and correction merge.

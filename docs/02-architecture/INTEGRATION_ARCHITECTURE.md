@@ -153,3 +153,7 @@ Adapters define timeout, retry, backoff and idempotency behavior. Retries cannot
 ## Health and operations
 
 Provider health reports mode, configuration readiness, mapping gaps, recent success/failure and last checked time without displaying secrets. Finance integration health reports unresolved control-total or confirmation failures without exposing restricted line values. Notification health reports event/template, recipient relationship, policy class, preference decision, queue/retry and delivery failures using sanitized metadata. Buyers assign an operational owner and alert path before production activation.
+
+## Rejection/correction recipient resolution
+
+For `approval.rejected_or_correction_required`, the notification adapter receives a bounded server-resolved recipient set, never a caller-selected address list. Resolution is restricted by source type and organization/legal-entity/data scope and includes the requester, affected worker where applicable, commercial change owner, or invoice-batch owner and finance preparer as applicable. Identity deduplication retains all applicable reasons using deterministic precedence. A missing, stale or out-of-scope mandatory relationship, or partial protected-recipient enqueue, is a visible fail-closed control failure. The decision/event identity makes retry idempotent. The generic event cannot coexist for the same decision with `commercial.approval_required` or `invoice_batch.action_required`.

@@ -139,3 +139,7 @@ Blocking findings:
 Owner decision required:
 Next controller action:
 ```
+
+## WOS-00F corrective hold
+
+`main@880b3dc244bf516c4e535fb68e455e6153aec395` is a merged blueprint baseline under corrective hold after the post-merge Round-14 P1/P2 findings. Draft PR #14 is the sole corrective work package. WOS-01A PR #12 remains blocked until this correction is published, independently clean-reviewed and merged. No runtime capability is claimed by this documentation-only work.

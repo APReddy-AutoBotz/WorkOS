@@ -203,3 +203,7 @@ Product-owner Gate B approval is recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`
 - Fresh clean independent Codex/Sol review at the exact moved GitHub head.
 - Resolution of any remaining blocking finding.
 - Exact-head squash merge and `v0.1.0` baseline.
+
+## 9. Round 14 post-merge correction
+
+The independent post-merge review of WOS-00 head `e8e05e0f17e78e7ef19a35c078601ebda5881a45` reported P1 `PRRT_kwDOUAv8Lc6beCXL` (generic invoice-batch reopen conflicted with the canonical lifecycle) and P2 `PRRT_kwDOUAv8Lc6beCXQ` (generic rejection/correction omitted applicable source owners). PR #1 had already merged when these findings were published. WOS-00F corrects the governing approval specification, architecture, deterministic vectors, implementation ownership and release gates. The merged `main@880b3dc244bf516c4e535fb68e455e6153aec395` is therefore under corrective hold rather than a final clean baseline; PR #12 remains blocked. Original threads remain unresolved until the correction reaches `main`.

@@ -141,3 +141,7 @@ Every request receives a correlation ID. Structured logs record safe route, stat
 ## Compatibility and deprecation
 
 Compatibility routes have an owner, migration plan, tests and removal release. A compatibility endpoint must not recreate a raw-source-to-batch shortcut, duplicate current line occupancy, split one approved-unbilled item, duplicate final-state export or weaken occupancy state semantics. Breaking changes require versioned contracts and release notes.
+
+## Invoice-batch approval correction contract
+
+The server atomically finalizes an invoice-batch approval and moves the batch to `Approved`; no pending approval may coexist with `Approved`, `Exported`, `Billed/Confirmed` or `Cancelled`. Generic reopen requests for those states, including stale or replayed requests, return a stable conflict and perform no writes. Pre-export correction is a protected cancellation command that verifies authority and version, records reason/audit, releases occupancy atomically, and creates no implicit approval; a replacement batch and approval use current eligible items. Failed export retains `Approved`. Post-export correction uses versioned reversal/supersession and a separately approved correction batch. API, persistence and role navigation expose the same state machine.

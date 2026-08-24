@@ -173,3 +173,7 @@ The product-owner Gate C review occurs only after PR-010, PR-011 and PR-012 are 
 ## Migration and rollback
 
 Commercial tables are additive and feature gated. Seeded vectors and neutral defaults are synthetic. The invoice-readiness migration creates and validates the database-unique current-occupancy control and detects ambiguous duplicates before enabling line creation. Before export/final occupancy use controlled cancellation/disable where valid; after snapshots, eligibility events, register items, accepted export artifacts, Exported/Billed/Confirmed batches or downstream confirmations exist, use forward corrections and preserve evidence.
+
+## Invoice-batch correction boundary
+
+An approved batch is never returned to review. Before export, protected cancellation releases current occupancy atomically and a replacement/new approval is built only from currently eligible items. Failed export retains approved occupancy and final approval. Exported or billed/confirmed history is immutable; correction is forward-only through reversal/supersession eligibility and a new correction batch and approval. This specialization extends the canonical invoice lifecycle and does not create a competing state machine.

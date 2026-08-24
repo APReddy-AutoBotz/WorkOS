@@ -105,3 +105,7 @@ A fresh independent review of the moved exact GitHub head is mandatory before me
 ## Deferred owner decisions
 
 Final commercial name/trademark, transaction-specific legal/commercial terms, buyer-specific RPO/RTO/support targets and first-buyer policy choices remain external or deferred and do not block the technical blueprint.
+
+## Post-merge controller disposition
+
+Round 14 found one P1 invoice-batch reopen conflict and one P2 missing source-owner recipient rule after PR #1 merged. Draft PR #14 is the bounded WOS-00F correction. The previous baseline is under corrective hold, no tag is moved or overwritten, and WOS-01A PR #12 remains blocked pending publication, an independent exact-head review and merge. No live issue or original-thread state is changed before branch publication.

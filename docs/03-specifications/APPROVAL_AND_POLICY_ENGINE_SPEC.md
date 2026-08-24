@@ -93,3 +93,12 @@ Negative:
 ## Migration and rollback
 
 Existing approval records map to generic instances with preserved entity links and decisions. Compatibility endpoints remain until parity tests pass. Rollback preserves migrated records and disables new policy routes rather than deleting evidence. Notification-event migration preserves event/idempotency identities so replay cannot create duplicate records.
+
+## WOS-00F invoice-batch specialization
+
+- Correction/rejection is allowed while an invoice batch is `Draft` or `Under Review`. Final approval atomically records the terminal decision and enters `Approved`, leaving no pending instance.
+- Invoice-batch generic reopen is forbidden for `Approved`, `Exported`, `Billed/Confirmed` and terminal `Cancelled`. A stale, concurrent or replayed reopen returns the same stable conflict with no approval, batch, membership, occupancy or export mutation.
+- Before successful export, an authorized material correction performs protected `Approved → Cancelled`, reason and audit recording, and occupancy release in one transaction. A replacement version selects still-current eligible items and has a new approval; prior approval and membership history are immutable.
+- Failed export leaves `Approved` and does not reopen approval. After export, authorized versioned reversal/supersession creates eligibility for a new correction batch and approval; exported/billed versions are not reopened or cancelled.
+
+For `approval.rejected_or_correction_required`, the server resolves a finite recipient set from the source type and authoritative scoped relationships. Requester is mandatory; affected worker is included where applicable; commercial-source decisions include the commercial change owner; invoice-batch decisions include the batch owner and finance preparer where applicable. Explicit source-owner relationships may be added only by the governing source contract. Deduplicate by recipient identity while retaining every reason (or deterministic precedence). Persist source/version, decision/operation, recipient/reasons, scope, template, policy class and idempotency identity. Caller omission or redirection is ignored and denied. Mandatory stale/out-of-scope resolution or partial protected delivery fails closed visibly. Same-decision retry is idempotent, and this event is mutually exclusive with both domain action events.
