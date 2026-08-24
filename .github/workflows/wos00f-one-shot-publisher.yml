@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - controller/wos00f-publisher-v7
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -14,12 +18,14 @@ concurrency:
 
 jobs:
   publish:
+    if: github.head_ref == 'controller/wos00f-publisher-v7' || github.ref_name == 'controller/wos00f-publisher-v7'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout isolated publisher branch
         uses: actions/checkout@v4
         with:
+          ref: controller/wos00f-publisher-v7
           fetch-depth: 0
 
       - name: Verify payload and publish exact correction
@@ -28,8 +34,6 @@ jobs:
           BASE_SHA: 2a288ea22d8aa53d81ae6804778a2f8932046829
           TARGET_BRANCH: controller/wos-00f-approval-controls
           PUBLISHER_BRANCH: controller/wos00f-publisher-v7
-          XZ_SHA256: f28645f504bfea36520d2f789d592069dca541991d8c25dc3bb62998cb2cd5ec
-          DIFF_SHA256: 13b69d76969f07ab9b37b43168b7c0080c51f993d3f2fa09f18acbc721176322
         run: |
           set -euo pipefail
 
@@ -130,5 +134,3 @@ jobs:
             echo "- Base: ${BASE_SHA}"
             echo "- Scope: 14 documentation/control files"
           } >> "${GITHUB_STEP_SUMMARY}"
-
-          git push origin --delete "${PUBLISHER_BRANCH}" || true
