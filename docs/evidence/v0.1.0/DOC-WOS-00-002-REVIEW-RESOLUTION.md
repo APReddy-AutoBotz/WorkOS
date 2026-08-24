@@ -7,7 +7,7 @@
 **Active corrective pull request:** #14  
 **Active branch:** `controller/wos-00f-approval-controls`  
 **Historical merged baseline:** `main@880b3dc244bf516c4e535fb68e455e6153aec395`  
-**Status:** Original blueprint reviews and subsequent WOS-00F corrective reviews are recorded below. WOS-00 remains under corrective hold; the current corrective head must receive a fresh independent review with no P0/P1/P2 before Ready/merge. No review summarized in this writer task is itself a clean-final acceptance.
+**Status:** Original blueprint reviews and subsequent WOS-00F corrective reviews are recorded below. WOS-00 remains under corrective hold; the current corrective head must receive a fresh independent review with no P0/P1/P2 before Ready/merge. No review summarized in this correction is itself a clean-final acceptance.
 
 ## 1. Reviewed heads and review IDs
 
@@ -34,8 +34,9 @@ Rounds 1–13 are the original PR #1 blueprint review sequence. Round 14 is the 
 | 17 | `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` | `PRR_kwDOUAv8Lc8AAAABKl2Ozw` | Two P2; corrected |
 | 18 | `c6185a7f5b39dda71c4198c305263e65e85f8264` | `PRR_kwDOUAv8Lc8AAAABKnPSiQ` | Three P2; corrected |
 | 19 | `c6185a7f5b39dda71c4198c305263e65e85f8264` | `PRR_kwDOUAv8Lc8AAAABKnm5YA` | Two P2; corrected |
-| 20 | `81f58a01d980031c87415bf5ba5347ec39877eed` | `PRR_kwDOUAv8Lc8AAAABKpzHEw` | Two P2; Round-19 authority follow-up in progress |
-| 21 | `81f58a01d980031c87415bf5ba5347ec39877eed` | `PRR_kwDOUAv8Lc8AAAABKp-K9w` | One P2; Round-19 authority follow-up in progress |
+| 20 | `81f58a01d980031c87415bf5ba5347ec39877eed` | `PRR_kwDOUAv8Lc8AAAABKpzHEw` | Two P2; corrected |
+| 21 | `81f58a01d980031c87415bf5ba5347ec39877eed` | `PRR_kwDOUAv8Lc8AAAABKp-K9w` | One P2; corrected |
+| 22 | `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` | `PRR_kwDOUAv8Lc8AAAABKqRg4w` | Two P2 authority/traceability findings; current convergence addresses them, fresh exact-head review still required |
 
 ## 2. Resolution summary by review round
 
@@ -106,7 +107,16 @@ Reviews `PRR_kwDOUAv8Lc8AAAABKpzHEw` and `PRR_kwDOUAv8Lc8AAAABKp-K9w` of exact h
 2. `DOC-WOS-00F-CORRECTION-REPORT.md` used an incomplete WOS-01A unblock prerequisite.
 3. This `DOC-WOS-00-002` file itself retained stale PR #1/Round-13 primary metadata/table/open gates.
 
-The bounded Round-19 writer aligns all three current authorities and the downstream release/task gates to the complete WOS-01A prerequisite. **This correction does not claim a clean review.**
+The bounded Round-19 follow-up aligned all three current authorities and downstream release/task gates to the complete WOS-01A prerequisite. It did not claim a clean review.
+
+### Round 22 — primary traceability/status convergence
+
+Review `PRR_kwDOUAv8Lc8AAAABKqRg4w` of exact head `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` found no new P0/P1 and two P2s:
+
+1. `PRRT_kwDOUAv8Lc6bx0dl` — the primary WOS-01A work-package traceability row still stopped after clean review, guarded merge and corrected-main SHA recording, omitting explicit controller reauthorization and PR #12 recreation/rebase.
+2. `PRRT_kwDOUAv8Lc6bx0du` — implementation status still presented the older `78d89bc...` four-P2 cycle as current operational state instead of the latest exact-head/review gate.
+
+The current controller convergence aligns those primary authority surfaces to the same five-part dependency law and review posture already present in the charter, release criteria, backlog, task and correction report. Historical review rows remain evidence only. **This correction does not claim a clean review; the moved GitHub head requires one fresh independent exact-head confirmation.**
 
 ## 3. Canonical notification policy and exclusivity
 
@@ -184,8 +194,8 @@ Product-owner Gate B approval is recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`
 
 ## 8. Open gates
 
-- Publish the bounded Round-19 authority correction on PR #14.
-- Run a **fresh independent Codex/Sol review of the exact resulting PR #14 GitHub head**.
+- Verify the current Round-22 authority/traceability convergence is fully published on Draft PR #14 and record its exact GitHub head.
+- Run a **fresh independent Codex/Sol review of that exact resulting PR #14 GitHub head**.
 - Any P0/P1/P2 finding blocks Ready/merge and requires another bounded correction plus re-review.
 - Resolve or demonstrate obsolescence of all blocking review threads against the exact clean-reviewed head.
 - Mark PR #14 Ready only after the repository-defined clean-review gate is satisfied.
