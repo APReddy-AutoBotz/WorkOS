@@ -38,8 +38,8 @@ PR #1 was squash-merged to `main@880b3dc244bf516c4e535fb68e455e6153aec395`, but 
 | Base | `main@880b3dc244bf516c4e535fb68e455e6153aec395` |
 | Historical merged PR | PR #1, merged head `e8e05e0f17e78e7ef19a35c078601ebda5881a45` |
 | Exact corrective head | Use live PR #14 metadata; exact reviewed SHA must be recorded before merge |
-| State | Three P2 convergence corrections active after review `PRR_kwDOUAv8Lc8AAAABKkn3EA` |
-| Current activity | Align canonical rejection/correction recipient matrices, issue ownership and primary status truth |
+| State | Four P2 follow-up corrections active after reviews `PRR_kwDOUAv8Lc8AAAABKlyssg` and `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` |
+| Current activity | Correct stale primary traceability, atomic protected-recipient persistence, executable verification evidence and corrective-hold rollback truth |
 | Product-owner Gate B | Approved; bounded WOS-00F correction authorized |
 | WOS-01A | Draft PR #12 is dependency-blocked and earns no implementation credit |
 | Application source | Not accepted/imported into `main`; reference repository remains read-only |
@@ -113,14 +113,16 @@ PR #1 was squash-merged to `main@880b3dc244bf516c4e535fb68e455e6153aec395`, but 
 12. `a023ebef80fad7aea354f3759801a430de18cb6e`, review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`: one P1.
 13. `86484cde78f1350a4a0a3f55f368f2e919353663`, review `PRR_kwDOUAv8Lc8AAAABKiIDxA`: one P1, one P2.
 14. Post-merge review of PR #1 head `e8e05e0f17e78e7ef19a35c078601ebda5881a45`: one P1 (`PRRT_kwDOUAv8Lc6beCXL`) and one P2 (`PRRT_kwDOUAv8Lc6beCXQ`), triggering WOS-00F.
-15. Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of WOS-00F head `039789b7860d38115c7dfbd39dd26c0a36314a6a`: three P2 covering canonical recipient matrices, issue ownership and stale implementation status; this convergence pass addresses those findings.
+15. Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of WOS-00F head `039789b7860d38115c7dfbd39dd26c0a36314a6a`: three P2 covering canonical recipient matrices, issue ownership and stale implementation status; those findings were corrected and resolved.
+16. Review `PRR_kwDOUAv8Lc8AAAABKlyssg` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf`: P2 `PRRT_kwDOUAv8Lc6bneWi` for stale primary traceability and P2 `PRRT_kwDOUAv8Lc6bneWu` for missing atomic protected-recipient persistence.
+17. Review `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of the same exact head: P2 `PRRT_kwDOUAv8Lc6bnl_f` for missing actual verification outcomes and P2 `PRRT_kwDOUAv8Lc6bnl_i` for rollback wording that did not preserve the corrective hold.
 
 The detailed resolution authority is `docs/evidence/v0.1.0/DOC-WOS-00-002-REVIEW-RESOLUTION.md` plus the WOS-00F correction report. No clean final WOS-00F review is claimed yet.
 
 ## 8. Next controller actions
 
-1. Publish the six-file P2 convergence on Draft PR #14 and verify the exact moved head.
-2. Resolve the three P2 review threads only after the published content is verified.
+1. Publish the bounded four-P2 follow-up convergence on Draft PR #14 and verify the exact moved head.
+2. Resolve the four active P2 review threads only after the published content is verified.
 3. Align live issues #2/#3/#7/#8/#9/#13 to their correct workstream ownership and corrective/dependency state.
 4. Request a fresh independent Codex/Sol review of the exact PR #14 head.
 5. Resolve any new P0/P1/P2 finding and re-review any moved head.

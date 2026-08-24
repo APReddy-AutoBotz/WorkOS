@@ -8,7 +8,21 @@ This documentation-only correction addresses the WOS approval, invoice and integ
 
 ## Verification classification
 
-Documentation inventory, requirement/NFR counts and mappings, ADR structure, relative links, issue-template front matter, Mermaid structure, forbidden-term/transaction/credential scans, changed-file scope, focused consistency, adversarial P1/P2 review and diff checks are required PASS evidence. Application build, runtime, API, migration and browser execution are SKIP/NOT RUN because this work changes no runnable artifact; implementation PRs must execute those gates.
+| Check | Outcome | Executable evidence |
+|---|---|---|
+| Required WOS-00 inventory/substantive content | PASS | Repository Python inventory validator confirmed every task-referenced document exists and has substantive content. |
+| Product requirements / NFRs / family mappings | PASS | Python/`rg` identifier validation found exactly 126 unique product IDs, 81 unique NFR IDs, and all 16 product plus 11 NFR families mapped. |
+| ADR-001–008 structure | PASS | Repository Python ADR validator confirmed all eight ADRs contain status and decision content. |
+| Relative Markdown links | PASS | Repository Python relative-link validator resolved all documentation-relative targets. |
+| Issue-template front matter | PASS | Repository Python validator accepted all three issue templates. |
+| Mermaid/Markdown fences | PASS | Repository Python fence validator accepted all 11 Mermaid blocks. |
+| Forbidden terms / owner-only strategy / credential-like values | PASS | Added-line `rg` scans reported no prohibited introduced value. |
+| Documentation-only seven-file scope | PASS | `git diff --name-only 78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` matched the seven authorized paths and introduced no application, dependency, migration, helper or workflow file. |
+| Focused lifecycle, notification, atomicity and A–H adversarial assertions | PASS | Focused Python/`rg` assertions confirmed approval finality, occupancy, bounded authorization, atomic zero-partial recipient state, corrected retry, external-channel isolation, event exclusivity, corrective hold and PR #12 block. |
+| Whitespace integrity | PASS | `git diff --check`. |
+| Application build/runtime/API/migration/browser | SKIP / NOT RUN | Documentation/control-only diff contains no runnable artifact, schema, dependency or deployment change. |
+
+No CI/status context exists for this documentation-only exact head; these locally executed documentation-safe commands are the evidence and no nonexistent CI pass is claimed.
 
 ## Live issue ownership and post-publication updates
 
@@ -30,10 +44,10 @@ Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of head `039789b7860d38115c7dfbd39dd26c0a363
 2. The proposed issue-update map cross-assigned #2/#3/#7/#8/#9 responsibilities.
 3. `IMPLEMENTATION_STATUS.md` retained stale pre-merge PR #1 actions and WOS-01 authorization language.
 
-The convergence pass directly updates the canonical product, integration, approval and test matrices; fixes this issue ownership map; and replaces the primary status authority with the actual PR #14 corrective-hold state. No clean final review is claimed by these edits themselves.
+The convergence pass directly updates the canonical product, integration, approval and test matrices; fixes this issue ownership map; and replaces the primary status authority with the actual PR #14 corrective-hold state. Reviews `PRR_kwDOUAv8Lc8AAAABKlyssg` and `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` then identified four active P2s: `PRRT_kwDOUAv8Lc6bneWi`, `PRRT_kwDOUAv8Lc6bneWu`, `PRRT_kwDOUAv8Lc6bnl_f` and `PRRT_kwDOUAv8Lc6bnl_i`. This follow-up corrects stale primary traceability, atomic protected-recipient persistence, executable verification outcomes and rollback truth. PR #14 remains Draft, PR #12 remains blocked, and no clean final review is claimed by these edits themselves.
 
 ## Security and rollback
 
-The server remains authoritative for source state, protected authority, recipient relationships and data scope. Stale/out-of-scope mandatory relationships and partial protected delivery fail closed; callers cannot redirect or omit recipients. Identity deduplication retains all applicable recipient reasons or approved deterministic precedence. The generic rejection/correction event is mutually exclusive for the same decision with `commercial.approval_required` and `invoice_batch.action_required`.
+The server remains authoritative for source state, protected authority, recipient relationships and data scope. The complete mandatory set is resolved and authorized before the canonical event identity, protected in-app records and recipient-reason mappings commit atomically. Any mandatory relationship or protected persistence failure leaves zero successful protected mutation; callers cannot redirect or omit recipients. Identity deduplication retains all applicable recipient reasons or approved deterministic precedence. Corrected retry creates the complete set exactly once. Optional external delivery is downstream and independently retriable. The generic rejection/correction event is mutually exclusive for the same decision with `commercial.approval_required` and `invoice_batch.action_required`.
 
-Rollback reverts the WOS-00F documentation correction only, restores the corrective hold, and does not delete or rewrite approval, batch, membership, notification or audit history. No schema, runtime, dependency, deployment or reference-repository change is included.
+Rollback must reverse only the defective substantive correction while retaining, or explicitly re-establishing in the same guarded change, the WOS-00F corrective hold, Draft PR #14 review gate and PR #12 dependency block. A plain revert is forbidden because the parent does not contain the corrective hold and therefore cannot “restore” it. Rollback does not delete or rewrite approval, batch, membership, notification or audit history. No schema, runtime, dependency, deployment or reference-repository change is included.
