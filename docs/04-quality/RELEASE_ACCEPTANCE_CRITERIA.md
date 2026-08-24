@@ -68,7 +68,7 @@ The buyer or deployment owner confirms:
 
 ## Approval gates
 
-- **Gate B:** blueprint approval before source bootstrap.
+- **Gate B:** blueprint approval before source bootstrap. Historical Gate B approval remains valid for the bounded WOS-00F correction but does not by itself authorize WOS-01A while the corrective hold is active.
 - **Gate C:** complete WOS-06 product-owner acceptance only after PR-010, PR-011 and PR-012 are merged **and PR-012 engineering acceptance has been independently proven at an exact head before the Gate C decision**. Gate C evidence must cover effective-dated commercial terms, deterministic calculations, source-specific billing eligibility, approved-unbilled registration, the complete invoice-ready batch and provider/CSV export lifecycle, reversals/corrections, authorization and control-total reconciliation. PR-011 alone cannot satisfy Gate C. Gate C is additional product-owner acceptance and never substitutes for PR-012 engineering evidence.
 - **Gate D:** final v1 release and buyer-handover approval.
 
@@ -76,4 +76,14 @@ Acceptance is recorded against a commit/tag and artifact; later changes require 
 
 ## WOS-00F release hold
 
-The merged WOS-00 baseline is not clean while Round-14 P1/P2 remains unmerged. Release evidence must prove invoice-batch approval finality, forbidden reopen states, protected cancellation/replacement, forward-only post-export correction, immutable history, occupancy correctness, failed-export behavior, bounded authoritative recipient resolution, fail-closed relationship failures, caller non-redirection, deduplication/idempotency and same-decision event exclusivity. PR-009, PR-012 and PR-013 must retain their assigned executable evidence. WOS-01A remains blocked until an exact-head clean review and correction merge.
+The historical merged WOS-00 baseline is under corrective hold until WOS-00F PR #14 is closed cleanly. Release evidence must prove invoice-batch approval finality, forbidden reopen states, protected cancellation/replacement, forward-only post-export correction, immutable history, occupancy correctness, failed-export behavior, bounded authoritative recipient resolution, atomic zero-partial protected-recipient persistence, fail-closed relationship failures, caller non-redirection, deduplication/idempotency and same-decision event exclusivity. PR-009, PR-012 and PR-013 retain their assigned executable evidence.
+
+WOS-01A PR #12 remains Draft and dependency-blocked until **all five** prerequisites are satisfied:
+
+1. PR #14 receives a fresh independent exact-head review with no P0/P1/P2 findings.
+2. PR #14 is merged under an expected-head guard against that reviewed SHA.
+3. The corrected exact `main` SHA is recorded as the accepted WOS-00 baseline.
+4. The implementation controller explicitly reauthorizes WOS-01A.
+5. PR #12 is recreated or rebased from the corrected baseline before source import or implementation resumes.
+
+Opening or retaining a Draft PR does not confer implementation or merge authority. If any prerequisite is incomplete, WOS-01A remains blocked.
