@@ -1,141 +1,133 @@
 # DOC-WOS-00-002 — Independent Review Resolution
 
-**Workstream:** WOS-00  
-**Issue:** #2  
-**Pull request:** #1  
-**Status:** Thirteen independent review rounds completed; all historical P1/P2 findings corrected; clean final exact-head re-review pending
+**Workstream:** WOS-00 / WOS-00F corrective closure  
+**Governing issue:** #2  
+**Corrective issue:** #13  
+**Historical merged pull request:** #1  
+**Active corrective pull request:** #14  
+**Active branch:** `controller/wos-00f-approval-controls`  
+**Historical merged baseline:** `main@880b3dc244bf516c4e535fb68e455e6153aec395`  
+**Status:** Original blueprint reviews and subsequent WOS-00F corrective reviews are recorded below. WOS-00 remains under corrective hold; the current corrective head must receive a fresh independent review with no P0/P1/P2 before Ready/merge. No review summarized in this correction is itself a clean-final acceptance.
 
 ## 1. Reviewed heads and review IDs
 
-| Round | Reviewed head | Review ID(s) | Findings |
+Rounds 1–13 are the original PR #1 blueprint review sequence. Round 14 is the post-merge review that triggered WOS-00F. Rounds 15 onward are PR #14 corrective exact-head reviews. Same-head re-reviews are recorded separately because they produced distinct findings.
+
+| Round | Reviewed head | Review ID(s) | Findings / disposition |
 |---:|---|---|---|
-| 1 | `492715dc8a40de6431365b6e52378d317721f617` | `PRR_kwDOUAv8Lc8AAAABKhE2vA` | Five P1, two P2 |
-| 2 | `c2e3dbb74bc7c78a8f946222497850ac0c49ac78` | `PRR_kwDOUAv8Lc8AAAABKhJrmQ` | Two P1 |
-| 3 | `1f36b49461b86516b5855dbf9930a75f234b58e1` | `PRR_kwDOUAv8Lc8AAAABKhMTmA` | One P1 |
-| 4 | `9fc70babdf7c4d5c72f9d18a54f8c2318c903b3b` | `PRR_kwDOUAv8Lc8AAAABKhNcnA` | One P1 |
-| 5 | `649db270e8d43af152076e1f99e07c7204c575fc` | `PRR_kwDOUAv8Lc8AAAABKhROXA` | Two P1 |
-| 6 | `7124709e4f6682ded0321c58d22a6851a5e32b9d` | `PRR_kwDOUAv8Lc8AAAABKhU3Ng`, `PRR_kwDOUAv8Lc8AAAABKhVa0Q` | Four P1, two P2 |
-| 7 | `76f05c9da71d21b1f774afc91e13dad4323d6358` | `PRR_kwDOUAv8Lc8AAAABKh3paA` | Two P1 |
-| 8 | `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` | `PRR_kwDOUAv8Lc8AAAABKh6Tsg` | Two P1 |
-| 9 | `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` | `PRR_kwDOUAv8Lc8AAAABKh-0NA` | One P1, one P2 |
-| 10 | `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` | `PRR_kwDOUAv8Lc8AAAABKh_5pA` | Three P2 |
-| 11 | `cd45de9181858d722e2974e92d6aaa53ba04ec17` | `PRR_kwDOUAv8Lc8AAAABKiBoBw` | Two P1, one P2 |
-| 12 | `a023ebef80fad7aea354f3759801a430de18cb6e` | Review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`; actionable thread `PRRT_kwDOUAv8Lc6bdgWF` | One P1 |
-| 13 | `86484cde78f1350a4a0a3f55f368f2e919353663` | `PRR_kwDOUAv8Lc8AAAABKiIDxA` | One P1, one P2 |
+| 1 | `492715dc8a40de6431365b6e52378d317721f617` | `PRR_kwDOUAv8Lc8AAAABKhE2vA` | Five P1, two P2; corrected |
+| 2 | `c2e3dbb74bc7c78a8f946222497850ac0c49ac78` | `PRR_kwDOUAv8Lc8AAAABKhJrmQ` | Two P1; corrected |
+| 3 | `1f36b49461b86516b5855dbf9930a75f234b58e1` | `PRR_kwDOUAv8Lc8AAAABKhMTmA` | One P1; corrected |
+| 4 | `9fc70babdf7c4d5c72f9d18a54f8c2318c903b3b` | `PRR_kwDOUAv8Lc8AAAABKhNcnA` | One P1; corrected |
+| 5 | `649db270e8d43af152076e1f99e07c7204c575fc` | `PRR_kwDOUAv8Lc8AAAABKhROXA` | Two P1; corrected |
+| 6 | `7124709e4f6682ded0321c58d22a6851a5e32b9d` | `PRR_kwDOUAv8Lc8AAAABKhU3Ng`, `PRR_kwDOUAv8Lc8AAAABKhVa0Q` | Four P1, two P2; corrected |
+| 7 | `76f05c9da71d21b1f774afc91e13dad4323d6358` | `PRR_kwDOUAv8Lc8AAAABKh3paA` | Two P1; corrected |
+| 8 | `b30ec6f921262602edcab9e9d96a2dbb1c8571b2` | `PRR_kwDOUAv8Lc8AAAABKh6Tsg` | Two P1; corrected |
+| 9 | `be42c047f6bcf2d4aa3476a7368bea04ebff1e70` | `PRR_kwDOUAv8Lc8AAAABKh-0NA` | One P1, one P2; corrected |
+| 10 | `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8` | `PRR_kwDOUAv8Lc8AAAABKh_5pA` | Three P2; corrected |
+| 11 | `cd45de9181858d722e2974e92d6aaa53ba04ec17` | `PRR_kwDOUAv8Lc8AAAABKiBoBw` | Two P1, one P2; corrected |
+| 12 | `a023ebef80fad7aea354f3759801a430de18cb6e` | Review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`; actionable thread `PRRT_kwDOUAv8Lc6bdgWF` | One P1; corrected |
+| 13 | `86484cde78f1350a4a0a3f55f368f2e919353663` | `PRR_kwDOUAv8Lc8AAAABKiIDxA` | One P1, one P2; corrected |
+| 14 | `e8e05e0f17e78e7ef19a35c078601ebda5881a45` | `PRR_kwDOUAv8Lc8AAAABKiPf2w` | Post-merge one P1 + one P2; triggered WOS-00F |
+| 15 | `039789b7860d38115c7dfbd39dd26c0a36314a6a` | `PRR_kwDOUAv8Lc8AAAABKkn3EA` | Three P2; corrected |
+| 16 | `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` | `PRR_kwDOUAv8Lc8AAAABKlyssg` | Two P2; corrected |
+| 17 | `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` | `PRR_kwDOUAv8Lc8AAAABKl2Ozw` | Two P2; corrected |
+| 18 | `c6185a7f5b39dda71c4198c305263e65e85f8264` | `PRR_kwDOUAv8Lc8AAAABKnPSiQ` | Three P2; corrected |
+| 19 | `c6185a7f5b39dda71c4198c305263e65e85f8264` | `PRR_kwDOUAv8Lc8AAAABKnm5YA` | Two P2; corrected |
+| 20 | `81f58a01d980031c87415bf5ba5347ec39877eed` | `PRR_kwDOUAv8Lc8AAAABKpzHEw` | Two P2; corrected |
+| 21 | `81f58a01d980031c87415bf5ba5347ec39877eed` | `PRR_kwDOUAv8Lc8AAAABKp-K9w` | One P2; corrected |
+| 22 | `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` | `PRR_kwDOUAv8Lc8AAAABKqRg4w` | Two P2 authority/traceability findings; current convergence addresses them, fresh exact-head review still required |
 
-## 2. Resolution map by review round
+## 2. Resolution summary by review round
 
-### Round 1
+### Rounds 1–5 — blueprint product/commercial/billing foundations
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Workforce requirements lacked explicit implementation owners | P1 | Split WOS-WKF ownership across PR-004 and PR-008 with concrete evidence |
-| NFR families lacked concrete ownership | P1 | Mapped all eleven NFR families to accountable planned PRs/evidence |
-| Approved-unbilled omitted non-T&M sources | P1 | Defined T&M, milestone, fixed-fee, retainer, managed-service and adjustment eligibility |
-| Neutral revenue policy was undefined | P1 | Defined non-statutory operational earned-management profiles and fail-closed non-T&M default |
-| Owner-only transaction strategy appeared in product docs | P1 | Removed pricing/licence/sale defaults; retained only a neutral external legal/commercial gate |
-| Forbidden-term allowlist was not reproducible | P2 | Neutralized literals outside approved provenance/control files |
-| Gate A was claimed but undefined | P2 | Removed Gate A as a formal acceptance gate; formal gates remain B, C and D |
+- Assigned workforce, CORE and every NFR family to implementation/evidence owners.
+- Defined all approved-unbilled source families and exclusive source → eligibility event → approved-unbilled item → line/batch lineage.
+- Made operational earned-management explicitly non-statutory and fail-closed without an authorized effective-dated policy.
+- Removed owner-only transaction strategy and undefined Gate A language.
+- Replaced direct source/snapshot-to-invoice lineage with the versioned billing-eligibility/register boundary.
+- Moved Gate C after complete PR-010/011/012 delivery and independently proven PR-012 engineering acceptance.
+- Defined canonical invoice-batch state, occupancy, failed-export, cancellation and correction semantics.
 
-### Round 2
+### Rounds 6–10 — export, identity, notification and governing consistency
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| CORE-004/005/008 lacked explicit work-package ownership | P1 | Added CORE ownership across PR-004 and PR-006 through PR-014 with evidence |
-| Architecture allowed unconditional snapshot-to-invoice lineage | P1 | Added source-specific eligibility event and approved-unbilled register boundary |
+- Made initial provider/CSV delivery `Approved`-only and final states retrieval/status-only.
+- Defined immutable provider-independent CSV acceptance and control totals.
+- Assigned complete notification delivery to PR-013 and identity hardening to PR-014.
+- Required production OIDC/named accounts universally with fail-closed behavior and no local/shared production fallback.
+- Added four notification policy classes and thirteen canonical event/template/default-recipient rows.
+- Required independent PR-012 engineering acceptance before Gate C.
+- Aligned reporting/export behavior and current Gate B state.
+- Replaced transitional OIDC wording across architecture/decision/security/NFR authorities.
 
-### Round 3
+### Rounds 11–13 — terminology, event exclusivity and no-double-billing hardening
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Domain model retained a direct snapshot-to-line edge | P1 | Replaced it with versioned billing-event → approved-unbilled item → line/batch relationships |
+- Removed statutory-recognition ambiguity from fixed-fee operational earned-management wording.
+- Made `approval.action_required`, `commercial.approval_required` and `invoice_batch.action_required` mutually exclusive by trigger boundary.
+- Established database-enforced unique current occupancy for each approved-unbilled-item ID/version.
+- Required same-batch, cross-batch, concurrent, idempotency, route-bypass, split-line, cancellation/re-batching and final-occupancy vectors in PR-012 evidence.
+- Brought review/status/traceability evidence through Round 13.
 
-### Round 4
+### Round 14 — post-merge WOS-00F trigger
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Requirements/derived docs still permitted raw-source/snapshot line traceability | P1 | Made the versioned approved-unbilled item the sole batchable object and added direct-bypass rejection throughout requirements, architecture, specifications, tests and PR-012 |
+Review `PRR_kwDOUAv8Lc8AAAABKiPf2w` occurred after PR #1 had already merged. It identified:
 
-### Round 5
+- **P1:** generic invoice-batch approval reopen conflicted with the canonical invoice-batch lifecycle;
+- **P2:** generic rejection/correction notification omitted applicable source owners.
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Gate C appeared before PR-012 | P1 | Moved Gate C after complete PR-010/011/012 delivery and independently proven PR-012 engineering acceptance |
-| Invoice-batch state/occupancy semantics were ambiguous | P1 | Defined canonical states, occupying classes, transitions, terminal behavior, failed export, pre-export cancellation and versioned corrections |
+WOS-00F PR #14 was created as the bounded corrective vehicle. The historical `main@880b3dc244bf516c4e535fb68e455e6153aec395` baseline was placed under corrective hold and WOS-01A PR #12 was dependency-blocked.
 
-### Round 6
+### Round 15 — canonical recipient/status convergence
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Playbook Gate C wording remained incomplete | P1 | Aligned playbook with full WOS-06 and PR-012 prerequisite |
-| Initial export could originate from final states | P2 | Made initial provider/CSV delivery `Approved`-only; final states are retrieval/status only |
-| Review traceability lagged | P2 | Updated traceability/status/evidence history |
-| CSV acceptance had no provider-independent semantics | P1 | Defined immutable CSV artifact, metadata/control totals, atomic transition and idempotency |
-| Notification delivery had no implementation owner | P1 | Assigned complete notification scope to PR-013/issue #9 |
-| ADR-007 allowed production local-auth fallback | P1 | Production OIDC is fail-closed; local auth remains non-production/demo only |
+Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` found three P2s: stale canonical recipient matrices, incorrect proposed live-issue ownership and stale pre-merge implementation status. The authoritative matrices, issue map and primary status were aligned to PR #14 corrective authority.
 
-### Round 7
+### Rounds 16–17 — traceability, atomic recipient state, evidence and rollback
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Release acceptance did not explicitly require independent PR-012 engineering acceptance before Gate C | P1 | `RELEASE_ACCEPTANCE_CRITERIA.md` requires PR-010/011/012 merged and PR-012 engineering acceptance independently proven at an exact head before Gate C. Gate C is additional owner acceptance and cannot substitute for engineering evidence. |
-| WOS-INT-002 lacked an executable notification event/template/default-recipient matrix | P1 | Added four policy classes and thirteen canonical event/template keys with triggers, default relationship recipients, preference/mandatory behavior, evidence fields, protected extensions and deterministic tests. |
+Reviews `PRR_kwDOUAv8Lc8AAAABKlyssg` and `PRR_kwDOUAv8Lc8AAAABKl2Ozw` found four P2s:
 
-### Round 8
+- stale WOS-00/WOS-01A primary traceability;
+- protected recipient enqueue could leave partial internal state;
+- verification outcomes were described prospectively rather than recorded;
+- rollback wording could remove the corrective hold.
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Reporting specification allowed a new finance export from “approved or finalized” batch lines | P1 | Initial provider/CSV delivery is now `Approved`-only. `Exported` and `Billed/Confirmed` support only idempotent retrieval/redownload of the accepted artifact or downstream-status confirmation and cannot create another delivery. |
-| Security architecture made production OIDC optional through “where configured” wording | P1 | `SECURITY_ARCHITECTURE.md` now requires configured OIDC and named accounts for every production deployment; missing, invalid or unavailable OIDC fails closed; local/shared demo authentication is non-production/demo only. |
+Corrections made protected event/in-app recipient state all-or-nothing, kept external delivery separately retriable, made status/traceability current, recorded executable evidence truthfully and required rollback to retain/re-establish the corrective hold.
 
-### Round 9
+### Rounds 18–19 — hold authority and verification truth
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Security/privacy and NFR quality baselines still made production OIDC optional | P1 | `SECURITY_PRIVACY_COMPLIANCE.md` and `NON_FUNCTIONAL_REQUIREMENTS.md` now require named accounts and configured OIDC for every production deployment. Missing, invalid or unavailable OIDC fails startup/readiness and authentication closed. WorkOS local credentials and shared/demo identities are restricted to approved non-production/demo profiles, must be disabled or absent in production and cannot become a production fallback. Production OIDC is marked mandatory in the environment schema and exact release evidence. |
-| Controller evidence still reported only the first review and pending Gate B | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` became the current consolidated controller record, linked this detailed review authority, recorded the review history and Gate B approval, and left only the moved-head review and merge open. |
+Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` found three P2s: residual WOS-01 authorization, forbidden-term scan contradiction and unsupported Mermaid PASS evidence. Review `PRR_kwDOUAv8Lc8AAAABKnm5YA` then found two P2s: authoritative backlog did not require corrected-main baseline recording before WOS-01A resume, and the retained adversarial evidence pass stopped at matrix H instead of A–I.
 
-### Round 10
+The correction superseded historical WOS-01-after-PR1-merge authorization, removed the non-allowlisted literal, classified Mermaid-aware validation as `NOT RUN` after registry HTTP 403, required corrected-main baseline recording and extended retained adversarial evidence through A–I.
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| Authoritative programme charter still described Gate B as pending | P2 | `PROGRAM_CHARTER.md` records the product owner's 2026-08-23 Gate B approval, links `DOC-WOS-00-003`, and preserves the clean-review, source-import and merge controls. |
-| Current controller evidence understated the represented review rounds | P2 | `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` now points to this complete review authority and records the current round count. |
-| Architecture ADR summary said “move toward OIDC” | P2 | `ARCHITECTURE_OVERVIEW.md` states the adopted ADR-007 decision: configured OIDC, named accounts and revocable sessions are required for every production deployment; WorkOS local/shared demo authentication is non-production/demo only with no fallback. |
+### Rounds 20–21 — current-authority convergence
 
-### Round 11
+Reviews `PRR_kwDOUAv8Lc8AAAABKpzHEw` and `PRR_kwDOUAv8Lc8AAAABKp-K9w` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed` identified three P2s:
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| WOS-COM-007 used “recognized/earned value” wording that could authorize statutory revenue-recognition behavior | P1 | WOS-COM-007 now requires fixed-fee tracking of contract value, billing schedule, effort/cost and margin risk, permits only explicitly **non-statutory operational earned-management revenue** under an authorized effective-dated WOS-COM-011 policy, fails closed when no policy is active, and keeps approved hours, billing eligibility and invoice readiness independent. PR-011 scope and financial golden vectors carry the same boundary. |
-| Commercial and invoice-batch domain events overlapped `approval.action_required`, allowing two action-required notifications for one pending approval transition | P1 | WOS-INT-002 now defines mutually exclusive trigger boundaries. `approval.action_required` is the sole action-request event whenever a valid generic stage is pending. `commercial.approval_required` is only a pre-submission requester/change-owner prompt. `invoice_batch.action_required` is only non-approval batch-owner remediation. One source/version/operation may create at most one action-required event. Integration architecture, approval specification, test strategy, PR-009/013 backlog and issue #9 are aligned with positive/negative exclusivity and replay-idempotency evidence. |
-| Accepted OIDC decision retained transitional wording in the decision log | P2 | WOS-DEC-018 now records the adopted requirement for configured OIDC, named production accounts and revocable sessions in every production deployment; missing, invalid or unavailable OIDC fails closed and WorkOS local/shared demo identities remain approved non-production/demo only with no production fallback. |
+1. `DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md` primary metadata/open gates still followed the historical PR #1/Round-13 workflow.
+2. `DOC-WOS-00F-CORRECTION-REPORT.md` used an incomplete WOS-01A unblock prerequisite.
+3. This `DOC-WOS-00-002` file itself retained stale PR #1/Round-13 primary metadata/table/open gates.
 
-### Round 12
+The bounded Round-19 follow-up aligned all three current authorities and downstream release/task gates to the complete WOS-01A prerequisite. It did not claim a clean review.
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| No-double-billing controls did not reject duplicate lines for one approved-unbilled-item version within the same batch or under concurrent commands | P1 | WOS-INV-003/008 and derived architecture, commercial, reporting, test and PR-012 controls require a database-unique current-occupancy record per approved-unbilled-item ID/version. Same-batch, cross-batch and concurrent duplicates fail; same-key retry returns the existing membership; valid cancellation releases occupancy atomically; final occupancy remains permanent; and split/partial billing requires distinct upstream event/item versions with reconciled totals. |
+### Round 22 — primary traceability/status convergence
 
-The GitHub review/timeline identifier `PRR_kwDOUAv8Lc8AAAABKiJB1g` and actionable thread `PRRT_kwDOUAv8Lc6bdgWF` refer to the same Round-12 finding and are retained together to avoid conflicting evidence.
+Review `PRR_kwDOUAv8Lc8AAAABKqRg4w` of exact head `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` found no new P0/P1 and two P2s:
 
-### Round 13
+1. `PRRT_kwDOUAv8Lc6bx0dl` — the primary WOS-01A work-package traceability row still stopped after clean review, guarded merge and corrected-main SHA recording, omitting explicit controller reauthorization and PR #12 recreation/rebase.
+2. `PRRT_kwDOUAv8Lc6bx0du` — implementation status still presented the older `78d89bc...` four-P2 cycle as current operational state instead of the latest exact-head/review gate.
 
-| Finding | Severity | Resolution |
-|---|---|---|
-| PR-012 acceptance did not explicitly require all Round-12 occupancy vectors | P1 | `TEST_STRATEGY.md`, PR-012 backlog evidence and traceability now explicitly require same-batch, cross-batch and concurrent duplicate rejection; database-unique occupancy with no orphan line, duplicate amount or control-total drift; same-key replay and changed/different-key conflicts; bulk/import/compatibility-route enforcement; split-line rejection; cancellation/re-batching; permanent final occupancy; and versioned corrections. |
-| Review evidence stopped at Round 11 after the Round-12 correction | P2 | This resolution authority, consolidated controller review, implementation status and traceability now record Rounds 12 and 13 consistently and retain the fresh clean exact-head re-review requirement. |
+The current controller convergence aligns those primary authority surfaces to the same five-part dependency law and review posture already present in the charter, release criteria, backlog, task and correction report. Historical review rows remain evidence only. **This correction does not claim a clean review; the moved GitHub head requires one fresh independent exact-head confirmation.**
 
 ## 3. Canonical notification policy and exclusivity
 
-Policy classes:
+Policy classes remain:
 
 - `ACTION_REQUIRED`
 - `CONTROL_MANDATORY`
 - `INFORMATIONAL`
 - `OPERATIONAL_CRITICAL`
 
-Canonical event/template keys:
+The thirteen canonical event/template keys remain:
 
 1. `work_period.submission_due`
 2. `work_period.submission_overdue`
@@ -151,55 +143,63 @@ Canonical event/template keys:
 12. `invoice_batch.exported_or_billed_confirmed`
 13. `integration.delivery_failed_or_degraded`
 
-Every event has a canonical/template key, version, source entity/version and operation, organization/legal-entity scope, server-resolved recipient relationship/reason, policy class, channel decision, locale/approved variables, idempotency identity and delivery-attempt/correlation evidence. Client recipients remain out of v1 scope. Protected buyer extensions cannot remove a mandatory recipient or downgrade a mandatory class below the governing requirement.
+A pending generic stage emits only `approval.action_required`; `commercial.approval_required` is pre-submission only; `invoice_batch.action_required` is non-approval remediation only; generic rejection/correction uses the single shared `approval.rejected_or_correction_required` event. One source entity/version/triggering operation may create at most one action-required event.
 
-Approval-event boundaries are authoritative:
-
-- A pending generic stage emits only `approval.action_required` to current-stage approvers.
-- `commercial.approval_required` occurs only before generic approval submission and resolves the requester/change owner, never current approvers.
-- `invoice_batch.action_required` occurs only for non-approval pre-submission/remediation work and never for pending approval or generic rejection/correction.
-- A source entity/version and triggering operation may create at most one action-required notification event.
+For `approval.rejected_or_correction_required`, the complete mandatory scoped recipient set is resolved before persistence. The canonical protected event identity, protected in-app recipient records and retained reason mappings commit atomically or leave zero successful protected-recipient mutation. Optional external email/collaboration delivery is downstream and separately retriable.
 
 ## 4. Cross-cutting corrections retained
 
 - Leave/absence is availability-only and cannot become productive/billable work or reduce capacity twice.
-- PR-002 cannot merge a prohibited company-specific runtime; cleanup occurs in PR-002 or only the combined clean PR-003 state may merge.
 - Operational earned-management revenue is non-statutory, policy-gated and never grants billing authority.
 - Commercial lineage is source → eligibility event → approved-unbilled item → database-unique current occupancy → line/batch → accepted provider/CSV export.
 - Initial export is `Approved`-only; failures remain `Approved`; final states are retrieval/status only.
-- Production OIDC is mandatory and fail-closed in charter, decision log, architecture, security/privacy and NFR quality baselines; WorkOS local/shared authentication is non-production/demo only.
-- Gate B is approved but source import and WOS-01 remain blocked until clean review and blueprint merge.
+- Production OIDC is mandatory and fail-closed; local/shared authentication is non-production/demo only.
+- Gate B remains approved for the bounded WOS-00F correction but does not waive review, merge, baseline-recording or WOS-01A reauthorization controls.
 - PR-013 owns complete notification delivery; PR-014 owns production identity/security evidence.
 
-## 5. Controller verification after Round 13
+## 5. WOS-01A dependency law
 
-| Check | Controller result | Limitation |
+Historical PR #1 having merged does not authorize WOS-01A. WOS-01A may resume only after **all five** conditions are satisfied:
+
+1. PR #14 receives a fresh independent exact-head clean review with no P0/P1/P2 findings.
+2. PR #14 is merged under an expected-head guard against that reviewed SHA.
+3. The corrected exact `main` SHA is recorded as the accepted WOS-00 baseline.
+4. The controller explicitly reauthorizes WOS-01A.
+5. PR #12 is recreated or rebased from that corrected baseline before any source import resumes.
+
+Until then PR #12 remains Draft, dependency-blocked and earns no implementation or acceptance credit.
+
+## 6. Verification posture
+
+| Check | Current result | Limitation |
 |---|---|---|
-| Gate B state and continuing blockers | PASS | Clean independent rerun required at final head |
+| Gate B state and continuing blockers | PASS | Gate B remains valid only for bounded correction; fresh clean review still required |
 | Gate C prerequisite | PASS | Runtime/product acceptance occurs in WOS-06 |
 | Fixed-fee earned-management wording | PASS | Runtime vectors/evidence belong to PR-011 |
 | Billing eligibility independent from earned-management | PASS | Runtime evidence belongs to PR-011/012 |
-| Database-unique current line occupancy and PR-012 vectors | PASS | Runtime/migration/concurrency evidence belongs to PR-012 |
-| Approval-event exclusivity | PASS | Implementation and replay evidence belongs to PR-009/013 |
-| Thirteen canonical event/template rows | PASS | Independent count/consistency rerun required |
+| Database-unique current occupancy and PR-012 vectors | PASS | Runtime/migration/concurrency evidence belongs to PR-012 |
+| Approval-event exclusivity and protected-recipient atomicity | PASS | Implementation/replay evidence belongs to PR-009/013 |
+| Thirteen canonical event/template rows | PASS | Runtime delivery evidence belongs to PR-013 |
 | Approved-only initial finance delivery | PASS | Runtime evidence belongs to PR-012/013 |
-| Final-state retrieval/status-only semantics | PASS | Runtime idempotency evidence belongs to PR-012/013 |
-| Mandatory production OIDC across governing, architecture and quality documents | PASS | Production startup/readiness evidence belongs to PR-014 |
-| Current controller evidence and thirteen-round history | PASS | Clean final review/merge remain open |
-| Requirement/NFR counts | Pending independent rerun | Must confirm 126/81 at exact head |
-| Application tests | SKIP | WOS-00 intentionally has no application source |
-| Shell/documentation-safe checks | NOT RUN by controller connector | Mandatory in clean final Codex/Sol review |
+| Mandatory production OIDC | PASS | Production startup/readiness evidence belongs to PR-014 |
+| Requirement/NFR counts | PASS in latest documentation-safe writer evidence | Must be independently revalidated at the new exact head |
+| Mermaid-aware validation | NOT RUN | Parser acquisition blocked by registry HTTP 403; no PASS claimed |
+| Application build/runtime/API/migration/browser | SKIP / NOT RUN | WOS-00F is documentation/control-only |
 
-## 6. Publication note
-
-Codex correction tasks sometimes produced local commits that could not be pushed through their task checkout. The implementation controller materialized the approved corrections through the connected GitHub controller interface. Local Codex SHAs are not acceptance evidence; only the exact live GitHub PR head reviewed in GitHub counts.
+Only the exact live GitHub head reviewed in GitHub counts as acceptance evidence. Local unpublished Codex commits are never acceptance evidence.
 
 ## 7. Gate B state
 
-Product-owner Gate B approval is recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`. It authorizes the controller to complete non-material review corrections, obtain the clean final exact-head review, squash-merge PR #1, establish `v0.1.0` and begin WOS-01. The approval does not waive the clean-review or exact-head merge controls.
+Product-owner Gate B approval is recorded in `DOC-WOS-00-003-GATE-B-APPROVAL.md`. Any historical authorization to begin WOS-01 after PR #1 merged is superseded by the WOS-00F corrective hold and the five-part WOS-01A dependency law above.
 
 ## 8. Open gates
 
-- Fresh clean independent Codex/Sol review at the exact moved GitHub head.
-- Resolution of any remaining blocking finding.
-- Exact-head squash merge and `v0.1.0` baseline.
+- Verify the current Round-22 authority/traceability convergence is fully published on Draft PR #14 and record its exact GitHub head.
+- Run a **fresh independent Codex/Sol review of that exact resulting PR #14 GitHub head**.
+- Any P0/P1/P2 finding blocks Ready/merge and requires another bounded correction plus re-review.
+- Resolve or demonstrate obsolescence of all blocking review threads against the exact clean-reviewed head.
+- Mark PR #14 Ready only after the repository-defined clean-review gate is satisfied.
+- Squash-merge PR #14 using an expected-head guard.
+- Record the corrected exact `main` SHA as the accepted WOS-00 baseline.
+- Close issue #13 and return issue #2 to completed only after merge verification.
+- Explicitly reauthorize WOS-01A and recreate or rebase PR #12 from the corrected baseline before source import resumes.

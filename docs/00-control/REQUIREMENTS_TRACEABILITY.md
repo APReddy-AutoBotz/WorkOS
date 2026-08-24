@@ -60,8 +60,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Work package | Requirement groups | Issue | PR | Accepted commit | Release | Status |
 |---|---|---|---|---|---|---|
-| WOS-00 | Programme/architecture/NFR/control | #2 | #1 | Pending clean review/merge | v0.1.0 | Thirteen review rounds corrected; Gate B approved; clean exact-head review pending |
-| WOS-01A | Source provenance/bootstrap | #3 | Planned PR-002 | Pending | v0.2.0 | Authorized after WOS-00 merge |
+| WOS-00 | Programme/architecture/NFR/control | #2 / corrective #13 | Historical PR #1 merged; Draft PR #14 active | Historical `main@880b3dc244bf516c4e535fb68e455e6153aec395`; corrected baseline pending | v0.1.0 | Corrective hold; accepted weight 0/suspended until PR #14 receives a clean exact-head review, guarded merge and corrected-baseline recording |
+| WOS-01A | Source provenance/bootstrap | #3 | Draft PR #12 | Pending | v0.2.0 | Dependency-blocked; no resume, rebase, source import or implementation until PR #14 is clean exact-head reviewed, guarded-merged, the corrected exact `main` SHA is recorded, the controller explicitly reauthorizes WOS-01A, and PR #12 is recreated or rebased from that corrected baseline |
 | WOS-01B | Neutral branding/configuration | #3 | Planned PR-003 | Pending | v0.2.0 | Not started |
 | WOS-02 | Organization/setup | #4 | Planned PR-004 | Pending | v0.4.0 | Not started |
 | WOS-03A | CI/migration/deployment | #5 | Planned PR-005 | Pending | v0.4.0 | Not started |
@@ -81,9 +81,10 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 
 | Evidence ID | Evidence | Status |
 |---|---|---|
-| DOC-WOS-00-001 | Current consolidated controller cross-document review | Complete/current in PR #1; thirteen rounds and Gate B state recorded |
-| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Thirteen review rounds completed/corrected; clean exact-head re-review pending |
+| DOC-WOS-00-001 | Historical consolidated controller cross-document review | Historical PR #1 evidence; PR #1 merged at `main@880b3dc244bf516c4e535fb68e455e6153aec395`, now under WOS-00F corrective hold |
+| DOC-WOS-00-002 | Independent Codex/Sol reviews and resolution mapping | Historical PR #1 Rounds 1–14 plus active WOS-00F PR #14 follow-up evidence; no clean final WOS-00F review claimed |
 | DOC-WOS-00-003 | Product-owner Gate B decision | Approved 2026-08-23; exact final head binds after clean review |
+| DOC-WOS-00F-001 | Active WOS-00F correction and verification evidence | Draft PR #14 active; latest independent review `PRR_kwDOUAv8Lc8AAAABKqRg4w` of `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` found two P2 authority/traceability inconsistencies; this convergence addresses them, but a fresh clean exact-head review remains mandatory |
 
 ### Review history represented by DOC-WOS-00-002
 
@@ -101,7 +102,17 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 12. `a023ebef80fad7aea354f3759801a430de18cb6e` / review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`, actionable thread `PRRT_kwDOUAv8Lc6bdgWF` — one P1: unique current line occupancy for each approved-unbilled-item version.
 13. `86484cde78f1350a4a0a3f55f368f2e919353663` / review `PRR_kwDOUAv8Lc8AAAABKiIDxA` — one P1 and one P2: explicit PR-012 occupancy vectors/ownership and stale Round-12 evidence.
 
-All listed findings are corrected in the active branch. The next evidence must be a clean independent review of the exact moved head.
+14. Post-merge review of PR #1 head `e8e05e0f17e78e7ef19a35c078601ebda5881a45` — P1 `PRRT_kwDOUAv8Lc6beCXL` and P2 `PRRT_kwDOUAv8Lc6beCXQ`, triggering WOS-00F after PR #1 had merged.
+15. Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of WOS-00F head `039789b7860d38115c7dfbd39dd26c0a36314a6a` — three P2 consistency findings, subsequently corrected and resolved.
+16. Review `PRR_kwDOUAv8Lc8AAAABKlyssg` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf` — P2 `PRRT_kwDOUAv8Lc6bneWi` (stale primary traceability) and P2 `PRRT_kwDOUAv8Lc6bneWu` (atomic protected-recipient creation), corrected.
+17. Review `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of the same exact head — P2 `PRRT_kwDOUAv8Lc6bnl_f` (actual verification outcomes) and P2 `PRRT_kwDOUAv8Lc6bnl_i` (rollback must preserve the corrective hold), corrected.
+18. Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264` — three P2 findings: stale WOS-01 authorization, forbidden-term scan contradiction and Mermaid-validation overclaim, corrected.
+19. Review `PRR_kwDOUAv8Lc8AAAABKnm5YA` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264` — two P2 findings: missing corrected-main baseline recording in backlog authority and incomplete A–I adversarial evidence, corrected.
+20. Review `PRR_kwDOUAv8Lc8AAAABKpzHEw` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed` — two P2 current-authority findings, corrected.
+21. Review `PRR_kwDOUAv8Lc8AAAABKp-K9w` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed` — one P2 current-authority finding, corrected.
+22. Review `PRR_kwDOUAv8Lc8AAAABKqRg4w` of exact head `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` — two P2 findings: the WOS-01A traceability row omitted explicit controller reauthorization plus PR #12 recreate/rebase, and implementation status retained stale prior-review scope; this convergence corrects both without claiming a clean final review.
+
+The WOS-00F corrective hold supersedes every historical authorization to begin WOS-01 after PR #1 merged. PR #12 remains blocked until PR #14 is clean-reviewed and merged, the corrected exact `main` SHA is recorded, the controller explicitly reauthorizes WOS-01A, and PR #12 is recreated or rebased from that corrected baseline before source import resumes. This correction addresses the active findings but does not claim a clean final review; the next acceptance evidence must be a fresh clean independent review of the exact moved PR #14 head.
 
 ## 5. Evidence taxonomy
 
@@ -191,3 +202,7 @@ Restore rehearsal:
 Buyer UAT:
 Owner Gate D approval:
 ```
+
+## WOS-00F corrective traceability
+
+The WOS approval, invoice and integration requirement families are clarified by WOS-00F. PR-009 owns generic approval finality, stable conflicts and authorization evidence; PR-012 owns invoice-batch cancellation/replacement, reversal/supersession, occupancy and export evidence; PR-013 owns bounded server-side recipient resolution, atomic all-or-nothing protected event/in-app recipient and reason-mapping persistence, zero-partial-state negatives, corrected exactly-once retry, downstream external-channel isolation, delivery idempotency and event exclusivity. Historical PR #1 evidence remains distinct from active PR #14 evidence. PR #12 remains blocked while the merged baseline is under corrective hold and until the complete five-part WOS-01A dependency law is satisfied.

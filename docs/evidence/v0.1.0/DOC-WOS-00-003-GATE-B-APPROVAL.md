@@ -16,7 +16,7 @@ The product owner approves the WorkOS v1 governing blueprint outcome and authori
 2. Obtain a clean independent Codex/Sol review of the final exact GitHub head.
 3. Squash-merge Draft PR #1 after that clean review and after all blocking review threads are resolved.
 4. Establish the `v0.1.0` governing-blueprint baseline and update status/traceability.
-5. Begin WOS-01 issue #3 through a controlled Draft source-bootstrap pull request after the WOS-00 merge.
+5. Historically, begin WOS-01 issue #3 through a controlled Draft source-bootstrap pull request after the WOS-00 merge; this trigger is now superseded by the WOS-00F corrective hold described in Section 4.
 
 ## 2. Approval boundary
 
@@ -38,7 +38,7 @@ No additional product-owner confirmation is required after the clean exact-head 
 
 ## 4. Post-approval controls
 
-- WOS-01 remains blocked until PR #1 is merged.
+- Gate B remains approved, but WOS-00F corrective hold supersedes the historical PR #1-merge trigger. WOS-01A remains blocked until PR #14 is clean-reviewed and merged, the corrected exact `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases PR #12 from that corrected baseline.
 - Source bootstrap must use only the pinned authorized reference commit and must not import Git history.
 - The reference repository must not be modified or receive a pull request.
 - Imported runtime content cannot merge while prohibited company-specific branding, data or operating assumptions remain.

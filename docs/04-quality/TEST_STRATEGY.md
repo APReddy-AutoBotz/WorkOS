@@ -121,7 +121,7 @@ PR-013 and the release matrix must execute at least one positive and one negativ
 | `work_period.submission_due` | Affected worker receives one in-app `ACTION_REQUIRED` record at the configured threshold | Preference cannot suppress in-app; another worker cannot be substituted |
 | `work_period.submission_overdue` | Worker plus scoped manager/escalation owner receive `CONTROL_MANDATORY` records after deadline/grace | Worker preference cannot remove either mandatory relationship recipient; out-of-scope manager denied |
 | `approval.action_required` | Current-stage approver(s) receive one shared approval event when any valid generic stage becomes pending, including commercial and invoice-batch approvals | Stale/non-current/delegation-out-of-scope recipient denied; replay does not duplicate; domain-action key cannot also fire for the same pending-stage operation |
-| `approval.rejected_or_correction_required` | Requester and distinct affected worker receive the canonical generic-approval event | Caller cannot redirect recipients or downgrade in-app delivery; invoice-batch domain action cannot also fire for the same rejection/correction decision |
+| `approval.rejected_or_correction_required` | Server resolves and deduplicates the requester, affected worker where applicable, commercial change owner for commercial sources, and invoice-batch owner plus finance preparer where applicable; one identity may carry multiple retained recipient reasons | Caller redirect/omission is denied; missing/stale/out-of-scope mandatory source-owner or partial protected enqueue fails closed visibly; replay is idempotent; neither domain action event may also fire for the same generic decision |
 | `approval.completed` | Requester and distinct affected worker receive `INFORMATIONAL` using channel preferences | Duplicate final-decision replay does not duplicate; unrelated user denied |
 | `approval.overdue_or_escalated` | Current approvers plus escalation target receive `CONTROL_MANDATORY` | Preferences cannot suppress mandatory recipients; duplicate scheduler run is idempotent |
 | `assignment.created_or_materially_changed` | Affected worker plus scoped resource/engagement manager receive one event | Non-material draft change or out-of-scope manager does not receive it |
@@ -160,11 +160,12 @@ In addition to the row-by-row matrix, PR-013 and the release matrix must prove:
 11. A source entity/version and triggering operation can create at most one action-required notification. When a generic approval stage is pending, only `approval.action_required` is emitted; `commercial.approval_required` and `invoice_batch.action_required` are rejected for that same transition.
 12. `commercial.approval_required` is proved only before generic approval submission and resolves requester/change-owner recipients, never current approvers.
 13. `invoice_batch.action_required` is proved only for non-approval batch-owner remediation and never for a pending generic approval stage or an approval rejection/correction decision.
-14. Event replay, scheduler retry and provider retry/backoff are idempotent and cannot duplicate domain-event, in-app or accepted channel-delivery evidence.
-15. Optional provider failure does not roll back the valid core transaction; failure state, next retry and operational owner remain visible.
-16. Templates, logs, provider responses and health surfaces do not expose secrets, unrestricted personal data, cost rates or margin.
-17. No v1 event resolves a client recipient because the client portal is deferred.
-18. Finance adapter initial delivery accepts only `Approved` batches with complete event/register lineage; final-state operations are retrieval/status-only and idempotent.
+14. For generic rejection/correction, every applicable protected source-owner relationship is resolved server-side; identities are deduplicated with reasons retained, stale/out-of-scope mandatory relationships fail closed visibly, and neither domain action event is emitted for that same decision.
+15. Event replay, scheduler retry and provider retry/backoff are idempotent and cannot duplicate domain-event, in-app or accepted channel-delivery evidence.
+16. Optional provider failure does not roll back the valid core transaction; failure state, next retry and operational owner remain visible.
+17. Templates, logs, provider responses and health surfaces do not expose secrets, unrestricted personal data, cost rates or margin.
+18. No v1 event resolves a client recipient because the client portal is deferred.
+19. Finance adapter initial delivery accepts only `Approved` batches with complete event/register lineage; final-state operations are retrieval/status-only and idempotent.
 
 ## Mandatory production identity vectors
 
@@ -202,3 +203,15 @@ Use synthetic organization, worker, client and commercial data. Fixtures intenti
 ## PR and release expectations
 
 Affected tests run in the implementation PR. The release candidate reruns the full matrix at one exact head and immutable artifact. Flaky or skipped high-risk tests are release blockers until disposition is approved and documented.
+
+## WOS-00F deterministic vectors
+
+PR-009/PR-012 lifecycle vectors cover correction/rejection in `Draft` and `Under Review`; atomic final approval into `Approved` with no pending approval; stable no-write generic-reopen conflicts for `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`; authorized pre-export cancellation with immutable history, atomic occupancy release and replacement/new approval; failed export retaining `Approved`; and post-export reversal/supersession with a new correction batch/approval. Concurrent approve/correct/reopen and stale/replayed requests must never create pending approval on an exportable/final batch or duplicate/release the wrong occupancy. API, database and browser-role observations must agree, including unauthorized negative cases.
+
+PR-009/PR-013 notification vectors cover distinct requester/commercial owner; distinct requester/batch owner/finance preparer; one identity holding multiple relationships with one record and all reasons or deterministic precedence; affected worker inclusion; attempted caller redirect/omission; and bounded source-type fixtures with no unrelated relationship fanout. They deterministically prove:
+
+1. A multi-recipient decision with one missing, stale or out-of-scope mandatory relationship commits zero protected event/in-app recipient records for every recipient, while separate sanitized visible failure evidence exists and does not claim partial success.
+2. An injected creation, enqueue or persistence failure on the second or later protected recipient leaves zero protected event/in-app recipient records and no mixed partial state.
+3. After the relationship or persistence fault is corrected, retry under the same decision/idempotency identity creates the complete deduplicated protected set exactly once with all retained reasons or approved deterministic precedence and inherits no partial state.
+4. Email or collaboration failure after the atomic protected event/in-app set commits leaves that set intact; external retry is idempotent and creates no duplicate internal event, recipient record or reason mapping, preserving WOS-INT-005 unless separately approved policy requires atomic external delivery.
+5. The same generic decision emits neither `commercial.approval_required` nor `invoice_batch.action_required`, including after response loss or replay.
