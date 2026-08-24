@@ -131,3 +131,78 @@ The WOS-00F corrective hold supersedes every historical authorization to begin W
 | `UAT-` | Production-like acceptance evidence |
 
 Evidence lives under versioned `docs/evidence/v<release>/` paths. Secrets, personal data and bulky transient artifacts are stored externally with only safe summaries/references committed.
+
+## 6. Requirement acceptance states
+
+| State | Meaning |
+|---|---|
+| Blueprint | Defined and mapped; no implementation accepted |
+| In progress | Active branch/PR; no accepted credit |
+| Engineering ready | Implementation/tests merged; environment/UAT/release gates remain |
+| Accepted | All evidence and approvals complete at an exact commit |
+| Deferred | Explicitly removed from current release with rationale |
+| Rejected | Decision made not to implement; authority updated |
+
+## 7. Implementation PR traceability requirements
+
+Every implementation PR includes requirement IDs, evidence IDs, exact head, required checks and limitations.
+
+### PR-011 evidence minimum
+
+- Fixed-fee and every non-T&M operational earned-management policy profile is explicitly non-statutory, effective-dated and fail-closed when no authorized policy is selected.
+- Operational earned-management results never create billing eligibility or invoice readiness and do not treat approved hours as automatically invoiceable.
+- Deterministic financial golden vectors independently specify policy inputs, timing, currency/FX, rounding, version and correction behavior.
+
+### PR-012 evidence minimum
+
+- Source-family eligibility vectors and direct raw-source bypass rejection.
+- One-to-one event/register creation and database-unique current occupancy: same-batch, cross-batch and concurrent duplicate rejection with no orphan line, duplicate amount or control-total drift.
+- Same-key identical retry returns the existing membership; same-key changed-input and different-key duplicates conflict; bulk, import and compatibility routes cannot bypass occupancy.
+- Partial-billing/presentation-splitting reuse is rejected; separately billable portions require distinct authorized/versioned event/item versions and reconciled source totals.
+- Valid pre-export cancellation releases only current occupancy atomically; controlled re-batching creates a new immutable membership version; final occupancy is permanent and corrections use reversal/superseding lineage.
+- Provider and immutable CSV-artifact acceptance; failed-operation and final-state retrieval semantics.
+- Reversals/supersessions and source → event → register → line → batch/export reconciliation.
+
+### PR-013 evidence minimum
+
+- One positive and one negative deterministic vector for each of the thirteen canonical WOS-INT-002 event/template keys.
+- Event/template/source versions, trigger, default relationship recipients and one of four policy classes.
+- In-app mandatory behavior; preference rules; mandatory override/no-opt-out; visible no-recipient failure.
+- Recipient scope/redirection negatives and no v1 client recipient.
+- Shared `approval.*` event reuse across work, leave, assignment, commercial and batch approvals.
+- Transition evidence that `commercial.approval_required` fires only before generic submission to requester/change owner and that a pending generic stage fires only `approval.action_required`.
+- Transition evidence that `invoice_batch.action_required` fires only for non-approval batch-owner remediation and never for pending approval or generic rejection/correction.
+- One source entity/version/operation cannot create more than one action-required notification; replay remains idempotent across event, in-app and channel delivery.
+- Versioned locale/template-variable safety and sanitized provider/health evidence.
+- Email/collaboration/worklog/finance adapter contracts, including Approved-only initial finance export and final-state retrieval/status-only behavior.
+
+### PR-014 evidence minimum
+
+- Production startup/readiness rejects missing, invalid or unavailable required OIDC configuration.
+- Production authentication remains fail-closed and cannot enable WorkOS local authentication.
+- Local credentials and shared/demo identities operate only in approved non-production/demo profiles and are disabled or absent in production.
+- Disabled users and revoked sessions lose access through the mandatory production identity path.
+
+## 8. v1 acceptance summary
+
+Completed by PR-016:
+
+```text
+Total v1 requirements:
+Accepted:
+Deferred by approved scope:
+Open blocking:
+Open non-blocking:
+Exact release commit:
+Release tag:
+Security disposition:
+Migration evidence:
+Commercial reconciliation:
+Restore rehearsal:
+Buyer UAT:
+Owner Gate D approval:
+```
+
+## WOS-00F corrective traceability
+
+The WOS approval, invoice and integration requirement families are clarified by WOS-00F. PR-009 owns generic approval finality, stable conflicts and authorization evidence; PR-012 owns invoice-batch cancellation/replacement, reversal/supersession, occupancy and export evidence; PR-013 owns bounded server-side recipient resolution, atomic all-or-nothing protected event/in-app recipient and reason-mapping persistence, zero-partial-state negatives, corrected exactly-once retry, downstream external-channel isolation, delivery idempotency and event exclusivity. Historical PR #1 evidence remains distinct from active PR #14 evidence. PR #12 remains blocked while the merged baseline is under corrective hold and until the complete five-part WOS-01A dependency law is satisfied.
