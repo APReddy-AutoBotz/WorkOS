@@ -1,0 +1,134 @@
+name: WOS-00F one-shot publisher
+
+on:
+  push:
+    branches:
+      - controller/wos00f-publisher-v7
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wos00f-one-shot-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout isolated publisher branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify payload and publish exact correction
+        shell: bash
+        env:
+          BASE_SHA: 2a288ea22d8aa53d81ae6804778a2f8932046829
+          TARGET_BRANCH: controller/wos-00f-approval-controls
+          PUBLISHER_BRANCH: controller/wos00f-publisher-v7
+          XZ_SHA256: f28645f504bfea36520d2f789d592069dca541991d8c25dc3bb62998cb2cd5ec
+          DIFF_SHA256: 13b69d76969f07ab9b37b43168b7c0080c51f993d3f2fa09f18acbc721176322
+        run: |
+          set -euo pipefail
+
+          cat .github/wos00f-publisher/part-*.b64 | tr -d '[:space:]' > /tmp/wos00f.b64
+
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import lzma
+          from pathlib import Path
+
+          encoded = Path('/tmp/wos00f.b64').read_text(encoding='ascii')
+          if len(encoded) != 10000:
+              raise SystemExit(f'payload length mismatch: {len(encoded)}')
+          compressed = base64.b64decode(encoded, validate=True)
+          if len(compressed) != 7500:
+              raise SystemExit(f'compressed length mismatch: {len(compressed)}')
+          if hashlib.sha256(compressed).hexdigest() != 'f28645f504bfea36520d2f789d592069dca541991d8c25dc3bb62998cb2cd5ec':
+              raise SystemExit('compressed SHA-256 mismatch')
+          diff = lzma.decompress(compressed, format=lzma.FORMAT_XZ)
+          if len(diff) != 23562:
+              raise SystemExit(f'diff length mismatch: {len(diff)}')
+          if hashlib.sha256(diff).hexdigest() != '13b69d76969f07ab9b37b43168b7c0080c51f993d3f2fa09f18acbc721176322':
+              raise SystemExit('diff SHA-256 mismatch')
+          Path('/tmp/wos00f.diff').write_bytes(diff)
+          PY
+
+          git fetch --no-tags origin "${TARGET_BRANCH}"
+          CURRENT_SHA="$(git rev-parse "origin/${TARGET_BRANCH}")"
+          test "${CURRENT_SHA}" = "${BASE_SHA}"
+          git checkout --detach "${CURRENT_SHA}"
+
+          git apply --check /tmp/wos00f.diff
+          git apply /tmp/wos00f.diff
+
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          expected = {
+              'CHANGELOG.md': (1641, '210049f17315b358e6222718441cb197d0a432e93ab221eddb6688f501c6e81f'),
+              'docs/00-control/IMPLEMENTATION_STATUS.md': (9177, '89f66e54f3ff6bce84bd573e887851e5e55747d4415c6f8728222d084b782355'),
+              'docs/00-control/PRODUCT_REQUIREMENTS.md': (45798, '52330db388cd9dc11899fdeda7fc415dcdaa285b1af96fb5bfd1737c4f5fa6aa'),
+              'docs/00-control/REQUIREMENTS_TRACEABILITY.md': (16079, '9e0243f9f08f6435649d5135a42c5839891d453e46f8682edc0b147e69afab09'),
+              'docs/02-architecture/API_ARCHITECTURE.md': (11305, 'e6f21cd588599cc688024a203b39308ad902efc5ee2ade3ef7636a1c554d9952'),
+              'docs/02-architecture/INTEGRATION_ARCHITECTURE.md': (12636, '1146a0335a738ac5790e541f0d7454ccbd21308f21654a241b5aba7402749fda'),
+              'docs/03-specifications/APPROVAL_AND_POLICY_ENGINE_SPEC.md': (9454, 'dc967b873ff5e649af4d64f642ed86f5817612cc431e8a59ff4d2a15992641dd'),
+              'docs/03-specifications/COMMERCIALS_REVENUE_MARGIN_SPEC.md': (14750, '5a9fc55931fd416e1265d0bb72bb12544f5c331a1caaba04c843f6a6ec79ae34'),
+              'docs/04-quality/RELEASE_ACCEPTANCE_CRITERIA.md': (4240, 'f9cdbf2610952e9d5f30e92de806827a4bceecfb0ab7976a2750ad60c14d2797'),
+              'docs/04-quality/TEST_STRATEGY.md': (20123, 'ca4d915567b9d94752f09daf8111a448cb1fe5465fc7d0c58fa0e0f5064160aa'),
+              'docs/05-delivery/IMPLEMENTATION_BACKLOG.md': (21894, '87b9ace99676c28cedec51e6cb8b7a7dc6d825f645f3623f946c79b53e8f6fa5'),
+              'docs/evidence/v0.1.0/DOC-WOS-00-002-REVIEW-RESOLUTION.md': (17632, '9cb2bfb03ef07c25cd4ace160d172c3a4d11b4a923703acadce0f0665b452981'),
+              'docs/evidence/v0.1.0/DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md': (11523, 'cb2c0ae4911b168d85e90a2be29a64b2d7c25508d58657b148a6b563d7727d1d'),
+              'docs/evidence/v0.1.0/DOC-WOS-00F-CORRECTION-REPORT.md': (2340, 'b26681b5dfb4cda6bc6e26935eae205048b2e59429a407b7bf3dea599545cfad'),
+          }
+          for path, (size, digest) in expected.items():
+              data = Path(path).read_bytes()
+              if len(data) != size:
+                  raise SystemExit(f'{path}: byte count {len(data)} != {size}')
+              actual = hashlib.sha256(data).hexdigest()
+              if actual != digest:
+                  raise SystemExit(f'{path}: SHA-256 {actual} != {digest}')
+          PY
+
+          cat > /tmp/expected-paths <<'EOF'
+          CHANGELOG.md
+          docs/00-control/IMPLEMENTATION_STATUS.md
+          docs/00-control/PRODUCT_REQUIREMENTS.md
+          docs/00-control/REQUIREMENTS_TRACEABILITY.md
+          docs/02-architecture/API_ARCHITECTURE.md
+          docs/02-architecture/INTEGRATION_ARCHITECTURE.md
+          docs/03-specifications/APPROVAL_AND_POLICY_ENGINE_SPEC.md
+          docs/03-specifications/COMMERCIALS_REVENUE_MARGIN_SPEC.md
+          docs/04-quality/RELEASE_ACCEPTANCE_CRITERIA.md
+          docs/04-quality/TEST_STRATEGY.md
+          docs/05-delivery/IMPLEMENTATION_BACKLOG.md
+          docs/evidence/v0.1.0/DOC-WOS-00-002-REVIEW-RESOLUTION.md
+          docs/evidence/v0.1.0/DOC-WOS-00-BLUEPRINT-CONTROLLER-REVIEW.md
+          docs/evidence/v0.1.0/DOC-WOS-00F-CORRECTION-REPORT.md
+          EOF
+          git diff --name-only "${BASE_SHA}" | LC_ALL=C sort > /tmp/actual-paths
+          diff -u /tmp/expected-paths /tmp/actual-paths
+          git diff --check
+
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          git add --pathspec-from-file=/tmp/expected-paths
+          git commit -m "WOS-00F: correct post-merge approval controls"
+          PUBLISHED_SHA="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          REMOTE_SHA="$(git ls-remote origin "refs/heads/${TARGET_BRANCH}" | cut -f1)"
+          test "${REMOTE_SHA}" = "${PUBLISHED_SHA}"
+
+          {
+            echo "## WOS-00F publication completed"
+            echo "- Target branch: ${TARGET_BRANCH}"
+            echo "- Published head: ${PUBLISHED_SHA}"
+            echo "- Base: ${BASE_SHA}"
+            echo "- Scope: 14 documentation/control files"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          git push origin --delete "${PUBLISHER_BRANCH}" || true
