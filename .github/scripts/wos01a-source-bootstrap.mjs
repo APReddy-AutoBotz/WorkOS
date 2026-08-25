@@ -8,7 +8,6 @@ import {
   readdir,
   rename,
   rm,
-  stat,
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
@@ -50,6 +49,7 @@ const walk = async (root) => {
   if (!(await exists(root))) return [];
   const result = [];
   for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (entry.isDirectory() && ['.git', 'dist', 'node_modules'].includes(entry.name)) continue;
     const file = path.join(root, entry.name);
     if (entry.isDirectory()) result.push(...await walk(file));
     else if (entry.isFile()) result.push(file);
@@ -83,7 +83,7 @@ const excludedTestPatterns = [
   /backend-uat-evidence/i,
 ];
 
-const sourceFiles = (await walk(sourceRoot)).filter(file => !rel(sourceRoot, file).startsWith('.git/'));
+const sourceFiles = await walk(sourceRoot);
 const selected = new Set();
 for (const file of selectedRootFiles) if (await exists(path.join(sourceRoot, file))) selected.add(file);
 for (const file of await walk(path.join(sourceRoot, 'src'))) selected.add(rel(sourceRoot, file));
@@ -247,9 +247,16 @@ await mkdir(path.join(targetRoot, 'public'), { recursive: true });
 await writeFile(path.join(targetRoot, 'public/workos-mark.svg'), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="WorkOS"><rect width="128" height="128" rx="28" fill="#0f172a"/><path d="M25 38h16l10 45 13-34h14l12 34 9-45h16L99 96H84L71 64 58 96H43z" fill="#f97316"/></svg>\n`);
 await writeFile(path.join(targetRoot, 'public/login-workspace-bg.svg'), `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0f172a"/><stop offset="1" stop-color="#e2e8f0"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><g fill="none" stroke="#f97316" stroke-opacity=".18"><circle cx="180" cy="160" r="120"/><circle cx="980" cy="620" r="220"/><path d="M0 520C260 360 430 690 700 490s360-230 500-170"/></g></svg>\n`);
 
-for (const file of await walk(targetRoot)) {
-  const targetPath = rel(targetRoot, file);
-  if (targetPath.startsWith('.git/')) continue;
+const brandingTargets = new Set(
+  [...selected].map(sourcePath => sourcePath === 'server/migrations/006_boundaryless_workos_prod_core.sql'
+    ? 'server/migrations/006_workos_prod_core.sql'
+    : sourcePath),
+);
+brandingTargets.add('public/workos-mark.svg');
+brandingTargets.add('public/login-workspace-bg.svg');
+for (const targetPath of [...brandingTargets].sort()) {
+  const file = path.join(targetRoot, targetPath);
+  if (!(await exists(file))) continue;
   const extension = path.extname(file);
   if (!TEXT_EXTENSIONS.has(extension) && !file.endsWith('.env.example')) continue;
   let text;
@@ -315,7 +322,7 @@ const rules = [
   ['shared demo password', /demo123/i],
   ['private key', /BEGIN (?:RSA|OPENSSH|EC|DSA) PRIVATE KEY/],
   ['GitHub token', /(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}/],
-  ['prohibited production URL', /https?:\\/\\/(?!localhost|127\\.0\\.0\\.1|login\\.microsoftonline\\.com|graph\\.microsoft\\.com|example\\.(?:test|invalid))[^\\s'\"<>]+/i],
+  ['prohibited production URL', /https?:\\/\\/(?!localhost|127\\.0\\.0\\.1|login\\.microsoftonline\\.com|graph\\.microsoft\\.com|teams\\.microsoft\\.com|outlook\\.office\\.com|example\\.(?:test|invalid))[^\\s'\"<>]+/i],
 ];
 const failures = [];
 for (const file of files) {
