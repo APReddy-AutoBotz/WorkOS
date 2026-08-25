@@ -70,6 +70,14 @@ const allowedHosts = new Set([
 ]);
 const isAllowedHost = (hostname) =>
   allowedHosts.has(hostname) || hostname.endsWith('.example.test') || hostname.endsWith('.example.invalid');
+const packageProvenanceHosts = new Set(['dotenvx.com', 'www.patreon.com', 'feross.org']);
+const isKnownNonRuntimeUrl = (relative, parsed) =>
+  (relative === 'package-lock.json' && packageProvenanceHosts.has(parsed.hostname.toLowerCase())) ||
+  (relative.endsWith('.svg') && parsed.href === 'http://www.w3.org/2000/svg');
+const normalizeLocalTemplateUrl = (rawUrl) => rawUrl.replace(
+  /^(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])):\$\{[^}]+\}/i,
+  '$1:0',
+);
 
 const failures = [];
 for (const file of [...new Set(files)].sort()) {
@@ -85,10 +93,10 @@ for (const file of [...new Set(files)].sort()) {
   }
 
   for (const match of text.matchAll(/https?:\/\/[^\s'"<>`]+/gi)) {
-    const rawUrl = match[0].replace(/[),.;]+$/, '');
+    const rawUrl = normalizeLocalTemplateUrl(match[0].replace(/[),.;]+$/, ''));
     try {
       const parsed = new URL(rawUrl);
-      if (!isAllowedHost(parsed.hostname.toLowerCase())) {
+      if (!isAllowedHost(parsed.hostname.toLowerCase()) && !isKnownNonRuntimeUrl(relative, parsed)) {
         failures.push(`non-placeholder remote URL (${parsed.hostname}): ${relative}`);
       }
     } catch {

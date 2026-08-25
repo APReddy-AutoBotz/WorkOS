@@ -191,6 +191,7 @@ let indexText = await readFile(indexFile, 'utf8');
 indexText = indexText
   .replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="%VITE_PRODUCT_LOGO_URL%" />')
   .replace(/\n\s*<link rel="alternate icon"[^>]*>/, '')
+  .replace(/\n\s*<link[^>]+(?:fonts\.googleapis\.com|fonts\.gstatic\.com)[^>]*>/g, '')
   .replace(/<title>[^<]*<\/title>/, '<title>%VITE_PRODUCT_NAME%</title>');
 await writeFile(indexFile, indexText);
 
@@ -321,6 +322,7 @@ for (const targetPath of [...brandingTargets].sort()) {
     .replaceAll('/workos-logo.png', '/workos-mark.svg')
     .replaceAll('/workos-logo-mini.png', '/workos-mark.svg')
     .replaceAll('/workos-wordmark.png', '/workos-mark.svg')
+    .replaceAll('RUT-${', 'WOS-${')
     .replaceAll("'rut_", "'workos_")
     .replaceAll("'rt_", "'workos_")
     .replaceAll("'bw_", "'workos_");
