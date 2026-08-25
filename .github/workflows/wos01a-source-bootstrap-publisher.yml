@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/wos01a-source-bootstrap-publisher.yml'
       - '.github/scripts/wos01a-source-bootstrap.mjs'
+      - '.github/scripts/wos01a/**'
 
 permissions:
   contents: write
@@ -21,6 +22,7 @@ concurrency:
 env:
   TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   EXPECTED_TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
+  EXPECTED_BASE_HEAD: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
   REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
   REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
   PR_NUMBER: '16'
@@ -32,6 +34,24 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      - name: Verify live PR association and exact start state
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const failures = [];
+            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
+            if (!pr.draft) failures.push('PR is not Draft');
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
+            if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
+            if (pr.base.sha !== process.env.EXPECTED_BASE_HEAD) failures.push(`base.sha=${pr.base.sha}`);
+            if (failures.length) core.setFailed(`WOS-01A PR association/start gate failed: ${failures.join(', ')}`);
+
       - name: Checkout controller scripts from main
         uses: actions/checkout@v4
         with:
@@ -64,12 +84,13 @@ jobs:
           cache: npm
           cache-dependency-path: reference/package-lock.json
 
-      - name: Verify immutable start gate
+      - name: Verify immutable repository start gate
         shell: bash
         run: |
           set -euo pipefail
           test "$(git -C workos rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
           test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
+          test "$(git -C reference rev-parse HEAD^{tree})" = "fdaa5d92854d378dae1c6146a8f09c7f34f8c273"
           test -z "$(git -C reference status --porcelain)"
           remote_head="$(git -C workos ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
           test "$remote_head" = "$EXPECTED_TARGET_HEAD"
@@ -78,7 +99,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node controller/.github/scripts/wos01a-source-bootstrap.mjs reference workos | tee /tmp/wos01a-result.json
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs reference workos controller | tee /tmp/wos01a-result.json
+
+      - name: Re-verify live Draft PR before publication
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const failures = [];
+            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
+            if (!pr.draft) failures.push('PR is not Draft');
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
+            if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
+            if (pr.base.sha !== process.env.EXPECTED_BASE_HEAD) failures.push(`base.sha=${pr.base.sha}`);
+            if (failures.length) core.setFailed(`WOS-01A PR moved or lost Draft association before publication: ${failures.join(', ')}`);
 
       - name: Commit and publish with exact-old-head guard
         id: publish
@@ -86,6 +125,8 @@ jobs:
         run: |
           set -euo pipefail
           cd workos
+          remote_head="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$EXPECTED_TARGET_HEAD"
           git config user.name "WorkOS Implementation Controller"
           git config user.email "actions@users.noreply.github.com"
           git add -A
@@ -99,6 +140,7 @@ jobs:
           echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
 
       - name: Verify published GitHub head
+        id: verify
         shell: bash
         run: |
           set -euo pipefail
@@ -106,6 +148,8 @@ jobs:
           test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
 
       - name: Comment successful publication on PR #16
+        if: steps.verify.outcome == 'success'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -125,14 +169,17 @@ jobs:
               body,
             });
 
-      - name: Comment failure without weakening gates
-        if: failure()
+      - name: Comment fail-closed publisher result
+        if: failure() && steps.verify.outcome != 'success'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
+            const publishOutcome = '${{ steps.publish.outcome }}';
+            const verifyOutcome = '${{ steps.verify.outcome }}';
             const body = `### WOS-01A publisher failed closed
 
-            Workflow \`${context.workflow}\` run \`${context.runId}\` did not publish the source-bootstrap branch. The exact-old-head guard, mandatory install/build/test/scan checks, or publication verification failed. PR #16 remains Draft and unmerged. Inspect the workflow job logs before correcting the actual failure; do not bypass or relabel a failed check.`;
+            Workflow \`${context.workflow}\` run \`${context.runId}\` did not establish a verified published WOS-01A head. Publish step: \`${publishOutcome}\`; verification step: \`${verifyOutcome}\`. The exact-old-head/PR-association guard, mandatory install/build/test/scan checks, push, or remote-head verification failed. PR #16 remains governed by its live GitHub state. Inspect the workflow job logs and correct the actual failure; do not bypass or relabel a failed check.`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
