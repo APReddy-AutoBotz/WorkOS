@@ -1,0 +1,141 @@
+name: WOS-01A Source Bootstrap Publisher
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/wos01a-source-bootstrap-publisher.yml'
+      - '.github/scripts/wos01a-source-bootstrap.mjs'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: wos01a-source-bootstrap-publisher
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  EXPECTED_TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
+  REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
+  REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
+  PR_NUMBER: '16'
+
+jobs:
+  publish:
+    name: Build, verify and publish WOS-01A
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout controller scripts from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: controller
+          persist-credentials: false
+
+      - name: Checkout exact WorkOS Draft branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          path: workos
+          fetch-depth: 0
+          token: ${{ github.token }}
+          persist-credentials: true
+
+      - name: Checkout pinned authorized reference read-only
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REFERENCE_REPOSITORY }}
+          ref: ${{ env.REFERENCE_COMMIT }}
+          path: reference
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: reference/package-lock.json
+
+      - name: Verify immutable start gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C workos rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+          test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
+          test -z "$(git -C reference status --porcelain)"
+          remote_head="$(git -C workos ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$EXPECTED_TARGET_HEAD"
+
+      - name: Materialize and verify the complete WOS-01A package
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs reference workos | tee /tmp/wos01a-result.json
+
+      - name: Commit and publish with exact-old-head guard
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd workos
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          test -n "$(git status --porcelain)"
+          git diff --cached --check
+          changed_count="$(git diff --cached --name-only | wc -l | tr -d ' ')"
+          git commit -m "feat: bootstrap authorized WorkOS source baseline"
+          new_head="$(git rev-parse HEAD)"
+          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+          echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published GitHub head
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_head="$(git -C workos ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
+
+      - name: Comment successful publication on PR #16
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### WOS-01A GitHub Actions publication complete
+
+            - Published exact head: \`${{ steps.publish.outputs.new_head }}\`
+            - Parent guard: \`${process.env.EXPECTED_TARGET_HEAD}\`
+            - Changed paths: ${{ steps.publish.outputs.changed_count }}
+            - Authorized reference: \`${process.env.REFERENCE_REPOSITORY}@${process.env.REFERENCE_COMMIT}\` (read-only)
+            - Construction workflow: \`${context.workflow}\` run \`${context.runId}\`
+
+            The Draft PR remains unmerged. Independent exact-head Sol review, clean-runtime acceptance and repository merge gates are still mandatory. No deployment, provider/customer-data action or reference-repository write occurred.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body,
+            });
+
+      - name: Comment failure without weakening gates
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### WOS-01A publisher failed closed
+
+            Workflow \`${context.workflow}\` run \`${context.runId}\` did not publish the source-bootstrap branch. The exact-old-head guard, mandatory install/build/test/scan checks, or publication verification failed. PR #16 remains Draft and unmerged. Inspect the workflow job logs before correcting the actual failure; do not bypass or relabel a failed check.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body,
+            });
