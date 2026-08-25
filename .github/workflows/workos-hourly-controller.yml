@@ -1,0 +1,170 @@
+name: WorkOS Hourly Implementation Controller
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/workos-hourly-controller.yml'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: workos-hourly-implementation-controller
+  cancel-in-progress: false
+
+jobs:
+  controller:
+    name: Inspect and pick the next WorkOS task
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Inspect active WorkOS PR and publish controller heartbeat
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const marker = '<!-- workos-hourly-controller -->';
+            const autoMarker = '[WORKOS-HOURLY-AUTOPICK]';
+            const now = Date.now();
+            const HOUR = 60 * 60 * 1000;
+
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              sort: 'updated',
+              direction: 'desc',
+              per_page: 100,
+            });
+
+            const candidates = pulls.filter((pr) =>
+              pr.draft &&
+              /^WOS-/i.test(pr.title || '') &&
+              !/transport/i.test(pr.title || '')
+            );
+
+            const active = candidates[0] || null;
+            let governingIssue = 3;
+            let action = 'No active Draft WOS implementation PR was found.';
+            let latestBotResponse = null;
+            let shouldAutopick = false;
+            let taskPath = null;
+
+            if (active) {
+              const issueMatch = (active.body || '').match(/(?:Governing issue|Corrective issue|WOS-01 governing issue):\s*#(\d+)/i);
+              if (issueMatch) governingIssue = Number(issueMatch[1]);
+
+              const taskMatch = (active.body || '').match(/`(docs\/tasks\/[^`]+\.md)`/i);
+              taskPath = taskMatch?.[1] || null;
+
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: active.number,
+                per_page: 100,
+              });
+
+              const botResponses = comments
+                .filter((comment) => comment.user?.login === 'chatgpt-codex-connector[bot]')
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+              latestBotResponse = botResponses[0] || null;
+
+              const taskComments = comments
+                .filter((comment) => /@codex\b/i.test(comment.body || ''))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+              const latestTask = taskComments[0] || null;
+
+              const recentAuto = comments
+                .filter((comment) => (comment.body || '').includes(autoMarker))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+
+              const latestTaskAge = latestTask ? now - new Date(latestTask.created_at).getTime() : Infinity;
+              const latestBotAge = latestBotResponse ? now - new Date(latestBotResponse.created_at).getTime() : Infinity;
+              const recentAutoAge = recentAuto ? now - new Date(recentAuto.created_at).getTime() : Infinity;
+              const botRespondedAfterTask = Boolean(
+                latestTask && latestBotResponse &&
+                new Date(latestBotResponse.created_at) > new Date(latestTask.created_at)
+              );
+
+              const bodyAllowsWork = !/(dependency[- ]blocked|not authorized to import|do not resume)/i.test(active.body || '');
+              const noRecentAutopick = recentAutoAge >= 55 * 60 * 1000;
+              const noLikelyRunningTask = !latestTask || botRespondedAfterTask || latestTaskAge >= 3 * HOUR;
+              const botIsNotFresh = latestBotAge >= 55 * 60 * 1000;
+
+              shouldAutopick = bodyAllowsWork && noRecentAutopick && noLikelyRunningTask && botIsNotFresh;
+
+              if (shouldAutopick) {
+                const taskReference = taskPath
+                  ? `Read and execute \`${taskPath}\` and the current PR body as the governing contract.`
+                  : 'Read the current PR body and governing WorkOS documents before acting.';
+
+                const taskBody = `@codex ${autoMarker}\n\nContinue the active WorkOS implementation on Draft PR #${active.number} from exact published head \`${active.head.sha}\`. ${taskReference}\n\nUse the **WorkOS Implementation** environment and the strongest appropriate **Sol** reasoning model. Re-fetch the live PR/head before writing. Use one writer/coordinator; parallel subagents may be read-only unless the governing task explicitly assigns disjoint write sets. Complete the next coherent, non-micro implementation family, run every applicable check, publish to the existing branch, and report the exact resulting GitHub head.\n\nKeep the PR Draft. Do not merge, deploy, use real secrets/providers/customer data, modify the authorized reference repository, or start a later workstream. If a hard gate blocks implementation, report the exact blocker and leave the branch unchanged.`;
+
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: active.number,
+                  body: taskBody,
+                });
+                action = `Posted an hourly Codex autopick task on PR #${active.number} at head ${active.head.sha}.`;
+              } else {
+                action = `Inspected PR #${active.number}; no duplicate writer was started. Existing task/review activity or a governing hold is still current.`;
+              }
+            }
+
+            const targetIssue = governingIssue || 3;
+            const issueComments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: targetIssue,
+              per_page: 100,
+            });
+            const heartbeat = issueComments.find((comment) =>
+              (comment.body || '').includes(marker) &&
+              comment.user?.login === 'github-actions[bot]'
+            );
+
+            const activeSummary = active
+              ? [
+                  `- Active PR: #${active.number} — ${active.title}`,
+                  `- State: Draft / ${active.state}`,
+                  `- Exact head: \`${active.head.sha}\``,
+                  `- Base: \`${active.base.sha}\``,
+                  `- Governing task: ${taskPath ? `\`${taskPath}\`` : 'not detected from PR body'}`,
+                  `- Latest Codex response: ${latestBotResponse ? latestBotResponse.created_at : 'none detected'}`,
+                ].join('\n')
+              : '- Active PR: none detected';
+
+            const heartbeatBody = `${marker}\n## WorkOS hourly implementation controller\n\n- Last run: ${new Date().toISOString()}\n${activeSummary}\n- Controller action: ${action}\n\nThis workflow never merges, marks Ready, deploys, accesses real secrets/customer data, or modifies the authorized reference repository. It only inspects live state, publishes a visible heartbeat and starts a bounded Codex continuation when no current writer/review appears active.`;
+
+            if (heartbeat) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: heartbeat.id,
+                body: heartbeatBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: targetIssue,
+                body: heartbeatBody,
+              });
+            }
+
+            core.summary
+              .addHeading('WorkOS hourly controller')
+              .addRaw(activeSummary)
+              .addEOL()
+              .addRaw(`Action: ${action}`)
+              .write();
