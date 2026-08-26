@@ -48,7 +48,7 @@ const contentRules = [
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/],
   ['Slack token', /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/],
 ];
-const passwordAssignment = /\b(?:password|passphrase)\s*[:=]\s*(['"])([^'"\r\n]+)\1/gi;
+const passwordAssignment = /\b(?:password|passphrase|credential|[A-Za-z_$][\w$]*(?:password|passphrase|credential)[A-Za-z0-9_$]*)\s*[:=]\s*(['"`])([^'"`\r\n]+)\1/gi;
 const TEST_ONLY_PASSWORD = 'workos-test-only';
 const allowedHosts = new Set([
   'localhost',
@@ -104,7 +104,11 @@ for (const file of [...new Set(files)].sort()) {
     failures.push(`hardcoded runtime product brand: ${relative}`);
   }
 
-  for (const match of text.matchAll(/https?:\/\/[^\s'"<>`]+/gi)) {
+  const urlScanText = text.replace(
+    /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\$\{[^}\r\n]+\}/gi,
+    rawUrl => normalizeLocalTemplateUrl(rawUrl),
+  );
+  for (const match of urlScanText.matchAll(/https?:\/\/[^\s'"<>`]+/gi)) {
     const rawUrl = normalizeLocalTemplateUrl(match[0].replace(/[),.;]+$/, ''));
     try {
       const parsed = new URL(rawUrl);

@@ -185,6 +185,34 @@ export const productConfig = Object.freeze({
 });
 `);
 
+const centralizeRuntimeBranding = (source, targetPath) => {
+  if (!/^src\/.*\.(?:ts|tsx)$/.test(targetPath) || targetPath === 'src/config/productConfig.ts') return source;
+  const substitutions = [
+    ['My WorkOS Hub', 'My ${productConfig.productName} Hub'],
+    ['Boundaryless-WorkOS', '${productConfig.productName}'],
+    ['Boundaryless WorkOS', '${productConfig.productName}'],
+    ['Configured product', '${productConfig.productName}'],
+    ['Boundaryless', '${productConfig.organizationName}'],
+    ['Your organization', '${productConfig.organizationName}'],
+  ];
+  let next = source;
+  let changed = false;
+  next = next.replace(/(['"])([^'"\r\n]*(?:My WorkOS Hub|Boundaryless-WorkOS|Boundaryless WorkOS|Configured product|Boundaryless|Your organization)[^'"\r\n]*)\1/g, (_match, _quote, value) => {
+    let replacement = value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${');
+    for (const [label, expression] of substitutions) replacement = replacement.replaceAll(label, expression);
+    changed = true;
+    return `\`${replacement}\``;
+  });
+  if (!changed || /(?:^|\n)import\s+\{\s*productConfig\s*\}/.test(next)) return next;
+  const depth = targetPath.slice('src/'.length).split('/').length - 1;
+  const configPath = `${'../'.repeat(depth)}config/productConfig`;
+  const imports = [...next.matchAll(/^import[^\n]*;\s*$/gm)];
+  if (!imports.length) throw new Error(`Cannot insert productConfig import in ${targetPath}`);
+  const lastImport = imports.at(-1);
+  const insertAt = lastImport.index + lastImport[0].length;
+  return `${next.slice(0, insertAt)}\nimport { productConfig } from '${configPath}';${next.slice(insertAt)}`;
+};
+
 const loginPage = path.join(targetRoot, 'src/pages/Login.tsx');
 let loginText = await readFile(loginPage, 'utf8');
 loginText = loginText
@@ -215,6 +243,12 @@ indexText = indexText
   .replace(/\n\s*<link[^>]+(?:fonts\.googleapis\.com|fonts\.gstatic\.com)[^>]*>/g, '')
   .replace(/<title>[^<]*<\/title>/, '<title>%VITE_PRODUCT_NAME%</title>');
 await writeFile(indexFile, indexText);
+
+const cssFile = path.join(targetRoot, 'src/index.css');
+if (await exists(cssFile)) {
+  const cssText = await readFile(cssFile, 'utf8');
+  await writeFile(cssFile, cssText.replace(/^\s*@import\s+(?:url\()?['"]?https:\/\/fonts\.(?:googleapis|gstatic)\.com[^;]*;\s*$/gim, ''));
+}
 
 const seedDemo = path.join(targetRoot, 'server/seed-demo.mjs');
 let seedText = await readFile(seedDemo, 'utf8');
@@ -257,7 +291,7 @@ await import('./index.mjs');
 
 const serverIndex = path.join(targetRoot, 'server/index.mjs');
 let serverText = await readFile(serverIndex, 'utf8');
-const localLoginRoute = /app\.post\((['"])\/api\/auth\/login\1,\s*async\s*\(req,\s*res\)\s*=>\s*\{/;
+const localLoginRoute = /app\.post\((['"])\/api\/auth\/login\1,\s*(?:(?:[A-Za-z_$][\w$]*),\s*)*async\s*\(req,\s*res\)\s*=>\s*\{/;
 const localLoginMatches = serverText.match(new RegExp(localLoginRoute.source, 'g')) || [];
 if (localLoginMatches.length !== 1) throw new Error(`Expected one local-login route, found ${localLoginMatches.length}`);
 serverText = serverText
@@ -367,6 +401,7 @@ for (const targetPath of [...brandingTargets].sort()) {
     .replaceAll("'rut_", "'workos_")
     .replaceAll("'rt_", "'workos_")
     .replaceAll("'bw_", "'workos_");
+  text = centralizeRuntimeBranding(text, targetPath);
   if (/src\/services\/(storage|demoData)\.ts$/.test(targetPath)) {
     text = text.replaceAll('BL-', 'WOS-');
   }
