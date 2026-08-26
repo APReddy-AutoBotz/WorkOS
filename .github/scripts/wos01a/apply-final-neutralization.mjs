@@ -27,8 +27,8 @@ replaceExactlyOnce(
 );
 
 replaceExactlyOnce(
-  "    .replaceAll('Boundaryless', 'WorkOS')\n    .replaceAll('boundaryless.com', 'example.test')\n    .replaceAll('boundaryless', 'workos')",
-  "    .replaceAll('boundaryless.demo', 'example.test')\n    .replaceAll('Boundaryless', 'WorkOS')\n    .replaceAll('boundaryless.com', 'example.test')\n    .replaceAll('boundaryless', 'workos')",
+  "    .replaceAll('Boundaryless', 'Your organization')\n    .replaceAll('boundaryless.com', 'example.test')\n    .replaceAll('boundaryless', 'your-organization')",
+  "    .replaceAll('boundaryless.demo', 'example.test')\n    .replaceAll('Boundaryless', 'Your organization')\n    .replaceAll('boundaryless.com', 'example.test')\n    .replaceAll('boundaryless', 'your-organization')",
   'demo-domain neutralization',
 );
 

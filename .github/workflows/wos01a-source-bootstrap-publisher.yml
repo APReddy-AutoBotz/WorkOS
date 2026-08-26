@@ -49,14 +49,14 @@ jobs:
             if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
             if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
             if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
-            if (pr.base.sha !== process.env.EXPECTED_BASE_HEAD) failures.push(`base.sha=${pr.base.sha}`);
             if (failures.length) core.setFailed(`WOS-01A PR association/start gate failed: ${failures.join(', ')}`);
 
-      - name: Checkout controller scripts from main
+      - name: Checkout controller scripts from triggering revision
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           path: controller
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout exact WorkOS Draft branch
@@ -88,6 +88,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "$GITHUB_SHA"
+          git -C controller merge-base --is-ancestor "$EXPECTED_BASE_HEAD" HEAD
+          git -C workos merge-base --is-ancestor "$EXPECTED_BASE_HEAD" HEAD
           test "$(git -C workos rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
           test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
           test "$(git -C reference rev-parse HEAD^{tree})" = "fdaa5d92854d378dae1c6146a8f09c7f34f8c273"
@@ -123,7 +126,6 @@ jobs:
             if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
             if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
             if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
-            if (pr.base.sha !== process.env.EXPECTED_BASE_HEAD) failures.push(`base.sha=${pr.base.sha}`);
             if (failures.length) core.setFailed(`WOS-01A PR moved or lost Draft association before publication: ${failures.join(', ')}`);
 
       - name: Commit and publish with exact-old-head guard
@@ -142,8 +144,10 @@ jobs:
           changed_count="$(git diff --cached --name-only | wc -l | tr -d ' ')"
           git commit -m "feat: bootstrap authorized WorkOS source baseline"
           new_head="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse HEAD^{tree})"
           git push --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" origin "HEAD:refs/heads/$TARGET_BRANCH"
           echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+          echo "new_tree=$new_tree" >> "$GITHUB_OUTPUT"
           echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
 
       - name: Verify published GitHub head
@@ -153,6 +157,9 @@ jobs:
           set -euo pipefail
           remote_head="$(git -C workos ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
           test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
+          git -C workos fetch --no-tags origin "$remote_head"
+          test "$(git -C workos rev-parse "$remote_head^{tree}")" = "${{ steps.publish.outputs.new_tree }}"
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
 
       - name: Comment successful publication on PR #16
         if: steps.verify.outcome == 'success'

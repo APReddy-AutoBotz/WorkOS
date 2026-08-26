@@ -48,10 +48,12 @@ const contentRules = [
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/],
   ['Slack token', /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/],
 ];
+const passwordAssignment = /\b(?:password|passphrase)\s*[:=]\s*(['"])([^'"\r\n]+)\1/gi;
+const TEST_ONLY_PASSWORD = 'workos-test-only';
 const allowedHosts = new Set([
   'localhost',
   '127.0.0.1',
-  '::1',
+  '[::1]',
   'login.microsoftonline.com',
   'graph.microsoft.com',
   'teams.microsoft.com',
@@ -90,6 +92,16 @@ for (const file of [...new Set(files)].sort()) {
   try { text = await readFile(file, 'utf8'); } catch { continue; }
   for (const [name, pattern] of contentRules) {
     if (pattern.test(text)) failures.push(`${name}: ${relative}`);
+  }
+
+  if (relative.startsWith('tests/')) {
+    for (const match of text.matchAll(passwordAssignment)) {
+      if (match[2] !== TEST_ONLY_PASSWORD) failures.push(`credential assignment: ${relative}`);
+    }
+  }
+  if (/^(?:src|server|templates)\//.test(relative) &&
+      relative !== 'src/config/productConfig.ts' && /\bWorkOS\b/.test(text)) {
+    failures.push(`hardcoded runtime product brand: ${relative}`);
   }
 
   for (const match of text.matchAll(/https?:\/\/[^\s'"<>`]+/gi)) {
