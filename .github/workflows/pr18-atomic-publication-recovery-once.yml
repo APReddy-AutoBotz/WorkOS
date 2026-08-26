@@ -1,4 +1,4 @@
-name: PR18 Atomic Publication Recovery Once
+name: PR18 Exact-Head Acceptance Verify Once
 
 on:
   push:
@@ -8,29 +8,29 @@ on:
       - '.github/workflows/pr18-atomic-publication-recovery-once.yml'
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
 
 concurrency:
-  group: pr18-atomic-publication-recovery-once
+  group: pr18-exact-head-acceptance-verify-once
   cancel-in-progress: false
 
 env:
   PUBLISHER_PR: '18'
-  PUBLISHER_BRANCH: controller/wos01a-actions-publisher
-  PUBLISHER_OLD_HEAD: 01eb16a22f9ef4b203e879a1568f7ee0ff34572d
-  PUBLISHER_TARGET_TREE: 42b1c19dd3a88b753c81ad8948b89b998884b01a
+  PUBLISHER_HEAD: 4d841b1ae783dd066c5d77fb7c29927b2657255f
+  PUBLISHER_TREE: 42b1c19dd3a88b753c81ad8948b89b998884b01a
   TARGET_PR: '16'
   TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
   TARGET_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
-  PATCH_RAW_SHA256: 36854dbc759e075495b19828d50f59012166b3cdc340f9e76bb3eafdb70b3d4f
-  PATCH_XZ_SHA256: 5528d2b4745f60e630535c55fe1d573e695f46a331eca376c63fcf135f1444c9
+  REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
+  REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
+  REFERENCE_TREE: fdaa5d92854d378dae1c6146a8f09c7f34f8c273
 
 jobs:
-  publish:
-    name: Atomically publish approved PR18 correction
+  verify:
+    name: Verify exact PR18 publisher head without publication
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - name: Verify exact live PR gate
         uses: actions/github-script@v7
@@ -49,60 +49,101 @@ jobs:
             const failures = [];
             if (publisher.state !== 'open') failures.push(`PR18 state=${publisher.state}`);
             if (!publisher.draft) failures.push('PR18 not Draft');
-            if (publisher.head.ref !== process.env.PUBLISHER_BRANCH) failures.push(`PR18 head.ref=${publisher.head.ref}`);
-            if (publisher.head.sha !== process.env.PUBLISHER_OLD_HEAD) failures.push(`PR18 head.sha=${publisher.head.sha}`);
+            if (publisher.head.ref !== 'controller/wos01a-actions-publisher') failures.push(`PR18 head.ref=${publisher.head.ref}`);
+            if (publisher.head.sha !== process.env.PUBLISHER_HEAD) failures.push(`PR18 head.sha=${publisher.head.sha}`);
             if (target.state !== 'open') failures.push(`PR16 state=${target.state}`);
             if (!target.draft) failures.push('PR16 not Draft');
             if (target.head.ref !== 'codex/wos-01-authorized-source-bootstrap-v2') failures.push(`PR16 head.ref=${target.head.ref}`);
             if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`PR16 head.sha=${target.head.sha}`);
             if (target.base.ref !== 'main') failures.push(`PR16 base.ref=${target.base.ref}`);
             if (target.base.sha !== process.env.TARGET_BASE) failures.push(`PR16 base.sha=${target.base.sha}`);
-            if (failures.length) core.setFailed(`Publication start gate failed: ${failures.join(', ')}`);
+            if (failures.length) core.setFailed(`Exact-head verifier start gate failed: ${failures.join(', ')}`);
 
-      - name: Checkout exact publisher head without credentials
+      - name: Checkout exact publisher head
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.PUBLISHER_OLD_HEAD }}
+          ref: ${{ env.PUBLISHER_HEAD }}
+          path: controller
           fetch-depth: 0
           persist-credentials: false
-          path: publisher
 
-      - name: Reconstruct and verify approved correction
-        id: build
+      - name: Checkout exact target head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: workos
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout pinned authorized reference read-only
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REFERENCE_REPOSITORY }}
+          ref: ${{ env.REFERENCE_COMMIT }}
+          path: reference
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: reference/package-lock.json
+
+      - name: Verify immutable inputs and credential isolation
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/pr18.patch.xz.b64 <<'PATCH_EOF'
-          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
-          PATCH_EOF
-          tr -d '[:space:]' < /tmp/pr18.patch.xz.b64 | base64 -d > /tmp/pr18.patch.xz
-          test "$(sha256sum /tmp/pr18.patch.xz | awk '{print $1}')" = "$PATCH_XZ_SHA256"
-          xz -dc /tmp/pr18.patch.xz > /tmp/pr18.patch
-          test "$(sha256sum /tmp/pr18.patch | awk '{print $1}')" = "$PATCH_RAW_SHA256"
+          test "$(git -C controller rev-parse HEAD)" = "$PUBLISHER_HEAD"
+          test "$(git -C controller rev-parse HEAD^{tree})" = "$PUBLISHER_TREE"
+          test "$(git -C workos rev-parse HEAD)" = "$TARGET_HEAD"
+          test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
+          test "$(git -C reference rev-parse HEAD^{tree})" = "$REFERENCE_TREE"
+          test -z "$(git -C reference status --porcelain)"
+          test -z "$(git -C controller config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          test -z "$(git -C reference config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
 
-          cd publisher
-          test "$(git rev-parse HEAD)" = "$PUBLISHER_OLD_HEAD"
-          test -z "$(git status --porcelain)"
-          git apply --binary --index /tmp/pr18.patch
-          test "$(git diff --cached --name-only | sort)" = "$(printf '%s\n' '.github/scripts/wos01a-source-bootstrap.mjs' '.github/scripts/wos01a/scan-bootstrap.mjs' | sort)"
-          git diff --cached --check
-          node --check .github/scripts/wos01a-source-bootstrap.mjs
-          node --check .github/scripts/wos01a/scan-bootstrap.mjs
-          node --check .github/scripts/wos01a/apply-final-neutralization.mjs
-          node --check .github/scripts/wos01a/verify-baseline.mjs
-          ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-source-bootstrap-publisher.yml')"
-          node .github/scripts/wos01a/scan-bootstrap.mjs --self-test
-          test "$(git hash-object .github/scripts/wos01a-source-bootstrap.mjs)" = "ae5a85058b05f0b675b0010ec0283df2f178a1df"
-          test "$(git hash-object .github/scripts/wos01a/scan-bootstrap.mjs)" = "dfdbb02b4b6706fec3db36c395bf9aa90b73a2cd"
-          test "$(git write-tree)" = "$PUBLISHER_TARGET_TREE"
-          git config user.name "WorkOS Implementation Controller"
-          git config user.email "controller@users.noreply.github.com"
-          git config core.hooksPath /dev/null
-          git commit -m "ci: converge WOS-01A scanner materialization semantics"
-          new_head="$(git rev-parse HEAD)"
-          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+      - name: Syntax and workflow checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check controller/.github/scripts/wos01a-source-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/apply-final-neutralization.mjs
+          node --check controller/.github/scripts/wos01a/scan-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/verify-baseline.mjs
+          ruby -e "require 'yaml'; YAML.parse_file('controller/.github/workflows/wos01a-source-bootstrap-publisher.yml')"
+          git -C controller diff --check
+          node controller/.github/scripts/wos01a/scan-bootstrap.mjs --self-test
 
-      - name: Re-verify exact live lease immediately before publication
+      - name: Apply bounded final neutralization in disposable checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a/apply-final-neutralization.mjs \
+            controller/.github/scripts/wos01a-source-bootstrap.mjs
+
+      - name: Materialize and run mandatory WOS-01A checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs reference workos controller | tee /tmp/wos01a-result.json
+
+      - name: Verify exact materialized result evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
+          git -C workos add -A
+          git -C workos diff --cached --check
+          changed_count="$(git -C workos diff --cached --name-only | wc -l | tr -d ' ')"
+          test "$changed_count" -gt 100
+          echo "MATERIALIZED_CHANGED_PATHS=$changed_count"
+          echo "MATERIALIZED_TREE=$(git -C workos write-tree)"
+          test "$(git -C workos rev-parse HEAD)" = "$TARGET_HEAD"
+
+      - name: Re-verify no GitHub branch moved
         uses: actions/github-script@v7
         with:
           script: |
@@ -117,40 +158,14 @@ jobs:
               pull_number: Number(process.env.TARGET_PR),
             });
             const failures = [];
-            if (publisher.state !== 'open' || !publisher.draft) failures.push('PR18 state/draft changed');
-            if (publisher.head.ref !== process.env.PUBLISHER_BRANCH) failures.push(`PR18 head.ref=${publisher.head.ref}`);
-            if (publisher.head.sha !== process.env.PUBLISHER_OLD_HEAD) failures.push(`PR18 head.sha=${publisher.head.sha}`);
-            if (target.state !== 'open' || !target.draft) failures.push('PR16 state/draft changed');
+            if (publisher.state !== 'open') failures.push(`PR18 state=${publisher.state}`);
+            if (!publisher.draft) failures.push('PR18 not Draft');
+            if (publisher.head.ref !== 'controller/wos01a-actions-publisher') failures.push(`PR18 head.ref=${publisher.head.ref}`);
+            if (publisher.head.sha !== process.env.PUBLISHER_HEAD) failures.push(`PR18 head.sha=${publisher.head.sha}`);
+            if (target.state !== 'open') failures.push(`PR16 state=${target.state}`);
+            if (!target.draft) failures.push('PR16 not Draft');
+            if (target.head.ref !== 'codex/wos-01-authorized-source-bootstrap-v2') failures.push(`PR16 head.ref=${target.head.ref}`);
             if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`PR16 head.sha=${target.head.sha}`);
-            if (target.base.ref !== 'main' || target.base.sha !== process.env.TARGET_BASE) failures.push(`PR16 base=${target.base.ref}@${target.base.sha}`);
-            if (failures.length) core.setFailed(`Pre-publication lease failed: ${failures.join(', ')}`);
-
-      - name: Atomic exact-old-head publication
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cd publisher
-          test "$(git rev-parse HEAD^)" = "$PUBLISHER_OLD_HEAD"
-          test "$(git rev-parse HEAD^{tree})" = "$PUBLISHER_TARGET_TREE"
-          git config core.hooksPath /dev/null
-          git config --unset-all credential.helper || true
-          git push --force-with-lease="refs/heads/${PUBLISHER_BRANCH}:${PUBLISHER_OLD_HEAD}" \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            HEAD:"refs/heads/${PUBLISHER_BRANCH}"
-
-      - name: Verify publication result
-        uses: actions/github-script@v7
-        env:
-          EXPECTED_NEW_HEAD: ${{ steps.build.outputs.new_head }}
-        with:
-          script: |
-            const { data: publisher } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.PUBLISHER_PR),
-            });
-            if (publisher.state !== 'open' || !publisher.draft) core.setFailed('PR18 state/draft changed');
-            if (publisher.head.ref !== process.env.PUBLISHER_BRANCH) core.setFailed(`PR18 head.ref=${publisher.head.ref}`);
-            if (publisher.head.sha !== process.env.EXPECTED_NEW_HEAD) core.setFailed(`PR18 head.sha=${publisher.head.sha} expected=${process.env.EXPECTED_NEW_HEAD}`);
+            if (target.base.ref !== 'main') failures.push(`PR16 base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.TARGET_BASE) failures.push(`PR16 base.sha=${target.base.sha}`);
+            if (failures.length) core.setFailed(`Exact-head verifier final gate failed: ${failures.join(', ')}`);
