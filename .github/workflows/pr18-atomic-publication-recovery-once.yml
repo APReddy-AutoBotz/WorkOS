@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  materialize:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -81,10 +81,8 @@ jobs:
           test "$(wc -c < /tmp/pr18.patch | tr -d ' ')" = '13617'
           test "$(sha256sum /tmp/pr18.patch | awk '{print $1}')" = 'ee3e10e2b8c95dd1029d23f9ec733ebe428a4814db2d3717669ebe460b85636e'
 
-      - name: Apply verified convergence and publish atomically
+      - name: Apply and verify exact convergence
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           old='a6ebc2d6867172cd7a8139676fb282b0dcaed9fd'
@@ -117,27 +115,61 @@ jobs:
           node --check .github/scripts/wos01a/verify-baseline.mjs
           ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-source-bootstrap-publisher.yml')"
 
-          rm -rf .git/hooks
-          mkdir -p .git/hooks
-          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
-          git config --local core.hooksPath /dev/null
-          git config user.name 'WorkOS Implementation Controller'
-          git config user.email 'actions@users.noreply.github.com'
+      - name: Materialize exact Git objects for controller publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          old='a6ebc2d6867172cd7a8139676fb282b0dcaed9fd'
+          target_tree='dea8824878f34b6539ace323fdd479f4deffd439'
+          repo="${GITHUB_REPOSITORY}"
+          base_tree="$(git rev-parse "${old}^{tree}")"
 
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin refs/heads/controller/wos01a-actions-publisher | cut -f1)"
-          test "$remote_head" = "$old"
+          create_blob() {
+            local path="$1"
+            local encoded
+            encoded="$(base64 -w0 "$path")"
+            gh api --method POST "repos/${repo}/git/blobs" \
+              -f content="$encoded" -f encoding='base64' --jq '.sha'
+          }
 
-          git commit --no-verify -m 'ci: converge WOS-01A publisher root guards'
-          new_head="$(git rev-parse HEAD)"
-          test "$(git rev-parse HEAD^)" = "$old"
-          test "$(git rev-parse HEAD^{tree})" = "$target_tree"
+          b1="$(create_blob '.github/scripts/wos01a-source-bootstrap.mjs')"
+          b2="$(create_blob '.github/scripts/wos01a/apply-final-neutralization.mjs')"
+          b3="$(create_blob '.github/scripts/wos01a/scan-bootstrap.mjs')"
+          b4="$(create_blob '.github/workflows/wos01a-source-bootstrap-publisher.yml')"
 
-          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push \
-            --no-verify \
-            --force-with-lease=refs/heads/controller/wos01a-actions-publisher:$old \
-            origin HEAD:refs/heads/controller/wos01a-actions-publisher
+          test "$b1" = '7f83f6786e801f18f7cad617f222f97d1edfa19a'
+          test "$b2" = '42f5998b19d1fbf07fbacc6e71243dd4b30a6fc6'
+          test "$b3" = 'cda4ade3fea612bf9ba38dcfe5bc6bd70c18baac'
+          test "$b4" = '0f713c66be56337928ecd585ddc625b4c36a2abf'
 
-          remote_after="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin refs/heads/controller/wos01a-actions-publisher | cut -f1)"
-          test "$remote_after" = "$new_head"
-          echo "published_head=$new_head" >> "$GITHUB_STEP_SUMMARY"
+          jq -n \
+            --arg base "$base_tree" \
+            --arg b1 "$b1" --arg b2 "$b2" --arg b3 "$b3" --arg b4 "$b4" \
+            '{
+              base_tree: $base,
+              tree: [
+                {path: ".github/scripts/wos01a-source-bootstrap.mjs", mode: "100644", type: "blob", sha: $b1},
+                {path: ".github/scripts/wos01a/apply-final-neutralization.mjs", mode: "100644", type: "blob", sha: $b2},
+                {path: ".github/scripts/wos01a/scan-bootstrap.mjs", mode: "100644", type: "blob", sha: $b3},
+                {path: ".github/workflows/wos01a-source-bootstrap-publisher.yml", mode: "100644", type: "blob", sha: $b4}
+              ]
+            }' > /tmp/tree.json
+
+          created_tree="$(gh api --method POST "repos/${repo}/git/trees" --input /tmp/tree.json --jq '.sha')"
+          test "$created_tree" = "$target_tree"
+
+          jq -n --arg tree "$created_tree" --arg parent "$old" \
+            '{message: "ci: converge WOS-01A publisher root guards", tree: $tree, parents: [$parent]}' \
+            > /tmp/commit.json
+          created_commit="$(gh api --method POST "repos/${repo}/git/commits" --input /tmp/commit.json --jq '.sha')"
+
+          test "$(gh api "repos/${repo}/git/commits/${created_commit}" --jq '.tree.sha')" = "$target_tree"
+          test "$(gh api "repos/${repo}/git/commits/${created_commit}" --jq '.parents[0].sha')" = "$old"
+          test "$(gh api "repos/${repo}/pulls/18" --jq '.head.sha')" = "$old"
+
+          echo "RECOVERY_COMMIT=$created_commit"
+          echo "RECOVERY_TREE=$created_tree"
+          echo "recovery_commit=$created_commit" >> "$GITHUB_STEP_SUMMARY"
+          echo "recovery_tree=$created_tree" >> "$GITHUB_STEP_SUMMARY"
