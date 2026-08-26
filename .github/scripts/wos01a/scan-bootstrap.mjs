@@ -48,9 +48,13 @@ const contentRules = [
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/],
   ['Slack token', /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/],
 ];
-const passwordAssignment = /\b(?:password|passphrase|credential|[A-Za-z_$][\w$]*(?:password|passphrase|credential)[A-Za-z0-9_$]*)\s*[:=]\s*(['"`])([^'"`\r\n]+)\1/gi;
+const credentialName = String.raw`(?:password|passphrase|credential|secret|token|key|[A-Za-z_$][\w$]*(?:Password|Passphrase|Credential|Secret|Token|Key)|[A-Za-z_$][\w$]*(?:_password|_passphrase|_credential|_secret|_token|_key))`;
+const credentialAssignment = new RegExp(
+  String.raw`(?:["']\s*)?\b(${credentialName})\b\s*(?:["']\s*)?[:=]\s*(['"\x60])([^'"\x60\r\n]+)\2`,
+  'gi',
+);
 const TEST_ONLY_PASSWORD = 'workos-test-only';
-const allowedHosts = new Set([
+const runtimeHosts = new Set([
   'localhost',
   '127.0.0.1',
   '[::1]',
@@ -58,6 +62,12 @@ const allowedHosts = new Set([
   'graph.microsoft.com',
   'teams.microsoft.com',
   'outlook.office.com',
+  'example.test',
+  'example.invalid',
+]);
+const isAllowedHost = (hostname) =>
+  runtimeHosts.has(hostname) || hostname.endsWith('.example.test') || hostname.endsWith('.example.invalid');
+const packageProvenanceHosts = new Set([
   'registry.npmjs.org',
   'www.npmjs.com',
   'npmjs.com',
@@ -67,14 +77,12 @@ const allowedHosts = new Set([
   'opencollective.com',
   'funding.communitybridge.org',
   'tidelift.com',
-  'example.test',
-  'example.invalid',
+  'dotenvx.com',
+  'www.patreon.com',
+  'feross.org',
 ]);
-const isAllowedHost = (hostname) =>
-  allowedHosts.has(hostname) || hostname.endsWith('.example.test') || hostname.endsWith('.example.invalid');
-const packageProvenanceHosts = new Set(['dotenvx.com', 'www.patreon.com', 'feross.org']);
 const isKnownNonRuntimeUrl = (relative, parsed) =>
-  (relative === 'package-lock.json' && packageProvenanceHosts.has(parsed.hostname.toLowerCase())) ||
+  (['package.json', 'package-lock.json'].includes(relative) && packageProvenanceHosts.has(parsed.hostname.toLowerCase())) ||
   (relative.endsWith('.svg') && parsed.href === 'http://www.w3.org/2000/svg');
 const normalizeLocalTemplateUrl = (rawUrl) => rawUrl.replace(
   /^(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])):\$\{[^}]+\}/i,
@@ -94,24 +102,28 @@ for (const file of [...new Set(files)].sort()) {
     if (pattern.test(text)) failures.push(`${name}: ${relative}`);
   }
 
-  if (relative.startsWith('tests/')) {
-    for (const match of text.matchAll(passwordAssignment)) {
-      if (match[2] !== TEST_ONLY_PASSWORD) failures.push(`credential assignment: ${relative}`);
-    }
+  for (const match of text.matchAll(credentialAssignment)) {
+    const testPlaceholder = relative.startsWith('tests/') && match[3] === TEST_ONLY_PASSWORD;
+    if (!testPlaceholder) failures.push(`credential assignment (${match[1]}): ${relative}`);
   }
   if (/^(?:src|server|templates)\//.test(relative) &&
       relative !== 'src/config/productConfig.ts' && /\bWorkOS\b/.test(text)) {
     failures.push(`hardcoded runtime product brand: ${relative}`);
   }
 
-  const urlScanText = text.replace(
+  const urlScanText = text.replaceAll('\\/', '/').replace(
     /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\$\{[^}\r\n]+\}/gi,
     rawUrl => normalizeLocalTemplateUrl(rawUrl),
   );
-  for (const match of urlScanText.matchAll(/https?:\/\/[^\s'"<>`]+/gi)) {
-    const rawUrl = normalizeLocalTemplateUrl(match[0].replace(/[),.;]+$/, ''));
+  const urlCandidates = [
+    ...urlScanText.matchAll(/https?:\/\/[^\s'"<>`]+/gi),
+    ...urlScanText.matchAll(/[='"`(]\s*\/\/([A-Za-z0-9.\-\[\]:]+)(?:\/[^\s'"<>`]*)?/g),
+  ];
+  for (const match of urlCandidates) {
+    const matchedUrl = match[0].replace(/^[='"`(\s]+/, '');
+    const rawUrl = normalizeLocalTemplateUrl(matchedUrl.replace(/[),.;]+$/, ''));
     try {
-      const parsed = new URL(rawUrl);
+      const parsed = new URL(rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl);
       if (!isAllowedHost(parsed.hostname.toLowerCase()) && !isKnownNonRuntimeUrl(relative, parsed)) {
         failures.push(`non-placeholder remote URL (${parsed.hostname}): ${relative}`);
       }
