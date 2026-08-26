@@ -311,10 +311,10 @@ await writeFile(serverIndex, serverText);
 
 const packageFile = path.join(targetRoot, 'package.json');
 const pkg = JSON.parse(await readFile(packageFile, 'utf8'));
+const configuredLintScript = pkg.scripts?.lint;
 pkg.name = 'workos';
 pkg.description = 'Buyer-owned professional-services operations platform';
 pkg.scripts.typecheck = 'tsc --noEmit';
-pkg.scripts.lint = 'tsc --noEmit';
 pkg.scripts['test:wos00-baseline'] = 'node scripts/verify-baseline.mjs';
 pkg.scripts['test:bootstrap-scan'] = 'node scripts/scan-bootstrap.mjs';
 const safeTestScripts = [
@@ -431,6 +431,11 @@ runCheck('WOS-00 baseline verifier', 'node', ['scripts/verify-baseline.mjs']);
 runCheck('Bootstrap security scan', 'node', ['scripts/scan-bootstrap.mjs']);
 runCheck('Locked dependency installation', 'npm', ['ci', '--ignore-scripts'], { timeout: 20 * 60 * 1000 });
 runCheck('Type check', 'npm', ['run', 'typecheck']);
+if (configuredLintScript) {
+  runCheck('Lint', 'npm', ['run', 'lint']);
+} else {
+  runResults.push({ name: 'Lint', status: 'NOT RUN', output: 'The authorized source package does not configure a lint script.' });
+}
 runCheck('Production build', 'npm', ['run', 'build']);
 runCheck('Retained safe test suite', 'npm', ['test'], {
   timeout: 20 * 60 * 1000,

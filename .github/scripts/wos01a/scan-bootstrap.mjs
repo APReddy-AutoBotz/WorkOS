@@ -53,6 +53,10 @@ const credentialAssignment = new RegExp(
   String.raw`(?:["']\s*)?\b(${credentialName})\b\s*(?:["']\s*)?[:=]\s*(['"\x60])([^'"\x60\r\n]+)\2`,
   'gi',
 );
+const unquotedConfigCredential = new RegExp(
+  String.raw`^\s*(?:["']\s*)?(${credentialName})(?:\s*["'])?\s*[:=]\s*([^\s#'"\x60][^\r\n#]*?)\s*(?:#.*)?$`,
+  'gim',
+);
 const TEST_ONLY_PASSWORD = 'workos-test-only';
 const runtimeHosts = new Set([
   'localhost',
@@ -105,6 +109,11 @@ for (const file of [...new Set(files)].sort()) {
   for (const match of text.matchAll(credentialAssignment)) {
     const testPlaceholder = relative.startsWith('tests/') && match[3] === TEST_ONLY_PASSWORD;
     if (!testPlaceholder) failures.push(`credential assignment (${match[1]}): ${relative}`);
+  }
+  for (const match of text.matchAll(unquotedConfigCredential)) {
+    const value = match[2].trim();
+    const testPlaceholder = relative.startsWith('tests/') && value === TEST_ONLY_PASSWORD;
+    if (!testPlaceholder) failures.push(`unquoted config credential (${match[1]}): ${relative}`);
   }
   if (/^(?:src|server|templates)\//.test(relative) &&
       relative !== 'src/config/productConfig.ts' && /\bWorkOS\b/.test(text)) {

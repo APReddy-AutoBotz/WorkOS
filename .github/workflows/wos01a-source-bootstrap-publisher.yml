@@ -65,8 +65,7 @@ jobs:
           ref: ${{ env.TARGET_BRANCH }}
           path: workos
           fetch-depth: 0
-          token: ${{ github.token }}
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Checkout pinned authorized reference read-only
         uses: actions/checkout@v4
@@ -86,6 +85,8 @@ jobs:
 
       - name: Verify immutable repository start gate
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$(git -C controller rev-parse HEAD)" = "$GITHUB_SHA"
@@ -95,8 +96,17 @@ jobs:
           test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
           test "$(git -C reference rev-parse HEAD^{tree})" = "fdaa5d92854d378dae1c6146a8f09c7f34f8c273"
           test -z "$(git -C reference status --porcelain)"
-          remote_head="$(git -C workos ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -C workos -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
           test "$remote_head" = "$EXPECTED_TARGET_HEAD"
+
+      - name: Assert package execution has no repository credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          ! git -C workos remote get-url origin | grep -Eq 'https://[^/@]+@'
 
       - name: Apply bounded final neutralization to publisher code
         shell: bash
@@ -131,10 +141,13 @@ jobs:
       - name: Commit and publish with exact-old-head guard
         id: publish
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cd workos
-          remote_head="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
           test "$remote_head" = "$EXPECTED_TARGET_HEAD"
           git config user.name "WorkOS Implementation Controller"
           git config user.email "actions@users.noreply.github.com"
@@ -145,20 +158,29 @@ jobs:
           git commit -m "feat: bootstrap authorized WorkOS source baseline"
           new_head="$(git rev-parse HEAD)"
           new_tree="$(git rev-parse HEAD^{tree})"
-          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" origin "HEAD:refs/heads/$TARGET_BRANCH"
+          git -c http.https://github.com/.extraheader="$auth_header" push --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" origin "HEAD:refs/heads/$TARGET_BRANCH"
           echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
           echo "new_tree=$new_tree" >> "$GITHUB_OUTPUT"
           echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
 
-      - name: Verify published GitHub head
+      - name: Fetch and verify published GitHub head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -C workos -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
+          git -C workos -c http.https://github.com/.extraheader="$auth_header" fetch --no-tags origin "$remote_head"
+          test "$(git -C workos rev-parse "$remote_head^{tree}")" = "${{ steps.publish.outputs.new_tree }}"
+
+      - name: Verify published result evidence without credentials
         id: verify
         shell: bash
         run: |
           set -euo pipefail
-          remote_head="$(git -C workos ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
-          test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
-          git -C workos fetch --no-tags origin "$remote_head"
-          test "$(git -C workos rev-parse "$remote_head^{tree}")" = "${{ steps.publish.outputs.new_tree }}"
+          test -z "${GH_TOKEN:-}"
           node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
 
       - name: Comment successful publication on PR #16
