@@ -7,7 +7,7 @@ on:
       - '.github/workflows/pr18-atomic-publication-recovery-once.yml'
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
   issues: read
 
@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  materialize:
+  export:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -115,61 +115,33 @@ jobs:
           node --check .github/scripts/wos01a/verify-baseline.mjs
           ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-source-bootstrap-publisher.yml')"
 
-      - name: Materialize exact Git objects for controller publication
+      - name: Export exact target bytes for controller publication
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          old='a6ebc2d6867172cd7a8139676fb282b0dcaed9fd'
-          target_tree='dea8824878f34b6539ace323fdd479f4deffd439'
-          repo="${GITHUB_REPOSITORY}"
-          base_tree="$(git rev-parse "${old}^{tree}")"
+          files=(
+            '.github/scripts/wos01a-source-bootstrap.mjs'
+            '.github/scripts/wos01a/apply-final-neutralization.mjs'
+            '.github/scripts/wos01a/scan-bootstrap.mjs'
+            '.github/workflows/wos01a-source-bootstrap-publisher.yml'
+          )
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -cf /tmp/pr18-targets.tar "${files[@]}"
+          xz -9e -c /tmp/pr18-targets.tar > /tmp/pr18-targets.tar.xz
 
-          create_blob() {
-            local path="$1"
-            local encoded
-            encoded="$(base64 -w0 "$path")"
-            gh api --method POST "repos/${repo}/git/blobs" \
-              -f content="$encoded" -f encoding='base64' --jq '.sha'
-          }
+          archive_bytes="$(wc -c < /tmp/pr18-targets.tar.xz | tr -d ' ')"
+          archive_sha="$(sha256sum /tmp/pr18-targets.tar.xz | awk '{print $1}')"
+          echo "TARGET_ARCHIVE_BYTES=$archive_bytes"
+          echo "TARGET_ARCHIVE_SHA256=$archive_sha"
 
-          b1="$(create_blob '.github/scripts/wos01a-source-bootstrap.mjs')"
-          b2="$(create_blob '.github/scripts/wos01a/apply-final-neutralization.mjs')"
-          b3="$(create_blob '.github/scripts/wos01a/scan-bootstrap.mjs')"
-          b4="$(create_blob '.github/workflows/wos01a-source-bootstrap-publisher.yml')"
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
 
-          test "$b1" = '7f83f6786e801f18f7cad617f222f97d1edfa19a'
-          test "$b2" = '42f5998b19d1fbf07fbacc6e71243dd4b30a6fc6'
-          test "$b3" = 'cda4ade3fea612bf9ba38dcfe5bc6bd70c18baac'
-          test "$b4" = '0f713c66be56337928ecd585ddc625b4c36a2abf'
-
-          jq -n \
-            --arg base "$base_tree" \
-            --arg b1 "$b1" --arg b2 "$b2" --arg b3 "$b3" --arg b4 "$b4" \
-            '{
-              base_tree: $base,
-              tree: [
-                {path: ".github/scripts/wos01a-source-bootstrap.mjs", mode: "100644", type: "blob", sha: $b1},
-                {path: ".github/scripts/wos01a/apply-final-neutralization.mjs", mode: "100644", type: "blob", sha: $b2},
-                {path: ".github/scripts/wos01a/scan-bootstrap.mjs", mode: "100644", type: "blob", sha: $b3},
-                {path: ".github/workflows/wos01a-source-bootstrap-publisher.yml", mode: "100644", type: "blob", sha: $b4}
-              ]
-            }' > /tmp/tree.json
-
-          created_tree="$(gh api --method POST "repos/${repo}/git/trees" --input /tmp/tree.json --jq '.sha')"
-          test "$created_tree" = "$target_tree"
-
-          jq -n --arg tree "$created_tree" --arg parent "$old" \
-            '{message: "ci: converge WOS-01A publisher root guards", tree: $tree, parents: [$parent]}' \
-            > /tmp/commit.json
-          created_commit="$(gh api --method POST "repos/${repo}/git/commits" --input /tmp/commit.json --jq '.sha')"
-
-          test "$(gh api "repos/${repo}/git/commits/${created_commit}" --jq '.tree.sha')" = "$target_tree"
-          test "$(gh api "repos/${repo}/git/commits/${created_commit}" --jq '.parents[0].sha')" = "$old"
-          test "$(gh api "repos/${repo}/pulls/18" --jq '.head.sha')" = "$old"
-
-          echo "RECOVERY_COMMIT=$created_commit"
-          echo "RECOVERY_TREE=$created_tree"
-          echo "recovery_commit=$created_commit" >> "$GITHUB_STEP_SUMMARY"
-          echo "recovery_tree=$created_tree" >> "$GITHUB_STEP_SUMMARY"
+          data = base64.b64encode(Path('/tmp/pr18-targets.tar.xz').read_bytes()).decode()
+          print(f'TARGET_ARCHIVE_BASE64_CHARS={len(data)}')
+          width = 3000
+          for index in range(0, len(data), width):
+              part = data[index:index + width]
+              print(f'TARGET_ARCHIVE_PART_{index // width:03d}={part}')
+          PY
