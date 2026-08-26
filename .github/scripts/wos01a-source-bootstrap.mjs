@@ -260,7 +260,14 @@ await writeFile(indexFile, indexText);
 const cssFile = path.join(targetRoot, 'src/index.css');
 if (await exists(cssFile)) {
   const cssText = await readFile(cssFile, 'utf8');
-  await writeFile(cssFile, cssText.replace(/^\s*@import\s+(?:url\()?['"]?https:\/\/fonts\.(?:googleapis|gstatic)\.com[^;]*;\s*$/gim, ''));
+  const localizedCssText = cssText.replace(
+    /@import\s+(?:url\(\s*)?['"]?https:\/\/fonts\.(?:googleapis|gstatic)\.com[\s\S]*?;\s*/gi,
+    '',
+  );
+  await writeFile(cssFile, localizedCssText);
+  if (/fonts\.(?:googleapis|gstatic)\.com/i.test(localizedCssText)) {
+    throw new Error('Remote Google Fonts dependency remains in src/index.css');
+  }
 }
 
 const seedDemo = path.join(targetRoot, 'server/seed-demo.mjs');
@@ -450,6 +457,7 @@ const runCheck = (name, command, args, options = {}) => {
 
 runCheck('Node syntax', 'bash', ['-lc', "find server scripts tests -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check"]);
 runCheck('WOS-00 baseline verifier', 'node', ['scripts/verify-baseline.mjs']);
+runCheck('Bootstrap scanner adversarial fixtures', 'node', ['scripts/scan-bootstrap.mjs', '--self-test']);
 runCheck('Bootstrap security scan', 'node', ['scripts/scan-bootstrap.mjs']);
 runCheck('Locked dependency installation', 'npm', ['ci', '--ignore-scripts'], { timeout: 20 * 60 * 1000 });
 runCheck('Type check', 'npm', ['run', 'typecheck']);
