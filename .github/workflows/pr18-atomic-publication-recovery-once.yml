@@ -1,0 +1,95 @@
+name: PR18 Atomic Publication Recovery Once
+on:
+  push:
+    branches:
+      - controller/retire-pr18-recovery-runner
+    paths:
+      - '.github/workflows/pr18-atomic-publication-recovery-once.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: pr18-atomic-publication-recovery-once
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact live PR18 head
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {data: pr} = await github.rest.pulls.get({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: 18
+            });
+            const failures = [];
+            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
+            if (!pr.draft) failures.push('not Draft');
+            if (pr.head.ref !== 'controller/wos01a-actions-publisher') failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.sha !== 'a6ebc2d6867172cd7a8139676fb282b0dcaed9fd') failures.push(`head.sha=${pr.head.sha}`);
+            if (failures.length) core.setFailed(`PR18 exact-head guard failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact PR18 branch
+        uses: actions/checkout@v4
+        with:
+          ref: controller/wos01a-actions-publisher
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply verified four-file convergence and publish atomically
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          old='a6ebc2d6867172cd7a8139676fb282b0dcaed9fd'
+          target_tree='dea8824878f34b6539ace323fdd479f4deffd439'
+          test "$(git rev-parse HEAD)" = "$old"
+          cat > /tmp/pr18.patch.xz.b64 <<'EOF_PATCH'
+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
+EOF_PATCH
+          base64 -d /tmp/pr18.patch.xz.b64 > /tmp/pr18.patch.xz
+          test "$(wc -c < /tmp/pr18.patch.xz | tr -d ' ')" = '4272'
+          test "$(sha256sum /tmp/pr18.patch.xz | awk '{print $1}')" = '0a24f7e017c6093446137f7e27f76470264fca34907e1e73a67a5852ae6f7995'
+          xz -dc /tmp/pr18.patch.xz > /tmp/pr18.patch
+          test "$(wc -c < /tmp/pr18.patch | tr -d ' ')" = '13617'
+          test "$(sha256sum /tmp/pr18.patch | awk '{print $1}')" = 'ee3e10e2b8c95dd1029d23f9ec733ebe428a4814db2d3717669ebe460b85636e'
+          git apply --binary --index /tmp/pr18.patch
+          git diff --cached --check
+          mapfile -t changed < <(git diff --cached --name-only)
+          expected=(
+            '.github/scripts/wos01a-source-bootstrap.mjs'
+            '.github/scripts/wos01a/apply-final-neutralization.mjs'
+            '.github/scripts/wos01a/scan-bootstrap.mjs'
+            '.github/workflows/wos01a-source-bootstrap-publisher.yml'
+          )
+          test "${#changed[@]}" = '4'
+          printf '%s\n' "${changed[@]}" | sort > /tmp/changed
+          printf '%s\n' "${expected[@]}" | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/changed
+          test "$(git hash-object .github/scripts/wos01a-source-bootstrap.mjs)" = '7f83f6786e801f18f7cad617f222f97d1edfa19a'
+          test "$(git hash-object .github/scripts/wos01a/apply-final-neutralization.mjs)" = '42f5998b19d1fbf07fbacc6e71243dd4b30a6fc6'
+          test "$(git hash-object .github/scripts/wos01a/scan-bootstrap.mjs)" = 'cda4ade3fea612bf9ba38dcfe5bc6bd70c18baac'
+          test "$(git hash-object .github/workflows/wos01a-source-bootstrap-publisher.yml)" = '0f713c66be56337928ecd585ddc625b4c36a2abf'
+          test "$(git write-tree)" = "$target_tree"
+          rm -rf .git/hooks
+          mkdir -p .git/hooks
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          git config --local core.hooksPath /dev/null
+          git config user.name 'WorkOS Implementation Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin refs/heads/controller/wos01a-actions-publisher | cut -f1)"
+          test "$remote_head" = "$old"
+          git commit --no-verify -m 'ci: converge WOS-01A publisher root guards'
+          new_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$old"
+          test "$(git rev-parse HEAD^{tree})" = "$target_tree"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify --force-with-lease=refs/heads/controller/wos01a-actions-publisher:$old origin HEAD:refs/heads/controller/wos01a-actions-publisher
+          remote_after="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin refs/heads/controller/wos01a-actions-publisher | cut -f1)"
+          test "$remote_after" = "$new_head"
+          echo "published_head=$new_head" >> "$GITHUB_STEP_SUMMARY"
