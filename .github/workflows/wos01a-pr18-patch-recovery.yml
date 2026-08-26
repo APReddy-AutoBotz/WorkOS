@@ -1,0 +1,185 @@
+name: WOS-01A PR18 Patch Recovery
+
+on:
+  push:
+    branches:
+      - controller/wos01a-actions-publisher
+    paths:
+      - '.github/workflows/wos01a-pr18-patch-recovery.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: wos01a-pr18-patch-recovery
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: controller/wos01a-actions-publisher
+  EXPECTED_PARENT: 5932d3135f47612f9b7fa6dbd9c577207009e6b7
+  EXPECTED_TARGET_TREE: 8958ebbc66ec4909aa7bec4fddab1363897e93a7
+  RAW_PATCH_SHA256: d5822d2575c4bf59f8c4de0c1d8886db1d6b98ce85cdd9ca423a0cfd5b100eca
+  XZ_PATCH_SHA256: 198cca7352008f88e357f1229fa102729c609503a3db395327cefebeb7895e8a
+  PR_NUMBER: '18'
+
+jobs:
+  recover:
+    name: Apply verified PR18 correction and self-delete
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Verify live Draft PR association
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const failures = [];
+            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
+            if (!pr.draft) failures.push('PR is not Draft');
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.sha !== context.sha) failures.push(`head.sha=${pr.head.sha} expected=${context.sha}`);
+            if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
+            if (failures.length) core.setFailed(`PR #18 recovery start gate failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact recovery commit without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Verify helper commit is the only delta over the guarded parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          expected='.github/workflows/wos01a-pr18-patch-recovery.yml'
+          actual="$(git diff --name-only "$EXPECTED_PARENT" HEAD)"
+          test "$actual" = "$expected"
+          test -z "$(git status --porcelain)"
+
+      - name: Decode, verify and apply canonical correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/wos01a.patch.xz.b64 <<'PAYLOAD'
+          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
+          PAYLOAD
+          base64 -d /tmp/wos01a.patch.xz.b64 > /tmp/wos01a.patch.xz
+          test "$(sha256sum /tmp/wos01a.patch.xz | cut -d' ' -f1)" = "$XZ_PATCH_SHA256"
+          xz -dc /tmp/wos01a.patch.xz > /tmp/wos01a.patch
+          test "$(sha256sum /tmp/wos01a.patch | cut -d' ' -f1)" = "$RAW_PATCH_SHA256"
+          git apply --binary --index /tmp/wos01a.patch
+          git rm .github/workflows/wos01a-pr18-patch-recovery.yml
+          git diff --cached --check
+          cat > /tmp/expected-paths <<'PATHS'
+          .github/scripts/wos01a-source-bootstrap.mjs
+          .github/scripts/wos01a/scan-bootstrap.mjs
+          .github/workflows/wos01a-pr18-patch-recovery.yml
+          .github/workflows/wos01a-source-bootstrap-publisher.yml
+          PATHS
+          git diff --cached --name-only | LC_ALL=C sort > /tmp/actual-paths
+          diff -u /tmp/expected-paths /tmp/actual-paths
+          test "$(git write-tree)" = "$EXPECTED_TARGET_TREE"
+
+      - name: Commit exact target tree
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "ci: secure WOS-01A publisher execution gates"
+          new_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TARGET_TREE"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+
+      - name: Re-verify Draft PR immediately before publication
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const failures = [];
+            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
+            if (!pr.draft) failures.push('PR is not Draft');
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.sha !== context.sha) failures.push(`head.sha=${pr.head.sha} expected=${context.sha}`);
+            if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
+            if (failures.length) core.setFailed(`PR #18 moved before recovery publication: ${failures.join(', ')}`);
+
+      - name: Publish with exact-old-head lease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_HEAD: ${{ steps.commit.outputs.new_head }}
+        run: |
+          set -euo pipefail
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$GITHUB_SHA"
+          git -c http.https://github.com/.extraheader="$auth_header" push             --force-with-lease="refs/heads/$TARGET_BRANCH:$GITHUB_SHA"             origin "HEAD:refs/heads/$TARGET_BRANCH"
+          published="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$published" = "$NEW_HEAD"
+
+      - name: Record verified publication
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### PR #18 guarded correction published
+
+            - Recovery parent: \`${context.sha}\`
+            - Exact published head: \`${{ steps.commit.outputs.new_head }}\`
+            - Exact published tree: \`${process.env.EXPECTED_TARGET_TREE}\`
+            - Canonical raw patch SHA-256: \`${process.env.RAW_PATCH_SHA256}\`
+            - Scope: three controller files; the temporary recovery workflow self-deleted.
+
+            PR #18 remains Draft. PR #16 was not mutated or executed. Fresh exact-head CI and independent review remain mandatory.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body,
+            });
