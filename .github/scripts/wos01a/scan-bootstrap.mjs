@@ -38,11 +38,11 @@ const forbiddenPathRules = [
 ];
 const contentRules = [
   ['reference brand/domain', /Boundaryless|boundaryless\.com/i],
-  ['RUT runtime token', /\bRUT\b/],
+  ['RUT runtime token', /(^|[^A-Za-z0-9])rut(?=$|[^A-Za-z0-9])/i],
   ['old logo/wordmark reference', /boundaryless[-_ ]?(?:logo|mark|wordmark)|workos-(?:logo|wordmark)(?:-mini)?/i],
   ['company-only access copy', /Authorized Internal Access|Internal workforce planning workspace|Boundaryless-WorkOS Workforce Operations Core/i],
   ['shared demo password', /demo123/i],
-  ['private key', /-----BEGIN (?:(?:RSA|OPENSSH|EC|DSA) |ENCRYPTED )?PRIVATE KEY-----/],
+  ['private key', /-----BEGIN (?:PGP PRIVATE KEY BLOCK|(?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY)-----/i],
   ['GitHub token', /(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}/],
   ['OpenAI-style secret', /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/],
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/],
@@ -125,7 +125,7 @@ for (const file of [...new Set(files)].sort()) {
     rawUrl => normalizeLocalTemplateUrl(rawUrl),
   );
   const urlCandidates = [
-    ...urlScanText.matchAll(/https?:\/\/[^\s'"<>`]+/gi),
+    ...urlScanText.matchAll(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>`]+/gi),
     ...urlScanText.matchAll(/[='"`(]\s*\/\/([A-Za-z0-9.\-\[\]:]+)(?:\/[^\s'"<>`]*)?/g),
   ];
   for (const match of urlCandidates) {
@@ -133,6 +133,11 @@ for (const file of [...new Set(files)].sort()) {
     const rawUrl = normalizeLocalTemplateUrl(matchedUrl.replace(/[),.;]+$/, ''));
     try {
       const parsed = new URL(rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl);
+      if (parsed.username || parsed.password) {
+        failures.push(`credential-bearing URL: ${relative}`);
+        continue;
+      }
+      if (!['http:', 'https:'].includes(parsed.protocol)) continue;
       if (!isAllowedHost(parsed.hostname.toLowerCase()) && !isKnownNonRuntimeUrl(relative, parsed)) {
         failures.push(`non-placeholder remote URL (${parsed.hostname}): ${relative}`);
       }

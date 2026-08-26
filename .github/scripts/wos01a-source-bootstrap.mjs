@@ -182,6 +182,17 @@ export const productConfig = Object.freeze({
   logoUrl: valueOr('VITE_PRODUCT_LOGO_URL', '/workos-mark.svg'),
   supportName: valueOr('VITE_SUPPORT_NAME', valueOr('VITE_PRODUCT_NAME', 'WorkOS') + ' Support'),
   supportEmail: valueOr('VITE_SUPPORT_EMAIL', 'support@example.test'),
+  terminology: Object.freeze({
+    employee: valueOr('VITE_TERM_EMPLOYEE', 'resource'),
+    manager: valueOr('VITE_TERM_MANAGER', 'manager'),
+    teamLead: valueOr('VITE_TERM_TEAM_LEAD', 'team lead'),
+    businessUnit: valueOr('VITE_TERM_BUSINESS_UNIT', 'business unit'),
+    region: valueOr('VITE_TERM_REGION', 'region'),
+    regionalOwner: valueOr('VITE_TERM_REGIONAL_OWNER', 'regional owner'),
+    engagement: valueOr('VITE_TERM_ENGAGEMENT', 'engagement'),
+    project: valueOr('VITE_TERM_PROJECT', 'project'),
+    worklog: valueOr('VITE_TERM_WORKLOG', 'worklog'),
+  }),
 });
 `);
 
@@ -194,10 +205,12 @@ const centralizeRuntimeBranding = (source, targetPath) => {
     ['Configured product', '${productConfig.productName}'],
     ['Boundaryless', '${productConfig.organizationName}'],
     ['Your organization', '${productConfig.organizationName}'],
+    ['Country Director', '${productConfig.terminology.regionalOwner}'],
+    ['regional ownership', '${productConfig.terminology.regionalOwner}'],
   ];
   let next = source;
   let changed = false;
-  next = next.replace(/(['"])([^'"\r\n]*(?:My WorkOS Hub|Boundaryless-WorkOS|Boundaryless WorkOS|Configured product|Boundaryless|Your organization)[^'"\r\n]*)\1/g, (_match, _quote, value) => {
+  next = next.replace(/(['"])([^'"\r\n]*(?:My WorkOS Hub|Boundaryless-WorkOS|Boundaryless WorkOS|Configured product|Boundaryless|Your organization|Country Director|regional ownership)[^'"\r\n]*)\1/g, (_match, _quote, value) => {
     let replacement = value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${');
     for (const [label, expression] of substitutions) replacement = replacement.replaceAll(label, expression);
     changed = true;
@@ -206,7 +219,7 @@ const centralizeRuntimeBranding = (source, targetPath) => {
   if (!changed || /(?:^|\n)import\s+\{\s*productConfig\s*\}/.test(next)) return next;
   const depth = targetPath.slice('src/'.length).split('/').length - 1;
   const configPath = `${'../'.repeat(depth)}config/productConfig`;
-  const imports = [...next.matchAll(/^import[^\n]*;\s*$/gm)];
+  const imports = [...next.matchAll(/^import\b[\s\S]*?;\s*$/gm)];
   if (!imports.length) throw new Error(`Cannot insert productConfig import in ${targetPath}`);
   const lastImport = imports.at(-1);
   const insertAt = lastImport.index + lastImport[0].length;
@@ -336,7 +349,7 @@ APP_MODE=development
 NODE_ENV=development
 PORT=4000
 APP_URL=http://localhost:3000
-DATABASE_URL=postgres://workos:workos@localhost:5432/workos
+DATABASE_URL=
 PGSSLMODE=disable
 API_SESSION_SECRET=
 LOGIN_RATE_LIMIT=8
@@ -350,6 +363,15 @@ VITE_ORGANIZATION_NAME=Your organization
 VITE_PRODUCT_LOGO_URL=/workos-mark.svg
 VITE_SUPPORT_NAME=WorkOS Support
 VITE_SUPPORT_EMAIL=support@example.test
+VITE_TERM_EMPLOYEE=resource
+VITE_TERM_MANAGER=manager
+VITE_TERM_TEAM_LEAD=team lead
+VITE_TERM_BUSINESS_UNIT=business unit
+VITE_TERM_REGION=region
+VITE_TERM_REGIONAL_OWNER=regional owner
+VITE_TERM_ENGAGEMENT=engagement
+VITE_TERM_PROJECT=project
+VITE_TERM_WORKLOG=worklog
 IDENTITY_PROVIDER=
 ENTRA_ENABLED=false
 ENTRA_TENANT_ID=
