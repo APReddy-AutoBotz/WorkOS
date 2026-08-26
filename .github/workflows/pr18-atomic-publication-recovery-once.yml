@@ -1,4 +1,5 @@
-name: PR18 Atomic Publication Recovery Once
+name: PR18 Exact-Head Acceptance Verify Once
+
 on:
   push:
     branches:
@@ -9,139 +10,162 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  issues: read
 
 concurrency:
-  group: pr18-atomic-publication-recovery-once
+  group: pr18-exact-head-acceptance-verify-once
   cancel-in-progress: false
 
+env:
+  PUBLISHER_PR: '18'
+  PUBLISHER_HEAD: 01eb16a22f9ef4b203e879a1568f7ee0ff34572d
+  PUBLISHER_TREE: dea8824878f34b6539ace323fdd479f4deffd439
+  TARGET_PR: '16'
+  TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
+  TARGET_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
+  REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
+  REFERENCE_TREE: fdaa5d92854d378dae1c6146a8f09c7f34f8c273
+
 jobs:
-  export:
+  verify:
+    name: Verify exact PR18 publisher head without publication
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
+
     steps:
-      - name: Verify exact live recovery gate
+      - name: Verify exact live PR gate
         uses: actions/github-script@v7
         with:
           script: |
-            const {data: publisher} = await github.rest.pulls.get({
-              owner: context.repo.owner, repo: context.repo.repo, pull_number: 18
+            const { data: publisher } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PUBLISHER_PR),
             });
-            const {data: target} = await github.rest.pulls.get({
-              owner: context.repo.owner, repo: context.repo.repo, pull_number: 16
+            const { data: target } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
             });
             const failures = [];
             if (publisher.state !== 'open') failures.push(`PR18 state=${publisher.state}`);
             if (!publisher.draft) failures.push('PR18 not Draft');
             if (publisher.head.ref !== 'controller/wos01a-actions-publisher') failures.push(`PR18 head.ref=${publisher.head.ref}`);
-            if (publisher.head.sha !== 'a6ebc2d6867172cd7a8139676fb282b0dcaed9fd') failures.push(`PR18 head.sha=${publisher.head.sha}`);
+            if (publisher.head.sha !== process.env.PUBLISHER_HEAD) failures.push(`PR18 head.sha=${publisher.head.sha}`);
             if (target.state !== 'open') failures.push(`PR16 state=${target.state}`);
             if (!target.draft) failures.push('PR16 not Draft');
             if (target.head.ref !== 'codex/wos-01-authorized-source-bootstrap-v2') failures.push(`PR16 head.ref=${target.head.ref}`);
-            if (target.head.sha !== '7e4b5fad6e0d0d95ddd6c58015a787fb201d8661') failures.push(`PR16 head.sha=${target.head.sha}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`PR16 head.sha=${target.head.sha}`);
             if (target.base.ref !== 'main') failures.push(`PR16 base.ref=${target.base.ref}`);
-            if (target.base.sha !== '1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea') failures.push(`PR16 base.sha=${target.base.sha}`);
-            if (failures.length) core.setFailed(`Recovery gate failed: ${failures.join(', ')}`);
+            if (target.base.sha !== process.env.TARGET_BASE) failures.push(`PR16 base.sha=${target.base.sha}`);
+            if (failures.length) core.setFailed(`Exact-head verifier start gate failed: ${failures.join(', ')}`);
 
-      - name: Checkout exact PR18 branch
+      - name: Checkout exact publisher head
         uses: actions/checkout@v4
         with:
-          ref: controller/wos01a-actions-publisher
+          ref: ${{ env.PUBLISHER_HEAD }}
+          path: controller
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Fetch verified Codex recovery artifact
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/issues/comments/5429923308" --jq '.body' > /tmp/recovery-comment.txt
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
+      - name: Checkout exact target head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: workos
+          fetch-depth: 0
+          persist-credentials: false
 
-          text = Path('/tmp/recovery-comment.txt').read_text()
-          match = re.search(
-              r'`PATCH_BASE64_BEGIN`\s*```text\s*([A-Za-z0-9+/=\s]+?)\s*```\s*`PATCH_BASE64_END`',
-              text,
-              re.S,
-          )
-          if not match:
-              raise SystemExit('canonical recovery payload markers not found')
-          payload = ''.join(match.group(1).split())
-          if len(payload) != 5696:
-              raise SystemExit(f'unexpected recovery Base64 length: {len(payload)}')
-          Path('/tmp/pr18.patch.xz.b64').write_text(payload)
-          PY
-          base64 -d /tmp/pr18.patch.xz.b64 > /tmp/pr18.patch.xz
-          test "$(wc -c < /tmp/pr18.patch.xz | tr -d ' ')" = '4272'
-          test "$(sha256sum /tmp/pr18.patch.xz | awk '{print $1}')" = '0a24f7e017c6093446137f7e27f76470264fca34907e1e73a67a5852ae6f7995'
-          xz -dc /tmp/pr18.patch.xz > /tmp/pr18.patch
-          test "$(wc -c < /tmp/pr18.patch | tr -d ' ')" = '13617'
-          test "$(sha256sum /tmp/pr18.patch | awk '{print $1}')" = 'ee3e10e2b8c95dd1029d23f9ec733ebe428a4814db2d3717669ebe460b85636e'
+      - name: Checkout pinned authorized reference read-only
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REFERENCE_REPOSITORY }}
+          ref: ${{ env.REFERENCE_COMMIT }}
+          path: reference
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Apply and verify exact convergence
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: reference/package-lock.json
+
+      - name: Verify immutable inputs and credential isolation
         shell: bash
         run: |
           set -euo pipefail
-          old='a6ebc2d6867172cd7a8139676fb282b0dcaed9fd'
-          target_tree='dea8824878f34b6539ace323fdd479f4deffd439'
-          test "$(git rev-parse HEAD)" = "$old"
+          test "$(git -C controller rev-parse HEAD)" = "$PUBLISHER_HEAD"
+          test "$(git -C controller rev-parse HEAD^{tree})" = "$PUBLISHER_TREE"
+          test "$(git -C workos rev-parse HEAD)" = "$TARGET_HEAD"
+          test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
+          test "$(git -C reference rev-parse HEAD^{tree})" = "$REFERENCE_TREE"
+          test -z "$(git -C reference status --porcelain)"
+          test -z "$(git -C controller config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          test -z "$(git -C reference config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
 
-          git apply --binary --index /tmp/pr18.patch
-          git diff --cached --check
-          mapfile -t changed < <(git diff --cached --name-only)
-          expected=(
-            '.github/scripts/wos01a-source-bootstrap.mjs'
-            '.github/scripts/wos01a/apply-final-neutralization.mjs'
-            '.github/scripts/wos01a/scan-bootstrap.mjs'
-            '.github/workflows/wos01a-source-bootstrap-publisher.yml'
-          )
-          test "${#changed[@]}" = '4'
-          printf '%s\n' "${changed[@]}" | sort > /tmp/changed
-          printf '%s\n' "${expected[@]}" | sort > /tmp/expected
-          diff -u /tmp/expected /tmp/changed
-
-          test "$(git hash-object .github/scripts/wos01a-source-bootstrap.mjs)" = '7f83f6786e801f18f7cad617f222f97d1edfa19a'
-          test "$(git hash-object .github/scripts/wos01a/apply-final-neutralization.mjs)" = '42f5998b19d1fbf07fbacc6e71243dd4b30a6fc6'
-          test "$(git hash-object .github/scripts/wos01a/scan-bootstrap.mjs)" = 'cda4ade3fea612bf9ba38dcfe5bc6bd70c18baac'
-          test "$(git hash-object .github/workflows/wos01a-source-bootstrap-publisher.yml)" = '0f713c66be56337928ecd585ddc625b4c36a2abf'
-          test "$(git write-tree)" = "$target_tree"
-
-          node --check .github/scripts/wos01a-source-bootstrap.mjs
-          node --check .github/scripts/wos01a/apply-final-neutralization.mjs
-          node --check .github/scripts/wos01a/scan-bootstrap.mjs
-          node --check .github/scripts/wos01a/verify-baseline.mjs
-          ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-source-bootstrap-publisher.yml')"
-
-      - name: Export exact target bytes for controller publication
+      - name: Syntax and workflow checks
         shell: bash
         run: |
           set -euo pipefail
-          files=(
-            '.github/scripts/wos01a-source-bootstrap.mjs'
-            '.github/scripts/wos01a/apply-final-neutralization.mjs'
-            '.github/scripts/wos01a/scan-bootstrap.mjs'
-            '.github/workflows/wos01a-source-bootstrap-publisher.yml'
-          )
-          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-            -cf /tmp/pr18-targets.tar "${files[@]}"
-          xz -9e -c /tmp/pr18-targets.tar > /tmp/pr18-targets.tar.xz
+          node --check controller/.github/scripts/wos01a-source-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/apply-final-neutralization.mjs
+          node --check controller/.github/scripts/wos01a/scan-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/verify-baseline.mjs
+          ruby -e "require 'yaml'; YAML.parse_file('controller/.github/workflows/wos01a-source-bootstrap-publisher.yml')"
+          git -C controller diff --check
 
-          archive_bytes="$(wc -c < /tmp/pr18-targets.tar.xz | tr -d ' ')"
-          archive_sha="$(sha256sum /tmp/pr18-targets.tar.xz | awk '{print $1}')"
-          echo "TARGET_ARCHIVE_BYTES=$archive_bytes"
-          echo "TARGET_ARCHIVE_SHA256=$archive_sha"
+      - name: Apply bounded final neutralization in disposable checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a/apply-final-neutralization.mjs \
+            controller/.github/scripts/wos01a-source-bootstrap.mjs
 
-          python3 - <<'PY'
-          import base64
-          from pathlib import Path
+      - name: Materialize and run mandatory WOS-01A checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs reference workos controller | tee /tmp/wos01a-result.json
 
-          data = base64.b64encode(Path('/tmp/pr18-targets.tar.xz').read_bytes()).decode()
-          print(f'TARGET_ARCHIVE_BASE64_CHARS={len(data)}')
-          width = 3000
-          for index in range(0, len(data), width):
-              part = data[index:index + width]
-              print(f'TARGET_ARCHIVE_PART_{index // width:03d}={part}')
-          PY
+      - name: Verify exact materialized result evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
+          git -C workos add -A
+          git -C workos diff --cached --check
+          changed_count="$(git -C workos diff --cached --name-only | wc -l | tr -d ' ')"
+          test "$changed_count" -gt 100
+          echo "MATERIALIZED_CHANGED_PATHS=$changed_count"
+          echo "MATERIALIZED_TREE=$(git -C workos write-tree)"
+          test "$(git -C workos rev-parse HEAD)" = "$TARGET_HEAD"
+
+      - name: Re-verify no GitHub branch moved
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: publisher } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PUBLISHER_PR),
+            });
+            const { data: target } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
+            });
+            const failures = [];
+            if (publisher.state !== 'open') failures.push(`PR18 state=${publisher.state}`);
+            if (!publisher.draft) failures.push('PR18 not Draft');
+            if (publisher.head.ref !== 'controller/wos01a-actions-publisher') failures.push(`PR18 head.ref=${publisher.head.ref}`);
+            if (publisher.head.sha !== process.env.PUBLISHER_HEAD) failures.push(`PR18 head.sha=${publisher.head.sha}`);
+            if (target.state !== 'open') failures.push(`PR16 state=${target.state}`);
+            if (!target.draft) failures.push('PR16 not Draft');
+            if (target.head.ref !== 'codex/wos-01-authorized-source-bootstrap-v2') failures.push(`PR16 head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`PR16 head.sha=${target.head.sha}`);
+            if (target.base.ref !== 'main') failures.push(`PR16 base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.TARGET_BASE) failures.push(`PR16 base.sha=${target.base.sha}`);
+            if (failures.length) core.setFailed(`Exact-head verifier final gate failed: ${failures.join(', ')}`);
