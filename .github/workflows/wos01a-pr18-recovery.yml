@@ -18,12 +18,13 @@ concurrency:
 
 jobs:
   recover:
-    if: github.event.head_commit.message == 'CTRL: stage PR18 recovery payload'
+    if: "${{ github.event.head_commit.message == 'CTRL: repair PR18 recovery bridge' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       BRANCH: controller/wos01a-actions-publisher
       OLD_HEAD: 3601bb92f8c607a99cb910f31cc8137ae0845c37
+      STAGING_PARENT: c0b2755365028128c6543e1df81af234329fab74
       TARGET_TREE: 5f7926b50da0811825796a3d99a0051dec7e0b2e
       ARCHIVE_SHA: a88c5c9bd6922516a5a3888792e5700d5d7f31a609f5b760e3ceba3f07450224
       PAYLOAD: .github/recovery/wos01a-pr18-target.tar.xz.b64
@@ -42,7 +43,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          test "$(git rev-parse HEAD^)" = "$OLD_HEAD"
+          test "$(git rev-parse HEAD^)" = "$STAGING_PARENT"
+          test "$(git rev-parse HEAD^^)" = "$OLD_HEAD"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/18" --jq .state)" = "open"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/18" --jq .draft)" = "true"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/18" --jq .head.ref)" = "$BRANCH"
@@ -71,7 +73,6 @@ jobs:
           test "${#changed[@]}" -eq 2
           test "${changed[0]}" = ".github/scripts/wos01a-source-bootstrap.mjs"
           test "${changed[1]}" = ".github/scripts/wos01a/scan-bootstrap.mjs"
-
           test "$(git write-tree)" = "$TARGET_TREE"
 
           git config user.name "github-actions[bot]"
