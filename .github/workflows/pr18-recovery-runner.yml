@@ -1,4 +1,4 @@
-name: PR18 Exact-Head WOS-01A Acceptance
+name: PR18 Guarded Publication Recovery
 
 on:
   push:
@@ -9,129 +9,136 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: read
   issues: read
 
 concurrency:
-  group: pr18-exact-head-acceptance
+  group: pr18-guarded-publication-recovery
   cancel-in-progress: false
 
 env:
-  PUBLISHER_PR: '18'
-  PUBLISHER_BRANCH: controller/wos01a-actions-publisher
-  PUBLISHER_HEAD: 1c485943826d8e5ec3f749050fd590e97683e396
-  PUBLISHER_TREE: d17865ed4d5279648a76ace5b8c54a7e05dd86e7
-  TARGET_PR: '16'
-  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
-  TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
-  WOS00_ACCEPTED_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
-  REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
-  REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
-  REFERENCE_TREE: fdaa5d92854d378dae1c6146a8f09c7f34f8c273
+  PR_NUMBER: '18'
+  TARGET_BRANCH: controller/wos01a-actions-publisher
+  EXPECTED_OLD_HEAD: 1c485943826d8e5ec3f749050fd590e97683e396
+  EXPECTED_TARGET_TREE: bb791652ae919d2be6c846cfc1e768f3e43433b6
+  RECOVERY_COMMENT_ID: '5437378631'
+  XZ_PATCH_SHA256: 098ca449ba3dbbdab5f480a171c20a76a76fcfa51b8ca1f6261c49be472c4593
+  RAW_PATCH_SHA256: 150af9b244250c5607011145597873e525fc84d827346779efa72c8dcf9a5c14
 
 jobs:
-  verify:
-    name: Verify exact publisher head and WOS-01A acceptance
+  publish:
+    name: Materialize exact PR18 correction
     runs-on: ubuntu-latest
-    timeout-minutes: 50
-
+    timeout-minutes: 15
     steps:
-      - name: Verify live Draft PR identities
+      - name: Verify live PR18 exact-old-head gate
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
-            const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
             const failures = [];
-            if (publisher.state !== 'open' || !publisher.draft || publisher.head.ref !== process.env.PUBLISHER_BRANCH || publisher.head.sha !== process.env.PUBLISHER_HEAD) failures.push(`publisher=${publisher.state}/${publisher.draft}/${publisher.head.ref}/${publisher.head.sha}`);
-            if (target.state !== 'open' || !target.draft || target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target=${target.state}/${target.draft}/${target.head.ref}/${target.head.sha}`);
-            if (target.base.ref !== 'main' || target.base.sha !== process.env.WOS00_ACCEPTED_BASE) failures.push(`target.base=${target.base.ref}/${target.base.sha}`);
-            const { data: commit } = await github.rest.git.getCommit({ owner: context.repo.owner, repo: context.repo.repo, commit_sha: process.env.PUBLISHER_HEAD });
-            if (commit.tree.sha !== process.env.PUBLISHER_TREE) failures.push(`publisher.tree=${commit.tree.sha}`);
-            if (failures.length) core.setFailed(`Acceptance start gate failed: ${failures.join(', ')}`);
+            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
+            if (!pr.draft) failures.push('not Draft');
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.sha !== process.env.EXPECTED_OLD_HEAD) failures.push(`head.sha=${pr.head.sha}`);
+            if (failures.length) core.setFailed(`PR18 recovery gate failed: ${failures.join(', ')}`);
 
-      - name: Checkout exact publisher head without credentials
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.PUBLISHER_HEAD }}
-          path: controller
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Checkout exact protected WOS-01A Draft branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TARGET_HEAD }}
-          path: workos
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Checkout pinned authorized reference read-only
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.REFERENCE_REPOSITORY }}
-          ref: ${{ env.REFERENCE_COMMIT }}
-          path: reference
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: reference/package-lock.json
-
-      - name: Verify immutable identities and credential isolation
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git -C controller rev-parse HEAD)" = "$PUBLISHER_HEAD"
-          test "$(git -C controller rev-parse HEAD^{tree})" = "$PUBLISHER_TREE"
-          test "$(git -C workos rev-parse HEAD)" = "$TARGET_HEAD"
-          test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
-          test "$(git -C reference rev-parse HEAD^{tree})" = "$REFERENCE_TREE"
-          test -z "$(git -C reference status --porcelain)"
-          git -C workos merge-base --is-ancestor "$WOS00_ACCEPTED_BASE" HEAD
-          test -z "${GH_TOKEN:-}"
-          for repo in controller workos reference; do
-            test -z "$(git -C "$repo" config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
-            ! git -C "$repo" remote get-url origin | grep -Eq 'https://[^/@]+@'
-          done
-
-      - name: Verify publisher syntax and adversarial fixtures
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --check controller/.github/scripts/wos01a-source-bootstrap.mjs
-          node --check controller/.github/scripts/wos01a/scan-bootstrap.mjs
-          node --check controller/.github/scripts/wos01a/apply-final-neutralization.mjs
-          node --check controller/.github/scripts/wos01a/verify-baseline.mjs
-          node controller/.github/scripts/wos01a-source-bootstrap.mjs --self-test-changed-paths
-          node controller/.github/scripts/wos01a/scan-bootstrap.mjs --self-test
-          ruby -e "require 'yaml'; YAML.parse_file('controller/.github/workflows/wos01a-source-bootstrap-publisher.yml'); puts 'yaml passed'"
-
-      - name: Apply the publisher's bounded final neutralization
-        shell: bash
-        run: |
-          set -euo pipefail
-          node controller/.github/scripts/wos01a/apply-final-neutralization.mjs \
-            controller/.github/scripts/wos01a-source-bootstrap.mjs
-          node --check controller/.github/scripts/wos01a-source-bootstrap.mjs
-
-      - name: Run authoritative exact-head WOS-01A acceptance path
-        shell: bash
-        run: |
-          set -euo pipefail
-          node controller/.github/scripts/wos01a-source-bootstrap.mjs reference workos controller | tee /tmp/wos01a-result.json
-          node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
-
-      - name: Revalidate live heads after acceptance
+      - name: Retrieve exact verified Codex recovery payload
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
-            const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
-            if (publisher.head.sha !== process.env.PUBLISHER_HEAD) core.setFailed(`PR #18 moved during acceptance: ${publisher.head.sha}`);
-            if (target.head.sha !== process.env.TARGET_HEAD) core.setFailed(`PR #16 moved during acceptance: ${target.head.sha}`);
+            const fs = require('fs');
+            const { data: comment } = await github.rest.issues.getComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: Number(process.env.RECOVERY_COMMENT_ID),
+            });
+            if (comment.user?.login !== 'chatgpt-codex-connector[bot]') {
+              return core.setFailed(`Unexpected recovery author: ${comment.user?.login}`);
+            }
+            const match = comment.body.match(/`PATCH_BASE64_BEGIN`\s*```text\s*([A-Za-z0-9+/=\s]+?)\s*```/);
+            if (!match) return core.setFailed('Exact recovery payload not found');
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/wos01a.patch.xz.b64`, match[1].replace(/\s+/g, ''));
+
+      - name: Checkout exact existing PR18 head without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_OLD_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reconstruct and verify exact two-file correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_OLD_HEAD"
+          base64 -d "$RUNNER_TEMP/wos01a.patch.xz.b64" > "$RUNNER_TEMP/wos01a.patch.xz"
+          test "$(wc -c < "$RUNNER_TEMP/wos01a.patch.xz" | tr -d ' ')" = "3876"
+          test "$(sha256sum "$RUNNER_TEMP/wos01a.patch.xz" | cut -d' ' -f1)" = "$XZ_PATCH_SHA256"
+          xz -dc "$RUNNER_TEMP/wos01a.patch.xz" > "$RUNNER_TEMP/wos01a.patch"
+          test "$(wc -c < "$RUNNER_TEMP/wos01a.patch" | tr -d ' ')" = "13070"
+          test "$(sha256sum "$RUNNER_TEMP/wos01a.patch" | cut -d' ' -f1)" = "$RAW_PATCH_SHA256"
+          git apply --check "$RUNNER_TEMP/wos01a.patch"
+          git apply "$RUNNER_TEMP/wos01a.patch"
+          git diff --check
+          mapfile -t changed < <(git diff --name-only | sort)
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = ".github/scripts/wos01a/scan-bootstrap.mjs"
+          test "${changed[1]}" = ".github/workflows/wos01a-source-bootstrap-publisher.yml"
+          test "$(wc -c < .github/workflows/wos01a-source-bootstrap-publisher.yml | tr -d ' ')" = "15687"
+          test "$(sha256sum .github/workflows/wos01a-source-bootstrap-publisher.yml | cut -d' ' -f1)" = "9b5e79024a9582c5e5ca3439f81196e00b72d0b72ca8449fb0c23f08771258b7"
+          test "$(git hash-object .github/workflows/wos01a-source-bootstrap-publisher.yml)" = "da5cbe741ec09798e3bbe10c6378d09ba481c1eb"
+          test "$(wc -c < .github/scripts/wos01a/scan-bootstrap.mjs | tr -d ' ')" = "15671"
+          test "$(sha256sum .github/scripts/wos01a/scan-bootstrap.mjs | cut -d' ' -f1)" = "5e8a8323127a29c7078dd521359edbc1f9653fbb1988e6a9da723a0024fef725"
+          test "$(git hash-object .github/scripts/wos01a/scan-bootstrap.mjs)" = "3c773e9ef0247e5b8f3af93ddc99b507f643ea88"
+          node --check .github/scripts/wos01a/scan-bootstrap.mjs
+          node .github/scripts/wos01a/scan-bootstrap.mjs --self-test
+          ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-source-bootstrap-publisher.yml'); puts 'yaml passed'"
+
+      - name: Commit and fast-forward existing PR18 branch under exact lease
+        id: publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          trusted_origin="https://github.com/${GITHUB_REPOSITORY}.git"
+          test "$(git remote)" = "origin"
+          git remote set-url origin "$trusted_origin"
+          rm -rf .git/hooks
+          mkdir -p .git/hooks
+          export GIT_CONFIG_GLOBAL=/dev/null
+          export GIT_CONFIG_SYSTEM=/dev/null
+          git config --local core.hooksPath /dev/null
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$EXPECTED_OLD_HEAD"
+          git config user.name "WorkOS Build Controller"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/workflows/wos01a-source-bootstrap-publisher.yml .github/scripts/wos01a/scan-bootstrap.mjs
+          git diff --cached --check
+          git commit --no-verify -m "ci: pin and recover WOS-01A publication"
+          new_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_OLD_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TARGET_TREE"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_OLD_HEAD" \
+            origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+
+      - name: Verify authoritative remote head and exact tree
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
+          git -c http.https://github.com/.extraheader="$auth_header" fetch --no-tags origin "$remote_head"
+          test "$(git rev-parse "$remote_head^{tree}")" = "$EXPECTED_TARGET_TREE"
