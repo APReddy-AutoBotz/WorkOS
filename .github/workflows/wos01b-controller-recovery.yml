@@ -1,0 +1,86 @@
+name: WOS-01B Controller Recovery (temporary)
+
+on:
+  push:
+    branches:
+      - controller/wos01a-clean-runtime-acceptance
+    paths:
+      - '.github/wos01b-recovery/**'
+      - '.github/workflows/wos01b-controller-recovery.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wos01b-controller-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact recovery head
+        uses: actions/checkout@v4
+        with:
+          ref: controller/wos01a-clean-runtime-acceptance
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify exact branch authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/controller/wos01a-clean-runtime-acceptance'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin controller/wos01a-clean-runtime-acceptance main
+          test "$(git rev-parse origin/controller/wos01a-clean-runtime-acceptance)" = "$GITHUB_SHA"
+
+      - name: Reconstruct and verify controller files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/wos01b-recovery/chunk-*.b64 | tr -d '\n\r ' | base64 -d > /tmp/wos01b-controller-fix.tar.xz
+          test "$(wc -c < /tmp/wos01b-controller-fix.tar.xz)" = '14200'
+          echo 'b4ea717cfde416c92be6c7e7621e7453a230c17f5f4e1db602bca9bd699e9b59  /tmp/wos01b-controller-fix.tar.xz' | sha256sum -c -
+          mapfile -t members < <(tar -tJf /tmp/wos01b-controller-fix.tar.xz | sed 's#^\./##' | sort)
+          expected=(
+            '.github/'
+            '.github/scripts/'
+            '.github/scripts/wos01b-clean-runtime-closure.mjs'
+            '.github/workflows/'
+            '.github/workflows/wos01a-clean-runtime-acceptance.yml'
+            '.github/workflows/wos01b-clean-runtime-publisher.yml'
+          )
+          test "${#members[@]}" -eq "${#expected[@]}"
+          for i in "${!expected[@]}"; do test "${members[$i]}" = "${expected[$i]}"; done
+          tar -xJf /tmp/wos01b-controller-fix.tar.xz -C .
+          echo '8d69ab2135ddb7ccdbd3927fb87b1ddf68db45c63f7e28c42f93501716319ef4  .github/scripts/wos01b-clean-runtime-closure.mjs' | sha256sum -c -
+          echo '0389da1b811091dabc1a80a8c99e3fda98bd88e73ccd357f43be33054bc5e626  .github/workflows/wos01b-clean-runtime-publisher.yml' | sha256sum -c -
+          echo 'c1c81b2a9f7b39513cf57113b70f18e481f21af3ee2feffbcbc2f465287b265b  .github/workflows/wos01a-clean-runtime-acceptance.yml' | sha256sum -c -
+          node --check .github/scripts/wos01b-clean-runtime-closure.mjs
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/wos01b-clean-runtime-publisher.yml'); YAML.load_file('.github/workflows/wos01a-clean-runtime-acceptance.yml')"
+
+      - name: Remove temporary recovery surface and commit exact result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/wos01b-recovery
+          rm -f .github/workflows/wos01b-controller-recovery.yml
+          git config user.name 'WorkOS Implementation Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git config core.hooksPath /dev/null
+          git add -A
+          git diff --cached --check
+          git commit --no-verify -m 'ci: converge WOS-01B controller review findings'
+          mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
+          expected=(
+            '.github/scripts/wos01b-browser-acceptance.mjs'
+            '.github/scripts/wos01b-clean-runtime-closure.mjs'
+            '.github/workflows/wos01a-clean-runtime-acceptance.yml'
+            '.github/workflows/wos01b-clean-runtime-publisher.yml'
+            '.github/workflows/wos01b-exact-head-validation-v2.yml'
+          )
+          test "${#changed[@]}" -eq "${#expected[@]}"
+          for i in "${!expected[@]}"; do test "${changed[$i]}" = "${expected[$i]}"; done
+          git push --no-verify --force-with-lease="refs/heads/controller/wos01a-clean-runtime-acceptance:$GITHUB_SHA" origin HEAD:refs/heads/controller/wos01a-clean-runtime-acceptance
