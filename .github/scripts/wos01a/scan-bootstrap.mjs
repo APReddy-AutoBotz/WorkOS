@@ -65,11 +65,26 @@ const unquotedConfigCredential = new RegExp(
   'gim',
 );
 const TEST_ONLY_PASSWORD = 'workos-test-only';
+const normalizeRepoRelative = (relative) => {
+  const normalized = path.posix.normalize(relative.replaceAll('\\', '/'));
+  if (normalized === '..' || normalized.startsWith('../') || path.posix.isAbsolute(normalized)) {
+    throw new Error(`Path escapes scan root: ${relative}`);
+  }
+  return normalized;
+};
+const isRetainedTestPath = (relative) => {
+  const normalized = normalizeRepoRelative(relative);
+  return normalized === 'tests' || normalized.startsWith('tests/');
+};
+const decodeCredentialEscapes = (text) => text
+  .replace(/\\u\{([0-9a-f]{1,6})\}/gi, (_, value) => String.fromCodePoint(Number.parseInt(value, 16)))
+  .replace(/\\u([0-9a-f]{4})/gi, (_, value) => String.fromCharCode(Number.parseInt(value, 16)))
+  .replace(/\\x([0-9a-f]{2})/gi, (_, value) => String.fromCharCode(Number.parseInt(value, 16)));
 const explicitPlaceholder = /^(?:<[^>]+>|\$\{[^}]+\}|\{\{[^}]+\}\}|(?:your|replace[-_ ]?with|example|placeholder)[-_ ].+)$/i;
 const isSafeCredentialDeclaration = (value, relative) => {
   const trimmed = value.trim();
   if (!trimmed) return true;
-  if (relative.startsWith('tests/') && trimmed === TEST_ONLY_PASSWORD) return true;
+  if (isRetainedTestPath(relative) && trimmed === TEST_ONLY_PASSWORD) return true;
   if (explicitPlaceholder.test(trimmed)) return true;
   // Schema/UI declarations frequently map a field to its type or display label. They are not
   // credential values; predictable operational values such as demo123 remain prohibited.
@@ -113,22 +128,26 @@ const normalizeLocalTemplateUrl = (rawUrl) => rawUrl.replace(
 
 const failures = [];
 for (const file of [...new Set(files)].sort()) {
-  const relative = path.relative(root, file).split(path.sep).join('/');
+  const relative = normalizeRepoRelative(path.relative(root, file));
   for (const [name, pattern] of forbiddenPathRules) {
     if (pattern.test(relative)) failures.push(`${name}: ${relative}`);
   }
 
   let text;
   try { text = await readFile(file, 'utf8'); } catch { continue; }
+  const credentialText = decodeCredentialEscapes(text);
+  if (!isRetainedTestPath(relative) && credentialText.includes(TEST_ONLY_PASSWORD)) {
+    failures.push(`test-only plaintext outside retained tests: ${relative}`);
+  }
   for (const [name, pattern] of contentRules) {
     if (pattern.test(text)) failures.push(`${name}: ${relative}`);
   }
 
-  for (const match of text.matchAll(credentialAssignment)) {
+  for (const match of credentialText.matchAll(credentialAssignment)) {
     if (!isSafeCredentialDeclaration(match[3], relative)) failures.push(`credential assignment (${match[1]}): ${relative}`);
   }
   if (/(?:^|\/)(?:\.env(?:\.[^/]+)?|[^/]+\.ya?ml)$/i.test(relative)) {
-    for (const match of text.matchAll(unquotedConfigCredential)) {
+    for (const match of credentialText.matchAll(unquotedConfigCredential)) {
       const value = match[2].trim();
       if (!isSafeCredentialDeclaration(value, relative)) failures.push(`unquoted config credential (${match[1]}): ${relative}`);
     }
@@ -141,7 +160,7 @@ for (const file of [...new Set(files)].sort()) {
   // Retained tests may assert URL-shaped regular expressions. Remove only syntactically
   // delimited regex literals before decoding serialized string slashes; runtime strings,
   // templates, HTML/CSS URLs and configuration values remain subject to hostname policy.
-  const urlSourceText = relative.startsWith('tests/')
+  const urlSourceText = isRetainedTestPath(relative)
     ? text.replace(/\/https?:\\\/\\\/[^/\r\n]+\/[dgimsuvy]*/g, '')
     : text;
   const urlScanText = urlSourceText.replaceAll('\\/', '/').replace(
@@ -195,7 +214,16 @@ if (selfTest) {
   try {
     await runFixture('approved-test-credential', { 'tests/auth.mjs': "const password = 'workos-test-only';\n" }, true);
     await runFixture('historical-shared-password', { 'tests/auth.mjs': "const password = 'demo123';\n" }, false);
-    await runFixture('test-credential-runtime-escape', { 'src/auth.ts': "const password = 'workos-test-only';\n" }, false);
+    await runFixture('test-credential-runtime-innocuous-name', { 'src/leak.ts': "export const marker = 'workos-test-only';\n" }, false);
+    await runFixture('test-credential-runtime-json', { 'public/config.json': '{"marker":"workos-test-only"}\n' }, false);
+    await runFixture('test-credential-runtime-yaml', { 'server/config.yml': 'marker: workos-test-only\n' }, false);
+    await runFixture('test-credential-runtime-env', { '.env.example': 'MARKER=workos-test-only\n' }, false);
+    await runFixture('test-credential-runtime-template', { 'templates/leak.txt': 'credential={{ workos-test-only }}\n' }, false);
+    await runFixture('test-credential-runtime-plain-text', { 'public/leak.txt': 'workos-test-only\n' }, false);
+    await runFixture('test-credential-runtime-serialized', { 'src/leak.ts': String.raw`export const marker = '\u0077orkos-test-only';\n` }, false);
+    await runFixture('test-credential-src-tests-lookalike', { 'src/tests/auth.mjs': "const marker = 'workos-test-only';\n" }, false);
+    await runFixture('retained-test-real-looking-credential', { 'tests/auth.mjs': "const initialPassword = 'CompanyPass2026!';\n" }, false);
+    await runFixture('historical-shared-password-runtime', { 'src/auth.ts': "const marker = 'demo123';\n" }, false);
     await runFixture('safe-identifiers', { 'src/safe.ts': `const key = schemaKey; const token = getToken(); const password = input.password;\nconst initialPassword = makePassword(); const sortKey = (row) => row.id; const dataKey: keyof Row = 'id'; const permissionKey = permission.key;\n`, '.env.example': 'PASSWORD=\nAPI_TOKEN=<replace-with-local-token>\nCLIENT_SECRET=${LOCAL_CLIENT_SECRET}\n' }, true);
     await runFixture('safe-regex', { 'tests/regex.mjs': String.raw`const graphScope = /https:\/\/graph\.microsoft\.com\/\.default/;\n` }, true);
     await runFixture('quoted-js-credential', { 'src/bad.ts': "const initialPassword = 'CompanyPass2026!';\n" }, false);
@@ -213,6 +241,16 @@ if (selfTest) {
     await runFixture('pgp-private-key', { 'src/key.txt': '-----BEGIN PGP PRIVATE KEY BLOCK-----\nnot-a-real-key\n' }, false);
     await runFixture('forbidden-path', { 'src/rut_session.ts': 'export const value = 1;\n' }, false);
     await runFixture('forbidden-brand', { 'src/bad.ts': "export const label = 'Boundaryless';\n" }, false);
+    for (const lookalike of ['tests-old/auth.mjs', 'contest/auth.mjs', 'src/tests/auth.mjs']) {
+      if (isRetainedTestPath(lookalike)) throw new Error(`Lookalike path entered retained-test boundary: ${lookalike}`);
+    }
+    try {
+      isRetainedTestPath('../tests/auth.mjs');
+      throw new Error('Traversal path did not fail closed');
+    } catch (error) {
+      if (!/Path escapes scan root/.test(error.message)) throw error;
+    }
+    if (!isRetainedTestPath('tests/auth.mjs')) throw new Error('Canonical retained-test path was rejected');
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
