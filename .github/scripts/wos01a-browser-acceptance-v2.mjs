@@ -52,12 +52,18 @@ chrome.stdout.on('data', chunk => { chromeOutput += chunk.toString(); });
 chrome.stderr.on('data', chunk => { chromeOutput += chunk.toString(); });
 
 const cleanup = async () => {
-  if (!chrome.killed) chrome.kill('SIGTERM');
+  if (chrome.exitCode === null && chrome.signalCode === null) chrome.kill('SIGTERM');
   await Promise.race([
     new Promise(resolve => chrome.once('exit', resolve)),
     sleep(3_000),
   ]).catch(() => {});
-  if (!chrome.killed) chrome.kill('SIGKILL');
+  if (chrome.exitCode === null && chrome.signalCode === null) {
+    chrome.kill('SIGKILL');
+    await Promise.race([
+      new Promise(resolve => chrome.once('exit', resolve)),
+      sleep(3_000),
+    ]).catch(() => {});
+  }
   await rm(userDataDir, { recursive: true, force: true });
 };
 
@@ -257,7 +263,13 @@ try {
     if (!snapshot || snapshot.path === '/admin') {
       throw new Error(`Employee was not denied /admin: ${JSON.stringify(snapshot)}`);
     }
-    if (snapshot.path === '/login') throw new Error('Employee denial incorrectly destroyed the synthetic authenticated session');
+    if (snapshot.path !== '/ess') {
+      throw new Error(`Employee denial did not use the authorized /ess fallback: ${JSON.stringify(snapshot)}`);
+    }
+    if (/Page not found/i.test(snapshot.text)) throw new Error('Employee denial rendered NotFound');
+    if (/Something went wrong|Unhandled|Application error/i.test(snapshot.text)) {
+      throw new Error(`Employee denial rendered an application error: ${snapshot.text.slice(0, 500)}`);
+    }
     console.log(`PASS Employee denied /admin -> ${snapshot.path}`);
   })(), journeyTimeoutMs, 'Employee denial journey');
 
