@@ -193,6 +193,9 @@ if (selfTest) {
     }
   };
   try {
+    await runFixture('approved-test-credential', { 'tests/auth.mjs': "const password = 'workos-test-only';\n" }, true);
+    await runFixture('historical-shared-password', { 'tests/auth.mjs': "const password = 'demo123';\n" }, false);
+    await runFixture('test-credential-runtime-escape', { 'src/auth.ts': "const password = 'workos-test-only';\n" }, false);
     await runFixture('safe-identifiers', { 'src/safe.ts': `const key = schemaKey; const token = getToken(); const password = input.password;\nconst initialPassword = makePassword(); const sortKey = (row) => row.id; const dataKey: keyof Row = 'id'; const permissionKey = permission.key;\n`, '.env.example': 'PASSWORD=\nAPI_TOKEN=<replace-with-local-token>\nCLIENT_SECRET=${LOCAL_CLIENT_SECRET}\n' }, true);
     await runFixture('safe-regex', { 'tests/regex.mjs': String.raw`const graphScope = /https:\/\/graph\.microsoft\.com\/\.default/;\n` }, true);
     await runFixture('quoted-js-credential', { 'src/bad.ts': "const initialPassword = 'CompanyPass2026!';\n" }, false);
