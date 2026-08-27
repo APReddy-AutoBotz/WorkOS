@@ -21,17 +21,19 @@ concurrency:
 
 env:
   TARGET_BRANCH: controller/wos01a-actions-publisher
-  EXPECTED_TARGET_HEAD: 4f59222649ed874109250ea6235da55d7d7d0b0a
-  EXPECTED_TARGET_TREE: b6db98362cb527185389ad71bfd5a2db13bba1c8
-  TARGET_FILE: .github/scripts/wos01a-source-bootstrap.mjs
-  TARGET_BLOB: b15d20f4b7677639937f0d7ef5522f26a6623a6d
-  RAW_PATCH_SHA256: 8be6d1f9fe2bcea93d4fdaa83b2d5523205915cb308a3b1c9d9cac9c58342091
-  XZ_PATCH_SHA256: a13d5cfaa5d13d396742af5cc72359f13bab86703e44c72f676fd54da2a0586c
+  EXPECTED_TARGET_HEAD: b5d1febf6b043d182c1f9002e162a9a7bbf80465
+  EXPECTED_TARGET_TREE: 3c6c52dc2ed77f185de0760fac07a2efb108c266
+  TARGET_FILE_1: .github/scripts/wos01a-source-bootstrap.mjs
+  TARGET_BLOB_1: db79b732e1b99559c0998858b2438acee43d9019
+  TARGET_FILE_2: .github/scripts/wos01a/scan-bootstrap.mjs
+  TARGET_BLOB_2: 7f1200024566bcd681676421c234c1eb89612a9c
+  RAW_PATCH_SHA256: ed8c753d03fc3105b416f4df1cf1dbd97b1fa4c73a35ac51df40a2cb05a3de90
+  XZ_PATCH_SHA256: 060fe14b54232210748176dfe618db2803f17cea554c88a47e379c34e1fac31c
   PR_NUMBER: '18'
 
 jobs:
   recover:
-    name: Publish exact semicolon-safe PR18 target tree
+    name: Publish exact retained-test dependency correction
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -56,24 +58,28 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Decode and verify approved one-file correction
+      - name: Decode and verify approved two-file correction
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
           test -z "$(git status --porcelain)"
           cat > /tmp/wos01a.patch.xz.b64 <<'PAYLOAD'
-          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
+          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
           PAYLOAD
           base64 -d /tmp/wos01a.patch.xz.b64 > /tmp/wos01a.patch.xz
           test "$(sha256sum /tmp/wos01a.patch.xz | cut -d' ' -f1)" = "$XZ_PATCH_SHA256"
           xz -dc /tmp/wos01a.patch.xz > /tmp/wos01a.patch
           test "$(sha256sum /tmp/wos01a.patch | cut -d' ' -f1)" = "$RAW_PATCH_SHA256"
           git apply --binary --index /tmp/wos01a.patch
-          test "$(git diff --cached --name-only)" = "$TARGET_FILE"
+          mapfile -t changed < <(git diff --cached --name-only)
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = "$TARGET_FILE_1"
+          test "${changed[1]}" = "$TARGET_FILE_2"
           git diff --cached --check
           test "$(git write-tree)" = "$EXPECTED_TARGET_TREE"
-          test "$(git hash-object "$TARGET_FILE")" = "$TARGET_BLOB"
+          test "$(git hash-object "$TARGET_FILE_1")" = "$TARGET_BLOB_1"
+          test "$(git hash-object "$TARGET_FILE_2")" = "$TARGET_BLOB_2"
 
       - name: Materialize exact Git objects and atomically fast-forward existing PR #18 branch
         uses: actions/github-script@v7
@@ -85,16 +91,21 @@ jobs:
             const prNumber = Number(process.env.PR_NUMBER);
             const oldHead = process.env.EXPECTED_TARGET_HEAD;
             const targetTree = process.env.EXPECTED_TARGET_TREE;
-            const targetPath = process.env.TARGET_FILE;
-            const expectedBlob = process.env.TARGET_BLOB;
-            const content = fs.readFileSync(targetPath).toString('base64');
-
-            const { data: blob } = await github.rest.git.createBlob({ owner, repo, content, encoding: 'base64' });
-            if (blob.sha !== expectedBlob) throw new Error(`blob mismatch ${blob.sha}`);
+            const targets = [
+              [process.env.TARGET_FILE_1, process.env.TARGET_BLOB_1],
+              [process.env.TARGET_FILE_2, process.env.TARGET_BLOB_2],
+            ];
+            const entries = [];
+            for (const [targetPath, expectedBlob] of targets) {
+              const content = fs.readFileSync(targetPath).toString('base64');
+              const { data: blob } = await github.rest.git.createBlob({ owner, repo, content, encoding: 'base64' });
+              if (blob.sha !== expectedBlob) throw new Error(`blob mismatch ${targetPath}: ${blob.sha}`);
+              entries.push({ path: targetPath, mode: '100644', type: 'blob', sha: blob.sha });
+            }
             const { data: parent } = await github.rest.git.getCommit({ owner, repo, commit_sha: oldHead });
-            const { data: tree } = await github.rest.git.createTree({ owner, repo, base_tree: parent.tree.sha, tree: [{ path: targetPath, mode: '100644', type: 'blob', sha: blob.sha }] });
+            const { data: tree } = await github.rest.git.createTree({ owner, repo, base_tree: parent.tree.sha, tree: entries });
             if (tree.sha !== targetTree) throw new Error(`tree mismatch ${tree.sha}`);
-            const { data: commit } = await github.rest.git.createCommit({ owner, repo, message: 'ci: make WOS-01A font neutralization semicolon-safe', tree: tree.sha, parents: [oldHead] });
+            const { data: commit } = await github.rest.git.createCommit({ owner, repo, message: 'ci: close WOS-01A retained test document dependencies', tree: tree.sha, parents: [oldHead] });
 
             const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
             const failures = [];
@@ -118,5 +129,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: Number(process.env.PR_NUMBER),
-              body: `### WOS-01A publisher correction published\n\n- Previous head: \`${process.env.EXPECTED_TARGET_HEAD}\`\n- Published head: \`${pr.head.sha}\`\n- Exact tree: \`${process.env.EXPECTED_TARGET_TREE}\`\n- Scope: one-file semicolon-safe Google Fonts neutralization correction.\n\nPR #18 remains Draft. Exact-head acceptance verification and fresh independent confirmation review remain mandatory before any merge.`
+              body: `### WOS-01A publisher correction published\n\n- Previous head: \`${process.env.EXPECTED_TARGET_HEAD}\`\n- Published head: \`${pr.head.sha}\`\n- Exact tree: \`${process.env.EXPECTED_TARGET_TREE}\`\n- Scope: retained-test dependency closure and context-safe path mapping.\n\nPR #18 remains Draft. Exact-head acceptance verification and fresh independent confirmation review remain mandatory before any merge.`
             });
