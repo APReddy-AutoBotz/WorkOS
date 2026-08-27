@@ -210,11 +210,36 @@ const centralizeRuntimeBranding = (source, targetPath) => {
   ];
   let next = source;
   let changed = false;
-  next = next.replace(/(['"])([^'"\r\n]*(?:My WorkOS Hub|Boundaryless-WorkOS|Boundaryless WorkOS|Configured product|Boundaryless|Your organization|Country Director|regional ownership)[^'"\r\n]*)\1/g, (_match, _quote, value) => {
+  const containsConfiguredLabel = /My WorkOS Hub|Boundaryless-WorkOS|Boundaryless WorkOS|Configured product|Boundaryless|Your organization|Country Director|regional ownership/;
+  const configureLabel = (value) => {
     let replacement = value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${');
     for (const [label, expression] of substitutions) replacement = replacement.replaceAll(label, expression);
+    return replacement;
+  };
+  const configureTemplateLabel = (value) => {
+    let replacement = value;
+    for (const [label, expression] of substitutions) replacement = replacement.replaceAll(label, expression);
+    return replacement;
+  };
+  next = next.replace(/(['"])([^'"\r\n]*(?:My WorkOS Hub|Boundaryless-WorkOS|Boundaryless WorkOS|Configured product|Boundaryless|Your organization|Country Director|regional ownership)[^'"\r\n]*)\1/g, (match, _quote, value, offset) => {
+    const before = next.slice(0, offset);
+    const openTag = before.lastIndexOf('<') > before.lastIndexOf('>');
+    const isJsxAttribute = openTag && /(?:^|\s)[A-Za-z_$][\w$:.\-]*\s*=\s*$/.test(before.slice(before.lastIndexOf('<') + 1));
     changed = true;
-    return `\`${replacement}\``;
+    const replacement = `\`${configureLabel(value)}\``;
+    return isJsxAttribute ? `{${replacement}}` : replacement;
+  });
+  next = next.replace(/`((?:\\.|[^`\\])*)`/gs, (match, value) => {
+    if (!containsConfiguredLabel.test(value)) return match;
+    changed = true;
+    return `\`${configureTemplateLabel(value)}\``;
+  });
+  // Quoted-string handling does not see JSX text nodes. Transform only plain text nodes;
+  // nodes containing JSX expressions are left to their existing expression semantics.
+  next = next.replace(/>([^<>{}]*)</g, (match, value) => {
+    if (!containsConfiguredLabel.test(value)) return match;
+    changed = true;
+    return `>{\`${configureLabel(value)}\`}<`;
   });
   if (!changed || /(?:^|\n)import\s+\{\s*productConfig\s*\}/.test(next)) return next;
   const depth = targetPath.slice('src/'.length).split('/').length - 1;
@@ -225,6 +250,28 @@ const centralizeRuntimeBranding = (source, targetPath) => {
   const insertAt = lastImport.index + lastImport[0].length;
   return `${next.slice(0, insertAt)}\nimport { productConfig } from '${configPath}';${next.slice(insertAt)}`;
 };
+
+const assertRuntimeBrandingTransform = () => {
+  const cases = [
+    {
+      name: 'JSX text and attribute',
+      input: "import React from 'react';\nexport const View = () => <Card title=\"Boundaryless WorkOS\">Welcome to Boundaryless</Card>;\n",
+      expected: "import React from 'react';\nimport { productConfig } from '../config/productConfig';\nexport const View = () => <Card title={`\${productConfig.productName}`}>{`Welcome to \${productConfig.organizationName}`}</Card>;\n",
+    },
+    {
+      name: 'template expression and multiline import',
+      input: "import {\n  value,\n} from './values';\nconst message = `Configured product: ${value}`;\nconst label = 'Configured product';\n",
+      expected: "import {\n  value,\n} from './values';\nimport { productConfig } from '../config/productConfig';\nconst message = `\${productConfig.productName}: ${value}`;\nconst label = `\${productConfig.productName}`;\n",
+    },
+  ];
+  for (const fixture of cases) {
+    const actual = centralizeRuntimeBranding(fixture.input, 'src/pages/Fixture.tsx');
+    if (actual !== fixture.expected) {
+      throw new Error(`Runtime branding transform regression (${fixture.name}):\n${actual}`);
+    }
+  }
+};
+assertRuntimeBrandingTransform();
 
 const loginPage = path.join(targetRoot, 'src/pages/Login.tsx');
 let loginText = await readFile(loginPage, 'utf8');
