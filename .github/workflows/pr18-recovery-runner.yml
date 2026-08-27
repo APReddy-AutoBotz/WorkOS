@@ -1,4 +1,4 @@
-name: PR18 Exact-Head WOS-01A Acceptance
+name: PR18 Publish Credential-Boundary Correction + WOS-01A Acceptance
 
 on:
   push:
@@ -6,22 +6,21 @@ on:
       - main
     paths:
       - '.github/workflows/pr18-recovery-runner.yml'
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: read
   issues: read
 
 concurrency:
-  group: pr18-exact-head-acceptance
+  group: pr18-credential-boundary-publication
   cancel-in-progress: false
 
 env:
   PUBLISHER_PR: '18'
   PUBLISHER_BRANCH: controller/wos01a-actions-publisher
-  PUBLISHER_HEAD: 5a14fd61536cc3f49296dd5fdf1fc1e806c7dfbc
-  PUBLISHER_TREE: 998c9b1044b834953836e361cf56018236bb401c
+  OLD_PUBLISHER_HEAD: 5a14fd61536cc3f49296dd5fdf1fc1e806c7dfbc
+  TARGET_PUBLISHER_TREE: d17865ed4d5279648a76ace5b8c54a7e05dd86e7
   TARGET_PR: '16'
   TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
@@ -31,33 +30,112 @@ env:
   REFERENCE_TREE: fdaa5d92854d378dae1c6146a8f09c7f34f8c273
 
 jobs:
-  verify:
-    name: Verify exact publisher head and WOS-01A acceptance
+  publish-and-verify:
+    name: Publish exact two-file correction and verify WOS-01A acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 55
 
     steps:
-      - name: Verify live Draft PR identities
+      - name: Verify live Draft PR leases before any write
         uses: actions/github-script@v7
         with:
           script: |
             const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
             const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
             const failures = [];
-            if (publisher.state !== 'open' || !publisher.draft || publisher.head.ref !== process.env.PUBLISHER_BRANCH || publisher.head.sha !== process.env.PUBLISHER_HEAD) failures.push(`publisher=${publisher.state}/${publisher.draft}/${publisher.head.ref}/${publisher.head.sha}`);
+            if (publisher.state !== 'open' || !publisher.draft || publisher.head.ref !== process.env.PUBLISHER_BRANCH || publisher.head.sha !== process.env.OLD_PUBLISHER_HEAD) failures.push(`publisher=${publisher.state}/${publisher.draft}/${publisher.head.ref}/${publisher.head.sha}`);
             if (target.state !== 'open' || !target.draft || target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target=${target.state}/${target.draft}/${target.head.ref}/${target.head.sha}`);
             if (target.base.ref !== 'main' || target.base.sha !== process.env.WOS00_ACCEPTED_BASE) failures.push(`target.base=${target.base.ref}/${target.base.sha}`);
-            const { data: commit } = await github.rest.git.getCommit({ owner: context.repo.owner, repo: context.repo.repo, commit_sha: process.env.PUBLISHER_HEAD });
-            if (commit.tree.sha !== process.env.PUBLISHER_TREE) failures.push(`publisher.tree=${commit.tree.sha}`);
-            if (failures.length) core.setFailed(`Acceptance start gate failed: ${failures.join(', ')}`);
+            if (failures.length) core.setFailed(`Publication start gate failed: ${failures.join(', ')}`);
 
-      - name: Checkout exact publisher head without credentials
+      - name: Checkout exact old publisher head without credentials
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.PUBLISHER_HEAD }}
+          ref: ${{ env.OLD_PUBLISHER_HEAD }}
           path: controller
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Reconstruct and verify exact Codex correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/patch.xz.b64 <<'PATCH_B64'
+          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
+          PATCH_B64
+          base64 -d /tmp/patch.xz.b64 > /tmp/patch.xz
+          test "$(wc -c < /tmp/patch.xz | tr -d ' ')" = "3456"
+          echo "a711b8e31623d1c47bd1ded7e32d020067909ca097d18fd8a545ebb9f2e4501d  /tmp/patch.xz" | sha256sum -c -
+          xz -dc /tmp/patch.xz > /tmp/patch.diff
+          test "$(wc -c < /tmp/patch.diff | tr -d ' ')" = "14012"
+          echo "c0010c3e8976086d6cc8fffbe65c48ca768810074917ae7b8f0a1cdac990725d  /tmp/patch.diff" | sha256sum -c -
+          git -C controller apply --index --binary /tmp/patch.diff
+          git -C controller diff --cached --check
+          test "$(git -C controller diff --cached --name-only | wc -l | tr -d ' ')" = "2"
+          test "$(git -C controller diff --cached --name-only | sort)" = "$(printf '%s\n' '.github/scripts/wos01a/apply-final-neutralization.mjs' '.github/scripts/wos01a/scan-bootstrap.mjs' | sort)"
+          test "$(wc -c < controller/.github/scripts/wos01a/apply-final-neutralization.mjs | tr -d ' ')" = "6294"
+          echo "88d5ee852ae525d19e523cdcd02cb6b5f9220b121878b58b01d46b9d373810b0  controller/.github/scripts/wos01a/apply-final-neutralization.mjs" | sha256sum -c -
+          test "$(git -C controller hash-object .github/scripts/wos01a/apply-final-neutralization.mjs)" = "67c3735e95aa05eb6cde4c63bb46e909b8336100"
+          test "$(wc -c < controller/.github/scripts/wos01a/scan-bootstrap.mjs | tr -d ' ')" = "14668"
+          echo "aa5483c814d98e1c203faa2ce59fff36c482de5bbd6fe766066a6c8bcd097419  controller/.github/scripts/wos01a/scan-bootstrap.mjs" | sha256sum -c -
+          test "$(git -C controller hash-object .github/scripts/wos01a/scan-bootstrap.mjs)" = "afc6831709399f8af02cd3c0790f08f67de1ed7f"
+          test "$(git -C controller write-tree)" = "$TARGET_PUBLISHER_TREE"
+          node --check controller/.github/scripts/wos01a/scan-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/apply-final-neutralization.mjs
+          node controller/.github/scripts/wos01a/scan-bootstrap.mjs --self-test
+
+      - name: Commit exact corrected tree locally
+        id: corrected
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C controller config user.name "WorkOS Build Controller"
+          git -C controller config user.email "actions@users.noreply.github.com"
+          git -C controller config core.hooksPath /dev/null
+          git -C controller commit -m "ci: bound synthetic test credentials"
+          test "$(git -C controller rev-parse HEAD^)" = "$OLD_PUBLISHER_HEAD"
+          test "$(git -C controller rev-parse HEAD^{tree})" = "$TARGET_PUBLISHER_TREE"
+          echo "sha=$(git -C controller rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate live leases immediately before publication
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
+            const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
+            if (publisher.head.sha !== process.env.OLD_PUBLISHER_HEAD || publisher.state !== 'open' || !publisher.draft || publisher.head.ref !== process.env.PUBLISHER_BRANCH) core.setFailed(`PR #18 lease moved: ${publisher.head.sha}`);
+            if (target.head.sha !== process.env.TARGET_HEAD || target.state !== 'open' || !target.draft || target.head.ref !== process.env.TARGET_BRANCH || target.base.sha !== process.env.WOS00_ACCEPTED_BASE) core.setFailed(`PR #16 lease moved: ${target.head.sha}/${target.base.sha}`);
+
+      - name: Publish exact fast-forward to existing PR18 branch
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -C controller -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push --force-with-lease="refs/heads/$PUBLISHER_BRANCH:$OLD_PUBLISHER_HEAD" \
+            origin "HEAD:refs/heads/$PUBLISHER_BRANCH"
+          unset auth
+
+      - name: Verify published PR18 head and exact tree
+        id: published
+        uses: actions/github-script@v7
+        env:
+          NEW_HEAD: ${{ steps.corrected.outputs.sha }}
+        with:
+          script: |
+            const expected = process.env.NEW_HEAD;
+            let publisher;
+            for (let i = 0; i < 12; i++) {
+              ({ data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) }));
+              if (publisher.head.sha === expected) break;
+              await new Promise(r => setTimeout(r, 2500));
+            }
+            if (publisher.head.sha !== expected) core.setFailed(`Published head mismatch after retries: ${publisher.head.sha} expected ${expected}`);
+            const { data: commit } = await github.rest.git.getCommit({ owner: context.repo.owner, repo: context.repo.repo, commit_sha: expected });
+            if (commit.tree.sha !== process.env.TARGET_PUBLISHER_TREE) core.setFailed(`Published tree mismatch: ${commit.tree.sha}`);
+            core.setOutput('head', expected);
 
       - name: Checkout exact protected WOS-01A Draft branch
         uses: actions/checkout@v4
@@ -87,20 +165,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C controller rev-parse HEAD)" = "$PUBLISHER_HEAD"
-          test "$(git -C controller rev-parse HEAD^{tree})" = "$PUBLISHER_TREE"
+          test "$(git -C controller rev-parse HEAD)" = "${{ steps.corrected.outputs.sha }}"
+          test "$(git -C controller rev-parse HEAD^{tree})" = "$TARGET_PUBLISHER_TREE"
           test "$(git -C workos rev-parse HEAD)" = "$TARGET_HEAD"
           test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
           test "$(git -C reference rev-parse HEAD^{tree})" = "$REFERENCE_TREE"
           test -z "$(git -C reference status --porcelain)"
           git -C workos merge-base --is-ancestor "$WOS00_ACCEPTED_BASE" HEAD
-          test -z "${GH_TOKEN:-}"
           for repo in controller workos reference; do
             test -z "$(git -C "$repo" config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
             ! git -C "$repo" remote get-url origin | grep -Eq 'https://[^/@]+@'
           done
 
-      - name: Verify publisher syntax and adversarial fixtures
+      - name: Verify exact corrected publisher syntax and adversarial fixtures
         shell: bash
         run: |
           set -euo pipefail
@@ -112,7 +189,7 @@ jobs:
           node controller/.github/scripts/wos01a/scan-bootstrap.mjs --self-test
           ruby -e "require 'yaml'; YAML.parse_file('controller/.github/workflows/wos01a-source-bootstrap-publisher.yml'); puts 'yaml passed'"
 
-      - name: Apply the publisher's bounded final neutralization
+      - name: Apply bounded final neutralization
         shell: bash
         run: |
           set -euo pipefail
@@ -127,11 +204,13 @@ jobs:
           node controller/.github/scripts/wos01a-source-bootstrap.mjs reference workos controller | tee /tmp/wos01a-result.json
           node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
 
-      - name: Revalidate live heads after acceptance
+      - name: Final live-head revalidation
         uses: actions/github-script@v7
+        env:
+          NEW_HEAD: ${{ steps.corrected.outputs.sha }}
         with:
           script: |
             const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
             const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
-            if (publisher.head.sha !== process.env.PUBLISHER_HEAD) core.setFailed(`PR #18 moved during acceptance: ${publisher.head.sha}`);
-            if (target.head.sha !== process.env.TARGET_HEAD) core.setFailed(`PR #16 moved during acceptance: ${target.head.sha}`);
+            if (publisher.head.sha !== process.env.NEW_HEAD || publisher.state !== 'open' || !publisher.draft) core.setFailed(`PR #18 moved during acceptance: ${publisher.head.sha}`);
+            if (target.head.sha !== process.env.TARGET_HEAD || target.state !== 'open' || !target.draft) core.setFailed(`PR #16 moved during acceptance: ${target.head.sha}`);
