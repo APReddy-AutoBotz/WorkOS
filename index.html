@@ -2,9 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="%VITE_PRODUCT_LOGO_URL%" />
+    <link id="workos-favicon" rel="icon" type="image/svg+xml" href="/workos-mark.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>%VITE_PRODUCT_NAME%</title>
+    <title>WorkOS</title>
+    <script type="module">
+      const productName = String(import.meta.env.VITE_PRODUCT_NAME || 'WorkOS').trim() || 'WorkOS';
+      const productLogoUrl = String(import.meta.env.VITE_PRODUCT_LOGO_URL || '/workos-mark.svg').trim() || '/workos-mark.svg';
+      document.title = productName;
+      const favicon = document.getElementById('workos-favicon');
+      if (favicon) favicon.setAttribute('href', productLogoUrl);
+    </script>
   </head>
   <body>
     <div id="root"></div>
