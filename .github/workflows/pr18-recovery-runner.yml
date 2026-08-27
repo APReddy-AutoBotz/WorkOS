@@ -1,4 +1,4 @@
-name: PR18 Guarded Recovery Runner
+name: PR18 Exact-Head Acceptance Verifier
 
 on:
   push:
@@ -9,142 +9,50 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
-  issues: write
 
 concurrency:
-  group: pr18-guarded-recovery-runner
+  group: pr18-exact-head-acceptance
   cancel-in-progress: false
 
 env:
-  TARGET_BRANCH: controller/wos01a-actions-publisher
-  EXPECTED_TARGET_HEAD: 613aec9c70d806d8f45b87d6757b321ef282cf1d
-  EXPECTED_TARGET_TREE: ec272c67f2a038b06fc24a1c2db2afd6f6572dc4
-  TARGET_FILE: .github/scripts/wos01a-source-bootstrap.mjs
-  TARGET_BLOB: fbb44f914a59b3fe628455360033bd0d1c77d97f
-  RAW_PATCH_SHA256: c8a60d29847f750b7cf900a96c1aedfabab492a6320e04264d8fcb0790c59879
-  XZ_PATCH_SHA256: 8f9c3d7e633e5ee5f6637385469216436353916fb0600da176dbb8ca1483d74e
-  PR_NUMBER: '18'
-  WOS01_PR_NUMBER: '16'
-  WOS01_TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
-  WOS01_EXPECTED_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
+  PUBLISHER_BRANCH: controller/wos01a-actions-publisher
+  PUBLISHER_HEAD: d37aadeadc15364fc2cfd338d7e4519dbd52d6ca
+  PUBLISHER_TREE: ec272c67f2a038b06fc24a1c2db2afd6f6572dc4
+  PUBLISHER_PR: '18'
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
+  TARGET_PR: '16'
   WOS00_ACCEPTED_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
   REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
   REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
   REFERENCE_TREE: fdaa5d92854d378dae1c6146a8f09c7f34f8c273
 
 jobs:
-  recover-and-verify:
-    name: Publish and verify retained-test contract convergence
+  verify:
+    name: Verify exact WOS-01A publisher head
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-      - name: Verify live PR #18 start gate
+      - name: Verify live Draft PR identities
+        id: live
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: pr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PR_NUMBER) });
+            const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
+            const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
             const failures = [];
-            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
-            if (!pr.draft) failures.push('not Draft');
-            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
-            if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
-            if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
-            if (failures.length) core.setFailed(`PR #18 recovery guard failed: ${failures.join(', ')}`);
+            if (publisher.state !== 'open' || !publisher.draft || publisher.head.ref !== process.env.PUBLISHER_BRANCH || publisher.head.sha !== process.env.PUBLISHER_HEAD) failures.push(`publisher=${publisher.state}/${publisher.draft}/${publisher.head.ref}/${publisher.head.sha}`);
+            if (target.state !== 'open' || !target.draft || target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target=${target.state}/${target.draft}/${target.head.ref}/${target.head.sha}`);
+            if (target.base.ref !== 'main' || target.base.sha !== process.env.WOS00_ACCEPTED_BASE) failures.push(`target.base=${target.base.ref}/${target.base.sha}`);
+            if (failures.length) core.setFailed(`Exact-head verifier start gate failed: ${failures.join(', ')}`);
 
-      - name: Checkout exact PR #18 parent without persisted credentials
+      - name: Checkout exact publisher revision without persisted credentials
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.EXPECTED_TARGET_HEAD }}
-          path: publisher
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Decode and verify approved one-file correction
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd publisher
-          test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
-          test -z "$(git status --porcelain)"
-          cat > /tmp/wos01a.patch.xz.b64 <<'PAYLOAD'
-          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
-          PAYLOAD
-          base64 -d /tmp/wos01a.patch.xz.b64 > /tmp/wos01a.patch.xz
-          test "$(sha256sum /tmp/wos01a.patch.xz | cut -d' ' -f1)" = "$XZ_PATCH_SHA256"
-          xz -dc /tmp/wos01a.patch.xz > /tmp/wos01a.patch
-          test "$(sha256sum /tmp/wos01a.patch | cut -d' ' -f1)" = "$RAW_PATCH_SHA256"
-          git apply --binary --index /tmp/wos01a.patch
-          mapfile -t changed < <(git diff --cached --name-only)
-          test "${#changed[@]}" -eq 1
-          test "${changed[0]}" = "$TARGET_FILE"
-          git diff --cached --check
-          test "$(git write-tree)" = "$EXPECTED_TARGET_TREE"
-          test "$(git hash-object "$TARGET_FILE")" = "$TARGET_BLOB"
-
-      - name: Materialize exact Git object and atomically fast-forward existing PR #18 branch
-        id: publish
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const prNumber = Number(process.env.PR_NUMBER);
-            const oldHead = process.env.EXPECTED_TARGET_HEAD;
-            const content = fs.readFileSync(`publisher/${process.env.TARGET_FILE}`).toString('base64');
-            const { data: blob } = await github.rest.git.createBlob({ owner, repo, content, encoding: 'base64' });
-            if (blob.sha !== process.env.TARGET_BLOB) throw new Error(`blob mismatch ${blob.sha}`);
-            const { data: parent } = await github.rest.git.getCommit({ owner, repo, commit_sha: oldHead });
-            const { data: tree } = await github.rest.git.createTree({ owner, repo, base_tree: parent.tree.sha, tree: [{ path: process.env.TARGET_FILE, mode: '100644', type: 'blob', sha: blob.sha }] });
-            if (tree.sha !== process.env.EXPECTED_TARGET_TREE) throw new Error(`tree mismatch ${tree.sha}`);
-            const { data: commit } = await github.rest.git.createCommit({ owner, repo, message: 'ci: align retained configurable label contracts', tree: tree.sha, parents: [oldHead] });
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
-            const failures = [];
-            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
-            if (!pr.draft) failures.push('not Draft');
-            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
-            if (pr.head.sha !== oldHead) failures.push(`head.sha=${pr.head.sha}`);
-            if (failures.length) throw new Error(`PR moved before publication: ${failures.join(', ')}`);
-            await github.rest.git.updateRef({ owner, repo, ref: `heads/${process.env.TARGET_BRANCH}`, sha: commit.sha, force: false });
-            const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: `heads/${process.env.TARGET_BRANCH}` });
-            if (ref.object.sha !== commit.sha) throw new Error(`publication mismatch ${ref.object.sha}`);
-            core.setOutput('new_head', commit.sha);
-            core.setOutput('new_tree', tree.sha);
-            core.notice(`Published PR #18 ${oldHead} -> ${commit.sha}, tree ${tree.sha}`);
-
-      - name: Record publication checkpoint
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: Number(process.env.PR_NUMBER),
-              body: `### WOS-01A retained-test contract correction published\n\n- Previous head: \`${process.env.EXPECTED_TARGET_HEAD}\`\n- Published head: \`${{ steps.publish.outputs.new_head }}\`\n- Exact tree: \`${{ steps.publish.outputs.new_tree }}\`\n- Scope: deterministic configurable-label retained-test contract convergence only.\n\nThis workflow will now run read-only exact-head WOS-01A acceptance against the published controller revision. PR #18 remains Draft and PR #16 remains untouched.`
-            });
-
-      - name: Verify live PR #18 published head and PR #16 start state
-        id: live_state
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: publisherPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PR_NUMBER) });
-            const { data: targetPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.WOS01_PR_NUMBER) });
-            const failures = [];
-            if (publisherPr.state !== 'open' || !publisherPr.draft || publisherPr.head.ref !== process.env.TARGET_BRANCH || publisherPr.head.sha !== '${{ steps.publish.outputs.new_head }}') failures.push(`publisher=${publisherPr.state}/${publisherPr.draft}/${publisherPr.head.ref}/${publisherPr.head.sha}`);
-            if (targetPr.state !== 'open' || !targetPr.draft || targetPr.head.ref !== process.env.WOS01_TARGET_BRANCH || targetPr.head.sha !== process.env.WOS01_EXPECTED_HEAD) failures.push(`target=${targetPr.state}/${targetPr.draft}/${targetPr.head.ref}/${targetPr.head.sha}`);
-            if (targetPr.base.ref !== 'main') failures.push(`target.base.ref=${targetPr.base.ref}`);
-            if (failures.length) core.setFailed(`Exact-head acceptance start gate failed: ${failures.join(', ')}`);
-            core.setOutput('target_base_sha', targetPr.base.sha);
-
-      - name: Checkout exact published PR #18 controller revision
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.publish.outputs.new_head }}
+          ref: ${{ env.PUBLISHER_HEAD }}
           path: controller
           fetch-depth: 0
           persist-credentials: false
@@ -152,7 +60,7 @@ jobs:
       - name: Checkout exact protected WOS-01A Draft branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.WOS01_EXPECTED_HEAD }}
+          ref: ${{ env.TARGET_HEAD }}
           path: workos
           fetch-depth: 0
           persist-credentials: false
@@ -173,36 +81,48 @@ jobs:
           cache: npm
           cache-dependency-path: reference/package-lock.json
 
-      - name: Verify immutable exact-head acceptance identities
+      - name: Verify immutable identities and accepted ancestry
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C controller rev-parse HEAD)" = "${{ steps.publish.outputs.new_head }}"
-          test "$(git -C controller rev-parse HEAD^{tree})" = "$EXPECTED_TARGET_TREE"
-          test "$(git -C workos rev-parse HEAD)" = "$WOS01_EXPECTED_HEAD"
+          test "$(git -C controller rev-parse HEAD)" = "$PUBLISHER_HEAD"
+          test "$(git -C controller rev-parse HEAD^{tree})" = "$PUBLISHER_TREE"
+          test "$(git -C workos rev-parse HEAD)" = "$TARGET_HEAD"
           test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
           test "$(git -C reference rev-parse HEAD^{tree})" = "$REFERENCE_TREE"
           test -z "$(git -C reference status --porcelain)"
           git -C controller merge-base --is-ancestor "$WOS00_ACCEPTED_BASE" HEAD
           git -C workos merge-base --is-ancestor "$WOS00_ACCEPTED_BASE" HEAD
-          git -C controller cat-file -e "${{ steps.live_state.outputs.target_base_sha }}^{commit}"
-          git -C controller merge-base --is-ancestor "$WOS00_ACCEPTED_BASE" "${{ steps.live_state.outputs.target_base_sha }}"
 
-      - name: Assert package execution has no repository credential
+      - name: Assert verification has no repository credential
         shell: bash
         run: |
           set -euo pipefail
           test -z "${GH_TOKEN:-}"
-          test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
-          ! git -C workos remote get-url origin | grep -Eq 'https://[^/@]+@'
+          for repo in controller workos reference; do
+            test -z "$(git -C "$repo" config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+            ! git -C "$repo" remote get-url origin | grep -Eq 'https://[^/@]+@'
+          done
 
-      - name: Apply bounded final neutralization to exact publisher code
+      - name: Verify controller JavaScript and workflow syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check controller/.github/scripts/wos01a-source-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/scan-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/apply-final-neutralization.mjs
+          node --check controller/.github/scripts/wos01a/verify-baseline.mjs
+          ruby -e "require 'yaml'; YAML.parse_file('controller/.github/workflows/wos01a-source-bootstrap-publisher.yml'); puts 'yaml passed'"
+          node controller/.github/scripts/wos01a/scan-bootstrap.mjs --self-test
+
+      - name: Apply bounded final neutralization to verification copy
         shell: bash
         run: |
           set -euo pipefail
           node controller/.github/scripts/wos01a/apply-final-neutralization.mjs controller/.github/scripts/wos01a-source-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a-source-bootstrap.mjs
 
-      - name: Materialize and verify complete WOS-01A package read-only
+      - name: Materialize and run complete WOS-01A acceptance path
         shell: bash
         run: |
           set -euo pipefail
@@ -215,37 +135,11 @@ jobs:
           test -z "${GH_TOKEN:-}"
           node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
 
-      - name: Revalidate live heads after exact-head acceptance
+      - name: Revalidate live heads after acceptance
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: publisherPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PR_NUMBER) });
-            const { data: targetPr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.WOS01_PR_NUMBER) });
-            if (publisherPr.head.sha !== '${{ steps.publish.outputs.new_head }}') core.setFailed(`PR #18 moved during acceptance: ${publisherPr.head.sha}`);
-            if (targetPr.head.sha !== process.env.WOS01_EXPECTED_HEAD) core.setFailed(`PR #16 moved during acceptance: ${targetPr.head.sha}`);
-
-      - name: Comment exact-head acceptance success
-        if: success()
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: Number(process.env.PR_NUMBER),
-              body: `### WOS-01A publisher exact-head acceptance PASS\n\n- Exact publisher head: \`${{ steps.publish.outputs.new_head }}\`\n- Exact publisher tree: \`${{ steps.publish.outputs.new_tree }}\`\n- Protected target head: \`${process.env.WOS01_EXPECTED_HEAD}\`\n- Pinned reference: \`${process.env.REFERENCE_REPOSITORY}@${process.env.REFERENCE_COMMIT}\`\n- Workflow run: \`${context.runId}\`\n\nThe complete materialization/result-digest path passed without publishing PR #16. Fresh independent exact-head confirmation review remains mandatory before any Ready/merge transition.`
-            });
-
-      - name: Comment fail-closed recovery or acceptance result
-        if: failure()
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: Number(process.env.PR_NUMBER),
-              body: `### WOS-01A publisher recovery / exact-head acceptance failed closed\n\nWorkflow \`${context.workflow}\` run \`${context.runId}\` failed before establishing a clean exact-head acceptance result. Inspect the real failing step/log and classify its root cause before any correction. PR #18 remains Draft and PR #16 must remain untouched.`
-            });
+            const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
+            const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
+            if (publisher.head.sha !== process.env.PUBLISHER_HEAD) core.setFailed(`PR #18 moved during acceptance: ${publisher.head.sha}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) core.setFailed(`PR #16 moved during acceptance: ${target.head.sha}`);
