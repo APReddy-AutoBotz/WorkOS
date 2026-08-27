@@ -1,0 +1,313 @@
+name: WOS-01A Source Bootstrap Publisher
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/wos01a-source-bootstrap-publisher.yml'
+      - '.github/scripts/wos01a-source-bootstrap.mjs'
+      - '.github/scripts/wos01a/**'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: wos01a-source-bootstrap-publisher
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  EXPECTED_TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
+  EXPECTED_BASE_HEAD: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
+  REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
+  PR_NUMBER: '16'
+  CONTROLLER_PR_NUMBER: '18'
+
+jobs:
+  publish:
+    name: Build, verify and publish WOS-01A
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Verify live PR association and exact start state
+        id: start_pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const failures = [];
+            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
+            if (!pr.draft) failures.push('PR is not Draft');
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
+            if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
+            if (!/^[a-f0-9]{40}$/.test(pr.base.sha)) failures.push(`base.sha=${pr.base.sha}`);
+            core.setOutput('base_sha', pr.base.sha);
+            if (failures.length) core.setFailed(`WOS-01A PR association/start gate failed: ${failures.join(', ')}`);
+
+      - name: Resolve accepted controller revision
+        id: controller
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.CONTROLLER_PR_NUMBER),
+            });
+            const failures = [];
+            if (pr.state !== 'closed' || !pr.merged_at) failures.push('controller PR is not merged');
+            if (pr.head.ref !== 'controller/wos01a-actions-publisher') failures.push(`head.ref=${pr.head.ref}`);
+            if (!/^[a-f0-9]{40}$/.test(pr.head.sha || '')) failures.push(`head.sha=${pr.head.sha}`);
+            if (!/^[a-f0-9]{40}$/.test(pr.merge_commit_sha || '')) failures.push(`merge_commit_sha=${pr.merge_commit_sha}`);
+            if (failures.length) return core.setFailed(`Accepted controller revision gate failed: ${failures.join(', ')}`);
+            core.setOutput('sha', pr.head.sha);
+            core.setOutput('merge_sha', pr.merge_commit_sha);
+
+      - name: Checkout controller scripts from triggering revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.controller.outputs.sha }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact WorkOS Draft branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          path: workos
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout pinned authorized reference read-only
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REFERENCE_REPOSITORY }}
+          ref: ${{ env.REFERENCE_COMMIT }}
+          path: reference
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: reference/package-lock.json
+
+      - name: Verify immutable repository start gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "${{ steps.controller.outputs.sha }}"
+          if test "$GITHUB_EVENT_NAME" = "push"; then
+            test "$GITHUB_SHA" = "${{ steps.controller.outputs.merge_sha }}"
+          fi
+          git -C controller merge-base --is-ancestor "$EXPECTED_BASE_HEAD" HEAD
+          git -C workos merge-base --is-ancestor "$EXPECTED_BASE_HEAD" HEAD
+          git -C controller cat-file -e "${{ steps.start_pr.outputs.base_sha }}^{commit}"
+          git -C controller merge-base --is-ancestor "$EXPECTED_BASE_HEAD" "${{ steps.start_pr.outputs.base_sha }}"
+          test "$(git -C workos rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+          test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
+          test "$(git -C reference rev-parse HEAD^{tree})" = "fdaa5d92854d378dae1c6146a8f09c7f34f8c273"
+          test -z "$(git -C reference status --porcelain)"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -C workos -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$EXPECTED_TARGET_HEAD"
+
+      - name: Assert package execution has no repository credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          ! git -C workos remote get-url origin | grep -Eq 'https://[^/@]+@'
+
+      - name: Apply bounded final neutralization to publisher code
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a/apply-final-neutralization.mjs \
+            controller/.github/scripts/wos01a-source-bootstrap.mjs
+
+      - name: Materialize and verify the complete WOS-01A package
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs reference workos controller | tee /tmp/wos01a-result.json
+
+      - name: Re-verify live Draft PR before publication
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const failures = [];
+            if (pr.state !== 'open') failures.push(`state=${pr.state}`);
+            if (!pr.draft) failures.push('PR is not Draft');
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
+            if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
+            if (pr.base.sha !== '${{ steps.start_pr.outputs.base_sha }}') failures.push(`base.sha=${pr.base.sha}`);
+            if (failures.length) core.setFailed(`WOS-01A PR moved or lost Draft association before publication: ${failures.join(', ')}`);
+
+      - name: Commit and publish with exact-old-head guard
+        id: publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd workos
+          trusted_origin="https://github.com/${GITHUB_REPOSITORY}.git"
+          test "$(git rev-parse --git-dir)" = ".git"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+          test -z "$(git config --show-origin --get-regexp '^(include|includeIf)\.|http\..*\.extraheader|credential\.|credential.helper|url\..*\.insteadOf|core\.hooksPath' || true)"
+          test "$(git remote)" = "origin"
+          case "$(git remote get-url origin)" in
+            "${trusted_origin}"|"${trusted_origin%.git}") ;;
+            *) exit 1 ;;
+          esac
+          git remote set-url origin "$trusted_origin"
+          rm -rf .git/hooks
+          mkdir -p .git/hooks
+          export GIT_CONFIG_GLOBAL=/dev/null
+          export GIT_CONFIG_SYSTEM=/dev/null
+          git config --local core.hooksPath /dev/null
+          test "$(git config --local --get core.hooksPath)" = "/dev/null"
+          test "$(git remote get-url origin)" = "$trusted_origin"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$EXPECTED_TARGET_HEAD"
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          test -n "$(git status --porcelain)"
+          git diff --cached --check
+          changed_count="$(git diff --cached --name-only | wc -l | tr -d ' ')"
+          git commit --no-verify -m "feat: bootstrap authorized WorkOS source baseline"
+          new_head="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse HEAD^{tree})"
+          node ../controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest .
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+          echo "new_tree=$new_tree" >> "$GITHUB_OUTPUT"
+          echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" origin "HEAD:refs/heads/$TARGET_BRANCH"
+
+      - name: Fetch and verify published GitHub head
+        id: published_verify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -C workos -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
+          git -C workos -c http.https://github.com/.extraheader="$auth_header" fetch --no-tags origin "$remote_head"
+          test "$(git -C workos rev-parse "$remote_head^{tree}")" = "${{ steps.publish.outputs.new_tree }}"
+
+      - name: Verify published result evidence without credentials
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${GH_TOKEN:-}"
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
+
+      - name: Roll back an unverified publication with an exact-new-head lease
+        id: rollback
+        if: failure() && steps.publish.outputs.new_head != '' && steps.verify.outcome != 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd workos
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          test "$(git config --local --get core.hooksPath)" = "/dev/null"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          new_head="${{ steps.publish.outputs.new_head }}"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          if test "$remote_head" = "$EXPECTED_TARGET_HEAD"; then
+            echo "state=not-published" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$remote_head" = "$new_head"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$new_head" origin "$EXPECTED_TARGET_HEAD:refs/heads/$TARGET_BRANCH"
+          restored="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$restored" = "$EXPECTED_TARGET_HEAD"
+          echo "state=restored" >> "$GITHUB_OUTPUT"
+
+      - name: Comment successful publication on PR #16
+        if: steps.verify.outcome == 'success'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### WOS-01A GitHub Actions publication complete
+
+            - Published exact head: \`${{ steps.publish.outputs.new_head }}\`
+            - Parent guard: \`${process.env.EXPECTED_TARGET_HEAD}\`
+            - Changed paths: ${{ steps.publish.outputs.changed_count }}
+            - Authorized reference: \`${process.env.REFERENCE_REPOSITORY}@${process.env.REFERENCE_COMMIT}\` (read-only)
+            - Construction workflow: \`${context.workflow}\` run \`${context.runId}\`
+
+            The Draft PR remains unmerged. Independent exact-head Sol review, clean-runtime acceptance and repository merge gates are still mandatory. No deployment, provider/customer-data action or reference-repository write occurred.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body,
+            });
+
+      - name: Comment fail-closed publisher result
+        if: failure() && steps.verify.outcome != 'success' && steps.rollback.outcome != 'failure'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const publishOutcome = '${{ steps.publish.outcome }}';
+            const verifyOutcome = '${{ steps.verify.outcome }}';
+            const body = `### WOS-01A publisher failed closed
+
+            Workflow \`${context.workflow}\` run \`${context.runId}\` did not establish a verified published WOS-01A head. Publish step: \`${publishOutcome}\`; verification step: \`${verifyOutcome}\`; rollback: \`${{ steps.rollback.outputs.state || steps.rollback.outcome }}\`. The exact-old-head/PR-association guard, mandatory install/build/test/scan checks, push, remote-head verification, or lease-safe restoration failed. Inspect the workflow job logs and correct the actual failure; do not bypass or relabel a failed check.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body,
+            });
+
+      - name: Comment rollback lease failure without claiming target state
+        if: failure() && steps.rollback.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### WOS-01A publisher rollback requires investigation
+
+            Workflow \`${context.workflow}\` run \`${context.runId}\` did not establish a verified publication, and its exact-new-head rollback did not complete. The rollback used a lease and did not overwrite a concurrent branch move. The current PR #16 branch state is intentionally not classified here; inspect the workflow and live ref before any further action.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body,
+            });

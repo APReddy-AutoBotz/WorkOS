@@ -1,0 +1,820 @@
+import { createHash } from 'node:crypto';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  access,
+  cp,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+const [sourceArg, targetArg, controllerArg] = process.argv.slice(2);
+if (!['--verify-result-digest', '--self-test-changed-paths'].includes(sourceArg) && (!sourceArg || !targetArg || !controllerArg)) {
+  throw new Error('Usage: node wos01a-source-bootstrap.mjs <reference-root> <workos-root> <controller-root>');
+}
+
+const sourceRoot = path.resolve(sourceArg);
+const targetRoot = path.resolve(targetArg || '.');
+const controllerRoot = path.resolve(controllerArg || '.');
+const EXPECTED_SOURCE = 'f2de1d85126f5d64f0e2e21b085b0303ca1d8417';
+const EXPECTED_SOURCE_TREE = 'fdaa5d92854d378dae1c6146a8f09c7f34f8c273';
+const EXPECTED_TARGET_PARENT = '7e4b5fad6e0d0d95ddd6c58015a787fb201d8661';
+const SOURCE_REPOSITORY = 'APReddy-AutoBotz/Boundaryless-WorkOS';
+const TEXT_EXTENSIONS = new Set([
+  '.cjs', '.csv', '.env', '.example', '.html', '.js', '.json', '.md', '.mjs', '.sql', '.ts', '.tsx', '.txt', '.yml', '.yaml',
+]);
+
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const rel = (root, file) => path.relative(root, file).split(path.sep).join('/');
+const exists = async (file) => access(file).then(() => true).catch(() => false);
+const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+
+const changedFilePaths = (root) => {
+  const output = execFileSync('git', [
+    'status', '--porcelain=v1', '-z', '--untracked-files=all',
+  ], { cwd: root, encoding: 'utf8' });
+  const records = output.split('\0');
+  const paths = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    if (record.length < 4 || record[2] !== ' ') {
+      throw new Error(`Unexpected Git status record: ${JSON.stringify(record)}`);
+    }
+    paths.push(record.slice(3));
+    if (/[RC]/.test(record.slice(0, 2))) index += 1; // Skip the rename/copy source record.
+  }
+  return paths.sort();
+};
+
+const assertChangedFilePathEnumeration = async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), 'wos01a-changed-paths-'));
+  try {
+    git(fixture, ['init', '--quiet']);
+    await writeFile(path.join(fixture, '.gitignore'), 'ignored/\ntransient.tmp\n');
+    await writeFile(path.join(fixture, 'modified.txt'), 'before\n');
+    await writeFile(path.join(fixture, 'deleted.txt'), 'before\n');
+    git(fixture, ['add', '.gitignore', 'modified.txt', 'deleted.txt']);
+    git(fixture, ['-c', 'user.name=WorkOS Test', '-c', 'user.email=test@example.test', 'commit', '--quiet', '-m', 'fixture']);
+    await writeFile(path.join(fixture, 'modified.txt'), 'after\n');
+    await rm(path.join(fixture, 'deleted.txt'));
+    await mkdir(path.join(fixture, 'untracked'), { recursive: true });
+    await mkdir(path.join(fixture, 'ignored'), { recursive: true });
+    for (let index = 0; index < 100; index += 1) {
+      await writeFile(path.join(fixture, 'untracked', `file-${String(index).padStart(3, '0')}.txt`), `${index}\n`);
+      await writeFile(path.join(fixture, 'ignored', `file-${index}.tmp`), 'ignored\n');
+    }
+    await writeFile(path.join(fixture, 'transient.tmp'), 'ignored\n');
+    const expected = ['deleted.txt', 'modified.txt', ...Array.from({ length: 100 }, (_, index) => `untracked/file-${String(index).padStart(3, '0')}.txt`)].sort();
+    const once = changedFilePaths(fixture);
+    const twice = changedFilePaths(fixture);
+    if (JSON.stringify(once) !== JSON.stringify(expected)) {
+      throw new Error(`Exact changed-file enumeration mismatch: expected ${expected.length}, found ${once.length}`);
+    }
+    if (JSON.stringify(twice) !== JSON.stringify(once)) {
+      throw new Error('Exact changed-file enumeration changed on replay');
+    }
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+};
+
+if (sourceArg === '--self-test-changed-paths') {
+  await assertChangedFilePathEnumeration();
+  console.log(JSON.stringify({ status: 'passed', check: 'exact-changed-file-enumeration' }));
+  process.exit(0);
+}
+
+const walk = async (root) => {
+  if (!(await exists(root))) return [];
+  const result = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (entry.isDirectory() && ['.git', 'dist', 'node_modules'].includes(entry.name)) continue;
+    const file = path.join(root, entry.name);
+    if (entry.isDirectory()) result.push(...await walk(file));
+    else if (entry.isFile()) result.push(file);
+  }
+  return result.sort();
+};
+
+const RESULT_DIGEST_EVIDENCE = 'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md';
+const resultDigest = async (root) => {
+  const entries = [];
+  for (const file of await walk(root)) {
+    const relative = rel(root, file);
+    if (relative === RESULT_DIGEST_EVIDENCE) continue;
+    entries.push(`${relative}\0${sha256(await readFile(file))}`);
+  }
+  return sha256(Buffer.from(entries.join('\n')));
+};
+
+if (sourceArg === '--verify-result-digest') {
+  const root = path.resolve(targetArg || '');
+  const evidenceText = await readFile(path.join(root, RESULT_DIGEST_EVIDENCE), 'utf8');
+  const recorded = evidenceText.match(/Result payload SHA-256: `([a-f0-9]{64})`/i)?.[1];
+  const actual = await resultDigest(root);
+  if (!recorded || recorded !== actual) throw new Error(`Result payload digest mismatch: recorded=${recorded || 'missing'} actual=${actual}`);
+  console.log(JSON.stringify({ status: 'passed', resultDigest: actual }));
+  process.exit(0);
+}
+
+const sourceHead = git(sourceRoot, ['rev-parse', 'HEAD']);
+const sourceTree = git(sourceRoot, ['rev-parse', 'HEAD^{tree}']);
+const targetHead = git(targetRoot, ['rev-parse', 'HEAD']);
+if (sourceHead !== EXPECTED_SOURCE || sourceTree !== EXPECTED_SOURCE_TREE) {
+  throw new Error(`Reference mismatch: ${sourceHead}/${sourceTree}`);
+}
+if (targetHead !== EXPECTED_TARGET_PARENT) {
+  throw new Error(`Target branch moved: expected ${EXPECTED_TARGET_PARENT}, found ${targetHead}`);
+}
+if (git(sourceRoot, ['status', '--porcelain']) !== '') {
+  throw new Error('Reference checkout is not clean');
+}
+await assertChangedFilePathEnumeration();
+
+const selectedRootFiles = [
+  '.env.example',
+  '.gitignore',
+  'index.html',
+  'metadata.json',
+  'package-lock.json',
+  'package.json',
+  'tsconfig.json',
+  'vite.config.ts',
+];
+const selectedServerFiles = [
+  'server/index.mjs',
+  'server/migrate.mjs',
+  'server/schema.sql',
+  'server/seed-demo.mjs',
+  'server/start-production.mjs',
+];
+const selectedTestFiles = [
+  'tests/access-control-smoke.mjs',
+  'tests/approval-engine-smoke.mjs',
+  'tests/backend-contract-smoke.mjs',
+  'tests/ess-hub-smoke.mjs',
+  'tests/import-template-smoke.mjs',
+  'tests/integration-adapters-smoke.mjs',
+  'tests/leave-management-smoke.mjs',
+  'tests/notification-center-smoke.mjs',
+  'tests/org-chart-smoke.mjs',
+  'tests/phase7-scope-smoke.mjs',
+  'tests/dynamic-permissions-smoke.mjs',
+  'tests/requirements-smoke.mjs',
+  'tests/resource-planning-smoke.mjs',
+];
+const retainedDependencyMappings = new Map([
+  [
+    'Boundaryless-WorkOS_Requirements.md',
+    'docs/03-specifications/WOS01A_RETAINED_REQUIREMENTS.md',
+  ],
+]);
+const sourceToTargetPath = (sourcePath) => retainedDependencyMappings.get(sourcePath)
+  || (sourcePath === 'server/migrations/006_boundaryless_workos_prod_core.sql'
+    ? 'server/migrations/006_workos_prod_core.sql'
+    : sourcePath);
+
+const sourceFiles = await walk(sourceRoot);
+const selected = new Set();
+for (const file of selectedRootFiles) if (await exists(path.join(sourceRoot, file))) selected.add(file);
+for (const file of await walk(path.join(sourceRoot, 'src'))) selected.add(rel(sourceRoot, file));
+for (const file of selectedServerFiles) if (await exists(path.join(sourceRoot, file))) selected.add(file);
+for (const file of await walk(path.join(sourceRoot, 'server/migrations'))) selected.add(rel(sourceRoot, file));
+for (const file of await walk(path.join(sourceRoot, 'templates/import'))) selected.add(rel(sourceRoot, file));
+for (const file of selectedTestFiles) {
+  if (!(await exists(path.join(sourceRoot, file)))) throw new Error(`Required retained test is absent: ${file}`);
+  selected.add(file);
+}
+for (const [dependency] of retainedDependencyMappings) {
+  if (!(await exists(path.join(sourceRoot, dependency)))) {
+    throw new Error(`Required retained-test dependency is absent: ${dependency}`);
+  }
+  selected.add(dependency);
+}
+
+const controlledPaths = [
+  '.env.example', '.gitignore', 'index.html', 'metadata.json', 'package-lock.json', 'package.json', 'tsconfig.json', 'vite.config.ts',
+  'src', 'server', 'templates', 'tests', 'public',
+  'docs/03-specifications/WOS01A_RETAINED_REQUIREMENTS.md',
+  'scripts/scan-bootstrap.mjs', 'scripts/verify-baseline.mjs',
+  'docs/00-control/SOURCE_IMPORT_MANIFEST.md',
+  'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md',
+];
+for (const controlled of controlledPaths) await rm(path.join(targetRoot, controlled), { recursive: true, force: true });
+
+for (const sourcePath of [...selected].sort()) {
+  const from = path.join(sourceRoot, sourcePath);
+  const to = path.join(targetRoot, sourceToTargetPath(sourcePath));
+  await mkdir(path.dirname(to), { recursive: true });
+  await cp(from, to, { force: true, preserveTimestamps: false });
+}
+
+const retainedRequirementsTarget = retainedDependencyMappings.get('Boundaryless-WorkOS_Requirements.md');
+const retainedRequirementsFile = path.join(targetRoot, retainedRequirementsTarget);
+let retainedRequirementsText = await readFile(retainedRequirementsFile, 'utf8');
+retainedRequirementsText = retainedRequirementsText.replaceAll('https://...', 'https://service.example.test');
+await writeFile(retainedRequirementsFile, retainedRequirementsText);
+const essTestFile = path.join(targetRoot, 'tests/ess-hub-smoke.mjs');
+let essTestText = await readFile(essTestFile, 'utf8');
+const retainedRequirementsReferences = essTestText.match(/Boundaryless-WorkOS_Requirements\.md/g) || [];
+if (retainedRequirementsReferences.length !== 1) {
+  throw new Error(`Expected one ESS retained-requirements dependency, found ${retainedRequirementsReferences.length}`);
+}
+essTestText = essTestText.replace('Boundaryless-WorkOS_Requirements.md', retainedRequirementsTarget);
+if (!essTestText.includes(retainedRequirementsTarget)) {
+  throw new Error('ESS retained-requirements dependency was not mapped');
+}
+await writeFile(essTestFile, essTestText);
+
+const retainedDisplayContractMappings = [
+  {
+    testPath: 'tests/ess-hub-smoke.mjs',
+    historical: "assert.match(sidebar, /My WorkOS Hub[\\s\\S]*path: '\\/ess'[\\s\\S]*navRoles: \\['Employee'\\]/, 'sidebar should expose one primary employee ESS hub');",
+    governed: "assert.match(sidebar, /name: `My \\$\\{productConfig\\.productName\\} Hub`[\\s\\S]*path: '\\/ess'[\\s\\S]*navRoles: \\['Employee'\\]/, 'sidebar should expose the configured primary employee ESS hub without weakening its route or navigation role');",
+  },
+  {
+    testPath: 'tests/ess-hub-smoke.mjs',
+    historical: "assert.match(header, /page-ess[\\s\\S]*title: 'My WorkOS Hub'[\\s\\S]*path: '\\/ess'/, 'header search should expose the unified ESS hub');",
+    governed: "assert.match(header, /page-ess[\\s\\S]*title: `My \\$\\{productConfig\\.productName\\} Hub`[\\s\\S]*path: '\\/ess'/, 'header search should expose the configured unified ESS hub on its canonical route');",
+  },
+  {
+    testPath: 'tests/ess-hub-smoke.mjs',
+    historical: "assert.match(traceability, /ESS \\/ My WorkOS Hub[\\s\\S]*engineeringStatus: 'Prod Core RC'[\\s\\S]*\\/my-workspace remains a compatibility route only/, 'BRD traceability should show ESS as the unified Prod Core RC hub with release-gate evidence');",
+    governed: "assert.match(traceability, /module: `ESS \\/ My \\$\\{productConfig\\.productName\\} Hub`[\\s\\S]*engineeringStatus: 'Prod Core RC'[\\s\\S]*\\/my-workspace remains a compatibility route only/, 'BRD traceability should use the configured product label while preserving ESS lifecycle evidence');",
+  },
+  {
+    testPath: 'tests/org-chart-smoke.mjs',
+    historical: "const { authService } = await import('../src/services/authService.ts');",
+    governed: "const { authService } = await import('../src/services/authService.ts');\nconst { productConfig } = await import('../src/config/productConfig.ts');",
+  },
+  {
+    testPath: 'tests/org-chart-smoke.mjs',
+    historical: "assert.equal(tree.root.label, 'Boundaryless Group', 'org tree should expose Boundaryless Group root');",
+    governed: "assert.equal(tree.root.label, `${productConfig.organizationName} Group`, 'org tree should expose the configured organization root');",
+  },
+];
+
+const adaptRetainedDisplayContracts = (testsByPath) => {
+  const adapted = new Map(testsByPath);
+  for (const mapping of retainedDisplayContractMappings) {
+    const current = adapted.get(mapping.testPath);
+    if (current === undefined) throw new Error(`Retained display-contract test is absent: ${mapping.testPath}`);
+    const historicalCount = current.split(mapping.historical).length - 1;
+    const governedCount = current.split(mapping.governed).length - 1;
+    if (governedCount === 1) {
+      continue;
+    } else if (historicalCount === 1) {
+      adapted.set(mapping.testPath, current.replace(mapping.historical, mapping.governed));
+    } else {
+      throw new Error(`Retained display-contract anchor drift in ${mapping.testPath}`);
+    }
+  }
+  return adapted;
+};
+
+const retainedTestsBeforeDisplayAdaptation = new Map();
+for (const testPath of selectedTestFiles) {
+  retainedTestsBeforeDisplayAdaptation.set(testPath, await readFile(path.join(targetRoot, testPath), 'utf8'));
+}
+const retainedTestsAfterDisplayAdaptation = adaptRetainedDisplayContracts(retainedTestsBeforeDisplayAdaptation);
+for (const [testPath, testText] of retainedTestsAfterDisplayAdaptation) {
+  await writeFile(path.join(targetRoot, testPath), testText);
+}
+
+const assertRetainedDisplayContractTransform = () => {
+  const sourceTests = new Map([
+    ['tests/ess-hub-smoke.mjs', retainedDisplayContractMappings.filter(({ testPath }) => testPath === 'tests/ess-hub-smoke.mjs').map(({ historical }) => historical).join('\n')],
+    ['tests/org-chart-smoke.mjs', retainedDisplayContractMappings.filter(({ testPath }) => testPath === 'tests/org-chart-smoke.mjs').map(({ historical }) => historical).join('\n')],
+  ]);
+  const once = adaptRetainedDisplayContracts(sourceTests);
+  const twice = adaptRetainedDisplayContracts(once);
+  if ([...once].some(([testPath, text]) => twice.get(testPath) !== text)) {
+    throw new Error('Retained display-contract adaptation is not idempotent');
+  }
+  const essContract = once.get('tests/ess-hub-smoke.mjs');
+  if (/My WorkOS Hub[\s\S]*path:/.test(essContract) || !essContract.includes('productConfig\\.productName')) {
+    throw new Error('Retained ESS display contract remains literal-only or uses the wrong configuration key');
+  }
+  const sidebarContract = new RegExp(String.raw`name: \`My \$\{productConfig\.productName\} Hub\`[\s\S]*path: '\/ess'[\s\S]*navRoles: \['Employee'\]`);
+  if (!sidebarContract.test("name: `My ${productConfig.productName} Hub`, path: '/ess', navRoles: ['Employee']")) {
+    throw new Error('Configured Sidebar fixture did not satisfy the retained contract');
+  }
+  for (const tampered of [
+    "name: `My ${productConfig.productName} Hub`, navRoles: ['Employee']",
+    "name: `My ${productConfig.productName} Hub`, path: '/ess'",
+    "name: `My ${productConfig.organizationName} Hub`, path: '/ess', navRoles: ['Employee']",
+  ]) {
+    if (sidebarContract.test(tampered)) throw new Error(`Tampered Sidebar fixture satisfied retained contract: ${tampered}`);
+  }
+  const identifierFixture = "const route = '/ess'; const fixturePath = 'fixtures/My WorkOS Hub.json'; const moduleName = 'WorkOSKernel'; const role = 'Employee';";
+  const unrelated = new Map(sourceTests);
+  unrelated.set('tests/ess-hub-smoke.mjs', `${unrelated.get('tests/ess-hub-smoke.mjs')}\n${identifierFixture}`);
+  if (!adaptRetainedDisplayContracts(unrelated).get('tests/ess-hub-smoke.mjs').includes(identifierFixture)) {
+    throw new Error('Retained display-contract adaptation rewrote an identifier, route, module, or role');
+  }
+};
+assertRetainedDisplayContractTransform();
+
+const assertRetainedDependencyClosure = async () => {
+  const literalDependencyPattern = /(?:readFile|readFileSync)\s*\(\s*(['"])([^'"\r\n]+)\1/g;
+  const unresolved = [];
+  for (const testPath of selectedTestFiles) {
+    const testText = await readFile(path.join(targetRoot, testPath), 'utf8');
+    for (const match of testText.matchAll(literalDependencyPattern)) {
+      const dependency = match[2];
+      if (/^(?:node:|https?:|\/)/.test(dependency) || dependency.includes('${')) continue;
+      const resolvedDependency = path.resolve(targetRoot, dependency);
+      const relativeDependency = rel(targetRoot, resolvedDependency);
+      if (relativeDependency === '..' || relativeDependency.startsWith('../')) {
+        unresolved.push(`${testPath} -> ${dependency} (outside materialized root)`);
+      } else if (!(await exists(resolvedDependency))) {
+        unresolved.push(`${testPath} -> ${dependency}`);
+      }
+    }
+  }
+  if (unresolved.length) throw new Error(`Unresolved retained-test dependencies:\n${unresolved.join('\n')}`);
+};
+await assertRetainedDependencyClosure();
+
+const oldMigration = path.join(targetRoot, 'server/migrations/006_boundaryless_workos_prod_core.sql');
+const newMigration = path.join(targetRoot, 'server/migrations/006_workos_prod_core.sql');
+if (await exists(oldMigration)) await rename(oldMigration, newMigration);
+
+const replaceRequired = async (file, search, replacement, label) => {
+  const current = await readFile(file, 'utf8');
+  const next = current.replace(search, replacement);
+  if (next === current) throw new Error(`Required transform not applied (${label}) in ${rel(targetRoot, file)}`);
+  await writeFile(file, next);
+};
+
+const apiClient = path.join(targetRoot, 'src/services/apiClient.ts');
+await replaceRequired(
+  apiClient,
+  "const frontendEnv = ((import.meta as unknown as { env?: Record<string, string | undefined> }).env || {});\nconst appMode = frontendEnv.VITE_APP_MODE || frontendEnv.APP_MODE || 'demo';\nconst disableDemoFallback = frontendEnv.VITE_DISABLE_DEMO_FALLBACK || frontendEnv.DISABLE_DEMO_FALLBACK;\n\nexport const isDemoFallbackAllowed = () =>\n  appMode !== 'production' && String(disableDemoFallback || '').toLowerCase() !== 'true';",
+  "const frontendEnv = ((import.meta as unknown as { env?: Record<string, string | undefined> }).env || {});\nconst processEnv = ((globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env || {});\nconst appMode = frontendEnv.VITE_APP_MODE || frontendEnv.APP_MODE || processEnv.VITE_APP_MODE || processEnv.APP_MODE || 'production';\nconst allowTestFallback = frontendEnv.VITE_ALLOW_TEST_FALLBACK || frontendEnv.ALLOW_TEST_FALLBACK || processEnv.VITE_ALLOW_TEST_FALLBACK || processEnv.ALLOW_TEST_FALLBACK;\n\nexport const isDemoFallbackAllowed = () =>\n  appMode === 'test' && String(allowTestFallback || '').toLowerCase() === 'true';",
+  'fail-closed API fallback',
+);
+
+const authService = path.join(targetRoot, 'src/services/authService.ts');
+let authText = await readFile(authService, 'utf8');
+authText = authText
+  .replace("const DEMO_PASSWORD = 'demo123';\n", '')
+  .replace("const SESSION_KEY = 'rut_session';", "const SESSION_KEY = 'workos_session';")
+  .replace(/\n\s*getDemoPassword:\s*\(\)\s*=>\s*DEMO_PASSWORD,\n/, '\n');
+if (/demo123|getDemoPassword/.test(authText)) throw new Error('Shared demo password remains in authService');
+await writeFile(authService, authText);
+
+await mkdir(path.join(targetRoot, 'src/config'), { recursive: true });
+await writeFile(path.join(targetRoot, 'src/config/productConfig.ts'), `const frontendEnv = ((import.meta as unknown as { env?: Record<string, string | undefined> }).env || {});
+
+const valueOr = (key: string, fallback: string) => {
+  const value = String(frontendEnv[key] || '').trim();
+  return value || fallback;
+};
+
+export const productConfig = Object.freeze({
+  productName: valueOr('VITE_PRODUCT_NAME', 'WorkOS'),
+  organizationName: valueOr('VITE_ORGANIZATION_NAME', 'Your organization'),
+  logoUrl: valueOr('VITE_PRODUCT_LOGO_URL', '/workos-mark.svg'),
+  supportName: valueOr('VITE_SUPPORT_NAME', valueOr('VITE_PRODUCT_NAME', 'WorkOS') + ' Support'),
+  supportEmail: valueOr('VITE_SUPPORT_EMAIL', 'support@example.test'),
+  terminology: Object.freeze({
+    employee: valueOr('VITE_TERM_EMPLOYEE', 'resource'),
+    manager: valueOr('VITE_TERM_MANAGER', 'manager'),
+    teamLead: valueOr('VITE_TERM_TEAM_LEAD', 'team lead'),
+    businessUnit: valueOr('VITE_TERM_BUSINESS_UNIT', 'business unit'),
+    region: valueOr('VITE_TERM_REGION', 'region'),
+    regionalOwner: valueOr('VITE_TERM_REGIONAL_OWNER', 'regional owner'),
+    engagement: valueOr('VITE_TERM_ENGAGEMENT', 'engagement'),
+    project: valueOr('VITE_TERM_PROJECT', 'project'),
+    worklog: valueOr('VITE_TERM_WORKLOG', 'worklog'),
+  }),
+});
+`);
+
+const centralizeRuntimeBranding = (source, targetPath) => {
+  if (!/^src\/.*\.(?:ts|tsx)$/.test(targetPath) || targetPath === 'src/config/productConfig.ts') return source;
+  const substitutions = [
+    ['My WorkOS Hub', 'My ${productConfig.productName} Hub'],
+    ['Boundaryless-WorkOS', '${productConfig.productName}'],
+    ['Boundaryless WorkOS', '${productConfig.productName}'],
+    ['Configured product', '${productConfig.productName}'],
+    ['Boundaryless', '${productConfig.organizationName}'],
+    ['Your organization', '${productConfig.organizationName}'],
+    ['Country Director', '${productConfig.terminology.regionalOwner}'],
+    ['regional ownership', '${productConfig.terminology.regionalOwner}'],
+  ];
+  let next = source;
+  let changed = false;
+  const containsConfiguredLabel = /My WorkOS Hub|Boundaryless-WorkOS|Boundaryless WorkOS|Configured product|Boundaryless|Your organization|Country Director|regional ownership/;
+  const configureLabel = (value) => {
+    let replacement = value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${');
+    for (const [label, expression] of substitutions) replacement = replacement.replaceAll(label, expression);
+    return replacement;
+  };
+  const configureTemplateLabel = (value) => {
+    let replacement = value;
+    for (const [label, expression] of substitutions) replacement = replacement.replaceAll(label, expression);
+    return replacement;
+  };
+  next = next.replace(/(['"])([^'"\r\n]*(?:My WorkOS Hub|Boundaryless-WorkOS|Boundaryless WorkOS|Configured product|Boundaryless|Your organization|Country Director|regional ownership)[^'"\r\n]*)\1/g, (match, _quote, value, offset) => {
+    const before = next.slice(0, offset);
+    const openTag = before.lastIndexOf('<') > before.lastIndexOf('>');
+    const isJsxAttribute = openTag && /(?:^|\s)[A-Za-z_$][\w$:.\-]*\s*=\s*$/.test(before.slice(before.lastIndexOf('<') + 1));
+    changed = true;
+    const replacement = `\`${configureLabel(value)}\``;
+    return isJsxAttribute ? `{${replacement}}` : replacement;
+  });
+  next = next.replace(/`((?:\\.|[^`\\])*)`/gs, (match, value) => {
+    if (!containsConfiguredLabel.test(value)) return match;
+    changed = true;
+    return `\`${configureTemplateLabel(value)}\``;
+  });
+  // Quoted-string handling does not see JSX text nodes. Transform only plain text nodes;
+  // nodes containing JSX expressions are left to their existing expression semantics.
+  next = next.replace(/>([^<>{}]*)</g, (match, value) => {
+    if (!containsConfiguredLabel.test(value)) return match;
+    changed = true;
+    return `>{\`${configureLabel(value)}\`}<`;
+  });
+  if (!changed || /(?:^|\n)import\s+\{\s*productConfig\s*\}/.test(next)) return next;
+  const depth = targetPath.slice('src/'.length).split('/').length - 1;
+  const configPath = `${'../'.repeat(depth)}config/productConfig`;
+  const imports = [...next.matchAll(/^import\b[\s\S]*?;\s*$/gm)];
+  if (!imports.length) throw new Error(`Cannot insert productConfig import in ${targetPath}`);
+  const lastImport = imports.at(-1);
+  const insertAt = lastImport.index + lastImport[0].length;
+  return `${next.slice(0, insertAt)}\nimport { productConfig } from '${configPath}';${next.slice(insertAt)}`;
+};
+
+const assertRuntimeBrandingTransform = () => {
+  const cases = [
+    {
+      name: 'JSX text and attribute',
+      input: "import React from 'react';\nexport const View = () => <Card title=\"Boundaryless WorkOS\">Welcome to Boundaryless</Card>;\n",
+      expected: "import React from 'react';\nimport { productConfig } from '../config/productConfig';\nexport const View = () => <Card title={`\${productConfig.productName}`}>{`Welcome to \${productConfig.organizationName}`}</Card>;\n",
+    },
+    {
+      name: 'template expression and multiline import',
+      input: "import {\n  value,\n} from './values';\nconst message = `Configured product: ${value}`;\nconst label = 'Configured product';\n",
+      expected: "import {\n  value,\n} from './values';\nimport { productConfig } from '../config/productConfig';\nconst message = `\${productConfig.productName}: ${value}`;\nconst label = `\${productConfig.productName}`;\n",
+    },
+  ];
+  for (const fixture of cases) {
+    const actual = centralizeRuntimeBranding(fixture.input, 'src/pages/Fixture.tsx');
+    if (actual !== fixture.expected) {
+      throw new Error(`Runtime branding transform regression (${fixture.name}):\n${actual}`);
+    }
+  }
+};
+assertRuntimeBrandingTransform();
+
+const loginPage = path.join(targetRoot, 'src/pages/Login.tsx');
+let loginText = await readFile(loginPage, 'utf8');
+loginText = loginText
+  .replace("import { isDemoFallbackAllowed } from '../services/apiClient';", "import { isDemoFallbackAllowed } from '../services/apiClient';\nimport { productConfig } from '../config/productConfig';")
+  .replace("setPassword(authService.getDemoPassword());", "setPassword('');")
+  .replace(/<img\s+src="\/boundaryless-logo\.png"[^>]*\/>/g, '<img src={productConfig.logoUrl} alt={productConfig.productName} className="h-10 w-auto object-contain" />')
+  .replace('Authorized Internal Access', 'Authorized {productConfig.productName} Access')
+  .replace('Boundaryless-WorkOS Workforce Operations Core', '{productConfig.productName} Professional Services Operations')
+  .replace('Internal workforce planning workspace', 'Professional-services operations workspace')
+  .replace('Internal workspace access', '{productConfig.productName} workspace access')
+  .replace('Shared UAT credentials are available only for testing and must be replaced by named production accounts before go-live.', 'Test identities are available only in explicit test mode; production requires named accounts and governed identity configuration.');
+await writeFile(loginPage, loginText);
+
+const sidebarFile = path.join(targetRoot, 'src/components/Layout/Sidebar.tsx');
+let sidebarText = await readFile(sidebarFile, 'utf8');
+sidebarText = sidebarText
+  .replace("import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from '../../config/featureFlags';", "import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from '../../config/featureFlags';\nimport { productConfig } from '../../config/productConfig';")
+  .replace("{ name: 'My WorkOS Hub', path: '/ess', icon: LayoutDashboard, roles: ROUTE_ROLES.employeeWorkspace, navRoles: ['Employee'] },", "{ name: `My ${productConfig.productName} Hub`, path: '/ess', icon: LayoutDashboard, roles: ROUTE_ROLES.employeeWorkspace, navRoles: ['Employee'] },")
+  .replace('<img src="/boundaryless-mark.png" alt="Boundaryless" className="w-7 h-7 object-contain" />', '<img src={productConfig.logoUrl} alt={productConfig.productName} className="w-7 h-7 object-contain" />')
+  .replace('<img src="/boundaryless-logo.png" alt="Boundaryless" className="h-full w-full object-contain" />', '<img src={productConfig.logoUrl} alt={productConfig.productName} className="h-full w-full object-contain" />');
+await writeFile(sidebarFile, sidebarText);
+
+const indexFile = path.join(targetRoot, 'index.html');
+let indexText = await readFile(indexFile, 'utf8');
+indexText = indexText
+  .replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="%VITE_PRODUCT_LOGO_URL%" />')
+  .replace(/\n\s*<link rel="alternate icon"[^>]*>/, '')
+  .replace(/\n\s*<link[^>]+(?:fonts\.googleapis\.com|fonts\.gstatic\.com)[^>]*>/g, '')
+  .replace(/<title>[^<]*<\/title>/, '<title>%VITE_PRODUCT_NAME%</title>');
+await writeFile(indexFile, indexText);
+
+const cssFile = path.join(targetRoot, 'src/index.css');
+if (await exists(cssFile)) {
+  const cssText = await readFile(cssFile, 'utf8');
+  const neutralizeExternalFontImports = (input) => {
+    const lines = input.match(/.*(?:\r\n|\n|\r|$)/g)?.filter(Boolean) ?? [];
+    return lines.map((line) => {
+      if (!/fonts\.(?:googleapis|gstatic)\.com/i.test(line)) return line;
+      // A first-semicolon regex is unsafe because font query values contain
+      // semicolon-separated weights. Remove only a complete single-line import,
+      // never adjacent CSS; malformed or multiline imports fail closed below.
+      const completeImport = /^\s*@import\s+(?:(?:url\(\s*(['"])https:\/\/fonts\.(?:googleapis|gstatic)\.com[^\r\n]*?\1\s*\))|(?:(['"])https:\/\/fonts\.(?:googleapis|gstatic)\.com[^\r\n]*?\2))\s*;\s*(?:\r\n|\n|\r)?$/i;
+      if (!completeImport.test(line)) return line;
+      return '';
+    }).join('');
+  };
+  const assertExternalFontNeutralization = () => {
+    const fixtures = [
+      "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');\n@import \"tailwindcss\";\n",
+      "@import \"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap\";\n@import \"tailwindcss\";\n",
+    ];
+    for (const fixture of fixtures) {
+      const once = neutralizeExternalFontImports(fixture);
+      const twice = neutralizeExternalFontImports(once);
+      if (once !== '@import "tailwindcss";\n' || twice !== once || /(?:500|600|700|fonts\.(?:googleapis|gstatic)\.com)/i.test(once)) {
+        throw new Error(`External font neutralization regression:\n${once}`);
+      }
+    }
+    const malformed = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500'\n@import \"tailwindcss\";\n";
+    if (!/fonts\.googleapis\.com/i.test(neutralizeExternalFontImports(malformed))) {
+      throw new Error('Malformed external font import did not fail closed');
+    }
+  };
+  assertExternalFontNeutralization();
+  const localizedCssText = neutralizeExternalFontImports(cssText);
+  await writeFile(cssFile, localizedCssText);
+  if (/fonts\.(?:googleapis|gstatic)\.com/i.test(localizedCssText)) {
+    throw new Error('Remote Google Fonts dependency remains in src/index.css');
+  }
+}
+
+const seedDemo = path.join(targetRoot, 'server/seed-demo.mjs');
+let seedText = await readFile(seedDemo, 'utf8');
+seedText = seedText
+  .replace(
+    "const reset = process.argv.includes('--reset') || process.env.RESET_DEMO_DATA === 'true';\nconst password = process.env.DEMO_SEED_PASSWORD || 'demo123';",
+    "const reset = process.argv.includes('--reset') || process.env.RESET_DEMO_DATA === 'true';\nif (process.env.NODE_ENV === 'production' || process.env.APP_MODE === 'production') {\n  throw new Error('Demo seeding is prohibited in production.');\n}\nconst password = String(process.env.DEMO_SEED_PASSWORD || '');\nif (!password) throw new Error('DEMO_SEED_PASSWORD is required for explicit non-production demo seeding.');",
+  )
+  .replace(/\n\s*demoPassword:\s*password,/, '');
+if (/demo123|demoPassword:\s*password/.test(seedText)) throw new Error('Unsafe demo password remains in seed-demo');
+await writeFile(seedDemo, seedText);
+
+await writeFile(path.join(targetRoot, 'server/start-production.mjs'), `import 'dotenv/config';
+
+process.env.NODE_ENV = 'production';
+process.env.APP_MODE = 'production';
+
+if (String(process.env.AUTO_SEED_DEMO || '').toLowerCase() === 'true') {
+  throw new Error('AUTO_SEED_DEMO is prohibited in production.');
+}
+if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required in production.');
+if (!process.env.API_SESSION_SECRET || process.env.API_SESSION_SECRET === 'dev-only-change-me') {
+  throw new Error('A non-default API_SESSION_SECRET is required in production.');
+}
+const identityProvider = String(process.env.IDENTITY_PROVIDER || '').trim().toLowerCase();
+if (!['entra', 'oidc'].includes(identityProvider)) {
+  throw new Error('IDENTITY_PROVIDER must select a governed non-local provider (entra or oidc) in production.');
+}
+const requiredIdentitySettings = identityProvider === 'entra'
+  ? ['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET', 'ENTRA_REDIRECT_URI']
+  : ['OIDC_ISSUER_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'OIDC_REDIRECT_URI'];
+for (const setting of requiredIdentitySettings) {
+  if (!String(process.env[setting] || '').trim()) throw new Error(setting + ' is required in production.');
+}
+process.env.LOCAL_LOGIN_ENABLED = 'false';
+
+await import('./migrate.mjs');
+await import('./index.mjs');
+`);
+
+const serverIndex = path.join(targetRoot, 'server/index.mjs');
+let serverText = await readFile(serverIndex, 'utf8');
+const localLoginRoute = /app\.post\((['"])\/api\/auth\/login\1,\s*(?:(?:[A-Za-z_$][\w$]*),\s*)*async\s*\(req,\s*res\)\s*=>\s*\{/;
+const localLoginMatches = serverText.match(new RegExp(localLoginRoute.source, 'g')) || [];
+if (localLoginMatches.length !== 1) throw new Error(`Expected one local-login route, found ${localLoginMatches.length}`);
+serverText = serverText
+  .replace(localLoginRoute, match => `${match}\n  if (process.env.NODE_ENV === 'production' || process.env.LOCAL_LOGIN_ENABLED === 'false') return res.status(404).json({ error: 'Not found' });`)
+  .replace("readCookie(req, 'rut_session')", "readCookie(req, 'workos_session')")
+  .replaceAll("'rut_session'", "'workos_session'")
+  .replace(
+    "const passwordHash = existingUser && !parsed.data.initial_password\n      ? null\n      : await scryptHash(parsed.data.initial_password || process.env.DEMO_SEED_PASSWORD || 'demo123');",
+    "if (!existingUser && !parsed.data.initial_password) {\n      throw new Error('initial_password is required when creating a new user.');\n    }\n    const passwordHash = existingUser && !parsed.data.initial_password\n      ? null\n      : await scryptHash(parsed.data.initial_password);",
+  )
+  .replace(
+    "const passwordHash = existingUser ? null : await scryptHash(row.initialPassword || process.env.DEMO_SEED_PASSWORD || 'demo123');",
+    "if (!existingUser && !row.initialPassword) {\n        throw new Error(`initialPassword is required for new user ${row.employeeId}`);\n      }\n      const passwordHash = existingUser ? null : await scryptHash(row.initialPassword);",
+  );
+if (/demo123|rut_session/.test(serverText)) throw new Error('Unsafe password/session fallback remains in server/index.mjs');
+await writeFile(serverIndex, serverText);
+
+const packageFile = path.join(targetRoot, 'package.json');
+const pkg = JSON.parse(await readFile(packageFile, 'utf8'));
+const configuredLintScript = pkg.scripts?.lint;
+pkg.name = 'workos';
+pkg.description = 'Buyer-owned professional-services operations platform';
+pkg.scripts.typecheck = 'tsc --noEmit';
+pkg.scripts['test:wos00-baseline'] = 'node scripts/verify-baseline.mjs';
+pkg.scripts['test:bootstrap-scan'] = 'node scripts/scan-bootstrap.mjs';
+const safeTestScripts = [
+  'test:requirements', 'test:access', 'test:ess', 'test:leave', 'test:backend', 'test:approvals',
+  'test:notifications', 'test:integrations', 'test:planning', 'test:phase7-scope', 'test:org-chart',
+  'test:permissions', 'test:import-templates',
+].filter(name => pkg.scripts[name]);
+pkg.scripts.test = safeTestScripts.map(name => `npm run ${name}`).join(' && ');
+await writeFile(packageFile, `${JSON.stringify(pkg, null, 2)}\n`);
+
+const lockFile = path.join(targetRoot, 'package-lock.json');
+const lock = JSON.parse(await readFile(lockFile, 'utf8'));
+lock.name = 'workos';
+if (lock.packages?.['']) lock.packages[''].name = 'workos';
+await writeFile(lockFile, `${JSON.stringify(lock, null, 2)}\n`);
+
+await writeFile(path.join(targetRoot, '.env.example'), `# WorkOS local/test example only. Never place real credentials in source.
+APP_MODE=development
+NODE_ENV=development
+PORT=4000
+APP_URL=http://localhost:3000
+DATABASE_URL=
+PGSSLMODE=disable
+API_SESSION_SECRET=
+LOGIN_RATE_LIMIT=8
+AUTO_SEED_DEMO=false
+RESET_DEMO_DATA=false
+DEMO_SEED_PASSWORD=
+VITE_APP_MODE=development
+VITE_ALLOW_TEST_FALLBACK=false
+VITE_PRODUCT_NAME=WorkOS
+VITE_ORGANIZATION_NAME=Your organization
+VITE_PRODUCT_LOGO_URL=/workos-mark.svg
+VITE_SUPPORT_NAME=WorkOS Support
+VITE_SUPPORT_EMAIL=support@example.test
+VITE_TERM_EMPLOYEE=resource
+VITE_TERM_MANAGER=manager
+VITE_TERM_TEAM_LEAD=team lead
+VITE_TERM_BUSINESS_UNIT=business unit
+VITE_TERM_REGION=region
+VITE_TERM_REGIONAL_OWNER=regional owner
+VITE_TERM_ENGAGEMENT=engagement
+VITE_TERM_PROJECT=project
+VITE_TERM_WORKLOG=worklog
+IDENTITY_PROVIDER=
+ENTRA_ENABLED=false
+ENTRA_TENANT_ID=
+ENTRA_CLIENT_ID=
+ENTRA_CLIENT_SECRET=
+ENTRA_REDIRECT_URI=http://localhost:4000/api/auth/entra/callback
+OIDC_ISSUER_URL=
+OIDC_CLIENT_ID=
+OIDC_CLIENT_SECRET=
+OIDC_REDIRECT_URI=http://localhost:4000/api/auth/oidc/callback
+TEAMS_ENABLED=false
+TEAMS_WEBHOOK_URL=
+`);
+
+await writeFile(path.join(targetRoot, 'metadata.json'), `${JSON.stringify({ name: 'WorkOS', description: 'Buyer-owned professional-services operations platform' }, null, 2)}\n`);
+await mkdir(path.join(targetRoot, 'public'), { recursive: true });
+await writeFile(path.join(targetRoot, 'public/workos-mark.svg'), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="WorkOS"><rect width="128" height="128" rx="28" fill="#0f172a"/><path d="M25 38h16l10 45 13-34h14l12 34 9-45h16L99 96H84L71 64 58 96H43z" fill="#f97316"/></svg>\n`);
+await writeFile(path.join(targetRoot, 'public/login-workspace-bg.svg'), `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0f172a"/><stop offset="1" stop-color="#e2e8f0"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><g fill="none" stroke="#f97316" stroke-opacity=".18"><circle cx="180" cy="160" r="120"/><circle cx="980" cy="620" r="220"/><path d="M0 520C260 360 430 690 700 490s360-230 500-170"/></g></svg>\n`);
+
+const brandingTargets = new Set(
+  [...selected].map(sourceToTargetPath),
+);
+brandingTargets.add('public/workos-mark.svg');
+brandingTargets.add('public/login-workspace-bg.svg');
+brandingTargets.add('src/config/productConfig.ts');
+for (const targetPath of [...brandingTargets].sort()) {
+  const file = path.join(targetRoot, targetPath);
+  if (!(await exists(file))) continue;
+  const extension = path.extname(file);
+  if (!TEXT_EXTENSIONS.has(extension) && !file.endsWith('.env.example')) continue;
+  let text;
+  try { text = await readFile(file, 'utf8'); } catch { continue; }
+  const original = text;
+  text = text
+    .replaceAll('Boundaryless-WorkOS', 'Configured product')
+    .replaceAll('Boundaryless WorkOS', 'Configured product')
+    .replaceAll('BOUNDARYLESS_WORKOS', 'CONFIGURED_PRODUCT')
+    .replaceAll('boundaryless-workos', 'configured-product')
+    .replaceAll('boundaryless_workos', 'configured_product')
+    .replaceAll('Boundaryless', 'Your organization')
+    .replaceAll('boundaryless.com', 'example.test')
+    .replaceAll('boundaryless', 'your-organization')
+    .replaceAll('/workos-logo.png', '/workos-mark.svg')
+    .replaceAll('/workos-logo-mini.png', '/workos-mark.svg')
+    .replaceAll('/workos-wordmark.png', '/workos-mark.svg')
+    .replaceAll('RUT-${', 'WOS-${')
+    .replaceAll("'rut_", "'workos_")
+    .replaceAll("'rt_", "'workos_")
+    .replaceAll("'bw_", "'workos_");
+  text = centralizeRuntimeBranding(text, targetPath);
+  if (/src\/services\/(storage|demoData)\.ts$/.test(targetPath)) {
+    text = text.replaceAll('BL-', 'WOS-');
+  }
+  if (text !== original) await writeFile(file, text);
+}
+
+await mkdir(path.join(targetRoot, 'scripts'), { recursive: true });
+await cp(path.join(controllerRoot, '.github/scripts/wos01a/verify-baseline.mjs'), path.join(targetRoot, 'scripts/verify-baseline.mjs'));
+await cp(path.join(controllerRoot, '.github/scripts/wos01a/scan-bootstrap.mjs'), path.join(targetRoot, 'scripts/scan-bootstrap.mjs'));
+
+const runResults = [];
+const runCheck = (name, command, args, options = {}) => {
+  const result = spawnSync(command, args, {
+    cwd: targetRoot,
+    encoding: 'utf8',
+    timeout: options.timeout ?? 15 * 60 * 1000,
+    env: { ...process.env, ...(options.env || {}) },
+  });
+  const output = `${result.stdout || ''}${result.stderr || ''}`.trim().slice(-12000);
+  const status = result.status === 0 ? 'PASS' : options.optional ? 'NOT RUN' : 'FAIL';
+  runResults.push({ name, status, output });
+  if (status === 'FAIL') throw new Error(`${name} failed:\n${output}`);
+};
+
+runCheck('Node syntax', 'bash', ['-lc', "find server scripts tests -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check"]);
+runCheck('WOS-00 baseline verifier', 'node', ['scripts/verify-baseline.mjs']);
+runCheck('Bootstrap scanner adversarial fixtures', 'node', ['scripts/scan-bootstrap.mjs', '--self-test']);
+runCheck('Bootstrap security scan', 'node', ['scripts/scan-bootstrap.mjs']);
+runCheck('Locked dependency installation', 'npm', ['ci', '--ignore-scripts'], { timeout: 20 * 60 * 1000 });
+runCheck('Type check', 'npm', ['run', 'typecheck']);
+if (configuredLintScript) {
+  runCheck('Lint', 'npm', ['run', 'lint']);
+} else {
+  runResults.push({ name: 'Lint', status: 'NOT RUN', output: 'The authorized source package does not configure a lint script.' });
+}
+runCheck('Production build', 'npm', ['run', 'build']);
+runCheck('Retained safe test suite', 'npm', ['test'], {
+  timeout: 20 * 60 * 1000,
+  env: {
+    NODE_ENV: 'test',
+    APP_MODE: 'test',
+    VITE_APP_MODE: 'test',
+    ALLOW_TEST_FALLBACK: 'true',
+    VITE_ALLOW_TEST_FALLBACK: 'true',
+  },
+});
+runResults.push({ name: 'Fresh/upgrade database migrations', status: 'NOT RUN', output: 'No disposable PostgreSQL service is provisioned by the source-bootstrap publisher.' });
+runResults.push({ name: 'Production startup and browser journeys', status: 'NOT RUN', output: 'Requires a disposable database and separate hosted/browser acceptance task.' });
+
+const inventoryRows = [];
+for (const sourceFile of sourceFiles) {
+  const sourcePath = rel(sourceRoot, sourceFile);
+  const bytes = await readFile(sourceFile);
+  const isIncluded = selected.has(sourcePath);
+  const targetPath = sourceToTargetPath(sourcePath);
+  const targetFile = path.join(targetRoot, targetPath);
+  const targetBytes = isIncluded && await exists(targetFile) ? await readFile(targetFile) : null;
+  let reason = retainedDependencyMappings.has(sourcePath)
+    ? 'Bounded retained-test document dependency'
+    : 'Approved application/build/test/schema source';
+  if (!isIncluded) {
+    if (/^(?:artifacts|docs|screenshots|presentations|generated|node_modules|dist)\//i.test(sourcePath)) reason = 'Generated, transient or company-only collateral';
+    else if (/seed-uat|microsoft-live|real-data-cutover|role-browser-uat|browser-ux|credential-handover|backend-uat|prod-readiness|prod-core|production-hardening|audit-governance|operations-readiness/i.test(sourcePath)) reason = 'Live-environment, company-evidence or UAT-only test/artifact';
+    else reason = 'Outside the bounded application-source allowlist';
+  }
+  inventoryRows.push({
+    sourcePath,
+    targetPath: isIncluded ? targetPath : '',
+    decision: isIncluded ? 'INCLUDE' : 'EXCLUDE',
+    reason,
+    sourceSha256: sha256(bytes),
+    resultSha256: targetBytes ? sha256(targetBytes) : '',
+    changed: targetBytes ? sha256(bytes) !== sha256(targetBytes) : false,
+  });
+}
+
+const includedCount = inventoryRows.filter(row => row.decision === 'INCLUDE').length;
+const excludedCount = inventoryRows.length - includedCount;
+const inventoryDigest = sha256(Buffer.from(JSON.stringify(inventoryRows)));
+const table = inventoryRows.map(row => `| ${row.decision} | \`${row.sourcePath}\` | ${row.targetPath ? `\`${row.targetPath}\`` : '—'} | ${row.reason} | \`${row.sourceSha256}\` | ${row.resultSha256 ? `\`${row.resultSha256}\`` : '—'} |`).join('\n');
+const manifest = `# WorkOS Source Import Manifest\n\n- Authorized source: \`${SOURCE_REPOSITORY}@${EXPECTED_SOURCE}\`\n- Authorized source tree: \`${EXPECTED_SOURCE_TREE}\`\n- WorkOS parent: \`${EXPECTED_TARGET_PARENT}\`\n- Inventory: ${inventoryRows.length} entries — ${includedCount} included / ${excludedCount} excluded\n- Inventory SHA-256: \`${inventoryDigest}\`\n- Import mode: approved bytes only; no source Git history\n- Reference access: read-only; source checkout remained clean\n\n| Decision | Source | Target | Reason | Source SHA-256 | Result SHA-256 |\n|---|---|---|---|---|---|\n${table}\n`;
+await mkdir(path.join(targetRoot, 'docs/00-control'), { recursive: true });
+await writeFile(path.join(targetRoot, 'docs/00-control/SOURCE_IMPORT_MANIFEST.md'), manifest);
+
+const checksTable = runResults.map(item => `| ${item.name} | ${item.status} | ${item.output ? item.output.replaceAll('|', '\\|').replaceAll('\n', '<br>') : '—'} |`).join('\n');
+const materializedResultDigest = await resultDigest(targetRoot);
+const renderEvidence = (changedPaths) => `# DOC-WOS-01-001 — Authorized Source Bootstrap\n\n## Authority\n\n- Workstream: WOS-01A\n- Draft PR: #16\n- Accepted base: \`${EXPECTED_TARGET_PARENT}\`\n- Authorized reference: \`${SOURCE_REPOSITORY}@${EXPECTED_SOURCE}\`\n- Source tree: \`${EXPECTED_SOURCE_TREE}\`\n- Reference mode: read-only; no Git-history import\n- Changed paths before commit: ${changedPaths}\n- Result payload SHA-256: \`${materializedResultDigest}\`\n- Result digest scope: deterministic path/content hashes for the fully materialized worktree, excluding only this self-referential evidence file and Git metadata\n\n## Outcome\n\nImported the bounded application, build, dependency, PostgreSQL schema/migrations, synthetic import templates and retained safe tests. Company collateral, live-environment evidence, credentials, production values and source history remain excluded. Runtime identity was neutralized to centrally configured WorkOS defaults; production fallback and automatic demo seeding fail closed; new users require explicit passwords.\n\n## Check matrix\n\n| Check | Result | Evidence |\n|---|---|---|\n${checksTable}\n\n## Frozen A–I closure\n\n- **A — Application path:** production build and retained safe tests pass from the imported toolchain.\n- **B — Authorization/security:** no reference-repository write, shared credential, private key, production URL or automatic production demo fallback is accepted.\n- **C — Concurrency:** imported database constraints, transactions and existing concurrency semantics are retained unchanged except bounded security neutralization.\n- **D — Replay/idempotency:** inherited idempotency contracts remain present; no bootstrap operation silently retries a partial import.\n- **E — Lifecycle:** WOS-00 governing approval, commercial and notification documents remain untouched and authoritative.\n- **F — Partial failure:** this publisher exits before commit/push on any mandatory install/build/test/scan failure.\n- **G — Bounds:** generated caches, artifacts, collateral and live-data fixtures are excluded.\n- **H — Fallback:** local fallback is allowed only when app mode is exactly test and explicit fallback opt-in is true; production configuration fails closed.\n- **I — Evidence:** 126 requirements, 81 NFRs, ADR-001..008, source hashes and the exact changed scope are reproducible.\n\n## Limitations\n\nDatabase migration execution, production startup and browser journeys require a later disposable-environment acceptance gate and are explicitly NOT RUN here. WOS-01A remains Draft until an independent exact-head review and clean-runtime merge boundary are satisfied.\n\n## Rollback\n\nBefore merge, reset the Draft branch to \`${EXPECTED_TARGET_PARENT}\`. After merge, use a reviewed revert/forward correction; never rewrite source provenance or accepted history.\n`;
+await mkdir(path.join(targetRoot, 'docs/evidence/v0.2.0'), { recursive: true });
+const evidenceFile = path.join(targetRoot, RESULT_DIGEST_EVIDENCE);
+await writeFile(evidenceFile, renderEvidence(0));
+const changedPaths = changedFilePaths(targetRoot).length;
+await writeFile(evidenceFile, renderEvidence(changedPaths));
+
+runCheck('Final WOS-00 baseline verifier', 'node', ['scripts/verify-baseline.mjs']);
+runCheck('Final bootstrap security scan', 'node', ['scripts/scan-bootstrap.mjs']);
+runCheck('Git diff check', 'git', ['diff', '--check']);
+
+const finalChanged = changedFilePaths(targetRoot);
+if (finalChanged.length < 80) throw new Error(`Unexpectedly small source bootstrap: ${finalChanged.length} changed paths`);
+if (finalChanged.length !== changedPaths) {
+  throw new Error(`Changed-path evidence mismatch: evidence=${changedPaths} final=${finalChanged.length}`);
+}
+console.log(JSON.stringify({
+  sourceHead,
+  sourceTree,
+  targetHead,
+  inventoryEntries: inventoryRows.length,
+  includedCount,
+  excludedCount,
+  changedPaths: finalChanged.length,
+  checks: runResults.map(({ name, status }) => ({ name, status })),
+}, null, 2));
