@@ -12,6 +12,8 @@ const outputRoot = path.resolve(outputArg);
 const baseUrl = 'http://127.0.0.1:3000';
 const cdpBase = 'http://127.0.0.1:9222';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const HTTP_ATTEMPT_TIMEOUT_MS = 1500;
+const CDP_COMMAND_TIMEOUT_MS = 4000;
 
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(outputRoot, { recursive: true });
@@ -103,7 +105,7 @@ const waitForHttp = async (url, timeoutMs) => {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: AbortSignal.timeout(HTTP_ATTEMPT_TIMEOUT_MS) });
       if (response.ok) return response;
       lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
@@ -185,19 +187,38 @@ const connectCdp = async websocketUrl => {
 
   let nextId = 1;
   const pending = new Map();
+  const rejectPending = error => {
+    for (const [id, entry] of pending) {
+      clearTimeout(entry.timer);
+      pending.delete(id);
+      entry.reject(error);
+    }
+  };
+
   socket.addEventListener('message', event => {
     const message = JSON.parse(String(event.data));
     if (!message.id) return;
     const entry = pending.get(message.id);
     if (!entry) return;
     pending.delete(message.id);
+    clearTimeout(entry.timer);
     if (message.error) entry.reject(new Error(JSON.stringify(message.error)));
     else entry.resolve(message.result);
   });
+  socket.addEventListener('close', () => rejectPending(new Error('CDP WebSocket closed with pending commands')));
+  socket.addEventListener('error', () => rejectPending(new Error('CDP WebSocket failed with pending commands')));
 
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
+  const send = (method, params = {}, timeoutMs = CDP_COMMAND_TIMEOUT_MS) => new Promise((resolve, reject) => {
+    if (socket.readyState !== WebSocket.OPEN) {
+      reject(new Error(`CDP WebSocket is not open for ${method}`));
+      return;
+    }
     const id = nextId++;
-    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`CDP command timeout after ${timeoutMs}ms: ${method}`));
+    }, timeoutMs);
+    pending.set(id, { resolve, reject, timer });
     socket.send(JSON.stringify({ id, method, params }));
   });
 
@@ -205,14 +226,17 @@ const connectCdp = async websocketUrl => {
 };
 
 const createPage = async url => {
-  const response = await fetch(`${cdpBase}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
+  const response = await fetch(`${cdpBase}/json/new?${encodeURIComponent(url)}`, {
+    method: 'PUT',
+    signal: AbortSignal.timeout(CDP_COMMAND_TIMEOUT_MS),
+  });
   if (!response.ok) throw new Error(`Unable to create CDP page: HTTP ${response.status}`);
   return response.json();
 };
 
 const closePage = async id => {
   try {
-    await fetch(`${cdpBase}/json/close/${id}`);
+    await fetch(`${cdpBase}/json/close/${id}`, { signal: AbortSignal.timeout(CDP_COMMAND_TIMEOUT_MS) });
   } catch {}
 };
 
