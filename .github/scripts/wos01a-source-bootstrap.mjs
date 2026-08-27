@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   access,
   cp,
+  mkdtemp,
   mkdir,
   readFile,
   readdir,
@@ -10,15 +11,16 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const [sourceArg, targetArg, controllerArg] = process.argv.slice(2);
-if (sourceArg !== '--verify-result-digest' && (!sourceArg || !targetArg || !controllerArg)) {
+if (!['--verify-result-digest', '--self-test-changed-paths'].includes(sourceArg) && (!sourceArg || !targetArg || !controllerArg)) {
   throw new Error('Usage: node wos01a-source-bootstrap.mjs <reference-root> <workos-root> <controller-root>');
 }
 
 const sourceRoot = path.resolve(sourceArg);
-const targetRoot = path.resolve(targetArg);
+const targetRoot = path.resolve(targetArg || '.');
 const controllerRoot = path.resolve(controllerArg || '.');
 const EXPECTED_SOURCE = 'f2de1d85126f5d64f0e2e21b085b0303ca1d8417';
 const EXPECTED_SOURCE_TREE = 'fdaa5d92854d378dae1c6146a8f09c7f34f8c273';
@@ -32,6 +34,62 @@ const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const rel = (root, file) => path.relative(root, file).split(path.sep).join('/');
 const exists = async (file) => access(file).then(() => true).catch(() => false);
 const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+
+const changedFilePaths = (root) => {
+  const output = execFileSync('git', [
+    'status', '--porcelain=v1', '-z', '--untracked-files=all',
+  ], { cwd: root, encoding: 'utf8' });
+  const records = output.split('\0');
+  const paths = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    if (record.length < 4 || record[2] !== ' ') {
+      throw new Error(`Unexpected Git status record: ${JSON.stringify(record)}`);
+    }
+    paths.push(record.slice(3));
+    if (/[RC]/.test(record.slice(0, 2))) index += 1; // Skip the rename/copy source record.
+  }
+  return paths.sort();
+};
+
+const assertChangedFilePathEnumeration = async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), 'wos01a-changed-paths-'));
+  try {
+    git(fixture, ['init', '--quiet']);
+    await writeFile(path.join(fixture, '.gitignore'), 'ignored/\ntransient.tmp\n');
+    await writeFile(path.join(fixture, 'modified.txt'), 'before\n');
+    await writeFile(path.join(fixture, 'deleted.txt'), 'before\n');
+    git(fixture, ['add', '.gitignore', 'modified.txt', 'deleted.txt']);
+    git(fixture, ['-c', 'user.name=WorkOS Test', '-c', 'user.email=test@example.test', 'commit', '--quiet', '-m', 'fixture']);
+    await writeFile(path.join(fixture, 'modified.txt'), 'after\n');
+    await rm(path.join(fixture, 'deleted.txt'));
+    await mkdir(path.join(fixture, 'untracked'), { recursive: true });
+    await mkdir(path.join(fixture, 'ignored'), { recursive: true });
+    for (let index = 0; index < 100; index += 1) {
+      await writeFile(path.join(fixture, 'untracked', `file-${String(index).padStart(3, '0')}.txt`), `${index}\n`);
+      await writeFile(path.join(fixture, 'ignored', `file-${index}.tmp`), 'ignored\n');
+    }
+    await writeFile(path.join(fixture, 'transient.tmp'), 'ignored\n');
+    const expected = ['deleted.txt', 'modified.txt', ...Array.from({ length: 100 }, (_, index) => `untracked/file-${String(index).padStart(3, '0')}.txt`)].sort();
+    const once = changedFilePaths(fixture);
+    const twice = changedFilePaths(fixture);
+    if (JSON.stringify(once) !== JSON.stringify(expected)) {
+      throw new Error(`Exact changed-file enumeration mismatch: expected ${expected.length}, found ${once.length}`);
+    }
+    if (JSON.stringify(twice) !== JSON.stringify(once)) {
+      throw new Error('Exact changed-file enumeration changed on replay');
+    }
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+};
+
+if (sourceArg === '--self-test-changed-paths') {
+  await assertChangedFilePathEnumeration();
+  console.log(JSON.stringify({ status: 'passed', check: 'exact-changed-file-enumeration' }));
+  process.exit(0);
+}
 
 const walk = async (root) => {
   if (!(await exists(root))) return [];
@@ -78,6 +136,7 @@ if (targetHead !== EXPECTED_TARGET_PARENT) {
 if (git(sourceRoot, ['status', '--porcelain']) !== '') {
   throw new Error('Reference checkout is not clean');
 }
+await assertChangedFilePathEnumeration();
 
 const selectedRootFiles = [
   '.env.example',
@@ -732,18 +791,23 @@ await mkdir(path.join(targetRoot, 'docs/00-control'), { recursive: true });
 await writeFile(path.join(targetRoot, 'docs/00-control/SOURCE_IMPORT_MANIFEST.md'), manifest);
 
 const checksTable = runResults.map(item => `| ${item.name} | ${item.status} | ${item.output ? item.output.replaceAll('|', '\\|').replaceAll('\n', '<br>') : '—'} |`).join('\n');
-const changedPaths = git(targetRoot, ['status', '--short']).split('\n').filter(Boolean).length;
 const materializedResultDigest = await resultDigest(targetRoot);
-const evidence = `# DOC-WOS-01-001 — Authorized Source Bootstrap\n\n## Authority\n\n- Workstream: WOS-01A\n- Draft PR: #16\n- Accepted base: \`${EXPECTED_TARGET_PARENT}\`\n- Authorized reference: \`${SOURCE_REPOSITORY}@${EXPECTED_SOURCE}\`\n- Source tree: \`${EXPECTED_SOURCE_TREE}\`\n- Reference mode: read-only; no Git-history import\n- Changed paths before commit: ${changedPaths}\n- Result payload SHA-256: \`${materializedResultDigest}\`\n- Result digest scope: deterministic path/content hashes for the fully materialized worktree, excluding only this self-referential evidence file and Git metadata\n\n## Outcome\n\nImported the bounded application, build, dependency, PostgreSQL schema/migrations, synthetic import templates and retained safe tests. Company collateral, live-environment evidence, credentials, production values and source history remain excluded. Runtime identity was neutralized to centrally configured WorkOS defaults; production fallback and automatic demo seeding fail closed; new users require explicit passwords.\n\n## Check matrix\n\n| Check | Result | Evidence |\n|---|---|---|\n${checksTable}\n\n## Frozen A–I closure\n\n- **A — Application path:** production build and retained safe tests pass from the imported toolchain.\n- **B — Authorization/security:** no reference-repository write, shared credential, private key, production URL or automatic production demo fallback is accepted.\n- **C — Concurrency:** imported database constraints, transactions and existing concurrency semantics are retained unchanged except bounded security neutralization.\n- **D — Replay/idempotency:** inherited idempotency contracts remain present; no bootstrap operation silently retries a partial import.\n- **E — Lifecycle:** WOS-00 governing approval, commercial and notification documents remain untouched and authoritative.\n- **F — Partial failure:** this publisher exits before commit/push on any mandatory install/build/test/scan failure.\n- **G — Bounds:** generated caches, artifacts, collateral and live-data fixtures are excluded.\n- **H — Fallback:** local fallback is allowed only when app mode is exactly test and explicit fallback opt-in is true; production configuration fails closed.\n- **I — Evidence:** 126 requirements, 81 NFRs, ADR-001..008, source hashes and the exact changed scope are reproducible.\n\n## Limitations\n\nDatabase migration execution, production startup and browser journeys require a later disposable-environment acceptance gate and are explicitly NOT RUN here. WOS-01A remains Draft until an independent exact-head review and clean-runtime merge boundary are satisfied.\n\n## Rollback\n\nBefore merge, reset the Draft branch to \`${EXPECTED_TARGET_PARENT}\`. After merge, use a reviewed revert/forward correction; never rewrite source provenance or accepted history.\n`;
+const renderEvidence = (changedPaths) => `# DOC-WOS-01-001 — Authorized Source Bootstrap\n\n## Authority\n\n- Workstream: WOS-01A\n- Draft PR: #16\n- Accepted base: \`${EXPECTED_TARGET_PARENT}\`\n- Authorized reference: \`${SOURCE_REPOSITORY}@${EXPECTED_SOURCE}\`\n- Source tree: \`${EXPECTED_SOURCE_TREE}\`\n- Reference mode: read-only; no Git-history import\n- Changed paths before commit: ${changedPaths}\n- Result payload SHA-256: \`${materializedResultDigest}\`\n- Result digest scope: deterministic path/content hashes for the fully materialized worktree, excluding only this self-referential evidence file and Git metadata\n\n## Outcome\n\nImported the bounded application, build, dependency, PostgreSQL schema/migrations, synthetic import templates and retained safe tests. Company collateral, live-environment evidence, credentials, production values and source history remain excluded. Runtime identity was neutralized to centrally configured WorkOS defaults; production fallback and automatic demo seeding fail closed; new users require explicit passwords.\n\n## Check matrix\n\n| Check | Result | Evidence |\n|---|---|---|\n${checksTable}\n\n## Frozen A–I closure\n\n- **A — Application path:** production build and retained safe tests pass from the imported toolchain.\n- **B — Authorization/security:** no reference-repository write, shared credential, private key, production URL or automatic production demo fallback is accepted.\n- **C — Concurrency:** imported database constraints, transactions and existing concurrency semantics are retained unchanged except bounded security neutralization.\n- **D — Replay/idempotency:** inherited idempotency contracts remain present; no bootstrap operation silently retries a partial import.\n- **E — Lifecycle:** WOS-00 governing approval, commercial and notification documents remain untouched and authoritative.\n- **F — Partial failure:** this publisher exits before commit/push on any mandatory install/build/test/scan failure.\n- **G — Bounds:** generated caches, artifacts, collateral and live-data fixtures are excluded.\n- **H — Fallback:** local fallback is allowed only when app mode is exactly test and explicit fallback opt-in is true; production configuration fails closed.\n- **I — Evidence:** 126 requirements, 81 NFRs, ADR-001..008, source hashes and the exact changed scope are reproducible.\n\n## Limitations\n\nDatabase migration execution, production startup and browser journeys require a later disposable-environment acceptance gate and are explicitly NOT RUN here. WOS-01A remains Draft until an independent exact-head review and clean-runtime merge boundary are satisfied.\n\n## Rollback\n\nBefore merge, reset the Draft branch to \`${EXPECTED_TARGET_PARENT}\`. After merge, use a reviewed revert/forward correction; never rewrite source provenance or accepted history.\n`;
 await mkdir(path.join(targetRoot, 'docs/evidence/v0.2.0'), { recursive: true });
-await writeFile(path.join(targetRoot, 'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md'), evidence);
+const evidenceFile = path.join(targetRoot, RESULT_DIGEST_EVIDENCE);
+await writeFile(evidenceFile, renderEvidence(0));
+const changedPaths = changedFilePaths(targetRoot).length;
+await writeFile(evidenceFile, renderEvidence(changedPaths));
 
 runCheck('Final WOS-00 baseline verifier', 'node', ['scripts/verify-baseline.mjs']);
 runCheck('Final bootstrap security scan', 'node', ['scripts/scan-bootstrap.mjs']);
 runCheck('Git diff check', 'git', ['diff', '--check']);
 
-const finalChanged = git(targetRoot, ['status', '--short']).split('\n').filter(Boolean);
+const finalChanged = changedFilePaths(targetRoot);
 if (finalChanged.length < 80) throw new Error(`Unexpectedly small source bootstrap: ${finalChanged.length} changed paths`);
+if (finalChanged.length !== changedPaths) {
+  throw new Error(`Changed-path evidence mismatch: evidence=${changedPaths} final=${finalChanged.length}`);
+}
 console.log(JSON.stringify({
   sourceHead,
   sourceTree,
