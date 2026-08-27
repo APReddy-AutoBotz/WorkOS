@@ -111,6 +111,16 @@ const selectedTestFiles = [
   'tests/requirements-smoke.mjs',
   'tests/resource-planning-smoke.mjs',
 ];
+const retainedDependencyMappings = new Map([
+  [
+    'Boundaryless-WorkOS_Requirements.md',
+    'docs/03-specifications/WOS01A_RETAINED_REQUIREMENTS.md',
+  ],
+]);
+const sourceToTargetPath = (sourcePath) => retainedDependencyMappings.get(sourcePath)
+  || (sourcePath === 'server/migrations/006_boundaryless_workos_prod_core.sql'
+    ? 'server/migrations/006_workos_prod_core.sql'
+    : sourcePath);
 
 const sourceFiles = await walk(sourceRoot);
 const selected = new Set();
@@ -123,10 +133,17 @@ for (const file of selectedTestFiles) {
   if (!(await exists(path.join(sourceRoot, file)))) throw new Error(`Required retained test is absent: ${file}`);
   selected.add(file);
 }
+for (const [dependency] of retainedDependencyMappings) {
+  if (!(await exists(path.join(sourceRoot, dependency)))) {
+    throw new Error(`Required retained-test dependency is absent: ${dependency}`);
+  }
+  selected.add(dependency);
+}
 
 const controlledPaths = [
   '.env.example', '.gitignore', 'index.html', 'metadata.json', 'package-lock.json', 'package.json', 'tsconfig.json', 'vite.config.ts',
   'src', 'server', 'templates', 'tests', 'public',
+  'docs/03-specifications/WOS01A_RETAINED_REQUIREMENTS.md',
   'scripts/scan-bootstrap.mjs', 'scripts/verify-baseline.mjs',
   'docs/00-control/SOURCE_IMPORT_MANIFEST.md',
   'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md',
@@ -135,10 +152,48 @@ for (const controlled of controlledPaths) await rm(path.join(targetRoot, control
 
 for (const sourcePath of [...selected].sort()) {
   const from = path.join(sourceRoot, sourcePath);
-  const to = path.join(targetRoot, sourcePath);
+  const to = path.join(targetRoot, sourceToTargetPath(sourcePath));
   await mkdir(path.dirname(to), { recursive: true });
   await cp(from, to, { force: true, preserveTimestamps: false });
 }
+
+const retainedRequirementsTarget = retainedDependencyMappings.get('Boundaryless-WorkOS_Requirements.md');
+const retainedRequirementsFile = path.join(targetRoot, retainedRequirementsTarget);
+let retainedRequirementsText = await readFile(retainedRequirementsFile, 'utf8');
+retainedRequirementsText = retainedRequirementsText.replaceAll('https://...', 'https://service.example.test');
+await writeFile(retainedRequirementsFile, retainedRequirementsText);
+const essTestFile = path.join(targetRoot, 'tests/ess-hub-smoke.mjs');
+let essTestText = await readFile(essTestFile, 'utf8');
+const retainedRequirementsReferences = essTestText.match(/Boundaryless-WorkOS_Requirements\.md/g) || [];
+if (retainedRequirementsReferences.length !== 1) {
+  throw new Error(`Expected one ESS retained-requirements dependency, found ${retainedRequirementsReferences.length}`);
+}
+essTestText = essTestText.replace('Boundaryless-WorkOS_Requirements.md', retainedRequirementsTarget);
+if (!essTestText.includes(retainedRequirementsTarget)) {
+  throw new Error('ESS retained-requirements dependency was not mapped');
+}
+await writeFile(essTestFile, essTestText);
+
+const assertRetainedDependencyClosure = async () => {
+  const literalDependencyPattern = /(?:readFile|readFileSync)\s*\(\s*(['"])([^'"\r\n]+)\1/g;
+  const unresolved = [];
+  for (const testPath of selectedTestFiles) {
+    const testText = await readFile(path.join(targetRoot, testPath), 'utf8');
+    for (const match of testText.matchAll(literalDependencyPattern)) {
+      const dependency = match[2];
+      if (/^(?:node:|https?:|\/)/.test(dependency) || dependency.includes('${')) continue;
+      const resolvedDependency = path.resolve(targetRoot, dependency);
+      const relativeDependency = rel(targetRoot, resolvedDependency);
+      if (relativeDependency === '..' || relativeDependency.startsWith('../')) {
+        unresolved.push(`${testPath} -> ${dependency} (outside materialized root)`);
+      } else if (!(await exists(resolvedDependency))) {
+        unresolved.push(`${testPath} -> ${dependency}`);
+      }
+    }
+  }
+  if (unresolved.length) throw new Error(`Unresolved retained-test dependencies:\n${unresolved.join('\n')}`);
+};
+await assertRetainedDependencyClosure();
 
 const oldMigration = path.join(targetRoot, 'server/migrations/006_boundaryless_workos_prod_core.sql');
 const newMigration = path.join(targetRoot, 'server/migrations/006_workos_prod_core.sql');
@@ -473,9 +528,7 @@ await writeFile(path.join(targetRoot, 'public/workos-mark.svg'), `<svg xmlns="ht
 await writeFile(path.join(targetRoot, 'public/login-workspace-bg.svg'), `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0f172a"/><stop offset="1" stop-color="#e2e8f0"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><g fill="none" stroke="#f97316" stroke-opacity=".18"><circle cx="180" cy="160" r="120"/><circle cx="980" cy="620" r="220"/><path d="M0 520C260 360 430 690 700 490s360-230 500-170"/></g></svg>\n`);
 
 const brandingTargets = new Set(
-  [...selected].map(sourcePath => sourcePath === 'server/migrations/006_boundaryless_workos_prod_core.sql'
-    ? 'server/migrations/006_workos_prod_core.sql'
-    : sourcePath),
+  [...selected].map(sourceToTargetPath),
 );
 brandingTargets.add('public/workos-mark.svg');
 brandingTargets.add('public/login-workspace-bg.svg');
@@ -559,12 +612,12 @@ for (const sourceFile of sourceFiles) {
   const sourcePath = rel(sourceRoot, sourceFile);
   const bytes = await readFile(sourceFile);
   const isIncluded = selected.has(sourcePath);
-  const targetPath = sourcePath === 'server/migrations/006_boundaryless_workos_prod_core.sql'
-    ? 'server/migrations/006_workos_prod_core.sql'
-    : sourcePath;
+  const targetPath = sourceToTargetPath(sourcePath);
   const targetFile = path.join(targetRoot, targetPath);
   const targetBytes = isIncluded && await exists(targetFile) ? await readFile(targetFile) : null;
-  let reason = 'Approved application/build/test/schema source';
+  let reason = retainedDependencyMappings.has(sourcePath)
+    ? 'Bounded retained-test document dependency'
+    : 'Approved application/build/test/schema source';
   if (!isIncluded) {
     if (/^(?:artifacts|docs|screenshots|presentations|generated|node_modules|dist)\//i.test(sourcePath)) reason = 'Generated, transient or company-only collateral';
     else if (/seed-uat|microsoft-live|real-data-cutover|role-browser-uat|browser-ux|credential-handover|backend-uat|prod-readiness|prod-core|production-hardening|audit-governance|operations-readiness/i.test(sourcePath)) reason = 'Live-environment, company-evidence or UAT-only test/artifact';

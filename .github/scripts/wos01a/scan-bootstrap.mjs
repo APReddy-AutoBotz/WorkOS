@@ -15,6 +15,7 @@ const rootFiles = [
   'package.json',
   'tsconfig.json',
   'vite.config.ts',
+  'docs/03-specifications/WOS01A_RETAINED_REQUIREMENTS.md',
 ];
 const files = [];
 
