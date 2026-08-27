@@ -26,6 +26,7 @@ env:
   REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
   REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
   PR_NUMBER: '16'
+  CONTROLLER_PR_NUMBER: '18'
 
 jobs:
   publish:
@@ -54,10 +55,29 @@ jobs:
             core.setOutput('base_sha', pr.base.sha);
             if (failures.length) core.setFailed(`WOS-01A PR association/start gate failed: ${failures.join(', ')}`);
 
+      - name: Resolve accepted controller revision
+        id: controller
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.CONTROLLER_PR_NUMBER),
+            });
+            const failures = [];
+            if (pr.state !== 'closed' || !pr.merged_at) failures.push('controller PR is not merged');
+            if (pr.head.ref !== 'controller/wos01a-actions-publisher') failures.push(`head.ref=${pr.head.ref}`);
+            if (!/^[a-f0-9]{40}$/.test(pr.head.sha || '')) failures.push(`head.sha=${pr.head.sha}`);
+            if (!/^[a-f0-9]{40}$/.test(pr.merge_commit_sha || '')) failures.push(`merge_commit_sha=${pr.merge_commit_sha}`);
+            if (failures.length) return core.setFailed(`Accepted controller revision gate failed: ${failures.join(', ')}`);
+            core.setOutput('sha', pr.head.sha);
+            core.setOutput('merge_sha', pr.merge_commit_sha);
+
       - name: Checkout controller scripts from triggering revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ steps.controller.outputs.sha }}
           path: controller
           fetch-depth: 0
           persist-credentials: false
@@ -92,7 +112,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(git -C controller rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C controller rev-parse HEAD)" = "${{ steps.controller.outputs.sha }}"
+          if test "$GITHUB_EVENT_NAME" = "push"; then
+            test "$GITHUB_SHA" = "${{ steps.controller.outputs.merge_sha }}"
+          fi
           git -C controller merge-base --is-ancestor "$EXPECTED_BASE_HEAD" HEAD
           git -C workos merge-base --is-ancestor "$EXPECTED_BASE_HEAD" HEAD
           git -C controller cat-file -e "${{ steps.start_pr.outputs.base_sha }}^{commit}"
@@ -181,12 +204,14 @@ jobs:
           git commit --no-verify -m "feat: bootstrap authorized WorkOS source baseline"
           new_head="$(git rev-parse HEAD)"
           new_tree="$(git rev-parse HEAD^{tree})"
-          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" origin "HEAD:refs/heads/$TARGET_BRANCH"
+          node ../controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest .
           echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
           echo "new_tree=$new_tree" >> "$GITHUB_OUTPUT"
           echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" origin "HEAD:refs/heads/$TARGET_BRANCH"
 
       - name: Fetch and verify published GitHub head
+        id: published_verify
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -205,6 +230,31 @@ jobs:
           set -euo pipefail
           test -z "${GH_TOKEN:-}"
           node controller/.github/scripts/wos01a-source-bootstrap.mjs --verify-result-digest workos
+
+      - name: Roll back an unverified publication with an exact-new-head lease
+        id: rollback
+        if: failure() && steps.publish.outputs.new_head != '' && steps.verify.outcome != 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd workos
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          test "$(git config --local --get core.hooksPath)" = "/dev/null"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          new_head="${{ steps.publish.outputs.new_head }}"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          if test "$remote_head" = "$EXPECTED_TARGET_HEAD"; then
+            echo "state=not-published" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$remote_head" = "$new_head"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$new_head" origin "$EXPECTED_TARGET_HEAD:refs/heads/$TARGET_BRANCH"
+          restored="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$restored" = "$EXPECTED_TARGET_HEAD"
+          echo "state=restored" >> "$GITHUB_OUTPUT"
 
       - name: Comment successful publication on PR #16
         if: steps.verify.outcome == 'success'
@@ -229,7 +279,7 @@ jobs:
             });
 
       - name: Comment fail-closed publisher result
-        if: failure() && steps.verify.outcome != 'success'
+        if: failure() && steps.verify.outcome != 'success' && steps.rollback.outcome != 'failure'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
@@ -238,7 +288,23 @@ jobs:
             const verifyOutcome = '${{ steps.verify.outcome }}';
             const body = `### WOS-01A publisher failed closed
 
-            Workflow \`${context.workflow}\` run \`${context.runId}\` did not establish a verified published WOS-01A head. Publish step: \`${publishOutcome}\`; verification step: \`${verifyOutcome}\`. The exact-old-head/PR-association guard, mandatory install/build/test/scan checks, push, or remote-head verification failed. PR #16 remains governed by its live GitHub state. Inspect the workflow job logs and correct the actual failure; do not bypass or relabel a failed check.`;
+            Workflow \`${context.workflow}\` run \`${context.runId}\` did not establish a verified published WOS-01A head. Publish step: \`${publishOutcome}\`; verification step: \`${verifyOutcome}\`; rollback: \`${{ steps.rollback.outputs.state || steps.rollback.outcome }}\`. The exact-old-head/PR-association guard, mandatory install/build/test/scan checks, push, remote-head verification, or lease-safe restoration failed. Inspect the workflow job logs and correct the actual failure; do not bypass or relabel a failed check.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body,
+            });
+
+      - name: Comment rollback lease failure without claiming target state
+        if: failure() && steps.rollback.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### WOS-01A publisher rollback requires investigation
+
+            Workflow \`${context.workflow}\` run \`${context.runId}\` did not establish a verified publication, and its exact-new-head rollback did not complete. The rollback used a lease and did not overwrite a concurrent branch move. The current PR #16 branch state is intentionally not classified here; inspect the workflow and live ref before any further action.`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,

@@ -140,7 +140,7 @@ for (const file of [...new Set(files)].sort()) {
     failures.push(`test-only plaintext outside retained tests: ${relative}`);
   }
   for (const [name, pattern] of contentRules) {
-    if (pattern.test(text)) failures.push(`${name}: ${relative}`);
+    if (pattern.test(text) || pattern.test(credentialText)) failures.push(`${name}: ${relative}`);
   }
 
   for (const match of credentialText.matchAll(credentialAssignment)) {
@@ -163,16 +163,16 @@ for (const file of [...new Set(files)].sort()) {
   const urlSourceText = isRetainedTestPath(relative)
     ? text.replace(/\/https?:\\\/\\\/[^/\r\n]+\/[dgimsuvy]*/g, '')
     : text;
-  const urlScanText = urlSourceText.replaceAll('\\/', '/').replace(
+  const urlScanText = decodeCredentialEscapes(urlSourceText).replaceAll('\\/', '/').replace(
     /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\$\{[^}\r\n]+\}/gi,
     rawUrl => normalizeLocalTemplateUrl(rawUrl),
   );
   const urlCandidates = [
     ...urlScanText.matchAll(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>`]+/gi),
-    ...urlScanText.matchAll(/[='"`(]\s*\/\/([A-Za-z0-9.\-\[\]:]+)(?:\/[^\s'"<>`]*)?/g),
+    ...urlScanText.matchAll(/(?:^|[='"`(:])\s*\/\/([A-Za-z0-9.\-\[\]:]+)(?:\/[^\s'"<>`]*)?/gm),
   ];
   for (const match of urlCandidates) {
-    const matchedUrl = match[0].replace(/^[='"`(\s]+/, '');
+    const matchedUrl = match[0].replace(/^[='"`(:\s]+/, '');
     const rawUrl = normalizeLocalTemplateUrl(matchedUrl.replace(/[),.;]+$/, ''));
     try {
       const parsed = new URL(rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl);
@@ -224,6 +224,8 @@ if (selfTest) {
     await runFixture('test-credential-src-tests-lookalike', { 'src/tests/auth.mjs': "const marker = 'workos-test-only';\n" }, false);
     await runFixture('retained-test-real-looking-credential', { 'tests/auth.mjs': "const initialPassword = 'CompanyPass2026!';\n" }, false);
     await runFixture('historical-shared-password-runtime', { 'src/auth.ts': "const marker = 'demo123';\n" }, false);
+    await runFixture('decoded-shared-password-unicode', { 'src/auth.ts': String.raw`const marker = 'd\u0065mo123';\n` }, false);
+    await runFixture('decoded-shared-password-hex-test', { 'tests/auth.mjs': String.raw`const marker = 'd\x65mo123';\n` }, false);
     await runFixture('safe-identifiers', { 'src/safe.ts': `const key = schemaKey; const token = getToken(); const password = input.password;\nconst initialPassword = makePassword(); const sortKey = (row) => row.id; const dataKey: keyof Row = 'id'; const permissionKey = permission.key;\n`, '.env.example': 'PASSWORD=\nAPI_TOKEN=<replace-with-local-token>\nCLIENT_SECRET=${LOCAL_CLIENT_SECRET}\n' }, true);
     await runFixture('safe-regex', { 'tests/regex.mjs': String.raw`const graphScope = /https:\/\/graph\.microsoft\.com\/\.default/;\n` }, true);
     await runFixture('quoted-js-credential', { 'src/bad.ts': "const initialPassword = 'CompanyPass2026!';\n" }, false);
@@ -234,7 +236,11 @@ if (selfTest) {
     await runFixture('credential-uri', { 'src/bad.ts': "const endpoint = 'https://user:pass@example.test/api';\n" }, false);
     await runFixture('runtime-url', { 'src/bad.ts': "const endpoint = 'https://prod.customer.example.com/api';\n" }, false);
     await runFixture('escaped-runtime-url', { 'src/bad.ts': String.raw`const endpoint = 'https:\/\/prod.customer.example.com/api';\n` }, false);
+    await runFixture('unicode-slash-runtime-url', { 'src/bad.ts': String.raw`const endpoint = 'https:\u002f\u002fprod.customer.example.com/api';\n` }, false);
+    await runFixture('hex-slash-runtime-url', { 'src/bad.ts': String.raw`const endpoint = 'https:\x2f\x2fprod.customer.example.com/api';\n` }, false);
     await runFixture('protocol-relative-url', { 'src/bad.ts': "const endpoint = '//prod.customer.example.com/api';\n" }, false);
+    await runFixture('yaml-protocol-relative-url', { 'server/config.yml': 'endpoint: //prod.customer.example.com/api\n' }, false);
+    await runFixture('safe-comments-and-prose', { 'src/safe.ts': '// prod.customer.example.com is prose, not an endpoint\nconst ratio = total // divisor;\n', 'server/config.yml': '# //prod.customer.example.com is a comment\n' }, true);
     await runFixture('hostname-lookalike', { 'src/bad.ts': "const endpoint = 'https://graph.microsoft.com.evil.example/api';\n" }, false);
     await runFixture('runtime-provenance', { 'src/bad.ts': "const endpoint = 'https://github.com/customer/private-api';\n" }, false);
     await runFixture('private-key', { 'tests/key.txt': '-----BEGIN ENCRYPTED PRIVATE KEY-----\nnot-a-real-key\n' }, false);
