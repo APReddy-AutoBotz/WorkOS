@@ -1,0 +1,384 @@
+name: WOS-01B Clean Runtime Publisher
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+    paths:
+      - '.github/workflows/wos01a-clean-runtime-acceptance.yml'
+      - '.github/workflows/wos01b-clean-runtime-publisher.yml'
+      - '.github/scripts/wos01b-clean-runtime-closure.mjs'
+      - '.github/scripts/wos01b-browser-acceptance.mjs'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/wos01a-clean-runtime-acceptance.yml'
+      - '.github/workflows/wos01b-clean-runtime-publisher.yml'
+      - '.github/scripts/wos01b-clean-runtime-closure.mjs'
+      - '.github/scripts/wos01b-browser-acceptance.mjs'
+
+concurrency:
+  group: wos01b-clean-runtime-publisher
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR_NUMBER: '24'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance
+  TARGET_PR_NUMBER: '16'
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  EXPECTED_TARGET_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_TARGET_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  EXPECTED_MAIN_PARENT: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  CLOSURE_SCRIPT: .github/scripts/wos01b-clean-runtime-closure.mjs
+  BROWSER_SCRIPT: .github/scripts/wos01b-browser-acceptance.mjs
+
+jobs:
+  validate:
+    name: Read-only exact-head WOS-01B construction acceptance
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Verify controller and target authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const controller = context.payload.pull_request;
+            const failures = [];
+            if (controller.state !== 'open') failures.push(`controller.state=${controller.state}`);
+            if (!controller.draft) failures.push('controller PR must remain Draft');
+            if (controller.number !== Number(process.env.CONTROLLER_PR_NUMBER)) failures.push(`controller.number=${controller.number}`);
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
+            if (controller.base.sha !== process.env.EXPECTED_MAIN_PARENT) failures.push(`controller.base.sha=${controller.base.sha}`);
+
+            const { data: main } = await github.rest.repos.getBranch({ owner: context.repo.owner, repo: context.repo.repo, branch: 'main' });
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_PARENT) failures.push(`current.main=${main.commit.sha}`);
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: controller.number,
+              per_page: 100,
+            });
+            const actual = files.map(file => file.filename).sort();
+            const expected = [
+              '.github/scripts/wos01b-browser-acceptance.mjs',
+              '.github/scripts/wos01b-clean-runtime-closure.mjs',
+              '.github/workflows/wos01a-clean-runtime-acceptance.yml',
+              '.github/workflows/wos01b-clean-runtime-publisher.yml',
+            ].sort();
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`controller.paths=${JSON.stringify(actual)}`);
+
+            const { data: target } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR_NUMBER),
+            });
+            if (target.state !== 'open') failures.push(`target.state=${target.state}`);
+            if (!target.draft) failures.push('target PR is not Draft');
+            if (target.merged_at) failures.push(`target.merged_at=${target.merged_at}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
+            if (target.base.ref !== 'main') failures.push(`target.base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.EXPECTED_TARGET_BASE) failures.push(`target.base.sha=${target.base.sha}`);
+
+            if (failures.length) core.setFailed(`WOS-01B validation authority failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact WorkOS Draft branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_TARGET_HEAD }}
+          path: workos
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workos/package-lock.json
+
+      - name: Verify credential isolation and exact inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git -C workos rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+          test -z "$(git -C workos status --porcelain)"
+          git -C workos merge-base --is-ancestor "$EXPECTED_TARGET_BASE" HEAD
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          node --check "controller/$CLOSURE_SCRIPT"
+          node --check "controller/$BROWSER_SCRIPT"
+
+      - name: Materialize and verify complete WOS-01B correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "controller/$CLOSURE_SCRIPT" workos | tee /tmp/wos01b-validation.json
+
+      - name: Run bounded local browser role journeys on corrected worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          before_browser="$(git -C workos status --porcelain)"
+          node "controller/$BROWSER_SCRIPT" workos /tmp/wos01b-browser-validation | tee /tmp/wos01b-browser-validation.json
+          after_browser="$(git -C workos status --porcelain)"
+          test "$after_browser" = "$before_browser"
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01b-controller-validation-${{ github.event.pull_request.head.sha }}
+          path: |
+            /tmp/wos01b-validation.json
+            /tmp/wos01b-browser-validation.json
+            /tmp/wos01b-browser-validation
+          if-no-files-found: warn
+          retention-days: 14
+
+  publish:
+    name: Build, verify and publish WOS-01B to existing Draft PR
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Resolve exact merged controller authority
+        id: controller
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: controller } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.CONTROLLER_PR_NUMBER),
+            });
+            const failures = [];
+            if (controller.state !== 'closed' || !controller.merged_at) failures.push('controller PR is not merged');
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (!/^[a-f0-9]{40}$/.test(controller.head.sha || '')) failures.push(`controller.head.sha=${controller.head.sha}`);
+            if (!/^[a-f0-9]{40}$/.test(controller.merge_commit_sha || '')) failures.push(`controller.merge_commit_sha=${controller.merge_commit_sha}`);
+            if (failures.length) return core.setFailed(`Merged controller authority failed: ${failures.join(', ')}`);
+            core.setOutput('head_sha', controller.head.sha);
+            core.setOutput('merge_sha', controller.merge_commit_sha);
+
+      - name: Verify target Draft PR exact start state
+        id: target
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: target } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR_NUMBER),
+            });
+            const failures = [];
+            if (target.state !== 'open') failures.push(`state=${target.state}`);
+            if (!target.draft) failures.push('target PR is not Draft');
+            if (target.merged_at) failures.push(`merged_at=${target.merged_at}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${target.head.sha}`);
+            if (target.base.ref !== 'main') failures.push(`base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.EXPECTED_TARGET_BASE) failures.push(`base.sha=${target.base.sha}`);
+            if (failures.length) core.setFailed(`WOS-01B target start gate failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact merged controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.controller.outputs.head_sha }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact WorkOS Draft branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          path: workos
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workos/package-lock.json
+
+      - name: Verify immutable controller and target inputs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_SHA" = "${{ steps.controller.outputs.merge_sha }}"
+          test "$(git -C controller rev-parse HEAD)" = "${{ steps.controller.outputs.head_sha }}"
+          test "$(git -C workos rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+          test -z "$(git -C workos status --porcelain)"
+          git -C controller merge-base --is-ancestor "$EXPECTED_MAIN_PARENT" HEAD
+          git -C workos merge-base --is-ancestor "$EXPECTED_TARGET_BASE" HEAD
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -C workos -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$EXPECTED_TARGET_HEAD"
+          node --check "controller/$CLOSURE_SCRIPT"
+          node --check "controller/$BROWSER_SCRIPT"
+
+      - name: Construct and verify WOS-01B without repository credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          node "controller/$CLOSURE_SCRIPT" workos | tee /tmp/wos01b-publish-result.json
+          node "controller/$BROWSER_SCRIPT" workos /tmp/wos01b-browser-publish | tee /tmp/wos01b-browser-publish.json
+
+      - name: Re-verify live target PR before publication
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: target } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR_NUMBER),
+            });
+            const failures = [];
+            if (target.state !== 'open') failures.push(`state=${target.state}`);
+            if (!target.draft) failures.push('target PR is not Draft');
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${target.head.sha}`);
+            if (target.base.sha !== process.env.EXPECTED_TARGET_BASE) failures.push(`base.sha=${target.base.sha}`);
+            if (failures.length) core.setFailed(`Target PR moved before WOS-01B publication: ${failures.join(', ')}`);
+
+      - name: Commit and publish through exact-old-head lease
+        id: publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd workos
+          trusted_origin="https://github.com/${GITHUB_REPOSITORY}.git"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+          test "$(git remote)" = "origin"
+          case "$(git remote get-url origin)" in
+            "${trusted_origin}"|"${trusted_origin%.git}") ;;
+            *) echo "Unexpected target origin" >&2; exit 1 ;;
+          esac
+          git remote set-url origin "$trusted_origin"
+          rm -rf .git/hooks
+          mkdir -p .git/hooks
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          git config --local core.hooksPath /dev/null
+          test "$(git config --local --get core.hooksPath)" = "/dev/null"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$EXPECTED_TARGET_HEAD"
+
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          test -n "$(git status --porcelain)"
+          git diff --cached --check
+          mapfile -t changed < <(git diff --cached --name-only)
+          test "${#changed[@]}" -eq 6
+          git commit --no-verify -m "fix: close WOS-01B clean-runtime blockers"
+          new_head="$(git rev-parse HEAD)"
+          new_tree="$(git rev-parse HEAD^{tree})"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+          echo "new_tree=$new_tree" >> "$GITHUB_OUTPUT"
+          echo "changed_count=${#changed[@]}" >> "$GITHUB_OUTPUT"
+
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" \
+            origin "HEAD:refs/heads/$TARGET_BRANCH"
+
+      - name: Fetch and verify published exact head
+        id: verify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -C workos -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
+          git -C workos -c http.https://github.com/.extraheader="$auth_header" fetch --no-tags origin "$remote_head"
+          test "$(git -C workos rev-parse "$remote_head^{tree}")" = "${{ steps.publish.outputs.new_tree }}"
+          test -z "$(git -C workos status --porcelain)"
+          cd workos
+          npm audit --omit=dev --json > /tmp/wos01b-post-publish-audit.json || audit_rc=$?
+          AUDIT_RC="${audit_rc:-0}" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const audit = JSON.parse(readFileSync('/tmp/wos01b-post-publish-audit.json', 'utf8'));
+          const counts = audit.metadata?.vulnerabilities || {};
+          if (Number(counts.high || 0) > 0 || Number(counts.critical || 0) > 0) process.exit(1);
+          if (Number(process.env.AUDIT_RC) !== 0 && Number(counts.total || 0) === 0) process.exit(1);
+          NODE
+          npm run test:product-identity
+          npm run test:wos00-baseline
+          npm run test:bootstrap-scan
+
+      - name: Roll back an unverified publication with exact-new-head lease
+        id: rollback
+        if: failure() && steps.publish.outputs.new_head != '' && steps.verify.outcome != 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd workos
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          new_head="${{ steps.publish.outputs.new_head }}"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          if test "$remote_head" = "$EXPECTED_TARGET_HEAD"; then
+            echo "state=not-published" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$remote_head" = "$new_head"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$new_head" \
+            origin "$EXPECTED_TARGET_HEAD:refs/heads/$TARGET_BRANCH"
+          restored="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$restored" = "$EXPECTED_TARGET_HEAD"
+          echo "state=restored" >> "$GITHUB_OUTPUT"
+
+      - name: Comment successful WOS-01B publication
+        if: steps.verify.outcome == 'success'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### WOS-01B clean-runtime closure published\n\n- Exact new head: \`${{ steps.publish.outputs.new_head }}\`\n- Exact parent guard: \`${process.env.EXPECTED_TARGET_HEAD}\`\n- Exact result tree: \`${{ steps.publish.outputs.new_tree }}\`\n- Changed paths: ${{ steps.publish.outputs.changed_count }}\n- Controller run: \`${context.runId}\`\n\nThe Draft PR remains unmerged. Repository-native post-publication clean-runtime acceptance and a fresh independent exact-head review remain mandatory. No deployment, real provider/customer-data action or reference-repository write occurred.`;
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.TARGET_PR_NUMBER), body });
+
+      - name: Comment fail-closed WOS-01B result
+        if: failure() && steps.verify.outcome != 'success' && steps.rollback.outcome != 'failure'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### WOS-01B publisher failed closed\n\nRun \`${context.runId}\` did not establish a verified new target head. Publish: \`${{ steps.publish.outcome }}\`; verify: \`${{ steps.verify.outcome }}\`; rollback: \`${{ steps.rollback.outputs.state || steps.rollback.outcome }}\`. Inspect the exact job failure; do not bypass or relabel it. PR #16 remains Draft.`;
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.TARGET_PR_NUMBER), body });
