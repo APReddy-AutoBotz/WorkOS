@@ -17,8 +17,8 @@ concurrency:
 
 env:
   PUBLISHER_PR: '18'
-  PUBLISHER_HEAD: 4f59222649ed874109250ea6235da55d7d7d0b0a
-  PUBLISHER_TREE: 6866d69ee89fd80363bd785aa9951a7a831d3df3
+  PUBLISHER_HEAD: b5d1febf6b043d182c1f9002e162a9a7bbf80465
+  PUBLISHER_TREE: b6db98362cb527185389ad71bfd5a2db13bba1c8
   TARGET_PR: '16'
   TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
   TARGET_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
@@ -36,16 +36,8 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: publisher } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.PUBLISHER_PR),
-            });
-            const { data: target } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.TARGET_PR),
-            });
+            const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
+            const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
             const failures = [];
             if (publisher.state !== 'open') failures.push(`PR18 state=${publisher.state}`);
             if (!publisher.draft) failures.push('PR18 not Draft');
@@ -121,8 +113,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node controller/.github/scripts/wos01a/apply-final-neutralization.mjs \
-            controller/.github/scripts/wos01a-source-bootstrap.mjs
+          node controller/.github/scripts/wos01a/apply-final-neutralization.mjs controller/.github/scripts/wos01a-source-bootstrap.mjs
 
       - name: Materialize and run mandatory WOS-01A checks
         shell: bash
@@ -147,16 +138,8 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: publisher } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.PUBLISHER_PR),
-            });
-            const { data: target } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.TARGET_PR),
-            });
+            const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
+            const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
             const failures = [];
             if (publisher.state !== 'open') failures.push(`PR18 state=${publisher.state}`);
             if (!publisher.draft) failures.push('PR18 not Draft');
