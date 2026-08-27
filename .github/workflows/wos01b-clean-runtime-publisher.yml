@@ -3,21 +3,21 @@ name: WOS-01B Clean Runtime Publisher
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches:
-      - main
+    branches: [main]
     paths:
+      - '.github/scripts/wos01b-browser-acceptance.mjs'
+      - '.github/scripts/wos01b-clean-runtime-closure.mjs'
       - '.github/workflows/wos01a-clean-runtime-acceptance.yml'
       - '.github/workflows/wos01b-clean-runtime-publisher.yml'
-      - '.github/scripts/wos01b-clean-runtime-closure.mjs'
-      - '.github/scripts/wos01b-browser-acceptance.mjs'
+      - '.github/workflows/wos01b-exact-head-validation-v2.yml'
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
+      - '.github/scripts/wos01b-browser-acceptance.mjs'
+      - '.github/scripts/wos01b-clean-runtime-closure.mjs'
       - '.github/workflows/wos01a-clean-runtime-acceptance.yml'
       - '.github/workflows/wos01b-clean-runtime-publisher.yml'
-      - '.github/scripts/wos01b-clean-runtime-closure.mjs'
-      - '.github/scripts/wos01b-browser-acceptance.mjs'
+      - '.github/workflows/wos01b-exact-head-validation-v2.yml'
 
 concurrency:
   group: wos01b-clean-runtime-publisher
@@ -42,7 +42,7 @@ jobs:
       contents: read
       pull-requests: read
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - name: Verify controller and target authority
         uses: actions/github-script@v7
@@ -54,6 +54,7 @@ jobs:
             if (!controller.draft) failures.push('controller PR must remain Draft');
             if (controller.number !== Number(process.env.CONTROLLER_PR_NUMBER)) failures.push(`controller.number=${controller.number}`);
             if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.head.sha !== context.sha) failures.push(`controller.head.sha=${controller.head.sha}`);
             if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
             if (controller.base.sha !== process.env.EXPECTED_MAIN_PARENT) failures.push(`controller.base.sha=${controller.base.sha}`);
 
@@ -72,6 +73,7 @@ jobs:
               '.github/scripts/wos01b-clean-runtime-closure.mjs',
               '.github/workflows/wos01a-clean-runtime-acceptance.yml',
               '.github/workflows/wos01b-clean-runtime-publisher.yml',
+              '.github/workflows/wos01b-exact-head-validation-v2.yml',
             ].sort();
             if (JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`controller.paths=${JSON.stringify(actual)}`);
 
@@ -87,7 +89,6 @@ jobs:
             if (target.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
             if (target.base.ref !== 'main') failures.push(`target.base.ref=${target.base.ref}`);
             if (target.base.sha !== process.env.EXPECTED_TARGET_BASE) failures.push(`target.base.sha=${target.base.sha}`);
-
             if (failures.length) core.setFailed(`WOS-01B validation authority failed: ${failures.join(', ')}`);
 
       - name: Checkout exact controller head
@@ -98,7 +99,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Checkout exact WorkOS Draft branch
+      - name: Checkout exact WorkOS Draft head
         uses: actions/checkout@v4
         with:
           ref: ${{ env.EXPECTED_TARGET_HEAD }}
@@ -113,7 +114,7 @@ jobs:
           cache: npm
           cache-dependency-path: workos/package-lock.json
 
-      - name: Verify credential isolation and exact inputs
+      - name: Verify isolated exact inputs
         shell: bash
         run: |
           set -euo pipefail
@@ -133,14 +134,14 @@ jobs:
           set -euo pipefail
           node "controller/$CLOSURE_SCRIPT" workos | tee /tmp/wos01b-validation.json
 
-      - name: Run bounded local browser role journeys on corrected worktree
+      - name: Run bounded local browser role journeys
         shell: bash
         run: |
           set -euo pipefail
-          before_browser="$(git -C workos status --porcelain)"
-          node "controller/$BROWSER_SCRIPT" workos /tmp/wos01b-browser-validation | tee /tmp/wos01b-browser-validation.json
-          after_browser="$(git -C workos status --porcelain)"
-          test "$after_browser" = "$before_browser"
+          before="$(git -C workos status --porcelain)"
+          timeout --signal=TERM --kill-after=15s 4m node "controller/$BROWSER_SCRIPT" workos /tmp/wos01b-browser-validation | tee /tmp/wos01b-browser-validation.json
+          after="$(git -C workos status --porcelain)"
+          test "$after" = "$before"
 
       - name: Upload validation evidence
         if: always()
@@ -162,7 +163,7 @@ jobs:
       issues: write
       pull-requests: read
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
     steps:
       - name: Resolve exact merged controller authority
         id: controller
@@ -177,14 +178,13 @@ jobs:
             const failures = [];
             if (controller.state !== 'closed' || !controller.merged_at) failures.push('controller PR is not merged');
             if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.merge_commit_sha !== context.sha) failures.push(`controller.merge_commit_sha=${controller.merge_commit_sha}`);
             if (!/^[a-f0-9]{40}$/.test(controller.head.sha || '')) failures.push(`controller.head.sha=${controller.head.sha}`);
-            if (!/^[a-f0-9]{40}$/.test(controller.merge_commit_sha || '')) failures.push(`controller.merge_commit_sha=${controller.merge_commit_sha}`);
             if (failures.length) return core.setFailed(`Merged controller authority failed: ${failures.join(', ')}`);
             core.setOutput('head_sha', controller.head.sha);
             core.setOutput('merge_sha', controller.merge_commit_sha);
 
       - name: Verify target Draft PR exact start state
-        id: target
         uses: actions/github-script@v7
         with:
           script: |
@@ -203,10 +203,10 @@ jobs:
             if (target.base.sha !== process.env.EXPECTED_TARGET_BASE) failures.push(`base.sha=${target.base.sha}`);
             if (failures.length) core.setFailed(`WOS-01B target start gate failed: ${failures.join(', ')}`);
 
-      - name: Checkout exact merged controller head
+      - name: Checkout merged controller revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.controller.outputs.head_sha }}
+          ref: ${{ github.sha }}
           path: controller
           fetch-depth: 0
           persist-credentials: false
@@ -232,8 +232,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$GITHUB_SHA" = "${{ steps.controller.outputs.merge_sha }}"
-          test "$(git -C controller rev-parse HEAD)" = "${{ steps.controller.outputs.head_sha }}"
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git -C controller rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git -C workos rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
           test -z "$(git -C workos status --porcelain)"
           git -C controller merge-base --is-ancestor "$EXPECTED_MAIN_PARENT" HEAD
@@ -244,7 +244,7 @@ jobs:
           node --check "controller/$CLOSURE_SCRIPT"
           node --check "controller/$BROWSER_SCRIPT"
 
-      - name: Construct and verify WOS-01B without repository credentials
+      - name: Construct and verify without repository credentials
         shell: bash
         run: |
           set -euo pipefail
@@ -252,9 +252,9 @@ jobs:
           test -z "${GITHUB_TOKEN:-}"
           test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
           node "controller/$CLOSURE_SCRIPT" workos | tee /tmp/wos01b-publish-result.json
-          node "controller/$BROWSER_SCRIPT" workos /tmp/wos01b-browser-publish | tee /tmp/wos01b-browser-publish.json
+          timeout --signal=TERM --kill-after=15s 4m node "controller/$BROWSER_SCRIPT" workos /tmp/wos01b-browser-publish | tee /tmp/wos01b-browser-publish.json
 
-      - name: Re-verify live target PR before publication
+      - name: Re-verify live target before publication
         uses: actions/github-script@v7
         with:
           script: |
@@ -264,12 +264,11 @@ jobs:
               pull_number: Number(process.env.TARGET_PR_NUMBER),
             });
             const failures = [];
-            if (target.state !== 'open') failures.push(`state=${target.state}`);
-            if (!target.draft) failures.push('target PR is not Draft');
+            if (target.state !== 'open' || !target.draft || target.merged_at) failures.push('target lifecycle changed');
             if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${target.head.ref}`);
             if (target.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${target.head.sha}`);
             if (target.base.sha !== process.env.EXPECTED_TARGET_BASE) failures.push(`base.sha=${target.base.sha}`);
-            if (failures.length) core.setFailed(`Target PR moved before WOS-01B publication: ${failures.join(', ')}`);
+            if (failures.length) core.setFailed(`Target moved before publication: ${failures.join(', ')}`);
 
       - name: Commit and publish through exact-old-head lease
         id: publish
@@ -281,104 +280,80 @@ jobs:
           cd workos
           trusted_origin="https://github.com/${GITHUB_REPOSITORY}.git"
           test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
-          test "$(git remote)" = "origin"
           case "$(git remote get-url origin)" in
             "${trusted_origin}"|"${trusted_origin%.git}") ;;
-            *) echo "Unexpected target origin" >&2; exit 1 ;;
+            *) echo 'Unexpected target origin' >&2; exit 1 ;;
           esac
           git remote set-url origin "$trusted_origin"
           rm -rf .git/hooks
           mkdir -p .git/hooks
           export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
           git config --local core.hooksPath /dev/null
-          test "$(git config --local --get core.hooksPath)" = "/dev/null"
           auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
           test "$remote_head" = "$EXPECTED_TARGET_HEAD"
 
-          git config user.name "WorkOS Implementation Controller"
-          git config user.email "actions@users.noreply.github.com"
+          git config user.name 'WorkOS Implementation Controller'
+          git config user.email 'actions@users.noreply.github.com'
           git add -A
-          test -n "$(git status --porcelain)"
           git diff --cached --check
           mapfile -t changed < <(git diff --cached --name-only)
           test "${#changed[@]}" -eq 6
-          git commit --no-verify -m "fix: close WOS-01B clean-runtime blockers"
+          git commit --no-verify -m 'fix: close WOS-01B clean-runtime blockers'
           new_head="$(git rev-parse HEAD)"
           new_tree="$(git rev-parse HEAD^{tree})"
           echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
           echo "new_tree=$new_tree" >> "$GITHUB_OUTPUT"
-          echo "changed_count=${#changed[@]}" >> "$GITHUB_OUTPUT"
 
           git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
             --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" \
             origin "HEAD:refs/heads/$TARGET_BRANCH"
 
-      - name: Fetch and verify published exact head
-        id: verify
+      - name: Verify publication and rollback fail closed
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          rollback() {
+            current="$(git -C workos -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+            if [ "$current" = "${{ steps.publish.outputs.new_head }}" ]; then
+              git -C workos -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+                --force-with-lease="refs/heads/$TARGET_BRANCH:${{ steps.publish.outputs.new_head }}" \
+                origin "$EXPECTED_TARGET_HEAD:refs/heads/$TARGET_BRANCH"
+            fi
+          }
+          trap 'rollback' ERR
           remote_head="$(git -C workos -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
           test "$remote_head" = "${{ steps.publish.outputs.new_head }}"
           git -C workos -c http.https://github.com/.extraheader="$auth_header" fetch --no-tags origin "$remote_head"
-          test "$(git -C workos rev-parse "$remote_head^{tree}")" = "${{ steps.publish.outputs.new_tree }}"
-          test -z "$(git -C workos status --porcelain)"
-          cd workos
-          npm audit --omit=dev --json > /tmp/wos01b-post-publish-audit.json || audit_rc=$?
-          AUDIT_RC="${audit_rc:-0}" node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
-          const audit = JSON.parse(readFileSync('/tmp/wos01b-post-publish-audit.json', 'utf8'));
-          const counts = audit.metadata?.vulnerabilities || {};
-          if (Number(counts.high || 0) > 0 || Number(counts.critical || 0) > 0) process.exit(1);
-          if (Number(process.env.AUDIT_RC) !== 0 && Number(counts.total || 0) === 0) process.exit(1);
-          NODE
-          npm run test:product-identity
-          npm run test:wos00-baseline
-          npm run test:bootstrap-scan
+          test "$(git -C workos rev-parse FETCH_HEAD^)" = "$EXPECTED_TARGET_HEAD"
+          test "$(git -C workos rev-parse FETCH_HEAD^{tree})" = "${{ steps.publish.outputs.new_tree }}"
+          test "$(git -C workos log -1 --format=%s FETCH_HEAD)" = 'fix: close WOS-01B clean-runtime blockers'
+          trap - ERR
 
-      - name: Roll back an unverified publication with exact-new-head lease
-        id: rollback
-        if: failure() && steps.publish.outputs.new_head != '' && steps.verify.outcome != 'success'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cd workos
-          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          new_head="${{ steps.publish.outputs.new_head }}"
-          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
-          if test "$remote_head" = "$EXPECTED_TARGET_HEAD"; then
-            echo "state=not-published" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          test "$remote_head" = "$new_head"
-          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
-            --force-with-lease="refs/heads/$TARGET_BRANCH:$new_head" \
-            origin "$EXPECTED_TARGET_HEAD:refs/heads/$TARGET_BRANCH"
-          restored="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
-          test "$restored" = "$EXPECTED_TARGET_HEAD"
-          echo "state=restored" >> "$GITHUB_OUTPUT"
-
-      - name: Comment successful WOS-01B publication
-        if: steps.verify.outcome == 'success'
+      - name: Record publication checkpoint
+        if: success()
         continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `### WOS-01B clean-runtime closure published\n\n- Exact new head: \`${{ steps.publish.outputs.new_head }}\`\n- Exact parent guard: \`${process.env.EXPECTED_TARGET_HEAD}\`\n- Exact result tree: \`${{ steps.publish.outputs.new_tree }}\`\n- Changed paths: ${{ steps.publish.outputs.changed_count }}\n- Controller run: \`${context.runId}\`\n\nThe Draft PR remains unmerged. Repository-native post-publication clean-runtime acceptance and a fresh independent exact-head review remain mandatory. No deployment, real provider/customer-data action or reference-repository write occurred.`;
-            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.TARGET_PR_NUMBER), body });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.TARGET_PR_NUMBER),
+              body: `WOS-01B guarded publication completed from controller PR #${process.env.CONTROLLER_PR_NUMBER}. The implementation PR remains Draft at exact head \`${{ steps.publish.outputs.new_head }}\`. Fresh exact-head acceptance and independent review remain mandatory.`,
+            });
 
-      - name: Comment fail-closed WOS-01B result
-        if: failure() && steps.verify.outcome != 'success' && steps.rollback.outcome != 'failure'
-        continue-on-error: true
-        uses: actions/github-script@v7
+      - name: Upload publisher evidence
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const body = `### WOS-01B publisher failed closed\n\nRun \`${context.runId}\` did not establish a verified new target head. Publish: \`${{ steps.publish.outcome }}\`; verify: \`${{ steps.verify.outcome }}\`; rollback: \`${{ steps.rollback.outputs.state || steps.rollback.outcome }}\`. Inspect the exact job failure; do not bypass or relabel it. PR #16 remains Draft.`;
-            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.TARGET_PR_NUMBER), body });
+          name: wos01b-publisher-${{ github.sha }}
+          path: |
+            /tmp/wos01b-publish-result.json
+            /tmp/wos01b-browser-publish.json
+            /tmp/wos01b-browser-publish
+          if-no-files-found: warn
+          retention-days: 14
