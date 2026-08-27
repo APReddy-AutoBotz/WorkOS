@@ -26,7 +26,8 @@ env:
   REFERENCE_REPOSITORY: APReddy-AutoBotz/Boundaryless-WorkOS
   REFERENCE_COMMIT: f2de1d85126f5d64f0e2e21b085b0303ca1d8417
   PR_NUMBER: '16'
-  CONTROLLER_PR_NUMBER: '18'
+  CONTROLLER_PR_NUMBER: '23'
+  CONTROLLER_BRANCH: controller/wos01a-publisher-authority-refresh
 
 jobs:
   publish:
@@ -67,7 +68,7 @@ jobs:
             });
             const failures = [];
             if (pr.state !== 'closed' || !pr.merged_at) failures.push('controller PR is not merged');
-            if (pr.head.ref !== 'controller/wos01a-actions-publisher') failures.push(`head.ref=${pr.head.ref}`);
+            if (pr.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
             if (!/^[a-f0-9]{40}$/.test(pr.head.sha || '')) failures.push(`head.sha=${pr.head.sha}`);
             if (!/^[a-f0-9]{40}$/.test(pr.merge_commit_sha || '')) failures.push(`merge_commit_sha=${pr.merge_commit_sha}`);
             if (failures.length) return core.setFailed(`Accepted controller revision gate failed: ${failures.join(', ')}`);
