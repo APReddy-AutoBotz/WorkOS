@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Open Sans", "Helvetica", "Arial", "Verdana", sans-serif;
+  --font-poppins: "Poppins", "Helvetica", "Arial", sans-serif;
+
+  --color-primary: #EF7D00;
+  --color-heading: #003761;
+  --color-slate-dark: #003761;
+  --color-sidebar-border: #002240;
+  --color-sidebar-label: #002240;
+  --color-body: #54595F;
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #F8F9FA;
+  --color-border-light: #E5E7EB;
+
+  --color-success: #059669; /* green-600 */
+  --color-success-bg: #F0FDF4;
+  --color-warning: #D97706; /* amber-600 */
+  --color-warning-bg: #FFFBEB;
+  --color-danger: #EF4444;
+  --color-danger-bg: #FEF2F2;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-secondary text-body font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply text-heading font-bold tracking-tight;
+    font-family: var(--font-poppins);
+  }
+}
+
+@layer components {
+  .dashboard-card {
+    @apply bg-white border border-border-light rounded-lg shadow-sm overflow-hidden;
+  }
+
+  .table-container {
+    @apply w-full overflow-hidden bg-white border border-border-light rounded-lg shadow-sm;
+  }
+
+  .btn-primary {
+    @apply bg-primary hover:bg-orange-600 text-white font-medium px-4 py-2 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-white border border-border-light hover:bg-bg-secondary text-slate-dark font-medium px-4 py-2 rounded-md transition-all duration-200;
+  }
+
+  .status-badge {
+    @apply px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider;
+  }
+
+  .bg-slate-dark h1,
+  .bg-slate-dark h2,
+  .bg-slate-dark h3,
+  .bg-slate-dark h4,
+  .bg-slate-dark h5,
+  .bg-slate-dark h6,
+  .bg-slate-dark\/95 h1,
+  .bg-slate-dark\/95 h2,
+  .bg-slate-dark\/95 h3,
+  .bg-slate-dark\/95 h4,
+  .bg-slate-dark\/95 h5,
+  .bg-slate-dark\/95 h6,
+  .bg-heading h1,
+  .bg-heading h2,
+  .bg-heading h3,
+  .bg-heading h4,
+  .bg-heading h5,
+  .bg-heading h6 {
+    color: #ffffff;
+  }
+}

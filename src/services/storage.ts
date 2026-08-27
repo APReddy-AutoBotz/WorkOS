@@ -1,0 +1,651 @@
+import {
+  Employee,
+  Project,
+  Allocation,
+  TimesheetSummary,
+  TimesheetEntry,
+  AuditLog,
+  ImportExportLog,
+  Client,
+  CatalogItem,
+  SystemSettings,
+  UserSession,
+  CountryDirector,
+  UserAccount,
+  UserRole,
+  LeaveType,
+  LeavePolicy,
+  HolidayCalendar,
+  LeaveBalance,
+  LeaveRequest,
+  ApprovalRecord,
+  ApprovalDelegation,
+  NotificationEvent,
+  NotificationTemplate,
+  NotificationPreference,
+  NotificationDeliveryAttempt,
+  IdentityProviderLink,
+  EntraRoleMapping,
+  TeamsUserLink,
+  TeamsActionToken,
+  IntegrationEventLog
+} from '../types';
+import { getActiveAllocationsForEmployee, getAllocationLoad, getLatestApprovedActualUtilization, overlapsDateRange } from './calculations';
+import {
+  createDefaultCatalog,
+  DEFAULT_COUNTRIES,
+  DEFAULT_DEPARTMENTS,
+  DEFAULT_INDUSTRIES,
+  DEFAULT_ROLE_DEFINITIONS,
+  DEMO_DATA_VERSION,
+  generateDemoDataset
+} from './demoData';
+
+import { productConfig } from '../config/productConfig';
+const STORAGE_KEYS = {
+  EMPLOYEES: 'workos_employees',
+  PROJECTS: 'workos_projects',
+  CLIENTS: 'workos_clients',
+  ALLOCATIONS: 'workos_allocations',
+  TIMESHEETS: 'workos_timesheets',
+  AUDIT_LOGS: 'workos_audit_logs',
+  IMPORT_EXPORT_LOGS: 'workos_import_export_logs',
+  SETTINGS: 'workos_settings',
+  AUTH: 'workos_auth',
+  CDS: 'workos_cds',
+  USER_ACCOUNTS: 'workos_user_accounts',
+  PERMISSION_ROLE_SETTINGS: 'workos_permission_role_settings',
+  PERMISSION_USER_GRANTS: 'workos_permission_user_grants',
+  ROLE_DEFINITIONS: 'workos_role_definitions',
+  DEPARTMENT_CATALOG: 'workos_department_catalog',
+  COUNTRY_CATALOG: 'workos_country_catalog',
+  INDUSTRY_CATALOG: 'workos_industry_catalog',
+  LEAVE_TYPES: 'workos_leave_types',
+  LEAVE_POLICIES: 'workos_leave_policies',
+  HOLIDAY_CALENDARS: 'workos_holiday_calendars',
+  LEAVE_BALANCES: 'workos_leave_balances',
+  LEAVE_REQUESTS: 'workos_leave_requests',
+  APPROVAL_RECORDS: 'workos_approval_records',
+  APPROVAL_DELEGATIONS: 'workos_approval_delegations',
+  NOTIFICATION_EVENTS: 'workos_notification_events',
+  NOTIFICATION_TEMPLATES: 'workos_notification_templates',
+  NOTIFICATION_PREFERENCES: 'workos_notification_preferences',
+  NOTIFICATION_DELIVERY_ATTEMPTS: 'workos_notification_delivery_attempts',
+  INTEGRATION_IDENTITY_LINKS: 'workos_integration_identity_links',
+  INTEGRATION_ENTRA_ROLE_MAPPINGS: 'workos_integration_entra_role_mappings',
+  INTEGRATION_TEAMS_USER_LINKS: 'workos_integration_teams_user_links',
+  INTEGRATION_TEAMS_ACTION_TOKENS: 'workos_integration_teams_action_tokens',
+  INTEGRATION_EVENT_LOGS: 'workos_integration_event_logs',
+  DEMO_DATA_VERSION: 'workos_demo_data_version'
+};
+
+// Seed Data Helpers
+const SEED_CDS = [
+  { id: 'cd-1', name: 'CD-1', region: 'India' },
+  { id: 'cd-2', name: 'CD-2', region: 'Sri Lanka' },
+  { id: 'cd-3', name: 'CD-3', region: 'USA' },
+  { id: 'cd-4', name: 'CD-4', region: 'United Kingdom' },
+  { id: 'cd-5', name: 'CD-5', region: 'Turkey' },
+  { id: 'cd-6', name: 'CD-6', region: 'Switzerland' },
+  { id: 'cd-7', name: 'CD-7', region: 'Spain' },
+  { id: 'cd-8', name: 'CD-8', region: 'Germany' },
+];
+
+const SEED_PMS = [
+  { id: 'pm-1', name: 'PM-1' },
+  { id: 'pm-2', name: 'PM-2' },
+  { id: 'pm-3', name: 'PM-3' },
+  { id: 'pm-4', name: 'PM-4' },
+  { id: 'pm-5', name: 'PM-5' },
+  { id: 'pm-6', name: 'PM-6' },
+];
+
+const SEED_PROJECTS: Project[] = [
+  { id: 'p-1', projectCode: 'C200', name: 'Strategy Audit', client: 'Client-1', managerId: 'pm-1', managerName: 'PM-1', startDate: '2026-01-01', endDate: '2026-12-31', status: 'Active', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-2', projectCode: 'D350', name: 'Cloud Migration', client: 'Client-2', managerId: 'pm-2', managerName: 'PM-2', startDate: '2026-02-15', endDate: '2026-08-30', status: 'Active', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-3', projectCode: 'A100', name: 'Internal Ops Automation', client: 'Client-3', managerId: 'pm-3', managerName: 'PM-3', startDate: '2026-01-10', endDate: '2026-06-30', status: 'Active', billable: false, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-4', projectCode: 'E500', name: 'Global ERP Rollout', client: 'Client-4', managerId: 'pm-4', managerName: 'PM-4', startDate: '2026-03-01', endDate: '2027-03-01', status: 'Proposed', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-5', projectCode: 'B400', name: 'Cybersecurity Vetting', client: 'Client-5', managerId: 'pm-5', managerName: 'PM-5', startDate: '2026-04-01', endDate: '2026-05-30', status: 'Active', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-6', projectCode: 'F600', name: 'Data Lake Setup', client: 'Client-6', managerId: 'pm-6', managerName: 'PM-6', startDate: '2026-05-01', endDate: '2026-11-01', status: 'Proposed', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-7', projectCode: 'G700', name: 'Mobile App Refresh', client: 'Client-7', managerId: 'pm-1', managerName: 'PM-1', startDate: '2026-01-15', endDate: '2026-04-15', status: 'Completed', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-8', projectCode: 'H800', name: 'Compliance Audit', client: 'Client-8', managerId: 'pm-2', managerName: 'PM-2', startDate: '2026-04-15', endDate: '2026-07-15', status: 'Active', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-9', projectCode: 'I900', name: 'Salesforce Integration', client: 'Client-9', managerId: 'pm-3', managerName: 'PM-3', startDate: '2026-02-01', endDate: '2026-06-01', status: 'On Hold', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+  { id: 'p-10', projectCode: 'J1000', name: 'Brand Realignment', client: 'Client-10', managerId: 'pm-4', managerName: 'PM-4', startDate: '2026-03-15', endDate: '2026-09-15', status: 'Active', billable: true, plannedUtilization: 0, actualUtilization: 0, resourceCount: 0 },
+];
+
+const SEED_EMPLOYEES: Employee[] = [
+  { id: 'e-1', employeeId: 'WOS-001', name: 'WOS-001', email: 'admin@example.test', designation: 'General Manager', department: 'Management', country: 'United Kingdom', primaryCountryDirectorId: 'cd-1', mappedCountryDirectorIds: ['cd-1'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-2', employeeId: 'WOS-002', name: 'WOS-002', email: 'hr@example.test', designation: 'HR Lead', department: 'Human Resources', country: 'United Kingdom', primaryCountryDirectorId: 'cd-1', mappedCountryDirectorIds: ['cd-1'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-3', employeeId: 'WOS-101', name: 'WOS-101', email: 'bl-101@example.test', designation: 'Senior Consultant', department: 'Digital Transformation', country: 'Singapore', primaryCountryDirectorId: 'cd-3', mappedCountryDirectorIds: ['cd-3', 'cd-5'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-4', employeeId: 'WOS-102', name: 'WOS-102', email: 'bl-102@example.test', designation: 'Team Lead', department: 'Cloud Solutions', country: 'USA', primaryCountryDirectorId: 'cd-4', mappedCountryDirectorIds: ['cd-4'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-5', employeeId: 'WOS-103', name: 'WOS-103', email: 'bl-103@example.test', designation: 'Software Engineer', department: 'Software Engineering', country: 'South Korea', primaryCountryDirectorId: 'cd-3', mappedCountryDirectorIds: ['cd-3'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-6', employeeId: 'WOS-104', name: 'WOS-104', email: 'bl-104@example.test', designation: 'Consultant', department: 'Strategy', country: 'Spain', primaryCountryDirectorId: 'cd-1', mappedCountryDirectorIds: ['cd-1', 'cd-2'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-7', employeeId: 'WOS-105', name: 'WOS-105', email: 'bl-105@example.test', designation: 'Project Manager', department: 'Project Management', country: 'Nigeria', primaryCountryDirectorId: 'cd-6', mappedCountryDirectorIds: ['cd-6'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-8', employeeId: 'WOS-106', name: 'WOS-106', email: 'bl-106@example.test', designation: 'Director', department: 'Commercial', country: 'United Kingdom', primaryCountryDirectorId: 'cd-1', mappedCountryDirectorIds: ['cd-1'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-9', employeeId: 'WOS-107', name: 'WOS-107', email: 'bl-107@example.test', designation: 'Architect', department: 'Cloud Solutions', country: 'Japan', primaryCountryDirectorId: 'cd-3', mappedCountryDirectorIds: ['cd-3'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'e-10', employeeId: 'WOS-108', name: 'WOS-108', email: 'bl-108@example.test', designation: 'UX Designer', department: 'Design & Innovation', country: 'France', primaryCountryDirectorId: 'cd-1', mappedCountryDirectorIds: ['cd-1'], status: 'On Leave', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'pm-1', employeeId: 'PM-001', name: 'PM-001', email: 'pm-001@example.test', designation: 'Project Manager', department: 'Project Management', country: 'United Kingdom', primaryCountryDirectorId: 'cd-1', mappedCountryDirectorIds: ['cd-1'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'pm-2', employeeId: 'PM-002', name: 'PM-002', email: 'pm-002@example.test', designation: 'Project Manager', department: 'Project Management', country: 'Singapore', primaryCountryDirectorId: 'cd-3', mappedCountryDirectorIds: ['cd-3'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  { id: 'pm-3', employeeId: 'PM-003', name: 'PM-003', email: 'pm-003@example.test', designation: 'Project Manager', department: 'Project Management', country: 'USA', primaryCountryDirectorId: 'cd-4', mappedCountryDirectorIds: ['cd-4'], status: 'Active', plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 },
+  // Adding more to reach ~30
+];
+
+// Fill more employees programmatically for scale
+const depts = ['Digital Transformation', 'Cloud Solutions', 'Software Engineering', 'Strategy', 'Design & Innovation'];
+const countries = ['United Kingdom', 'USA', 'Singapore', 'Spain', 'France', 'Nigeria', 'India', 'Germany', 'Australia'];
+const firstNames = ['Employee'];
+const lastNames = ['Record'];
+
+while (false && SEED_EMPLOYEES.length < 35) {
+  const fName = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const lName = lastNames[Math.floor(Math.random() * lastNames.length)];
+  const name = `${fName} ${lName}`;
+  const id = `e-${SEED_EMPLOYEES.length + 1}`;
+  const empId = `WOS-${100 + SEED_EMPLOYEES.length}`;
+  const dept = depts[Math.floor(Math.random() * depts.length)];
+  const country = countries[Math.floor(Math.random() * countries.length)];
+  const cd = SEED_CDS[Math.floor(Math.random() * SEED_CDS.length)];
+
+  SEED_EMPLOYEES.push({
+    id,
+    employeeId: empId,
+    name,
+    email: `${fName.toLowerCase()}.${lName.toLowerCase()}@example.test`,
+    designation: 'Consultant',
+    department: dept,
+    country,
+    primaryCountryDirectorId: cd.id,
+    mappedCountryDirectorIds: [cd.id],
+    status: 'Active',
+    plannedUtilization: 0,
+    actualUtilization: 0,
+    activeProjectCount: 0
+  });
+}
+
+const defaultSettings: SystemSettings = {
+  utilizationThresholdHigh: 100,
+  utilizationThresholdLow: 80,
+  timesheetPolicyMaxHours: 40,
+  expectedWeeklyHours: 40,
+  benchThreshold: 20,
+  blockOverAllocation: false,
+  demoSubmissionMode: false,
+  currency: 'GBP'
+};
+
+const LEGACY_DEMO_PERSON_NAMES = new Set<string>();
+
+const defaultLeaveTypes: LeaveType[] = [
+  { id: 'leave-type-annual', code: 'ANNUAL', name: 'Annual Leave', paid: true, requiresApproval: true, active: true },
+  { id: 'leave-type-sick', code: 'SICK', name: 'Sick Leave', paid: true, requiresApproval: true, active: true },
+  { id: 'leave-type-unpaid', code: 'UNPAID', name: 'Unpaid Leave', paid: false, requiresApproval: true, active: true },
+];
+
+const defaultLeavePolicies: LeavePolicy[] = [
+  {
+    id: 'leave-policy-global',
+    name: 'Global Standard Leave Policy',
+    country: 'Global',
+    annualAllowanceDays: 24,
+    carryForwardDays: 5,
+    accrualMethod: 'Annual',
+    status: 'Active',
+    leaveTypeIds: defaultLeaveTypes.map(type => type.id),
+  },
+];
+
+const buildDefaultHolidayCalendars = (): HolidayCalendar[] => {
+  const year = new Date().getFullYear();
+  return [
+    {
+      id: `holiday-global-${year}`,
+      name: `Global Company Calendar ${year}`,
+      country: 'Global',
+      year,
+      status: 'Active',
+      holidays: [
+        { id: `holiday-global-${year}-new-year`, calendarId: `holiday-global-${year}`, name: 'New Year Holiday', date: `${year}-01-01`, type: 'Company' },
+        { id: `holiday-global-${year}-year-end`, calendarId: `holiday-global-${year}`, name: 'Year End Holiday', date: `${year}-12-25`, type: 'Company' },
+      ],
+    },
+  ];
+};
+
+const buildDefaultLeaveBalances = (employees: Employee[]): LeaveBalance[] => {
+  const year = new Date().getFullYear();
+  return employees
+    .filter(employee => employee.status !== 'Exited')
+    .map(employee => ({
+      id: `leave-balance-${employee.id}-${year}`,
+      employeeId: employee.id,
+      employeeName: employee.name,
+      leaveTypeId: 'leave-type-annual',
+      leaveTypeName: 'Annual Leave',
+      policyId: 'leave-policy-global',
+      year,
+      openingDays: 0,
+      accruedDays: 24,
+      usedDays: 0,
+      adjustedDays: 0,
+      pendingDays: 0,
+      availableDays: 24,
+    }));
+};
+
+const defaultNotificationTemplates: NotificationTemplate[] = [
+  {
+    id: 'notification-template-approval-requested',
+    eventType: 'ApprovalRequested',
+    channel: 'InApp',
+    subject: 'Approval requested',
+    body: 'A workforce approval item is waiting for review.',
+    active: true,
+  },
+  {
+    id: 'notification-template-approval-decided',
+    eventType: 'ApprovalDecided',
+    channel: 'InApp',
+    subject: 'Approval updated',
+    body: 'A workforce approval item has been decided.',
+    active: true,
+  },
+];
+
+const defaultEntraRoleMappings: EntraRoleMapping[] = (['Employee', 'TeamLead', 'ProjectManager', 'CountryDirector', 'HR', 'Admin'] as UserRole[]).map(role => ({
+  id: `entra-role-map-${role.toLowerCase()}`,
+  groupId: `mock-entra-group-${role.toLowerCase()}`,
+  groupName: `${productConfig.productName} ${role}`,
+  roleName: role,
+  active: true,
+}));
+
+const buildDefaultIdentityLinks = (employees: Employee[]): IdentityProviderLink[] => employees
+  .filter(employee => employee.entraObjectId)
+  .map(employee => ({
+    id: `identity-link-${employee.id}`,
+    employeeId: employee.id,
+    employeeName: employee.name,
+    provider: 'entra',
+    providerSubject: employee.entraObjectId || '',
+    providerUpn: employee.email,
+    status: 'Linked',
+  }));
+
+const buildDefaultTeamsLinks = (employees: Employee[]): TeamsUserLink[] => employees
+  .filter(employee => employee.teamsUserId)
+  .map(employee => ({
+    id: `teams-link-${employee.id}`,
+    employeeId: employee.id,
+    employeeName: employee.name,
+    teamsUserId: employee.teamsUserId || '',
+    teamsUpn: employee.email,
+    teamsTenantId: 'mock-tenant',
+    status: 'Linked',
+  }));
+
+const todayIso = () => new Date().toISOString().split('T')[0];
+const DEMO_PASSWORD_HASH = 'sha256:38094400ab24889690788361033f7727fe69ec3e18b4da756ee593d5dcba2c13';
+
+const rolesForEmployee = (employee: Employee): UserRole[] => {
+  if (employee.employeeId === 'ADMIN-1') return ['Admin'];
+  if (employee.employeeId === 'HR-1') return ['HR'];
+  if (employee.employeeId.startsWith('CD-')) return ['CountryDirector'];
+  if (employee.employeeId === 'PM-1') return ['ProjectManager', 'TeamLead', 'Employee'];
+  if (employee.employeeId.startsWith('PM-')) return ['ProjectManager', 'Employee'];
+  return ['Employee'];
+};
+
+const usernameForEmployee = (employee: Employee) => employee.employeeId.toLowerCase();
+
+const buildAccountForEmployee = (employee: Employee): UserAccount => {
+  const roles = rolesForEmployee(employee);
+  return {
+    id: `u-${employee.id}`,
+    userName: usernameForEmployee(employee),
+    employeeRecordId: employee.id,
+    employeeId: employee.employeeId,
+    email: employee.email,
+    displayName: employee.name,
+    passwordHash: DEMO_PASSWORD_HASH,
+    roles,
+    primaryRole: roles[0],
+    status: employee.status === 'Exited' ? 'Disabled' : 'Active',
+  };
+};
+
+export const isActiveOnDate = (startDate: string, endDate: string, date = todayIso()) => {
+  return overlapsDateRange(startDate, endDate, date, date);
+};
+
+// Storage abstraction
+export class DataStorage {
+  static get<T>(key: string, defaultValue: T): T {
+    const data = localStorage.getItem(key);
+    if (!data) return defaultValue;
+    try {
+      return JSON.parse(data);
+    } catch {
+      return defaultValue;
+    }
+  }
+
+  static set<T>(key: string, value: T): void {
+    localStorage.setItem(key, JSON.stringify(value));
+  }
+
+  static initialize() {
+    if (this.get<string>(STORAGE_KEYS.DEMO_DATA_VERSION, '') !== DEMO_DATA_VERSION || this.hasLegacyNamedDemoSeed()) {
+      this.resetDemoData();
+      return;
+    }
+
+    if (!localStorage.getItem(STORAGE_KEYS.CDS)) {
+      this.set(STORAGE_KEYS.CDS, generateDemoDataset().countryDirectors);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.CLIENTS)) {
+      this.set(STORAGE_KEYS.CLIENTS, generateDemoDataset().clients);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.PROJECTS)) {
+      this.set(STORAGE_KEYS.PROJECTS, generateDemoDataset().projects);
+    } else {
+      this.ensureClientMaster();
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.EMPLOYEES)) {
+      this.set(STORAGE_KEYS.EMPLOYEES, generateDemoDataset().employees);
+    } else {
+      this.ensureSeedEmployees();
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.ROLE_DEFINITIONS)) {
+      this.set(STORAGE_KEYS.ROLE_DEFINITIONS, DEFAULT_ROLE_DEFINITIONS);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.DEPARTMENT_CATALOG)) {
+      this.set<CatalogItem[]>(STORAGE_KEYS.DEPARTMENT_CATALOG, createDefaultCatalog('department', DEFAULT_DEPARTMENTS));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.COUNTRY_CATALOG)) {
+      this.set<CatalogItem[]>(STORAGE_KEYS.COUNTRY_CATALOG, createDefaultCatalog('country', DEFAULT_COUNTRIES));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.INDUSTRY_CATALOG)) {
+      this.set<CatalogItem[]>(STORAGE_KEYS.INDUSTRY_CATALOG, createDefaultCatalog('industry', DEFAULT_INDUSTRIES));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
+      this.set(STORAGE_KEYS.SETTINGS, defaultSettings);
+    } else {
+      this.set(STORAGE_KEYS.SETTINGS, { ...defaultSettings, ...this.get<SystemSettings>(STORAGE_KEYS.SETTINGS, defaultSettings) });
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.ALLOCATIONS)) {
+      this.set(STORAGE_KEYS.ALLOCATIONS, generateDemoDataset().allocations);
+      this.recalculateUtilization();
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.TIMESHEETS)) {
+      this.set(STORAGE_KEYS.TIMESHEETS, generateDemoDataset().timesheets);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
+      this.set(STORAGE_KEYS.AUDIT_LOGS, generateDemoDataset().auditLogs);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.IMPORT_EXPORT_LOGS)) {
+      this.set<ImportExportLog[]>(STORAGE_KEYS.IMPORT_EXPORT_LOGS, []);
+    }
+    this.ensureLeaveFoundation();
+    this.ensureIntegrationFoundation();
+    this.ensureUserAccounts();
+    this.recalculateUtilization();
+  }
+
+  static resetDemoData() {
+    const dataset = generateDemoDataset();
+    this.set(STORAGE_KEYS.CDS, dataset.countryDirectors);
+    this.set(STORAGE_KEYS.CLIENTS, dataset.clients);
+    this.set(STORAGE_KEYS.PROJECTS, dataset.projects);
+    this.set(STORAGE_KEYS.EMPLOYEES, dataset.employees);
+    this.set(STORAGE_KEYS.ALLOCATIONS, dataset.allocations);
+    this.set(STORAGE_KEYS.TIMESHEETS, dataset.timesheets);
+    this.set(STORAGE_KEYS.AUDIT_LOGS, dataset.auditLogs);
+    this.set<ImportExportLog[]>(STORAGE_KEYS.IMPORT_EXPORT_LOGS, []);
+    this.set(STORAGE_KEYS.ROLE_DEFINITIONS, dataset.roleDefinitions);
+    this.set<CatalogItem[]>(STORAGE_KEYS.DEPARTMENT_CATALOG, createDefaultCatalog('department', DEFAULT_DEPARTMENTS));
+    this.set<CatalogItem[]>(STORAGE_KEYS.COUNTRY_CATALOG, createDefaultCatalog('country', DEFAULT_COUNTRIES));
+    this.set<CatalogItem[]>(STORAGE_KEYS.INDUSTRY_CATALOG, createDefaultCatalog('industry', DEFAULT_INDUSTRIES));
+    this.set(STORAGE_KEYS.SETTINGS, defaultSettings);
+    this.set(STORAGE_KEYS.LEAVE_TYPES, defaultLeaveTypes);
+    this.set(STORAGE_KEYS.LEAVE_POLICIES, defaultLeavePolicies);
+    this.set(STORAGE_KEYS.HOLIDAY_CALENDARS, buildDefaultHolidayCalendars());
+    this.set(STORAGE_KEYS.LEAVE_BALANCES, buildDefaultLeaveBalances(dataset.employees));
+    this.set<LeaveRequest[]>(STORAGE_KEYS.LEAVE_REQUESTS, []);
+    this.set<ApprovalRecord[]>(STORAGE_KEYS.APPROVAL_RECORDS, []);
+    this.set<ApprovalDelegation[]>(STORAGE_KEYS.APPROVAL_DELEGATIONS, []);
+    this.set<NotificationEvent[]>(STORAGE_KEYS.NOTIFICATION_EVENTS, []);
+    this.set(STORAGE_KEYS.NOTIFICATION_TEMPLATES, defaultNotificationTemplates);
+    this.set<NotificationPreference[]>(STORAGE_KEYS.NOTIFICATION_PREFERENCES, []);
+    this.set<NotificationDeliveryAttempt[]>(STORAGE_KEYS.NOTIFICATION_DELIVERY_ATTEMPTS, []);
+    this.set(STORAGE_KEYS.INTEGRATION_IDENTITY_LINKS, buildDefaultIdentityLinks(dataset.employees));
+    this.set(STORAGE_KEYS.INTEGRATION_ENTRA_ROLE_MAPPINGS, defaultEntraRoleMappings);
+    this.set(STORAGE_KEYS.INTEGRATION_TEAMS_USER_LINKS, buildDefaultTeamsLinks(dataset.employees));
+    this.set<TeamsActionToken[]>(STORAGE_KEYS.INTEGRATION_TEAMS_ACTION_TOKENS, []);
+    this.set<IntegrationEventLog[]>(STORAGE_KEYS.INTEGRATION_EVENT_LOGS, []);
+    localStorage.removeItem(STORAGE_KEYS.AUTH);
+    localStorage.removeItem(STORAGE_KEYS.USER_ACCOUNTS);
+    sessionStorage.removeItem('workos_session');
+    this.set(STORAGE_KEYS.DEMO_DATA_VERSION, DEMO_DATA_VERSION);
+    this.ensureUserAccounts();
+    this.recalculateUtilization();
+  }
+
+  static hasLegacyNamedDemoSeed() {
+    const directors = this.get<CountryDirector[]>(STORAGE_KEYS.CDS, []);
+    const employees = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    return directors.some(director => LEGACY_DEMO_PERSON_NAMES.has(director.name)) ||
+      employees.some(employee => LEGACY_DEMO_PERSON_NAMES.has(employee.name));
+  }
+
+  static ensureSeedEmployees() {
+    const employees = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    const existingEmails = new Set(employees.map(e => e.email.toLowerCase()));
+    const missing = generateDemoDataset().employees.filter(e => !existingEmails.has(e.email.toLowerCase()));
+    if (missing.length > 0) {
+      this.set(STORAGE_KEYS.EMPLOYEES, [...employees, ...missing]);
+    }
+  }
+
+  static ensureLeaveFoundation() {
+    const employees = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    if (!localStorage.getItem(STORAGE_KEYS.LEAVE_TYPES)) {
+      this.set(STORAGE_KEYS.LEAVE_TYPES, defaultLeaveTypes);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.LEAVE_POLICIES)) {
+      this.set(STORAGE_KEYS.LEAVE_POLICIES, defaultLeavePolicies);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.HOLIDAY_CALENDARS)) {
+      this.set(STORAGE_KEYS.HOLIDAY_CALENDARS, buildDefaultHolidayCalendars());
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.LEAVE_BALANCES)) {
+      this.set(STORAGE_KEYS.LEAVE_BALANCES, buildDefaultLeaveBalances(employees));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.LEAVE_REQUESTS)) {
+      this.set<LeaveRequest[]>(STORAGE_KEYS.LEAVE_REQUESTS, []);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.APPROVAL_RECORDS)) {
+      this.set<ApprovalRecord[]>(STORAGE_KEYS.APPROVAL_RECORDS, []);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.APPROVAL_DELEGATIONS)) {
+      this.set<ApprovalDelegation[]>(STORAGE_KEYS.APPROVAL_DELEGATIONS, []);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.NOTIFICATION_EVENTS)) {
+      this.set<NotificationEvent[]>(STORAGE_KEYS.NOTIFICATION_EVENTS, []);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.NOTIFICATION_TEMPLATES)) {
+      this.set(STORAGE_KEYS.NOTIFICATION_TEMPLATES, defaultNotificationTemplates);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.NOTIFICATION_PREFERENCES)) {
+      this.set<NotificationPreference[]>(STORAGE_KEYS.NOTIFICATION_PREFERENCES, []);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.NOTIFICATION_DELIVERY_ATTEMPTS)) {
+      this.set<NotificationDeliveryAttempt[]>(STORAGE_KEYS.NOTIFICATION_DELIVERY_ATTEMPTS, []);
+    }
+  }
+
+  static ensureIntegrationFoundation() {
+    const employees = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    if (!localStorage.getItem(STORAGE_KEYS.INTEGRATION_IDENTITY_LINKS)) {
+      this.set(STORAGE_KEYS.INTEGRATION_IDENTITY_LINKS, buildDefaultIdentityLinks(employees));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.INTEGRATION_ENTRA_ROLE_MAPPINGS)) {
+      this.set(STORAGE_KEYS.INTEGRATION_ENTRA_ROLE_MAPPINGS, defaultEntraRoleMappings);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.INTEGRATION_TEAMS_USER_LINKS)) {
+      this.set(STORAGE_KEYS.INTEGRATION_TEAMS_USER_LINKS, buildDefaultTeamsLinks(employees));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.INTEGRATION_TEAMS_ACTION_TOKENS)) {
+      this.set<TeamsActionToken[]>(STORAGE_KEYS.INTEGRATION_TEAMS_ACTION_TOKENS, []);
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.INTEGRATION_EVENT_LOGS)) {
+      this.set<IntegrationEventLog[]>(STORAGE_KEYS.INTEGRATION_EVENT_LOGS, []);
+    }
+  }
+
+  static ensureClientMaster() {
+    const existingClients = this.get<Client[]>(STORAGE_KEYS.CLIENTS, []);
+    const projects = this.get<Project[]>(STORAGE_KEYS.PROJECTS, []);
+    const directors = this.get<CountryDirector[]>(STORAGE_KEYS.CDS, []);
+    const now = new Date().toISOString();
+    const clientsByName = new Map(existingClients.map(client => [client.name.toLowerCase(), client]));
+    const clientsById = new Map(existingClients.map(client => [client.id, client]));
+    const nextClients = [...existingClients];
+    let changed = false;
+
+    projects.forEach(project => {
+      const normalizedName = project.client.trim();
+      if (!normalizedName) return;
+      if (project.clientId && clientsById.has(project.clientId)) return;
+
+      const existing = clientsByName.get(normalizedName.toLowerCase());
+      if (existing) {
+        if (project.clientId !== existing.id) {
+          project.clientId = existing.id;
+          changed = true;
+        }
+        return;
+      }
+
+      const client: Client = {
+        id: `client-${normalizedName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || Date.now()}`,
+        name: normalizedName,
+        industry: 'Unclassified',
+        countryDirectorIds: directors[0] ? [directors[0].id] : [],
+        status: 'Active',
+        createdAt: now,
+        updatedAt: now,
+      };
+      clientsByName.set(client.name.toLowerCase(), client);
+      clientsById.set(client.id, client);
+      nextClients.push(client);
+      project.clientId = client.id;
+      changed = true;
+    });
+
+    if (changed || existingClients.length === 0) {
+      this.set(STORAGE_KEYS.CLIENTS, nextClients);
+      this.set(STORAGE_KEYS.PROJECTS, projects);
+    }
+  }
+
+  static ensureUserAccounts() {
+    const employees = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    const existing = this.get<UserAccount[]>(STORAGE_KEYS.USER_ACCOUNTS, []);
+    const existingByEmployeeRecord = new Map(existing.map(account => [account.employeeRecordId, account]));
+    const next = employees.map(employee => {
+      const generated = buildAccountForEmployee(employee);
+      const current = existingByEmployeeRecord.get(employee.id);
+      return {
+        ...generated,
+        ...current,
+        email: employee.email,
+        displayName: employee.name,
+        employeeId: employee.employeeId,
+        roles: generated.roles,
+        primaryRole: current?.primaryRole && generated.roles.includes(current.primaryRole) ? current.primaryRole : generated.primaryRole,
+        status: employee.status === 'Exited' ? 'Disabled' as const : current?.status || generated.status,
+      };
+    });
+    this.set(STORAGE_KEYS.USER_ACCOUNTS, next);
+    this.ensureClientMaster();
+  }
+
+  static recalculateUtilization() {
+    const allocations = this.get<Allocation[]>(STORAGE_KEYS.ALLOCATIONS, []);
+    const employees = this.get<Employee[]>(STORAGE_KEYS.EMPLOYEES, []);
+    const projects = this.get<Project[]>(STORAGE_KEYS.PROJECTS, []);
+    const timesheets = this.get<TimesheetSummary[]>(STORAGE_KEYS.TIMESHEETS, []);
+    const settings = this.get<SystemSettings>(STORAGE_KEYS.SETTINGS, defaultSettings);
+    const currentDate = todayIso();
+
+    const updatedEmployees = employees.map(emp => {
+      const empAlloc = getActiveAllocationsForEmployee(emp.id, allocations, projects, currentDate, currentDate);
+      const plannedUtil = getAllocationLoad(emp.id, allocations, projects, currentDate, currentDate);
+      const actualUtil = getLatestApprovedActualUtilization(emp.id, timesheets, settings);
+
+      return {
+        ...emp,
+        plannedUtilization: plannedUtil,
+        actualUtilization: actualUtil,
+        activeProjectCount: empAlloc.length
+      };
+    });
+
+    const updatedProjects = projects.map(proj => {
+      const projectIsActive = proj.status === 'Active' && isActiveOnDate(proj.startDate, proj.endDate, currentDate);
+      const projAlloc = allocations.filter(a =>
+        a.projectId === proj.id &&
+        a.status === 'Active' &&
+        projectIsActive &&
+        isActiveOnDate(a.startDate, a.endDate, currentDate)
+      );
+      const plannedUtil = projAlloc.reduce((sum, a) => sum + a.percentage, 0);
+      const projectApprovedEntries = timesheets
+        .filter(t => t.status === 'Approved')
+        .flatMap(t => t.entries)
+        .filter(entry => entry.projectId === proj.id);
+      const projectHours = projectApprovedEntries.reduce((sum, entry) => sum + entry.hours, 0);
+      const actualUtilization = projAlloc.length > 0
+        ? Math.round((projectHours / (settings.expectedWeeklyHours * Math.max(projAlloc.length, 1))) * 100)
+        : proj.actualUtilization;
+      return {
+        ...proj,
+        plannedUtilization: plannedUtil,
+        actualUtilization,
+        resourceCount: projAlloc.length
+      };
+    });
+
+    this.set(STORAGE_KEYS.EMPLOYEES, updatedEmployees);
+    this.set(STORAGE_KEYS.PROJECTS, updatedProjects);
+  }
+
+  static logAction(
+    userId: string,
+    userName: string,
+    userRole: string,
+    action: string,
+    module: string,
+    details: string,
+    metadata: Partial<Pick<AuditLog, 'entityType' | 'entityId' | 'oldValue' | 'newValue' | 'reason' | 'source' | 'activeRole'>> = {}
+  ) {
+    const logs = this.get<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, []);
+    const newLog: AuditLog = {
+      id: crypto.randomUUID(),
+      userId,
+      userName,
+      userRole,
+      activeRole: metadata.activeRole || userRole,
+      source: metadata.source || 'Web',
+      action,
+      module,
+      details,
+      ...metadata,
+      timestamp: new Date().toISOString()
+    };
+    this.set(STORAGE_KEYS.AUDIT_LOGS, [newLog, ...logs].slice(0, 500));
+  }
+}
+
+export { STORAGE_KEYS };
