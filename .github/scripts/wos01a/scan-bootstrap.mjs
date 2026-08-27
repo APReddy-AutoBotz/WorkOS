@@ -118,13 +118,44 @@ const packageProvenanceHosts = new Set([
   'www.patreon.com',
   'feross.org',
 ]);
-const isKnownNonRuntimeUrl = (relative, parsed) =>
+const isSvgNamespaceDeclaration = (relative, text, start, rawUrl) => {
+  if (!relative.endsWith('.svg') || rawUrl !== 'http://www.w3.org/2000/svg') return false;
+  const prefix = text.slice(Math.max(0, start - 16), start);
+  return /xmlns\s*=\s*["']$/i.test(prefix);
+};
+const isKnownNonRuntimeUrl = (relative, parsed, context) =>
   (['package.json', 'package-lock.json'].includes(relative) && packageProvenanceHosts.has(parsed.hostname.toLowerCase())) ||
-  (relative.endsWith('.svg') && parsed.href === 'http://www.w3.org/2000/svg');
+  isSvgNamespaceDeclaration(relative, context.text, context.start, context.rawUrl);
 const normalizeLocalTemplateUrl = (rawUrl) => rawUrl.replace(
   /^(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])):\$\{[^}]+\}/i,
   '$1:0',
 );
+const extractUrlCandidates = (relative, text) => {
+  const candidates = [];
+  const occupied = [];
+  const add = (rawUrl, start, end) => {
+    if (occupied.some(([left, right]) => start >= left && start < right)) return;
+    candidates.push({ rawUrl, start });
+    occupied.push([start, end]);
+  };
+
+  // Schemed URLs are authoritative for their entire occurrence. Recording their spans first
+  // prevents the protocol-relative extractor from re-reading the `//` inside any scheme.
+  for (const match of text.matchAll(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>`]+/gi)) {
+    add(match[0], match.index, match.index + match[0].length);
+  }
+  for (const match of text.matchAll(/(?:^|[='"`(])\s*(\/\/[A-Za-z0-9.\-\[\]:]+(?:\/[^\s'"<>`]*)?)/gm)) {
+    const start = match.index + match[0].lastIndexOf(match[1]);
+    add(match[1], start, start + match[1].length);
+  }
+  if (/(?:^|\/)(?:\.env(?:\.[^/]+)?|[^/]+\.ya?ml)$/i.test(relative)) {
+    for (const match of text.matchAll(/^[ \t]*[A-Za-z_][\w.-]*[ \t]*:[ \t]*(\/\/[A-Za-z0-9.\-\[\]:]+(?:\/[^\s#'"<>`]*)?)/gm)) {
+      const start = match.index + match[0].lastIndexOf(match[1]);
+      add(match[1], start, start + match[1].length);
+    }
+  }
+  return candidates;
+};
 
 const failures = [];
 for (const file of [...new Set(files)].sort()) {
@@ -167,13 +198,9 @@ for (const file of [...new Set(files)].sort()) {
     /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\$\{[^}\r\n]+\}/gi,
     rawUrl => normalizeLocalTemplateUrl(rawUrl),
   );
-  const urlCandidates = [
-    ...urlScanText.matchAll(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>`]+/gi),
-    ...urlScanText.matchAll(/(?:^|[='"`(:])\s*\/\/([A-Za-z0-9.\-\[\]:]+)(?:\/[^\s'"<>`]*)?/gm),
-  ];
-  for (const match of urlCandidates) {
-    const matchedUrl = match[0].replace(/^[='"`(:\s]+/, '');
-    const rawUrl = normalizeLocalTemplateUrl(matchedUrl.replace(/[),.;]+$/, ''));
+  const urlCandidates = extractUrlCandidates(relative, urlScanText);
+  for (const candidate of urlCandidates) {
+    const rawUrl = normalizeLocalTemplateUrl(candidate.rawUrl.replace(/[),.;]+$/, ''));
     try {
       const parsed = new URL(rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl);
       if (parsed.username || parsed.password) {
@@ -181,7 +208,11 @@ for (const file of [...new Set(files)].sort()) {
         continue;
       }
       if (!['http:', 'https:'].includes(parsed.protocol)) continue;
-      if (!isAllowedHost(parsed.hostname.toLowerCase()) && !isKnownNonRuntimeUrl(relative, parsed)) {
+      if (!isAllowedHost(parsed.hostname.toLowerCase()) && !isKnownNonRuntimeUrl(relative, parsed, {
+        text: urlScanText,
+        start: candidate.start,
+        rawUrl,
+      })) {
         failures.push(`non-placeholder remote URL (${parsed.hostname}): ${relative}`);
       }
     } catch {
@@ -212,6 +243,15 @@ if (selfTest) {
     }
   };
   try {
+    for (const candidate of [
+      'http://www.w3.org/2000/svg',
+      'postgresql://db.example.invalid/workos',
+    ]) {
+      const extracted = extractUrlCandidates('src/example.ts', candidate);
+      if (extracted.length !== 1 || extracted[0].rawUrl !== candidate) {
+        throw new Error(`Scheme URL was not classified exactly once: ${candidate}`);
+      }
+    }
     await runFixture('approved-test-credential', { 'tests/auth.mjs': "const password = 'workos-test-only';\n" }, true);
     await runFixture('historical-shared-password', { 'tests/auth.mjs': "const password = 'demo123';\n" }, false);
     await runFixture('test-credential-runtime-innocuous-name', { 'src/leak.ts': "export const marker = 'workos-test-only';\n" }, false);
@@ -241,6 +281,11 @@ if (selfTest) {
     await runFixture('protocol-relative-url', { 'src/bad.ts': "const endpoint = '//prod.customer.example.com/api';\n" }, false);
     await runFixture('yaml-protocol-relative-url', { 'server/config.yml': 'endpoint: //prod.customer.example.com/api\n' }, false);
     await runFixture('safe-comments-and-prose', { 'src/safe.ts': '// prod.customer.example.com is prose, not an endpoint\nconst ratio = total // divisor;\n', 'server/config.yml': '# //prod.customer.example.com is a comment\n' }, true);
+    await runFixture('non-http-scheme-example', { 'docs/03-specifications/WOS01A_RETAINED_REQUIREMENTS.md': 'DATABASE_URL=postgresql://db.example.invalid/workos\n' }, true);
+    await runFixture('non-http-scheme-userinfo', { 'docs/03-specifications/WOS01A_RETAINED_REQUIREMENTS.md': 'DATABASE_URL=postgresql://user:pass@db.example.invalid/workos\n' }, false);
+    await runFixture('svg-namespace', { 'public/mark.svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>\n' }, true);
+    await runFixture('svg-w3c-runtime-url', { 'public/mark.svg': '<svg><a href="https://www.w3.org/2000/svg">bad</a></svg>\n' }, false);
+    await runFixture('svg-w3c-http-non-namespace', { 'public/mark.svg': '<svg data-url="http://www.w3.org/2000/svg"></svg>\n' }, false);
     await runFixture('hostname-lookalike', { 'src/bad.ts': "const endpoint = 'https://graph.microsoft.com.evil.example/api';\n" }, false);
     await runFixture('runtime-provenance', { 'src/bad.ts': "const endpoint = 'https://github.com/customer/private-api';\n" }, false);
     await runFixture('private-key', { 'tests/key.txt': '-----BEGIN ENCRYPTED PRIVATE KEY-----\nnot-a-real-key\n' }, false);
