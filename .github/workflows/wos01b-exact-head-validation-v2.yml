@@ -1,0 +1,153 @@
+name: WOS-01B Exact-Head Validation V2
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+    paths:
+      - '.github/workflows/wos01b-exact-head-validation-v2.yml'
+      - '.github/workflows/wos01a-clean-runtime-acceptance.yml'
+      - '.github/workflows/wos01b-clean-runtime-publisher.yml'
+      - '.github/scripts/wos01b-clean-runtime-closure.mjs'
+      - '.github/scripts/wos01b-browser-acceptance.mjs'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: wos01b-exact-head-validation-v2
+  cancel-in-progress: true
+
+env:
+  CONTROLLER_PR_NUMBER: '24'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance
+  TARGET_PR_NUMBER: '16'
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  EXPECTED_TARGET_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_TARGET_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  CLOSURE_SCRIPT: .github/scripts/wos01b-clean-runtime-closure.mjs
+  BROWSER_SCRIPT: .github/scripts/wos01b-browser-acceptance.mjs
+
+jobs:
+  validate:
+    name: Validate exact WOS-01B correction and browser journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Verify exact controller and target authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const controller = context.payload.pull_request;
+            const failures = [];
+            if (controller.number !== Number(process.env.CONTROLLER_PR_NUMBER)) failures.push(`controller.number=${controller.number}`);
+            if (controller.state !== 'open') failures.push(`controller.state=${controller.state}`);
+            if (!controller.draft) failures.push('controller PR must remain Draft');
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
+            if (controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base.sha=${controller.base.sha}`);
+
+            const { data: main } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`current.main=${main.commit.sha}`);
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: controller.number,
+              per_page: 100,
+            });
+            const actual = files.map(file => file.filename).sort();
+            const expected = [
+              '.github/scripts/wos01b-browser-acceptance.mjs',
+              '.github/scripts/wos01b-clean-runtime-closure.mjs',
+              '.github/workflows/wos01a-clean-runtime-acceptance.yml',
+              '.github/workflows/wos01b-clean-runtime-publisher.yml',
+              '.github/workflows/wos01b-exact-head-validation-v2.yml',
+            ].sort();
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`controller.paths=${JSON.stringify(actual)}`);
+
+            const { data: target } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR_NUMBER),
+            });
+            if (target.state !== 'open') failures.push(`target.state=${target.state}`);
+            if (!target.draft) failures.push('target PR is not Draft');
+            if (target.merged_at) failures.push(`target.merged_at=${target.merged_at}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
+            if (target.base.ref !== 'main') failures.push(`target.base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.EXPECTED_TARGET_BASE) failures.push(`target.base.sha=${target.base.sha}`);
+
+            if (failures.length) core.setFailed(`WOS-01B V2 authority failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact WorkOS implementation head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_TARGET_HEAD }}
+          path: workos
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workos/package-lock.json
+
+      - name: Verify isolated exact inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git -C workos rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+          test -z "$(git -C workos status --porcelain)"
+          git -C workos merge-base --is-ancestor "$EXPECTED_TARGET_BASE" HEAD
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
+          test -z "$(git -C workos config --local --get-regexp 'http\..*\.extraheader|credential\..*|credential.helper' || true)"
+          node --check "controller/$CLOSURE_SCRIPT"
+          node --check "controller/$BROWSER_SCRIPT"
+
+      - name: Materialize and verify complete WOS-01B correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "controller/$CLOSURE_SCRIPT" workos | tee /tmp/wos01b-v2-closure.json
+
+      - name: Run bounded local browser role journeys
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$(git -C workos status --porcelain)"
+          node "controller/$BROWSER_SCRIPT" workos /tmp/wos01b-v2-browser | tee /tmp/wos01b-v2-browser-summary.json
+          after="$(git -C workos status --porcelain)"
+          test "$after" = "$before"
+
+      - name: Upload exact-head validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01b-v2-${{ github.event.pull_request.head.sha }}
+          path: |
+            /tmp/wos01b-v2-closure.json
+            /tmp/wos01b-v2-browser-summary.json
+            /tmp/wos01b-v2-browser
+          if-no-files-found: warn
+          retention-days: 14
