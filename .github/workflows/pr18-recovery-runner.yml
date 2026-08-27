@@ -1,4 +1,4 @@
-name: PR18 Count-Recovery Publisher + Exact-Head Acceptance
+name: PR18 Exact-Head WOS-01A Acceptance
 
 on:
   push:
@@ -9,27 +9,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
   issues: read
 
 concurrency:
-  group: pr18-count-recovery
+  group: pr18-exact-head-acceptance
   cancel-in-progress: false
 
 env:
   PUBLISHER_PR: '18'
   PUBLISHER_BRANCH: controller/wos01a-actions-publisher
-  OLD_PUBLISHER_HEAD: d37aadeadc15364fc2cfd338d7e4519dbd52d6ca
-  OLD_PUBLISHER_TREE: ec272c67f2a038b06fc24a1c2db2afd6f6572dc4
-  TARGET_PUBLISHER_TREE: d787ee5972dbea2349da431f97058d333b4b8c50
-  TARGET_FILE_BLOB: 5cad75f382ddafc9c548276225a8c1127c831f06
-  RECOVERY_COMMENT_ID: '5434583890'
-  RAW_PATCH_BYTES: '12115'
-  RAW_PATCH_SHA256: 474b0a1f13bbe167d817fb5cf012b93bdca660b23f6516661518eac3cc46c990
-  XZ_PATCH_BYTES: '3588'
-  XZ_PATCH_SHA256: 22328f084bde5a92dc3b30abe963419fdaca8aeda4abaa7f61bd37b3b8bc5969
-  BASE64_CHARACTERS: '4784'
+  PUBLISHER_HEAD: 5a14fd61536cc3f49296dd5fdf1fc1e806c7dfbc
+  PUBLISHER_TREE: 998c9b1044b834953836e361cf56018236bb401c
   TARGET_PR: '16'
   TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   TARGET_HEAD: 7e4b5fad6e0d0d95ddd6c58015a787fb201d8661
@@ -39,115 +31,33 @@ env:
   REFERENCE_TREE: fdaa5d92854d378dae1c6146a8f09c7f34f8c273
 
 jobs:
-  publish-and-verify:
-    name: Publish exact count fix and verify WOS-01A publisher
+  verify:
+    name: Verify exact publisher head and WOS-01A acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 50
 
     steps:
-      - name: Verify live Draft PR identities before recovery
+      - name: Verify live Draft PR identities
         uses: actions/github-script@v7
         with:
           script: |
             const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
             const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
             const failures = [];
-            if (publisher.state !== 'open' || !publisher.draft || publisher.head.ref !== process.env.PUBLISHER_BRANCH || publisher.head.sha !== process.env.OLD_PUBLISHER_HEAD) failures.push(`publisher=${publisher.state}/${publisher.draft}/${publisher.head.ref}/${publisher.head.sha}`);
+            if (publisher.state !== 'open' || !publisher.draft || publisher.head.ref !== process.env.PUBLISHER_BRANCH || publisher.head.sha !== process.env.PUBLISHER_HEAD) failures.push(`publisher=${publisher.state}/${publisher.draft}/${publisher.head.ref}/${publisher.head.sha}`);
             if (target.state !== 'open' || !target.draft || target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target=${target.state}/${target.draft}/${target.head.ref}/${target.head.sha}`);
             if (target.base.ref !== 'main' || target.base.sha !== process.env.WOS00_ACCEPTED_BASE) failures.push(`target.base=${target.base.ref}/${target.base.sha}`);
-            const { data: oldCommit } = await github.rest.git.getCommit({ owner: context.repo.owner, repo: context.repo.repo, commit_sha: process.env.OLD_PUBLISHER_HEAD });
-            if (oldCommit.tree.sha !== process.env.OLD_PUBLISHER_TREE) failures.push(`publisher.tree=${oldCommit.tree.sha}`);
-            if (failures.length) core.setFailed(`Recovery start gate failed: ${failures.join(', ')}`);
+            const { data: commit } = await github.rest.git.getCommit({ owner: context.repo.owner, repo: context.repo.repo, commit_sha: process.env.PUBLISHER_HEAD });
+            if (commit.tree.sha !== process.env.PUBLISHER_TREE) failures.push(`publisher.tree=${commit.tree.sha}`);
+            if (failures.length) core.setFailed(`Acceptance start gate failed: ${failures.join(', ')}`);
 
-      - name: Checkout exact old publisher revision without credentials
+      - name: Checkout exact publisher head without credentials
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.OLD_PUBLISHER_HEAD }}
+          ref: ${{ env.PUBLISHER_HEAD }}
           path: controller
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Extract canonical Codex recovery artifact
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const { data } = await github.rest.issues.getComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: Number(process.env.RECOVERY_COMMENT_ID) });
-            const body = data.body || '';
-            for (const required of [
-              `PATCH_PARENT=${process.env.OLD_PUBLISHER_HEAD}`,
-              `PATCH_TREE=${process.env.TARGET_PUBLISHER_TREE}`,
-              `RAW_PATCH_BYTES=${process.env.RAW_PATCH_BYTES}`,
-              `RAW_PATCH_SHA256=${process.env.RAW_PATCH_SHA256}`,
-              `XZ_PATCH_BYTES=${process.env.XZ_PATCH_BYTES}`,
-              `XZ_PATCH_SHA256=${process.env.XZ_PATCH_SHA256}`,
-              `BASE64_CHARACTERS=${process.env.BASE64_CHARACTERS}`,
-            ]) {
-              if (!body.includes(required)) core.setFailed(`Recovery comment missing ${required}`);
-            }
-            const start = body.indexOf('`PATCH_BASE64_BEGIN`');
-            const end = body.indexOf('`PATCH_BASE64_END`');
-            if (start < 0 || end <= start) core.setFailed('Recovery payload markers missing');
-            const section = body.slice(start + '`PATCH_BASE64_BEGIN`'.length, end);
-            const b64 = section.replace(/```(?:text)?/g, '').replace(/\s+/g, '');
-            if (b64.length !== Number(process.env.BASE64_CHARACTERS)) core.setFailed(`Base64 length mismatch: ${b64.length}`);
-            fs.writeFileSync('/tmp/wos01a-count.patch.xz.b64', b64, 'utf8');
-
-      - name: Reconstruct and verify exact corrected tree
-        working-directory: controller
-        shell: bash
-        run: |
-          set -euo pipefail
-          base64 -d /tmp/wos01a-count.patch.xz.b64 > /tmp/wos01a-count.patch.xz
-          test "$(wc -c < /tmp/wos01a-count.patch.xz | tr -d ' ')" = "$XZ_PATCH_BYTES"
-          echo "$XZ_PATCH_SHA256  /tmp/wos01a-count.patch.xz" | sha256sum --check
-          xz -dc /tmp/wos01a-count.patch.xz > /tmp/wos01a-count.patch
-          test "$(wc -c < /tmp/wos01a-count.patch | tr -d ' ')" = "$RAW_PATCH_BYTES"
-          echo "$RAW_PATCH_SHA256  /tmp/wos01a-count.patch" | sha256sum --check
-          git apply --binary --index /tmp/wos01a-count.patch
-          test "$(git write-tree)" = "$TARGET_PUBLISHER_TREE"
-          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = 1
-          test "$(git diff --cached --name-only)" = '.github/scripts/wos01a-source-bootstrap.mjs'
-          git diff --cached --check
-          node --check .github/scripts/wos01a-source-bootstrap.mjs
-          node .github/scripts/wos01a-source-bootstrap.mjs --self-test-changed-paths
-          node --check .github/scripts/wos01a/scan-bootstrap.mjs
-          node --check .github/scripts/wos01a/apply-final-neutralization.mjs
-          node --check .github/scripts/wos01a/verify-baseline.mjs
-          node .github/scripts/wos01a/scan-bootstrap.mjs --self-test
-          ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-source-bootstrap-publisher.yml'); puts 'yaml passed'"
-
-      - name: Atomically publish corrected tree to existing PR 18 branch
-        id: publish
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const crypto = require('crypto');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const filePath = '.github/scripts/wos01a-source-bootstrap.mjs';
-            const bytes = fs.readFileSync(`controller/${filePath}`);
-            const gitBlobSha = crypto.createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`), bytes])).digest('hex');
-            if (gitBlobSha !== process.env.TARGET_FILE_BLOB) core.setFailed(`Target blob mismatch: ${gitBlobSha}`);
-
-            let { data: publisher } = await github.rest.pulls.get({ owner, repo, pull_number: Number(process.env.PUBLISHER_PR) });
-            if (publisher.head.sha !== process.env.OLD_PUBLISHER_HEAD || publisher.head.ref !== process.env.PUBLISHER_BRANCH || publisher.state !== 'open' || !publisher.draft) core.setFailed(`Publisher moved before publication: ${publisher.head.sha}`);
-            const { data: target } = await github.rest.pulls.get({ owner, repo, pull_number: Number(process.env.TARGET_PR) });
-            if (target.head.sha !== process.env.TARGET_HEAD || target.state !== 'open' || !target.draft) core.setFailed(`Target moved before publication: ${target.head.sha}`);
-
-            const { data: blob } = await github.rest.git.createBlob({ owner, repo, content: bytes.toString('base64'), encoding: 'base64' });
-            if (blob.sha !== process.env.TARGET_FILE_BLOB) core.setFailed(`Created blob mismatch: ${blob.sha}`);
-            const { data: tree } = await github.rest.git.createTree({ owner, repo, base_tree: process.env.OLD_PUBLISHER_TREE, tree: [{ path: filePath, mode: '100644', type: 'blob', sha: blob.sha }] });
-            if (tree.sha !== process.env.TARGET_PUBLISHER_TREE) core.setFailed(`Target tree mismatch: ${tree.sha}`);
-            const { data: commit } = await github.rest.git.createCommit({ owner, repo, message: 'ci: count materialized files exactly', tree: tree.sha, parents: [process.env.OLD_PUBLISHER_HEAD] });
-
-            ({ data: publisher } = await github.rest.pulls.get({ owner, repo, pull_number: Number(process.env.PUBLISHER_PR) }));
-            if (publisher.head.sha !== process.env.OLD_PUBLISHER_HEAD) core.setFailed(`Publisher moved during object construction: ${publisher.head.sha}`);
-            await github.rest.git.updateRef({ owner, repo, ref: `heads/${process.env.PUBLISHER_BRANCH}`, sha: commit.sha, force: false });
-            const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: `heads/${process.env.PUBLISHER_BRANCH}` });
-            if (ref.object.sha !== commit.sha) core.setFailed(`Ref verification failed: ${ref.object.sha}`);
-            core.setOutput('new_head', commit.sha);
 
       - name: Checkout exact protected WOS-01A Draft branch
         uses: actions/checkout@v4
@@ -173,11 +83,12 @@ jobs:
           cache: npm
           cache-dependency-path: reference/package-lock.json
 
-      - name: Verify immutable acceptance identities and credential isolation
+      - name: Verify immutable identities and credential isolation
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C controller write-tree)" = "$TARGET_PUBLISHER_TREE"
+          test "$(git -C controller rev-parse HEAD)" = "$PUBLISHER_HEAD"
+          test "$(git -C controller rev-parse HEAD^{tree})" = "$PUBLISHER_TREE"
           test "$(git -C workos rev-parse HEAD)" = "$TARGET_HEAD"
           test "$(git -C reference rev-parse HEAD)" = "$REFERENCE_COMMIT"
           test "$(git -C reference rev-parse HEAD^{tree})" = "$REFERENCE_TREE"
@@ -189,6 +100,18 @@ jobs:
             ! git -C "$repo" remote get-url origin | grep -Eq 'https://[^/@]+@'
           done
 
+      - name: Verify publisher syntax and adversarial fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check controller/.github/scripts/wos01a-source-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/scan-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a/apply-final-neutralization.mjs
+          node --check controller/.github/scripts/wos01a/verify-baseline.mjs
+          node controller/.github/scripts/wos01a-source-bootstrap.mjs --self-test-changed-paths
+          node controller/.github/scripts/wos01a/scan-bootstrap.mjs --self-test
+          ruby -e "require 'yaml'; YAML.parse_file('controller/.github/workflows/wos01a-source-bootstrap-publisher.yml'); puts 'yaml passed'"
+
       - name: Run authoritative exact-head WOS-01A acceptance path
         shell: bash
         run: |
@@ -198,11 +121,9 @@ jobs:
 
       - name: Revalidate live heads after acceptance
         uses: actions/github-script@v7
-        env:
-          NEW_PUBLISHER_HEAD: ${{ steps.publish.outputs.new_head }}
         with:
           script: |
             const { data: publisher } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PUBLISHER_PR) });
             const { data: target } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR) });
-            if (publisher.head.sha !== process.env.NEW_PUBLISHER_HEAD) core.setFailed(`PR #18 moved during acceptance: ${publisher.head.sha}`);
+            if (publisher.head.sha !== process.env.PUBLISHER_HEAD) core.setFailed(`PR #18 moved during acceptance: ${publisher.head.sha}`);
             if (target.head.sha !== process.env.TARGET_HEAD) core.setFailed(`PR #16 moved during acceptance: ${target.head.sha}`);
