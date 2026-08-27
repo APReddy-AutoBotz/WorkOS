@@ -112,6 +112,14 @@ jobs:
           node controller/.github/scripts/wos01a/scan-bootstrap.mjs --self-test
           ruby -e "require 'yaml'; YAML.parse_file('controller/.github/workflows/wos01a-source-bootstrap-publisher.yml'); puts 'yaml passed'"
 
+      - name: Apply the publisher's bounded final neutralization
+        shell: bash
+        run: |
+          set -euo pipefail
+          node controller/.github/scripts/wos01a/apply-final-neutralization.mjs \
+            controller/.github/scripts/wos01a-source-bootstrap.mjs
+          node --check controller/.github/scripts/wos01a-source-bootstrap.mjs
+
       - name: Run authoritative exact-head WOS-01A acceptance path
         shell: bash
         run: |
