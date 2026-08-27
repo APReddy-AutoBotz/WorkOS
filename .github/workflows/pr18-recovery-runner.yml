@@ -21,16 +21,17 @@ concurrency:
 
 env:
   TARGET_BRANCH: controller/wos01a-actions-publisher
-  EXPECTED_TARGET_HEAD: 5885b294963a91289e1d1241c0a5e0b0cfe41cec
-  EXPECTED_TARGET_PARENT: 5932d3135f47612f9b7fa6dbd9c577207009e6b7
-  EXPECTED_TARGET_TREE: 8958ebbc66ec4909aa7bec4fddab1363897e93a7
-  RAW_PATCH_SHA256: d5822d2575c4bf59f8c4de0c1d8886db1d6b98ce85cdd9ca423a0cfd5b100eca
-  XZ_PATCH_SHA256: 198cca7352008f88e357f1229fa102729c609503a3db395327cefebeb7895e8a
+  EXPECTED_TARGET_HEAD: 4f59222649ed874109250ea6235da55d7d7d0b0a
+  EXPECTED_TARGET_TREE: b6db98362cb527185389ad71bfd5a2db13bba1c8
+  TARGET_FILE: .github/scripts/wos01a-source-bootstrap.mjs
+  TARGET_BLOB: b15d20f4b7677639937f0d7ef5522f26a6623a6d
+  RAW_PATCH_SHA256: 8be6d1f9fe2bcea93d4fdaa83b2d5523205915cb308a3b1c9d9cac9c58342091
+  XZ_PATCH_SHA256: a13d5cfaa5d13d396742af5cc72359f13bab86703e44c72f676fd54da2a0586c
   PR_NUMBER: '18'
 
 jobs:
   recover:
-    name: Publish exact reviewed PR18 target tree
+    name: Publish exact semicolon-safe PR18 target tree
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -39,125 +40,83 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.PR_NUMBER),
-            });
+            const { data: pr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PR_NUMBER) });
             const failures = [];
             if (pr.state !== 'open') failures.push(`state=${pr.state}`);
-            if (!pr.draft) failures.push('PR is not Draft');
+            if (!pr.draft) failures.push('not Draft');
             if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
             if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
             if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
-            if (failures.length) core.setFailed(`PR #18 recovery start gate failed: ${failures.join(', ')}`);
+            if (failures.length) core.setFailed(`PR #18 recovery guard failed: ${failures.join(', ')}`);
 
       - name: Checkout exact PR #18 branch without persisted credentials
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.TARGET_BRANCH }}
-          fetch-depth: 2
+          ref: ${{ env.EXPECTED_TARGET_HEAD }}
+          fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify exact branch ancestry and temporary-helper-only delta
+      - name: Decode and verify approved one-file correction
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_TARGET_PARENT"
-          test "$(git diff --name-only "$EXPECTED_TARGET_PARENT" HEAD)" = ".github/workflows/wos01a-pr18-patch-recovery.yml"
           test -z "$(git status --porcelain)"
-          test -z "$(git config --get credential.helper || true)"
-          test -z "$(git config --get-all http.https://github.com/.extraheader || true)"
-          ! git remote get-url origin | grep -Eq 'x-access-token|oauth2|github_pat|ghp_'
-
-      - name: Decode, verify and apply canonical three-file correction
-        shell: bash
-        run: |
-          set -euo pipefail
           cat > /tmp/wos01a.patch.xz.b64 <<'PAYLOAD'
-          /Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4CAJCjVdADIaSQnC/BF9UN4KT0fM8VPxtdoVrw2gT8G03Zk3CFRcCLY7EmrlqJvHofhA+dYD6c0EevV2ytV32k50CSfxlrzvCPScmsdTy4X50cwVWEkOGm8HYebxyNHrd69ZFzKpxSi/vkSdjpF6rKVkJZTkGsO6LpwApGwIanPRdBiwDdN9Zcc3OK06H+gQbPjn3t1S2xe2zG6vbWnLeXxkbBi6HEl9pwCDji2gCwr7rjDaGZ08iQ3WSTCjA/AMu4YkEK51TdgoeG3ViT3y4W7IOno4yfKzU3efCUs+Wa7HVHU0/MW4HbHCaPoA+Z98c9Uk+A/A4jNsBMJn6vllkC3ps7Enf+34gosZ8bd7a9sb3ASHVAjYKXVqsIZwAtY54XRJ/Ul/MNdu1Th2PvX4aH/3yRhPwxJJaCwzXv9TGVZKfKIas4jza5omMwddwvhv5oTFVZMy4gG1g+59Z50wYyHfmtd7+XT5CaULNxwsOnBrDhIYPvxR0TfxPaaXPE1KWGVaMAHXg0/LQwxCvyeMdkYdm59cBuXBUsDoupYgH4TCx7CsyiIxkgKGNTA4jaL0Ll+mVLG9aaKXTB1kmknbMlLCADzabVvWMHCqD1i2JxDo/6TQ+9GEn4aIQp9Tw0U6musJuhLfZLK1kV5f34Kd34Fk96//AeVfer3gGR9q21ejJF6Qah961Ds+HxSTa2Aj9YfkCAyHiKFqD9nmyrDF3NlUw5SXHWnbztsqwQam0yLN4LopqFWPY/tffIUTS5AyaG90fR30y1IQG8fxU762/MwoCTKEottvPM/L8W0ZmBV+A3Jj+XITEF6sdkwF3gQxfLCYQr2/6AyWaipB7fl7wiVYzilFrAxRG0/zfv2ZebYtnDrK8G7zeEKqY/kt9CsBwf2Ohr4GhBcKAyFaNaVhNOvZio/uMf+XDvl3a/QimUQM3aVtEw5GsqwC+0lhFASl92eENCLJ1lX3d6MTbwNYWUafay4RApDAVzAn5wmDyB96VVAQaukebJzhSIVpVQJc8JKoG4fr6I/6NsUj/Oo3kd2s11aFwPXketH8O9kMlzv7gjvQ+ECoUwier5vw617v/xfIPsAf+mTEPOUQgUJ2QFhQNpRtktPYyhla0vFRI8Qskj2CRaFS9MrG5mHKLJSlgX1Bft6dl9C1Gy+LCZjL/fVaZAv4Um8tcUtWYX1C7qGP/dnfzJMsrSVTlrbGCfdN6pqOBctnjAxok5X7Q6xU7GQ/fYvqeHhS93Fxv4euK0ESz3899vMeCklif3IVjcdDqcKp8hB1oFxL4hna/EpWI9BrUu7UsnkrTWUG0alH+j1tsbBsIONOJs6edRamDYU91DnY431di5FgFtxUWK3hMOptlXb57mTEl9LjFD5zRaVGFipRXUm6E6TxbkWnlvT336zNvHflu/Z2YrJNYgNB6Stk9MJEn3w/MuzcpaJJUinSpbEoCZkuB6rOKZNg1RPm3JErkphVCIhMUz3/jCrl9iJnfH5m12IX5a+2D5im8Vp7RDWyV6aoWD1kO10H1t1pTTrnEKMEY9gmAJgD3QR2EGrYYlBUeFQj+5bblsRQM0pRJnBlZvfahSWpC3/lHM/5MPPwpkPqv76egbsJtzytxNEIjg9X3Z9x59lR2thtfO3OXR7CZ0MDDFsoupiDVCcbtCWRUxHTqPV0895egX7dLX3Ew7fWZBPs173IbtBuPEKxUOwLxS+oyn3Pw/YjHf5pChmeKGL6qxeArs9IV+5JchiNvU3XhMu78F1vuA3Ton7FKNu7mLbdgDVNq/TnO9qMy4Hgm3MMCm12cTf3qCsu0TEqx2YA5yMZeMH9ho3+bSGMKyw1Glyf1a6S8YJBVvRQ/OcuqQGF+jhObr4tLkyTA45QOSKj7bOKZIu/jU10wdFHpViP372mSIczLR09pHtQbDcxK69+2Kh2ZsThe1oMSCvh2lllNiJSLssPO4TRHgPIqV8agWFhgJ6JVEjIxHJUAIG685yC5jcPUx9pjf0uSaHAQNyw9RHSJ9FomZ3ThkVrsRt49agpU1ihPgHQ7BmYGpbcoeXWWQ53J2IBqjL/eL5lOC3DMXgHEHF4y4d+iuNqKmZhUHMilKwiHEwyRPGteHi/jGXN3N7CqqN3JFLTYG2EG/01Rybyfa3gmikEQn/FiBsbwiRt0o+NiwN/b84ZDKIZ6znS/5SetfoIZBslNAXPa3gJYMyFhoL5OnoEqIObM13OQpVKbB4pvQEn8+vOzyTmCDjLnjrCkPKH9qgZg4zUzLUcY1taj6HRgpnZjQdmBuf0p3e1d0JCPR4souUwgRFRFXrh6CSsiVJNUqMXz4EV9vbnCKuYY5R/yNl0j5PIh3ZCu76Poy93U9O3NTztrfvl3QzaZzbk/PARxgVD3HWAlVZx8FMdC5a3ZbDVGgB2fYTn0JUXhoZyATD4yuFRfTxidgdt6elcELck7TbDmlNv7gzkAmOazsXQjTpuf3LKlPVI3leoY6g6lZfr7Ny+eLXJ2c53fAkggtR9AuMpgxkFLkixCQ+J6ySHUIIuDyRZuPLGjpMlxZq7Rl7XEoISM28RPQs+K8tChdGLYwkwaJQWkk8yRUwi5zDjIq3gky6MrjdjcphNaU+jIbDsujDgoZXjZZSbeCNCdGLhD5EV//tTknJj8OsmEQdV6FAFqskoTckm//Lb+WPdaVgqw3n9k8Gjk+B+T/G+D3Vok0/430nMO11B9rzGgM0bcfqrKV3AqpuFvmEJCQHP4vOIBcBueHCYCjuqYp8FHAZI/eD205ODqPJbrCRemNSDIn/3eG4kFFsNQcNVj0zK/bZvzF8HJ2ffzkIjckIs9H+LdWHK06P/RKR9fJaSyQqPt9zmDxiI8WXUUI3LOGrRV9uHgx7LGmTZTa1W5xNu/S8X0S4sys1AuuQBnC4FR3CBq/A3745mTVG/KirlAFbE7a7Aq5Hw30XEC++U43n2Awr2hLphEuzYkAqpyplovs2yxxay32ug8yYjlyqUIKysSfCW8/JRyVHF7iXF9iQHT849ASOZU5qySiKPzABRFE1t/R1A7cTD5JUJ2hkbvmy+mAJ4gIoZVXWG+ovtoPlyyB7DvEjd2mJBLb6XmeQf2dZjqvaXZNdFxoNnzSEmQgztalQmXYf69VRJPD+PR4Zjp0YGQRKJ3lqg7McstY9KUlwwxcDbjvS9IYMsk1KJL0cA+ouykx+M/A3HCpQr05BVFt+Uvz+Cb2yCieNnXmHPdCZBZ0HK68v7DAnJKueR3o+DUiLTySgEazKoFMgtqJeoOqfDFIMAnW0u7nJtl4Lx9rPPNePPnTsr5he0pPbGu89dy8OyEIFlArWSQWQHiUWPAdc8zyYGNxu9aO9q2jteTzU/+zTkPxhfNcn+98DL/8VTMOJs9Vu9kgimUiDRyIRAn6Oaze74ExvRdXGmA8wMn0A1n+2zE4Ndzhlf2C9IuQ6cWBd5+z2JG2OTsKwf2jIoQajZkbmJzz7Ev1yAN6CS2vr6VAAAAACX1CqqAFy7kQAB0RSKQAAAivEpfbHEZ/sCAAAAAARZWg==
+          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
           PAYLOAD
           base64 -d /tmp/wos01a.patch.xz.b64 > /tmp/wos01a.patch.xz
           test "$(sha256sum /tmp/wos01a.patch.xz | cut -d' ' -f1)" = "$XZ_PATCH_SHA256"
           xz -dc /tmp/wos01a.patch.xz > /tmp/wos01a.patch
           test "$(sha256sum /tmp/wos01a.patch | cut -d' ' -f1)" = "$RAW_PATCH_SHA256"
           git apply --binary --index /tmp/wos01a.patch
-          git rm .github/workflows/wos01a-pr18-patch-recovery.yml
+          test "$(git diff --cached --name-only)" = "$TARGET_FILE"
           git diff --cached --check
-          cat > /tmp/expected-paths <<'PATHS'
-          .github/scripts/wos01a-source-bootstrap.mjs
-          .github/scripts/wos01a/scan-bootstrap.mjs
-          .github/workflows/wos01a-pr18-patch-recovery.yml
-          .github/workflows/wos01a-source-bootstrap-publisher.yml
-          PATHS
-          git diff --cached --name-only | LC_ALL=C sort > /tmp/actual-paths
-          diff -u /tmp/expected-paths /tmp/actual-paths
           test "$(git write-tree)" = "$EXPECTED_TARGET_TREE"
+          test "$(git hash-object "$TARGET_FILE")" = "$TARGET_BLOB"
 
-      - name: Commit exact target tree
-        id: commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "WorkOS Implementation Controller"
-          git config user.email "actions@users.noreply.github.com"
-          git commit -m "ci: secure WOS-01A publisher execution gates"
-          new_head="$(git rev-parse HEAD)"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_TARGET_HEAD"
-          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TARGET_TREE"
-          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
-
-      - name: Re-verify Draft PR immediately before publication
+      - name: Materialize exact Git objects and atomically fast-forward existing PR #18 branch
         uses: actions/github-script@v7
         with:
           script: |
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.PR_NUMBER),
-            });
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = Number(process.env.PR_NUMBER);
+            const oldHead = process.env.EXPECTED_TARGET_HEAD;
+            const targetTree = process.env.EXPECTED_TARGET_TREE;
+            const targetPath = process.env.TARGET_FILE;
+            const expectedBlob = process.env.TARGET_BLOB;
+            const content = fs.readFileSync(targetPath).toString('base64');
+
+            const { data: blob } = await github.rest.git.createBlob({ owner, repo, content, encoding: 'base64' });
+            if (blob.sha !== expectedBlob) throw new Error(`blob mismatch ${blob.sha}`);
+            const { data: parent } = await github.rest.git.getCommit({ owner, repo, commit_sha: oldHead });
+            const { data: tree } = await github.rest.git.createTree({ owner, repo, base_tree: parent.tree.sha, tree: [{ path: targetPath, mode: '100644', type: 'blob', sha: blob.sha }] });
+            if (tree.sha !== targetTree) throw new Error(`tree mismatch ${tree.sha}`);
+            const { data: commit } = await github.rest.git.createCommit({ owner, repo, message: 'ci: make WOS-01A font neutralization semicolon-safe', tree: tree.sha, parents: [oldHead] });
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
             const failures = [];
             if (pr.state !== 'open') failures.push(`state=${pr.state}`);
-            if (!pr.draft) failures.push('PR is not Draft');
+            if (!pr.draft) failures.push('not Draft');
             if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`head.ref=${pr.head.ref}`);
-            if (pr.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`head.sha=${pr.head.sha}`);
-            if (pr.base.ref !== 'main') failures.push(`base.ref=${pr.base.ref}`);
-            if (failures.length) core.setFailed(`PR #18 moved before recovery publication: ${failures.join(', ')}`);
+            if (pr.head.sha !== oldHead) failures.push(`head.sha=${pr.head.sha}`);
+            if (failures.length) throw new Error(`PR moved before publication: ${failures.join(', ')}`);
 
-      - name: Publish with exact-old-head lease
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NEW_HEAD: ${{ steps.commit.outputs.new_head }}
-        run: |
-          set -euo pipefail
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
-          test "$remote_head" = "$EXPECTED_TARGET_HEAD"
-          git -c http.https://github.com/.extraheader="$auth_header" push \
-            --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" \
-            origin "HEAD:refs/heads/$TARGET_BRANCH"
-          published="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
-          test "$published" = "$NEW_HEAD"
+            await github.rest.git.updateRef({ owner, repo, ref: `heads/${process.env.TARGET_BRANCH}`, sha: commit.sha, force: false });
+            const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: `heads/${process.env.TARGET_BRANCH}` });
+            if (ref.object.sha !== commit.sha) throw new Error(`publication mismatch ${ref.object.sha}`);
+            core.notice(`Published PR #18 ${oldHead} -> ${commit.sha}, tree ${tree.sha}`);
 
-      - name: Record verified PR #18 publication
-        continue-on-error: true
+      - name: Record publication checkpoint
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `### PR #18 guarded correction published
-
-            - Exact old head: \`${process.env.EXPECTED_TARGET_HEAD}\`
-            - Exact published head: \`${{ steps.commit.outputs.new_head }}\`
-            - Exact published tree: \`${process.env.EXPECTED_TARGET_TREE}\`
-            - Canonical patch SHA-256: \`${process.env.RAW_PATCH_SHA256}\`
-            - Temporary branch helper removed; PR #16 was not mutated or executed.
-
-            PR #18 remains Draft. Fresh exact-head CI/check evidence and independent review remain mandatory.`;
+            const { data: pr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PR_NUMBER) });
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: Number(process.env.PR_NUMBER),
-              body,
+              body: `### WOS-01A publisher correction published\n\n- Previous head: \`${process.env.EXPECTED_TARGET_HEAD}\`\n- Published head: \`${pr.head.sha}\`\n- Exact tree: \`${process.env.EXPECTED_TARGET_TREE}\`\n- Scope: one-file semicolon-safe Google Fonts neutralization correction.\n\nPR #18 remains Draft. Exact-head acceptance verification and fresh independent confirmation review remain mandatory before any merge.`
             });
