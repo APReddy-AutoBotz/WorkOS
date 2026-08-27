@@ -174,6 +174,95 @@ if (!essTestText.includes(retainedRequirementsTarget)) {
 }
 await writeFile(essTestFile, essTestText);
 
+const retainedDisplayContractMappings = [
+  {
+    testPath: 'tests/ess-hub-smoke.mjs',
+    historical: "assert.match(sidebar, /My WorkOS Hub[\\s\\S]*path: '\\/ess'[\\s\\S]*navRoles: \\['Employee'\\]/, 'sidebar should expose one primary employee ESS hub');",
+    governed: "assert.match(sidebar, /name: `My \\$\\{productConfig\\.productName\\} Hub`[\\s\\S]*path: '\\/ess'[\\s\\S]*navRoles: \\['Employee'\\]/, 'sidebar should expose the configured primary employee ESS hub without weakening its route or navigation role');",
+  },
+  {
+    testPath: 'tests/ess-hub-smoke.mjs',
+    historical: "assert.match(header, /page-ess[\\s\\S]*title: 'My WorkOS Hub'[\\s\\S]*path: '\\/ess'/, 'header search should expose the unified ESS hub');",
+    governed: "assert.match(header, /page-ess[\\s\\S]*title: `My \\$\\{productConfig\\.productName\\} Hub`[\\s\\S]*path: '\\/ess'/, 'header search should expose the configured unified ESS hub on its canonical route');",
+  },
+  {
+    testPath: 'tests/ess-hub-smoke.mjs',
+    historical: "assert.match(traceability, /ESS \\/ My WorkOS Hub[\\s\\S]*engineeringStatus: 'Prod Core RC'[\\s\\S]*\\/my-workspace remains a compatibility route only/, 'BRD traceability should show ESS as the unified Prod Core RC hub with release-gate evidence');",
+    governed: "assert.match(traceability, /module: `ESS \\/ My \\$\\{productConfig\\.productName\\} Hub`[\\s\\S]*engineeringStatus: 'Prod Core RC'[\\s\\S]*\\/my-workspace remains a compatibility route only/, 'BRD traceability should use the configured product label while preserving ESS lifecycle evidence');",
+  },
+  {
+    testPath: 'tests/org-chart-smoke.mjs',
+    historical: "const { authService } = await import('../src/services/authService.ts');",
+    governed: "const { authService } = await import('../src/services/authService.ts');\nconst { productConfig } = await import('../src/config/productConfig.ts');",
+  },
+  {
+    testPath: 'tests/org-chart-smoke.mjs',
+    historical: "assert.equal(tree.root.label, 'Boundaryless Group', 'org tree should expose Boundaryless Group root');",
+    governed: "assert.equal(tree.root.label, `${productConfig.organizationName} Group`, 'org tree should expose the configured organization root');",
+  },
+];
+
+const adaptRetainedDisplayContracts = (testsByPath) => {
+  const adapted = new Map(testsByPath);
+  for (const mapping of retainedDisplayContractMappings) {
+    const current = adapted.get(mapping.testPath);
+    if (current === undefined) throw new Error(`Retained display-contract test is absent: ${mapping.testPath}`);
+    const historicalCount = current.split(mapping.historical).length - 1;
+    const governedCount = current.split(mapping.governed).length - 1;
+    if (governedCount === 1) {
+      continue;
+    } else if (historicalCount === 1) {
+      adapted.set(mapping.testPath, current.replace(mapping.historical, mapping.governed));
+    } else {
+      throw new Error(`Retained display-contract anchor drift in ${mapping.testPath}`);
+    }
+  }
+  return adapted;
+};
+
+const retainedTestsBeforeDisplayAdaptation = new Map();
+for (const testPath of selectedTestFiles) {
+  retainedTestsBeforeDisplayAdaptation.set(testPath, await readFile(path.join(targetRoot, testPath), 'utf8'));
+}
+const retainedTestsAfterDisplayAdaptation = adaptRetainedDisplayContracts(retainedTestsBeforeDisplayAdaptation);
+for (const [testPath, testText] of retainedTestsAfterDisplayAdaptation) {
+  await writeFile(path.join(targetRoot, testPath), testText);
+}
+
+const assertRetainedDisplayContractTransform = () => {
+  const sourceTests = new Map([
+    ['tests/ess-hub-smoke.mjs', retainedDisplayContractMappings.filter(({ testPath }) => testPath === 'tests/ess-hub-smoke.mjs').map(({ historical }) => historical).join('\n')],
+    ['tests/org-chart-smoke.mjs', retainedDisplayContractMappings.filter(({ testPath }) => testPath === 'tests/org-chart-smoke.mjs').map(({ historical }) => historical).join('\n')],
+  ]);
+  const once = adaptRetainedDisplayContracts(sourceTests);
+  const twice = adaptRetainedDisplayContracts(once);
+  if ([...once].some(([testPath, text]) => twice.get(testPath) !== text)) {
+    throw new Error('Retained display-contract adaptation is not idempotent');
+  }
+  const essContract = once.get('tests/ess-hub-smoke.mjs');
+  if (/My WorkOS Hub[\s\S]*path:/.test(essContract) || !essContract.includes('productConfig\\.productName')) {
+    throw new Error('Retained ESS display contract remains literal-only or uses the wrong configuration key');
+  }
+  const sidebarContract = new RegExp(String.raw`name: \`My \$\{productConfig\.productName\} Hub\`[\s\S]*path: '\/ess'[\s\S]*navRoles: \['Employee'\]`);
+  if (!sidebarContract.test("name: `My ${productConfig.productName} Hub`, path: '/ess', navRoles: ['Employee']")) {
+    throw new Error('Configured Sidebar fixture did not satisfy the retained contract');
+  }
+  for (const tampered of [
+    "name: `My ${productConfig.productName} Hub`, navRoles: ['Employee']",
+    "name: `My ${productConfig.productName} Hub`, path: '/ess'",
+    "name: `My ${productConfig.organizationName} Hub`, path: '/ess', navRoles: ['Employee']",
+  ]) {
+    if (sidebarContract.test(tampered)) throw new Error(`Tampered Sidebar fixture satisfied retained contract: ${tampered}`);
+  }
+  const identifierFixture = "const route = '/ess'; const fixturePath = 'fixtures/My WorkOS Hub.json'; const moduleName = 'WorkOSKernel'; const role = 'Employee';";
+  const unrelated = new Map(sourceTests);
+  unrelated.set('tests/ess-hub-smoke.mjs', `${unrelated.get('tests/ess-hub-smoke.mjs')}\n${identifierFixture}`);
+  if (!adaptRetainedDisplayContracts(unrelated).get('tests/ess-hub-smoke.mjs').includes(identifierFixture)) {
+    throw new Error('Retained display-contract adaptation rewrote an identifier, route, module, or role');
+  }
+};
+assertRetainedDisplayContractTransform();
+
 const assertRetainedDependencyClosure = async () => {
   const literalDependencyPattern = /(?:readFile|readFileSync)\s*\(\s*(['"])([^'"\r\n]+)\1/g;
   const unresolved = [];
