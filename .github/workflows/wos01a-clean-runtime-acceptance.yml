@@ -1,76 +1,47 @@
-name: WOS-01A Clean Runtime Acceptance
+name: WOS-01B Post-Publish Clean Runtime Acceptance
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    branches:
-      - main
-    paths:
-      - '.github/workflows/wos01a-clean-runtime-acceptance.yml'
+  workflow_run:
+    workflows:
+      - WOS-01B Clean Runtime Publisher
+    types:
+      - completed
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: wos01a-clean-runtime-acceptance
+  group: wos01b-post-publish-acceptance
   cancel-in-progress: false
 
 env:
   TARGET_PR_NUMBER: '16'
   TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
-  EXPECTED_TARGET_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
-  EXPECTED_TARGET_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
-  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
-  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance
-  CONTROLLER_PATH: .github/workflows/wos01a-clean-runtime-acceptance.yml
+  EXPECTED_PARENT: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  BROWSER_SCRIPT: .github/scripts/wos01b-browser-acceptance.mjs
 
 jobs:
   authority:
-    name: Verify exact read-only acceptance authority
+    name: Resolve exact published WOS-01B authority
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      target_head: ${{ steps.target.outputs.head_sha }}
+      target_tree: ${{ steps.target.outputs.tree_sha }}
     steps:
-      - name: Verify controller PR and target PR identities
+      - name: Verify publisher and exact target ancestry
+        id: target
         uses: actions/github-script@v7
         with:
           script: |
-            if (context.eventName !== 'pull_request') {
-              return core.setFailed(`Unsupported event: ${context.eventName}`);
-            }
-
-            const controller = context.payload.pull_request;
+            const run = context.payload.workflow_run;
             const failures = [];
-            if (!controller) failures.push('missing controller pull_request payload');
-            if (controller?.state !== 'open') failures.push(`controller.state=${controller?.state}`);
-            if (!controller?.draft) failures.push('controller PR must remain Draft');
-            if (controller?.head?.ref !== process.env.CONTROLLER_BRANCH) {
-              failures.push(`controller.head.ref=${controller?.head?.ref}`);
-            }
-            if (controller?.base?.ref !== 'main') failures.push(`controller.base.ref=${controller?.base?.ref}`);
-            if (controller?.base?.sha !== process.env.EXPECTED_MAIN_HEAD) {
-              failures.push(`controller.base.sha=${controller?.base?.sha}`);
-            }
-
-            const { data: mainBranch } = await github.rest.repos.getBranch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              branch: 'main',
-            });
-            if (mainBranch.commit.sha !== process.env.EXPECTED_MAIN_HEAD) {
-              failures.push(`current.main=${mainBranch.commit.sha}`);
-            }
-
-            const changed = await github.paginate(github.rest.pulls.listFiles, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: controller.number,
-              per_page: 100,
-            });
-            const changedPaths = changed.map(file => file.filename).sort();
-            if (changedPaths.length !== 1 || changedPaths[0] !== process.env.CONTROLLER_PATH) {
-              failures.push(`controller.changedPaths=${JSON.stringify(changedPaths)}`);
-            }
+            if (run.name !== 'WOS-01B Clean Runtime Publisher') failures.push(`run.name=${run.name}`);
+            if (run.conclusion !== 'success') failures.push(`run.conclusion=${run.conclusion}`);
+            if (run.head_branch !== 'main') failures.push(`run.head_branch=${run.head_branch}`);
 
             const { data: target } = await github.rest.pulls.get({
               owner: context.repo.owner,
@@ -81,51 +52,36 @@ jobs:
             if (!target.draft) failures.push('target PR is not Draft');
             if (target.merged_at) failures.push(`target.merged_at=${target.merged_at}`);
             if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${target.head.ref}`);
-            if (target.head.sha !== process.env.EXPECTED_TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
+            if (target.head.sha === process.env.EXPECTED_PARENT) failures.push('target head did not advance');
             if (target.base.ref !== 'main') failures.push(`target.base.ref=${target.base.ref}`);
-            if (target.base.sha !== process.env.EXPECTED_TARGET_BASE) failures.push(`target.base.sha=${target.base.sha}`);
+            if (target.base.sha !== process.env.EXPECTED_BASE) failures.push(`target.base.sha=${target.base.sha}`);
 
-            if (failures.length) {
-              core.setFailed(`WOS-01A acceptance authority failed: ${failures.join(', ')}`);
+            const { data: commit } = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: target.head.sha,
+            });
+            if (commit.parents.length !== 1 || commit.parents[0].sha !== process.env.EXPECTED_PARENT) {
+              failures.push(`target.parent=${commit.parents.map(parent => parent.sha).join(',')}`);
+            }
+            if (commit.commit.message.split('\n')[0] !== 'fix: close WOS-01B clean-runtime blockers') {
+              failures.push(`target.message=${commit.commit.message.split('\n')[0]}`);
             }
 
-      - name: Checkout exact controller head
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          persist-credentials: false
+            if (failures.length) return core.setFailed(`Post-publish authority failed: ${failures.join(', ')}`);
+            core.setOutput('head_sha', target.head.sha);
+            core.setOutput('tree_sha', commit.commit.tree.sha);
 
-      - name: Verify current main and one-file controller scope
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$GITHUB_HEAD_REF" = "$CONTROLLER_BRANCH"
-          test "$GITHUB_BASE_REF" = "main"
-          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          git cat-file -e "$EXPECTED_MAIN_HEAD^{commit}"
-          git merge-base --is-ancestor "$EXPECTED_MAIN_HEAD" HEAD
-
-          trusted_origin="https://github.com/${GITHUB_REPOSITORY}"
-          case "$(git remote get-url origin)" in
-            "$trusted_origin"|"$trusted_origin.git") ;;
-            *) echo "Unexpected origin URL" >&2; exit 1 ;;
-          esac
-
-          mapfile -t changed_paths < <(git diff --name-only "$EXPECTED_MAIN_HEAD"...HEAD)
-          test "${#changed_paths[@]}" -eq 1
-          test "${changed_paths[0]}" = "$CONTROLLER_PATH"
-
-  static_dependency:
-    name: Exact-head static, dependency and default-build acceptance
+  static:
+    name: Published exact-head static and dependency acceptance
     needs: authority
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Checkout exact WOS-01A head
+      - name: Checkout exact published target head
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.EXPECTED_TARGET_HEAD }}
+          ref: ${{ needs.authority.outputs.target_head }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -136,158 +92,70 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Verify exact implementation identity
+      - name: Verify exact tree and complete static gates
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
+          test "$(git rev-parse HEAD)" = "${{ needs.authority.outputs.target_head }}"
+          test "$(git rev-parse HEAD^{tree})" = "${{ needs.authority.outputs.target_tree }}"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
           test -z "$(git status --porcelain)"
-          git merge-base --is-ancestor "$EXPECTED_TARGET_BASE" HEAD
-          mkdir -p acceptance-artifacts
-          : > acceptance-artifacts/static-failures.txt
 
-      - name: Locked install and retained checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --ignore-scripts 2>&1 | tee acceptance-artifacts/npm-ci.log
-
-          run_check() {
-            check_name="$1"
-            log_file="$2"
-            shift 2
-            set +e
-            "$@" 2>&1 | tee "$log_file"
-            check_rc="${PIPESTATUS[0]}"
-            set -e
-            if test "$check_rc" -ne 0; then
-              echo "${check_name} failed with exit ${check_rc}." >> acceptance-artifacts/static-failures.txt
-            fi
-          }
-
-          run_check "Type check" acceptance-artifacts/typecheck.log npm run typecheck
-          run_check "Configured lint command" acceptance-artifacts/lint.log npm run lint
-          run_check "WOS-00 baseline verifier" acceptance-artifacts/wos00-baseline.log npm run test:wos00-baseline
-          run_check "Bootstrap security scan" acceptance-artifacts/bootstrap-scan.log npm run test:bootstrap-scan
-
-          run_check "Retained safe test suite" acceptance-artifacts/retained-tests.log \
-            env \
-              NODE_ENV=test \
-              APP_MODE=test \
-              VITE_APP_MODE=test \
-              ALLOW_TEST_FALLBACK=true \
-              VITE_ALLOW_TEST_FALLBACK=true \
-              npm test
-
-      - name: Classify full and production dependency advisories
-        shell: bash
-        run: |
-          set -euo pipefail
-          full_rc=0
-          prod_rc=0
-          npm audit --json > acceptance-artifacts/npm-audit-full.json || full_rc=$?
-          npm audit --omit=dev --json > acceptance-artifacts/npm-audit-production.json || prod_rc=$?
-          FULL_RC="$full_rc" PROD_RC="$prod_rc" node --input-type=module <<'NODE' | tee acceptance-artifacts/npm-audit-summary.json
-          import { readFileSync, appendFileSync } from 'node:fs';
-
-          const readAudit = (file) => {
-            try {
-              return JSON.parse(readFileSync(file, 'utf8'));
-            } catch (error) {
-              appendFileSync('acceptance-artifacts/static-failures.txt', `Dependency audit JSON unreadable for ${file}: ${error.message}\n`);
-              return {};
-            }
-          };
-
-          const counts = (audit) => {
-            const source = audit?.metadata?.vulnerabilities || {};
-            return {
-              info: Number(source.info || 0),
-              low: Number(source.low || 0),
-              moderate: Number(source.moderate || 0),
-              high: Number(source.high || 0),
-              critical: Number(source.critical || 0),
-              total: Number(source.total || 0),
-            };
-          };
-
-          const full = counts(readAudit('acceptance-artifacts/npm-audit-full.json'));
-          const production = counts(readAudit('acceptance-artifacts/npm-audit-production.json'));
-          const summary = {
-            fullCommandExit: Number(process.env.FULL_RC),
-            productionCommandExit: Number(process.env.PROD_RC),
-            full,
-            production,
-            policy: 'Production high/critical advisories are merge blockers; development-only findings require explicit disposition.',
-          };
-          console.log(JSON.stringify(summary, null, 2));
-
-          if (production.high > 0 || production.critical > 0) {
-            appendFileSync(
-              'acceptance-artifacts/static-failures.txt',
-              `Production dependency audit has ${production.high} high and ${production.critical} critical advisories.\n`,
-            );
-          }
-          if (Number(process.env.FULL_RC) !== 0 && full.total === 0) {
-            appendFileSync('acceptance-artifacts/static-failures.txt', 'Full dependency audit failed without parseable advisory counts.\n');
-          }
-          if (Number(process.env.PROD_RC) !== 0 && production.total === 0) {
-            appendFileSync('acceptance-artifacts/static-failures.txt', 'Production dependency audit failed without parseable advisory counts.\n');
+          npm ci --ignore-scripts
+          npm audit --json > /tmp/audit-full.json || full_rc=$?
+          npm audit --omit=dev --json > /tmp/audit-production.json || prod_rc=$?
+          FULL_RC="${full_rc:-0}" PROD_RC="${prod_rc:-0}" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          for (const [label, file, rc] of [
+            ['full', '/tmp/audit-full.json', Number(process.env.FULL_RC)],
+            ['production', '/tmp/audit-production.json', Number(process.env.PROD_RC)],
+          ]) {
+            const audit = JSON.parse(readFileSync(file, 'utf8'));
+            const counts = audit.metadata?.vulnerabilities || {};
+            console.log(JSON.stringify({ label, commandExit: rc, counts }));
+            if (Number(counts.high || 0) > 0 || Number(counts.critical || 0) > 0) process.exit(1);
+            if (rc !== 0 && Number(counts.total || 0) === 0) process.exit(1);
           }
           NODE
 
-      - name: Build with no branding environment and reject unresolved tokens
-        shell: bash
-        run: |
-          set -euo pipefail
-          build_rc=0
-          env \
-            -u VITE_PRODUCT_NAME \
-            -u VITE_PRODUCT_LOGO_URL \
-            -u VITE_ORGANIZATION_NAME \
-            -u VITE_SUPPORT_NAME \
-            -u VITE_SUPPORT_EMAIL \
-            npm run build > acceptance-artifacts/default-build.log 2>&1 || build_rc=$?
-          cat acceptance-artifacts/default-build.log
+          npm run typecheck
+          npm run lint
+          npm run test:wos00-baseline
+          node scripts/scan-bootstrap.mjs --self-test
+          npm run test:bootstrap-scan
+          env NODE_ENV=test APP_MODE=test VITE_APP_MODE=test ALLOW_TEST_FALLBACK=true VITE_ALLOW_TEST_FALLBACK=true npm test
 
-          if test "$build_rc" -ne 0; then
-            echo "Default production build failed with exit $build_rc." >> acceptance-artifacts/static-failures.txt
-          fi
+          env -u VITE_PRODUCT_NAME -u VITE_PRODUCT_LOGO_URL -u VITE_ORGANIZATION_NAME -u VITE_SUPPORT_NAME -u VITE_SUPPORT_EMAIL npm run build > /tmp/default-build.log 2>&1
+          cat /tmp/default-build.log
+          ! grep -E '%VITE_[A-Z0-9_]+%' /tmp/default-build.log
+          ! grep -E '%VITE_[A-Z0-9_]+%' dist/index.html
+          grep -F '<title>WorkOS</title>' dist/index.html
+          grep -F '/workos-mark.svg' dist/index.html
 
-          if grep -E '%VITE_(PRODUCT_NAME|PRODUCT_LOGO_URL)%' acceptance-artifacts/default-build.log >/dev/null; then
-            echo "Default build emitted unresolved product-name/logo placeholder warnings." >> acceptance-artifacts/static-failures.txt
-          fi
+          rm -rf dist
+          VITE_APP_MODE=production VITE_ALLOW_TEST_FALLBACK=false VITE_PRODUCT_NAME='Configured WorkOS' VITE_PRODUCT_LOGO_URL='/configured-workos.svg' VITE_ORGANIZATION_NAME='Configured organization' VITE_SUPPORT_NAME='Configured Support' VITE_SUPPORT_EMAIL='support@example.test' npm run build > /tmp/configured-build.log 2>&1
+          cat /tmp/configured-build.log
+          ! grep -E '%VITE_[A-Z0-9_]+%' /tmp/configured-build.log
+          grep -R -F 'Configured WorkOS' dist/assets >/dev/null
+          grep -R -F '/configured-workos.svg' dist/assets >/dev/null
+          npm run test:product-identity
+          git diff --check
 
-          if test -f dist/index.html && grep -E '%VITE_(PRODUCT_NAME|PRODUCT_LOGO_URL)%' dist/index.html >/dev/null; then
-            echo "Default dist/index.html contains unresolved product-name/logo placeholders." >> acceptance-artifacts/static-failures.txt
-          fi
-
-          if test -f dist/index.html; then
-            cp dist/index.html acceptance-artifacts/default-dist-index.html
-          fi
-
-      - name: Static acceptance adjudication
-        shell: bash
-        run: |
-          set -euo pipefail
-          if test -s acceptance-artifacts/static-failures.txt; then
-            echo "WOS-01A static acceptance blockers:"
-            cat acceptance-artifacts/static-failures.txt
-            exit 1
-          fi
-          echo "No static/dependency/default-build merge blocker detected."
-
-      - name: Upload static acceptance evidence
+      - name: Upload static evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wos01a-static-dependency-${{ env.EXPECTED_TARGET_HEAD }}
-          path: acceptance-artifacts
-          if-no-files-found: error
+          name: wos01b-static-${{ needs.authority.outputs.target_head }}
+          path: |
+            /tmp/audit-full.json
+            /tmp/audit-production.json
+            /tmp/default-build.log
+            /tmp/configured-build.log
+          if-no-files-found: warn
           retention-days: 14
 
   database_runtime:
-    name: Disposable PostgreSQL migration and production-runtime acceptance
+    name: Published exact-head PostgreSQL and production runtime acceptance
     needs: authority
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -309,11 +177,12 @@ jobs:
       DATABASE_URL: postgresql://workos:workos-acceptance@127.0.0.1:5432/workos_acceptance
       UPGRADE_DATABASE_URL: postgresql://workos:workos-acceptance@127.0.0.1:5432/workos_upgrade
       PGSSLMODE: disable
+      EVIDENCE_DIR: /tmp/wos01b-database-runtime
     steps:
-      - name: Checkout exact WOS-01A head
+      - name: Checkout exact published target head
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.EXPECTED_TARGET_HEAD }}
+          ref: ${{ needs.authority.outputs.target_head }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -324,190 +193,91 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install exact dependencies
+      - name: Install and execute fresh/replay/upgrade migrations
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
-          mkdir -p acceptance-artifacts
-          npm ci --ignore-scripts 2>&1 | tee acceptance-artifacts/npm-ci.log
+          mkdir -p "$EVIDENCE_DIR"
+          test "$(git rev-parse HEAD)" = "${{ needs.authority.outputs.target_head }}"
+          npm ci --ignore-scripts
+          npm run api:migrate | tee "$EVIDENCE_DIR/migrate-fresh.log"
+          npm run api:migrate | tee "$EVIDENCE_DIR/migrate-replay.log"
 
-      - name: Execute fresh and replay migrations
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run api:migrate 2>&1 | tee acceptance-artifacts/migrate-fresh.log
-          npm run api:migrate 2>&1 | tee acceptance-artifacts/migrate-replay.log
-
-          node --input-type=module <<'NODE' | tee acceptance-artifacts/migration-fresh-summary.json
+          node --input-type=module <<'NODE' | tee "$EVIDENCE_DIR/fresh-summary.json"
           import pg from 'pg';
           import { readdirSync } from 'node:fs';
-
           const expected = 1 + readdirSync('server/migrations').filter(name => name.endsWith('.sql')).length;
           const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
           const rows = await pool.query('select id from schema_migrations order by id');
-          const summary = { expectedMigrationCount: expected, actualMigrationCount: rows.rowCount, migrationIds: rows.rows.map(row => row.id) };
-          console.log(JSON.stringify(summary, null, 2));
+          console.log(JSON.stringify({ expected, actual: rows.rowCount, ids: rows.rows.map(row => row.id) }, null, 2));
           await pool.end();
           if (rows.rowCount !== expected) process.exit(1);
           NODE
 
-      - name: Execute upgrade-style migration path
-        shell: bash
-        run: |
-          set -euo pipefail
           node --input-type=module <<'NODE'
           import pg from 'pg';
           import { readFileSync } from 'node:fs';
-
-          const admin = new pg.Client({
-            connectionString: 'postgresql://workos:workos-acceptance@127.0.0.1:5432/postgres',
-          });
+          const admin = new pg.Client({ connectionString: 'postgresql://workos:workos-acceptance@127.0.0.1:5432/postgres' });
           await admin.connect();
           await admin.query('drop database if exists workos_upgrade');
           await admin.query('create database workos_upgrade');
           await admin.end();
-
           const client = new pg.Client({ connectionString: process.env.UPGRADE_DATABASE_URL });
           await client.connect();
           await client.query('begin');
           await client.query(readFileSync('server/schema.sql', 'utf8'));
-          await client.query(`
-            create table if not exists schema_migrations (
-              id text primary key,
-              applied_at timestamptz not null default now()
-            )
-          `);
-          await client.query(
-            'insert into schema_migrations (id) values ($1) on conflict (id) do nothing',
-            ['005_auth_lifecycle'],
-          );
+          await client.query('create table if not exists schema_migrations (id text primary key, applied_at timestamptz not null default now())');
+          await client.query('insert into schema_migrations (id) values ($1) on conflict (id) do nothing', ['005_auth_lifecycle']);
           await client.query('commit');
           await client.end();
           NODE
+          DATABASE_URL="$UPGRADE_DATABASE_URL" npm run api:migrate | tee "$EVIDENCE_DIR/migrate-upgrade.log"
 
-          DATABASE_URL="$UPGRADE_DATABASE_URL" npm run api:migrate 2>&1 | tee acceptance-artifacts/migrate-upgrade.log
-
-          DATABASE_URL="$UPGRADE_DATABASE_URL" node --input-type=module <<'NODE' | tee acceptance-artifacts/migration-upgrade-summary.json
+          DATABASE_URL="$UPGRADE_DATABASE_URL" node --input-type=module <<'NODE' | tee "$EVIDENCE_DIR/upgrade-summary.json"
           import pg from 'pg';
           import { readdirSync } from 'node:fs';
-
           const expected = 1 + readdirSync('server/migrations').filter(name => name.endsWith('.sql')).length;
           const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
           const rows = await pool.query('select id from schema_migrations order by id');
-          console.log(JSON.stringify({ expectedMigrationCount: expected, actualMigrationCount: rows.rowCount, migrationIds: rows.rows.map(row => row.id) }, null, 2));
+          console.log(JSON.stringify({ expected, actual: rows.rowCount, ids: rows.rows.map(row => row.id) }, null, 2));
           await pool.end();
           if (rows.rowCount !== expected) process.exit(1);
           NODE
 
-      - name: Verify production fail-closed configuration gates
+      - name: Verify fail-closed production configuration and live local runtime
         shell: bash
         run: |
           set -euo pipefail
           missing_idp_rc=0
-          timeout 20s env \
-            NODE_ENV=production \
-            APP_MODE=production \
-            AUTO_SEED_DEMO=false \
-            DATABASE_URL="$DATABASE_URL" \
-            PGSSLMODE=disable \
-            API_SESSION_SECRET=acceptance-session-secret-not-for-production \
-            IDENTITY_PROVIDER= \
-            npm start > acceptance-artifacts/start-missing-idp.log 2>&1 || missing_idp_rc=$?
-          if test "$missing_idp_rc" -eq 0 || test "$missing_idp_rc" -eq 124; then
-            echo "Production startup did not fail closed when IDENTITY_PROVIDER was absent." >&2
-            cat acceptance-artifacts/start-missing-idp.log
-            exit 1
-          fi
+          timeout 20s env NODE_ENV=production APP_MODE=production AUTO_SEED_DEMO=false DATABASE_URL="$DATABASE_URL" PGSSLMODE=disable API_SESSION_SECRET=acceptance-session-secret-not-for-production IDENTITY_PROVIDER= npm start > "$EVIDENCE_DIR/start-missing-idp.log" 2>&1 || missing_idp_rc=$?
+          test "$missing_idp_rc" -ne 0
+          test "$missing_idp_rc" -ne 124
 
           auto_seed_rc=0
-          timeout 20s env \
-            NODE_ENV=production \
-            APP_MODE=production \
-            AUTO_SEED_DEMO=true \
-            DATABASE_URL="$DATABASE_URL" \
-            PGSSLMODE=disable \
-            API_SESSION_SECRET=acceptance-session-secret-not-for-production \
-            IDENTITY_PROVIDER=oidc \
-            OIDC_ISSUER_URL=https://issuer.example.test \
-            OIDC_CLIENT_ID=acceptance-client \
-            OIDC_CLIENT_SECRET=acceptance-secret \
-            OIDC_REDIRECT_URI=http://127.0.0.1:4010/api/auth/oidc/callback \
-            npm start > acceptance-artifacts/start-auto-seed.log 2>&1 || auto_seed_rc=$?
-          if test "$auto_seed_rc" -eq 0 || test "$auto_seed_rc" -eq 124; then
-            echo "Production startup did not reject AUTO_SEED_DEMO=true." >&2
-            cat acceptance-artifacts/start-auto-seed.log
-            exit 1
-          fi
+          timeout 20s env NODE_ENV=production APP_MODE=production AUTO_SEED_DEMO=true DATABASE_URL="$DATABASE_URL" PGSSLMODE=disable API_SESSION_SECRET=acceptance-session-secret-not-for-production IDENTITY_PROVIDER=oidc OIDC_ISSUER_URL=https://issuer.example.test OIDC_CLIENT_ID=acceptance-client OIDC_CLIENT_SECRET=acceptance-secret OIDC_REDIRECT_URI=http://127.0.0.1:4010/api/auth/oidc/callback npm start > "$EVIDENCE_DIR/start-auto-seed.log" 2>&1 || auto_seed_rc=$?
+          test "$auto_seed_rc" -ne 0
+          test "$auto_seed_rc" -ne 124
 
-      - name: Build and start production against disposable database
-        shell: bash
-        run: |
-          set -euo pipefail
-          VITE_APP_MODE=production \
-          VITE_ALLOW_TEST_FALLBACK=false \
-          VITE_PRODUCT_NAME=WorkOS \
-          VITE_ORGANIZATION_NAME="Your organization" \
-          VITE_PRODUCT_LOGO_URL=/workos-mark.svg \
-          VITE_SUPPORT_NAME="WorkOS Support" \
-          VITE_SUPPORT_EMAIL=support@example.test \
-          npm run build 2>&1 | tee acceptance-artifacts/production-build.log
+          VITE_APP_MODE=production VITE_ALLOW_TEST_FALLBACK=false VITE_PRODUCT_NAME=WorkOS VITE_ORGANIZATION_NAME='Your organization' VITE_PRODUCT_LOGO_URL=/workos-mark.svg VITE_SUPPORT_NAME='WorkOS Support' VITE_SUPPORT_EMAIL=support@example.test npm run build > "$EVIDENCE_DIR/production-build.log" 2>&1
 
-          env \
-            PORT=4010 \
-            NODE_ENV=production \
-            APP_MODE=production \
-            APP_URL=http://127.0.0.1:3000 \
-            AUTO_SEED_DEMO=false \
-            RESET_DEMO_DATA=false \
-            DATABASE_URL="$DATABASE_URL" \
-            PGSSLMODE=disable \
-            API_SESSION_SECRET=acceptance-session-secret-not-for-production \
-            IDENTITY_PROVIDER=oidc \
-            OIDC_ISSUER_URL=https://issuer.example.test \
-            OIDC_CLIENT_ID=acceptance-client \
-            OIDC_CLIENT_SECRET=acceptance-secret \
-            OIDC_REDIRECT_URI=http://127.0.0.1:4010/api/auth/oidc/callback \
-            npm start > acceptance-artifacts/production-server.log 2>&1 &
+          env PORT=4010 NODE_ENV=production APP_MODE=production APP_URL=http://127.0.0.1:3000 AUTO_SEED_DEMO=false RESET_DEMO_DATA=false DATABASE_URL="$DATABASE_URL" PGSSLMODE=disable API_SESSION_SECRET=acceptance-session-secret-not-for-production IDENTITY_PROVIDER=oidc OIDC_ISSUER_URL=https://issuer.example.test OIDC_CLIENT_ID=acceptance-client OIDC_CLIENT_SECRET=acceptance-secret OIDC_REDIRECT_URI=http://127.0.0.1:4010/api/auth/oidc/callback npm start > "$EVIDENCE_DIR/production-server.log" 2>&1 &
           server_pid=$!
-          echo "$server_pid" > acceptance-artifacts/production-server.pid
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-
-          healthy=false
           for _ in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:4010/api/health > acceptance-artifacts/health.json; then
-              healthy=true
-              break
-            fi
-            if ! kill -0 "$server_pid" 2>/dev/null; then
-              break
-            fi
+            if curl --fail --silent http://127.0.0.1:4010/api/health > "$EVIDENCE_DIR/health.json"; then break; fi
+            kill -0 "$server_pid"
             sleep 1
           done
-          if test "$healthy" != true; then
-            cat acceptance-artifacts/production-server.log
-            exit 1
-          fi
-
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
-          const health = JSON.parse(readFileSync('acceptance-artifacts/health.json', 'utf8'));
-          if (health.status !== 'ok' || health.database !== 'connected') {
-            throw new Error(`Unexpected health response: ${JSON.stringify(health)}`);
-          }
+          const health = JSON.parse(readFileSync(`${process.env.EVIDENCE_DIR}/health.json`, 'utf8'));
+          if (health.status !== 'ok' || health.database !== 'connected') process.exit(1);
           NODE
-
-          login_status="$(curl --silent --output acceptance-artifacts/local-login-response.json --write-out '%{http_code}' \
-            --request POST \
-            --header 'Content-Type: application/json' \
-            --data '{"username":"acceptance","password":"not-a-real-password"}' \
-            http://127.0.0.1:4010/api/auth/login)"
-          test "$login_status" = "404"
-
-          curl --fail --silent http://127.0.0.1:4010/ > acceptance-artifacts/root-index.html
-          ! grep -E '%VITE_(PRODUCT_NAME|PRODUCT_LOGO_URL)%' acceptance-artifacts/root-index.html
-          grep -F '<title>WorkOS</title>' acceptance-artifacts/root-index.html
-
+          login_status="$(curl --silent --output "$EVIDENCE_DIR/local-login.json" --write-out '%{http_code}' --request POST --header 'Content-Type: application/json' --data '{"username":"acceptance","password":"not-a-real-password"}' http://127.0.0.1:4010/api/auth/login)"
+          test "$login_status" = '404'
+          curl --fail --silent http://127.0.0.1:4010/ > "$EVIDENCE_DIR/root-index.html"
+          ! grep -E '%VITE_[A-Z0-9_]+%' "$EVIDENCE_DIR/root-index.html"
+          grep -F '<title>WorkOS</title>' "$EVIDENCE_DIR/root-index.html"
           kill "$server_pid"
           wait "$server_pid" || true
           trap - EXIT
@@ -516,23 +286,30 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wos01a-database-runtime-${{ env.EXPECTED_TARGET_HEAD }}
-          path: acceptance-artifacts
+          name: wos01b-database-runtime-${{ needs.authority.outputs.target_head }}
+          path: ${{ env.EVIDENCE_DIR }}
           if-no-files-found: error
           retention-days: 14
 
-  browser_roles:
-    name: Local browser role and route journeys
+  browser:
+    name: Published exact-head browser role journeys
     needs: authority
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      BROWSER_ARTIFACTS: /tmp/wos01a-browser-artifacts
+    timeout-minutes: 25
     steps:
-      - name: Checkout exact WOS-01A head
+      - name: Checkout exact controller scripts
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.EXPECTED_TARGET_HEAD }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact published target head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.authority.outputs.target_head }}
+          path: workos
           fetch-depth: 0
           persist-credentials: false
 
@@ -541,171 +318,25 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: workos/package-lock.json
 
-      - name: Install and start explicit test-fallback frontend
+      - name: Install and run bounded local browser acceptance
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
-          rm -rf "$BROWSER_ARTIFACTS"
-          mkdir -p "$BROWSER_ARTIFACTS"
-          npm ci --ignore-scripts 2>&1 | tee "$BROWSER_ARTIFACTS/npm-ci.log"
+          test "$(git -C workos rev-parse HEAD)" = "${{ needs.authority.outputs.target_head }}"
+          node --check "controller/$BROWSER_SCRIPT"
+          npm --prefix workos ci --ignore-scripts
+          node "controller/$BROWSER_SCRIPT" workos /tmp/wos01b-browser-evidence | tee /tmp/wos01b-browser-summary.json
+          test -z "$(git -C workos status --porcelain)"
 
-          cat > public/__wos01a_acceptance.html <<'HTML'
-          <!doctype html>
-          <html lang="en">
-            <head><meta charset="utf-8"><title>WOS-01A acceptance</title></head>
-            <body>
-              <pre id="result">pending</pre>
-              <script>
-                const params = new URLSearchParams(location.search);
-                const role = params.get('role');
-                const targetPath = params.get('path');
-                const expectedPath = params.get('expected');
-                const permission = params.get('permission');
-                const session = {
-                  id: `acceptance-${role}`,
-                  userName: `acceptance-${role.toLowerCase()}`,
-                  employeeId: `ACCEPT-${role}`,
-                  name: `${role} Acceptance`,
-                  email: `${role.toLowerCase()}@example.test`,
-                  role,
-                  availableRoles: [role],
-                  permissions: permission ? [permission] : [],
-                  permissionRole: role,
-                  lastLogin: new Date().toISOString(),
-                };
-                localStorage.setItem('workos_demo_data_version', JSON.stringify('demo-your-organization-anonymized-v10'));
-                localStorage.setItem('workos_auth', JSON.stringify(session));
-
-                const frame = document.createElement('iframe');
-                frame.id = 'app-frame';
-                frame.src = targetPath;
-                frame.style.width = '1280px';
-                frame.style.height = '900px';
-                document.body.appendChild(frame);
-
-                const finish = () => {
-                  try {
-                    const finalPath = frame.contentWindow.location.pathname;
-                    const body = frame.contentDocument.body.innerText || '';
-                    const invalid = /Page not found|Sign in to|Authentication required/i.test(body);
-                    const pass = finalPath === expectedPath && body.trim().length > 80 && !invalid;
-                    document.documentElement.dataset.acceptance = pass ? 'pass' : 'fail';
-                    document.getElementById('result').textContent = JSON.stringify({
-                      role,
-                      targetPath,
-                      expectedPath,
-                      finalPath,
-                      bodyLength: body.length,
-                      invalid,
-                      pass,
-                      excerpt: body.slice(0, 800),
-                    });
-                  } catch (error) {
-                    document.documentElement.dataset.acceptance = 'fail';
-                    document.getElementById('result').textContent = JSON.stringify({ role, error: String(error), pass: false });
-                  }
-                };
-
-                const timer = setInterval(() => {
-                  try {
-                    if (frame.contentDocument?.body?.innerText?.trim().length > 80) {
-                      clearInterval(timer);
-                      setTimeout(finish, 500);
-                    }
-                  } catch {}
-                }, 200);
-                setTimeout(() => {
-                  clearInterval(timer);
-                  finish();
-                }, 7000);
-              </script>
-            </body>
-          </html>
-          HTML
-
-          nohup env \
-            VITE_APP_MODE=test \
-            VITE_ALLOW_TEST_FALLBACK=true \
-            VITE_PRODUCT_NAME=WorkOS \
-            VITE_ORGANIZATION_NAME="Your organization" \
-            VITE_PRODUCT_LOGO_URL=/workos-mark.svg \
-            VITE_SUPPORT_NAME="WorkOS Support" \
-            VITE_SUPPORT_EMAIL=support@example.test \
-            npm run dev > "$BROWSER_ARTIFACTS/vite.log" 2>&1 &
-          vite_pid=$!
-          echo "$vite_pid" > "$BROWSER_ARTIFACTS/vite.pid"
-          for _ in $(seq 1 45); do
-            if curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then
-              exit 0
-            fi
-            if ! kill -0 "$vite_pid" 2>/dev/null; then
-              cat "$BROWSER_ARTIFACTS/vite.log"
-              exit 1
-            fi
-            sleep 1
-          done
-          cat "$BROWSER_ARTIFACTS/vite.log"
-          exit 1
-
-      - name: Execute role and denied-route browser journeys
-        shell: bash
-        run: |
-          set -euo pipefail
-          chrome="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
-          test -n "$chrome"
-          "$chrome" --version | tee "$BROWSER_ARTIFACTS/chrome-version.txt"
-
-          journey() {
-            case_name="$1"
-            role="$2"
-            target_path="$3"
-            expected_path="$4"
-            permission="$5"
-            output="$BROWSER_ARTIFACTS/browser-${case_name}.html"
-            profile="/tmp/wos01a-chrome-${case_name}"
-            rm -rf "$profile"
-            url="http://127.0.0.1:3000/__wos01a_acceptance.html?role=${role}&path=${target_path}&expected=${expected_path}&permission=${permission}"
-            "$chrome" \
-              --headless=new \
-              --no-sandbox \
-              --disable-gpu \
-              --disable-dev-shm-usage \
-              --disable-background-networking \
-              --host-resolver-rules="MAP * 0.0.0.0, EXCLUDE 127.0.0.1, EXCLUDE localhost" \
-              --user-data-dir="$profile" \
-              --virtual-time-budget=10000 \
-              --dump-dom "$url" > "$output" 2> "$BROWSER_ARTIFACTS/browser-${case_name}.log"
-            grep -F 'data-acceptance="pass"' "$output"
-          }
-
-          journey admin-home Admin %2F %2F dashboard.view
-          journey hr-home HR %2F %2F dashboard.view
-          journey regional-home CountryDirector %2F %2F dashboard.view
-          journey pm-home ProjectManager %2Fpm-workspace %2Fpm-workspace pm_workspace.view
-          journey teamlead-home TeamLead %2Ftimesheets%2Fapproval %2Ftimesheets%2Fapproval timesheets.approve
-          journey employee-home Employee %2Fess %2Fess employee_workspace.view
-
-          journey pm-admin-denied ProjectManager %2Fadmin %2Fpm-workspace pm_workspace.view
-          journey teamlead-admin-denied TeamLead %2Fadmin %2Ftimesheets%2Fapproval timesheets.approve
-          journey employee-admin-denied Employee %2Fadmin %2Fess employee_workspace.view
-
-      - name: Stop local frontend
-        if: always()
-        shell: bash
-        run: |
-          if test -f "$BROWSER_ARTIFACTS/vite.pid"; then
-            kill "$(cat "$BROWSER_ARTIFACTS/vite.pid")" 2>/dev/null || true
-          fi
-          rm -f public/__wos01a_acceptance.html
-
-      - name: Upload browser journey evidence
+      - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wos01a-browser-roles-${{ env.EXPECTED_TARGET_HEAD }}
-          path: ${{ env.BROWSER_ARTIFACTS }}
-          if-no-files-found: error
+          name: wos01b-browser-${{ needs.authority.outputs.target_head }}
+          path: |
+            /tmp/wos01b-browser-evidence
+            /tmp/wos01b-browser-summary.json
+          if-no-files-found: warn
           retention-days: 14
