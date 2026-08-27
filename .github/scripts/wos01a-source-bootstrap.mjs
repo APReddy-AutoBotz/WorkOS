@@ -307,10 +307,37 @@ await writeFile(indexFile, indexText);
 const cssFile = path.join(targetRoot, 'src/index.css');
 if (await exists(cssFile)) {
   const cssText = await readFile(cssFile, 'utf8');
-  const localizedCssText = cssText.replace(
-    /@import\s+(?:url\(\s*)?['"]?https:\/\/fonts\.(?:googleapis|gstatic)\.com[\s\S]*?;\s*/gi,
-    '',
-  );
+  const neutralizeExternalFontImports = (input) => {
+    const lines = input.match(/.*(?:\r\n|\n|\r|$)/g)?.filter(Boolean) ?? [];
+    return lines.map((line) => {
+      if (!/fonts\.(?:googleapis|gstatic)\.com/i.test(line)) return line;
+      // A first-semicolon regex is unsafe because font query values contain
+      // semicolon-separated weights. Remove only a complete single-line import,
+      // never adjacent CSS; malformed or multiline imports fail closed below.
+      const completeImport = /^\s*@import\s+(?:(?:url\(\s*(['"])https:\/\/fonts\.(?:googleapis|gstatic)\.com[^\r\n]*?\1\s*\))|(?:(['"])https:\/\/fonts\.(?:googleapis|gstatic)\.com[^\r\n]*?\2))\s*;\s*(?:\r\n|\n|\r)?$/i;
+      if (!completeImport.test(line)) return line;
+      return '';
+    }).join('');
+  };
+  const assertExternalFontNeutralization = () => {
+    const fixtures = [
+      "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');\n@import \"tailwindcss\";\n",
+      "@import \"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap\";\n@import \"tailwindcss\";\n",
+    ];
+    for (const fixture of fixtures) {
+      const once = neutralizeExternalFontImports(fixture);
+      const twice = neutralizeExternalFontImports(once);
+      if (once !== '@import "tailwindcss";\n' || twice !== once || /(?:500|600|700|fonts\.(?:googleapis|gstatic)\.com)/i.test(once)) {
+        throw new Error(`External font neutralization regression:\n${once}`);
+      }
+    }
+    const malformed = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500'\n@import \"tailwindcss\";\n";
+    if (!/fonts\.googleapis\.com/i.test(neutralizeExternalFontImports(malformed))) {
+      throw new Error('Malformed external font import did not fail closed');
+    }
+  };
+  assertExternalFontNeutralization();
+  const localizedCssText = neutralizeExternalFontImports(cssText);
   await writeFile(cssFile, localizedCssText);
   if (/fonts\.(?:googleapis|gstatic)\.com/i.test(localizedCssText)) {
     throw new Error('Remote Google Fonts dependency remains in src/index.css');
