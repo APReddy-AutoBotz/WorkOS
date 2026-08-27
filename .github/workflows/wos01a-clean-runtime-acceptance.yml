@@ -151,11 +151,33 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --ignore-scripts 2>&1 | tee acceptance-artifacts/npm-ci.log
-          npm run typecheck 2>&1 | tee acceptance-artifacts/typecheck.log
-          npm run lint 2>&1 | tee acceptance-artifacts/lint.log
-          npm run test:wos00-baseline 2>&1 | tee acceptance-artifacts/wos00-baseline.log
-          npm run test:bootstrap-scan 2>&1 | tee acceptance-artifacts/bootstrap-scan.log
-          npm test 2>&1 | tee acceptance-artifacts/retained-tests.log
+
+          run_check() {
+            check_name="$1"
+            log_file="$2"
+            shift 2
+            set +e
+            "$@" 2>&1 | tee "$log_file"
+            check_rc="${PIPESTATUS[0]}"
+            set -e
+            if test "$check_rc" -ne 0; then
+              echo "${check_name} failed with exit ${check_rc}." >> acceptance-artifacts/static-failures.txt
+            fi
+          }
+
+          run_check "Type check" acceptance-artifacts/typecheck.log npm run typecheck
+          run_check "Configured lint command" acceptance-artifacts/lint.log npm run lint
+          run_check "WOS-00 baseline verifier" acceptance-artifacts/wos00-baseline.log npm run test:wos00-baseline
+          run_check "Bootstrap security scan" acceptance-artifacts/bootstrap-scan.log npm run test:bootstrap-scan
+
+          run_check "Retained safe test suite" acceptance-artifacts/retained-tests.log \
+            env \
+              NODE_ENV=test \
+              APP_MODE=test \
+              VITE_APP_MODE=test \
+              ALLOW_TEST_FALLBACK=true \
+              VITE_ALLOW_TEST_FALLBACK=true \
+              npm test
 
       - name: Classify full and production dependency advisories
         shell: bash
@@ -504,6 +526,8 @@ jobs:
     needs: authority
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      BROWSER_ARTIFACTS: /tmp/wos01a-browser-artifacts
     steps:
       - name: Checkout exact WOS-01A head
         uses: actions/checkout@v4
@@ -524,8 +548,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_TARGET_HEAD"
-          mkdir -p acceptance-artifacts
-          npm ci --ignore-scripts 2>&1 | tee acceptance-artifacts/npm-ci.log
+          rm -rf "$BROWSER_ARTIFACTS"
+          mkdir -p "$BROWSER_ARTIFACTS"
+          npm ci --ignore-scripts 2>&1 | tee "$BROWSER_ARTIFACTS/npm-ci.log"
 
           cat > public/__wos01a_acceptance.html <<'HTML'
           <!doctype html>
@@ -551,6 +576,7 @@ jobs:
                   permissionRole: role,
                   lastLogin: new Date().toISOString(),
                 };
+                localStorage.setItem('workos_demo_data_version', JSON.stringify('demo-your-organization-anonymized-v10'));
                 localStorage.setItem('workos_auth', JSON.stringify(session));
 
                 const frame = document.createElement('iframe');
@@ -608,20 +634,20 @@ jobs:
             VITE_PRODUCT_LOGO_URL=/workos-mark.svg \
             VITE_SUPPORT_NAME="WorkOS Support" \
             VITE_SUPPORT_EMAIL=support@example.test \
-            npm run dev > acceptance-artifacts/vite.log 2>&1 &
+            npm run dev > "$BROWSER_ARTIFACTS/vite.log" 2>&1 &
           vite_pid=$!
-          echo "$vite_pid" > acceptance-artifacts/vite.pid
+          echo "$vite_pid" > "$BROWSER_ARTIFACTS/vite.pid"
           for _ in $(seq 1 45); do
             if curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then
               exit 0
             fi
             if ! kill -0 "$vite_pid" 2>/dev/null; then
-              cat acceptance-artifacts/vite.log
+              cat "$BROWSER_ARTIFACTS/vite.log"
               exit 1
             fi
             sleep 1
           done
-          cat acceptance-artifacts/vite.log
+          cat "$BROWSER_ARTIFACTS/vite.log"
           exit 1
 
       - name: Execute role and denied-route browser journeys
@@ -630,7 +656,7 @@ jobs:
           set -euo pipefail
           chrome="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
           test -n "$chrome"
-          "$chrome" --version | tee acceptance-artifacts/chrome-version.txt
+          "$chrome" --version | tee "$BROWSER_ARTIFACTS/chrome-version.txt"
 
           journey() {
             case_name="$1"
@@ -638,7 +664,7 @@ jobs:
             target_path="$3"
             expected_path="$4"
             permission="$5"
-            output="acceptance-artifacts/browser-${case_name}.html"
+            output="$BROWSER_ARTIFACTS/browser-${case_name}.html"
             profile="/tmp/wos01a-chrome-${case_name}"
             rm -rf "$profile"
             url="http://127.0.0.1:3000/__wos01a_acceptance.html?role=${role}&path=${target_path}&expected=${expected_path}&permission=${permission}"
@@ -651,7 +677,7 @@ jobs:
               --host-resolver-rules="MAP * 0.0.0.0, EXCLUDE 127.0.0.1, EXCLUDE localhost" \
               --user-data-dir="$profile" \
               --virtual-time-budget=10000 \
-              --dump-dom "$url" > "$output" 2> "acceptance-artifacts/browser-${case_name}.log"
+              --dump-dom "$url" > "$output" 2> "$BROWSER_ARTIFACTS/browser-${case_name}.log"
             grep -F 'data-acceptance="pass"' "$output"
           }
 
@@ -670,8 +696,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if test -f acceptance-artifacts/vite.pid; then
-            kill "$(cat acceptance-artifacts/vite.pid)" 2>/dev/null || true
+          if test -f "$BROWSER_ARTIFACTS/vite.pid"; then
+            kill "$(cat "$BROWSER_ARTIFACTS/vite.pid")" 2>/dev/null || true
           fi
           rm -f public/__wos01a_acceptance.html
 
@@ -680,6 +706,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wos01a-browser-roles-${{ env.EXPECTED_TARGET_HEAD }}
-          path: acceptance-artifacts
+          path: ${{ env.BROWSER_ARTIFACTS }}
           if-no-files-found: error
           retention-days: 14
