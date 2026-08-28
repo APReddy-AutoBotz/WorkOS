@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'
       - '.github/scripts/wos01a-browser-acceptance-v2.mjs'
+      - '.github/scripts/verify-wos01a-controller-v2.mjs'
   workflow_dispatch:
 
 permissions:
@@ -150,6 +151,12 @@ jobs:
           cache: npm
           cache-dependency-path: target/package-lock.json
 
+      - name: Verify controller fallback and evidence isolation
+        id: controller_regression
+        shell: bash
+        working-directory: controller
+        run: node .github/scripts/verify-wos01a-controller-v2.mjs
+
       - name: Prepare evidence directory
         shell: bash
         run: |
@@ -178,7 +185,8 @@ jobs:
           node scripts/scan-bootstrap.mjs 2>&1 | tee .acceptance-evidence/scan-bootstrap.log
           npm run typecheck 2>&1 | tee .acceptance-evidence/typecheck.log
           npm run lint 2>&1 | tee .acceptance-evidence/lint.log
-          npm test 2>&1 | tee .acceptance-evidence/tests.log
+          VITE_APP_MODE='test' VITE_ALLOW_TEST_FALLBACK='true' \
+            npm test 2>&1 | tee .acceptance-evidence/tests.log
 
       - name: Runtime and full dependency advisory classification
         id: dependencies
@@ -442,6 +450,7 @@ jobs:
           cat > .acceptance-evidence/step-outcomes.txt <<EOF
           authority=${{ steps.authority.outcome }}
           repository_boundary=${{ steps.repository_boundary.outcome }}
+          controller_regression=${{ steps.controller_regression.outcome }}
           install=${{ steps.install.outcome }}
           engineering=${{ steps.engineering.outcome }}
           dependencies=${{ steps.dependencies.outcome }}
@@ -461,6 +470,7 @@ jobs:
         with:
           name: wos01a-clean-runtime-${{ env.TARGET_HEAD }}
           path: target/.acceptance-evidence
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
@@ -482,6 +492,7 @@ jobs:
           }
           check authority '${{ steps.authority.outcome }}'
           check repository_boundary '${{ steps.repository_boundary.outcome }}'
+          check controller_regression '${{ steps.controller_regression.outcome }}'
           check install '${{ steps.install.outcome }}'
           check engineering '${{ steps.engineering.outcome }}'
           check dependencies '${{ steps.dependencies.outcome }}'
