@@ -1,0 +1,255 @@
+name: WorkOS PR27 Live Proof v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr27-live-proof-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: workos-pr27-live-proof-v1
+  cancel-in-progress: false
+
+env:
+  ORIGINAL_PRODUCT_HEAD: 0935424a52b57cc3a51adeef737e6eaec2946a88
+
+jobs:
+  authority:
+    name: Wait for direct PR 27 identity publication and corrected PR 26
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      acceptance: ${{ steps.wait.outputs.acceptance }}
+      product: ${{ steps.wait.outputs.product }}
+      parent: ${{ steps.wait.outputs.parent }}
+      main: ${{ steps.wait.outputs.main }}
+    steps:
+      - name: Poll exact live branch/package authority
+        id: wait
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const expectedPaths = [
+              'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md',
+              'package.json',
+              'server/identity-discovery.mjs',
+              'server/index.mjs',
+              'server/start-production.mjs',
+              'tests/identity-discovery-smoke.mjs',
+              'tests/production-identity-smoke.mjs',
+            ].sort();
+            for (let attempt = 1; attempt <= 20; attempt += 1) {
+              const [acceptance, product, parent, main] = await Promise.all([
+                github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 26}),
+                github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 27}),
+                github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 16}),
+                github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+              ]);
+              const a = acceptance.data;
+              const t = product.data;
+              const p = parent.data;
+              const m = main.data;
+              const controllerFiles = await Promise.all([
+                github.rest.repos.getContent({owner: context.repo.owner, repo: context.repo.repo, path: '.github/scripts/wos01a-clean-runtime-matrix-v2.sh', ref: a.head.sha}),
+                github.rest.repos.getContent({owner: context.repo.owner, repo: context.repo.repo, path: '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml', ref: a.head.sha}),
+              ]).catch(() => null);
+              let correctedController = false;
+              if (controllerFiles) {
+                const matrix = Buffer.from(controllerFiles[0].data.content, 'base64').toString('utf8');
+                const workflow = Buffer.from(controllerFiles[1].data.content, 'base64').toString('utf8');
+                correctedController = !matrix.includes('GH_TOKEN')
+                  && workflow.includes('id: final_authority')
+                  && workflow.includes('controller.head.ref !== process.env.CONTROLLER_BRANCH');
+              }
+              const published = t.head.sha !== process.env.ORIGINAL_PRODUCT_HEAD;
+              let exactPaths = false;
+              if (published) {
+                const files = await github.paginate(github.rest.pulls.listFiles, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: 27,
+                  per_page: 100,
+                });
+                const closurePaths = files
+                  .map(file => file.filename)
+                  .filter(path => expectedPaths.includes(path))
+                  .sort();
+                exactPaths = JSON.stringify(closurePaths) === JSON.stringify(expectedPaths);
+              }
+              core.info(`attempt=${attempt} product=${t.head.sha} published=${published} exactSeven=${exactPaths} controller=${a.head.sha} correctedController=${correctedController}`);
+              if (a.state !== 'open' || !a.draft || a.head.ref !== 'controller/wos01a-clean-runtime-acceptance-v2' || a.base.ref !== 'main') return core.setFailed('PR #26 authority changed');
+              if (t.state !== 'open' || !t.draft || t.head.ref !== 'codex/wos01a-acceptance-closure' || t.base.ref !== 'codex/wos-01-authorized-source-bootstrap-v2') return core.setFailed('PR #27 authority changed');
+              if (p.state !== 'open' || !p.draft || p.head.ref !== 'codex/wos-01-authorized-source-bootstrap-v2' || p.base.ref !== 'main') return core.setFailed('PR #16 authority changed');
+              if (published && exactPaths && correctedController) {
+                core.setOutput('acceptance', a.head.sha);
+                core.setOutput('product', t.head.sha);
+                core.setOutput('parent', p.head.sha);
+                core.setOutput('main', m.commit.sha);
+                return;
+              }
+              if (attempt < 20) await sleep(120000);
+            }
+            core.setFailed('Timed out waiting for directly published seven-file identity closure and corrected PR #26 controller.');
+
+  prove:
+    name: Run complete exact-head proof on directly published PR 27
+    needs: authority
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CONTROLLER_PR: '26'
+      CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      CONTROLLER_HEAD: ${{ needs.authority.outputs.acceptance }}
+      TARGET_PR: '27'
+      TARGET_BRANCH: codex/wos01a-acceptance-closure
+      TARGET_HEAD: ${{ needs.authority.outputs.product }}
+      PARENT_PR: '16'
+      PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      PARENT_HEAD: ${{ needs.authority.outputs.parent }}
+      EXPECTED_MAIN_HEAD: ${{ needs.authority.outputs.main }}
+      ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: workos
+      PGPASSWORD: workos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: current-main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+      - name: Prove identity package shape before full matrix
+        run: |
+          set -euo pipefail
+          cd target
+          test -f server/identity-discovery.mjs
+          test -f tests/identity-discovery-smoke.mjs
+          grep -q "redirect: 'manual'" server/identity-discovery.mjs
+          grep -q 'ENTRA_TENANT_ID' server/identity-discovery.mjs
+          grep -q 'identity-discovery' server/start-production.mjs
+          grep -q 'identity-discovery' server/index.mjs
+          node tests/identity-discovery-smoke.mjs
+      - name: Execute complete token-free exact-head matrix
+        id: matrix
+        continue-on-error: true
+        run: |
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh "$GITHUB_WORKSPACE/controller" "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/current-main"
+      - name: Final isolated live authority
+        id: authority
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const failures = [];
+            const [c, t, p, m] = await Promise.all([
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 26}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 27}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 16}),
+              github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+            ]);
+            if (c.data.head.sha !== process.env.CONTROLLER_HEAD || c.data.head.ref !== process.env.CONTROLLER_BRANCH || c.data.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('controller lease changed');
+            if (t.data.head.sha !== process.env.TARGET_HEAD || t.data.head.ref !== process.env.TARGET_BRANCH || t.data.base.sha !== process.env.PARENT_HEAD) failures.push('target lease changed');
+            if (p.data.head.sha !== process.env.PARENT_HEAD || p.data.head.ref !== process.env.PARENT_BRANCH || p.data.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push('parent lease changed');
+            if (m.data.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('main changed');
+            const dir = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+            fs.mkdirSync(dir, {recursive: true});
+            fs.writeFileSync(path.join(dir, 'pr27-live-proof-final-authority.json'), `${JSON.stringify({status: failures.length ? 'failed' : 'passed', failures, controller: c.data, target: t.data, parent: p.data, main: m.data}, null, 2)}\n`);
+            if (failures.length) core.setFailed(failures.join(', '));
+      - name: Upload exact live PR 27 evidence
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-pr27-live-proof-${{ env.TARGET_HEAD }}
+          path: target/.acceptance-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Aggregate exact live PR 27 proof
+        if: always()
+        run: |
+          set -euo pipefail
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.authority.outcome }}' = success
+          test '${{ steps.upload.outcome }}' = success
+
+  report:
+    name: Report directly published identity closure proof
+    needs: [authority, prove]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const head = '${{ needs.authority.outputs.product }}';
+            const proof = '${{ needs.prove.result }}';
+            if (head) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: 27,
+                body: `### WOS-01A identity closure publication reporter\n\n- Published exact head: \`${head}\`\n- Complete corrected-controller proof: **${proof}**\n- Workflow run: \`${context.runId}\`\n\nThis reporter covers a directly published seven-file identity package; the patch watcher remains only a fallback.`,
+              });
+            }
+            if (proof === 'success') {
+              for (const id of ['PRRT_kwDOUAv8Lc6dFOrw', 'PRRT_kwDOUAv8Lc6dFOry', 'PRRT_kwDOUAv8Lc6dFOr0', 'PRRT_kwDOUAv8Lc6dFdcg']) {
+                try {
+                  await github.graphql(`mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }`, {id});
+                } catch (error) {
+                  core.warning(`Could not resolve ${id}: ${error.message}`);
+                }
+              }
+            } else {
+              core.setFailed(`direct PR #27 proof outcome=${proof}`);
+            }
