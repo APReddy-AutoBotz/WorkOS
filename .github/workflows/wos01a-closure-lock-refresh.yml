@@ -203,7 +203,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          cp /tmp/wos01a-lock-refresh/package-lock.json package-lock.json
+          mapfile -t lock_candidates < <(find /tmp/wos01a-lock-refresh -type f -name package-lock.json -print | sort)
+          test "${#lock_candidates[@]}" -eq 1
+          cp "${lock_candidates[0]}" package-lock.json
           test "$(sha256sum package-lock.json | cut -d' ' -f1)" = "${{ needs.prepare.outputs.lock_sha256 }}"
           rm "$WORKFLOW_PATH"
           mapfile -t changed < <(git status --porcelain | sed 's/^...//' | sort)
