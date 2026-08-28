@@ -1,0 +1,292 @@
+name: WorkOS PR27 Callback Audit Hotfix v2
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr27-callback-audit-hotfix-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: workos-pr27-callback-audit-hotfix-v2
+  cancel-in-progress: false
+
+env:
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_OLD_HEAD: d02a971c69dbb972cb5b12b340f86aaca7c72fad
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  CONTROLLER_OLD_HEAD: c1c8ee6fbe05288d199e287a947a7d1f7ed9cc57
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+
+jobs:
+  publish:
+    name: Validate, publish and rebind exact heads
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: workos
+      PGPASSWORD: workos
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Verify initial exact PR and branch leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const readPr = async (number) => (await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(number),
+            })).data;
+            const [target, controller, parent, main] = await Promise.all([
+              readPr(process.env.TARGET_PR),
+              readPr(process.env.CONTROLLER_PR),
+              readPr(process.env.PARENT_PR),
+              github.rest.repos.getBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: 'main',
+              }).then(({data}) => data),
+            ]);
+            const check = (pr, label, branch, head, baseBranch, baseHead) => {
+              if (pr.state !== 'open') failures.push(`${label}.state=${pr.state}`);
+              if (!pr.draft) failures.push(`${label} is not Draft`);
+              if (pr.head.ref !== branch) failures.push(`${label}.head.ref=${pr.head.ref}`);
+              if (pr.head.sha !== head) failures.push(`${label}.head.sha=${pr.head.sha}`);
+              if (pr.base.ref !== baseBranch) failures.push(`${label}.base.ref=${pr.base.ref}`);
+              if (pr.base.sha !== baseHead) failures.push(`${label}.base.sha=${pr.base.sha}`);
+            };
+            check(target, 'target', process.env.TARGET_BRANCH, process.env.TARGET_OLD_HEAD, process.env.PARENT_BRANCH, process.env.PARENT_HEAD);
+            check(controller, 'controller', process.env.CONTROLLER_BRANCH, process.env.CONTROLLER_OLD_HEAD, 'main', process.env.MAIN_HEAD);
+            check(parent, 'parent', process.env.PARENT_BRANCH, process.env.PARENT_HEAD, 'main', process.env.ACCEPTED_WOS00_BASE);
+            if (main.commit.sha !== process.env.MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(`Initial lease failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact product head without retained credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_OLD_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Apply and statically verify bounded correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('server/index.mjs')
+          source = path.read_text()
+          old_ip = "const getRequestIp = (req) => String(req.headers['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '').split(',')[0].trim();"
+          new_ip = "const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '').split(',')[0].trim();"
+          if source.count(old_ip) != 1:
+              raise SystemExit('unexpected getRequestIp shape')
+          source = source.replace(old_ip, new_ip, 1)
+
+          old_audit = "    await audit(client, { ...req, user: { sub: user.id, username: user.username, activeRole: session.activeRole } }, {"
+          new_audit = "    req.user = { sub: user.id, username: user.username, activeRole: session.activeRole };\n    await audit(client, req, {"
+          if source.count(old_audit) != 1:
+              raise SystemExit('unexpected Entra callback audit shape')
+          path.write_text(source.replace(old_audit, new_audit, 1))
+          PY
+
+          node --check server/index.mjs
+          git diff --check
+          test "$(git diff --name-only)" = 'server/index.mjs'
+          grep -F "const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for']" server/index.mjs
+          grep -F "req.user = { sub: user.id, username: user.username, activeRole: session.activeRole };" server/index.mjs
+          if grep -F "await audit(client, { ...req, user:" server/index.mjs; then
+            echo 'Request-spread audit path remains' >&2
+            exit 1
+          fi
+
+      - name: Install and run focused production callback acceptance without repository credentials
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/workos_prod
+          PGSSLMODE: disable
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          psql -d postgres -v ON_ERROR_STOP=1 -c 'drop database if exists workos_prod;'
+          psql -d postgres -v ON_ERROR_STOP=1 -c 'create database workos_prod;'
+          node server/migrate.mjs
+          npm run test:production-identity
+
+      - name: Commit validated product correction locally
+        id: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/index.mjs
+          git commit -m 'fix: preserve request context during Entra login audit'
+          echo "target_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate and publish product under exact-old-head lease
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          remote_head="$(git ls-remote "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/heads/$TARGET_BRANCH" | awk '{print $1}')"
+          test "$remote_head" = "$TARGET_OLD_HEAD"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin \
+            HEAD:"refs/heads/$TARGET_BRANCH" \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$TARGET_OLD_HEAD"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Checkout exact controller head without retained credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_OLD_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rebind and verify controller locally
+        id: controller
+        shell: bash
+        env:
+          TARGET_HEAD: ${{ steps.product.outputs.target_head }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          old_target = 'd02a971c69dbb972cb5b12b340f86aaca7c72fad'
+          new_target = os.environ['TARGET_HEAD']
+          workflow_path = Path('.github/workflows/wos01a-clean-runtime-acceptance-v2.yml')
+          workflow = workflow_path.read_text()
+          if workflow.count(f'TARGET_HEAD: {old_target}') != 1:
+              raise SystemExit('unexpected controller workflow target binding')
+          workflow_path.write_text(workflow.replace(f'TARGET_HEAD: {old_target}', f'TARGET_HEAD: {new_target}', 1))
+
+          verifier_path = Path('.github/scripts/verify-wos01a-controller-v2.mjs')
+          verifier = verifier_path.read_text()
+          if verifier.count(old_target) != 1:
+              raise SystemExit('unexpected controller verifier target binding')
+          verifier_path.write_text(verifier.replace(old_target, new_target, 1))
+          PY
+
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          node --check .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+          mapfile -t changed < <(git diff --name-only | sort)
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = '.github/scripts/verify-wos01a-controller-v2.mjs'
+          test "${changed[1]}" = '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "${changed[@]}"
+          git commit -m 'ci: bind WOS-01A acceptance to callback audit fix'
+          echo "controller_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify live product publication before controller publication
+        uses: actions/github-script@v7
+        env:
+          TARGET_HEAD: ${{ steps.product.outputs.target_head }}
+        with:
+          script: |
+            const failures = [];
+            const [target, controller, parent, main] = await Promise.all([
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)}).then(({data}) => data),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)}).then(({data}) => data),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)}).then(({data}) => data),
+              github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}).then(({data}) => data),
+            ]);
+            if (target.state !== 'open' || !target.draft || target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target=${target.state}/${target.draft}/${target.head.ref}/${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}/${target.base.sha}`);
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.CONTROLLER_OLD_HEAD) failures.push(`controller=${controller.state}/${controller.draft}/${controller.head.ref}/${controller.head.sha}`);
+            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.MAIN_HEAD) failures.push(`controller.base=${controller.base.ref}/${controller.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft || parent.head.sha !== process.env.PARENT_HEAD || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push('parent authority changed');
+            if (main.commit.sha !== process.env.MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(`Controller publication lease failed: ${failures.join(', ')}`);
+
+      - name: Publish rebound controller under exact-old-head lease
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          remote_head="$(git ls-remote "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/heads/$CONTROLLER_BRANCH" | awk '{print $1}')"
+          test "$remote_head" = "$CONTROLLER_OLD_HEAD"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin \
+            HEAD:"refs/heads/$CONTROLLER_BRANCH" \
+            --force-with-lease="refs/heads/$CONTROLLER_BRANCH:$CONTROLLER_OLD_HEAD"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Publish bounded checkpoint
+        uses: actions/github-script@v7
+        env:
+          TARGET_HEAD: ${{ steps.product.outputs.target_head }}
+          CONTROLLER_HEAD: ${{ steps.controller.outputs.controller_head }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.TARGET_PR),
+              body: [
+                '### Production identity callback audit correction published',
+                '',
+                `- New exact head: \`${process.env.TARGET_HEAD}\``,
+                '- Preserved the original Express request object for the Entra login audit.',
+                '- Made request-IP extraction safe when headers are absent.',
+                '- Locked install, production build, disposable migration and the signed synthetic Entra callback acceptance passed before publication.',
+                '',
+                'PR #27 remains Draft pending the complete exact-head controller matrix and fresh independent review.',
+              ].join('\n'),
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.CONTROLLER_PR),
+              body: [
+                '### Controller rebound to callback audit correction',
+                '',
+                `- Product head: \`${process.env.TARGET_HEAD}\``,
+                `- Controller head: \`${process.env.CONTROLLER_HEAD}\``,
+                '',
+                'The complete exact-head acceptance workflow is now the active authority gate. PR #26 remains Draft.',
+              ].join('\n'),
+            });
