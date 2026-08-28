@@ -5,11 +5,11 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'
+      - '.github/scripts/wos01a-clean-runtime-matrix-v2.sh'
       - '.github/scripts/wos01a-browser-acceptance-v2.mjs'
       - '.github/scripts/wos01a-browser-lifecycle-v2.mjs'
       - '.github/scripts/test-wos01a-browser-lifecycle-v2.mjs'
       - '.github/scripts/verify-wos01a-controller-v2.mjs'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,9 +20,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
   TARGET_PR: '27'
   TARGET_BRANCH: codex/wos01a-acceptance-closure
-  TARGET_HEAD: 4415eb15aee8ce8f07d2b83d586241653f1c949d
+  TARGET_HEAD: 117ad0afc2a0607ec290ba9d040d32cd08d20b3e
   PARENT_PR: '16'
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
@@ -54,116 +56,92 @@ jobs:
           --health-retries 20
 
     steps:
-      - name: Checkout exact controller revision
+      - name: Verify exact controller, target, parent and main authority
+        id: authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const controller = context.payload.pull_request;
+            const failures = [];
+            if (controller.number !== Number(process.env.CONTROLLER_PR)) failures.push(`controller.number=${controller.number}`);
+            if (controller.state !== 'open') failures.push(`controller.state=${controller.state}`);
+            if (!controller.draft) failures.push('controller is not Draft');
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.head.sha !== context.sha) failures.push(`controller.head.sha=${controller.head.sha}`);
+            if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
+            if (controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base.sha=${controller.base.sha}`);
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: controller.number,
+              per_page: 100,
+            });
+            const actual = files.map(file => file.filename).sort();
+            const expected = [
+              '.github/scripts/test-wos01a-browser-lifecycle-v2.mjs',
+              '.github/scripts/verify-wos01a-controller-v2.mjs',
+              '.github/scripts/wos01a-browser-acceptance-v2.mjs',
+              '.github/scripts/wos01a-browser-lifecycle-v2.mjs',
+              '.github/scripts/wos01a-clean-runtime-matrix-v2.sh',
+              '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml',
+            ].sort();
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`controller.paths=${JSON.stringify(actual)}`);
+
+            const {data: target} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
+            });
+            if (target.state !== 'open') failures.push(`target.state=${target.state}`);
+            if (!target.draft) failures.push('target is not Draft');
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH) failures.push(`target.base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base.sha=${target.base.sha}`);
+
+            const {data: parent} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PARENT_PR),
+            });
+            if (parent.state !== 'open') failures.push(`parent.state=${parent.state}`);
+            if (!parent.draft) failures.push('parent is not Draft');
+            if (parent.head.ref !== process.env.PARENT_BRANCH) failures.push(`parent.head.ref=${parent.head.ref}`);
+            if (parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head.sha=${parent.head.sha}`);
+            if (parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent.base.sha=${parent.base.sha}`);
+
+            const {data: main} = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(`WOS-01A exact authority failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact controller head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: controller
           fetch-depth: 0
           persist-credentials: false
-          path: controller
 
-      - name: Verify immutable authority and target PR
-        id: authority
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            test "${GITHUB_HEAD_REF}" = "controller/wos01a-clean-runtime-acceptance-v2"
-            test "${GITHUB_BASE_REF}" = "main"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            test "${GITHUB_REF}" = "refs/heads/main"
-          else
-            echo "Unsupported event: ${GITHUB_EVENT_NAME}" >&2
-            exit 1
-          fi
-
-          api="https://api.github.com/repos/${REPOSITORY}/pulls/${TARGET_PR}"
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "${api}" > /tmp/target-pr.json
-
-          test "$(jq -r .state /tmp/target-pr.json)" = "open"
-          test "$(jq -r .draft /tmp/target-pr.json)" = "true"
-          test "$(jq -r .head.ref /tmp/target-pr.json)" = "${TARGET_BRANCH}"
-          test "$(jq -r .head.sha /tmp/target-pr.json)" = "${TARGET_HEAD}"
-          test "$(jq -r .base.ref /tmp/target-pr.json)" = "${PARENT_BRANCH}"
-          test "$(jq -r .base.sha /tmp/target-pr.json)" = "${PARENT_HEAD}"
-
-          parent_api="https://api.github.com/repos/${REPOSITORY}/pulls/${PARENT_PR}"
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "${parent_api}" > /tmp/parent-pr.json
-          test "$(jq -r .state /tmp/parent-pr.json)" = "open"
-          test "$(jq -r .draft /tmp/parent-pr.json)" = "true"
-          test "$(jq -r .head.ref /tmp/parent-pr.json)" = "${PARENT_BRANCH}"
-          test "$(jq -r .head.sha /tmp/parent-pr.json)" = "${PARENT_HEAD}"
-          echo "Target PR #${TARGET_PR} is stacked on frozen parent PR #${PARENT_PR}."
-
-      - name: Resolve current main through the read-only GitHub API
-        id: current_main
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          api="https://api.github.com/repos/${REPOSITORY}/git/ref/heads/main"
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "${api}" > /tmp/current-main.json
-          current_main="$(jq -er '.object.sha | select(test("^[0-9a-f]{40}$"))' /tmp/current-main.json)"
-          test "${current_main}" = "${EXPECTED_MAIN_HEAD}"
-          echo "sha=${current_main}" >> "${GITHUB_OUTPUT}"
-
-      - name: Checkout exact WOS-01A implementation head
+      - name: Checkout exact corrected product head
         uses: actions/checkout@v4
         with:
           ref: ${{ env.TARGET_HEAD }}
+          path: target
           fetch-depth: 0
           persist-credentials: false
-          path: target
 
-      - name: Checkout exact current main revision
+      - name: Checkout exact current main
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.current_main.outputs.sha }}
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: current-main
           fetch-depth: 0
           persist-credentials: false
-          path: current-main
-
-      - name: Verify merge base, controller-only main drift and clean checkout
-        id: repository_boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git -C target rev-parse HEAD)" = "${TARGET_HEAD}"
-          test "$(git -C target merge-base "${TARGET_HEAD}" "${PARENT_HEAD}")" = "${PARENT_HEAD}"
-          test "$(git -C current-main rev-parse HEAD)" = "${{ steps.current_main.outputs.sha }}"
-          merge_base="$(git -C current-main merge-base "${TARGET_HEAD}" HEAD)"
-          test "${merge_base}" = "${ACCEPTED_WOS00_BASE}"
-
-          drift="$(git -C current-main diff --name-only "${ACCEPTED_WOS00_BASE}..HEAD" | grep -Ev '^\.github/' || true)"
-          if [[ -n "${drift}" ]]; then
-            echo "Current main contains non-controller drift after the accepted WOS-00 base:" >&2
-            echo "${drift}" >&2
-            exit 1
-          fi
-          test -z "$(git -C target status --porcelain)"
-          test -z "$(git -C current-main status --porcelain)"
-          if git -C target ls-files | grep -Eq '(^|/)\.git(/|$)'; then
-            echo "Imported Git-history path detected" >&2
-            exit 1
-          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -172,360 +150,19 @@ jobs:
           cache: npm
           cache-dependency-path: target/package-lock.json
 
-      - name: Verify controller fallback and evidence isolation
-        id: controller_regression
-        shell: bash
-        working-directory: controller
-        run: node .github/scripts/verify-wos01a-controller-v2.mjs
-
-      - name: Verify bounded browser lifecycle regressions
-        id: browser_lifecycle_regression
-        shell: bash
-        working-directory: controller
-        run: node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
-
-      - name: Prepare evidence directory
-        shell: bash
-        run: |
-          rm -rf target/dist target/.acceptance-evidence
-          mkdir -p target/.acceptance-evidence
-
-      - name: Locked dependency installation
-        id: install
+      - name: Run complete fail-closed acceptance matrix
+        id: matrix
         continue-on-error: true
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          npm ci 2>&1 | tee .acceptance-evidence/npm-ci.log
-
-      - name: Engineering baseline and retained controls
-        id: engineering
-        if: always()
-        continue-on-error: true
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          test "${{ steps.install.outcome }}" = "success"
-          node scripts/verify-baseline.mjs 2>&1 | tee .acceptance-evidence/verify-baseline.log
-          node scripts/scan-bootstrap.mjs 2>&1 | tee .acceptance-evidence/scan-bootstrap.log
-          npm run typecheck 2>&1 | tee .acceptance-evidence/typecheck.log
-          npm run lint 2>&1 | tee .acceptance-evidence/lint.log
-          VITE_APP_MODE='test' VITE_ALLOW_TEST_FALLBACK='true' \
-            npm test 2>&1 | tee .acceptance-evidence/tests.log
-
-      - name: Runtime and full dependency advisory classification
-        id: dependencies
-        if: always()
-        continue-on-error: true
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          test "${{ steps.install.outcome }}" = "success"
-          set +e
-          npm audit --omit=dev --json > .acceptance-evidence/npm-audit-runtime.json
-          runtime_status=$?
-          npm audit --json > .acceptance-evidence/npm-audit-full.json
-          full_status=$?
-          set -e
-          test "${runtime_status}" -eq 0 -o "${runtime_status}" -eq 1
-          test "${full_status}" -eq 0 -o "${full_status}" -eq 1
-          node <<'NODE'
-          const fs = require('node:fs');
-          const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
-          const summarize = (data, label) => {
-            const vulnerabilities = data?.metadata?.vulnerabilities;
-            const levels = ['info', 'low', 'moderate', 'high', 'critical', 'total'];
-            if (!vulnerabilities || levels.some(level => !Number.isInteger(vulnerabilities[level]) || vulnerabilities[level] < 0)) {
-              throw new Error(`${label} npm audit did not return complete vulnerability metadata`);
-            }
-            return vulnerabilities;
-          };
-          const runtime = summarize(read('.acceptance-evidence/npm-audit-runtime.json'), 'runtime');
-          const full = summarize(read('.acceptance-evidence/npm-audit-full.json'), 'full');
-          fs.writeFileSync('.acceptance-evidence/npm-audit-summary.json', JSON.stringify({ runtime, full }, null, 2));
-          console.log(JSON.stringify({ runtime, full }, null, 2));
-          const blocking = Number(runtime.high || 0) + Number(runtime.critical || 0);
-          if (blocking > 0) {
-            console.error(`Blocking runtime high/critical advisories: ${blocking}`);
-            process.exit(1);
-          }
-          NODE
-
-      - name: Default build must not emit unresolved branding tokens
-        id: default_build
-        if: always()
-        continue-on-error: true
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          test "${{ steps.install.outcome }}" = "success"
-          rm -rf dist
-          npm run build 2>&1 | tee .acceptance-evidence/default-build.log
-          if grep -R -n -E '%VITE_[A-Z0-9_]+%' dist > .acceptance-evidence/default-build-unresolved-tokens.log; then
-            cat .acceptance-evidence/default-build-unresolved-tokens.log >&2
-            echo "Default build contains unresolved Vite branding placeholders" >&2
-            exit 1
-          fi
-          : > .acceptance-evidence/default-build-unresolved-tokens.log
-
-      - name: Configured production build
-        id: configured_build
-        if: always()
-        continue-on-error: true
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          test "${{ steps.install.outcome }}" = "success"
-          rm -rf dist
-          VITE_PRODUCT_NAME='WorkOS' \
-          VITE_ORGANIZATION_NAME='Acceptance Organization' \
-          VITE_PRODUCT_LOGO_URL='/workos-mark.svg' \
-          VITE_SUPPORT_NAME='WorkOS Acceptance Support' \
-          VITE_SUPPORT_EMAIL='support@example.test' \
-          npm run build 2>&1 | tee .acceptance-evidence/configured-build.log
-          if grep -R -n -E '%VITE_[A-Z0-9_]+%' dist > .acceptance-evidence/configured-build-unresolved-tokens.log; then
-            cat .acceptance-evidence/configured-build-unresolved-tokens.log >&2
-            exit 1
-          fi
-          : > .acceptance-evidence/configured-build-unresolved-tokens.log
-          grep -q '<title>WorkOS</title>' dist/index.html
-
-      - name: Install PostgreSQL client
-        id: postgres_client
-        if: always()
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client
-          pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d postgres
-
-      - name: Fresh, replay and upgrade-shaped migration acceptance
-        id: migrations
-        if: always()
-        continue-on-error: true
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          test "${{ steps.install.outcome }}" = "success"
-          test "${{ steps.postgres_client.outcome }}" = "success"
-
-          for db in workos_fresh workos_upgrade workos_prod; do
-            dropdb --if-exists "${db}"
-            createdb "${db}"
-          done
-
-          fresh_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_fresh"
-          DATABASE_URL="${fresh_url}" node server/migrate.mjs 2>&1 | tee .acceptance-evidence/migrate-fresh.log
-          fresh_count="$(psql "${fresh_url}" -Atc 'select count(*) from schema_migrations')"
-          DATABASE_URL="${fresh_url}" node server/migrate.mjs 2>&1 | tee .acceptance-evidence/migrate-replay.log
-          replay_count="$(psql "${fresh_url}" -Atc 'select count(*) from schema_migrations')"
-          test "${fresh_count}" = "${replay_count}"
-
-          upgrade_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_upgrade"
-          psql "${upgrade_url}" -v ON_ERROR_STOP=1 -f server/schema.sql > .acceptance-evidence/upgrade-baseline-schema.log
-          psql "${upgrade_url}" -v ON_ERROR_STOP=1 <<'SQL'
-          create table if not exists schema_migrations (
-            id text primary key,
-            applied_at timestamptz not null default now()
-          );
-          insert into schema_migrations (id) values ('005_auth_lifecycle') on conflict do nothing;
-          SQL
-          DATABASE_URL="${upgrade_url}" node server/migrate.mjs 2>&1 | tee .acceptance-evidence/migrate-upgrade.log
-          DATABASE_URL="${upgrade_url}" node server/migrate.mjs 2>&1 | tee .acceptance-evidence/migrate-upgrade-replay.log
-
-          expected="$((1 + $(find server/migrations -maxdepth 1 -type f -name '*.sql' | wc -l)))"
-          fresh_final="$(psql "${fresh_url}" -Atc 'select count(*) from schema_migrations')"
-          upgrade_final="$(psql "${upgrade_url}" -Atc 'select count(*) from schema_migrations')"
-          printf 'expected=%s\nfresh=%s\nupgrade=%s\n' "${expected}" "${fresh_final}" "${upgrade_final}" | tee .acceptance-evidence/migration-counts.txt
-          test "${fresh_final}" = "${expected}"
-          test "${upgrade_final}" = "${expected}"
-
-          prod_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_prod"
-          DATABASE_URL="${prod_url}" node server/migrate.mjs 2>&1 | tee .acceptance-evidence/migrate-production-fixture.log
-
-      - name: Production startup, health, authentication and no-seed acceptance
-        id: production
-        if: always()
-        continue-on-error: true
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          test "${{ steps.configured_build.outcome }}" = "success"
-          test "${{ steps.migrations.outcome }}" = "success"
-
-          prod_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_prod"
-          before_users="$(psql "${prod_url}" -Atc 'select count(*) from users')"
-          before_employees="$(psql "${prod_url}" -Atc 'select count(*) from employees')"
-          test "${before_users}" = "0"
-          test "${before_employees}" = "0"
-
-          DATABASE_URL="${prod_url}" \
-          API_SESSION_SECRET='acceptance-only-session-secret-0123456789' \
-          IDENTITY_PROVIDER='entra' \
-          ENTRA_TENANT_ID='00000000-0000-0000-0000-000000000001' \
-          ENTRA_CLIENT_ID='00000000-0000-0000-0000-000000000002' \
-          ENTRA_CLIENT_SECRET='acceptance-only-entra-secret' \
-          ENTRA_REDIRECT_URI='http://127.0.0.1:4010/api/auth/entra/callback' \
-          APP_URL='http://127.0.0.1:4010' \
-          AUTO_SEED_DEMO='false' \
-          EMAIL_PROVIDER='mock' \
-          TEAMS_PROVIDER='mock' \
-          PORT='4010' \
-          node server/start-production.mjs > .acceptance-evidence/production-server.log 2>&1 &
-          echo $! > .acceptance-evidence/production-server.pid
-
-          ready='false'
-          for attempt in $(seq 1 60); do
-            if curl --silent --fail http://127.0.0.1:4010/api/health > .acceptance-evidence/health.json; then
-              ready='true'
-              break
-            fi
-            if ! kill -0 "$(cat .acceptance-evidence/production-server.pid)" 2>/dev/null; then
-              cat .acceptance-evidence/production-server.log >&2
-              exit 1
-            fi
-            sleep 1
-          done
-          test "${ready}" = "true"
-          test "$(jq -r .status .acceptance-evidence/health.json)" = "ok"
-          test "$(jq -r .database .acceptance-evidence/health.json)" = "connected"
-
-          login_status="$(curl --silent --output .acceptance-evidence/local-login.json --write-out '%{http_code}' \
-            -H 'Content-Type: application/json' \
-            -X POST --data '{"username":"acceptance","password":"acceptance"}' \
-            http://127.0.0.1:4010/api/auth/login)"
-          test "${login_status}" = "404"
-
-          protected_status="$(curl --silent --output .acceptance-evidence/protected-api.json --write-out '%{http_code}' \
-            http://127.0.0.1:4010/api/employees)"
-          test "${protected_status}" = "401"
-
-          after_users="$(psql "${prod_url}" -Atc 'select count(*) from users')"
-          after_employees="$(psql "${prod_url}" -Atc 'select count(*) from employees')"
-          printf 'users_before=%s\nusers_after=%s\nemployees_before=%s\nemployees_after=%s\n' \
-            "${before_users}" "${after_users}" "${before_employees}" "${after_employees}" \
-            | tee .acceptance-evidence/no-seed-counts.txt
-          test "${after_users}" = "${before_users}"
-          test "${after_employees}" = "${before_employees}"
-
-      - name: Stop production server
-        if: always()
-        shell: bash
-        working-directory: target
-        run: |
-          if [[ -f .acceptance-evidence/production-server.pid ]]; then
-            kill "$(cat .acceptance-evidence/production-server.pid)" 2>/dev/null || true
-          fi
-
-      - name: Bounded synthetic-session browser route acceptance
-        id: browser
-        if: always()
-        continue-on-error: true
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          test "${{ steps.install.outcome }}" = "success"
-          test "${{ steps.engineering.outcome }}" = "success"
-
-          rm -rf dist
-          VITE_APP_MODE='test' \
-          VITE_ALLOW_TEST_FALLBACK='true' \
-          VITE_PRODUCT_NAME='WorkOS' \
-          VITE_ORGANIZATION_NAME='Acceptance Organization' \
-          VITE_PRODUCT_LOGO_URL='/workos-mark.svg' \
-          VITE_SUPPORT_EMAIL='support@example.test' \
-          npm run build 2>&1 | tee .acceptance-evidence/browser-build.log
-
-          ./node_modules/.bin/vite preview --host 127.0.0.1 --port 4173 > .acceptance-evidence/browser-server.log 2>&1 &
-          echo $! > .acceptance-evidence/browser-server.pid
-          ready='false'
-          for attempt in $(seq 1 40); do
-            if curl --silent --fail http://127.0.0.1:4173/login > /dev/null; then
-              ready='true'
-              break
-            fi
-            sleep 0.5
-          done
-          test "${ready}" = "true"
-          node ../controller/.github/scripts/wos01a-browser-acceptance-v2.mjs 2>&1 | tee .acceptance-evidence/browser-journeys.log
-          test -z "$(git status --porcelain)"
-
-      - name: Stop browser server
-        if: always()
-        shell: bash
-        working-directory: target
-        run: |
-          if [[ -f .acceptance-evidence/browser-server.pid ]]; then
-            kill "$(cat .acceptance-evidence/browser-server.pid)" 2>/dev/null || true
-          fi
-
-      - name: Revalidate controller, target, parent and main leases
-        id: final_authority
-        if: always()
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          set -euo pipefail
-          test "$(git -C controller rev-parse HEAD)" = "${CONTROLLER_HEAD}"
-          test "$(git -C target rev-parse HEAD)" = "${TARGET_HEAD}"
-          test "$(git -C current-main rev-parse HEAD)" = "${EXPECTED_MAIN_HEAD}"
-          for pr in "${TARGET_PR}" "${PARENT_PR}"; do
-            curl --fail --silent --show-error \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${REPOSITORY}/pulls/${pr}" > "/tmp/final-pr-${pr}.json"
-            test "$(jq -r .state "/tmp/final-pr-${pr}.json")" = open
-            test "$(jq -r .draft "/tmp/final-pr-${pr}.json")" = true
-          done
-          test "$(jq -r .head.sha "/tmp/final-pr-${TARGET_PR}.json")" = "${TARGET_HEAD}"
-          test "$(jq -r .base.sha "/tmp/final-pr-${TARGET_PR}.json")" = "${PARENT_HEAD}"
-          test "$(jq -r .head.sha "/tmp/final-pr-${PARENT_PR}.json")" = "${PARENT_HEAD}"
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${REPOSITORY}/git/ref/heads/main" > /tmp/final-main.json
-          test "$(jq -r .object.sha /tmp/final-main.json)" = "${EXPECTED_MAIN_HEAD}"
-          printf 'controller=%s\ntarget_pr=%s\ntarget=%s\nparent_pr=%s\nparent=%s\nmain=%s\nwos00=%s\n' \
-            "${CONTROLLER_HEAD}" "${TARGET_PR}" "${TARGET_HEAD}" "${PARENT_PR}" "${PARENT_HEAD}" \
-            "${EXPECTED_MAIN_HEAD}" "${ACCEPTED_WOS00_BASE}" > target/.acceptance-evidence/exact-leases.txt
-
-      - name: Record exact step outcomes
-        if: always()
-        shell: bash
-        working-directory: target
-        run: |
-          cat > .acceptance-evidence/step-outcomes.txt <<EOF
-          authority=${{ steps.authority.outcome }}
-          repository_boundary=${{ steps.repository_boundary.outcome }}
-          controller_regression=${{ steps.controller_regression.outcome }}
-          browser_lifecycle_regression=${{ steps.browser_lifecycle_regression.outcome }}
-          install=${{ steps.install.outcome }}
-          engineering=${{ steps.engineering.outcome }}
-          dependencies=${{ steps.dependencies.outcome }}
-          default_build=${{ steps.default_build.outcome }}
-          configured_build=${{ steps.configured_build.outcome }}
-          postgres_client=${{ steps.postgres_client.outcome }}
-          migrations=${{ steps.migrations.outcome }}
-          production=${{ steps.production.outcome }}
-          browser=${{ steps.browser.outcome }}
-          final_authority=${{ steps.final_authority.outcome }}
-          EOF
-          cat .acceptance-evidence/step-outcomes.txt
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            "$GITHUB_WORKSPACE/controller" \
+            "$GITHUB_WORKSPACE/target" \
+            "$GITHUB_WORKSPACE/current-main"
 
       - name: Upload exact-head acceptance evidence
         id: evidence_upload
@@ -538,35 +175,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Aggregate fail-closed acceptance result
+      - name: Aggregate fail-closed result
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          failed=0
-          check() {
-            local name="$1"
-            local outcome="$2"
-            if [[ "${outcome}" != 'success' ]]; then
-              echo "BLOCKED ${name}: ${outcome}" >&2
-              failed=1
-            else
-              echo "PASS ${name}"
-            fi
-          }
-          check authority '${{ steps.authority.outcome }}'
-          check repository_boundary '${{ steps.repository_boundary.outcome }}'
-          check controller_regression '${{ steps.controller_regression.outcome }}'
-          check browser_lifecycle_regression '${{ steps.browser_lifecycle_regression.outcome }}'
-          check install '${{ steps.install.outcome }}'
-          check engineering '${{ steps.engineering.outcome }}'
-          check dependencies '${{ steps.dependencies.outcome }}'
-          check default_build '${{ steps.default_build.outcome }}'
-          check configured_build '${{ steps.configured_build.outcome }}'
-          check postgres_client '${{ steps.postgres_client.outcome }}'
-          check migrations '${{ steps.migrations.outcome }}'
-          check production '${{ steps.production.outcome }}'
-          check browser '${{ steps.browser.outcome }}'
-          check final_authority '${{ steps.final_authority.outcome }}'
-          check evidence_upload '${{ steps.evidence_upload.outcome }}'
-          exit "${failed}"
+          test '${{ steps.authority.outcome }}' = success
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.evidence_upload.outcome }}' = success

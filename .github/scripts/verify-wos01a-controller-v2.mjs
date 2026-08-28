@@ -1,58 +1,55 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import {readFileSync} from 'node:fs';
 
-const workflowPath = new URL('../workflows/wos01a-clean-runtime-acceptance-v2.yml', import.meta.url);
-const workflow = readFileSync(workflowPath, 'utf8');
+const workflow = readFileSync(new URL('../workflows/wos01a-clean-runtime-acceptance-v2.yml', import.meta.url), 'utf8');
+const matrix = readFileSync(new URL('./wos01a-clean-runtime-matrix-v2.sh', import.meta.url), 'utf8');
 
-const occurrences = (pattern) => workflow.match(pattern)?.length ?? 0;
-
-assert.equal(
-  occurrences(/VITE_APP_MODE='test'/g),
-  2,
-  'test app mode must be scoped only to the retained-test command and browser build',
-);
-assert.equal(
-  occurrences(/VITE_ALLOW_TEST_FALLBACK='true'/g),
-  2,
-  'test fallback must be scoped only to the retained-test command and browser build',
-);
-assert.match(
-  workflow,
-  /VITE_APP_MODE='test' VITE_ALLOW_TEST_FALLBACK='true' \\\n+\s+npm test 2>&1 \| tee \.acceptance-evidence\/tests\.log/,
-  'retained tests must opt into their synthetic DataStorage fallback explicitly',
-);
-assert.doesNotMatch(
-  workflow,
-  /^\s{0,8}(?:VITE_APP_MODE|VITE_ALLOW_TEST_FALLBACK):/m,
-  'test-only fallback variables must not be inherited through workflow, job, or step env',
-);
-
-const productionStep = workflow.match(
-  /- name: Configured production build[\s\S]*?(?=\n\s{6}- name:)/,
-)?.[0];
-assert.ok(productionStep, 'configured production build step must exist');
-assert.doesNotMatch(
-  productionStep,
-  /VITE_(?:APP_MODE|ALLOW_TEST_FALLBACK)/,
-  'configured production build must not receive test fallback settings',
-);
-
-const uploadStep = workflow.match(
-  /- name: Upload exact-head acceptance evidence[\s\S]*?(?=\n\s{6}- name:)/,
-)?.[0];
-assert.ok(uploadStep, 'acceptance evidence upload step must exist');
-assert.match(uploadStep, /path: target\/\.acceptance-evidence/);
-assert.match(uploadStep, /include-hidden-files: true/);
-assert.match(uploadStep, /if-no-files-found: error/);
-assert.match(
-  workflow,
-  /check evidence_upload '\$\{\{ steps\.evidence_upload\.outcome \}\}'/,
-  'aggregate acceptance must fail closed when evidence upload is unsuccessful',
-);
-assert.match(workflow, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 4415eb15aee8ce8f07d2b83d586241653f1c949d/);
+assert.match(workflow, /permissions:\n  contents: read\n  pull-requests: read/);
+assert.doesNotMatch(workflow, /contents: write|pull-requests: write/);
+assert.match(workflow, /CONTROLLER_PR: '26'/);
+assert.match(workflow, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 117ad0afc2a0607ec290ba9d040d32cd08d20b3e/);
 assert.match(workflow, /PARENT_PR: '16'[\s\S]*PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60/);
-assert.match(workflow, /test "\$\(jq -r \.base\.sha \/tmp\/target-pr\.json\)" = "\$\{PARENT_HEAD\}"/);
-assert.match(workflow, /check browser_lifecycle_regression '\$\{\{ steps\.browser_lifecycle_regression\.outcome \}\}'/);
-assert.match(workflow, /check final_authority '\$\{\{ steps\.final_authority\.outcome \}\}'/);
+assert.match(workflow, /EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42/);
+assert.match(workflow, /ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea/);
+assert.match(workflow, /image: postgres:16/);
+assert.match(workflow, /persist-credentials: false/g);
+assert.match(workflow, /wos01a-clean-runtime-matrix-v2\.sh/);
+assert.match(workflow, /include-hidden-files: true/);
+assert.match(workflow, /if-no-files-found: error/);
+assert.match(workflow, /test '\$\{\{ steps\.matrix\.outcome \}\}' = success/);
+assert.match(workflow, /test '\$\{\{ steps\.evidence_upload\.outcome \}\}' = success/);
 
-console.log('WOS-01A controller fallback and evidence isolation assertions passed.');
+for (const gate of [
+  'repository_boundary',
+  'controller_regression',
+  'browser_lifecycle_regression',
+  'locked_install',
+  'engineering_controls',
+  'dependency_classification',
+  'build_acceptance',
+  'postgres_client',
+  'migration_acceptance',
+  'production_acceptance',
+  'browser_acceptance',
+  'final_authority',
+]) {
+  assert.match(matrix, new RegExp(`run_gate ${gate} ${gate}`), `matrix must retain ${gate}`);
+}
+assert.match(matrix, /npm audit --omit=dev --json/);
+assert.match(matrix, /runtime\.counts\.high > 0 \|\| runtime\.counts\.critical > 0/);
+assert.match(matrix, /node scripts\/scan-bootstrap\.mjs --self-test/);
+assert.match(matrix, /npm run test:bootstrap-scan/);
+assert.match(matrix, /Fresh|migrate-fresh\.log/);
+assert.match(matrix, /local-login\.json/);
+assert.match(matrix, /protected-api\.json/);
+assert.match(matrix, /no-seed-counts\.txt/);
+assert.match(matrix, /wos01a-browser-acceptance-v2\.mjs/);
+assert.match(matrix, /WOS-01A exact-head acceptance failed closed/);
+
+const production = matrix.match(/production_acceptance\(\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(production, 'production acceptance function must exist');
+assert.doesNotMatch(production, /VITE_APP_MODE=test|VITE_ALLOW_TEST_FALLBACK=true/);
+assert.match(production, /NODE_ENV=production/);
+assert.match(production, /AUTO_SEED_DEMO=false/);
+
+console.log('WOS-01A controller authority, fallback and evidence assertions passed.');
