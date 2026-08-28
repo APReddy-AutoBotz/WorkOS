@@ -1,0 +1,69 @@
+name: WorkOS PR28 Final Gates Publisher v3
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr28-final-gates-publisher-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: workos-pr28-final-gates-publisher-v3
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: controller/workos-continuous-controller-v2
+  TARGET_OLD_HEAD: 2a2f83196aa89d74a54879142576a12eaee9fd1c
+
+jobs:
+  publish:
+    name: Publish exact PR28 final gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          path: publisher
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact target head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_OLD_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify target lease and apply deterministic correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C target config user.name 'github-actions[bot]'
+          git -C target config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C target fetch --no-tags origin "$TARGET_BRANCH"
+          test "$(git -C target rev-parse HEAD)" = "$TARGET_OLD_HEAD"
+          test "$(git -C target rev-parse refs/remotes/origin/$TARGET_BRANCH)" = "$TARGET_OLD_HEAD"
+          python3 publisher/.github/scripts/publish-pr28-final-gates.py target
+          if git -C target diff -- . ':!*.lock' | grep -E 'Boundaryless|BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|gh[pousr]_[A-Za-z0-9_]{20,}' | grep -v 'APReddy-AutoBotz/Boundaryless-WorkOS'; then
+            echo 'Unexpected prohibited material in PR28 patch' >&2
+            exit 1
+          fi
+          git -C target add \
+            .github/scripts/workos-continuous-controller.cjs \
+            .github/scripts/test-workos-continuous-controller.cjs \
+            docs/tasks/WOS-CONTINUOUS-CONTROLLER.md
+          test -n "$(git -C target status --porcelain)"
+          git -C target commit -m 'ci: close final continuous-controller merge gates'
+          NEW_HEAD="$(git -C target rev-parse HEAD)"
+          git -C target push origin \
+            HEAD:"refs/heads/$TARGET_BRANCH" \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$TARGET_OLD_HEAD"
+          echo "Published PR #28 exact head $NEW_HEAD" >> "$GITHUB_STEP_SUMMARY"
