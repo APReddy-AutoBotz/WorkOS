@@ -1,0 +1,158 @@
+name: WorkOS Exact-Head Acceptance Proof v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-acceptance-proof-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: workos-exact-head-acceptance-proof-v1
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  CONTROLLER_HEAD: d2b362904f04f0b8157c10da4e6419879e652360
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_HEAD: 0935424a52b57cc3a51adeef737e6eaec2946a88
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  PGHOST: 127.0.0.1
+  PGPORT: '5432'
+  PGUSER: workos
+  PGPASSWORD: workos
+
+jobs:
+  acceptance:
+    name: Exact-head full acceptance proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Verify live PR and branch authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.CONTROLLER_PR),
+            });
+            if (controller.state !== 'open' || !controller.draft) failures.push('controller state/draft');
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push('controller head');
+            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('controller base');
+
+            const {data: target} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
+            });
+            if (target.state !== 'open' || !target.draft) failures.push('target state/draft');
+            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push('target head');
+            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push('target base');
+
+            const {data: parent} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PARENT_PR),
+            });
+            if (parent.state !== 'open' || !parent.draft) failures.push('parent state/draft');
+            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push('parent head');
+            if (parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push('parent base');
+
+            const {data: main} = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('main head');
+            if (failures.length) core.setFailed(`Exact authority failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact acceptance controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact product closure
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: current-main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+
+      - name: Execute complete fail-closed matrix
+        id: matrix
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            "$GITHUB_WORKSPACE/controller" \
+            "$GITHUB_WORKSPACE/target" \
+            "$GITHUB_WORKSPACE/current-main"
+
+      - name: Upload exact proof evidence
+        id: evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-exact-proof-${{ env.CONTROLLER_HEAD }}-${{ env.TARGET_HEAD }}
+          path: target/.acceptance-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Aggregate exact proof
+        if: always()
+        run: |
+          set -euo pipefail
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.evidence.outcome }}' = success
