@@ -217,35 +217,45 @@ migration_acceptance() {
     createdb "$db"
   done
 
-  local fresh_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_fresh"
-  DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-fresh.log"
-  local fresh_count
-  fresh_count="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
-  DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-replay.log"
-  local replay_count
-  replay_count="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
-  test "$fresh_count" = "$replay_count"
+  local expected
+expected="$((1 + $(find server/migrations -maxdepth 1 -type f -name '*.sql' | wc -l)))"
 
-  local upgrade_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_upgrade"
-  psql "$upgrade_url" -v ON_ERROR_STOP=1 -f server/schema.sql > "$EVIDENCE_DIR/upgrade-baseline-schema.log"
-  psql "$upgrade_url" -v ON_ERROR_STOP=1 <<'SQL'
-  create table if not exists schema_migrations (
-    id text primary key,
-    applied_at timestamptz not null default now()
-  );
-  insert into schema_migrations (id) values ('005_auth_lifecycle') on conflict do nothing;
+local fresh_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_fresh"
+DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-fresh.log"
+local fresh_first
+fresh_first="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
+test "$fresh_first" = "$expected"
+DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-replay.log"
+local fresh_replay
+fresh_replay="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
+test "$fresh_replay" = "$expected"
+test "$fresh_replay" = "$fresh_first"
+
+local upgrade_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_upgrade"
+psql "$upgrade_url" -v ON_ERROR_STOP=1 -f server/schema.sql > "$EVIDENCE_DIR/upgrade-baseline-schema.log"
+psql "$upgrade_url" -v ON_ERROR_STOP=1 <<'SQL'
+create table if not exists schema_migrations (
+  id text primary key,
+  applied_at timestamptz not null default now()
+);
+insert into schema_migrations (id) values ('005_auth_lifecycle') on conflict do nothing;
 SQL
-  DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade.log"
-  DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade-replay.log"
+DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade.log"
+local upgrade_first
+upgrade_first="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
+test "$upgrade_first" = "$expected"
+DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade-replay.log"
+local upgrade_replay
+upgrade_replay="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
+test "$upgrade_replay" = "$expected"
+test "$upgrade_replay" = "$upgrade_first"
 
-  local expected fresh_final upgrade_final
-  expected="$((1 + $(find server/migrations -maxdepth 1 -type f -name '*.sql' | wc -l)))"
-  fresh_final="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
-  upgrade_final="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
-  printf 'expected=%s\nfresh=%s\nupgrade=%s\n' "$expected" "$fresh_final" "$upgrade_final" \
-    | tee "$EVIDENCE_DIR/migration-counts.txt"
-  test "$fresh_final" = "$expected"
-  test "$upgrade_final" = "$expected"
+printf 'expected=%s
+fresh_first=%s
+fresh_replay=%s
+upgrade_first=%s
+upgrade_replay=%s
+'   "$expected" "$fresh_first" "$fresh_replay" "$upgrade_first" "$upgrade_replay"   | tee "$EVIDENCE_DIR/migration-counts.txt"
 
   local prod_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_prod"
   DATABASE_URL="$prod_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-production-fixture.log"
