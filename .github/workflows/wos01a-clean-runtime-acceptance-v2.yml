@@ -24,7 +24,7 @@ env:
   CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
   TARGET_PR: '27'
   TARGET_BRANCH: codex/wos01a-acceptance-closure
-  TARGET_HEAD: 4751310c0c53b6c1fb1c77b2747ee5feb8061feb
+  TARGET_HEAD: 53dd7b8d372cae9cd3480d39d549a709a12c4c90
   PARENT_PR: '16'
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
