@@ -1,0 +1,68 @@
+name: WorkOS Live Status Snapshot v3
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-live-status-snapshot-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+  issues: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Capture live PRs and latest WorkOS workflow runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const [main, pr16, pr26, pr27, pr28, runs] = await Promise.all([
+              github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 16}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 26}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 27}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 28}),
+              github.rest.actions.listWorkflowRunsForRepo({owner: context.repo.owner, repo: context.repo.repo, per_page: 100}),
+            ]);
+            const prs = [pr16.data, pr26.data, pr27.data, pr28.data].map(pr => ({number: pr.number, state: pr.state, draft: pr.draft, merged: pr.merged, head_ref: pr.head.ref, head_sha: pr.head.sha, base_ref: pr.base.ref, base_sha: pr.base.sha, mergeable: pr.mergeable, mergeable_state: pr.mergeable_state, updated_at: pr.updated_at}));
+            const watched = new Set([
+              'WorkOS Controller Fixes Publisher v6',
+              'WorkOS Controller Verification Reporter v2',
+              'WorkOS PR26 Closure Watcher v1',
+              'WorkOS PR27 Patch Watcher v1',
+              'WorkOS PR27 Live Proof v1',
+              'WorkOS PR27 Closure and Parent Proof v1',
+              'WorkOS PR16 Closure and PR28 Refresh v1',
+              'WorkOS PR28 Final Closure v1',
+              'WorkOS Publisher Workflow Syntax v1',
+            ]);
+            const workflows = {};
+            for (const run of runs.data.workflow_runs) {
+              if (!watched.has(run.name) || workflows[run.name]) continue;
+              workflows[run.name] = {id: run.id, branch: run.head_branch, head_sha: run.head_sha, status: run.status, conclusion: run.conclusion, run_number: run.run_number, created_at: run.created_at, updated_at: run.updated_at};
+            }
+            const snapshot = {captured_at: new Date().toISOString(), main: main.data.commit.sha, prs, workflows};
+            fs.mkdirSync('docs/control', {recursive: true});
+            fs.writeFileSync('docs/control/WORKOS_LIVE_STATUS_V3.json', `${JSON.stringify(snapshot, null, 2)}\n`);
+      - name: Commit snapshot
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/control/WORKOS_LIVE_STATUS_V3.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'chore: capture current WorkOS pipeline status'
+          git push origin HEAD:refs/heads/controller/workos-root-publisher-v1
