@@ -6,7 +6,9 @@ const {
   checksAreGreen,
   classifyLatestWorkflowRuns,
   isExactCleanReview,
+  isExactReviewRequest,
   latestDecisiveReviews,
+  latestSubmittedReviewAt,
   parseMergeLease,
   selectActiveDraft,
   selectMergeCandidate,
@@ -14,6 +16,7 @@ const {
 
 const HEAD = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
+const OTHER_HEAD = 'c'.repeat(40);
 
 assert.deepEqual(
   parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD} base=${BASE}]`),
@@ -22,12 +25,19 @@ assert.deepEqual(
 assert.equal(parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD}]`), null);
 assert.equal(parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD} base=${'c'.repeat(39)}]`), null);
 
-assert.equal(
-  isExactCleanReview(`Reviewed ${HEAD}. No actionable P0/P1/P2 findings remain.`, HEAD),
-  true,
-);
-assert.equal(isExactCleanReview('No actionable P0/P1/P2 findings remain.', HEAD), false);
-assert.equal(isExactCleanReview(`Reviewed ${HEAD}. P1 remains.`, HEAD), false);
+const reviewRequest = `@codex review\n[WORKOS-INDEPENDENT-REVIEW-REQUEST head=${HEAD}]`;
+assert.equal(isExactReviewRequest(reviewRequest, HEAD), true);
+assert.equal(isExactReviewRequest(`[WORKOS-INDEPENDENT-REVIEW-REQUEST head=${HEAD}]`, HEAD), false);
+assert.equal(isExactReviewRequest(reviewRequest, OTHER_HEAD), false);
+
+const cleanResult = `[WORKOS-INDEPENDENT-REVIEW-RESULT head=${HEAD} result=clean p0=0 p1=0 p2=0]`;
+assert.equal(isExactCleanReview(cleanResult, HEAD), true);
+assert.equal(isExactCleanReview(`Reviewed ${HEAD}. No actionable P0/P1/P2 findings remain.`, HEAD), false);
+assert.equal(isExactCleanReview(`${cleanResult}\nP0/P1/P2 status is not clean.`, HEAD), false);
+assert.equal(isExactCleanReview(`${cleanResult}\nP1 remains open.`, HEAD), false);
+assert.equal(isExactCleanReview(`No actionable P0/P1/P2 findings remain? Not yet. ${HEAD}`, HEAD), false);
+assert.equal(isExactCleanReview(`[WORKOS-INDEPENDENT-REVIEW-RESULT head=${HEAD} result=blocked p0=0 p1=0 p2=0]`, HEAD), false);
+assert.equal(isExactCleanReview(cleanResult, OTHER_HEAD), false);
 
 assert.deepEqual(
   checksAreGreen([
@@ -41,19 +51,26 @@ assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 's
 assert.equal(checksAreGreen([{name: 'build', status: 'in_progress', conclusion: null}], []).green, false);
 assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'pending'}]).green, false);
 
+const now = new Date('2026-08-28T01:00:00Z').getTime();
 assert.equal(classifyLatestWorkflowRuns([
-  {workflow_id: 1, status: 'completed', conclusion: 'cancelled', run_attempt: 1, created_at: '2026-08-28T00:00:00Z'},
-]).classification, 'transient');
+  {workflow_id: 1, status: 'completed', conclusion: 'cancelled', run_attempt: 1, updated_at: '2026-08-28T00:55:00Z'},
+], now).classification, 'transient');
 assert.equal(classifyLatestWorkflowRuns([
-  {workflow_id: 1, status: 'completed', conclusion: 'failure', run_attempt: 1, created_at: '2026-08-28T00:00:00Z'},
-]).classification, 'failure');
+  {workflow_id: 1, status: 'completed', conclusion: 'success', run_attempt: 1, updated_at: '2026-08-28T00:50:00Z'},
+], now).classification, 'recent');
 assert.equal(classifyLatestWorkflowRuns([
-  {workflow_id: 1, status: 'completed', conclusion: 'timed_out', run_attempt: 2, created_at: '2026-08-28T00:00:00Z'},
-]).classification, 'none');
+  {workflow_id: 1, status: 'completed', conclusion: 'failure', run_attempt: 1, updated_at: '2026-08-28T00:50:00Z'},
+], now).classification, 'recent');
 assert.equal(classifyLatestWorkflowRuns([
-  {workflow_id: 1, status: 'in_progress', conclusion: null, run_attempt: 1, created_at: '2026-08-28T00:01:00Z'},
-  {workflow_id: 1, status: 'completed', conclusion: 'failure', run_attempt: 1, created_at: '2026-08-28T00:00:00Z'},
-]).classification, 'active');
+  {workflow_id: 1, status: 'completed', conclusion: 'failure', run_attempt: 1, updated_at: '2026-08-28T00:00:00Z'},
+], now).classification, 'failure');
+assert.equal(classifyLatestWorkflowRuns([
+  {workflow_id: 1, status: 'completed', conclusion: 'timed_out', run_attempt: 2, updated_at: '2026-08-28T00:00:00Z'},
+], now).classification, 'none');
+assert.equal(classifyLatestWorkflowRuns([
+  {workflow_id: 1, status: 'in_progress', conclusion: null, run_attempt: 1, updated_at: '2026-08-28T00:59:00Z'},
+  {workflow_id: 1, status: 'completed', conclusion: 'failure', run_attempt: 1, updated_at: '2026-08-28T00:00:00Z'},
+], now).classification, 'active');
 
 const decisive = latestDecisiveReviews([
   {
@@ -81,6 +98,11 @@ assert.equal(latestDecisiveReviews([
     user: {login: 'reviewer'},
   },
 ])[0].state, 'APPROVED');
+assert.equal(latestSubmittedReviewAt([
+  {submitted_at: '2026-08-28T00:01:00Z'},
+  {submitted_at: '2026-08-28T00:05:00Z'},
+]), new Date('2026-08-28T00:05:00Z').getTime());
+assert.equal(latestSubmittedReviewAt([]), 0);
 
 const pulls = [
   {
@@ -100,7 +122,7 @@ const pulls = [
     title: 'CTRL: controller',
     updated_at: '2026-08-28T02:00:00Z',
     body: '',
-    head: {sha: 'c'.repeat(40)},
+    head: {sha: OTHER_HEAD},
     base: {sha: BASE},
   },
 ];
@@ -113,7 +135,7 @@ const ready = {
   body: `[WORKOS-AUTO-MERGE head=${HEAD} base=${BASE}]`,
 };
 assert.equal(selectMergeCandidate([ready]).number, 27);
-assert.equal(selectMergeCandidate([{...ready, body: `[WORKOS-AUTO-MERGE head=${'d'.repeat(40)} base=${BASE}]`}]), null);
+assert.equal(selectMergeCandidate([{...ready, body: `[WORKOS-AUTO-MERGE head=${OTHER_HEAD} base=${BASE}]`}]), null);
 
 const source = readFileSync(require.resolve('./workos-continuous-controller.cjs'), 'utf8');
 assert.match(source, /fresh\.mergeable !== true \|\| fresh\.mergeable_state !== 'clean'/);
@@ -121,7 +143,16 @@ assert.match(source, /check\.status !== 'completed' \|\| check\.conclusion !== '
 assert.match(source, /unresolved\.length > 0/);
 assert.match(source, /reviewDecision === 'CHANGES_REQUESTED'/);
 assert.match(source, /DECISIVE_REVIEW_STATES/);
-assert.match(source, /no independent exact-head no-P0\/P1\/P2 confirmation/);
+assert.match(source, /REVIEW_REQUEST_PATTERN/);
+assert.match(source, /REVIEW_RESULT_PATTERN/);
+assert.match(source, /CONTRADICTORY_REVIEW_PATTERN/);
+assert.match(source, /comment\.user\?\.login === owner/);
+assert.match(source, /new Date\(comment\.created_at\) > requestTime/);
+assert.match(source, /no independent structured clean result after the exact review request/);
+assert.match(source, /WORKFLOW_ACTIVITY_FRESHNESS_MS/);
+assert.match(source, /classification: 'workflow-recent'/);
+assert.match(source, /github\.rest\.pulls\.listReviews/);
+assert.match(source, /reviewAge >= 45 \* MINUTE/);
 assert.match(source, /sha: final\.head\.sha/);
 assert.match(source, /merge_method: 'squash'/);
 assert.match(source, /LEGACY_HEARTBEAT_MARKER/);
@@ -137,8 +168,11 @@ console.log(JSON.stringify({
   policy: 'ten-minute guarded continuous controller',
   exactLease: true,
   strictChecks: true,
+  structuredIndependentReview: true,
+  negativeReviewLanguageRejected: true,
+  recentWorkflowFreshness: true,
+  submittedReviewFreshness: true,
   decisiveReviewState: true,
-  independentReview: true,
   postActionRefetch: true,
   legacyHeartbeatMigration: true,
   neverAutoReady: true,

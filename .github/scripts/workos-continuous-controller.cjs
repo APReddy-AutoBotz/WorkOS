@@ -4,21 +4,36 @@ const HEARTBEAT_MARKER = '<!-- workos-continuous-controller -->';
 const LEGACY_HEARTBEAT_MARKER = '<!-- workos-hourly-controller -->';
 const AUTOPICK_MARKER = '[WORKOS-CONTROLLER-AUTOPICK]';
 const MERGE_LEASE_PATTERN = /\[WORKOS-AUTO-MERGE\s+head=([0-9a-f]{40})\s+base=([0-9a-f]{40})\]/i;
+const REVIEW_REQUEST_PATTERN = /\[WORKOS-INDEPENDENT-REVIEW-REQUEST\s+head=([0-9a-f]{40})\]/i;
+const REVIEW_RESULT_PATTERN = /\[WORKOS-INDEPENDENT-REVIEW-RESULT\s+head=([0-9a-f]{40})\s+result=clean\s+p0=0\s+p1=0\s+p2=0\]/i;
+const CONTRADICTORY_REVIEW_PATTERN = /\b(?:not|isn't|isnt|is\s+not|never|cannot|can't)\s+(?:fully\s+)?clean\b|\b(?:p0|p1|p2)\b[^.\n]{0,80}\b(?:remain(?:s|ing)?|open|present|found|blocked|failing|fail(?:ed|ure)?)\b|\bresult\s*=\s*(?:blocked|fail(?:ed)?|unclean)\b/i;
 const TRANSIENT_CONCLUSIONS = new Set(['cancelled', 'timed_out', 'startup_failure']);
 const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 const BOT_LOGINS = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
 const MINUTE = 60 * 1000;
+const WORKFLOW_ACTIVITY_FRESHNESS_MS = 20 * MINUTE;
 
 function parseMergeLease(body = '') {
   const match = String(body).match(MERGE_LEASE_PATTERN);
   return match ? {head: match[1].toLowerCase(), base: match[2].toLowerCase()} : null;
 }
 
+function isExactReviewRequest(body = '', headSha = '') {
+  const text = String(body).replace(/\s+/g, ' ').trim();
+  const match = text.match(REVIEW_REQUEST_PATTERN);
+  return Boolean(
+    headSha
+    && match
+    && match[1].toLowerCase() === headSha.toLowerCase()
+    && /@codex\s+review\b/i.test(text)
+  );
+}
+
 function isExactCleanReview(body = '', headSha = '') {
   const text = String(body).replace(/\s+/g, ' ').trim();
-  if (!headSha || !text.toLowerCase().includes(headSha.toLowerCase())) return false;
-  return /no\s+(?:actionable\s+|current\s+|remaining\s+)?p0\s*\/\s*p1\s*\/\s*p2\s+(?:finding|findings|issue|issues|blocker|blockers)(?:\s+remain(?:s|ing)?)?/i.test(text)
-    || /p0\s*\/\s*p1\s*\/\s*p2[^.]{0,80}\b(?:none|clean|clear)\b/i.test(text);
+  const match = text.match(REVIEW_RESULT_PATTERN);
+  if (!headSha || !match || match[1].toLowerCase() !== headSha.toLowerCase()) return false;
+  return !CONTRADICTORY_REVIEW_PATTERN.test(text);
 }
 
 function checksAreGreen(checkRuns = [], statuses = []) {
@@ -41,9 +56,15 @@ function checksAreGreen(checkRuns = [], statuses = []) {
   return {green: true, reason: 'all exact-head check runs and statuses succeeded'};
 }
 
-function classifyLatestWorkflowRuns(runs = []) {
+function workflowRunTimestamp(run) {
+  const value = run.updated_at || run.run_started_at || run.created_at;
+  const time = new Date(value || 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function classifyLatestWorkflowRuns(runs = [], nowMs = Date.now()) {
   const latestByWorkflow = new Map();
-  for (const run of [...runs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))) {
+  for (const run of [...runs].sort((a, b) => workflowRunTimestamp(b) - workflowRunTimestamp(a))) {
     if (!latestByWorkflow.has(run.workflow_id)) latestByWorkflow.set(run.workflow_id, run);
   }
   const latest = [...latestByWorkflow.values()];
@@ -55,6 +76,12 @@ function classifyLatestWorkflowRuns(runs = []) {
     && Number(run.run_attempt || 1) < 2
   );
   if (transient) return {classification: 'transient', run: transient};
+  const recent = latest.find((run) => {
+    if (run.status !== 'completed') return false;
+    const age = nowMs - workflowRunTimestamp(run);
+    return age >= 0 && age < WORKFLOW_ACTIVITY_FRESHNESS_MS;
+  });
+  if (recent) return {classification: 'recent', run: recent};
   const failure = latest.find((run) => run.status === 'completed' && run.conclusion === 'failure');
   if (failure) return {classification: 'failure', run: failure};
   return {classification: 'none', run: null};
@@ -72,6 +99,13 @@ function latestDecisiveReviews(reviews = []) {
     if (login && !latestByAuthor.has(login)) latestByAuthor.set(login, review);
   }
   return [...latestByAuthor.values()];
+}
+
+function latestSubmittedReviewAt(reviews = []) {
+  const times = reviews
+    .map((review) => new Date(review.submitted_at || review.submittedAt || 0).getTime())
+    .filter((time) => Number.isFinite(time) && time > 0);
+  return times.length ? Math.max(...times) : 0;
 }
 
 function selectActiveDraft(pulls = []) {
@@ -148,20 +182,31 @@ async function inspectReviewGate({github, owner, repo, pr}) {
     issue_number: pr.number,
     per_page: 100,
   });
+  const reviewRequest = comments
+    .filter((comment) =>
+      comment.user?.login === owner
+      && new Date(comment.created_at) >= headTime
+      && isExactReviewRequest(comment.body || '', pr.head.sha)
+    )
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+  if (!reviewRequest) {
+    return {clean: false, reason: 'no owner-authored independent review request marker for the exact head'};
+  }
+  const requestTime = new Date(reviewRequest.created_at);
   const exactCleanComment = comments.find((comment) =>
     BOT_LOGINS.has(comment.user?.login)
-    && new Date(comment.created_at) >= headTime
+    && new Date(comment.created_at) > requestTime
     && isExactCleanReview(comment.body || '', pr.head.sha)
   );
   const exactCleanReview = reviews.find((review) => {
     const login = review.user?.login || review.author?.login;
     const submitted = new Date(review.submitted_at || review.submittedAt || 0);
-    return BOT_LOGINS.has(login) && submitted >= headTime && isExactCleanReview(review.body || '', pr.head.sha);
+    return BOT_LOGINS.has(login) && submitted > requestTime && isExactCleanReview(review.body || '', pr.head.sha);
   });
   if (!exactCleanComment && !exactCleanReview) {
-    return {clean: false, reason: 'no independent exact-head no-P0/P1/P2 confirmation'};
+    return {clean: false, reason: 'no independent structured clean result after the exact review request'};
   }
-  return {clean: true, reason: 'independent exact-head review is clean'};
+  return {clean: true, reason: 'independent exact-head review request/result pair is clean'};
 }
 
 async function inspectChecks({github, owner, repo, sha}) {
@@ -237,12 +282,20 @@ async function maybeRerunTransient({github, owner, repo, active}) {
 
 async function maybeAutopick({github, owner, repo, active}) {
   if (!active) return null;
-  const comments = await github.paginate(github.rest.issues.listComments, {
-    owner,
-    repo,
-    issue_number: active.number,
-    per_page: 100,
-  });
+  const [comments, reviews] = await Promise.all([
+    github.paginate(github.rest.issues.listComments, {
+      owner,
+      repo,
+      issue_number: active.number,
+      per_page: 100,
+    }),
+    github.paginate(github.rest.pulls.listReviews, {
+      owner,
+      repo,
+      pull_number: active.number,
+      per_page: 100,
+    }),
+  ]);
   const now = Date.now();
   const botResponses = comments
     .filter((comment) => BOT_LOGINS.has(comment.user?.login))
@@ -256,14 +309,20 @@ async function maybeAutopick({github, owner, repo, active}) {
   const latestBot = botResponses[0] || null;
   const latestTask = taskComments[0] || null;
   const latestAuto = autoComments[0] || null;
+  const latestReviewTime = latestSubmittedReviewAt(reviews);
   const taskAge = latestTask ? now - new Date(latestTask.created_at).getTime() : Infinity;
   const botAge = latestBot ? now - new Date(latestBot.created_at).getTime() : Infinity;
   const autoAge = latestAuto ? now - new Date(latestAuto.created_at).getTime() : Infinity;
+  const reviewAge = latestReviewTime ? now - latestReviewTime : Infinity;
   const botRespondedAfterTask = Boolean(latestTask && latestBot && new Date(latestBot.created_at) > new Date(latestTask.created_at));
   const bodyAllowsWork = !/(dependency[- ]blocked|not authorized to import|do not resume)/i.test(active.body || '');
   const noLikelyRunningTask = !latestTask || botRespondedAfterTask || taskAge >= 75 * MINUTE;
-  const shouldPost = bodyAllowsWork && noLikelyRunningTask && botAge >= 45 * MINUTE && autoAge >= 45 * MINUTE;
-  if (!shouldPost) return {posted: false, detail: 'current task/review activity is still fresh'};
+  const shouldPost = bodyAllowsWork
+    && noLikelyRunningTask
+    && botAge >= 45 * MINUTE
+    && autoAge >= 45 * MINUTE
+    && reviewAge >= 45 * MINUTE;
+  if (!shouldPost) return {posted: false, detail: 'current workflow/task/review activity is still fresh'};
 
   const taskMatch = (active.body || '').match(/`(docs\/tasks\/[^`]+\.md)`/i);
   const taskReference = taskMatch
@@ -292,7 +351,7 @@ async function publishHeartbeat({github, owner, repo, mainSha, pulls, active, me
     .slice(0, 8)
     .map((pr) => `- #${pr.number} ${pr.draft ? 'Draft' : 'Ready'}: \`${pr.head.sha}\` → \`${pr.base.sha}\` — ${pr.title}`)
     .join('\n') || '- none';
-  const body = `${HEARTBEAT_MARKER}\n## WorkOS continuous implementation controller\n\n- Cadence: every 10 minutes plus manual dispatch\n- Current main: \`${mainSha}\`\n- Active Draft: ${active ? `#${active.number} at \`${active.head.sha}\`` : 'none'}\n- Exact auto-merge candidate: ${mergeCandidate ? `#${mergeCandidate.number} at \`${mergeCandidate.head.sha}\`` : 'none'}\n- Last state-changing/classified action: **${action.classification}** — ${action.detail}\n\n### Open WorkOS controller/implementation PRs\n${openSummary}\n\nThe controller never marks a Draft Ready, never treats stale/pending/skipped/cancelled/unexecuted checks as green, and merges only a non-Draft PR carrying an exact head/base lease after all exact-head checks succeed, an independent exact-head review reports no actionable P0/P1/P2, no review thread or change request remains, and GitHub reports a clean merge state. It never deploys or uses real providers, secrets or customer data.`;
+  const body = `${HEARTBEAT_MARKER}\n## WorkOS continuous implementation controller\n\n- Cadence: every 10 minutes plus manual dispatch\n- Current main: \`${mainSha}\`\n- Active Draft: ${active ? `#${active.number} at \`${active.head.sha}\`` : 'none'}\n- Exact auto-merge candidate: ${mergeCandidate ? `#${mergeCandidate.number} at \`${mergeCandidate.head.sha}\`` : 'none'}\n- Last state-changing/classified action: **${action.classification}** — ${action.detail}\n\n### Open WorkOS controller/implementation PRs\n${openSummary}\n\nThe controller never marks a Draft Ready, never treats stale/pending/skipped/cancelled/unexecuted checks as green, and merges only a non-Draft PR carrying an exact head/base lease after all exact-head checks succeed, an owner-authored exact-head independent-review request is followed by a structured independent clean result, no review thread or change request remains, and GitHub reports a clean merge state. It never deploys or uses real providers, secrets or customer data.`;
   if (!existing) {
     await github.rest.issues.createComment({owner, repo, issue_number: issueNumber, body});
   } else if ((existing.body || '').trim() !== body.trim()) {
@@ -334,6 +393,11 @@ async function run({github, context, core}) {
       action = {
         classification: 'workflow-active',
         detail: `workflow ${workflow.run.id} is ${workflow.run.status}; no duplicate continuation was started`,
+      };
+    } else if (workflow?.classification === 'recent') {
+      action = {
+        classification: 'workflow-recent',
+        detail: `workflow ${workflow.run.id} recently completed as ${workflow.run.conclusion}; the bounded freshness lease prevents a duplicate continuation`,
       };
     } else if (workflow?.classification === 'failure') {
       const autopick = await maybeAutopick({github, owner, repo, active});
@@ -383,10 +447,14 @@ module.exports = {
   AUTOPICK_MARKER,
   HEARTBEAT_MARKER,
   LEGACY_HEARTBEAT_MARKER,
+  REVIEW_REQUEST_PATTERN,
+  REVIEW_RESULT_PATTERN,
   checksAreGreen,
   classifyLatestWorkflowRuns,
   isExactCleanReview,
+  isExactReviewRequest,
   latestDecisiveReviews,
+  latestSubmittedReviewAt,
   parseMergeLease,
   run,
   selectActiveDraft,
