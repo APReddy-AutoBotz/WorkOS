@@ -1,9 +1,11 @@
 'use strict';
 
 const HEARTBEAT_MARKER = '<!-- workos-continuous-controller -->';
+const LEGACY_HEARTBEAT_MARKER = '<!-- workos-hourly-controller -->';
 const AUTOPICK_MARKER = '[WORKOS-CONTROLLER-AUTOPICK]';
 const MERGE_LEASE_PATTERN = /\[WORKOS-AUTO-MERGE\s+head=([0-9a-f]{40})\s+base=([0-9a-f]{40})\]/i;
 const TRANSIENT_CONCLUSIONS = new Set(['cancelled', 'timed_out', 'startup_failure']);
+const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 const BOT_LOGINS = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
 const MINUTE = 60 * 1000;
 
@@ -58,6 +60,20 @@ function classifyLatestWorkflowRuns(runs = []) {
   return {classification: 'none', run: null};
 }
 
+function latestDecisiveReviews(reviews = []) {
+  const latestByAuthor = new Map();
+  const sorted = [...reviews]
+    .filter((review) => DECISIVE_REVIEW_STATES.has(review.state))
+    .sort((a, b) =>
+      new Date(b.submitted_at || b.submittedAt || 0) - new Date(a.submitted_at || a.submittedAt || 0)
+    );
+  for (const review of sorted) {
+    const login = review.user?.login || review.author?.login;
+    if (login && !latestByAuthor.has(login)) latestByAuthor.set(login, review);
+  }
+  return [...latestByAuthor.values()];
+}
+
 function selectActiveDraft(pulls = []) {
   return pulls
     .filter((pr) => pr.draft && /^(?:WOS-|CTRL:)/i.test(pr.title || '') && !/transport/i.test(pr.title || ''))
@@ -74,14 +90,16 @@ function selectMergeCandidate(pulls = []) {
     .sort((a, b) => a.number - b.number)[0] || null;
 }
 
-async function listReviewThreads(github, owner, repo, number) {
-  const nodes = [];
+async function readReviewAuthority(github, owner, repo, number) {
+  const threads = [];
+  let reviewDecision = null;
   let after = null;
   do {
     const data = await github.graphql(`
       query($owner: String!, $repo: String!, $number: Int!, $after: String) {
         repository(owner: $owner, name: $repo) {
           pullRequest(number: $number) {
+            reviewDecision
             reviewThreads(first: 100, after: $after) {
               nodes { id isResolved }
               pageInfo { hasNextPage endCursor }
@@ -90,19 +108,24 @@ async function listReviewThreads(github, owner, repo, number) {
         }
       }
     `, {owner, repo, number, after});
-    const page = data.repository?.pullRequest?.reviewThreads;
-    if (!page) throw new Error(`Unable to read review threads for PR #${number}`);
-    nodes.push(...page.nodes);
+    const pullRequest = data.repository?.pullRequest;
+    const page = pullRequest?.reviewThreads;
+    if (!page) throw new Error(`Unable to read review authority for PR #${number}`);
+    if (reviewDecision === null) reviewDecision = pullRequest.reviewDecision || null;
+    threads.push(...page.nodes);
     after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
   } while (after);
-  return nodes;
+  return {threads, reviewDecision};
 }
 
 async function inspectReviewGate({github, owner, repo, pr}) {
-  const threads = await listReviewThreads(github, owner, repo, pr.number);
-  const unresolved = threads.filter((thread) => !thread.isResolved);
+  const authority = await readReviewAuthority(github, owner, repo, pr.number);
+  const unresolved = authority.threads.filter((thread) => !thread.isResolved);
   if (unresolved.length > 0) {
     return {clean: false, reason: `${unresolved.length} unresolved review thread(s)`};
+  }
+  if (authority.reviewDecision === 'CHANGES_REQUESTED') {
+    return {clean: false, reason: 'GitHub aggregate review decision is CHANGES_REQUESTED'};
   }
 
   const reviews = await github.paginate(github.rest.pulls.listReviews, {
@@ -111,12 +134,8 @@ async function inspectReviewGate({github, owner, repo, pr}) {
     pull_number: pr.number,
     per_page: 100,
   });
-  const latestByAuthor = new Map();
-  for (const review of [...reviews].sort((a, b) => new Date(b.submitted_at || b.submittedAt || 0) - new Date(a.submitted_at || a.submittedAt || 0))) {
-    const login = review.user?.login || review.author?.login;
-    if (login && !latestByAuthor.has(login)) latestByAuthor.set(login, review);
-  }
-  const changeRequest = [...latestByAuthor.values()].find((review) => review.state === 'CHANGES_REQUESTED');
+  const changeRequest = latestDecisiveReviews(reviews)
+    .find((review) => review.state === 'CHANGES_REQUESTED');
   if (changeRequest) {
     return {clean: false, reason: `changes requested by ${changeRequest.user?.login || changeRequest.author?.login}`};
   }
@@ -255,7 +274,7 @@ async function maybeAutopick({github, owner, repo, active}) {
   return {posted: true, detail: `posted bounded Codex continuation on PR #${active.number}`};
 }
 
-async function publishHeartbeat({github, context, owner, repo, mainSha, pulls, active, mergeCandidate, action}) {
+async function publishHeartbeat({github, owner, repo, mainSha, pulls, active, mergeCandidate, action}) {
   const issueNumber = 3;
   const comments = await github.paginate(github.rest.issues.listComments, {
     owner,
@@ -263,9 +282,11 @@ async function publishHeartbeat({github, context, owner, repo, mainSha, pulls, a
     issue_number: issueNumber,
     per_page: 100,
   });
-  const existing = comments.find((comment) =>
-    (comment.body || '').includes(HEARTBEAT_MARKER) && comment.user?.login === 'github-actions[bot]'
-  );
+  const existing = comments.find((comment) => {
+    const body = comment.body || '';
+    return comment.user?.login === 'github-actions[bot]'
+      && (body.includes(HEARTBEAT_MARKER) || body.includes(LEGACY_HEARTBEAT_MARKER));
+  });
   const openSummary = pulls
     .filter((pr) => /^(?:WOS-|CTRL:)/i.test(pr.title || ''))
     .slice(0, 8)
@@ -280,11 +301,8 @@ async function publishHeartbeat({github, context, owner, repo, mainSha, pulls, a
   return body;
 }
 
-async function run({github, context, core}) {
-  const owner = context.repo.owner;
-  const repo = context.repo.repo;
-  const main = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
-  const pulls = await github.paginate(github.rest.pulls.list, {
+async function listOpenPulls(github, owner, repo) {
+  return github.paginate(github.rest.pulls.list, {
     owner,
     repo,
     state: 'open',
@@ -292,25 +310,42 @@ async function run({github, context, core}) {
     direction: 'desc',
     per_page: 100,
   });
-  const active = selectActiveDraft(pulls);
-  const mergeCandidate = selectMergeCandidate(pulls);
+}
+
+async function run({github, context, core}) {
+  const owner = context.repo.owner;
+  const repo = context.repo.repo;
+  const initialPulls = await listOpenPulls(github, owner, repo);
+  const active = selectActiveDraft(initialPulls);
+  const mergeCandidate = selectMergeCandidate(initialPulls);
   let action = {classification: 'observed', detail: 'no state-changing action was eligible'};
 
   if (mergeCandidate) {
     action = await attemptGuardedMerge({github, owner, repo, candidate: mergeCandidate});
   }
   if (!action.performed) {
-    const transient = await maybeRerunTransient({github, owner, repo, active});
-    if (transient?.rerun) {
+    const workflow = await maybeRerunTransient({github, owner, repo, active});
+    if (workflow?.rerun) {
       action = {
         classification: 'transient-rerun',
-        detail: `reran workflow ${transient.run.id} once after ${transient.run.conclusion}`,
+        detail: `reran workflow ${workflow.run.id} once after ${workflow.run.conclusion}`,
       };
-    } else if (transient?.classification === 'failure') {
+    } else if (workflow?.classification === 'active') {
       action = {
-        classification: 'gate-failure',
-        detail: `latest workflow ${transient.run.id} failed; no automatic rerun because failure is not proven transient`,
+        classification: 'workflow-active',
+        detail: `workflow ${workflow.run.id} is ${workflow.run.status}; no duplicate continuation was started`,
       };
+    } else if (workflow?.classification === 'failure') {
+      const autopick = await maybeAutopick({github, owner, repo, active});
+      action = autopick?.posted
+        ? {
+            classification: 'gate-failure-codex-continuation',
+            detail: `workflow ${workflow.run.id} failed without automatic rerun; ${autopick.detail}`,
+          }
+        : {
+            classification: 'gate-failure',
+            detail: `workflow ${workflow.run.id} failed and is not proven transient; ${autopick?.detail || 'no continuation eligible'}`,
+          };
     } else {
       const autopick = await maybeAutopick({github, owner, repo, active});
       if (autopick?.posted) action = {classification: 'codex-continuation', detail: autopick.detail};
@@ -322,15 +357,18 @@ async function run({github, context, core}) {
     }
   }
 
+  const finalMain = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
+  const finalPulls = await listOpenPulls(github, owner, repo);
+  const finalActive = selectActiveDraft(finalPulls);
+  const finalMergeCandidate = selectMergeCandidate(finalPulls);
   const heartbeat = await publishHeartbeat({
     github,
-    context,
     owner,
     repo,
-    mainSha: main.commit.sha,
-    pulls,
-    active,
-    mergeCandidate,
+    mainSha: finalMain.commit.sha,
+    pulls: finalPulls,
+    active: finalActive,
+    mergeCandidate: finalMergeCandidate,
     action,
   });
   core.summary
@@ -344,9 +382,11 @@ async function run({github, context, core}) {
 module.exports = {
   AUTOPICK_MARKER,
   HEARTBEAT_MARKER,
+  LEGACY_HEARTBEAT_MARKER,
   checksAreGreen,
   classifyLatestWorkflowRuns,
   isExactCleanReview,
+  latestDecisiveReviews,
   parseMergeLease,
   run,
   selectActiveDraft,
