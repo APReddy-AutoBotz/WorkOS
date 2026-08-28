@@ -1,0 +1,252 @@
+{
+  "captured_at": "2026-08-28T16:22:16.043Z",
+  "main": "44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42",
+  "prs": [
+    {
+      "number": 16,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "head_ref": "codex/wos-01-authorized-source-bootstrap-v2",
+      "head_sha": "590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60",
+      "base_ref": "main",
+      "base_sha": "1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea",
+      "updated_at": "2026-08-28T16:17:15Z"
+    },
+    {
+      "number": 26,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "mergeable": true,
+      "mergeable_state": "unstable",
+      "head_ref": "controller/wos01a-clean-runtime-acceptance-v2",
+      "head_sha": "84c5fc35236e7885af34ab7faccc6e1b50464d61",
+      "base_ref": "main",
+      "base_sha": "44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42",
+      "updated_at": "2026-08-28T16:02:34Z"
+    },
+    {
+      "number": 27,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "head_ref": "codex/wos01a-acceptance-closure",
+      "head_sha": "ac1e4692f50f9c034352cb06c43b6d9f73808e33",
+      "base_ref": "codex/wos-01-authorized-source-bootstrap-v2",
+      "base_sha": "590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60",
+      "updated_at": "2026-08-28T16:10:42Z"
+    },
+    {
+      "number": 28,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "mergeable": true,
+      "mergeable_state": "unstable",
+      "head_ref": "controller/workos-continuous-controller-v2",
+      "head_sha": "ba4f8fb32ea11a8128814db85728ee4ccb3ba4d4",
+      "base_ref": "main",
+      "base_sha": "44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42",
+      "updated_at": "2026-08-28T16:11:41Z"
+    }
+  ],
+  "workflows": {
+    "WorkOS PR27 Live Proof v1": {
+      "id": 33189535131,
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "head_sha": "ab67502a75d679c6550cc67df4a18105efdc1dd1",
+      "created_at": "2026-08-28T16:20:56Z",
+      "updated_at": "2026-08-28T16:21:10Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33189535131"
+    },
+    "WorkOS Publisher Workflow Syntax v1": {
+      "id": 33188996672,
+      "status": "completed",
+      "conclusion": "success",
+      "run_number": 1,
+      "head_sha": "5ee7c5c43644f4a5d510cd37f9b08e8648035011",
+      "created_at": "2026-08-28T16:14:14Z",
+      "updated_at": "2026-08-28T16:14:23Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33188996672"
+    },
+    "WorkOS PR28 Final Closure v1": {
+      "id": 33188894733,
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "head_sha": "a720b9cffd7c73249c1c71c2848f4ea1050404a7",
+      "created_at": "2026-08-28T16:12:57Z",
+      "updated_at": "2026-08-28T16:13:01Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33188894733"
+    },
+    "WorkOS PR16 Closure and PR28 Refresh v1": {
+      "id": 33188770937,
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "head_sha": "0ac301f4ddfe3202c8b9d5078b3ed96072c6ed39",
+      "created_at": "2026-08-28T16:11:22Z",
+      "updated_at": "2026-08-28T16:11:26Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33188770937"
+    },
+    "WorkOS Controller Fixes Publisher v4": {
+      "id": 33188622138,
+      "status": "completed",
+      "conclusion": "failure",
+      "run_number": 1,
+      "head_sha": "9cf25c679d9dfb09a1cd17d9aab0933a77add8e9",
+      "created_at": "2026-08-28T16:09:31Z",
+      "updated_at": "2026-08-28T16:09:52Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33188622138"
+    },
+    "WorkOS PR27 Closure and Parent Proof v1": {
+      "id": 33188402817,
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "head_sha": "50cbb72fcbfd604ff18425fac7f36fc34df6704a",
+      "created_at": "2026-08-28T16:06:44Z",
+      "updated_at": "2026-08-28T16:06:47Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33188402817"
+    },
+    "WorkOS PR27 Patch Watcher v1": {
+      "id": 33188225687,
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "head_sha": "da238bf1102a6b74eb11ee8d5865a0528e2b2dff",
+      "created_at": "2026-08-28T16:04:33Z",
+      "updated_at": "2026-08-28T16:04:36Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33188225687"
+    },
+    "WorkOS PR26 Closure Watcher v1": {
+      "id": 33188057736,
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "head_sha": "592ba778babfd1b5ae72fe4066039107851a0721",
+      "created_at": "2026-08-28T16:02:30Z",
+      "updated_at": "2026-08-28T16:02:33Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33188057736"
+    },
+    "WorkOS Controller Verification Reporter v1": {
+      "id": 33187854714,
+      "status": "completed",
+      "conclusion": "failure",
+      "run_number": 1,
+      "head_sha": "fecafe130dae873f7d47c106f69809133834e35c",
+      "created_at": "2026-08-28T16:00:08Z",
+      "updated_at": "2026-08-28T16:02:37Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33187854714"
+    },
+    "WorkOS Controller Fixes Publisher v3": {
+      "id": 33187441827,
+      "status": "completed",
+      "conclusion": "failure",
+      "run_number": 1,
+      "head_sha": "79cc11cad8007c0f5767d10932f44d0699425f02",
+      "created_at": "2026-08-28T15:54:53Z",
+      "updated_at": "2026-08-28T15:55:05Z",
+      "html_url": "https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/33187441827"
+    }
+  },
+  "recent_issue3_markers": [
+    {
+      "id": 5440323542,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-27T14:07:18Z",
+      "first_line": "WOS-01A CONTROLLER CHECKPOINT — source publication is complete and the independent exact-head implementation review is now the active gate."
+    },
+    {
+      "id": 5444408942,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-27T19:47:26Z",
+      "first_line": "### WOS-01A controller checkpoint — corrected clean-runtime acceptance started"
+    },
+    {
+      "id": 5444451268,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-27T19:51:33Z",
+      "first_line": "### WOS-01A controller checkpoint — clean-runtime execution and stacked closure active"
+    },
+    {
+      "id": 5449468761,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-28T06:59:52Z",
+      "first_line": "@codex WORKOS ROOT IMPLEMENTATION CONTROLLER — continue immediately from the exact live repository state and finish the currently authorized WorkOS dependency chain. Use one root writer/coordinator and the strongest appropriate Sol reasoning model. Re-fetch every SHA, PR state, workflow result, review thread and task dependency before any write; older values below are context only, never authority."
+    },
+    {
+      "id": 5449482092,
+      "author": "chatgpt-codex-connector[bot]",
+      "created_at": "2026-08-28T07:01:31Z",
+      "first_line": "### Outcome"
+    },
+    {
+      "id": 5449552281,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-28T07:09:51Z",
+      "first_line": "@codex CONTINUOUS MONITOR REVIEW/CONVERGENCE — a new Draft controller PR now exists with head branch `controller/workos-continuous-monitor-v2` and title `CTRL: Replace hourly heartbeat with guarded continuous controller`. Re-fetch its live PR number/head and all changed paths. This is part of the root WorkOS controller task already assigned above; do not create a duplicate branch or PR."
+    },
+    {
+      "id": 5449565206,
+      "author": "chatgpt-codex-connector[bot]",
+      "created_at": "2026-08-28T07:11:26Z",
+      "first_line": "### Outcome"
+    },
+    {
+      "id": 5449571372,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-28T07:12:08Z",
+      "first_line": "@codex controller hygiene amendment: re-fetch open issues and close, without merge or implementation effect, any accidental issue whose exact title is `noop test should not create` and exact body is `noop`. Add a one-line closure note stating it was an accidental connector probe. Also verify `docs/tasks/THIS-SHOULD-NOT-BE-CREATED.md` is absent from every live branch; remove it if present. Continue the existing root WorkOS task afterward and do not create replacements for either accidental item."
+    },
+    {
+      "id": 5449580587,
+      "author": "chatgpt-codex-connector[bot]",
+      "created_at": "2026-08-28T07:13:16Z",
+      "first_line": "### Outcome"
+    },
+    {
+      "id": 5451995806,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-28T11:31:32Z",
+      "first_line": "@codex WORKOS ROOT CONTROLLER — reconcile and finish the current exact chain now. Use one root writer/coordinator and the strongest appropriate Sol reasoning model. Re-fetch live state before every transition; values below are the latest controller-authorized inputs, not substitutes for live verification."
+    },
+    {
+      "id": 5452005928,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-28T11:32:44Z",
+      "first_line": "### WorkOS controller checkpoint — WOS-01A acceptance and guarded merge stage"
+    },
+    {
+      "id": 5452007692,
+      "author": "chatgpt-codex-connector[bot]",
+      "created_at": "2026-08-28T11:32:55Z",
+      "first_line": "### Outcome"
+    },
+    {
+      "id": 5454822318,
+      "author": "APReddy-AutoBotz",
+      "created_at": "2026-08-28T16:07:06Z",
+      "first_line": "@codex WORKOS ROOT CLOSURE CONTROLLER — continue autonomously from live GitHub state. Use the WorkOS Implementation environment, one root writer/coordinator, strongest appropriate Sol reasoning model, and read-only subagents only where useful. Re-fetch everything before any write; do not trust older SHAs."
+    },
+    {
+      "id": 5454837595,
+      "author": "chatgpt-codex-connector[bot]",
+      "created_at": "2026-08-28T16:08:35Z",
+      "first_line": "### Outcome"
+    },
+    {
+      "id": 5454898139,
+      "author": "github-actions[bot]",
+      "created_at": "2026-08-28T16:14:20Z",
+      "first_line": "### Temporary publisher workflow syntax checkpoint"
+    }
+  ]
+}
