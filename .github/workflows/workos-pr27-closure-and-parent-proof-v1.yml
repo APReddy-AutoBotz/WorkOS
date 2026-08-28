@@ -1,0 +1,317 @@
+name: WorkOS PR27 Closure and Parent Proof v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr27-closure-and-parent-proof-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  checks: read
+  statuses: read
+
+concurrency:
+  group: workos-pr27-closure-and-parent-proof-v1
+  cancel-in-progress: false
+
+jobs:
+  close-product:
+    name: Wait for exact PR 27 proof and independent review, then merge into PR 16 branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    outputs:
+      parent_head: ${{ steps.close.outputs.parent_head }}
+      product_head: ${{ steps.close.outputs.product_head }}
+    steps:
+      - name: Poll live gates and perform one exact-head stacked merge
+        id: close
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const number = 27;
+            const parentBranch = 'codex/wos-01-authorized-source-bootstrap-v2';
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const bots = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
+
+            async function threadAuthority() {
+              const threads = [];
+              let after = null;
+              let decision = null;
+              do {
+                const data = await github.graphql(`
+                  query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) {
+                        reviewDecision
+                        reviewThreads(first: 100, after: $after) {
+                          nodes { id isResolved }
+                          pageInfo { hasNextPage endCursor }
+                        }
+                      }
+                    }
+                  }
+                `, {owner, repo, number, after});
+                const pr = data.repository.pullRequest;
+                decision ??= pr.reviewDecision;
+                threads.push(...pr.reviewThreads.nodes);
+                after = pr.reviewThreads.pageInfo.hasNextPage ? pr.reviewThreads.pageInfo.endCursor : null;
+              } while (after);
+              return {threads, decision};
+            }
+
+            async function decisiveReviews() {
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {owner, repo, pull_number: number, per_page: 100});
+              const states = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
+              const latest = new Map();
+              for (const review of reviews.filter(r => states.has(r.state)).sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0))) {
+                if (review.user?.login && !latest.has(review.user.login)) latest.set(review.user.login, review);
+              }
+              return [...latest.values()];
+            }
+
+            for (let attempt = 1; attempt <= 24; attempt += 1) {
+              const pr = (await github.rest.pulls.get({owner, repo, pull_number: number})).data;
+              if (pr.state === 'closed' && pr.merged) {
+                const parent = (await github.rest.repos.getBranch({owner, repo, branch: parentBranch})).data;
+                core.setOutput('parent_head', parent.commit.sha);
+                core.setOutput('product_head', pr.head.sha);
+                return;
+              }
+              if (pr.state !== 'open' || pr.head.ref !== 'codex/wos01a-acceptance-closure' || pr.base.ref !== parentBranch) {
+                core.setFailed(`PR #27 authority changed: state=${pr.state} head=${pr.head.ref} base=${pr.base.ref}`);
+                return;
+              }
+              const head = pr.head.sha;
+              const commit = (await github.rest.repos.getCommit({owner, repo, ref: head})).data;
+              const headTime = new Date(commit.commit.committer?.date || commit.commit.author?.date || 0).getTime();
+              const comments = await github.paginate(github.rest.issues.listComments, {owner, repo, issue_number: number, per_page: 100});
+              const reporter = comments
+                .filter(c => c.user?.login === 'github-actions[bot]')
+                .filter(c => (c.body || '').includes('WOS-01A identity closure publication reporter'))
+                .filter(c => (c.body || '').includes(`Published exact head: \`${head}\``))
+                .filter(c => (c.body || '').includes('Complete corrected-controller proof: **success**'))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+              const request = comments
+                .filter(c => c.user?.login === owner)
+                .filter(c => /@codex\s+review\b/i.test(c.body || ''))
+                .filter(c => (c.body || '').includes('WAIT FOR THE PUBLISHED IDENTITY-CLOSURE HEAD'))
+                .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))[0] || null;
+              const threshold = Math.max(headTime, reporter ? new Date(reporter.created_at).getTime() : 0, request ? new Date(request.updated_at || request.created_at).getTime() : 0);
+              const clean = reporter && request ? comments
+                .filter(c => bots.has(c.user?.login))
+                .filter(c => new Date(c.created_at).getTime() > threshold)
+                .filter(c => {
+                  const body = String(c.body || '');
+                  const marker = `[WORKOS-INDEPENDENT-REVIEW-RESULT head=${head} result=clean p0=0 p1=0 p2=0]`;
+                  const exact = body.split(/\r?\n/).some(line => line.trim() === marker);
+                  const standard = /Codex Review:\s*Didn['’]t find any major issues/i.test(body)
+                    && body.toLowerCase().includes(head.slice(0, 10).toLowerCase());
+                  const outside = body.replace(marker, '');
+                  const finding = /\bP[0-2]\b|actionable\s+P[0-2]|changes?\s+requested/i.test(outside);
+                  return (exact || standard) && !finding;
+                })
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] : null;
+              const authority = await threadAuthority();
+              const decisive = await decisiveReviews();
+              const unresolved = authority.threads.filter(t => !t.isResolved);
+              const changes = authority.decision === 'CHANGES_REQUESTED' || decisive.some(r => r.state === 'CHANGES_REQUESTED');
+              core.info(`attempt=${attempt} head=${head} reporter=${Boolean(reporter)} request=${Boolean(request)} clean=${Boolean(clean)} unresolved=${unresolved.length} changes=${changes} mergeable=${pr.mergeable}/${pr.mergeable_state}`);
+
+              if (reporter && request && clean && unresolved.length === 0 && !changes && pr.mergeable === true && pr.mergeable_state === 'clean') {
+                if (pr.draft) {
+                  await github.graphql(`mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { number isDraft } } }`, {id: pr.node_id});
+                }
+                const fresh = (await github.rest.pulls.get({owner, repo, pull_number: number})).data;
+                if (fresh.state !== 'open' || fresh.draft || fresh.head.sha !== head || fresh.base.ref !== parentBranch || fresh.base.sha !== pr.base.sha || fresh.mergeable !== true || fresh.mergeable_state !== 'clean') {
+                  core.setFailed('PR #27 changed during final Ready/merge revalidation.');
+                  return;
+                }
+                const result = await github.rest.pulls.merge({
+                  owner, repo, pull_number: number, sha: head, merge_method: 'squash',
+                  commit_title: `${fresh.title} (#${number})`,
+                });
+                if (!result.data.merged) {
+                  core.setFailed(result.data.message || 'GitHub rejected PR #27 merge');
+                  return;
+                }
+                const parent = (await github.rest.repos.getBranch({owner, repo, branch: parentBranch})).data;
+                core.setOutput('parent_head', parent.commit.sha);
+                core.setOutput('product_head', head);
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: 3,
+                  body: `### WOS-01A stacked closure incorporated\n\n- PR #27 merged from exact head \`${head}\`\n- Resulting full PR #16 branch head: \`${parent.commit.sha}\`\n- Merge commit: \`${result.data.sha}\`\n\nThe next job will reprove the complete PR #16 product head before any main merge. No deployment was performed.`,
+                });
+                return;
+              }
+              if (attempt < 24) await sleep(120000);
+            }
+            core.setFailed('Timed out waiting for PR #27 proof/review gates; no merge was attempted.');
+
+  parent-authority:
+    name: Wait for PR 26 controller merge and capture final PR 16 authority
+    needs: close-product
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      controller: ${{ steps.wait.outputs.controller }}
+      parent: ${{ steps.wait.outputs.parent }}
+      main: ${{ steps.wait.outputs.main }}
+    steps:
+      - name: Poll live controller/main/parent authority
+        id: wait
+        uses: actions/github-script@v7
+        env:
+          EXPECTED_PARENT_HEAD: ${{ needs.close-product.outputs.parent_head }}
+        with:
+          script: |
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            for (let attempt = 1; attempt <= 10; attempt += 1) {
+              const [controller, parent, main] = await Promise.all([
+                github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 26}),
+                github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 16}),
+                github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+              ]);
+              if (parent.data.state !== 'open' || !parent.data.draft || parent.data.head.ref !== 'codex/wos-01-authorized-source-bootstrap-v2' || parent.data.head.sha !== process.env.EXPECTED_PARENT_HEAD || parent.data.base.ref !== 'main') {
+                core.setFailed('PR #16 authority changed after stacked merge.');
+                return;
+              }
+              if (controller.data.merged) {
+                core.setOutput('controller', controller.data.head.sha);
+                core.setOutput('parent', parent.data.head.sha);
+                core.setOutput('main', main.data.commit.sha);
+                return;
+              }
+              core.info(`PR #26 has not merged yet; attempt ${attempt}/10`);
+              if (attempt < 10) await sleep(120000);
+            }
+            core.setFailed('Timed out waiting for PR #26 controller merge.');
+
+  prove-parent:
+    name: Prove complete resulting PR 16 head
+    needs: [close-product, parent-authority]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CONTROLLER_HEAD: ${{ needs.parent-authority.outputs.controller }}
+      TARGET_PR: '16'
+      TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      TARGET_HEAD: ${{ needs.parent-authority.outputs.parent }}
+      PARENT_PR: '0'
+      PARENT_BRANCH: main
+      PARENT_HEAD: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+      EXPECTED_MAIN_HEAD: ${{ needs.parent-authority.outputs.main }}
+      ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: workos
+      PGPASSWORD: workos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: current-main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+      - name: Run complete token-free full-parent matrix
+        id: matrix
+        continue-on-error: true
+        run: |
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh "$GITHUB_WORKSPACE/controller" "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/current-main"
+      - name: Final isolated full-parent authority
+        id: authority
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const [parent, main] = await Promise.all([
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 16}),
+              github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+            ]);
+            const failures = [];
+            if (parent.data.state !== 'open' || !parent.data.draft || parent.data.head.ref !== process.env.TARGET_BRANCH || parent.data.head.sha !== process.env.TARGET_HEAD || parent.data.base.ref !== 'main' || parent.data.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('full parent lease changed');
+            if (main.data.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('main changed');
+            const dir = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+            fs.mkdirSync(dir, {recursive: true});
+            fs.writeFileSync(path.join(dir, 'full-parent-final-authority.json'), `${JSON.stringify({status: failures.length ? 'failed' : 'passed', failures, parent: parent.data, main: main.data}, null, 2)}\n`);
+            if (failures.length) core.setFailed(failures.join(', '));
+      - name: Upload full-parent evidence
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-full-pr16-proof-${{ env.TARGET_HEAD }}
+          path: target/.acceptance-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Aggregate full-parent proof
+        if: always()
+        run: |
+          set -euo pipefail
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.authority.outcome }}' = success
+          test '${{ steps.upload.outcome }}' = success
+
+  report-parent:
+    name: Report full PR 16 proof
+    needs: [close-product, parent-authority, prove-parent]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish exact full-parent checkpoint
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const head = '${{ needs.parent-authority.outputs.parent }}';
+            const result = '${{ needs.prove-parent.result }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 16,
+              body: `### Complete WOS-01A parent verification reporter\n\n- Resulting full PR #16 head: \`${head}\`\n- Full clean-runtime proof: **${result}**\n- Workflow run: \`${context.runId}\`\n\nThis proof executes the complete imported product plus identity closure against current main after the PR #26 controller merge. No deployment or live-provider action occurred.`,
+            });
+            if (result !== 'success') core.setFailed(`full parent proof outcome=${result}`);
