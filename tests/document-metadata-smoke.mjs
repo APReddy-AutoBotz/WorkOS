@@ -19,7 +19,7 @@ const walkText = root => {
   const result = [];
   for (const name of readdirSync(root).sort()) {
     const file = path.join(root, name);
-    if (statSync(file).isDirectory()) result.push(...walkText(file));
+    if (statSync(file).isDirectory()) result.push(walkText(file));
     else result.push(readFileSync(file, 'utf8'));
   }
   return result.join('\n');
