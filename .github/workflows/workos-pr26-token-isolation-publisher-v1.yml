@@ -1,0 +1,410 @@
+name: WorkOS PR26 Token Isolation Publisher v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr26-token-isolation-publisher-v1.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: workos-pr26-token-isolation-publisher-v1
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  TARGET_OLD_HEAD: 6f23d25c395dd881eb45608262e5c4733f7b8069
+  TARGET_PR: '27'
+  TARGET_PRODUCT_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_PRODUCT_HEAD: 53dd7b8d372cae9cd3480d39d549a709a12c4c90
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  PGHOST: 127.0.0.1
+  PGPORT: '5432'
+  PGUSER: workos
+  PGPASSWORD: workos
+
+jobs:
+  publish:
+    name: Publish token-isolated controller head
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      new_head: ${{ steps.publish.outputs.new_head }}
+
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Patch and publish under exact-old-head lease
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin "$TARGET_BRANCH"
+          test "$(git rev-parse refs/remotes/origin/$TARGET_BRANCH)" = "$TARGET_OLD_HEAD"
+          git checkout --detach "$TARGET_OLD_HEAD"
+          git reset --hard "$TARGET_OLD_HEAD"
+          git clean -fdx
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow_path = Path('.github/workflows/wos01a-clean-runtime-acceptance-v2.yml')
+          workflow = workflow_path.read_text()
+          old_env = '''        env:
+            GH_TOKEN: ${{ github.token }}
+            CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+          run: |
+          '''
+          new_env = '''        env:
+            CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+          run: |
+          '''
+          if workflow.count(old_env) != 1:
+              raise SystemExit('unexpected matrix token environment shape')
+          workflow = workflow.replace(old_env, new_env, 1)
+
+          upload_marker = '''      - name: Upload exact-head acceptance evidence
+          '''
+          if workflow.count(upload_marker) != 1:
+              raise SystemExit('unexpected upload marker count')
+          final_step = '''      - name: Verify final live authority and retain evidence
+            id: final_authority
+            if: always()
+            uses: actions/github-script@v7
+            env:
+              CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+            with:
+              script: |
+                const fs = require('fs');
+                const path = require('path');
+                const evidence = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+                fs.mkdirSync(evidence, {recursive: true});
+                const failures = [];
+
+                const {data: controller} = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: Number(process.env.CONTROLLER_PR),
+                });
+                const {data: target} = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: Number(process.env.TARGET_PR),
+                });
+                const {data: parent} = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: Number(process.env.PARENT_PR),
+                });
+                const {data: main} = await github.rest.repos.getBranch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  branch: 'main',
+                });
+
+                if (controller.state !== 'open') failures.push(`controller.state=${controller.state}`);
+                if (!controller.draft) failures.push('controller is not Draft');
+                if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+                if (controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push(`controller.head.sha=${controller.head.sha}`);
+                if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
+                if (controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base.sha=${controller.base.sha}`);
+
+                if (target.state !== 'open') failures.push(`target.state=${target.state}`);
+                if (!target.draft) failures.push('target is not Draft');
+                if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${target.head.ref}`);
+                if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
+                if (target.base.ref !== process.env.PARENT_BRANCH) failures.push(`target.base.ref=${target.base.ref}`);
+                if (target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base.sha=${target.base.sha}`);
+
+                if (parent.state !== 'open') failures.push(`parent.state=${parent.state}`);
+                if (!parent.draft) failures.push('parent is not Draft');
+                if (parent.head.ref !== process.env.PARENT_BRANCH) failures.push(`parent.head.ref=${parent.head.ref}`);
+                if (parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head.sha=${parent.head.sha}`);
+                if (parent.base.ref !== 'main') failures.push(`parent.base.ref=${parent.base.ref}`);
+                if (parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent.base.sha=${parent.base.sha}`);
+                if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+
+                fs.writeFileSync(path.join(evidence, 'final-controller-pr.json'), `${JSON.stringify(controller, null, 2)}\n`);
+                fs.writeFileSync(path.join(evidence, 'final-target-pr.json'), `${JSON.stringify(target, null, 2)}\n`);
+                fs.writeFileSync(path.join(evidence, 'final-parent-pr.json'), `${JSON.stringify(parent, null, 2)}\n`);
+                fs.writeFileSync(path.join(evidence, 'final-main.json'), `${JSON.stringify(main, null, 2)}\n`);
+                fs.appendFileSync(path.join(evidence, 'gate-outcomes.txt'), `final_authority=${failures.length ? 'FAIL' : 'PASS'}\n`);
+                if (failures.length) core.setFailed(`WOS-01A final authority failed: ${failures.join(', ')}`);
+
+          '''
+          workflow = workflow.replace(upload_marker, final_step + upload_marker, 1)
+
+          aggregate_old = '''          test '${{ steps.authority.outcome }}' = success
+            test '${{ steps.matrix.outcome }}' = success
+            test '${{ steps.evidence_upload.outcome }}' = success
+          '''
+          aggregate_new = '''          test '${{ steps.authority.outcome }}' = success
+            test '${{ steps.matrix.outcome }}' = success
+            test '${{ steps.final_authority.outcome }}' = success
+            test '${{ steps.evidence_upload.outcome }}' = success
+          '''
+          if workflow.count(aggregate_old) != 1:
+              raise SystemExit('unexpected aggregate shape')
+          workflow_path.write_text(workflow.replace(aggregate_old, aggregate_new, 1))
+
+          matrix_path = Path('.github/scripts/wos01a-clean-runtime-matrix-v2.sh')
+          matrix = matrix_path.read_text()
+          token_requirement = ': "${GH_TOKEN:?GH_TOKEN is required}"\n'
+          if matrix.count(token_requirement) != 1:
+              raise SystemExit('unexpected GH_TOKEN requirement count')
+          matrix = matrix.replace(token_requirement, '', 1)
+          start = matrix.index('final_authority() {\n')
+          end = matrix.index('\n\nrm -rf "$TARGET_ROOT/dist"', start)
+          matrix = matrix[:start] + matrix[end + 2:]
+          gate_line = 'run_gate final_authority final_authority\n'
+          if matrix.count(gate_line) != 1:
+              raise SystemExit('unexpected final-authority gate count')
+          matrix_path.write_text(matrix.replace(gate_line, '', 1))
+
+          verifier = r'''import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+
+          const workflow = readFileSync(new URL('../workflows/wos01a-clean-runtime-acceptance-v2.yml', import.meta.url), 'utf8');
+          const matrix = readFileSync(new URL('./wos01a-clean-runtime-matrix-v2.sh', import.meta.url), 'utf8');
+
+          assert.match(workflow, /permissions:\n  contents: read\n  pull-requests: read/);
+          assert.doesNotMatch(workflow, /contents: write|pull-requests: write/);
+          assert.doesNotMatch(workflow, /GH_TOKEN:/);
+          assert.doesNotMatch(matrix, /GH_TOKEN|Authorization: Bearer/);
+          assert.match(workflow, /CONTROLLER_PR: '26'/);
+          assert.match(workflow, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 53dd7b8d372cae9cd3480d39d549a709a12c4c90/);
+          assert.match(workflow, /PARENT_PR: '16'[\s\S]*PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60/);
+          assert.match(workflow, /EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42/);
+          assert.match(workflow, /ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea/);
+          assert.match(workflow, /parent\.base\.ref !== 'main'/);
+          assert.match(workflow, /image: postgres:16/);
+          assert.match(workflow, /persist-credentials: false/g);
+          assert.match(workflow, /wos01a-clean-runtime-matrix-v2\.sh/);
+          assert.match(workflow, /id: final_authority[\s\S]*uses: actions\/github-script@v7/);
+          assert.match(workflow, /controller\.head\.ref !== process\.env\.CONTROLLER_BRANCH/);
+          assert.match(workflow, /final-controller-pr\.json/);
+          assert.match(workflow, /final-parent-pr\.json/);
+          assert.match(workflow, /final_authority=\$\{failures\.length \? 'FAIL' : 'PASS'\}/);
+          assert.match(workflow, /include-hidden-files: true/);
+          assert.match(workflow, /if-no-files-found: error/);
+          assert.match(workflow, /test '\$\{\{ steps\.matrix\.outcome \}\}' = success/);
+          assert.match(workflow, /test '\$\{\{ steps\.final_authority\.outcome \}\}' = success/);
+          assert.match(workflow, /test '\$\{\{ steps\.evidence_upload\.outcome \}\}' = success/);
+
+          for (const gate of [
+            'repository_boundary',
+            'controller_regression',
+            'browser_lifecycle_regression',
+            'locked_install',
+            'engineering_controls',
+            'dependency_classification',
+            'build_acceptance',
+            'postgres_client',
+            'migration_acceptance',
+            'production_acceptance',
+            'browser_acceptance',
+          ]) {
+            assert.match(matrix, new RegExp(`run_gate ${gate} ${gate}`), `matrix must retain ${gate}`);
+          }
+          assert.doesNotMatch(matrix, /run_gate final_authority|final_authority\(\)/);
+          assert.match(matrix, /npm audit --omit=dev --json/);
+          assert.match(matrix, /runtime\.counts\.high > 0 \|\| runtime\.counts\.critical > 0/);
+          assert.match(matrix, /node scripts\/scan-bootstrap\.mjs --self-test/);
+          assert.match(matrix, /npm run test:bootstrap-scan/);
+          assert.match(matrix, /<title>Configured WorkOS<\/title>/);
+          assert.match(matrix, /href=\"\/configured-workos\.svg\"/);
+          assert.match(matrix, /migrate-fresh\.log/);
+          const migration = matrix.match(/migration_acceptance\(\) \{[\s\S]*?\n\}/)?.[0];
+          assert.ok(migration, 'migration acceptance function must exist');
+          assert.match(migration, /test "\$fresh_first" = "\$expected"/);
+          assert.match(migration, /test "\$fresh_replay" = "\$expected"/);
+          assert.match(migration, /test "\$fresh_replay" = "\$fresh_first"/);
+          const firstUpgradeRun = migration.indexOf('migrate-upgrade.log');
+          const firstUpgradeCount = migration.indexOf('upgrade_first=');
+          const firstUpgradeAssert = migration.indexOf('test "$upgrade_first" = "$expected"');
+          const replayUpgradeRun = migration.indexOf('migrate-upgrade-replay.log');
+          assert.ok(firstUpgradeRun >= 0, 'first upgrade command must exist');
+          assert.ok(firstUpgradeRun < firstUpgradeCount, 'first upgrade count must follow the first command');
+          assert.ok(firstUpgradeCount < firstUpgradeAssert, 'first upgrade count must be asserted immediately');
+          assert.ok(firstUpgradeAssert < replayUpgradeRun, 'first upgrade must be complete before replay starts');
+          assert.match(migration, /test "\$upgrade_replay" = "\$expected"/);
+          assert.match(migration, /test "\$upgrade_replay" = "\$upgrade_first"/);
+          assert.match(matrix, /npm run test:production-identity/);
+          assert.match(matrix, /WOS_PRODUCTION_IDENTITY_EVIDENCE/);
+          assert.match(matrix, /production-identity-summary\.json/);
+          assert.match(matrix, /configured-provider-ready-then-unavailable/);
+          assert.match(matrix, /\.localLogin[\s\S]*= 404/);
+          assert.match(matrix, /\.protectedApi[\s\S]*= 401/);
+          assert.match(matrix, /\.outageReadiness[\s\S]*= closed/);
+          assert.match(matrix, /wos01a-browser-acceptance-v2\.mjs/);
+          assert.match(matrix, /WOS-01A exact-head acceptance failed closed/);
+
+          const production = matrix.match(/production_acceptance\(\) \{[\s\S]*?\n\}/)?.[0];
+          assert.ok(production, 'production acceptance function must exist');
+          assert.doesNotMatch(production, /VITE_APP_MODE=test|VITE_ALLOW_TEST_FALLBACK=true/);
+          assert.match(production, /test:production-identity/);
+          assert.match(production, /readiness == \"closed\"/);
+
+          console.log('WOS-01A token isolation, final authority, identity and evidence assertions passed.');
+          '''
+          Path('.github/scripts/verify-wos01a-controller-v2.mjs').write_text(verifier)
+          PY
+
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+          git add \
+            .github/workflows/wos01a-clean-runtime-acceptance-v2.yml \
+            .github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            .github/scripts/verify-wos01a-controller-v2.mjs
+          test -n "$(git status --porcelain)"
+          git commit -m 'ci: isolate final authority token from target processes'
+          NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$TARGET_BRANCH" \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$TARGET_OLD_HEAD"
+          echo "new_head=$NEW_HEAD" >> "$GITHUB_OUTPUT"
+          echo "Published PR #26 exact head $NEW_HEAD" >> "$GITHUB_STEP_SUMMARY"
+
+  proof:
+    name: Prove exact token-isolated controller
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout exact corrected controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.publish.outputs.new_head }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact product closure
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_PRODUCT_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: current-main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+
+      - name: Execute token-free target matrix
+        id: matrix
+        continue-on-error: true
+        shell: bash
+        env:
+          CONTROLLER_HEAD: ${{ needs.publish.outputs.new_head }}
+          TARGET_BRANCH: ${{ env.TARGET_PRODUCT_BRANCH }}
+          TARGET_HEAD: ${{ env.TARGET_PRODUCT_HEAD }}
+        run: |
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            "$GITHUB_WORKSPACE/controller" \
+            "$GITHUB_WORKSPACE/target" \
+            "$GITHUB_WORKSPACE/current-main"
+
+      - name: Verify final live authority without exposing token to target commands
+        id: final_authority
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CONTROLLER_HEAD: ${{ needs.publish.outputs.new_head }}
+          CONTROLLER_BRANCH: ${{ env.TARGET_BRANCH }}
+          TARGET_BRANCH: ${{ env.TARGET_PRODUCT_BRANCH }}
+          TARGET_HEAD: ${{ env.TARGET_PRODUCT_HEAD }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const evidence = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+            fs.mkdirSync(evidence, {recursive: true});
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 26});
+            const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
+            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
+            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            if (controller.state !== 'open' || !controller.draft) failures.push('controller state/draft');
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push(`controller.head.sha=${controller.head.sha}`);
+            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('controller base');
+            if (target.state !== 'open' || !target.draft) failures.push('target state/draft');
+            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push('target head');
+            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push('target base');
+            if (parent.state !== 'open' || !parent.draft) failures.push('parent state/draft');
+            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push('parent head');
+            if (parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push('parent base');
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            fs.writeFileSync(path.join(evidence, 'final-controller-pr.json'), `${JSON.stringify(controller, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-target-pr.json'), `${JSON.stringify(target, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-parent-pr.json'), `${JSON.stringify(parent, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-main.json'), `${JSON.stringify(main, null, 2)}\n`);
+            fs.appendFileSync(path.join(evidence, 'gate-outcomes.txt'), `final_authority=${failures.length ? 'FAIL' : 'PASS'}\n`);
+            if (failures.length) core.setFailed(failures.join(', '));
+
+      - name: Upload exact proof evidence
+        id: evidence_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-pr26-token-isolated-${{ needs.publish.outputs.new_head }}-${{ env.TARGET_PRODUCT_HEAD }}
+          path: target/.acceptance-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Aggregate proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.final_authority.outcome }}' = success
+          test '${{ steps.evidence_upload.outcome }}' = success
