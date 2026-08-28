@@ -1,0 +1,153 @@
+name: WorkOS PR26 Closure Watcher v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr26-closure-watcher-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  checks: read
+  statuses: read
+
+concurrency:
+  group: workos-pr26-closure-watcher-v1
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Wait for exact proof and independent review, then merge PR 26
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Poll exact live gates and perform one guarded merge
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = 26;
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+            const botLogins = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
+
+            async function reviewThreads(number) {
+              const threads = [];
+              let after = null;
+              let decision = null;
+              do {
+                const data = await github.graphql(`
+                  query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) {
+                        reviewDecision
+                        reviewThreads(first: 100, after: $after) {
+                          nodes { id isResolved }
+                          pageInfo { hasNextPage endCursor }
+                        }
+                      }
+                    }
+                  }
+                `, {owner, repo, number, after});
+                const pr = data.repository.pullRequest;
+                decision ??= pr.reviewDecision;
+                threads.push(...pr.reviewThreads.nodes);
+                after = pr.reviewThreads.pageInfo.hasNextPage ? pr.reviewThreads.pageInfo.endCursor : null;
+              } while (after);
+              return {threads, decision};
+            }
+
+            async function latestDecisiveReviews(number) {
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner, repo, pull_number: number, per_page: 100,
+              });
+              const decisive = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
+              const byAuthor = new Map();
+              for (const review of reviews
+                .filter(r => decisive.has(r.state))
+                .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0))) {
+                const login = review.user?.login;
+                if (login && !byAuthor.has(login)) byAuthor.set(login, review);
+              }
+              return [...byAuthor.values()];
+            }
+
+            for (let attempt = 1; attempt <= 24; attempt += 1) {
+              const pr = (await github.rest.pulls.get({owner, repo, pull_number: prNumber})).data;
+              if (pr.state !== 'open') {
+                core.info(`PR #${prNumber} is ${pr.state}; stopping.`);
+                return;
+              }
+              const head = pr.head.sha;
+              const commit = (await github.rest.repos.getCommit({owner, repo, ref: head})).data;
+              const headTime = new Date(commit.commit.committer?.date || commit.commit.author?.date || 0).getTime();
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: prNumber, per_page: 100,
+              });
+
+              const proof = comments
+                .filter(c => c.user?.login === 'github-actions[bot]')
+                .filter(c => (c.body || '').includes('Live exact-head verification reporter'))
+                .filter(c => (c.body || '').includes(`Controller head: \`${head}\``))
+                .filter(c => (c.body || '').includes('Acceptance proof: **success**'))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+
+              const request = comments
+                .filter(c => c.user?.login === owner)
+                .filter(c => new Date(c.updated_at || c.created_at).getTime() >= headTime)
+                .filter(c => /@codex\s+review\b/i.test(c.body || ''))
+                .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))[0] || null;
+
+              const cleanReview = request ? comments
+                .filter(c => botLogins.has(c.user?.login))
+                .filter(c => new Date(c.created_at).getTime() > new Date(request.updated_at || request.created_at).getTime())
+                .filter(c => {
+                  const body = String(c.body || '');
+                  const exactMarker = body.includes(`[WORKOS-INDEPENDENT-REVIEW-RESULT head=${head} result=clean p0=0 p1=0 p2=0]`);
+                  const standardClean = /Codex Review:\s*Didn['’]t find any major issues/i.test(body)
+                    && new RegExp(`Reviewed commit:\\*?\\*?\\s*\\\`${head.slice(0, 10)}`, 'i').test(body);
+                  const finding = /\bP[0-2]\b|actionable\s+P[0-2]|changes?\s+requested/i.test(body.replace(`[WORKOS-INDEPENDENT-REVIEW-RESULT head=${head} result=clean p0=0 p1=0 p2=0]`, ''));
+                  return (exactMarker || standardClean) && !finding;
+                })
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] : null;
+
+              const authority = await reviewThreads(prNumber);
+              const decisive = await latestDecisiveReviews(prNumber);
+              const unresolved = authority.threads.filter(t => !t.isResolved);
+              const changeRequest = authority.decision === 'CHANGES_REQUESTED'
+                || decisive.some(r => r.state === 'CHANGES_REQUESTED');
+
+              core.info(`attempt=${attempt} head=${head} proof=${Boolean(proof)} request=${Boolean(request)} cleanReview=${Boolean(cleanReview)} unresolved=${unresolved.length} changesRequested=${changeRequest} mergeable=${pr.mergeable}/${pr.mergeable_state}`);
+
+              if (proof && request && cleanReview && unresolved.length === 0 && !changeRequest && pr.mergeable === true && pr.mergeable_state === 'clean') {
+                if (pr.draft) {
+                  await github.graphql(`mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { number isDraft } } }`, {id: pr.node_id});
+                }
+                const fresh = (await github.rest.pulls.get({owner, repo, pull_number: prNumber})).data;
+                if (fresh.state !== 'open' || fresh.draft || fresh.head.sha !== head || fresh.base.sha !== pr.base.sha || fresh.mergeable !== true || fresh.mergeable_state !== 'clean') {
+                  core.setFailed('PR changed during final Ready/merge revalidation.');
+                  return;
+                }
+                const merged = await github.rest.pulls.merge({
+                  owner, repo, pull_number: prNumber, sha: head, merge_method: 'squash',
+                  commit_title: `${fresh.title} (#${prNumber})`,
+                });
+                if (!merged.data.merged) {
+                  core.setFailed(merged.data.message || 'GitHub rejected merge');
+                  return;
+                }
+                const main = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: 3,
+                  body: `### WOS-01A controller closure\n\n- PR #26 merged from exact head \`${head}\`\n- Merge commit: \`${merged.data.sha}\`\n- Current main: \`${main.commit.sha}\`\n- Proof and independent-review gates were re-fetched immediately before merge.\n\nNext dependency action: refresh and complete the stacked PR #27 → PR #16 product chain; no deployment was performed.`,
+                });
+                return;
+              }
+
+              if (attempt < 24) await sleep(120000);
+            }
+            core.setFailed('Timed out waiting for the exact PR #26 proof/review gates; no merge was attempted.');
