@@ -156,7 +156,6 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
@@ -164,6 +163,71 @@ jobs:
             "$GITHUB_WORKSPACE/controller" \
             "$GITHUB_WORKSPACE/target" \
             "$GITHUB_WORKSPACE/current-main"
+
+      - name: Verify final live authority and retain evidence
+        id: final_authority
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const evidence = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+            fs.mkdirSync(evidence, {recursive: true});
+            const failures = [];
+
+            const {data: controller} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.CONTROLLER_PR),
+            });
+            const {data: target} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
+            });
+            const {data: parent} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PARENT_PR),
+            });
+            const {data: main} = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+
+            if (controller.state !== 'open') failures.push(`controller.state=${controller.state}`);
+            if (!controller.draft) failures.push('controller is not Draft');
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push(`controller.head.sha=${controller.head.sha}`);
+            if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
+            if (controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base.sha=${controller.base.sha}`);
+
+            if (target.state !== 'open') failures.push(`target.state=${target.state}`);
+            if (!target.draft) failures.push('target is not Draft');
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH) failures.push(`target.base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base.sha=${target.base.sha}`);
+
+            if (parent.state !== 'open') failures.push(`parent.state=${parent.state}`);
+            if (!parent.draft) failures.push('parent is not Draft');
+            if (parent.head.ref !== process.env.PARENT_BRANCH) failures.push(`parent.head.ref=${parent.head.ref}`);
+            if (parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head.sha=${parent.head.sha}`);
+            if (parent.base.ref !== 'main') failures.push(`parent.base.ref=${parent.base.ref}`);
+            if (parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent.base.sha=${parent.base.sha}`);
+
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+
+            fs.writeFileSync(path.join(evidence, 'final-controller-pr.json'), `${JSON.stringify(controller, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-target-pr.json'), `${JSON.stringify(target, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-parent-pr.json'), `${JSON.stringify(parent, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-main.json'), `${JSON.stringify(main, null, 2)}\n`);
+            fs.appendFileSync(path.join(evidence, 'gate-outcomes.txt'), `final_authority=${failures.length ? 'FAIL' : 'PASS'}\n`);
+            if (failures.length) core.setFailed(`WOS-01A final authority failed: ${failures.join(', ')}`);
 
       - name: Upload exact-head acceptance evidence
         id: evidence_upload
@@ -183,4 +247,5 @@ jobs:
           set -euo pipefail
           test '${{ steps.authority.outcome }}' = success
           test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.final_authority.outcome }}' = success
           test '${{ steps.evidence_upload.outcome }}' = success

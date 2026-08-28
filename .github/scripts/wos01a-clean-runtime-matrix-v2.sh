@@ -21,7 +21,6 @@ mkdir -p "$EVIDENCE_DIR"
 : "${PARENT_HEAD:?PARENT_HEAD is required}"
 : "${EXPECTED_MAIN_HEAD:?EXPECTED_MAIN_HEAD is required}"
 : "${ACCEPTED_WOS00_BASE:?ACCEPTED_WOS00_BASE is required}"
-: "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${PGHOST:?PGHOST is required}"
 : "${PGPORT:?PGPORT is required}"
@@ -218,44 +217,41 @@ migration_acceptance() {
   done
 
   local expected
-expected="$((1 + $(find server/migrations -maxdepth 1 -type f -name '*.sql' | wc -l)))"
+  expected="$((1 + $(find server/migrations -maxdepth 1 -type f -name '*.sql' | wc -l)))"
 
-local fresh_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_fresh"
-DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-fresh.log"
-local fresh_first
-fresh_first="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
-test "$fresh_first" = "$expected"
-DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-replay.log"
-local fresh_replay
-fresh_replay="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
-test "$fresh_replay" = "$expected"
-test "$fresh_replay" = "$fresh_first"
+  local fresh_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_fresh"
+  DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-fresh.log"
+  local fresh_first
+  fresh_first="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
+  test "$fresh_first" = "$expected"
+  DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-replay.log"
+  local fresh_replay
+  fresh_replay="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
+  test "$fresh_replay" = "$expected"
+  test "$fresh_replay" = "$fresh_first"
 
-local upgrade_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_upgrade"
-psql "$upgrade_url" -v ON_ERROR_STOP=1 -f server/schema.sql > "$EVIDENCE_DIR/upgrade-baseline-schema.log"
-psql "$upgrade_url" -v ON_ERROR_STOP=1 <<'SQL'
-create table if not exists schema_migrations (
-  id text primary key,
-  applied_at timestamptz not null default now()
-);
-insert into schema_migrations (id) values ('005_auth_lifecycle') on conflict do nothing;
+  local upgrade_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_upgrade"
+  psql "$upgrade_url" -v ON_ERROR_STOP=1 -f server/schema.sql > "$EVIDENCE_DIR/upgrade-baseline-schema.log"
+  psql "$upgrade_url" -v ON_ERROR_STOP=1 <<'SQL'
+  create table if not exists schema_migrations (
+    id text primary key,
+    applied_at timestamptz not null default now()
+  );
+  insert into schema_migrations (id) values ('005_auth_lifecycle') on conflict do nothing;
 SQL
-DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade.log"
-local upgrade_first
-upgrade_first="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
-test "$upgrade_first" = "$expected"
-DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade-replay.log"
-local upgrade_replay
-upgrade_replay="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
-test "$upgrade_replay" = "$expected"
-test "$upgrade_replay" = "$upgrade_first"
+  DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade.log"
+  local upgrade_first
+  upgrade_first="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
+  test "$upgrade_first" = "$expected"
+  DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade-replay.log"
+  local upgrade_replay
+  upgrade_replay="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
+  test "$upgrade_replay" = "$expected"
+  test "$upgrade_replay" = "$upgrade_first"
 
-printf 'expected=%s
-fresh_first=%s
-fresh_replay=%s
-upgrade_first=%s
-upgrade_replay=%s
-'   "$expected" "$fresh_first" "$fresh_replay" "$upgrade_first" "$upgrade_replay"   | tee "$EVIDENCE_DIR/migration-counts.txt"
+  printf 'expected=%s\nfresh_first=%s\nfresh_replay=%s\nupgrade_first=%s\nupgrade_replay=%s\n' \
+    "$expected" "$fresh_first" "$fresh_replay" "$upgrade_first" "$upgrade_replay" \
+    | tee "$EVIDENCE_DIR/migration-counts.txt"
 
   local prod_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_prod"
   DATABASE_URL="$prod_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-production-fixture.log"
@@ -328,38 +324,6 @@ browser_acceptance() {
   trap - EXIT
 }
 
-final_authority() {
-  set -euo pipefail
-  local api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
-  local auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
-  curl --fail --silent --show-error "${auth[@]}" "$api/pulls/26" > "$EVIDENCE_DIR/final-controller-pr.json"
-  curl --fail --silent --show-error "${auth[@]}" "$api/pulls/${TARGET_PR}" > "$EVIDENCE_DIR/final-target-pr.json"
-  curl --fail --silent --show-error "${auth[@]}" "$api/pulls/${PARENT_PR}" > "$EVIDENCE_DIR/final-parent-pr.json"
-  curl --fail --silent --show-error "${auth[@]}" "$api/git/ref/heads/main" > "$EVIDENCE_DIR/final-main.json"
-
-  test "$(jq -r .state "$EVIDENCE_DIR/final-controller-pr.json")" = open
-  test "$(jq -r .draft "$EVIDENCE_DIR/final-controller-pr.json")" = true
-  test "$(jq -r .head.sha "$EVIDENCE_DIR/final-controller-pr.json")" = "$CONTROLLER_HEAD"
-  test "$(jq -r .base.ref "$EVIDENCE_DIR/final-controller-pr.json")" = main
-  test "$(jq -r .base.sha "$EVIDENCE_DIR/final-controller-pr.json")" = "$EXPECTED_MAIN_HEAD"
-
-  test "$(jq -r .state "$EVIDENCE_DIR/final-target-pr.json")" = open
-  test "$(jq -r .draft "$EVIDENCE_DIR/final-target-pr.json")" = true
-  test "$(jq -r .head.ref "$EVIDENCE_DIR/final-target-pr.json")" = "$TARGET_BRANCH"
-  test "$(jq -r .head.sha "$EVIDENCE_DIR/final-target-pr.json")" = "$TARGET_HEAD"
-  test "$(jq -r .base.ref "$EVIDENCE_DIR/final-target-pr.json")" = "$PARENT_BRANCH"
-  test "$(jq -r .base.sha "$EVIDENCE_DIR/final-target-pr.json")" = "$PARENT_HEAD"
-
-  test "$(jq -r .state "$EVIDENCE_DIR/final-parent-pr.json")" = open
-  test "$(jq -r .draft "$EVIDENCE_DIR/final-parent-pr.json")" = true
-  test "$(jq -r .head.ref "$EVIDENCE_DIR/final-parent-pr.json")" = "$PARENT_BRANCH"
-  test "$(jq -r .head.sha "$EVIDENCE_DIR/final-parent-pr.json")" = "$PARENT_HEAD"
-  test "$(jq -r .base.ref "$EVIDENCE_DIR/final-parent-pr.json")" = main
-  test "$(jq -r .base.sha "$EVIDENCE_DIR/final-parent-pr.json")" = "$ACCEPTED_WOS00_BASE"
-
-  test "$(jq -r .object.sha "$EVIDENCE_DIR/final-main.json")" = "$EXPECTED_MAIN_HEAD"
-}
-
 rm -rf "$TARGET_ROOT/dist" "$EVIDENCE_DIR"
 mkdir -p "$EVIDENCE_DIR"
 
@@ -374,7 +338,6 @@ run_gate postgres_client postgres_client
 run_gate migration_acceptance migration_acceptance
 run_gate production_acceptance production_acceptance
 run_gate browser_acceptance browser_acceptance
-run_gate final_authority final_authority
 
 {
   for name in "${GATE_ORDER[@]}"; do
