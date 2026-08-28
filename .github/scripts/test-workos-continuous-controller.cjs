@@ -3,12 +3,14 @@
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const {
+  authorityTimestamp,
   checksAreGreen,
   classifyLatestWorkflowRuns,
   isExactCleanReview,
   isExactReviewRequest,
   latestDecisiveReviews,
   latestSubmittedReviewAt,
+  occursAfterReviewRequest,
   parseMergeLease,
   selectActiveDraft,
   selectMergeCandidate,
@@ -35,6 +37,8 @@ assert.equal(isExactCleanReview(cleanResult, HEAD), true);
 assert.equal(isExactCleanReview(`Reviewed ${HEAD}. No actionable P0/P1/P2 findings remain.`, HEAD), false);
 assert.equal(isExactCleanReview(`${cleanResult}\nP0/P1/P2 status is not clean.`, HEAD), false);
 assert.equal(isExactCleanReview(`${cleanResult}\nP1 remains open.`, HEAD), false);
+assert.equal(isExactCleanReview(`${cleanResult}\n[P1] Merge accepts an unsafe review result.`, HEAD), false);
+assert.equal(isExactCleanReview(`${cleanResult}\nThere is an actionable P0 issue.`, HEAD), false);
 assert.equal(isExactCleanReview(`No actionable P0/P1/P2 findings remain? Not yet. ${HEAD}`, HEAD), false);
 assert.equal(isExactCleanReview(`[WORKOS-INDEPENDENT-REVIEW-RESULT head=${HEAD} result=blocked p0=0 p1=0 p2=0]`, HEAD), false);
 assert.equal(isExactCleanReview(cleanResult, OTHER_HEAD), false);
@@ -104,6 +108,22 @@ assert.equal(latestSubmittedReviewAt([
 ]), new Date('2026-08-28T00:05:00Z').getTime());
 assert.equal(latestSubmittedReviewAt([]), 0);
 
+const editedRequest = {
+  created_at: '2026-08-28T00:00:00Z',
+  updated_at: '2026-08-28T00:10:00Z',
+};
+const preEditResult = {
+  created_at: '2026-08-28T00:05:00Z',
+  updated_at: '2026-08-28T00:05:00Z',
+};
+const postEditResult = {
+  created_at: '2026-08-28T00:11:00Z',
+  updated_at: '2026-08-28T00:11:00Z',
+};
+assert.equal(authorityTimestamp(editedRequest), new Date('2026-08-28T00:10:00Z').getTime());
+assert.equal(occursAfterReviewRequest(preEditResult, editedRequest), false);
+assert.equal(occursAfterReviewRequest(postEditResult, editedRequest), true);
+
 const pulls = [
   {
     number: 27,
@@ -147,7 +167,8 @@ assert.match(source, /REVIEW_REQUEST_PATTERN/);
 assert.match(source, /REVIEW_RESULT_PATTERN/);
 assert.match(source, /CONTRADICTORY_REVIEW_PATTERN/);
 assert.match(source, /comment\.user\?\.login === owner/);
-assert.match(source, /new Date\(comment\.created_at\) > requestTime/);
+assert.match(source, /occursAfterReviewRequest\(comment, reviewRequest\)/);
+assert.match(source, /authorityTimestamp\(comment\) >= headTime\.getTime\(\)/);
 assert.match(source, /no independent structured clean result after the exact review request/);
 assert.match(source, /WORKFLOW_ACTIVITY_FRESHNESS_MS/);
 assert.match(source, /classification: 'workflow-recent'/);
@@ -169,6 +190,8 @@ console.log(JSON.stringify({
   exactLease: true,
   strictChecks: true,
   structuredIndependentReview: true,
+  editedRequestOrdering: true,
+  findingBearingResultRejected: true,
   negativeReviewLanguageRejected: true,
   recentWorkflowFreshness: true,
   submittedReviewFreshness: true,

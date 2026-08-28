@@ -29,11 +29,33 @@ function isExactReviewRequest(body = '', headSha = '') {
   );
 }
 
+function authorityTimestamp(value = {}) {
+  const candidates = [
+    value.created_at,
+    value.createdAt,
+    value.updated_at,
+    value.updatedAt,
+    value.submitted_at,
+    value.submittedAt,
+  ]
+    .map((item) => new Date(item || 0).getTime())
+    .filter((time) => Number.isFinite(time) && time > 0);
+  return candidates.length ? Math.max(...candidates) : 0;
+}
+
+function occursAfterReviewRequest(candidate, request) {
+  const requestTime = authorityTimestamp(request);
+  const candidateTime = authorityTimestamp(candidate);
+  return requestTime > 0 && candidateTime > requestTime;
+}
+
 function isExactCleanReview(body = '', headSha = '') {
   const text = String(body).replace(/\s+/g, ' ').trim();
   const match = text.match(REVIEW_RESULT_PATTERN);
   if (!headSha || !match || match[1].toLowerCase() !== headSha.toLowerCase()) return false;
-  return !CONTRADICTORY_REVIEW_PATTERN.test(text);
+  const outsideMarker = text.replace(REVIEW_RESULT_PATTERN, ' ').trim();
+  if (/\bp[0-2]\b/i.test(outsideMarker)) return false;
+  return !CONTRADICTORY_REVIEW_PATTERN.test(outsideMarker);
 }
 
 function checksAreGreen(checkRuns = [], statuses = []) {
@@ -183,26 +205,26 @@ async function inspectReviewGate({github, owner, repo, pr}) {
     per_page: 100,
   });
   const reviewRequest = comments
-    .filter((comment) =>
-      comment.user?.login === owner
-      && new Date(comment.created_at) >= headTime
-      && isExactReviewRequest(comment.body || '', pr.head.sha)
-    )
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
-  if (!reviewRequest) {
-    return {clean: false, reason: 'no owner-authored independent review request marker for the exact head'};
-  }
-  const requestTime = new Date(reviewRequest.created_at);
-  const exactCleanComment = comments.find((comment) =>
-    BOT_LOGINS.has(comment.user?.login)
-    && new Date(comment.created_at) > requestTime
-    && isExactCleanReview(comment.body || '', pr.head.sha)
-  );
-  const exactCleanReview = reviews.find((review) => {
-    const login = review.user?.login || review.author?.login;
-    const submitted = new Date(review.submitted_at || review.submittedAt || 0);
-    return BOT_LOGINS.has(login) && submitted > requestTime && isExactCleanReview(review.body || '', pr.head.sha);
-  });
+  .filter((comment) =>
+    comment.user?.login === owner
+    && authorityTimestamp(comment) >= headTime.getTime()
+    && isExactReviewRequest(comment.body || '', pr.head.sha)
+  )
+  .sort((a, b) => authorityTimestamp(b) - authorityTimestamp(a))[0] || null;
+if (!reviewRequest) {
+  return {clean: false, reason: 'no owner-authored independent review request marker for the exact head'};
+}
+const exactCleanComment = comments.find((comment) =>
+  BOT_LOGINS.has(comment.user?.login)
+  && occursAfterReviewRequest(comment, reviewRequest)
+  && isExactCleanReview(comment.body || '', pr.head.sha)
+);
+const exactCleanReview = reviews.find((review) => {
+  const login = review.user?.login || review.author?.login;
+  return BOT_LOGINS.has(login)
+    && occursAfterReviewRequest(review, reviewRequest)
+    && isExactCleanReview(review.body || '', pr.head.sha);
+});
   if (!exactCleanComment && !exactCleanReview) {
     return {clean: false, reason: 'no independent structured clean result after the exact review request'};
   }
@@ -449,12 +471,14 @@ module.exports = {
   LEGACY_HEARTBEAT_MARKER,
   REVIEW_REQUEST_PATTERN,
   REVIEW_RESULT_PATTERN,
+  authorityTimestamp,
   checksAreGreen,
   classifyLatestWorkflowRuns,
   isExactCleanReview,
   isExactReviewRequest,
   latestDecisiveReviews,
   latestSubmittedReviewAt,
+  occursAfterReviewRequest,
   parseMergeLease,
   run,
   selectActiveDraft,
