@@ -12,7 +12,7 @@ assert.ok(databaseUrl, 'DATABASE_URL is required for production identity accepta
 const host = '127.0.0.1';
 const positivePort = Number(process.env.WOS_PRODUCTION_IDENTITY_PORT || 4010);
 const discoveryPort = Number(process.env.WOS_IDENTITY_DISCOVERY_PORT || 4011);
-const rootOrigin = `http://${host}:${positivePort}`;
+const rootOrigin = `http://127.0.0.1:${positivePort}`;
 const testKeys = [
   'PORT',
   'NODE_ENV',
@@ -52,11 +52,11 @@ const cleanEnvironment = (overrides = {}) => {
     RESET_DEMO_DATA: 'false',
     DATABASE_URL: databaseUrl,
     PGSSLMODE: 'disable',
-    API_SESSION_SECRET: 'acceptance-only-session-secret-0123456789',
+    API_SESSION_SECRET: 'workos-test-only',
     IDENTITY_PROVIDER: 'entra',
     ENTRA_TENANT_ID: '00000000-0000-0000-0000-000000000001',
     ENTRA_CLIENT_ID: '00000000-0000-0000-0000-000000000002',
-    ENTRA_CLIENT_SECRET: 'acceptance-only-entra-secret',
+    ENTRA_CLIENT_SECRET: 'workos-test-only',
     ENTRA_REDIRECT_URI: `${rootOrigin}/api/auth/entra/callback`,
     IDENTITY_DISCOVERY_ALLOW_HTTP_LOOPBACK: 'true',
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
@@ -127,7 +127,7 @@ const fetchWithTimeout = (url, options = {}, timeoutMs = 1000) => fetch(url, {
 const assertNotServingReadiness = async (port) => {
   let response = null;
   try {
-    response = await fetchWithTimeout(`http://${host}:${port}/api/health`, {}, 500);
+    response = await fetchWithTimeout(`http://127.0.0.1:${port}/api/health`, {}, 500);
   } catch {
     return;
   }
@@ -137,8 +137,8 @@ const assertNotServingReadiness = async (port) => {
 const assertStartupFailure = async ({name, port, overrides, expected}) => {
   const environment = cleanEnvironment({
     PORT: port,
-    APP_URL: `http://${host}:${port}`,
-    ENTRA_REDIRECT_URI: `http://${host}:${port}/api/auth/entra/callback`,
+    APP_URL: `http://127.0.0.1:${port}`,
+    ENTRA_REDIRECT_URI: `http://127.0.0.1:${port}/api/auth/entra/callback`,
     ...overrides,
   });
   const {child, output} = spawnProduction(environment);
@@ -162,7 +162,7 @@ const discoveryPayload = {
 };
 
 let invalidDiscovery = false;
-const discoveryServer = createServer((request, response) => {
+const discoveryServer = createServer((_request, response) => {
   response.statusCode = 200;
   response.setHeader('content-type', 'application/json');
   response.end(JSON.stringify(invalidDiscovery ? {issuer: discoveryPayload.issuer} : discoveryPayload));
@@ -198,7 +198,7 @@ try {
     name: 'unavailable-discovery',
     port: positivePort + 13,
     overrides: {
-      ENTRA_OPENID_CONFIGURATION_URL: `http://${host}:9/unavailable`,
+      ENTRA_OPENID_CONFIGURATION_URL: 'http://127.0.0.1:9/unavailable',
       IDENTITY_DISCOVERY_TIMEOUT_MS: '500',
     },
     expected: /Identity provider discovery is unavailable/,
@@ -209,7 +209,7 @@ try {
     name: 'invalid-discovery-document',
     port: positivePort + 14,
     overrides: {
-      ENTRA_OPENID_CONFIGURATION_URL: `http://${host}:${discoveryPort}/invalid`,
+      ENTRA_OPENID_CONFIGURATION_URL: `http://127.0.0.1:${discoveryPort}/invalid`,
     },
     expected: /Identity provider discovery is missing authorization_endpoint/,
   }));
@@ -224,7 +224,7 @@ try {
     PORT: positivePort,
     APP_URL: rootOrigin,
     ENTRA_REDIRECT_URI: `${rootOrigin}/api/auth/entra/callback`,
-    ENTRA_OPENID_CONFIGURATION_URL: `http://${host}:${discoveryPort}/.well-known/openid-configuration`,
+    ENTRA_OPENID_CONFIGURATION_URL: `http://127.0.0.1:${discoveryPort}/.well-known/openid-configuration`,
   });
   const production = spawnProduction(environment);
   productionChild = production.child;
@@ -258,7 +258,7 @@ try {
   const localLogin = await fetchWithTimeout(`${rootOrigin}/api/auth/login`, {
     method: 'POST',
     headers: {'content-type': 'application/json'},
-    body: JSON.stringify({username: 'acceptance', password: 'acceptance'}),
+    body: JSON.stringify({username: 'acceptance', password: 'workos-test-only'}),
   });
   assert.equal(localLogin.status, 404, 'local production login must remain disabled');
 
