@@ -7,6 +7,7 @@ import cors from 'cors';
 import express from 'express';
 import pg from 'pg';
 import { z } from 'zod';
+import {fetchBoundedJson, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
 
 const { Pool } = pg;
 
@@ -680,14 +681,7 @@ const verifyEntraState = (state) => {
 };
 
 const getMicrosoftOpenIdConfiguration = async () => {
-  const tenantId = getEntraTenantId();
-  if (!tenantId) throw new Error('ENTRA_TENANT_ID is not configured');
-  const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/v2.0/.well-known/openid-configuration`);
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.authorization_endpoint || !payload.token_endpoint || !payload.jwks_uri) {
-    throw new Error('Microsoft OpenID configuration could not be loaded');
-  }
-  return payload;
+  return loadEntraOpenIdConfiguration();
 };
 
 const exchangeEntraCode = async (code) => {
@@ -700,13 +694,10 @@ const exchangeEntraCode = async (code) => {
     redirect_uri: getEntraRedirectUri(),
     scope: 'openid profile email',
   });
-  const response = await fetch(config.token_endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.id_token) {
+  const payload = await fetchBoundedJson(config.token_endpoint, 'Microsoft token endpoint', {fetchOptions: {
+    method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body,
+  }});
+  if (!payload.id_token) {
     throw new Error(payload.error_description || payload.error || 'Microsoft token exchange failed');
   }
   return { config, tokenPayload: payload };
@@ -718,8 +709,7 @@ const verifyEntraIdToken = async (idToken, { nonce, config }) => {
   const header = decodeBase64UrlJson(parts[0]);
   const claims = decodeBase64UrlJson(parts[1]);
   if (!header.kid) throw new Error('Entra ID token is missing key id');
-  const keysResponse = await fetch(config.jwks_uri);
-  const keysPayload = await keysResponse.json().catch(() => ({}));
+  const keysPayload = await fetchBoundedJson(config.jwks_uri, 'Microsoft JWKS endpoint');
   const jwk = keysPayload.keys?.find((key) => key.kid === header.kid);
   if (!jwk) throw new Error('Entra signing key was not found');
   const verifier = crypto.createVerify('RSA-SHA256');
@@ -728,6 +718,7 @@ const verifyEntraIdToken = async (idToken, { nonce, config }) => {
   const valid = verifier.verify(crypto.createPublicKey({ key: jwk, format: 'jwk' }), parts[2], 'base64url');
   if (!valid) throw new Error('Entra ID token signature is invalid');
   if (claims.aud !== getEntraClientId()) throw new Error('Entra ID token audience is invalid');
+  if (claims.iss !== config.issuer) throw new Error('Entra ID token issuer is invalid');
   if (claims.nonce !== nonce) throw new Error('Entra ID token nonce is invalid');
   if (!claims.exp || claims.exp * 1000 < Date.now()) throw new Error('Entra ID token is expired');
   const expectedTenant = getEntraTenantId();

@@ -41,11 +41,12 @@
     "test:prod-core-rc": "node tests/prod-core-rc-smoke.mjs",
     "test:prod-readiness": "node tests/prod-readiness.mjs",
     "test:production-identity": "node tests/production-identity-smoke.mjs",
+    "test:identity-discovery": "node tests/identity-discovery-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",
     "test:document-metadata": "node tests/document-metadata-smoke.mjs",
-    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata"
+    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery"
   },
   "dependencies": {
     "clsx": "^2.1.1",

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {writeFileSync} from 'node:fs';
-import {createServer} from 'node:http';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {createServer} from 'node:https';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
 
@@ -12,6 +15,14 @@ assert.ok(databaseUrl, 'DATABASE_URL is required for production identity accepta
 const host = '127.0.0.1';
 const positivePort = Number(process.env.WOS_PRODUCTION_IDENTITY_PORT || 4010);
 const discoveryPort = Number(process.env.WOS_IDENTITY_DISCOVERY_PORT || 4011);
+const certificateDirectory = mkdtempSync(join(tmpdir(), 'workos-identity-'));
+const certificatePath = join(certificateDirectory, 'server.crt');
+const privateKeyPath = join(certificateDirectory, 'server.key');
+execFileSync('openssl', [
+  'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+  '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
+  '-keyout', privateKeyPath, '-out', certificatePath,
+], {stdio: 'ignore', timeout: 10_000});
 const rootOrigin = `http://127.0.0.1:${positivePort}`;
 const testKeys = [
   'PORT',
@@ -35,6 +46,7 @@ const testKeys = [
   'OIDC_REDIRECT_URI',
   'OIDC_DISCOVERY_URL',
   'IDENTITY_DISCOVERY_ALLOW_HTTP_LOOPBACK',
+  'NODE_EXTRA_CA_CERTS',
   'IDENTITY_DISCOVERY_TIMEOUT_MS',
   'IDENTITY_DISCOVERY_RECHECK_MS',
   'LOCAL_LOGIN_ENABLED',
@@ -58,7 +70,7 @@ const cleanEnvironment = (overrides = {}) => {
     ENTRA_CLIENT_ID: '00000000-0000-0000-0000-000000000002',
     ENTRA_CLIENT_SECRET: 'workos-test-only',
     ENTRA_REDIRECT_URI: `${rootOrigin}/api/auth/entra/callback`,
-    IDENTITY_DISCOVERY_ALLOW_HTTP_LOOPBACK: 'true',
+    NODE_EXTRA_CA_CERTS: certificatePath,
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
     IDENTITY_DISCOVERY_RECHECK_MS: '5000',
     EMAIL_PROVIDER: 'mock',
@@ -155,14 +167,16 @@ const assertStartupFailure = async ({name, port, overrides, expected}) => {
 };
 
 const discoveryPayload = {
-  issuer: 'https://identity.example.test/tenant/v2.0',
-  authorization_endpoint: 'https://identity.example.test/authorize',
-  token_endpoint: 'https://identity.example.test/token',
-  jwks_uri: 'https://identity.example.test/keys',
+  issuer: `https://localhost:${discoveryPort}/00000000-0000-0000-0000-000000000001/v2.0`,
+  authorization_endpoint: `https://localhost:${discoveryPort}/00000000-0000-0000-0000-000000000001/authorize`,
+  token_endpoint: `https://localhost:${discoveryPort}/00000000-0000-0000-0000-000000000001/token`,
+  jwks_uri: `https://localhost:${discoveryPort}/00000000-0000-0000-0000-000000000001/keys`,
 };
 
 let invalidDiscovery = false;
-const discoveryServer = createServer((_request, response) => {
+let discoveryRequests = 0;
+const discoveryServer = createServer({key: readFileSync(privateKeyPath), cert: readFileSync(certificatePath)}, (_request, response) => {
+  discoveryRequests += 1;
   response.statusCode = 200;
   response.setHeader('content-type', 'application/json');
   response.end(JSON.stringify(invalidDiscovery ? {issuer: discoveryPayload.issuer} : discoveryPayload));
@@ -198,7 +212,7 @@ try {
     name: 'unavailable-discovery',
     port: positivePort + 13,
     overrides: {
-      ENTRA_OPENID_CONFIGURATION_URL: 'http://127.0.0.1:9/unavailable',
+      ENTRA_OPENID_CONFIGURATION_URL: 'https://localhost:9/unavailable',
       IDENTITY_DISCOVERY_TIMEOUT_MS: '500',
     },
     expected: /Identity provider discovery is unavailable/,
@@ -209,7 +223,7 @@ try {
     name: 'invalid-discovery-document',
     port: positivePort + 14,
     overrides: {
-      ENTRA_OPENID_CONFIGURATION_URL: `http://127.0.0.1:${discoveryPort}/invalid`,
+      ENTRA_OPENID_CONFIGURATION_URL: `https://localhost:${discoveryPort}/invalid`,
     },
     expected: /Identity provider discovery is missing authorization_endpoint/,
   }));
@@ -224,7 +238,7 @@ try {
     PORT: positivePort,
     APP_URL: rootOrigin,
     ENTRA_REDIRECT_URI: `${rootOrigin}/api/auth/entra/callback`,
-    ENTRA_OPENID_CONFIGURATION_URL: `http://127.0.0.1:${discoveryPort}/.well-known/openid-configuration`,
+    ENTRA_OPENID_CONFIGURATION_URL: `https://localhost:${discoveryPort}/.well-known/openid-configuration`,
   });
   const production = spawnProduction(environment);
   productionChild = production.child;
@@ -254,6 +268,12 @@ try {
   const identityConfigBody = await identityConfig.json();
   assert.equal(identityConfigBody.enabled, true);
   assert.equal(identityConfigBody.provider, 'entra');
+
+  const discoveryRequestsBeforeAuth = discoveryRequests;
+  const authStart = await fetchWithTimeout(`${rootOrigin}/api/auth/entra/start`, {redirect: 'manual'}, 1000);
+  assert.equal(authStart.status, 302);
+  assert.ok(discoveryRequests > discoveryRequestsBeforeAuth, 'authentication initiation must use configured discovery');
+  assert.match(authStart.headers.get('location') || '', new RegExp(`^https://localhost:${discoveryPort}/`));
 
   const localLogin = await fetchWithTimeout(`${rootOrigin}/api/auth/login`, {
     method: 'POST',
@@ -293,6 +313,7 @@ try {
   await closeDiscovery();
   await terminate(productionChild);
   await pool.end();
+  rmSync(certificateDirectory, {recursive: true, force: true});
 }
 
 const report = {
