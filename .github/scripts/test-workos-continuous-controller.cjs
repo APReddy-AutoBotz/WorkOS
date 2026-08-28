@@ -1,0 +1,108 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const {readFileSync} = require('node:fs');
+const {
+  checksAreGreen,
+  classifyLatestWorkflowRuns,
+  isExactCleanReview,
+  parseMergeLease,
+  selectActiveDraft,
+  selectMergeCandidate,
+} = require('./workos-continuous-controller.cjs');
+
+const HEAD = 'a'.repeat(40);
+const BASE = 'b'.repeat(40);
+
+assert.deepEqual(
+  parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD} base=${BASE}]`),
+  {head: HEAD, base: BASE},
+);
+assert.equal(parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD}]`), null);
+assert.equal(parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD} base=${'c'.repeat(39)}]`), null);
+
+assert.equal(
+  isExactCleanReview(`Reviewed ${HEAD}. No actionable P0/P1/P2 findings remain.`, HEAD),
+  true,
+);
+assert.equal(isExactCleanReview('No actionable P0/P1/P2 findings remain.', HEAD), false);
+assert.equal(isExactCleanReview(`Reviewed ${HEAD}. P1 remains.`, HEAD), false);
+
+assert.deepEqual(
+  checksAreGreen([
+    {name: 'build', status: 'completed', conclusion: 'success'},
+    {name: 'acceptance', status: 'completed', conclusion: 'success'},
+  ], [{context: 'legacy', state: 'success'}]),
+  {green: true, reason: 'all exact-head check runs and statuses succeeded'},
+);
+assert.equal(checksAreGreen([], []).green, false);
+assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'skipped'}], []).green, false);
+assert.equal(checksAreGreen([{name: 'build', status: 'in_progress', conclusion: null}], []).green, false);
+assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'pending'}]).green, false);
+
+assert.equal(classifyLatestWorkflowRuns([
+  {workflow_id: 1, status: 'completed', conclusion: 'cancelled', run_attempt: 1, created_at: '2026-08-28T00:00:00Z'},
+]).classification, 'transient');
+assert.equal(classifyLatestWorkflowRuns([
+  {workflow_id: 1, status: 'completed', conclusion: 'failure', run_attempt: 1, created_at: '2026-08-28T00:00:00Z'},
+]).classification, 'failure');
+assert.equal(classifyLatestWorkflowRuns([
+  {workflow_id: 1, status: 'completed', conclusion: 'timed_out', run_attempt: 2, created_at: '2026-08-28T00:00:00Z'},
+]).classification, 'none');
+assert.equal(classifyLatestWorkflowRuns([
+  {workflow_id: 1, status: 'in_progress', conclusion: null, run_attempt: 1, created_at: '2026-08-28T00:01:00Z'},
+  {workflow_id: 1, status: 'completed', conclusion: 'failure', run_attempt: 1, created_at: '2026-08-28T00:00:00Z'},
+]).classification, 'active');
+
+const pulls = [
+  {
+    number: 27,
+    state: 'open',
+    draft: true,
+    title: 'WOS-01A: product',
+    updated_at: '2026-08-28T01:00:00Z',
+    body: '',
+    head: {sha: HEAD},
+    base: {sha: BASE},
+  },
+  {
+    number: 26,
+    state: 'open',
+    draft: true,
+    title: 'CTRL: controller',
+    updated_at: '2026-08-28T02:00:00Z',
+    body: '',
+    head: {sha: 'c'.repeat(40)},
+    base: {sha: BASE},
+  },
+];
+assert.equal(selectActiveDraft(pulls).number, 26);
+assert.equal(selectMergeCandidate(pulls), null);
+
+const ready = {
+  ...pulls[0],
+  draft: false,
+  body: `[WORKOS-AUTO-MERGE head=${HEAD} base=${BASE}]`,
+};
+assert.equal(selectMergeCandidate([ready]).number, 27);
+assert.equal(selectMergeCandidate([{...ready, body: `[WORKOS-AUTO-MERGE head=${'d'.repeat(40)} base=${BASE}]`}]), null);
+
+const source = readFileSync(require.resolve('./workos-continuous-controller.cjs'), 'utf8');
+assert.match(source, /fresh\.mergeable !== true \|\| fresh\.mergeable_state !== 'clean'/);
+assert.match(source, /check\.status !== 'completed' \|\| check\.conclusion !== 'success'/);
+assert.match(source, /unresolved\.length > 0/);
+assert.match(source, /CHANGES_REQUESTED/);
+assert.match(source, /no independent exact-head no-P0\/P1\/P2 confirmation/);
+assert.match(source, /sha: final\.head\.sha/);
+assert.match(source, /merge_method: 'squash'/);
+assert.doesNotMatch(source, /markPullRequestReadyForReview|mark_pull_request_ready/);
+assert.doesNotMatch(source, /deployments\.|createDeployment|secret|customer data/i);
+
+console.log(JSON.stringify({
+  status: 'passed',
+  policy: 'ten-minute guarded continuous controller',
+  exactLease: true,
+  strictChecks: true,
+  independentReview: true,
+  neverAutoReady: true,
+}, null, 2));
