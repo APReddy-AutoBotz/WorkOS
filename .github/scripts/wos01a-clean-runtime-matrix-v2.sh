@@ -174,7 +174,7 @@ build_acceptance() {
   fi
   : > "$EVIDENCE_DIR/default-build-unresolved-tokens.log"
   grep -q '<title>WorkOS</title>' dist/index.html
-  grep -q '/workos-mark.svg' dist/index.html
+  grep -q 'href="/workos-mark.svg"' dist/index.html
 
   rm -rf dist
   VITE_APP_MODE=production \
@@ -190,7 +190,8 @@ build_acceptance() {
     return 1
   fi
   : > "$EVIDENCE_DIR/configured-build-unresolved-tokens.log"
-  grep -q '<title>WorkOS</title>' dist/index.html
+  grep -q '<title>Configured WorkOS</title>' dist/index.html
+  grep -q 'href="/configured-workos.svg"' dist/index.html
   grep -R -F 'Configured WorkOS' dist/assets >/dev/null
   grep -R -F '/configured-workos.svg' dist/assets >/dev/null
 }
@@ -384,16 +385,23 @@ final_authority() {
   test "$(jq -r .state "$EVIDENCE_DIR/final-controller-pr.json")" = open
   test "$(jq -r .draft "$EVIDENCE_DIR/final-controller-pr.json")" = true
   test "$(jq -r .head.sha "$EVIDENCE_DIR/final-controller-pr.json")" = "$CONTROLLER_HEAD"
+  test "$(jq -r .base.ref "$EVIDENCE_DIR/final-controller-pr.json")" = main
+  test "$(jq -r .base.sha "$EVIDENCE_DIR/final-controller-pr.json")" = "$EXPECTED_MAIN_HEAD"
+
   test "$(jq -r .state "$EVIDENCE_DIR/final-target-pr.json")" = open
   test "$(jq -r .draft "$EVIDENCE_DIR/final-target-pr.json")" = true
   test "$(jq -r .head.ref "$EVIDENCE_DIR/final-target-pr.json")" = "$TARGET_BRANCH"
   test "$(jq -r .head.sha "$EVIDENCE_DIR/final-target-pr.json")" = "$TARGET_HEAD"
   test "$(jq -r .base.ref "$EVIDENCE_DIR/final-target-pr.json")" = "$PARENT_BRANCH"
   test "$(jq -r .base.sha "$EVIDENCE_DIR/final-target-pr.json")" = "$PARENT_HEAD"
+
   test "$(jq -r .state "$EVIDENCE_DIR/final-parent-pr.json")" = open
   test "$(jq -r .draft "$EVIDENCE_DIR/final-parent-pr.json")" = true
   test "$(jq -r .head.ref "$EVIDENCE_DIR/final-parent-pr.json")" = "$PARENT_BRANCH"
   test "$(jq -r .head.sha "$EVIDENCE_DIR/final-parent-pr.json")" = "$PARENT_HEAD"
+  test "$(jq -r .base.ref "$EVIDENCE_DIR/final-parent-pr.json")" = main
+  test "$(jq -r .base.sha "$EVIDENCE_DIR/final-parent-pr.json")" = "$ACCEPTED_WOS00_BASE"
+
   test "$(jq -r .object.sha "$EVIDENCE_DIR/final-main.json")" = "$EXPECTED_MAIN_HEAD"
 }
 
