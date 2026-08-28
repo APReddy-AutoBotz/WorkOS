@@ -1,0 +1,45 @@
+name: WorkOS Publisher Workflow Syntax v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-publisher-workflow-syntax-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          persist-credentials: false
+      - name: Parse all temporary publisher workflows as YAML
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e '
+            paths = Dir[".github/workflows/workos-*.yml"].sort
+            abort "no workflows found" if paths.empty?
+            paths.each do |path|
+              YAML.load_file(path, aliases: true)
+              puts "PASS #{path}"
+            end
+          '
+      - name: Report syntax checkpoint
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 3,
+              body: `### Temporary publisher workflow syntax checkpoint\n\n- Run: \`${context.runId}\`\n- YAML parse outcome: **${{ job.status }}**\n\nThe root controller should inspect any failed workflow's exact parser/run logs before changing product branches.`,
+            });
