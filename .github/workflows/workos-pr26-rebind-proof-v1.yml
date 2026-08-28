@@ -1,0 +1,420 @@
+name: WorkOS PR26 Rebind and Exact Proof v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr26-rebind-proof-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: workos-pr26-rebind-proof-v1
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  CONTROLLER_OLD_HEAD: 84c5fc35236e7885af34ab7faccc6e1b50464d61
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_HEAD: d02a971c69dbb972cb5b12b340f86aaca7c72fad
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+
+jobs:
+  publish:
+    name: Publish exact PR26 controller correction
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      controller_head: ${{ steps.publish.outputs.controller_head }}
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify live publication lease
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const readPr = async (number) => (await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(number),
+            })).data;
+            const [controller, target, parent, main] = await Promise.all([
+              readPr(process.env.CONTROLLER_PR),
+              readPr(process.env.TARGET_PR),
+              readPr(process.env.PARENT_PR),
+              github.rest.repos.getBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: 'main',
+              }).then(({data}) => data),
+            ]);
+            const checkPr = (pr, label, branch, head, baseBranch, baseHead) => {
+              if (pr.state !== 'open') failures.push(`${label}.state=${pr.state}`);
+              if (!pr.draft) failures.push(`${label} is not Draft`);
+              if (pr.head.ref !== branch) failures.push(`${label}.head.ref=${pr.head.ref}`);
+              if (pr.head.sha !== head) failures.push(`${label}.head.sha=${pr.head.sha}`);
+              if (pr.base.ref !== baseBranch) failures.push(`${label}.base.ref=${pr.base.ref}`);
+              if (pr.base.sha !== baseHead) failures.push(`${label}.base.sha=${pr.base.sha}`);
+            };
+            checkPr(controller, 'controller', process.env.CONTROLLER_BRANCH, process.env.CONTROLLER_OLD_HEAD, 'main', process.env.MAIN_HEAD);
+            checkPr(target, 'target', process.env.TARGET_BRANCH, process.env.TARGET_HEAD, process.env.PARENT_BRANCH, process.env.PARENT_HEAD);
+            checkPr(parent, 'parent', process.env.PARENT_BRANCH, process.env.PARENT_HEAD, 'main', process.env.ACCEPTED_WOS00_BASE);
+            if (main.commit.sha !== process.env.MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(`Publication lease failed: ${failures.join(', ')}`);
+
+      - name: Patch, verify and publish under exact-old-head lease
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin \
+            "+refs/heads/$CONTROLLER_BRANCH:refs/remotes/origin/$CONTROLLER_BRANCH" \
+            "+refs/heads/$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH" \
+            "+refs/heads/$PARENT_BRANCH:refs/remotes/origin/$PARENT_BRANCH" \
+            "+refs/heads/main:refs/remotes/origin/main"
+          test "$(git rev-parse "refs/remotes/origin/$CONTROLLER_BRANCH")" = "$CONTROLLER_OLD_HEAD"
+          test "$(git rev-parse "refs/remotes/origin/$TARGET_BRANCH")" = "$TARGET_HEAD"
+          test "$(git rev-parse "refs/remotes/origin/$PARENT_BRANCH")" = "$PARENT_HEAD"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$MAIN_HEAD"
+          git checkout --detach "$CONTROLLER_OLD_HEAD"
+          git reset --hard "$CONTROLLER_OLD_HEAD"
+          git clean -fdx
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old_target = 'ac1e4692f50f9c034352cb06c43b6d9f73808e33'
+          new_target = 'd02a971c69dbb972cb5b12b340f86aaca7c72fad'
+
+          workflow_path = Path('.github/workflows/wos01a-clean-runtime-acceptance-v2.yml')
+          workflow = workflow_path.read_text()
+          if workflow.count(f'TARGET_HEAD: {old_target}') != 1:
+              raise SystemExit('unexpected stale TARGET_HEAD shape')
+          workflow = workflow.replace(
+              f'TARGET_HEAD: {old_target}',
+              f'TARGET_HEAD: {new_target}',
+              1,
+          )
+
+          old_digest = """          case "$ARTIFACT_DIGEST" in
+                      sha256:*) ;;
+                      *) echo 'Artifact digest is not SHA-256 evidence' >&2; exit 1 ;;
+                    esac"""
+          new_digest = """          if [[ ! "$ARTIFACT_DIGEST" =~ ^(sha256:)?[0-9A-Fa-f]{64}$ ]]; then
+                      echo 'Artifact digest is not a valid SHA-256 value' >&2
+                      exit 1
+                    fi"""
+          if workflow.count(old_digest) != 1:
+              raise SystemExit('unexpected artifact digest contract shape')
+          workflow_path.write_text(workflow.replace(old_digest, new_digest, 1))
+
+          verifier_path = Path('.github/scripts/verify-wos01a-controller-v2.mjs')
+          verifier = verifier_path.read_text()
+          if verifier.count(old_target) != 1:
+              raise SystemExit('unexpected verifier target binding shape')
+          verifier = verifier.replace(old_target, new_target, 1)
+
+          marker = "assert.match(workflow, /test '\\$\\{\\{ steps\\.evidence_upload\\.outcome \\}\\}' = success/);\n"
+          addition = marker + r"""
+          const artifactDigestPattern = /^(?:sha256:)?[0-9A-Fa-f]{64}$/;
+          for (const value of ['a'.repeat(64), `sha256:${'F'.repeat(64)}`]) {
+            assert.match(value, artifactDigestPattern);
+          }
+          for (const value of ['', 'sha256:', 'a'.repeat(63), 'g'.repeat(64), `sha1:${'a'.repeat(64)}`]) {
+            assert.doesNotMatch(value, artifactDigestPattern);
+          }
+          assert.match(workflow, /\^\(sha256:\)\?\[0-9A-Fa-f\]\{64\}\$/);
+          """
+          if verifier.count(marker) != 1:
+              raise SystemExit('unexpected verifier evidence assertion marker')
+          verifier_path.write_text(verifier.replace(marker, addition, 1))
+          PY
+
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          node --check .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+
+          mapfile -t changed < <(git diff --name-only | sort)
+          expected=(
+            '.github/scripts/verify-wos01a-controller-v2.mjs'
+            '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'
+          )
+          test "${#changed[@]}" -eq "${#expected[@]}"
+          for index in "${!expected[@]}"; do
+            test "${changed[$index]}" = "${expected[$index]}"
+          done
+
+          git add "${expected[@]}"
+          git commit -m 'ci: rebind WOS-01A proof and normalize artifact digest'
+          controller_head="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$CONTROLLER_BRANCH" \
+            --force-with-lease="refs/heads/$CONTROLLER_BRANCH:$CONTROLLER_OLD_HEAD"
+          echo "controller_head=$controller_head" >> "$GITHUB_OUTPUT"
+
+  proof:
+    name: Prove exact corrected PR26 head
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    env:
+      CONTROLLER_HEAD: ${{ needs.publish.outputs.controller_head }}
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: workos
+      PGPASSWORD: workos
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Verify exact controller, target, parent and main authority
+        id: authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const readPr = async (number) => (await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(number),
+            })).data;
+            const [controller, target, parent, main] = await Promise.all([
+              readPr(process.env.CONTROLLER_PR),
+              readPr(process.env.TARGET_PR),
+              readPr(process.env.PARENT_PR),
+              github.rest.repos.getBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: 'main',
+              }).then(({data}) => data),
+            ]);
+            const checkPr = (pr, label, branch, head, baseBranch, baseHead) => {
+              if (pr.state !== 'open') failures.push(`${label}.state=${pr.state}`);
+              if (!pr.draft) failures.push(`${label} is not Draft`);
+              if (pr.head.ref !== branch) failures.push(`${label}.head.ref=${pr.head.ref}`);
+              if (pr.head.sha !== head) failures.push(`${label}.head.sha=${pr.head.sha}`);
+              if (pr.base.ref !== baseBranch) failures.push(`${label}.base.ref=${pr.base.ref}`);
+              if (pr.base.sha !== baseHead) failures.push(`${label}.base.sha=${pr.base.sha}`);
+            };
+            checkPr(controller, 'controller', process.env.CONTROLLER_BRANCH, process.env.CONTROLLER_HEAD, 'main', process.env.MAIN_HEAD);
+            checkPr(target, 'target', process.env.TARGET_BRANCH, process.env.TARGET_HEAD, process.env.PARENT_BRANCH, process.env.PARENT_HEAD);
+            checkPr(parent, 'parent', process.env.PARENT_BRANCH, process.env.PARENT_HEAD, 'main', process.env.ACCEPTED_WOS00_BASE);
+            if (main.commit.sha !== process.env.MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.CONTROLLER_PR),
+              per_page: 100,
+            });
+            const actual = files.map(({filename}) => filename).sort();
+            const expected = [
+              '.github/scripts/test-wos01a-browser-lifecycle-v2.mjs',
+              '.github/scripts/verify-wos01a-controller-v2.mjs',
+              '.github/scripts/wos01a-browser-acceptance-v2.mjs',
+              '.github/scripts/wos01a-browser-lifecycle-v2.mjs',
+              '.github/scripts/wos01a-clean-runtime-matrix-v2.sh',
+              '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml',
+            ].sort();
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`controller.paths=${JSON.stringify(actual)}`);
+            if (failures.length) core.setFailed(`Exact proof authority failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact corrected product head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MAIN_HEAD }}
+          path: current-main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+
+      - name: Run complete fail-closed acceptance matrix
+        id: matrix
+        continue-on-error: true
+        shell: bash
+        run: |
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            "$GITHUB_WORKSPACE/controller" \
+            "$GITHUB_WORKSPACE/target" \
+            "$GITHUB_WORKSPACE/current-main"
+
+      - name: Verify final live authority and retain evidence
+        id: final_authority
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const evidence = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+            fs.mkdirSync(evidence, {recursive: true});
+            const failures = [];
+            const readPr = async (number) => (await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(number),
+            })).data;
+            const [controller, target, parent, main] = await Promise.all([
+              readPr(process.env.CONTROLLER_PR),
+              readPr(process.env.TARGET_PR),
+              readPr(process.env.PARENT_PR),
+              github.rest.repos.getBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: 'main',
+              }).then(({data}) => data),
+            ]);
+            const checkPr = (pr, label, branch, head, baseBranch, baseHead) => {
+              if (pr.state !== 'open') failures.push(`${label}.state=${pr.state}`);
+              if (!pr.draft) failures.push(`${label} is not Draft`);
+              if (pr.head.ref !== branch) failures.push(`${label}.head.ref=${pr.head.ref}`);
+              if (pr.head.sha !== head) failures.push(`${label}.head.sha=${pr.head.sha}`);
+              if (pr.base.ref !== baseBranch) failures.push(`${label}.base.ref=${pr.base.ref}`);
+              if (pr.base.sha !== baseHead) failures.push(`${label}.base.sha=${pr.base.sha}`);
+            };
+            checkPr(controller, 'controller', process.env.CONTROLLER_BRANCH, process.env.CONTROLLER_HEAD, 'main', process.env.MAIN_HEAD);
+            checkPr(target, 'target', process.env.TARGET_BRANCH, process.env.TARGET_HEAD, process.env.PARENT_BRANCH, process.env.PARENT_HEAD);
+            checkPr(parent, 'parent', process.env.PARENT_BRANCH, process.env.PARENT_HEAD, 'main', process.env.ACCEPTED_WOS00_BASE);
+            if (main.commit.sha !== process.env.MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            fs.writeFileSync(path.join(evidence, 'final-controller-pr.json'), `${JSON.stringify(controller, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-target-pr.json'), `${JSON.stringify(target, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-parent-pr.json'), `${JSON.stringify(parent, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-main.json'), `${JSON.stringify(main, null, 2)}\n`);
+            fs.appendFileSync(path.join(evidence, 'gate-outcomes.txt'), `final_authority=${failures.length ? 'FAIL' : 'PASS'}\n`);
+            if (failures.length) core.setFailed(`Final authority failed: ${failures.join(', ')}`);
+
+      - name: Upload exact-head acceptance evidence
+        id: artifact_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-pr26-rebind-${{ env.CONTROLLER_HEAD }}-${{ env.TARGET_HEAD }}
+          path: target/.acceptance-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify retained evidence artifact publication
+        id: evidence_upload
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_CONCLUSION: ${{ steps.artifact_upload.conclusion }}
+          ARTIFACT_ID: ${{ steps.artifact_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact_upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ARTIFACT_CONCLUSION" = success
+          test -n "$ARTIFACT_ID"
+          test -n "$ARTIFACT_DIGEST"
+          if [[ ! "$ARTIFACT_DIGEST" =~ ^(sha256:)?[0-9A-Fa-f]{64}$ ]]; then
+            echo 'Artifact digest is not a valid SHA-256 value' >&2
+            exit 1
+          fi
+
+      - name: Aggregate fail-closed result
+        id: aggregate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ steps.authority.outcome }}' = success
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.final_authority.outcome }}' = success
+          test '${{ steps.evidence_upload.outcome }}' = success
+
+      - name: Publish exact proof result
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          AUTHORITY_OUTCOME: ${{ steps.authority.outcome }}
+          MATRIX_OUTCOME: ${{ steps.matrix.outcome }}
+          FINAL_AUTHORITY_OUTCOME: ${{ steps.final_authority.outcome }}
+          EVIDENCE_OUTCOME: ${{ steps.evidence_upload.outcome }}
+          AGGREGATE_OUTCOME: ${{ steps.aggregate.outcome }}
+          ARTIFACT_ID: ${{ steps.artifact_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact_upload.outputs.artifact-digest }}
+        with:
+          script: |
+            const passed = process.env.AGGREGATE_OUTCOME === 'success';
+            const body = [
+              '### PR #26 exact rebind proof',
+              '',
+              `- Controller head: \`${process.env.CONTROLLER_HEAD}\``,
+              `- Product head: \`${process.env.TARGET_HEAD}\``,
+              `- Authority: **${process.env.AUTHORITY_OUTCOME}**`,
+              `- Full matrix: **${process.env.MATRIX_OUTCOME}**`,
+              `- Final authority: **${process.env.FINAL_AUTHORITY_OUTCOME}**`,
+              `- Evidence publication: **${process.env.EVIDENCE_OUTCOME}**`,
+              `- Artifact ID: \`${process.env.ARTIFACT_ID || ''}\``,
+              `- Artifact digest: \`${process.env.ARTIFACT_DIGEST || ''}\``,
+              `- Workflow run: \`${context.runId}\``,
+              '',
+              passed
+                ? 'The exact corrected controller/product authority chain passed every executable gate. The PR remains Draft pending a fresh independent exact-head review.'
+                : 'At least one executable gate failed. The PR remains Draft and no merge transition is authorized.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.CONTROLLER_PR),
+              body,
+            });
