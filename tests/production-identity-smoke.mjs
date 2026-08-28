@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
+import {writeFileSync} from 'node:fs';
 import {createServer} from 'node:http';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
@@ -294,7 +295,10 @@ try {
   await pool.end();
 }
 
-console.log(JSON.stringify({
+const report = {
   status: 'passed',
   cases: results,
-}, null, 2));
+};
+const evidencePath = String(process.env.WOS_PRODUCTION_IDENTITY_EVIDENCE || '').trim();
+if (evidencePath) writeFileSync(evidencePath, `${JSON.stringify(report, null, 2)}\n`);
+console.log(JSON.stringify(report, null, 2));
