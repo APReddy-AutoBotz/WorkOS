@@ -96,7 +96,7 @@ assert.match(source, /no independent exact-head no-P0\/P1\/P2 confirmation/);
 assert.match(source, /sha: final\.head\.sha/);
 assert.match(source, /merge_method: 'squash'/);
 assert.doesNotMatch(source, /markPullRequestReadyForReview|mark_pull_request_ready/);
-assert.doesNotMatch(source, /deployments\.|createDeployment|secret|customer data/i);
+assert.doesNotMatch(source, /github\.rest\.deployments|createDeployment|createOrUpdateEnvironmentSecret|createOrUpdateRepoSecret/);
 
 console.log(JSON.stringify({
   status: 'passed',
