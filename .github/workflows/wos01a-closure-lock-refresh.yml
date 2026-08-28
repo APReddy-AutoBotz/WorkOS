@@ -151,11 +151,16 @@ jobs:
           set -euo pipefail
           lock_sha256="$(sha256sum package-lock.json | cut -d' ' -f1)"
           echo "lock_sha256=$lock_sha256" >> "$GITHUB_OUTPUT"
+          node --input-type=module <<'NODE' > /tmp/router-versions.txt
+          import {readFileSync} from 'node:fs';
+          const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+          console.log(`react_router_dom=${lock.packages['node_modules/react-router-dom'].version}`);
+          console.log(`react_router=${lock.packages['node_modules/react-router'].version}`);
+          NODE
           {
             echo "source_sha=$GITHUB_SHA"
             echo "lock_sha256=$lock_sha256"
-            echo "react_router_dom=$(node -p \"require('./package-lock.json').packages['node_modules/react-router-dom'].version\")"
-            echo "react_router=$(node -p \"require('./package-lock.json').packages['node_modules/react-router'].version\")"
+            cat /tmp/router-versions.txt
           } > /tmp/lock-authority.txt
 
       - name: Upload verified lockfile and audit evidence
