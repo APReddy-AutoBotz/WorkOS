@@ -1,0 +1,459 @@
+name: WorkOS Controller Fixes Publisher v3
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-controller-fixes-publisher-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: workos-controller-fixes-publisher-v3
+  cancel-in-progress: false
+
+env:
+  MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  ACCEPTANCE_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  ACCEPTANCE_OLD_HEAD: d2b362904f04f0b8157c10da4e6419879e652360
+  PRODUCT_BRANCH: codex/wos01a-acceptance-closure
+  PRODUCT_HEAD: 0935424a52b57cc3a51adeef737e6eaec2946a88
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  MONITOR_BRANCH: controller/workos-continuous-controller-v2
+  MONITOR_OLD_HEAD: 2a2f83196aa89d74a54879142576a12eaee9fd1c
+
+jobs:
+  publish-acceptance:
+    name: Publish PR 26 token-scope and final-ref corrections
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      head: ${{ steps.publish.outputs.head }}
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Patch and publish exact acceptance-controller head
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin "$ACCEPTANCE_BRANCH"
+          test "$(git rev-parse refs/remotes/origin/$ACCEPTANCE_BRANCH)" = "$ACCEPTANCE_OLD_HEAD"
+          git checkout --detach "$ACCEPTANCE_OLD_HEAD"
+          git reset --hard "$ACCEPTANCE_OLD_HEAD"
+          git clean -fdx
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          matrix_path = Path('.github/scripts/wos01a-clean-runtime-matrix-v2.sh')
+          matrix = matrix_path.read_text()
+          for required in [
+              ': "${GH_TOKEN:?GH_TOKEN is required}"\n',
+              ': "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"\n',
+          ]:
+              if matrix.count(required) != 1:
+                  raise SystemExit(f'unexpected matrix authority requirement: {required!r}')
+              matrix = matrix.replace(required, '', 1)
+          final_start = matrix.index('\nfinal_authority() {\n')
+          final_end = matrix.index('\nrm -rf "$TARGET_ROOT/dist"', final_start)
+          matrix = matrix[:final_start] + '\n' + matrix[final_end:]
+          invocation = '\nrun_gate final_authority final_authority\n'
+          if matrix.count(invocation) != 1:
+              raise SystemExit('unexpected final-authority invocation count')
+          matrix = matrix.replace(invocation, '\n', 1)
+          matrix_path.write_text(matrix)
+
+          workflow_path = Path('.github/workflows/wos01a-clean-runtime-acceptance-v2.yml')
+          workflow = workflow_path.read_text()
+          token_env = '''        env:
+                    GH_TOKEN: ${{ github.token }}
+                    CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+          '''
+          if workflow.count(token_env) != 1:
+              raise SystemExit('unexpected matrix token environment shape')
+          workflow = workflow.replace(token_env, '''        env:
+                    CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+          ''', 1)
+          upload_marker = '      - name: Upload exact-head acceptance evidence\n'
+          if workflow.count(upload_marker) != 1:
+              raise SystemExit('unexpected evidence upload marker')
+          final_step = '''      - name: Revalidate final live authority
+                  id: final_authority
+                  if: always()
+                  uses: actions/github-script@v7
+                  env:
+                    CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+                  with:
+                    script: |
+                      const fs = require('node:fs');
+                      const path = require('node:path');
+                      const failures = [];
+                      const [controller, target, parent, main] = await Promise.all([
+                        github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)}),
+                        github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)}),
+                        github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)}),
+                        github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+                      ]);
+                      const c = controller.data;
+                      const t = target.data;
+                      const p = parent.data;
+                      const m = main.data;
+                      if (c.state !== 'open') failures.push(`controller.state=${c.state}`);
+                      if (!c.draft) failures.push('controller is not Draft');
+                      if (c.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${c.head.ref}`);
+                      if (c.head.sha !== process.env.CONTROLLER_HEAD) failures.push(`controller.head.sha=${c.head.sha}`);
+                      if (c.base.ref !== 'main') failures.push(`controller.base.ref=${c.base.ref}`);
+                      if (c.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base.sha=${c.base.sha}`);
+                      if (t.state !== 'open') failures.push(`target.state=${t.state}`);
+                      if (!t.draft) failures.push('target is not Draft');
+                      if (t.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${t.head.ref}`);
+                      if (t.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head.sha=${t.head.sha}`);
+                      if (t.base.ref !== process.env.PARENT_BRANCH) failures.push(`target.base.ref=${t.base.ref}`);
+                      if (t.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base.sha=${t.base.sha}`);
+                      if (p.state !== 'open') failures.push(`parent.state=${p.state}`);
+                      if (!p.draft) failures.push('parent is not Draft');
+                      if (p.head.ref !== process.env.PARENT_BRANCH) failures.push(`parent.head.ref=${p.head.ref}`);
+                      if (p.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head.sha=${p.head.sha}`);
+                      if (p.base.ref !== 'main') failures.push(`parent.base.ref=${p.base.ref}`);
+                      if (p.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent.base.sha=${p.base.sha}`);
+                      if (m.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${m.commit.sha}`);
+                      const evidence = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+                      fs.mkdirSync(evidence, {recursive: true});
+                      fs.writeFileSync(path.join(evidence, 'final-controller-pr.json'), `${JSON.stringify(c, null, 2)}\n`);
+                      fs.writeFileSync(path.join(evidence, 'final-target-pr.json'), `${JSON.stringify(t, null, 2)}\n`);
+                      fs.writeFileSync(path.join(evidence, 'final-parent-pr.json'), `${JSON.stringify(p, null, 2)}\n`);
+                      fs.writeFileSync(path.join(evidence, 'final-main.json'), `${JSON.stringify(m, null, 2)}\n`);
+                      fs.writeFileSync(path.join(evidence, 'final-authority-outcome.json'), `${JSON.stringify({status: failures.length ? 'failed' : 'passed', failures}, null, 2)}\n`);
+                      if (failures.length) core.setFailed(`WOS-01A final authority failed: ${failures.join(', ')}`);
+
+          '''
+          workflow = workflow.replace(upload_marker, final_step + upload_marker, 1)
+          aggregate = "          test '${{ steps.matrix.outcome }}' = success\n"
+          if workflow.count(aggregate) != 1:
+              raise SystemExit('unexpected aggregate matrix assertion')
+          workflow = workflow.replace(
+              aggregate,
+              aggregate + "          test '${{ steps.final_authority.outcome }}' = success\n",
+              1,
+          )
+          workflow_path.write_text(workflow)
+
+          verifier_path = Path('.github/scripts/verify-wos01a-controller-v2.mjs')
+          verifier = verifier_path.read_text()
+          verifier = verifier.replace("  'final_authority',\n", '', 1)
+          verifier = '\n'.join(
+              line for line in verifier.splitlines()
+              if 'final-controller-pr' not in line and 'final-parent-pr' not in line
+          ) + '\n'
+          insertion_marker = "assert.match(workflow, /if-no-files-found: error/);\n"
+          if verifier.count(insertion_marker) != 1:
+              raise SystemExit('unexpected verifier insertion marker')
+          additions = insertion_marker + '''assert.doesNotMatch(workflow, /GH_TOKEN:/);
+          assert.match(workflow, /id: final_authority/);
+          assert.match(workflow, /controller\\.head\\.ref !== process\\.env\\.CONTROLLER_BRANCH/);
+          assert.match(workflow, /controller\\.head\\.sha !== process\\.env\\.CONTROLLER_HEAD/);
+          assert.match(workflow, /target\\.base\\.sha !== process\\.env\\.PARENT_HEAD/);
+          assert.match(workflow, /parent\\.base\\.sha !== process\\.env\\.ACCEPTED_WOS00_BASE/);
+          assert.match(workflow, /steps\\.final_authority\\.outcome/);
+          assert.doesNotMatch(matrix, /GH_TOKEN|Authorization: Bearer/);
+          assert.doesNotMatch(matrix, /run_gate final_authority/);
+          '''
+          verifier = verifier.replace(insertion_marker, additions, 1)
+          verifier_path.write_text(verifier)
+          PY
+
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+          git add \
+            .github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            .github/scripts/verify-wos01a-controller-v2.mjs \
+            .github/workflows/wos01a-clean-runtime-acceptance-v2.yml
+          test -n "$(git status --porcelain)"
+          git commit -m 'ci: isolate final authority token and revalidate controller ref'
+          NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$ACCEPTANCE_BRANCH" \
+            --force-with-lease="refs/heads/$ACCEPTANCE_BRANCH:$ACCEPTANCE_OLD_HEAD"
+          echo "head=$NEW_HEAD" >> "$GITHUB_OUTPUT"
+          echo "Published PR #26 exact head $NEW_HEAD" >> "$GITHUB_STEP_SUMMARY"
+
+  publish-monitor:
+    name: Publish PR 28 standalone-review and aggregate-status corrections
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      head: ${{ steps.publish.outputs.head }}
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Patch and publish exact continuous-controller head
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin "$MONITOR_BRANCH"
+          test "$(git rev-parse refs/remotes/origin/$MONITOR_BRANCH)" = "$MONITOR_OLD_HEAD"
+          git checkout --detach "$MONITOR_OLD_HEAD"
+          git reset --hard "$MONITOR_OLD_HEAD"
+          git clean -fdx
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          controller_path = Path('.github/scripts/workos-continuous-controller.cjs')
+          controller = controller_path.read_text()
+          pattern_line = next(line for line in controller.splitlines() if line.startswith('const REVIEW_RESULT_PATTERN = '))
+          replacement_line = r"const REVIEW_RESULT_PATTERN = /^[ \\t]*\\[WORKOS-INDEPENDENT-REVIEW-RESULT\\s+head=([0-9a-f]{40})\\s+result=clean\\s+p0=0\\s+p1=0\\s+p2=0\\][ \\t]*$/im;"
+          controller = controller.replace(pattern_line, replacement_line, 1)
+
+          start = controller.index("function isExactCleanReview(body = '', headSha = '') {")
+          end = controller.index('\n\nfunction checksAreGreen', start)
+          review_function = r'''function isExactCleanReview(body = '', headSha = '') {
+            const text = String(body).replace(/\r\n?/g, '\n');
+            const match = text.match(REVIEW_RESULT_PATTERN);
+            if (!headSha || !match || match[1].toLowerCase() !== headSha.toLowerCase()) return false;
+            const outsideMarker = text.replace(REVIEW_RESULT_PATTERN, '\n').trim();
+            if (/\bp[0-2]\b/i.test(outsideMarker)) return false;
+            return !CONTRADICTORY_REVIEW_PATTERN.test(outsideMarker);
+          }'''
+          controller = controller[:start] + review_function + controller[end:]
+
+          old_signature = 'function checksAreGreen(checkRuns = [], statuses = []) {'
+          if controller.count(old_signature) != 1:
+              raise SystemExit('unexpected checksAreGreen signature')
+          controller = controller.replace(
+              old_signature,
+              "function checksAreGreen(checkRuns = [], statuses = [], combinedState = 'success') {",
+              1,
+          )
+          signature_end = controller.index('\n', controller.index("function checksAreGreen")) + 1
+          controller = controller[:signature_end] + "  if (combinedState !== 'success') {\n    return {green: false, reason: `combined commit status is ${combinedState || 'missing'}`};\n  }\n" + controller[signature_end:]
+          old_return = '  return checksAreGreen(checks, combined.data.statuses || []);'
+          if controller.count(old_return) != 1:
+              raise SystemExit('unexpected combined-status call shape')
+          controller = controller.replace(
+              old_return,
+              '  return checksAreGreen(checks, combined.data.statuses || [], combined.data.state);',
+              1,
+          )
+          controller_path.write_text(controller)
+
+          test_path = Path('.github/scripts/test-workos-continuous-controller.cjs')
+          test = test_path.read_text()
+          clean_fixture = "assert.equal(isExactCleanReview(cleanResult, OTHER_HEAD), false);\n"
+          if test.count(clean_fixture) != 1:
+              raise SystemExit('unexpected clean result fixture marker')
+          test = test.replace(clean_fixture, clean_fixture + '''assert.equal(isExactCleanReview(`> ${cleanResult}`, HEAD), false);
+          assert.equal(isExactCleanReview(`Review: ${cleanResult}`, HEAD), false);
+          ''', 1)
+          checks_fixture = "assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'pending'}]).green, false);\n"
+          if test.count(checks_fixture) != 1:
+              raise SystemExit('unexpected checks fixture marker')
+          test = test.replace(checks_fixture, checks_fixture + '''assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [], 'pending').green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [], 'failure').green, false);
+          ''', 1)
+          source_marker = "assert.match(source, /check\\.status !== 'completed' \\|\\| check\\.conclusion !== 'success'/);\n"
+          if test.count(source_marker) != 1:
+              raise SystemExit('unexpected source check marker')
+          test = test.replace(source_marker, source_marker + '''assert.match(source, /combinedState !== 'success'/);
+          assert.match(source, /combined\\.data\\.state/);
+          assert.match(source, /REVIEW_RESULT_PATTERN = \/\\^/);
+          ''', 1)
+          test_path.write_text(test)
+
+          docs_path = Path('docs/tasks/WOS-CONTINUOUS-CONTROLLER.md')
+          docs = docs_path.read_text()
+          docs = docs.replace(
+              'A later Codex response or submitted Codex review must contain the exact, unambiguous result marker:',
+              'A later Codex response or submitted Codex review must contain the exact, unambiguous result marker as an unquoted standalone line:',
+              1,
+          )
+          docs = docs.replace(
+              'at least one exact-head check run exists and every check run/status is completed successfully, with no pending, neutral, skipped, cancelled or unexecuted result accepted;',
+              'at least one exact-head check run exists, every check run/status is completed successfully, and GitHub’s combined commit status is exactly `success`, with no pending, neutral, skipped, cancelled, omitted or unexecuted result accepted;',
+              1,
+          )
+          docs_path.write_text(docs)
+          PY
+
+          node .github/scripts/test-workos-continuous-controller.cjs
+          node --check .github/scripts/workos-continuous-controller.cjs
+          git diff --check
+          git add \
+            .github/scripts/workos-continuous-controller.cjs \
+            .github/scripts/test-workos-continuous-controller.cjs \
+            docs/tasks/WOS-CONTINUOUS-CONTROLLER.md
+          test -n "$(git status --porcelain)"
+          git commit -m 'ci: require standalone review results and successful aggregate status'
+          NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$MONITOR_BRANCH" \
+            --force-with-lease="refs/heads/$MONITOR_BRANCH:$MONITOR_OLD_HEAD"
+          echo "head=$NEW_HEAD" >> "$GITHUB_OUTPUT"
+          echo "Published PR #28 exact head $NEW_HEAD" >> "$GITHUB_STEP_SUMMARY"
+
+  prove-acceptance:
+    name: Prove corrected PR 26 against exact PR 27
+    needs: publish-acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CONTROLLER_PR: '26'
+      CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      CONTROLLER_HEAD: ${{ needs.publish-acceptance.outputs.head }}
+      TARGET_PR: '27'
+      TARGET_BRANCH: codex/wos01a-acceptance-closure
+      TARGET_HEAD: 0935424a52b57cc3a51adeef737e6eaec2946a88
+      PARENT_PR: '16'
+      PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+      EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: workos
+      PGPASSWORD: workos
+    steps:
+      - name: Checkout exact corrected acceptance controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact product closure
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: current-main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+      - name: Execute token-free product acceptance matrix
+        id: matrix
+        continue-on-error: true
+        shell: bash
+        run: |
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            "$GITHUB_WORKSPACE/controller" \
+            "$GITHUB_WORKSPACE/target" \
+            "$GITHUB_WORKSPACE/current-main"
+      - name: Revalidate final live authority with token isolated from product processes
+        id: final_authority
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const failures = [];
+            const [controller, target, parent, main] = await Promise.all([
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)}),
+              github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+            ]);
+            const c = controller.data;
+            const t = target.data;
+            const p = parent.data;
+            const m = main.data;
+            if (c.state !== 'open' || !c.draft || c.head.ref !== process.env.CONTROLLER_BRANCH || c.head.sha !== process.env.CONTROLLER_HEAD || c.base.ref !== 'main' || c.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('controller lease changed');
+            if (t.state !== 'open' || !t.draft || t.head.ref !== process.env.TARGET_BRANCH || t.head.sha !== process.env.TARGET_HEAD || t.base.ref !== process.env.PARENT_BRANCH || t.base.sha !== process.env.PARENT_HEAD) failures.push('target lease changed');
+            if (p.state !== 'open' || !p.draft || p.head.ref !== process.env.PARENT_BRANCH || p.head.sha !== process.env.PARENT_HEAD || p.base.ref !== 'main' || p.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push('parent lease changed');
+            if (m.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('main changed');
+            const evidence = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+            fs.mkdirSync(evidence, {recursive: true});
+            fs.writeFileSync(path.join(evidence, 'final-authority-outcome.json'), `${JSON.stringify({status: failures.length ? 'failed' : 'passed', failures, controller: c, target: t, parent: p, main: m}, null, 2)}\n`);
+            if (failures.length) core.setFailed(failures.join(', '));
+      - name: Upload exact corrected acceptance evidence
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-controller-fixes-proof-${{ env.CONTROLLER_HEAD }}-${{ env.TARGET_HEAD }}
+          path: target/.acceptance-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Aggregate corrected acceptance proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.final_authority.outcome }}' = success
+          test '${{ steps.upload.outcome }}' = success
+
+  validate-monitor:
+    name: Validate corrected PR 28 exact head
+    needs: publish-monitor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact corrected monitor
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.publish-monitor.outputs.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run retained controller policy suite
+        run: |
+          set -euo pipefail
+          node .github/scripts/test-workos-continuous-controller.cjs
+          node --check .github/scripts/workos-continuous-controller.cjs
+          git diff --check "$MAIN_HEAD..HEAD"
+          test -z "$(git status --porcelain)"
