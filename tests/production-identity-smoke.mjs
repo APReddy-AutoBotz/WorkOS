@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {execFileSync} from 'node:child_process';
+import {createPrivateKey, createPublicKey, createSign} from 'node:crypto';
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {createServer} from 'node:https';
 import {tmpdir} from 'node:os';
@@ -23,7 +24,9 @@ execFileSync('openssl', [
   '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
   '-keyout', privateKeyPath, '-out', certificatePath,
 ], {stdio: 'ignore', timeout: 10_000});
-const rootOrigin = `http://127.0.0.1:${positivePort}`;
+const serviceOrigin = `http://127.0.0.1:${positivePort}`;
+const rootOrigin = 'https://app.example.test';
+const entraAuthority = 'https://login.microsoftonline.com';
 const testKeys = [
   'PORT',
   'NODE_ENV',
@@ -40,6 +43,7 @@ const testKeys = [
   'ENTRA_CLIENT_SECRET',
   'ENTRA_REDIRECT_URI',
   'ENTRA_OPENID_CONFIGURATION_URL',
+  'ENTRA_AUTHORITY',
   'OIDC_ISSUER_URL',
   'OIDC_CLIENT_ID',
   'OIDC_CLIENT_SECRET',
@@ -47,6 +51,8 @@ const testKeys = [
   'OIDC_DISCOVERY_URL',
   'IDENTITY_DISCOVERY_ALLOW_HTTP_LOOPBACK',
   'NODE_EXTRA_CA_CERTS',
+  'NODE_OPTIONS',
+  'WOS_ENTRA_FIXTURE_ORIGIN',
   'IDENTITY_DISCOVERY_TIMEOUT_MS',
   'IDENTITY_DISCOVERY_RECHECK_MS',
   'LOCAL_LOGIN_ENABLED',
@@ -70,7 +76,11 @@ const cleanEnvironment = (overrides = {}) => {
     ENTRA_CLIENT_ID: '00000000-0000-0000-0000-000000000002',
     ENTRA_CLIENT_SECRET: 'workos-test-only',
     ENTRA_REDIRECT_URI: `${rootOrigin}/api/auth/entra/callback`,
+    ENTRA_AUTHORITY: entraAuthority,
+    ENTRA_OPENID_CONFIGURATION_URL: `${entraAuthority}/00000000-0000-0000-0000-000000000001/v2.0/.well-known/openid-configuration`,
     NODE_EXTRA_CA_CERTS: certificatePath,
+    NODE_OPTIONS: '--import=./tests/support/entra-fetch-fixture.mjs',
+    WOS_ENTRA_FIXTURE_ORIGIN: `https://localhost:${discoveryPort}`,
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
     IDENTITY_DISCOVERY_RECHECK_MS: '5000',
     EMAIL_PROVIDER: 'mock',
@@ -149,8 +159,8 @@ const assertNotServingReadiness = async (port) => {
 const assertStartupFailure = async ({name, port, overrides, expected}) => {
   const environment = cleanEnvironment({
     PORT: port,
-    APP_URL: `http://127.0.0.1:${port}`,
-    ENTRA_REDIRECT_URI: `http://127.0.0.1:${port}/api/auth/entra/callback`,
+    APP_URL: rootOrigin,
+    ENTRA_REDIRECT_URI: `${rootOrigin}/api/auth/entra/callback`,
     ...overrides,
   });
   const {child, output} = spawnProduction(environment);
@@ -167,19 +177,48 @@ const assertStartupFailure = async ({name, port, overrides, expected}) => {
 };
 
 const discoveryPayload = {
-  issuer: `https://localhost:${discoveryPort}/00000000-0000-0000-0000-000000000001/v2.0`,
-  authorization_endpoint: `https://localhost:${discoveryPort}/00000000-0000-0000-0000-000000000001/authorize`,
-  token_endpoint: `https://localhost:${discoveryPort}/00000000-0000-0000-0000-000000000001/token`,
-  jwks_uri: `https://localhost:${discoveryPort}/00000000-0000-0000-0000-000000000001/keys`,
+  issuer: `${entraAuthority}/00000000-0000-0000-0000-000000000001/v2.0`,
+  authorization_endpoint: `${entraAuthority}/00000000-0000-0000-0000-000000000001/oauth2/v2.0/authorize`,
+  token_endpoint: `${entraAuthority}/00000000-0000-0000-0000-000000000001/oauth2/v2.0/token`,
+  jwks_uri: `${entraAuthority}/00000000-0000-0000-0000-000000000001/discovery/v2.0/keys`,
+};
+
+const signingKey = createPrivateKey(readFileSync(privateKeyPath));
+const publicJwk = createPublicKey(signingKey).export({format: 'jwk'});
+publicJwk.kid = 'synthetic-key';
+publicJwk.use = 'sig';
+const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+const signIdToken = (nonce) => {
+  const header = encode({alg: 'RS256', kid: publicJwk.kid});
+  const claims = encode({
+    aud: '00000000-0000-0000-0000-000000000002',
+    iss: discoveryPayload.issuer,
+    tid: '00000000-0000-0000-0000-000000000001',
+    nonce,
+    exp: Math.floor(Date.now() / 1000) + 300,
+    oid: 'synthetic-provider-subject',
+    preferred_username: 'synthetic.user@example.test',
+  });
+  const signer = createSign('RSA-SHA256');
+  signer.update(`${header}.${claims}`);
+  signer.end();
+  return `${header}.${claims}.${signer.sign(signingKey, 'base64url')}`;
 };
 
 let invalidDiscovery = false;
 let discoveryRequests = 0;
-const discoveryServer = createServer({key: readFileSync(privateKeyPath), cert: readFileSync(certificatePath)}, (_request, response) => {
+let callbackNonce = '';
+const discoveryServer = createServer({key: readFileSync(privateKeyPath), cert: readFileSync(certificatePath)}, async (request, response) => {
   discoveryRequests += 1;
   response.statusCode = 200;
   response.setHeader('content-type', 'application/json');
-  response.end(JSON.stringify(invalidDiscovery ? {issuer: discoveryPayload.issuer} : discoveryPayload));
+  if (request.url?.endsWith('/oauth2/v2.0/token')) {
+    response.end(JSON.stringify({id_token: signIdToken(callbackNonce)}));
+  } else if (request.url?.endsWith('/discovery/v2.0/keys')) {
+    response.end(JSON.stringify({keys: [publicJwk]}));
+  } else {
+    response.end(JSON.stringify(invalidDiscovery ? {issuer: discoveryPayload.issuer} : discoveryPayload));
+  }
 });
 await new Promise((resolve, reject) => {
   discoveryServer.once('error', reject);
@@ -197,6 +236,30 @@ const pool = new Pool({connectionString: databaseUrl, ssl: undefined});
 
 try {
   results.push(await assertStartupFailure({
+    name: 'missing-app-url',
+    port: positivePort + 7,
+    overrides: {APP_URL: undefined},
+    expected: /APP_URL is invalid/,
+  }));
+  results.push(await assertStartupFailure({
+    name: 'http-app-url',
+    port: positivePort + 8,
+    overrides: {APP_URL: 'http://app.example.test'},
+    expected: /APP_URL must use HTTPS/,
+  }));
+  results.push(await assertStartupFailure({
+    name: 'loopback-callback',
+    port: positivePort + 9,
+    overrides: {ENTRA_REDIRECT_URI: 'https://localhost/api/auth/entra/callback'},
+    expected: /ENTRA_REDIRECT_URI must not use a loopback host/,
+  }));
+  results.push(await assertStartupFailure({
+    name: 'wrong-callback-route',
+    port: positivePort + 10,
+    overrides: {ENTRA_REDIRECT_URI: `${rootOrigin}/wrong`},
+    expected: /ENTRA_REDIRECT_URI must use the APP_URL origin and exact \/api\/auth\/entra\/callback route/,
+  }));
+  results.push(await assertStartupFailure({
     name: 'missing-identity-setting',
     port: positivePort + 11,
     overrides: {ENTRA_CLIENT_SECRET: undefined},
@@ -212,7 +275,7 @@ try {
     name: 'unavailable-discovery',
     port: positivePort + 13,
     overrides: {
-      ENTRA_OPENID_CONFIGURATION_URL: 'https://localhost:9/unavailable',
+      WOS_ENTRA_FIXTURE_ORIGIN: 'https://localhost:9',
       IDENTITY_DISCOVERY_TIMEOUT_MS: '500',
     },
     expected: /Identity provider discovery is unavailable/,
@@ -223,7 +286,7 @@ try {
     name: 'invalid-discovery-document',
     port: positivePort + 14,
     overrides: {
-      ENTRA_OPENID_CONFIGURATION_URL: `https://localhost:${discoveryPort}/invalid`,
+      WOS_ENTRA_FIXTURE_ORIGIN: `https://localhost:${discoveryPort}`,
     },
     expected: /Identity provider discovery is missing authorization_endpoint/,
   }));
@@ -238,7 +301,6 @@ try {
     PORT: positivePort,
     APP_URL: rootOrigin,
     ENTRA_REDIRECT_URI: `${rootOrigin}/api/auth/entra/callback`,
-    ENTRA_OPENID_CONFIGURATION_URL: `https://localhost:${discoveryPort}/.well-known/openid-configuration`,
   });
   const production = spawnProduction(environment);
   productionChild = production.child;
@@ -249,7 +311,7 @@ try {
       throw new Error(`production server exited before readiness: ${production.output()}`);
     }
     try {
-      const response = await fetchWithTimeout(`${rootOrigin}/api/health`, {}, 750);
+      const response = await fetchWithTimeout(`${serviceOrigin}/api/health`, {}, 750);
       if (response.ok) {
         health = await response.json();
         break;
@@ -263,32 +325,43 @@ try {
   assert.equal(health.status, 'ok');
   assert.equal(health.database, 'connected');
 
-  const identityConfig = await fetchWithTimeout(`${rootOrigin}/api/auth/entra/config`, {}, 1000);
+  const identityConfig = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/config`, {}, 1000);
   assert.equal(identityConfig.status, 200);
   const identityConfigBody = await identityConfig.json();
   assert.equal(identityConfigBody.enabled, true);
   assert.equal(identityConfigBody.provider, 'entra');
 
   const discoveryRequestsBeforeAuth = discoveryRequests;
-  const authStart = await fetchWithTimeout(`${rootOrigin}/api/auth/entra/start`, {redirect: 'manual'}, 1000);
+  const authStart = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/start`, {redirect: 'manual'}, 1000);
   assert.equal(authStart.status, 302);
   assert.ok(discoveryRequests > discoveryRequestsBeforeAuth, 'authentication initiation must use configured discovery');
-  assert.match(authStart.headers.get('location') || '', new RegExp(`^https://localhost:${discoveryPort}/`));
+  const authorizationLocation = new URL(authStart.headers.get('location') || '');
+  assert.equal(authorizationLocation.origin, entraAuthority);
+  callbackNonce = authorizationLocation.searchParams.get('nonce') || '';
+  const state = authorizationLocation.searchParams.get('state') || '';
+  assert.ok(callbackNonce && state, 'authentication initiation must issue nonce and state');
 
-  const localLogin = await fetchWithTimeout(`${rootOrigin}/api/auth/login`, {
+  const localLogin = await fetchWithTimeout(`${serviceOrigin}/api/auth/login`, {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify({username: 'acceptance', password: 'workos-test-only'}),
   });
   assert.equal(localLogin.status, 404, 'local production login must remain disabled');
 
-  const protectedApi = await fetchWithTimeout(`${rootOrigin}/api/employees`);
+  const protectedApi = await fetchWithTimeout(`${serviceOrigin}/api/employees`);
   assert.equal(protectedApi.status, 401, 'anonymous protected API access must remain closed');
 
   const afterUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);
   const afterEmployees = Number((await pool.query('select count(*)::int as count from employees')).rows[0].count);
   assert.equal(afterUsers, beforeUsers, 'production startup must not auto-seed users');
   assert.equal(afterEmployees, beforeEmployees, 'production startup must not auto-seed employees');
+
+  const syntheticUser = await pool.query("insert into users (username, email, entra_object_id, status) values ('synthetic-user', 'synthetic.user@example.test', 'synthetic-provider-subject', 'Active') returning id");
+  await pool.query('insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1', [syntheticUser.rows[0].id]);
+  const callback = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`, {redirect: 'manual'}, 2000);
+  assert.equal(callback.status, 302);
+  assert.equal(callback.headers.get('location'), `${rootOrigin}/auth/entra/complete`);
+  await pool.query("delete from users where username = 'synthetic-user'");
 
   await closeDiscovery();
   const outageExit = await waitForExit(productionChild, 15_000);

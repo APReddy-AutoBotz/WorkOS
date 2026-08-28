@@ -85,3 +85,23 @@ Production now accepts only the implemented Entra provider. Startup, readiness, 
 - **I — Evidence:** retained negatives cover obsolete HTTP flags, redirects, wrong tenants, substituted authorities, oversized responses and configured discovery use; accepted WOS-00 provenance above is unchanged.
 
 No migrations or persisted data change. Security rollback is a normal revert of this closure commit; doing so reopens the documented production-identity findings and therefore requires fail-closed deployment handling.
+
+## WOS-01A production identity security closure reconstruction
+
+This correction is reconstructed directly on published closure head `53dd7b8d372cae9cd3480d39d549a709a12c4c90` without changing the accepted WOS-00 or authorized-source provenance above. It addresses WOS-IAM-001, WOS-OPS-002, WOS-OPS-004, WOS-NFR-SEC-001, WOS-NFR-SEC-002 and WOS-NFR-REL-002.
+
+The production identity trust root is now independent of discovery content. Microsoft public cloud is the default authority; a sovereign-cloud authority must be selected explicitly and must normalize to the closed Microsoft authority set. Discovery, issuer, authorization, token and JWKS URLs must match the selected authority and exact tenant paths. Token exchange therefore cannot transmit the client secret to an origin selected by a discovery document. Production also requires credential-free, non-loopback HTTPS `APP_URL` and `ENTRA_REDIRECT_URI`, with the redirect URI fixed to the governed application origin and `/api/auth/entra/callback`; successful login completion returns to that same application origin.
+
+Discovery, token and JWKS JSON bodies are consumed incrementally. The reader is cancelled immediately when the cumulative bytes exceed the applicable finite bound, including when a chunked response omits `Content-Length`. Retained dependency-free tests cover public and explicitly selected sovereign authorities, custom/wrong authorities, tenant and endpoint mismatches, redirect rejection, production URL negatives, valid HTTPS URL governance and early cancellation for discovery/token/JWKS streams. The disposable PostgreSQL acceptance fixture additionally retains provider outage, local-login `404`, protected API `401`, zero automatic seeding and a signed synthetic callback redirect assertion.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Exact construction base and ancestry | PASS | Work started at `53dd7b8d372cae9cd3480d39d549a709a12c4c90`; parent `590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60` remains an ancestor locally. |
+| Identity discovery/authority/URL/stream negatives | PASS | `npm run test:identity-discovery` exercises the dependency-free retained cases, including early stream cancellation. |
+| Verifier, scanner, syntax/lint and focused identity tests | PASS | The verifier reports 126 requirements, 81 NFRs and 8 ADRs; scanner self-test/scan, syntax lint and `test:identity-discovery` pass. |
+| Locked install, typecheck, complete retained suite and builds | FAIL | Registry transport did not materialize the complete locked dependency graph; typecheck and the retained suite consequently reported missing packages. Builds were not represented as run. |
+| Runtime/full dependency audits | NOT RUN | The registry audit endpoint returned HTTP 403 for both commands; no advisory result is represented as green. |
+| PostgreSQL production identity callback/outage and migrations | NOT RUN | No disposable PostgreSQL service is assumed by this evidence update; controller acceptance must execute the retained fixture. |
+| Browser journeys and audit evidence | NOT RUN | These remain controller-only exact-head gates. |
+
+Security rollback is a normal revert of the closure commit, but rollback reopens authority substitution, OAuth URL downgrade and unbounded-response risks. No schema migration or persisted-data rollback is required.

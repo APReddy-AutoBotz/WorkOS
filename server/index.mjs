@@ -7,7 +7,7 @@ import cors from 'cors';
 import express from 'express';
 import pg from 'pg';
 import { z } from 'zod';
-import {fetchBoundedJson, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
+import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
 
 const { Pool } = pg;
 
@@ -669,7 +669,9 @@ const decodeBase64UrlJson = (value) => JSON.parse(Buffer.from(value, 'base64url'
 const getEntraTenantId = () => process.env.ENTRA_TENANT_ID || process.env.GRAPH_TENANT_ID || process.env.TEAMS_TENANT_ID;
 const getEntraClientId = () => process.env.ENTRA_CLIENT_ID || process.env.GRAPH_CLIENT_ID;
 const getEntraClientSecret = () => process.env.ENTRA_CLIENT_SECRET || process.env.GRAPH_CLIENT_SECRET;
-const getEntraRedirectUri = () => process.env.ENTRA_REDIRECT_URI || buildAppUrl('/api/auth/entra/callback');
+const getEntraRedirectUri = () => process.env.NODE_ENV === 'production'
+  ? getGovernedAppUrls().redirectUri
+  : process.env.ENTRA_REDIRECT_URI || buildAppUrl('/api/auth/entra/callback');
 const isEntraLoginConfigured = () => Boolean(getEntraTenantId() && getEntraClientId() && getEntraClientSecret());
 
 const signEntraState = (payload) => signToken({ ...payload, kind: 'entra_auth_state', exp: Date.now() + 10 * 60 * 1000 });
@@ -1157,7 +1159,10 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
       source: 'System',
     });
     await client.query('commit');
-    res.redirect(buildAppUrl('/auth/entra/complete'));
+    const completionUrl = process.env.NODE_ENV === 'production'
+      ? new URL('/auth/entra/complete', getGovernedAppUrls().appUrl).href
+      : buildAppUrl('/auth/entra/complete');
+    res.redirect(completionUrl);
   } catch (error) {
     await client.query('rollback').catch(() => {});
     console.error(error);

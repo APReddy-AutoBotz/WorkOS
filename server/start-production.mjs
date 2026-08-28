@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import {loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
+import {getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
 
 process.env.NODE_ENV = 'production';
 process.env.APP_MODE = 'production';
@@ -25,6 +25,7 @@ const requiredIdentitySettings = ['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_C
 for (const setting of requiredIdentitySettings) {
   if (!String(process.env[setting] || '').trim()) throw new Error(setting + ' is required in production.');
 }
+getGovernedAppUrls();
 process.env.LOCAL_LOGIN_ENABLED = 'false';
 
 const probeIdentityProvider = loadEntraOpenIdConfiguration;

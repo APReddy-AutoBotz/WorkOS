@@ -96,6 +96,8 @@ const runtimeHosts = new Set([
   '127.0.0.1',
   '[::1]',
   'login.microsoftonline.com',
+  'login.microsoftonline.us',
+  'login.partner.microsoftonline.cn',
   'graph.microsoft.com',
   'teams.microsoft.com',
   'outlook.office.com',
