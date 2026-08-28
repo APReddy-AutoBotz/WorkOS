@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  issues: read
 
 concurrency:
   group: wos01a-publication-recovery
@@ -28,6 +29,8 @@ jobs:
 
       - name: Materialize and publish exact recovered tree
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           target_branch='codex/wos01a-acceptance-closure'
@@ -45,56 +48,61 @@ jobs:
           test "$(git rev-parse origin/main)" = "$main_head"
           test "$(git rev-parse HEAD)" = "$target_old"
 
-          cat > /tmp/wos01a.patch.gz.b64 <<'B64'
-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
-B64
-          tr -d '\n\r ' < /tmp/wos01a.patch.gz.b64 > /tmp/wos01a.patch.gz.b64.clean
-          base64 -d /tmp/wos01a.patch.gz.b64.clean > /tmp/wos01a.patch.gz
-          test "$(wc -c < /tmp/wos01a.patch.gz)" = "8871"
-          test "$(sha256sum /tmp/wos01a.patch.gz | cut -d' ' -f1)" = "386b2401f3ac9471f1e06ae995c519b84e61866cf16787d649c263dae096c15b"
-          gzip -dc /tmp/wos01a.patch.gz > /tmp/wos01a.patch
-          test "$(wc -c < /tmp/wos01a.patch)" = "30187"
-          test "$(sha256sum /tmp/wos01a.patch | cut -d' ' -f1)" = "00959e9a2059ef9137222865494f4c21239fcdd01d9dc084f202749d1ac9977f"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/comments/5452388784" --jq .body > /tmp/recovery-comment.md
+          python - <<'PY'
+          import base64, gzip, hashlib, pathlib, re
+          body = pathlib.Path('/tmp/recovery-comment.md').read_text()
+          expected = '386b2401f3ac9471f1e06ae995c519b84e61866cf16787d649c263dae096c15b'
+          matches = re.findall(r'\[WOS01A-RECOVERY-CHUNK (\d+)/3 sha256=([0-9a-f]{64})\]\s*```base64\s*([A-Za-z0-9+/=\s]+?)```', body)
+          assert len(matches) == 3, f'expected 3 recovery chunks, got {len(matches)}'
+          matches.sort(key=lambda item: int(item[0]))
+          assert [int(item[0]) for item in matches] == [1, 2, 3]
+          assert all(item[1] == expected for item in matches)
+          chunks = [''.join(item[2].split()) for item in matches]
+          assert [len(chunk) for chunk in chunks] == [4800, 4800, 2228]
+          payload = base64.b64decode(''.join(chunks), validate=True)
+          assert len(payload) == 8871
+          assert hashlib.sha256(payload).hexdigest() == expected
+          patch = gzip.decompress(payload)
+          assert len(patch) == 30187
+          assert hashlib.sha256(patch).hexdigest() == '00959e9a2059ef9137222865494f4c21239fcdd01d9dc084f202749d1ac9977f'
+          pathlib.Path('/tmp/wos01a.patch').write_bytes(patch)
+          PY
 
           git apply --index --check /tmp/wos01a.patch
           git apply --index /tmp/wos01a.patch
-
-          cat > /tmp/expected-files <<'EOF'
-          docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
-          package.json
-          server/identity-discovery.mjs
-          server/index.mjs
-          server/start-production.mjs
-          tests/identity-discovery-smoke.mjs
-          tests/production-identity-smoke.mjs
-          EOF
-          sed -i 's/^          //' /tmp/expected-files
+          printf '%s\n' \
+            'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md' \
+            'package.json' \
+            'server/identity-discovery.mjs' \
+            'server/index.mjs' \
+            'server/start-production.mjs' \
+            'tests/identity-discovery-smoke.mjs' \
+            'tests/production-identity-smoke.mjs' > /tmp/expected-files
           git diff --cached --name-only | sort > /tmp/actual-files
           diff -u /tmp/expected-files /tmp/actual-files
 
-          test "$(sha256sum "docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md" | cut -d' ' -f1)" = "f704d16fafd4075c170fd699abe23a5d8d64a2412dbfbfc857f506e2d822c490"
-          test "$(git hash-object "docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md")" = "7efaef2748e4ed863e3167b7c94af765a6bf54df"
-          test "$(sha256sum "package.json" | cut -d' ' -f1)" = "4c3ec16f039fee870ff8341bcedfc62e3d56989c3b194cb118feceb8175c0ee0"
-          test "$(git hash-object "package.json")" = "3dcb9f04af8a587afc6b3db024058a5533d31711"
-          test "$(sha256sum "server/identity-discovery.mjs" | cut -d' ' -f1)" = "9b84c3affaff0bfed03f398cf6b046f47b2d2834a09729ce826ddd94d61e3c94"
-          test "$(git hash-object "server/identity-discovery.mjs")" = "1ebd83cedf6e8c7c0e7ce41a3f5279837b513687"
-          test "$(sha256sum "server/index.mjs" | cut -d' ' -f1)" = "b5c1ffb1db3ebc741616de567c12729b0bd918ac640ae8982fb5d9f2eef17d66"
-          test "$(git hash-object "server/index.mjs")" = "830d9d65002aaf5fbd3cb0f5a0d6eb35064a5fc2"
-          test "$(sha256sum "server/start-production.mjs" | cut -d' ' -f1)" = "47960ba786e307c43b63734809b864a8c119b0818d0fb851ea78b03efc0b7eea"
-          test "$(git hash-object "server/start-production.mjs")" = "b45e0a4a4d7725633146a2136d81de78f8303668"
-          test "$(sha256sum "tests/identity-discovery-smoke.mjs" | cut -d' ' -f1)" = "663015168a95842844c1b59340d728454ee32248022dc5ecb45989fc49334b32"
-          test "$(git hash-object "tests/identity-discovery-smoke.mjs")" = "2b5621c709eacc648654b2c8b2d80654dd7c0a45"
-          test "$(sha256sum "tests/production-identity-smoke.mjs" | cut -d' ' -f1)" = "fc1581bdbaecfcf36a4127be373c345f72ed4d05637f505b807b4b0b8f13887f"
-          test "$(git hash-object "tests/production-identity-smoke.mjs")" = "c22937605db8a233f69113b0a38b7c8c8ce754ab"
+          test "$(sha256sum docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md | cut -d' ' -f1)" = 'f704d16fafd4075c170fd699abe23a5d8d64a2412dbfbfc857f506e2d822c490'
+          test "$(git hash-object docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md)" = '7efaef2748e4ed863e3167b7c94af765a6bf54df'
+          test "$(sha256sum package.json | cut -d' ' -f1)" = '4c3ec16f039fee870ff8341bcedfc62e3d56989c3b194cb118feceb8175c0ee0'
+          test "$(git hash-object package.json)" = '3dcb9f04af8a587afc6b3db024058a5533d31711'
+          test "$(sha256sum server/identity-discovery.mjs | cut -d' ' -f1)" = '9b84c3affaff0bfed03f398cf6b046f47b2d2834a09729ce826ddd94d61e3c94'
+          test "$(git hash-object server/identity-discovery.mjs)" = '1ebd83cedf6e8c7c0e7ce41a3f5279837b513687'
+          test "$(sha256sum server/index.mjs | cut -d' ' -f1)" = 'b5c1ffb1db3ebc741616de567c12729b0bd918ac640ae8982fb5d9f2eef17d66'
+          test "$(git hash-object server/index.mjs)" = '830d9d65002aaf5fbd3cb0f5a0d6eb35064a5fc2'
+          test "$(sha256sum server/start-production.mjs | cut -d' ' -f1)" = '47960ba786e307c43b63734809b864a8c119b0818d0fb851ea78b03efc0b7eea'
+          test "$(git hash-object server/start-production.mjs)" = 'b45e0a4a4d7725633146a2136d81de78f8303668'
+          test "$(sha256sum tests/identity-discovery-smoke.mjs | cut -d' ' -f1)" = '663015168a95842844c1b59340d728454ee32248022dc5ecb45989fc49334b32'
+          test "$(git hash-object tests/identity-discovery-smoke.mjs)" = '2b5621c709eacc648654b2c8b2d80654dd7c0a45'
+          test "$(sha256sum tests/production-identity-smoke.mjs | cut -d' ' -f1)" = 'fc1581bdbaecfcf36a4127be373c345f72ed4d05637f505b807b4b0b8f13887f'
+          test "$(git hash-object tests/production-identity-smoke.mjs)" = 'c22937605db8a233f69113b0a38b7c8c8ce754ab'
 
           git diff --cached --check
           git config user.name 'WorkOS Build Controller'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix: enforce governed HTTPS identity discovery'
           test "$(git rev-parse HEAD^)" = "$target_old"
-          test "$(git rev-parse HEAD^{tree})" = "9fcda3ca3632175e2a9c264f88e2ffb99ada28f0"
+          test "$(git rev-parse HEAD^{tree})" = '9fcda3ca3632175e2a9c264f88e2ffb99ada28f0'
 
           new_head="$(git rev-parse HEAD)"
           git push origin "HEAD:refs/heads/$target_branch" \
