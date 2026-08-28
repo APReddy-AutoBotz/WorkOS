@@ -1,0 +1,324 @@
+name: WorkOS PR27 Callback Audit Hotfix v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr27-callback-audit-hotfix-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workos-pr27-callback-audit-hotfix-v1
+  cancel-in-progress: false
+
+env:
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_OLD_HEAD: d02a971c69dbb972cb5b12b340f86aaca7c72fad
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  CONTROLLER_OLD_HEAD: c1c8ee6fbe05288d199e287a947a7d1f7ed9cc57
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+
+jobs:
+  validate:
+    name: Validate credential-free callback audit correction
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      patch_sha256: ${{ steps.patch.outputs.patch_sha256 }}
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: workos
+      PGPASSWORD: workos
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout exact product head without retained credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_OLD_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Apply bounded production audit correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('server/index.mjs')
+          source = path.read_text()
+
+          old_ip = "const getRequestIp = (req) => String(req.headers['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '').split(',')[0].trim();"
+          new_ip = "const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '').split(',')[0].trim();"
+          if source.count(old_ip) != 1:
+              raise SystemExit('unexpected getRequestIp shape')
+          source = source.replace(old_ip, new_ip, 1)
+
+          old_audit = "    await audit(client, { ...req, user: { sub: user.id, username: user.username, activeRole: session.activeRole } }, {"
+          new_audit = "    req.user = { sub: user.id, username: user.username, activeRole: session.activeRole };\n    await audit(client, req, {"
+          if source.count(old_audit) != 1:
+              raise SystemExit('unexpected Entra callback audit shape')
+          source = source.replace(old_audit, new_audit, 1)
+          path.write_text(source)
+          PY
+
+          node --check server/index.mjs
+          git diff --check
+          test "$(git diff --name-only)" = 'server/index.mjs'
+          grep -F "const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for']" server/index.mjs
+          grep -F "req.user = { sub: user.id, username: user.username, activeRole: session.activeRole };" server/index.mjs
+          if grep -F "await audit(client, { ...req, user:" server/index.mjs; then
+            echo 'Request-spread audit path remains' >&2
+            exit 1
+          fi
+
+      - name: Install locked dependencies without repository credentials
+        shell: bash
+        run: npm ci
+
+      - name: Run focused production identity callback acceptance
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/workos_prod
+          PGSSLMODE: disable
+        run: |
+          set -euo pipefail
+          psql -d postgres -v ON_ERROR_STOP=1 -c 'drop database if exists workos_prod;'
+          psql -d postgres -v ON_ERROR_STOP=1 -c 'create database workos_prod;'
+          node server/migrate.mjs
+          npm run test:production-identity
+
+      - name: Create deterministic product patch
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary "$TARGET_OLD_HEAD" -- server/index.mjs > pr27-callback-audit.patch
+          test -s pr27-callback-audit.patch
+          patch_sha256="$(sha256sum pr27-callback-audit.patch | awk '{print $1}')"
+          echo "patch_sha256=$patch_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload validated product patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr27-callback-audit-patch-${{ env.TARGET_OLD_HEAD }}
+          path: pr27-callback-audit.patch
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Publish product fix and rebind controller
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+      pull-requests: read
+      issues: write
+    outputs:
+      target_head: ${{ steps.publish.outputs.target_head }}
+      controller_head: ${{ steps.publish.outputs.controller_head }}
+
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download validated product patch
+        uses: actions/download-artifact@v4
+        with:
+          name: pr27-callback-audit-patch-${{ env.TARGET_OLD_HEAD }}
+          path: validated
+
+      - name: Verify exact live branch and PR leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const readPr = async (number) => (await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(number),
+            })).data;
+            const [target, controller, parent, main] = await Promise.all([
+              readPr(process.env.TARGET_PR),
+              readPr(process.env.CONTROLLER_PR),
+              readPr(process.env.PARENT_PR),
+              github.rest.repos.getBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: 'main',
+              }).then(({data}) => data),
+            ]);
+            const check = (pr, label, branch, head, baseBranch, baseHead) => {
+              if (pr.state !== 'open') failures.push(`${label}.state=${pr.state}`);
+              if (!pr.draft) failures.push(`${label} is not Draft`);
+              if (pr.head.ref !== branch) failures.push(`${label}.head.ref=${pr.head.ref}`);
+              if (pr.head.sha !== head) failures.push(`${label}.head.sha=${pr.head.sha}`);
+              if (pr.base.ref !== baseBranch) failures.push(`${label}.base.ref=${pr.base.ref}`);
+              if (pr.base.sha !== baseHead) failures.push(`${label}.base.sha=${pr.base.sha}`);
+            };
+            check(target, 'target', process.env.TARGET_BRANCH, process.env.TARGET_OLD_HEAD, process.env.PARENT_BRANCH, process.env.PARENT_HEAD);
+            check(controller, 'controller', process.env.CONTROLLER_BRANCH, process.env.CONTROLLER_OLD_HEAD, 'main', process.env.MAIN_HEAD);
+            check(parent, 'parent', process.env.PARENT_BRANCH, process.env.PARENT_HEAD, 'main', process.env.ACCEPTED_WOS00_BASE);
+            if (main.commit.sha !== process.env.MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(`Publication lease failed: ${failures.join(', ')}`);
+
+      - name: Publish exact product fix and controller rebind
+        id: publish
+        shell: bash
+        env:
+          EXPECTED_PATCH_SHA256: ${{ needs.validate.outputs.patch_sha256 }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          test "$(sha256sum validated/pr27-callback-audit.patch | awk '{print $1}')" = "$EXPECTED_PATCH_SHA256"
+
+          git fetch --no-tags origin \
+            "+refs/heads/$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH" \
+            "+refs/heads/$CONTROLLER_BRANCH:refs/remotes/origin/$CONTROLLER_BRANCH" \
+            "+refs/heads/$PARENT_BRANCH:refs/remotes/origin/$PARENT_BRANCH" \
+            "+refs/heads/main:refs/remotes/origin/main"
+          test "$(git rev-parse "refs/remotes/origin/$TARGET_BRANCH")" = "$TARGET_OLD_HEAD"
+          test "$(git rev-parse "refs/remotes/origin/$CONTROLLER_BRANCH")" = "$CONTROLLER_OLD_HEAD"
+          test "$(git rev-parse "refs/remotes/origin/$PARENT_BRANCH")" = "$PARENT_HEAD"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$MAIN_HEAD"
+
+          git checkout --detach "$TARGET_OLD_HEAD"
+          git reset --hard "$TARGET_OLD_HEAD"
+          git clean -fdx
+          git apply --check "$GITHUB_WORKSPACE/validated/pr27-callback-audit.patch"
+          git apply "$GITHUB_WORKSPACE/validated/pr27-callback-audit.patch"
+          node --check server/index.mjs
+          git diff --check
+          test "$(git diff --name-only)" = 'server/index.mjs'
+          git add server/index.mjs
+          git commit -m 'fix: preserve request context during Entra login audit'
+          target_head="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$TARGET_BRANCH" \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$TARGET_OLD_HEAD"
+
+          git checkout --detach "$CONTROLLER_OLD_HEAD"
+          git reset --hard "$CONTROLLER_OLD_HEAD"
+          git clean -fdx
+          python3 - "$target_head" <<'PY'
+          from pathlib import Path
+          import sys
+
+          old_target = 'd02a971c69dbb972cb5b12b340f86aaca7c72fad'
+          new_target = sys.argv[1]
+
+          workflow_path = Path('.github/workflows/wos01a-clean-runtime-acceptance-v2.yml')
+          workflow = workflow_path.read_text()
+          if workflow.count(f'TARGET_HEAD: {old_target}') != 1:
+              raise SystemExit('unexpected controller workflow target binding')
+          workflow_path.write_text(workflow.replace(
+              f'TARGET_HEAD: {old_target}',
+              f'TARGET_HEAD: {new_target}',
+              1,
+          ))
+
+          verifier_path = Path('.github/scripts/verify-wos01a-controller-v2.mjs')
+          verifier = verifier_path.read_text()
+          if verifier.count(old_target) != 1:
+              raise SystemExit('unexpected controller verifier target binding')
+          verifier_path.write_text(verifier.replace(old_target, new_target, 1))
+          PY
+
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          node --check .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+          mapfile -t changed < <(git diff --name-only | sort)
+          expected=(
+            '.github/scripts/verify-wos01a-controller-v2.mjs'
+            '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'
+          )
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = "${expected[0]}"
+          test "${changed[1]}" = "${expected[1]}"
+          git add "${expected[@]}"
+          git commit -m 'ci: bind WOS-01A acceptance to callback audit fix'
+          controller_head="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$CONTROLLER_BRANCH" \
+            --force-with-lease="refs/heads/$CONTROLLER_BRANCH:$CONTROLLER_OLD_HEAD"
+
+          echo "target_head=$target_head" >> "$GITHUB_OUTPUT"
+          echo "controller_head=$controller_head" >> "$GITHUB_OUTPUT"
+
+      - name: Publish bounded checkpoint
+        uses: actions/github-script@v7
+        env:
+          TARGET_HEAD: ${{ steps.publish.outputs.target_head }}
+          CONTROLLER_HEAD: ${{ steps.publish.outputs.controller_head }}
+        with:
+          script: |
+            const targetBody = [
+              '### Production identity callback audit correction published',
+              '',
+              `- Previous exact head: \`${process.env.TARGET_OLD_HEAD}\``,
+              `- New exact head: \`${process.env.TARGET_HEAD}\``,
+              '- Preserved the original Express request object for the Entra login audit.',
+              '- Made request-IP extraction fail closed when headers are absent.',
+              '- The locked focused production identity callback acceptance passed before publication.',
+              '',
+              'PR #27 remains Draft. The complete exact-head controller matrix is the next authority gate.',
+            ].join('\n');
+            const controllerBody = [
+              '### Controller rebound to callback audit correction',
+              '',
+              `- Product head: \`${process.env.TARGET_HEAD}\``,
+              `- Controller head: \`${process.env.CONTROLLER_HEAD}\``,
+              '',
+              'The existing pull-request workflow will now run the complete engineering, security, migration, production identity, browser and final-authority matrix. PR #26 remains Draft.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.TARGET_PR),
+              body: targetBody,
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.CONTROLLER_PR),
+              body: controllerBody,
+            });
