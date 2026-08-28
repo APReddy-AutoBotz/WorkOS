@@ -1,0 +1,150 @@
+{
+  "captured_at": "2026-08-28T16:32:24.712Z",
+  "main": "44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42",
+  "prs": [
+    {
+      "number": 16,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "codex/wos-01-authorized-source-bootstrap-v2",
+      "head_sha": "590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60",
+      "base_ref": "main",
+      "base_sha": "1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea",
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "updated_at": "2026-08-28T16:17:15Z"
+    },
+    {
+      "number": 26,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "controller/wos01a-clean-runtime-acceptance-v2",
+      "head_sha": "84c5fc35236e7885af34ab7faccc6e1b50464d61",
+      "base_ref": "main",
+      "base_sha": "44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42",
+      "mergeable": true,
+      "mergeable_state": "unstable",
+      "updated_at": "2026-08-28T16:31:03Z"
+    },
+    {
+      "number": 27,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "codex/wos01a-acceptance-closure",
+      "head_sha": "ac1e4692f50f9c034352cb06c43b6d9f73808e33",
+      "base_ref": "codex/wos-01-authorized-source-bootstrap-v2",
+      "base_sha": "590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60",
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "updated_at": "2026-08-28T16:23:27Z"
+    },
+    {
+      "number": 28,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "controller/workos-continuous-controller-v2",
+      "head_sha": "ba4f8fb32ea11a8128814db85728ee4ccb3ba4d4",
+      "base_ref": "main",
+      "base_sha": "44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42",
+      "mergeable": true,
+      "mergeable_state": "unstable",
+      "updated_at": "2026-08-28T16:31:19Z"
+    }
+  ],
+  "workflows": {
+    "WorkOS Controller Verification Reporter v2": {
+      "id": 33190254901,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "2dac2700031e68b2cd51d34c555237c9570f3a82",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "created_at": "2026-08-28T16:30:07Z",
+      "updated_at": "2026-08-28T16:30:10Z"
+    },
+    "WorkOS Controller Fixes Publisher v6": {
+      "id": 33189890121,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "05fb7666beaf4d3dc41bf7721bac56f2e2503cae",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_number": 1,
+      "created_at": "2026-08-28T16:25:27Z",
+      "updated_at": "2026-08-28T16:25:47Z"
+    },
+    "WorkOS PR27 Live Proof v1": {
+      "id": 33189535131,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "ab67502a75d679c6550cc67df4a18105efdc1dd1",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_number": 1,
+      "created_at": "2026-08-28T16:20:56Z",
+      "updated_at": "2026-08-28T16:23:30Z"
+    },
+    "WorkOS Publisher Workflow Syntax v1": {
+      "id": 33188996672,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "5ee7c5c43644f4a5d510cd37f9b08e8648035011",
+      "status": "completed",
+      "conclusion": "success",
+      "run_number": 1,
+      "created_at": "2026-08-28T16:14:14Z",
+      "updated_at": "2026-08-28T16:14:23Z"
+    },
+    "WorkOS PR28 Final Closure v1": {
+      "id": 33188894733,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "a720b9cffd7c73249c1c71c2848f4ea1050404a7",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "created_at": "2026-08-28T16:12:57Z",
+      "updated_at": "2026-08-28T16:13:01Z"
+    },
+    "WorkOS PR16 Closure and PR28 Refresh v1": {
+      "id": 33188770937,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "0ac301f4ddfe3202c8b9d5078b3ed96072c6ed39",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "created_at": "2026-08-28T16:11:22Z",
+      "updated_at": "2026-08-28T16:11:26Z"
+    },
+    "WorkOS PR27 Closure and Parent Proof v1": {
+      "id": 33188402817,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "50cbb72fcbfd604ff18425fac7f36fc34df6704a",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "created_at": "2026-08-28T16:06:44Z",
+      "updated_at": "2026-08-28T16:06:47Z"
+    },
+    "WorkOS PR27 Patch Watcher v1": {
+      "id": 33188225687,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "da238bf1102a6b74eb11ee8d5865a0528e2b2dff",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "created_at": "2026-08-28T16:04:33Z",
+      "updated_at": "2026-08-28T16:04:36Z"
+    },
+    "WorkOS PR26 Closure Watcher v1": {
+      "id": 33188057736,
+      "branch": "controller/workos-root-publisher-v1",
+      "head_sha": "592ba778babfd1b5ae72fe4066039107851a0721",
+      "status": "in_progress",
+      "conclusion": null,
+      "run_number": 1,
+      "created_at": "2026-08-28T16:02:30Z",
+      "updated_at": "2026-08-28T16:02:33Z"
+    }
+  }
+}
