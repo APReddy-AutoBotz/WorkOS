@@ -206,7 +206,7 @@ try {
     name: 'local-provider-prohibited',
     port: positivePort + 12,
     overrides: {IDENTITY_PROVIDER: 'local'},
-    expected: /governed non-local provider/,
+    expected: /IDENTITY_PROVIDER must select the implemented governed Entra provider in production\./,
   }));
   results.push(await assertStartupFailure({
     name: 'unavailable-discovery',
