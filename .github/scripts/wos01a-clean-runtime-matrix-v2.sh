@@ -258,74 +258,19 @@ production_acceptance() {
   cd "$TARGET_ROOT"
 
   local prod_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_prod"
-  local before_users before_employees server_pid=''
-  before_users="$(psql "$prod_url" -Atc 'select count(*) from users')"
-  before_employees="$(psql "$prod_url" -Atc 'select count(*) from employees')"
-  test "$before_users" = "0"
-  test "$before_employees" = "0"
-
-  cleanup_production() {
-    if [[ -n "$server_pid" ]]; then
-      kill "$server_pid" 2>/dev/null || true
-      wait "$server_pid" 2>/dev/null || true
-    fi
-  }
-  trap cleanup_production EXIT
-
-  PORT=4010 \
-  NODE_ENV=production \
-  APP_MODE=production \
-  APP_URL='http://127.0.0.1:4010' \
-  AUTO_SEED_DEMO=false \
-  RESET_DEMO_DATA=false \
   DATABASE_URL="$prod_url" \
-  PGSSLMODE=disable \
-  API_SESSION_SECRET='acceptance-only-session-secret-0123456789' \
-  IDENTITY_PROVIDER=entra \
-  ENTRA_TENANT_ID='00000000-0000-0000-0000-000000000001' \
-  ENTRA_CLIENT_ID='00000000-0000-0000-0000-000000000002' \
-  ENTRA_CLIENT_SECRET='acceptance-only-entra-secret' \
-  ENTRA_REDIRECT_URI='http://127.0.0.1:4010/api/auth/entra/callback' \
-  EMAIL_PROVIDER=mock \
-  TEAMS_PROVIDER=mock \
-    node server/start-production.mjs > "$EVIDENCE_DIR/production-server.log" 2>&1 &
-  server_pid=$!
-  echo "$server_pid" > "$EVIDENCE_DIR/production-server.pid"
+  WOS_PRODUCTION_IDENTITY_PORT=4010 \
+  WOS_IDENTITY_DISCOVERY_PORT=4011 \
+  WOS_PRODUCTION_IDENTITY_EVIDENCE="$EVIDENCE_DIR/production-identity-summary.json" \
+    npm run test:production-identity 2>&1 | tee "$EVIDENCE_DIR/production-identity.log"
 
-  local ready=false attempt
-  for attempt in $(seq 1 60); do
-    if curl --silent --fail http://127.0.0.1:4010/api/health > "$EVIDENCE_DIR/health.json"; then
-      ready=true
-      break
-    fi
-    kill -0 "$server_pid"
-    sleep 1
-  done
-  test "$ready" = true
-  test "$(jq -r .status "$EVIDENCE_DIR/health.json")" = ok
-  test "$(jq -r .database "$EVIDENCE_DIR/health.json")" = connected
-
-  local login_status protected_status after_users after_employees
-  login_status="$(curl --silent --output "$EVIDENCE_DIR/local-login.json" --write-out '%{http_code}' \
-    -H 'Content-Type: application/json' -X POST \
-    --data '{"username":"acceptance","password":"acceptance"}' \
-    http://127.0.0.1:4010/api/auth/login)"
-  test "$login_status" = 404
-
-  protected_status="$(curl --silent --output "$EVIDENCE_DIR/protected-api.json" --write-out '%{http_code}' \
-    http://127.0.0.1:4010/api/employees)"
-  test "$protected_status" = 401
-
-  after_users="$(psql "$prod_url" -Atc 'select count(*) from users')"
-  after_employees="$(psql "$prod_url" -Atc 'select count(*) from employees')"
-  printf 'users_before=%s\nusers_after=%s\nemployees_before=%s\nemployees_after=%s\n' \
-    "$before_users" "$after_users" "$before_employees" "$after_employees" \
-    | tee "$EVIDENCE_DIR/no-seed-counts.txt"
-  test "$after_users" = "$before_users"
-  test "$after_employees" = "$before_employees"
-  cleanup_production
-  server_pid=''
-  trap - EXIT
+  test -s "$EVIDENCE_DIR/production-identity-summary.json"
+  test "$(jq -r .status "$EVIDENCE_DIR/production-identity-summary.json")" = passed
+  test "$(jq -r '[.cases[] | select(.readiness == "closed")] | length' "$EVIDENCE_DIR/production-identity-summary.json")" -eq 4
+  test "$(jq -r '.cases[] | select(.name == "configured-provider-ready-then-unavailable") | .startup' "$EVIDENCE_DIR/production-identity-summary.json")" = ready
+  test "$(jq -r '.cases[] | select(.name == "configured-provider-ready-then-unavailable") | .localLogin' "$EVIDENCE_DIR/production-identity-summary.json")" = 404
+  test "$(jq -r '.cases[] | select(.name == "configured-provider-ready-then-unavailable") | .protectedApi' "$EVIDENCE_DIR/production-identity-summary.json")" = 401
+  test "$(jq -r '.cases[] | select(.name == "configured-provider-ready-then-unavailable") | .outageReadiness' "$EVIDENCE_DIR/production-identity-summary.json")" = closed
 }
 
 browser_acceptance() {
