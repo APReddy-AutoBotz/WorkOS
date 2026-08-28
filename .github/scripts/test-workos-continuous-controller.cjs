@@ -39,6 +39,11 @@ assert.equal(isExactCleanReview(`${cleanResult}\nP0/P1/P2 status is not clean.`,
 assert.equal(isExactCleanReview(`${cleanResult}\nP1 remains open.`, HEAD), false);
 assert.equal(isExactCleanReview(`${cleanResult}\n[P1] Merge accepts an unsafe review result.`, HEAD), false);
 assert.equal(isExactCleanReview(`${cleanResult}\nThere is an actionable P0 issue.`, HEAD), false);
+assert.equal(isExactCleanReview(`DO NOT ACCEPT THIS RESULT:\n${cleanResult}`, HEAD), false);
+assert.equal(isExactCleanReview(`Quoted example only:\n\`${cleanResult}\``, HEAD), false);
+assert.equal(isExactCleanReview(['```text', cleanResult, '```'].join('\n'), HEAD), false);
+assert.equal(isExactCleanReview(`> ${cleanResult}`, HEAD), false);
+assert.equal(isExactCleanReview(`  ${cleanResult}`, HEAD), false);
 assert.equal(isExactCleanReview(`No actionable P0/P1/P2 findings remain? Not yet. ${HEAD}`, HEAD), false);
 assert.equal(isExactCleanReview(`[WORKOS-INDEPENDENT-REVIEW-RESULT head=${HEAD} result=blocked p0=0 p1=0 p2=0]`, HEAD), false);
 assert.equal(isExactCleanReview(cleanResult, OTHER_HEAD), false);
@@ -47,13 +52,15 @@ assert.deepEqual(
   checksAreGreen([
     {name: 'build', status: 'completed', conclusion: 'success'},
     {name: 'acceptance', status: 'completed', conclusion: 'success'},
-  ], [{context: 'legacy', state: 'success'}]),
+  ], [{context: 'legacy', state: 'success'}], 'success'),
   {green: true, reason: 'all exact-head check runs and statuses succeeded'},
 );
-assert.equal(checksAreGreen([], []).green, false);
-assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'skipped'}], []).green, false);
-assert.equal(checksAreGreen([{name: 'build', status: 'in_progress', conclusion: null}], []).green, false);
-assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'pending'}]).green, false);
+assert.equal(checksAreGreen([], [], 'success').green, false);
+assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'skipped'}], [], 'success').green, false);
+assert.equal(checksAreGreen([{name: 'build', status: 'in_progress', conclusion: null}], [], 'success').green, false);
+assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'pending'}], 'pending').green, false);
+assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'success'}], 'pending').green, false);
+assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'success'}], 'failure').green, false);
 
 const now = new Date('2026-08-28T01:00:00Z').getTime();
 assert.equal(classifyLatestWorkflowRuns([
@@ -166,6 +173,9 @@ assert.match(source, /DECISIVE_REVIEW_STATES/);
 assert.match(source, /REVIEW_REQUEST_PATTERN/);
 assert.match(source, /REVIEW_RESULT_PATTERN/);
 assert.match(source, /CONTRADICTORY_REVIEW_PATTERN/);
+assert.match(source, /NON_AUTHORITATIVE_REVIEW_PATTERN/);
+assert.match(source, /findStandaloneCleanResult/);
+assert.match(source, /combined\.data\.state/);
 assert.match(source, /comment\.user\?\.login === owner/);
 assert.match(source, /occursAfterReviewRequest\(comment, reviewRequest\)/);
 assert.match(source, /authorityTimestamp\(comment\) >= headTime\.getTime\(\)/);
@@ -176,6 +186,12 @@ assert.match(source, /github\.rest\.pulls\.listReviews/);
 assert.match(source, /reviewAge >= 45 \* MINUTE/);
 assert.match(source, /sha: final\.head\.sha/);
 assert.match(source, /merge_method: 'squash'/);
+const finalValidationStart = source.indexOf('const final =');
+const finalMergeStart = source.indexOf('const result = await github.rest.pulls.merge', finalValidationStart);
+assert.ok(finalValidationStart >= 0 && finalMergeStart > finalValidationStart);
+const finalValidation = source.slice(finalValidationStart, finalMergeStart);
+assert.match(finalValidation, /finalChecks = await inspectChecks/);
+assert.match(finalValidation, /finalReview = await inspectReviewGate/);
 assert.match(source, /LEGACY_HEARTBEAT_MARKER/);
 assert.match(source, /const finalMain =/);
 assert.match(source, /const finalPulls =/);
@@ -190,6 +206,9 @@ console.log(JSON.stringify({
   exactLease: true,
   strictChecks: true,
   structuredIndependentReview: true,
+  standaloneReviewResult: true,
+  aggregateCommitStatus: true,
+  finalMutableGateRevalidation: true,
   editedRequestOrdering: true,
   findingBearingResultRejected: true,
   negativeReviewLanguageRejected: true,

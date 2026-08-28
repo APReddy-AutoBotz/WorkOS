@@ -5,7 +5,8 @@ const LEGACY_HEARTBEAT_MARKER = '<!-- workos-hourly-controller -->';
 const AUTOPICK_MARKER = '[WORKOS-CONTROLLER-AUTOPICK]';
 const MERGE_LEASE_PATTERN = /\[WORKOS-AUTO-MERGE\s+head=([0-9a-f]{40})\s+base=([0-9a-f]{40})\]/i;
 const REVIEW_REQUEST_PATTERN = /\[WORKOS-INDEPENDENT-REVIEW-REQUEST\s+head=([0-9a-f]{40})\]/i;
-const REVIEW_RESULT_PATTERN = /\[WORKOS-INDEPENDENT-REVIEW-RESULT\s+head=([0-9a-f]{40})\s+result=clean\s+p0=0\s+p1=0\s+p2=0\]/i;
+const REVIEW_RESULT_PATTERN = /^\[WORKOS-INDEPENDENT-REVIEW-RESULT\s+head=([0-9a-f]{40})\s+result=clean\s+p0=0\s+p1=0\s+p2=0\]$/i;
+const NON_AUTHORITATIVE_REVIEW_PATTERN = /\b(?:do not accept|do not use|not authoritative|quoted example|example only|illustrative example|for example)\b/i;
 const CONTRADICTORY_REVIEW_PATTERN = /\b(?:not|isn't|isnt|is\s+not|never|cannot|can't)\s+(?:fully\s+)?clean\b|\b(?:p0|p1|p2)\b[^.\n]{0,80}\b(?:remain(?:s|ing)?|open|present|found|blocked|failing|fail(?:ed|ure)?)\b|\bresult\s*=\s*(?:blocked|fail(?:ed)?|unclean)\b/i;
 const TRANSIENT_CONCLUSIONS = new Set(['cancelled', 'timed_out', 'startup_failure']);
 const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
@@ -49,16 +50,36 @@ function occursAfterReviewRequest(candidate, request) {
   return requestTime > 0 && candidateTime > requestTime;
 }
 
+function findStandaloneCleanResult(body = '', headSha = '') {
+  const lines = String(body).replace(/\r/g, '').split('\n');
+  let inFence = false;
+  let result = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index];
+    const trimmed = raw.trim();
+    if (/^```/.test(trimmed)) {
+      inFence = !inFence;
+      continue;
+    }
+    const match = trimmed.match(REVIEW_RESULT_PATTERN);
+    if (!match) continue;
+    if (inFence || raw !== trimmed || result) return null;
+    if (!headSha || match[1].toLowerCase() !== headSha.toLowerCase()) return null;
+    result = {lines, index};
+  }
+  return result;
+}
+
 function isExactCleanReview(body = '', headSha = '') {
-  const text = String(body).replace(/\s+/g, ' ').trim();
-  const match = text.match(REVIEW_RESULT_PATTERN);
-  if (!headSha || !match || match[1].toLowerCase() !== headSha.toLowerCase()) return false;
-  const outsideMarker = text.replace(REVIEW_RESULT_PATTERN, ' ').trim();
+  const result = findStandaloneCleanResult(body, headSha);
+  if (!result) return false;
+  const outsideMarker = result.lines.filter((_line, index) => index !== result.index).join('\n').trim();
+  if (NON_AUTHORITATIVE_REVIEW_PATTERN.test(outsideMarker)) return false;
   if (/\bp[0-2]\b/i.test(outsideMarker)) return false;
   return !CONTRADICTORY_REVIEW_PATTERN.test(outsideMarker);
 }
 
-function checksAreGreen(checkRuns = [], statuses = []) {
+function checksAreGreen(checkRuns = [], statuses = [], aggregateState = '') {
   if (!Array.isArray(checkRuns) || checkRuns.length === 0) {
     return {green: false, reason: 'no check runs exist for the exact head'};
   }
@@ -70,6 +91,9 @@ function checksAreGreen(checkRuns = [], statuses = []) {
       green: false,
       reason: `check ${badCheck.name || badCheck.id} is ${badCheck.status}/${badCheck.conclusion || 'none'}`,
     };
+  }
+  if (aggregateState !== 'success') {
+    return {green: false, reason: `combined status is ${aggregateState || 'missing'}`};
   }
   const badStatus = (statuses || []).find((status) => status.state !== 'success');
   if (badStatus) {
@@ -240,7 +264,7 @@ async function inspectChecks({github, owner, repo, sha}) {
     per_page: 100,
   });
   const combined = await github.rest.repos.getCombinedStatusForRef({owner, repo, ref: sha, per_page: 100});
-  return checksAreGreen(checks, combined.data.statuses || []);
+  return checksAreGreen(checks, combined.data.statuses || [], combined.data.state);
 }
 
 async function attemptGuardedMerge({github, owner, repo, candidate}) {
@@ -268,6 +292,15 @@ async function attemptGuardedMerge({github, owner, repo, candidate}) {
   const finalLease = parseMergeLease(final.body || '');
   if (!finalLease || finalLease.head !== final.head.sha.toLowerCase() || finalLease.base !== final.base.sha.toLowerCase()) {
     return {performed: false, classification: 'merge-blocked', detail: 'final merge lease is not exact'};
+  }
+
+  const finalChecks = await inspectChecks({github, owner, repo, sha: final.head.sha});
+  if (!finalChecks.green) {
+    return {performed: false, classification: 'merge-blocked', detail: `final ${finalChecks.reason}`};
+  }
+  const finalReview = await inspectReviewGate({github, owner, repo, pr: final});
+  if (!finalReview.clean) {
+    return {performed: false, classification: 'merge-blocked', detail: `final ${finalReview.reason}`};
   }
 
   const result = await github.rest.pulls.merge({

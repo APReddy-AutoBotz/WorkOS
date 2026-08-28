@@ -39,25 +39,26 @@ Independent review uses an explicit two-message authority pair. After the review
 [WORKOS-INDEPENDENT-REVIEW-REQUEST head=<40-character-head-sha>]
 ```
 
-A later Codex response or submitted Codex review must contain the exact, unambiguous result marker:
+A later Codex response or submitted Codex review must contain the exact, unambiguous result marker as one affirmative, unquoted standalone line:
 
 ```text
 [WORKOS-INDEPENDENT-REVIEW-RESULT head=<40-character-head-sha> result=clean p0=0 p1=0 p2=0]
 ```
 
-Natural-language self-reports, implementation completion comments, responses before the marked request, wrong-head markers, question-form claims, negated clean language or any contradictory P0/P1/P2 wording do not satisfy the review gate.
+Inline, prefixed, backtick-quoted, blockquoted or fenced example markers do not qualify. Natural-language self-reports, implementation completion comments, responses before the marked request, wrong-head markers, question-form claims, negated clean language, non-authoritative example language or any contradictory P0/P1/P2 wording do not satisfy the review gate.
 
 Before squash merge, the controller must prove all of the following against the live PR:
 
 1. the body lease matches the live head and base;
 2. GitHub reports `mergeable=true` and `mergeable_state=clean`;
-3. at least one exact-head check run exists and every check run/status is completed successfully, with no pending, neutral, skipped, cancelled or unexecuted result accepted;
+3. at least one exact-head check run exists, every check run/status is completed successfully, and GitHub's aggregate commit-status state is exactly `success`, with no pending, neutral, skipped, cancelled, omitted or unexecuted result accepted;
 4. no unresolved review thread remains;
 5. neither GitHub's aggregate review decision nor any reviewer's latest decisive review is `CHANGES_REQUESTED`; a later `COMMENTED` review cannot hide an earlier change request;
 6. an owner-authored exact-head independent-review request exists after the head commit;
-7. a Codex structured clean result exists after that distinct request and is bound to the same exact SHA;
+7. a Codex structured clean result exists after that distinct request, is bound to the same exact SHA and appears as an affirmative standalone line;
 8. a final live re-fetch proves that Draft/state/head/base and the body lease did not move;
-9. the merge API receives the exact expected head SHA.
+9. immediately after that final fetch, the controller reruns the complete mutable check/status and review/thread gates and fails closed if any changed;
+10. the merge API receives the exact expected head SHA.
 
 Only one eligible PR is merged per controller run so stacked dependencies re-evaluate on the next run.
 
