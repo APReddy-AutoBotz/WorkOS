@@ -1,0 +1,81 @@
+name: WorkOS PR26 Artifact Output Publisher v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr26-artifact-output-publisher-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: workos-pr26-artifact-output-publisher-v1
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  TARGET_OLD_HEAD: 84c5fc35236e7885af34ab7faccc6e1b50464d61
+
+jobs:
+  publish:
+    name: Publish exact artifact output correction
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_OLD_HEAD }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Patch, validate and publish under exact-old-head lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin "$TARGET_BRANCH"
+          test "$(git rev-parse HEAD)" = "$TARGET_OLD_HEAD"
+          test "$(git rev-parse refs/remotes/origin/$TARGET_BRANCH)" = "$TARGET_OLD_HEAD"
+          test -z "$(git status --porcelain)"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def gha(expression: str) -> str:
+              return '$' + '{' + '{ ' + expression + ' }}'
+
+          path = Path('.github/workflows/wos01a-clean-runtime-acceptance-v2.yml')
+          text = path.read_text()
+          replacements = [
+              (
+                  '          ARTIFACT_ID: ' + gha('steps.artifact_upload.outputs.artifact-id'),
+                  "          ARTIFACT_ID: " + gha("steps.artifact_upload.outputs['artifact-id']"),
+              ),
+              (
+                  '          ARTIFACT_DIGEST: ' + gha('steps.artifact_upload.outputs.artifact-digest'),
+                  "          ARTIFACT_DIGEST: " + gha("steps.artifact_upload.outputs['artifact-digest']"),
+              ),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'unexpected output expression count for {old!r}: {text.count(old)}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+          git add .github/workflows/wos01a-clean-runtime-acceptance-v2.yml
+          test -n "$(git status --porcelain)"
+          git commit -m 'ci: read artifact outputs with bracket notation'
+          NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$TARGET_BRANCH" \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$TARGET_OLD_HEAD"
+          echo "Published PR #26 exact head $NEW_HEAD" >> "$GITHUB_STEP_SUMMARY"
