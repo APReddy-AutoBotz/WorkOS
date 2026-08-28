@@ -1,0 +1,205 @@
+name: WorkOS PR28 Final Closure v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr28-final-closure-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+  checks: read
+  statuses: read
+
+concurrency:
+  group: workos-pr28-final-closure-v1
+  cancel-in-progress: false
+
+jobs:
+  close-and-prove:
+    name: Wait for refreshed PR 28 review, merge and manually dispatch controller
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - name: Poll exact refreshed gates, merge once and prove manual controller run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const number = 28;
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const bots = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
+
+            async function threadAuthority() {
+              const threads = [];
+              let after = null;
+              let decision = null;
+              do {
+                const data = await github.graphql(`
+                  query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) {
+                        reviewDecision
+                        reviewThreads(first: 100, after: $after) {
+                          nodes { id isResolved }
+                          pageInfo { hasNextPage endCursor }
+                        }
+                      }
+                    }
+                  }
+                `, {owner, repo, number, after});
+                const pr = data.repository.pullRequest;
+                decision ??= pr.reviewDecision;
+                threads.push(...pr.reviewThreads.nodes);
+                after = pr.reviewThreads.pageInfo.hasNextPage ? pr.reviewThreads.pageInfo.endCursor : null;
+              } while (after);
+              return {threads, decision};
+            }
+
+            async function decisiveReviews() {
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {owner, repo, pull_number: number, per_page: 100});
+              const states = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
+              const latest = new Map();
+              for (const review of reviews.filter(r => states.has(r.state)).sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0))) {
+                if (review.user?.login && !latest.has(review.user.login)) latest.set(review.user.login, review);
+              }
+              return [...latest.values()];
+            }
+
+            let mergedMain = null;
+            let mergedHead = null;
+            for (let attempt = 1; attempt <= 27; attempt += 1) {
+              const pr = (await github.rest.pulls.get({owner, repo, pull_number: number})).data;
+              if (pr.state === 'closed' && pr.merged) {
+                const main = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
+                mergedMain = main.commit.sha;
+                mergedHead = pr.head.sha;
+                break;
+              }
+              if (pr.state !== 'open' || pr.head.ref !== 'controller/workos-continuous-controller-v2' || pr.base.ref !== 'main') {
+                core.setFailed(`PR #28 authority changed: state=${pr.state} head=${pr.head.ref} base=${pr.base.ref}`);
+                return;
+              }
+              const head = pr.head.sha;
+              const commit = (await github.rest.repos.getCommit({owner, repo, ref: head})).data;
+              const headTime = new Date(commit.commit.committer?.date || commit.commit.author?.date || 0).getTime();
+              const comments = await github.paginate(github.rest.issues.listComments, {owner, repo, issue_number: number, per_page: 100});
+              const reporter = comments
+                .filter(c => c.user?.login === 'github-actions[bot]')
+                .filter(c => (c.body || '').includes('PR28 post-WOS-01A refresh reporter'))
+                .filter(c => (c.body || '').includes(`Refreshed exact head: \`${head}\``))
+                .filter(c => (c.body || '').includes('Refreshed policy/diff proof: **success**'))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+              const request = comments
+                .filter(c => c.user?.login === owner)
+                .filter(c => /@codex\s+review\b/i.test(c.body || ''))
+                .filter(c => (c.body || '').includes('WAIT FOR THE POST-WOS-01A REFRESH'))
+                .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))[0] || null;
+              const threshold = Math.max(headTime, reporter ? new Date(reporter.created_at).getTime() : 0, request ? new Date(request.updated_at || request.created_at).getTime() : 0);
+              const clean = reporter && request ? comments
+                .filter(c => bots.has(c.user?.login))
+                .filter(c => new Date(c.created_at).getTime() > threshold)
+                .filter(c => {
+                  const body = String(c.body || '');
+                  const marker = `[WORKOS-INDEPENDENT-REVIEW-RESULT head=${head} result=clean p0=0 p1=0 p2=0]`;
+                  const exact = body.split(/\r?\n/).some(line => line.trim() === marker);
+                  const standard = /Codex Review:\s*Didn['’]t find any major issues/i.test(body)
+                    && body.toLowerCase().includes(head.slice(0, 10).toLowerCase());
+                  const outside = body.replace(marker, '');
+                  const finding = /\bP[0-2]\b|actionable\s+P[0-2]|changes?\s+requested/i.test(outside);
+                  return (exact || standard) && !finding;
+                })
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] : null;
+              const authority = await threadAuthority();
+              const decisive = await decisiveReviews();
+              const unresolved = authority.threads.filter(t => !t.isResolved);
+              const changes = authority.decision === 'CHANGES_REQUESTED' || decisive.some(r => r.state === 'CHANGES_REQUESTED');
+              core.info(`attempt=${attempt} head=${head} reporter=${Boolean(reporter)} request=${Boolean(request)} clean=${Boolean(clean)} unresolved=${unresolved.length} changes=${changes} mergeable=${pr.mergeable}/${pr.mergeable_state}`);
+
+              if (reporter && request && clean && unresolved.length === 0 && !changes && pr.mergeable === true && pr.mergeable_state === 'clean') {
+                if (pr.draft) {
+                  await github.graphql(`mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { number isDraft } } }`, {id: pr.node_id});
+                }
+                const fresh = (await github.rest.pulls.get({owner, repo, pull_number: number})).data;
+                if (fresh.state !== 'open' || fresh.draft || fresh.head.sha !== head || fresh.base.ref !== 'main' || fresh.base.sha !== pr.base.sha || fresh.mergeable !== true || fresh.mergeable_state !== 'clean') {
+                  core.setFailed('PR #28 changed during final Ready/merge revalidation.');
+                  return;
+                }
+                const result = await github.rest.pulls.merge({owner, repo, pull_number: number, sha: head, merge_method: 'squash', commit_title: `${fresh.title} (#${number})`});
+                if (!result.data.merged) {
+                  core.setFailed(result.data.message || 'GitHub rejected PR #28 merge');
+                  return;
+                }
+                const main = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
+                mergedMain = main.commit.sha;
+                mergedHead = head;
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: 3,
+                  body: `### Continuous WorkOS controller merged\n\n- PR #28 exact head: \`${head}\`\n- Merge commit: \`${result.data.sha}\`\n- Current main: \`${mergedMain}\`\n\nA manual workflow dispatch will now prove the merged controller. No deployment was performed.`,
+                });
+                break;
+              }
+              if (attempt < 27) await sleep(120000);
+            }
+            if (!mergedMain) {
+              core.setFailed('Timed out waiting for PR #28 refresh/review gates; no merge was attempted.');
+              return;
+            }
+
+            const dispatchStarted = new Date().toISOString();
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: 'workos-hourly-controller.yml',
+              ref: 'main',
+            });
+
+            let dispatchedRun = null;
+            for (let attempt = 1; attempt <= 20; attempt += 1) {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: 'workos-hourly-controller.yml',
+                event: 'workflow_dispatch',
+                branch: 'main',
+                per_page: 20,
+              });
+              dispatchedRun = runs.data.workflow_runs.find(run =>
+                run.head_sha === mergedMain
+                && new Date(run.created_at).getTime() >= new Date(dispatchStarted).getTime() - 5000
+              ) || null;
+              if (dispatchedRun) break;
+              await sleep(15000);
+            }
+            if (!dispatchedRun) {
+              core.setFailed('Manual controller dispatch was not observable on exact merged main.');
+              return;
+            }
+
+            for (let attempt = 1; attempt <= 30; attempt += 1) {
+              const run = (await github.rest.actions.getWorkflowRun({owner, repo, run_id: dispatchedRun.id})).data;
+              if (run.status === 'completed') {
+                if (run.conclusion !== 'success') {
+                  core.setFailed(`Manual controller run ${run.id} concluded ${run.conclusion}`);
+                  return;
+                }
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: 3,
+                  body: `### Merged continuous-controller proof\n\n- Exact main: \`${mergedMain}\`\n- Merged PR #28 head: \`${mergedHead}\`\n- Manual controller workflow run: \`${run.id}\` — **success**\n\nThe temporary publisher branch is now eligible for retirement. The root implementation controller may begin the next dependency-safe roadmap package.`,
+                });
+                try {
+                  await github.rest.git.deleteRef({owner, repo, ref: 'heads/controller/workos-root-publisher-v1'});
+                } catch (error) {
+                  core.warning(`Temporary publisher branch retirement deferred: ${error.message}`);
+                }
+                return;
+              }
+              await sleep(30000);
+            }
+            core.setFailed(`Timed out waiting for manual controller run ${dispatchedRun.id}.`);
