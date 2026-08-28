@@ -6,6 +6,7 @@ const {
   checksAreGreen,
   classifyLatestWorkflowRuns,
   isExactCleanReview,
+  latestDecisiveReviews,
   parseMergeLease,
   selectActiveDraft,
   selectMergeCandidate,
@@ -54,6 +55,33 @@ assert.equal(classifyLatestWorkflowRuns([
   {workflow_id: 1, status: 'completed', conclusion: 'failure', run_attempt: 1, created_at: '2026-08-28T00:00:00Z'},
 ]).classification, 'active');
 
+const decisive = latestDecisiveReviews([
+  {
+    state: 'CHANGES_REQUESTED',
+    submitted_at: '2026-08-28T00:00:00Z',
+    user: {login: 'reviewer'},
+  },
+  {
+    state: 'COMMENTED',
+    submitted_at: '2026-08-28T00:05:00Z',
+    user: {login: 'reviewer'},
+  },
+]);
+assert.equal(decisive.length, 1);
+assert.equal(decisive[0].state, 'CHANGES_REQUESTED');
+assert.equal(latestDecisiveReviews([
+  {
+    state: 'CHANGES_REQUESTED',
+    submitted_at: '2026-08-28T00:00:00Z',
+    user: {login: 'reviewer'},
+  },
+  {
+    state: 'APPROVED',
+    submitted_at: '2026-08-28T00:05:00Z',
+    user: {login: 'reviewer'},
+  },
+])[0].state, 'APPROVED');
+
 const pulls = [
   {
     number: 27,
@@ -91,10 +119,16 @@ const source = readFileSync(require.resolve('./workos-continuous-controller.cjs'
 assert.match(source, /fresh\.mergeable !== true \|\| fresh\.mergeable_state !== 'clean'/);
 assert.match(source, /check\.status !== 'completed' \|\| check\.conclusion !== 'success'/);
 assert.match(source, /unresolved\.length > 0/);
-assert.match(source, /CHANGES_REQUESTED/);
+assert.match(source, /reviewDecision === 'CHANGES_REQUESTED'/);
+assert.match(source, /DECISIVE_REVIEW_STATES/);
 assert.match(source, /no independent exact-head no-P0\/P1\/P2 confirmation/);
 assert.match(source, /sha: final\.head\.sha/);
 assert.match(source, /merge_method: 'squash'/);
+assert.match(source, /LEGACY_HEARTBEAT_MARKER/);
+assert.match(source, /const finalMain =/);
+assert.match(source, /const finalPulls =/);
+assert.match(source, /classification: 'workflow-active'/);
+assert.match(source, /classification: 'gate-failure-codex-continuation'/);
 assert.doesNotMatch(source, /markPullRequestReadyForReview|mark_pull_request_ready/);
 assert.doesNotMatch(source, /github\.rest\.deployments|createDeployment|createOrUpdateEnvironmentSecret|createOrUpdateRepoSecret/);
 
@@ -103,6 +137,9 @@ console.log(JSON.stringify({
   policy: 'ten-minute guarded continuous controller',
   exactLease: true,
   strictChecks: true,
+  decisiveReviewState: true,
   independentReview: true,
+  postActionRefetch: true,
+  legacyHeartbeatMigration: true,
   neverAutoReady: true,
 }, null, 2));
