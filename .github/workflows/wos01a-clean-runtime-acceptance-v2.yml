@@ -67,7 +67,7 @@ jobs:
             if (controller.state !== 'open') failures.push(`controller.state=${controller.state}`);
             if (!controller.draft) failures.push('controller is not Draft');
             if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
-            if (controller.head.sha !== context.sha) failures.push(`controller.head.sha=${controller.head.sha}`);
+            if (controller.head.sha !== context.payload.pull_request.head.sha) failures.push(`controller.head.sha=${controller.head.sha}`);
             if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
             if (controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base.sha=${controller.base.sha}`);
 
