@@ -24,7 +24,7 @@ env:
   CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
   TARGET_PR: '27'
   TARGET_BRANCH: codex/wos01a-acceptance-closure
-  TARGET_HEAD: ac1e4692f50f9c034352cb06c43b6d9f73808e33
+  TARGET_HEAD: d02a971c69dbb972cb5b12b340f86aaca7c72fad
   PARENT_PR: '16'
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
@@ -253,10 +253,10 @@ jobs:
           test "$ARTIFACT_CONCLUSION" = success
           test -n "$ARTIFACT_ID"
           test -n "$ARTIFACT_DIGEST"
-          case "$ARTIFACT_DIGEST" in
-            sha256:*) ;;
-            *) echo 'Artifact digest is not SHA-256 evidence' >&2; exit 1 ;;
-          esac
+          if [[ ! "$ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]; then
+            echo 'Artifact digest is not valid SHA-256 evidence' >&2
+            exit 1
+          fi
 
       - name: Aggregate fail-closed result
         if: always()
