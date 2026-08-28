@@ -52,3 +52,46 @@ Database migration execution, production startup and browser journeys require a 
 ## Rollback
 
 Before merge, reset the Draft branch to `7e4b5fad6e0d0d95ddd6c58015a787fb201d8661`. After merge, use a reviewed revert/forward correction; never rewrite source provenance or accepted history.
+
+## WOS-01A clean-runtime product closure
+
+### Authority and bounded outcome
+
+- Parent PR #16 head/base: `590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60`.
+- Closure input head: `6528bde30cbce0c99e08530b4a0f27cb225d35a6`.
+- Accepted WOS-00 merge base: `1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea`.
+- Changed paths are limited to dependency manifest/lockfile classification, a distinct JavaScript lint gate, retained default/configured metadata smoke coverage, and this appended evidence.
+- Build tooling was moved from the production dependency classification to `devDependencies`; no blanket override, forced audit fix, suppression, framework rewrite, migration, authorization, production fallback, customer data, credential, or live-infrastructure change was made.
+
+### Clean-runtime check matrix
+
+| Check | Result | Evidence |
+|---|---|---|
+| Lockfile-only supported dependency classification | PASS | `npm install --package-lock-only --offline --ignore-scripts` regenerated the npm lockfile from the manifest. |
+| Locked dependency installation | FAIL | The available package proxy returned without materializing the complete locked graph; offline installation lacked the cached `zod@4.3.6` tarball. |
+| WOS-00 baseline verifier | PASS | Verified 126 product requirements, 81 NFRs and 8 ADRs. |
+| Bootstrap scanner | PASS | Scanned 122 governed files. |
+| JavaScript lint | PASS | The distinct lint command syntax-checked 21 JavaScript modules. |
+| Type check | FAIL | Required locked packages were unavailable after the incomplete installation. |
+| Retained safe test suite | NOT RUN | Required locked packages were unavailable after the incomplete installation. |
+| Default/configured metadata build regression | NOT RUN | Vite was unavailable after the incomplete installation; the retained regression covers both modes and unconditional cleanup. |
+| Runtime dependency audit | FAIL | The registry audit endpoint returned HTTP 403; the offline zero result was not promoted to acceptance evidence. |
+| Full dependency audit | FAIL | The registry audit endpoint returned HTTP 403; controller verification remains required. |
+| Fresh/replay/upgrade-shaped PostgreSQL migrations | NOT RUN | No disposable PostgreSQL service was available. |
+| Production startup/health/auth/no-seed | NOT RUN | No disposable runtime controller/database was available. |
+| Browser role journeys | NOT RUN | Browser/controller infrastructure was unavailable. |
+| Independent exact-published-head review | NOT RUN | Publication and hosted exact-head review remain controller gates. |
+
+### Frozen A–I adversarial assessment
+
+- **A — Application path:** only dependency classification and build/test gates changed; canonical application, router and startup paths remain unchanged.
+- **B — Authorization/security:** no credentials, providers or customer data were introduced, and production identity/API fallback remains fail closed.
+- **C — Concurrency:** the correction is based on exact closure input `6528bde30cbce0c99e08530b4a0f27cb225d35a6`; hosted lease verification remains mandatory before publication.
+- **D — Replay/idempotency:** the lockfile is package-manager generated, metadata builds clean `dist` unconditionally, and migrations are unchanged.
+- **E — Lifecycle:** PR #27 and parent PR #16 must remain Draft; this evidence authorizes no merge, deployment or later workstream.
+- **F — Partial failure:** unavailable install, audits and runtime/browser gates remain visible and are not represented as PASS.
+- **G — Bounds:** no generated dependency cache, build output or unbounded fixture is committed.
+- **H — Fallback:** neutral metadata defaults remain subordinate to governed configuration; synthetic values are test-only and production identity remains fail closed.
+- **I — Evidence:** accepted WOS-00 requirements, NFRs, ADRs and source provenance above remain unchanged and verifiable.
+
+Security impact is limited to more accurate production dependency classification and retained checks; authorization and data-scope behavior are unchanged. Rollback is a normal revert of this bounded closure commit, preserving the accepted source-bootstrap and WOS-00 history.
