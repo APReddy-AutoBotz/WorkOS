@@ -1,0 +1,61 @@
+name: WorkOS Temporary Run Consolidator v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-temp-run-consolidator-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Cancel superseded temporary publisher runs only
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const obsolete = new Set([
+              'WorkOS Root Blocker Publisher v1',
+              'WorkOS Monitor Publisher v1',
+              'WorkOS Exact-Head Acceptance Proof v1',
+              'WorkOS Controller Fixes Publisher v3',
+              'WorkOS Controller Fixes Publisher v4',
+              'WorkOS Controller Fixes Publisher v5',
+              'WorkOS Controller Verification Reporter v1',
+              'WorkOS Live Status Snapshot v1',
+              'WorkOS Live Status Snapshot v2',
+              'WorkOS Live Status Snapshot v3',
+            ]);
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'controller/workos-root-publisher-v1',
+              per_page: 100,
+            });
+            const cancelled = [];
+            for (const run of runs) {
+              if (run.id === context.runId) continue;
+              if (!obsolete.has(run.name)) continue;
+              if (!['queued', 'in_progress', 'waiting', 'requested', 'pending'].includes(run.status)) continue;
+              try {
+                await github.rest.actions.cancelWorkflowRun({owner: context.repo.owner, repo: context.repo.repo, run_id: run.id});
+                cancelled.push({id: run.id, name: run.name, status: run.status});
+              } catch (error) {
+                core.warning(`Could not cancel ${run.name} ${run.id}: ${error.message}`);
+              }
+            }
+            core.summary.addHeading('WorkOS temporary-run consolidation').addCodeBlock(JSON.stringify({cancelled}, null, 2), 'json').write();
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 3,
+              body: `### Temporary WorkOS run consolidation\n\nCancelled ${cancelled.length} queued/in-progress superseded publisher run(s). The active chain is limited to controller publisher v6, verification reporter v2, PR #26 closure, PR #27 publication/proof, full-parent proof and final PR #28 closure. No product branch or hosted environment was changed by this cleanup.`,
+            });
