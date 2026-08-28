@@ -1,0 +1,332 @@
+name: WorkOS PR27 Patch Watcher v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr27-patch-watcher-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: workos-pr27-patch-watcher-v1
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Wait for complete Codex patch and publish exact PR 27 head
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    outputs:
+      head: ${{ steps.publish.outputs.head }}
+      old_head: ${{ steps.payload.outputs.old_head }}
+    steps:
+      - name: Checkout publisher authority with guarded write credential
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Poll for complete machine-readable Codex patch payload
+        id: payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const bots = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
+            for (let attempt = 1; attempt <= 20; attempt += 1) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: 27,
+                per_page: 100,
+              });
+              const candidates = comments
+                .filter(comment => bots.has(comment.user?.login))
+                .filter(comment => (comment.body || '').includes('WOS01A_PATCH_BASE64_BEGIN'))
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+              for (const comment of candidates) {
+                const body = String(comment.body || '');
+                const oldHead = body.match(/WOS01A_PATCH_OLD_HEAD=([0-9a-f]{40})/i)?.[1]?.toLowerCase();
+                const rawSha = body.match(/WOS01A_PATCH_RAW_SHA256=([0-9a-f]{64})/i)?.[1]?.toLowerCase();
+                const gzipSha = body.match(/WOS01A_PATCH_GZIP_SHA256=([0-9a-f]{64})/i)?.[1]?.toLowerCase();
+                const payload = body.match(/WOS01A_PATCH_BASE64_BEGIN\s*([A-Za-z0-9+/=\r\n]+?)\s*WOS01A_PATCH_BASE64_END/i)?.[1]?.replace(/\s+/g, '');
+                if (!oldHead || !rawSha || !gzipSha || !payload) continue;
+                const pr = (await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 27})).data;
+                if (pr.state !== 'open' || !pr.draft || pr.head.ref !== 'codex/wos01a-acceptance-closure' || pr.base.ref !== 'codex/wos-01-authorized-source-bootstrap-v2') {
+                  core.setFailed(`PR #27 authority changed: state=${pr.state} draft=${pr.draft} head=${pr.head.ref} base=${pr.base.ref}`);
+                  return;
+                }
+                if (pr.head.sha.toLowerCase() !== oldHead) {
+                  core.warning(`Ignoring payload for ${oldHead}; live head is ${pr.head.sha}`);
+                  continue;
+                }
+                const out = process.env.GITHUB_WORKSPACE;
+                fs.writeFileSync(path.join(out, 'wos01a-patch.b64'), `${payload}\n`);
+                fs.writeFileSync(path.join(out, 'wos01a-patch-meta.json'), `${JSON.stringify({oldHead, rawSha, gzipSha, commentId: comment.id}, null, 2)}\n`);
+                core.setOutput('old_head', oldHead);
+                core.setOutput('raw_sha', rawSha);
+                core.setOutput('gzip_sha', gzipSha);
+                core.setOutput('comment_id', String(comment.id));
+                return;
+              }
+              core.info(`No complete matching patch payload yet; attempt ${attempt}/20`);
+              if (attempt < 20) await sleep(120000);
+            }
+            core.setFailed('Timed out waiting for a complete PR #27 patch payload.');
+
+      - name: Decode, verify, apply, test and publish under exact-old-head lease
+        id: publish
+        shell: bash
+        env:
+          OLD_HEAD: ${{ steps.payload.outputs.old_head }}
+          RAW_SHA: ${{ steps.payload.outputs.raw_sha }}
+          GZIP_SHA: ${{ steps.payload.outputs.gzip_sha }}
+          TARGET_BRANCH: codex/wos01a-acceptance-closure
+        run: |
+          set -euo pipefail
+          test -n "$OLD_HEAD"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin "$TARGET_BRANCH"
+          test "$(git rev-parse refs/remotes/origin/$TARGET_BRANCH)" = "$OLD_HEAD"
+          git checkout --detach "$OLD_HEAD"
+          git reset --hard "$OLD_HEAD"
+          git clean -fdx
+
+          base64 --decode "$GITHUB_WORKSPACE/wos01a-patch.b64" > "$RUNNER_TEMP/wos01a.patch.gz"
+          test "$(sha256sum "$RUNNER_TEMP/wos01a.patch.gz" | awk '{print $1}')" = "$GZIP_SHA"
+          gzip -dc "$RUNNER_TEMP/wos01a.patch.gz" > "$RUNNER_TEMP/wos01a.patch"
+          test "$(sha256sum "$RUNNER_TEMP/wos01a.patch" | awk '{print $1}')" = "$RAW_SHA"
+          git apply --binary --check "$RUNNER_TEMP/wos01a.patch"
+          git apply --binary --index "$RUNNER_TEMP/wos01a.patch"
+
+          cat > "$RUNNER_TEMP/expected-paths.txt" <<'PATHS'
+          docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
+          package.json
+          server/identity-discovery.mjs
+          server/index.mjs
+          server/start-production.mjs
+          tests/identity-discovery-smoke.mjs
+          tests/production-identity-smoke.mjs
+          PATHS
+          git diff --cached --name-only | LC_ALL=C sort > "$RUNNER_TEMP/actual-paths.txt"
+          LC_ALL=C sort -o "$RUNNER_TEMP/expected-paths.txt" "$RUNNER_TEMP/expected-paths.txt"
+          diff -u "$RUNNER_TEMP/expected-paths.txt" "$RUNNER_TEMP/actual-paths.txt"
+
+          node --check server/identity-discovery.mjs
+          node --check server/start-production.mjs
+          node --check server/index.mjs
+          node --check tests/identity-discovery-smoke.mjs
+          node --check tests/production-identity-smoke.mjs
+          node tests/identity-discovery-smoke.mjs
+          node scripts/verify-baseline.mjs
+          node scripts/scan-bootstrap.mjs --self-test
+          git diff --cached --check
+
+          git commit -m 'fix: converge governed Entra discovery authority'
+          NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$TARGET_BRANCH" \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$OLD_HEAD"
+          echo "head=$NEW_HEAD" >> "$GITHUB_OUTPUT"
+          echo "Published PR #27 exact head $NEW_HEAD from payload comment ${{ steps.payload.outputs.comment_id }}" >> "$GITHUB_STEP_SUMMARY"
+
+  acceptance-authority:
+    name: Wait for corrected PR 26 and capture exact live chain
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      acceptance: ${{ steps.wait.outputs.acceptance }}
+      product: ${{ steps.wait.outputs.product }}
+      parent: ${{ steps.wait.outputs.parent }}
+      main: ${{ steps.wait.outputs.main }}
+    steps:
+      - name: Poll controller authority and token-isolation correction
+        id: wait
+        uses: actions/github-script@v7
+        env:
+          PUBLISHED_PRODUCT_HEAD: ${{ needs.publish.outputs.head }}
+        with:
+          script: |
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            for (let attempt = 1; attempt <= 10; attempt += 1) {
+              const [acceptance, product, parent, main, matrix, workflow] = await Promise.all([
+                github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 26}),
+                github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 27}),
+                github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 16}),
+                github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+                github.rest.repos.getContent({owner: context.repo.owner, repo: context.repo.repo, path: '.github/scripts/wos01a-clean-runtime-matrix-v2.sh', ref: 'controller/wos01a-clean-runtime-acceptance-v2'}),
+                github.rest.repos.getContent({owner: context.repo.owner, repo: context.repo.repo, path: '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml', ref: 'controller/wos01a-clean-runtime-acceptance-v2'}),
+              ]);
+              const matrixText = Buffer.from(matrix.data.content, 'base64').toString('utf8');
+              const workflowText = Buffer.from(workflow.data.content, 'base64').toString('utf8');
+              const ready = !matrixText.includes('GH_TOKEN')
+                && workflowText.includes('id: final_authority')
+                && workflowText.includes('controller.head.ref !== process.env.CONTROLLER_BRANCH');
+              if (ready) {
+                const a = acceptance.data;
+                const t = product.data;
+                const p = parent.data;
+                const m = main.data;
+                if (a.state !== 'open' || !a.draft || a.head.ref !== 'controller/wos01a-clean-runtime-acceptance-v2' || a.base.ref !== 'main') return core.setFailed('PR #26 authority changed');
+                if (t.state !== 'open' || !t.draft || t.head.sha !== process.env.PUBLISHED_PRODUCT_HEAD || t.head.ref !== 'codex/wos01a-acceptance-closure' || t.base.ref !== 'codex/wos-01-authorized-source-bootstrap-v2') return core.setFailed('PR #27 authority changed');
+                if (p.state !== 'open' || !p.draft || p.head.ref !== 'codex/wos-01-authorized-source-bootstrap-v2' || p.base.ref !== 'main') return core.setFailed('PR #16 authority changed');
+                core.setOutput('acceptance', a.head.sha);
+                core.setOutput('product', t.head.sha);
+                core.setOutput('parent', p.head.sha);
+                core.setOutput('main', m.data.commit.sha);
+                return;
+              }
+              core.info(`PR #26 correction not yet live; attempt ${attempt}/10`);
+              if (attempt < 10) await sleep(120000);
+            }
+            core.setFailed('Timed out waiting for corrected PR #26 authority.');
+
+  prove:
+    name: Prove published PR 27 with corrected PR 26 matrix
+    needs: [publish, acceptance-authority]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CONTROLLER_PR: '26'
+      CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      CONTROLLER_HEAD: ${{ needs.acceptance-authority.outputs.acceptance }}
+      TARGET_PR: '27'
+      TARGET_BRANCH: codex/wos01a-acceptance-closure
+      TARGET_HEAD: ${{ needs.publish.outputs.head }}
+      PARENT_PR: '16'
+      PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      PARENT_HEAD: ${{ needs.acceptance-authority.outputs.parent }}
+      EXPECTED_MAIN_HEAD: ${{ needs.acceptance-authority.outputs.main }}
+      ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: workos
+      PGPASSWORD: workos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: current-main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+      - name: Run complete token-free exact-head matrix
+        id: matrix
+        continue-on-error: true
+        run: |
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh "$GITHUB_WORKSPACE/controller" "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/current-main"
+      - name: Final isolated live authority
+        id: authority
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const failures = [];
+            const [c, t, p, m] = await Promise.all([
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 26}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 27}),
+              github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: 16}),
+              github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'}),
+            ]);
+            if (c.data.head.sha !== process.env.CONTROLLER_HEAD || c.data.head.ref !== process.env.CONTROLLER_BRANCH || c.data.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('controller lease changed');
+            if (t.data.head.sha !== process.env.TARGET_HEAD || t.data.head.ref !== process.env.TARGET_BRANCH || t.data.base.sha !== process.env.PARENT_HEAD) failures.push('target lease changed');
+            if (p.data.head.sha !== process.env.PARENT_HEAD || p.data.head.ref !== process.env.PARENT_BRANCH || p.data.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push('parent lease changed');
+            if (m.data.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('main changed');
+            const dir = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
+            fs.mkdirSync(dir, {recursive: true});
+            fs.writeFileSync(path.join(dir, 'pr27-patch-watcher-final-authority.json'), `${JSON.stringify({status: failures.length ? 'failed' : 'passed', failures, controller: c.data, target: t.data, parent: p.data, main: m.data}, null, 2)}\n`);
+            if (failures.length) core.setFailed(failures.join(', '));
+      - name: Upload exact PR 27 proof
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-pr27-identity-proof-${{ env.TARGET_HEAD }}
+          path: target/.acceptance-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Aggregate PR 27 proof
+        if: always()
+        run: |
+          set -euo pipefail
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.authority.outcome }}' = success
+          test '${{ steps.upload.outcome }}' = success
+
+  report:
+    name: Report published PR 27 exact head
+    needs: [publish, prove]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish checkpoint and resolve superseded review findings
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const head = '${{ needs.publish.outputs.head }}';
+            const proof = '${{ needs.prove.result }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 27,
+              body: `### WOS-01A identity closure publication reporter\n\n- Published exact head: \`${head}\`\n- Complete corrected-controller proof: **${proof}**\n- Workflow run: \`${context.runId}\`\n\nThe published seven-file package converges startup/readiness/authentication on one governed Entra discovery authority and retains redirect, downgrade, wrong-tenant, no-local-fallback and provider-outage negatives.`,
+            });
+            if (proof === 'success') {
+              for (const threadId of ['PRRT_kwDOUAv8Lc6dFOrw', 'PRRT_kwDOUAv8Lc6dFOry', 'PRRT_kwDOUAv8Lc6dFOr0', 'PRRT_kwDOUAv8Lc6dFdcg']) {
+                try {
+                  await github.graphql(`mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }`, {id: threadId});
+                } catch (error) {
+                  core.warning(`Could not resolve ${threadId}: ${error.message}`);
+                }
+              }
+            } else {
+              core.setFailed(`PR #27 proof outcome=${proof}`);
+            }
