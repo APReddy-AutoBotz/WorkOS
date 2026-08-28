@@ -1,0 +1,193 @@
+name: WorkOS Monitor Publisher v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-monitor-publisher-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: workos-monitor-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish hardened monitor exact head
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGET_BRANCH: controller/workos-continuous-controller-v2
+      TARGET_OLD_HEAD: d6e7c61ff1311e2bbde7e8b5567e732b15e65b93
+
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Publish monitor corrections under exact-old-head lease
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin "$TARGET_BRANCH"
+          test "$(git rev-parse refs/remotes/origin/$TARGET_BRANCH)" = "$TARGET_OLD_HEAD"
+          git checkout --detach "$TARGET_OLD_HEAD"
+          git reset --hard "$TARGET_OLD_HEAD"
+          git clean -fdx
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          controller_path = Path('.github/scripts/workos-continuous-controller.cjs')
+          controller = controller_path.read_text()
+
+          start = controller.index("function isExactCleanReview(body = '', headSha = '') {")
+          end = controller.index('\n\nfunction checksAreGreen', start)
+          functions = '''function authorityTimestamp(value = {}) {
+            const candidates = [
+              value.created_at,
+              value.createdAt,
+              value.updated_at,
+              value.updatedAt,
+              value.submitted_at,
+              value.submittedAt,
+            ]
+              .map((item) => new Date(item || 0).getTime())
+              .filter((time) => Number.isFinite(time) && time > 0);
+            return candidates.length ? Math.max(...candidates) : 0;
+          }
+
+          function occursAfterReviewRequest(candidate, request) {
+            const requestTime = authorityTimestamp(request);
+            const candidateTime = authorityTimestamp(candidate);
+            return requestTime > 0 && candidateTime > requestTime;
+          }
+
+          function isExactCleanReview(body = '', headSha = '') {
+            const text = String(body).replace(/\\s+/g, ' ').trim();
+            const match = text.match(REVIEW_RESULT_PATTERN);
+            if (!headSha || !match || match[1].toLowerCase() !== headSha.toLowerCase()) return false;
+            const outsideMarker = text.replace(REVIEW_RESULT_PATTERN, ' ').trim();
+            if (/\\bp[0-2]\\b/i.test(outsideMarker)) return false;
+            return !CONTRADICTORY_REVIEW_PATTERN.test(outsideMarker);
+          }'''
+          controller = controller[:start] + functions + controller[end:]
+
+          gate_start = controller.index('  const reviewRequest = comments', controller.index('async function inspectReviewGate'))
+          gate_end = controller.index('  if (!exactCleanComment && !exactCleanReview) {', gate_start)
+          gate = '''  const reviewRequest = comments
+            .filter((comment) =>
+              comment.user?.login === owner
+              && authorityTimestamp(comment) >= headTime.getTime()
+              && isExactReviewRequest(comment.body || '', pr.head.sha)
+            )
+            .sort((a, b) => authorityTimestamp(b) - authorityTimestamp(a))[0] || null;
+          if (!reviewRequest) {
+            return {clean: false, reason: 'no owner-authored independent review request marker for the exact head'};
+          }
+          const exactCleanComment = comments.find((comment) =>
+            BOT_LOGINS.has(comment.user?.login)
+            && occursAfterReviewRequest(comment, reviewRequest)
+            && isExactCleanReview(comment.body || '', pr.head.sha)
+          );
+          const exactCleanReview = reviews.find((review) => {
+            const login = review.user?.login || review.author?.login;
+            return BOT_LOGINS.has(login)
+              && occursAfterReviewRequest(review, reviewRequest)
+              && isExactCleanReview(review.body || '', pr.head.sha);
+          });
+          '''
+          controller = controller[:gate_start] + gate + controller[gate_end:]
+
+          export_marker = '  REVIEW_RESULT_PATTERN,\n'
+          if controller.count(export_marker) != 1:
+              raise SystemExit('unexpected review-result export marker')
+          controller = controller.replace(export_marker, export_marker + '  authorityTimestamp,\n', 1)
+          submitted_marker = '  latestSubmittedReviewAt,\n'
+          if controller.count(submitted_marker) != 1:
+              raise SystemExit('unexpected submitted-review export marker')
+          controller = controller.replace(submitted_marker, submitted_marker + '  occursAfterReviewRequest,\n', 1)
+          controller_path.write_text(controller)
+
+          test_path = Path('.github/scripts/test-workos-continuous-controller.cjs')
+          test = test_path.read_text()
+          import_marker = 'const {\n  checksAreGreen,'
+          if test.count(import_marker) != 1:
+              raise SystemExit('unexpected test import marker')
+          test = test.replace(import_marker, 'const {\n  authorityTimestamp,\n  checksAreGreen,', 1)
+          test_submitted_marker = '  latestSubmittedReviewAt,\n  parseMergeLease,'
+          if test.count(test_submitted_marker) != 1:
+              raise SystemExit('unexpected test submitted marker')
+          test = test.replace(
+              test_submitted_marker,
+              '  latestSubmittedReviewAt,\n  occursAfterReviewRequest,\n  parseMergeLease,',
+              1,
+          )
+
+          clean_marker = "assert.equal(isExactCleanReview(`${cleanResult}\\nP1 remains open.`, HEAD), false);\n"
+          if test.count(clean_marker) != 1:
+              raise SystemExit('unexpected clean fixture marker')
+          test = test.replace(clean_marker, clean_marker + '''assert.equal(isExactCleanReview(`${cleanResult}\\n[P1] Merge accepts an unsafe review result.`, HEAD), false);
+          assert.equal(isExactCleanReview(`${cleanResult}\\nThere is an actionable P0 issue.`, HEAD), false);
+          ''', 1)
+
+          timestamp_marker = 'assert.equal(latestSubmittedReviewAt([]), 0);\n'
+          if test.count(timestamp_marker) != 1:
+              raise SystemExit('unexpected timestamp fixture marker')
+          test = test.replace(timestamp_marker, timestamp_marker + '''
+          const editedRequest = {
+            created_at: '2026-08-28T00:00:00Z',
+            updated_at: '2026-08-28T00:10:00Z',
+          };
+          const preEditResult = {
+            created_at: '2026-08-28T00:05:00Z',
+            updated_at: '2026-08-28T00:05:00Z',
+          };
+          const postEditResult = {
+            created_at: '2026-08-28T00:11:00Z',
+            updated_at: '2026-08-28T00:11:00Z',
+          };
+          assert.equal(authorityTimestamp(editedRequest), new Date('2026-08-28T00:10:00Z').getTime());
+          assert.equal(occursAfterReviewRequest(preEditResult, editedRequest), false);
+          assert.equal(occursAfterReviewRequest(postEditResult, editedRequest), true);
+          ''', 1)
+
+          source_marker = 'assert.match(source, /new Date\\(comment\\.created_at\\) > requestTime/);'
+          if test.count(source_marker) != 1:
+              raise SystemExit('unexpected source ordering assertion')
+          test = test.replace(
+              source_marker,
+              'assert.match(source, /occursAfterReviewRequest\\(comment, reviewRequest\\)/);\nassert.match(source, /authorityTimestamp\\(comment\\) >= headTime\\.getTime\\(\\)/);',
+              1,
+          )
+          report_marker = '  structuredIndependentReview: true,'
+          if test.count(report_marker) != 1:
+              raise SystemExit('unexpected test report marker')
+          test = test.replace(
+              report_marker,
+              report_marker + '\n  editedRequestOrdering: true,\n  findingBearingResultRejected: true,',
+              1,
+          )
+          test_path.write_text(test)
+          PY
+
+          node .github/scripts/test-workos-continuous-controller.cjs
+          git diff --check
+          git add \
+            .github/scripts/workos-continuous-controller.cjs \
+            .github/scripts/test-workos-continuous-controller.cjs
+          test -n "$(git status --porcelain)"
+          git commit -m 'ci: harden independent review ordering and result parsing'
+          NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$TARGET_BRANCH" \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$TARGET_OLD_HEAD"
+          echo "Published PR #28 monitor head $NEW_HEAD" >> "$GITHUB_STEP_SUMMARY"
