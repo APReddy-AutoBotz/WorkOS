@@ -40,6 +40,7 @@
     "test:prod-hardening": "node tests/production-hardening-smoke.mjs",
     "test:prod-core-rc": "node tests/prod-core-rc-smoke.mjs",
     "test:prod-readiness": "node tests/prod-readiness.mjs",
+    "test:production-identity": "node tests/production-identity-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",
