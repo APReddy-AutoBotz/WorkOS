@@ -49,5 +49,10 @@ assert.match(
   /check evidence_upload '\$\{\{ steps\.evidence_upload\.outcome \}\}'/,
   'aggregate acceptance must fail closed when evidence upload is unsuccessful',
 );
+assert.match(workflow, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 4415eb15aee8ce8f07d2b83d586241653f1c949d/);
+assert.match(workflow, /PARENT_PR: '16'[\s\S]*PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60/);
+assert.match(workflow, /test "\$\(jq -r \.base\.sha \/tmp\/target-pr\.json\)" = "\$\{PARENT_HEAD\}"/);
+assert.match(workflow, /check browser_lifecycle_regression '\$\{\{ steps\.browser_lifecycle_regression\.outcome \}\}'/);
+assert.match(workflow, /check final_authority '\$\{\{ steps\.final_authority\.outcome \}\}'/);
 
 console.log('WOS-01A controller fallback and evidence isolation assertions passed.');

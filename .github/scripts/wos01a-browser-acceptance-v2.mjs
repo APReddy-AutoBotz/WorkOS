@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { CdpClient, removeProfile, terminateProcessTree } from './wos01a-browser-lifecycle-v2.mjs';
 
 const origin = process.env.WOS_BROWSER_ORIGIN || 'http://127.0.0.1:4173';
 const debugPort = Number(process.env.WOS_CHROME_DEBUG_PORT || 9222);
@@ -45,30 +46,31 @@ const chrome = spawn(chromeBin, [
   `--remote-debugging-port=${debugPort}`,
   `--user-data-dir=${userDataDir}`,
   'about:blank',
-], { stdio: ['ignore', 'pipe', 'pipe'] });
+], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 
 let chromeOutput = '';
 chrome.stdout.on('data', chunk => { chromeOutput += chunk.toString(); });
 chrome.stderr.on('data', chunk => { chromeOutput += chunk.toString(); });
 
-const cleanup = async () => {
-  if (chrome.exitCode === null && chrome.signalCode === null) chrome.kill('SIGTERM');
-  await Promise.race([
-    new Promise(resolve => chrome.once('exit', resolve)),
-    sleep(3_000),
-  ]).catch(() => {});
-  if (chrome.exitCode === null && chrome.signalCode === null) {
-    chrome.kill('SIGKILL');
-    await Promise.race([
-      new Promise(resolve => chrome.once('exit', resolve)),
-      sleep(3_000),
-    ]).catch(() => {});
+let client;
+let targetId;
+let cleanupPromise;
+const cleanup = () => cleanupPromise ||= (async () => {
+  if (client) {
+    if (targetId) await client.send('Target.closeTarget', { targetId }).catch(() => {});
+    await client.send('Browser.close').catch(() => {});
+    await client.close();
   }
-  await rm(userDataDir, { recursive: true, force: true });
-};
+  await terminateProcessTree(chrome);
+  await removeProfile(userDataDir);
+})();
 
-process.on('SIGINT', () => { cleanup().finally(() => process.exit(130)); });
-process.on('SIGTERM', () => { cleanup().finally(() => process.exit(143)); });
+const cleanupForSignal = (code) => cleanup().then(
+  () => process.exit(code),
+  error => { console.error(error); process.exit(1); },
+);
+process.on('SIGINT', () => { void cleanupForSignal(130); });
+process.on('SIGTERM', () => { void cleanupForSignal(143); });
 
 const withTimeout = async (promise, timeoutMs, label) => {
   let timer;
@@ -99,61 +101,6 @@ const waitForJson = async (url, timeoutMs, label) => {
   }
   throw new Error(`${label} did not become ready: ${lastError?.message || 'unknown error'}\n${chromeOutput.slice(-4_000)}`);
 };
-
-class CdpClient {
-  constructor(url) {
-    this.url = url;
-    this.socket = null;
-    this.sequence = 0;
-    this.pending = new Map();
-  }
-
-  async connect() {
-    this.socket = new WebSocket(this.url);
-    this.socket.addEventListener('message', event => {
-      const message = JSON.parse(String(event.data));
-      if (!message.id) return;
-      const waiter = this.pending.get(message.id);
-      if (!waiter) return;
-      this.pending.delete(message.id);
-      clearTimeout(waiter.timer);
-      if (message.error) waiter.reject(new Error(`${waiter.method}: ${message.error.message}`));
-      else waiter.resolve(message.result || {});
-    });
-    const rejectPending = (reason) => {
-      for (const waiter of this.pending.values()) {
-        clearTimeout(waiter.timer);
-        waiter.reject(new Error(`CDP socket ${reason} while awaiting ${waiter.method}`));
-      }
-      this.pending.clear();
-    };
-    this.socket.addEventListener('close', () => rejectPending('closed'));
-    this.socket.addEventListener('error', () => rejectPending('failed'));
-    await withTimeout(new Promise((resolve, reject) => {
-      this.socket.addEventListener('open', resolve, { once: true });
-      this.socket.addEventListener('error', () => reject(new Error('CDP socket failed to open')), { once: true });
-    }), commandTimeoutMs, 'CDP connection');
-  }
-
-  send(method, params = {}) {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error(`CDP socket is not open for ${method}`));
-    }
-    const id = ++this.sequence;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${method} timed out after ${commandTimeoutMs}ms`));
-      }, commandTimeoutMs);
-      this.pending.set(id, { resolve, reject, timer, method });
-      this.socket.send(JSON.stringify({ id, method, params }));
-    });
-  }
-
-  close() {
-    this.socket?.close();
-  }
-}
 
 const evaluate = async (client, expression) => {
   const result = await client.send('Runtime.evaluate', {
@@ -215,7 +162,8 @@ try {
     return response.json();
   });
 
-  const client = new CdpClient(target.webSocketDebuggerUrl);
+  targetId = target.id;
+  client = new CdpClient(target.webSocketDebuggerUrl, { commandTimeoutMs });
   await client.connect();
   await client.send('Page.enable');
   await client.send('Runtime.enable');
@@ -273,7 +221,6 @@ try {
     console.log(`PASS Employee denied /admin -> ${snapshot.path}`);
   })(), journeyTimeoutMs, 'Employee denial journey');
 
-  client.close();
   console.log('WOS-01A bounded browser acceptance passed.');
 } finally {
   await cleanup();

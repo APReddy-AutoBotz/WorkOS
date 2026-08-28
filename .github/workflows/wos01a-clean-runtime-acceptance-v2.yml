@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'
       - '.github/scripts/wos01a-browser-acceptance-v2.mjs'
+      - '.github/scripts/wos01a-browser-lifecycle-v2.mjs'
+      - '.github/scripts/test-wos01a-browser-lifecycle-v2.mjs'
       - '.github/scripts/verify-wos01a-controller-v2.mjs'
   workflow_dispatch:
 
@@ -18,9 +20,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  TARGET_PR: '16'
-  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
-  TARGET_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_HEAD: 4415eb15aee8ce8f07d2b83d586241653f1c949d
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
   ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
   PGHOST: 127.0.0.1
   PGPORT: '5432'
@@ -62,6 +68,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
+          CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
@@ -85,8 +92,20 @@ jobs:
           test "$(jq -r .draft /tmp/target-pr.json)" = "true"
           test "$(jq -r .head.ref /tmp/target-pr.json)" = "${TARGET_BRANCH}"
           test "$(jq -r .head.sha /tmp/target-pr.json)" = "${TARGET_HEAD}"
-          test "$(jq -r .base.ref /tmp/target-pr.json)" = "main"
-          echo "Target PR #${TARGET_PR} is open, Draft and frozen at ${TARGET_HEAD}."
+          test "$(jq -r .base.ref /tmp/target-pr.json)" = "${PARENT_BRANCH}"
+          test "$(jq -r .base.sha /tmp/target-pr.json)" = "${PARENT_HEAD}"
+
+          parent_api="https://api.github.com/repos/${REPOSITORY}/pulls/${PARENT_PR}"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${parent_api}" > /tmp/parent-pr.json
+          test "$(jq -r .state /tmp/parent-pr.json)" = "open"
+          test "$(jq -r .draft /tmp/parent-pr.json)" = "true"
+          test "$(jq -r .head.ref /tmp/parent-pr.json)" = "${PARENT_BRANCH}"
+          test "$(jq -r .head.sha /tmp/parent-pr.json)" = "${PARENT_HEAD}"
+          echo "Target PR #${TARGET_PR} is stacked on frozen parent PR #${PARENT_PR}."
 
       - name: Resolve current main through the read-only GitHub API
         id: current_main
@@ -103,6 +122,7 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "${api}" > /tmp/current-main.json
           current_main="$(jq -er '.object.sha | select(test("^[0-9a-f]{40}$"))' /tmp/current-main.json)"
+          test "${current_main}" = "${EXPECTED_MAIN_HEAD}"
           echo "sha=${current_main}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout exact WOS-01A implementation head
@@ -127,6 +147,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C target rev-parse HEAD)" = "${TARGET_HEAD}"
+          test "$(git -C target merge-base "${TARGET_HEAD}" "${PARENT_HEAD}")" = "${PARENT_HEAD}"
           test "$(git -C current-main rev-parse HEAD)" = "${{ steps.current_main.outputs.sha }}"
           merge_base="$(git -C current-main merge-base "${TARGET_HEAD}" HEAD)"
           test "${merge_base}" = "${ACCEPTED_WOS00_BASE}"
@@ -156,6 +177,12 @@ jobs:
         shell: bash
         working-directory: controller
         run: node .github/scripts/verify-wos01a-controller-v2.mjs
+
+      - name: Verify bounded browser lifecycle regressions
+        id: browser_lifecycle_regression
+        shell: bash
+        working-directory: controller
+        run: node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
 
       - name: Prepare evidence directory
         shell: bash
@@ -442,6 +469,41 @@ jobs:
             kill "$(cat .acceptance-evidence/browser-server.pid)" 2>/dev/null || true
           fi
 
+      - name: Revalidate controller, target, parent and main leases
+        id: final_authority
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "${CONTROLLER_HEAD}"
+          test "$(git -C target rev-parse HEAD)" = "${TARGET_HEAD}"
+          test "$(git -C current-main rev-parse HEAD)" = "${EXPECTED_MAIN_HEAD}"
+          for pr in "${TARGET_PR}" "${PARENT_PR}"; do
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${REPOSITORY}/pulls/${pr}" > "/tmp/final-pr-${pr}.json"
+            test "$(jq -r .state "/tmp/final-pr-${pr}.json")" = open
+            test "$(jq -r .draft "/tmp/final-pr-${pr}.json")" = true
+          done
+          test "$(jq -r .head.sha "/tmp/final-pr-${TARGET_PR}.json")" = "${TARGET_HEAD}"
+          test "$(jq -r .base.sha "/tmp/final-pr-${TARGET_PR}.json")" = "${PARENT_HEAD}"
+          test "$(jq -r .head.sha "/tmp/final-pr-${PARENT_PR}.json")" = "${PARENT_HEAD}"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${REPOSITORY}/git/ref/heads/main" > /tmp/final-main.json
+          test "$(jq -r .object.sha /tmp/final-main.json)" = "${EXPECTED_MAIN_HEAD}"
+          printf 'controller=%s\ntarget_pr=%s\ntarget=%s\nparent_pr=%s\nparent=%s\nmain=%s\nwos00=%s\n' \
+            "${CONTROLLER_HEAD}" "${TARGET_PR}" "${TARGET_HEAD}" "${PARENT_PR}" "${PARENT_HEAD}" \
+            "${EXPECTED_MAIN_HEAD}" "${ACCEPTED_WOS00_BASE}" > target/.acceptance-evidence/exact-leases.txt
+
       - name: Record exact step outcomes
         if: always()
         shell: bash
@@ -451,6 +513,7 @@ jobs:
           authority=${{ steps.authority.outcome }}
           repository_boundary=${{ steps.repository_boundary.outcome }}
           controller_regression=${{ steps.controller_regression.outcome }}
+          browser_lifecycle_regression=${{ steps.browser_lifecycle_regression.outcome }}
           install=${{ steps.install.outcome }}
           engineering=${{ steps.engineering.outcome }}
           dependencies=${{ steps.dependencies.outcome }}
@@ -460,6 +523,7 @@ jobs:
           migrations=${{ steps.migrations.outcome }}
           production=${{ steps.production.outcome }}
           browser=${{ steps.browser.outcome }}
+          final_authority=${{ steps.final_authority.outcome }}
           EOF
           cat .acceptance-evidence/step-outcomes.txt
 
@@ -493,6 +557,7 @@ jobs:
           check authority '${{ steps.authority.outcome }}'
           check repository_boundary '${{ steps.repository_boundary.outcome }}'
           check controller_regression '${{ steps.controller_regression.outcome }}'
+          check browser_lifecycle_regression '${{ steps.browser_lifecycle_regression.outcome }}'
           check install '${{ steps.install.outcome }}'
           check engineering '${{ steps.engineering.outcome }}'
           check dependencies '${{ steps.dependencies.outcome }}'
@@ -502,5 +567,6 @@ jobs:
           check migrations '${{ steps.migrations.outcome }}'
           check production '${{ steps.production.outcome }}'
           check browser '${{ steps.browser.outcome }}'
+          check final_authority '${{ steps.final_authority.outcome }}'
           check evidence_upload '${{ steps.evidence_upload.outcome }}'
           exit "${failed}"
