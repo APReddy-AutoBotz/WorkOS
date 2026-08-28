@@ -1,0 +1,328 @@
+name: WorkOS Root Blocker Publisher v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-root-publisher-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: workos-root-blocker-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish exact-head controller corrections
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ACCEPTANCE_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      ACCEPTANCE_OLD_HEAD: e30d5684dde77b79659077d07a9072bf906cff3c
+      MONITOR_BRANCH: controller/workos-continuous-controller-v2
+      MONITOR_OLD_HEAD: d6e7c61ff1311e2bbde7e8b5567e732b15e65b93
+
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure publisher identity
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin \
+            "$ACCEPTANCE_BRANCH" \
+            "$MONITOR_BRANCH"
+
+      - name: Correct migration single-run completion evidence on PR 26
+        run: |
+          set -euo pipefail
+          git checkout --detach "$ACCEPTANCE_OLD_HEAD"
+          test "$(git rev-parse HEAD)" = "$ACCEPTANCE_OLD_HEAD"
+          test "$(git rev-parse refs/remotes/origin/$ACCEPTANCE_BRANCH)" = "$ACCEPTANCE_OLD_HEAD"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          matrix_path = Path('.github/scripts/wos01a-clean-runtime-matrix-v2.sh')
+          matrix = matrix_path.read_text()
+          start = matrix.index('  local fresh_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_fresh"')
+          end = matrix.index('  local prod_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_prod"', start)
+          replacement = '''  local expected
+          expected="$((1 + $(find server/migrations -maxdepth 1 -type f -name '*.sql' | wc -l)))"
+
+          local fresh_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_fresh"
+          DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-fresh.log"
+          local fresh_first
+          fresh_first="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
+          test "$fresh_first" = "$expected"
+          DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-replay.log"
+          local fresh_replay
+          fresh_replay="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
+          test "$fresh_replay" = "$expected"
+          test "$fresh_replay" = "$fresh_first"
+
+          local upgrade_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_upgrade"
+          psql "$upgrade_url" -v ON_ERROR_STOP=1 -f server/schema.sql > "$EVIDENCE_DIR/upgrade-baseline-schema.log"
+          psql "$upgrade_url" -v ON_ERROR_STOP=1 <<'SQL'
+          create table if not exists schema_migrations (
+            id text primary key,
+            applied_at timestamptz not null default now()
+          );
+          insert into schema_migrations (id) values ('005_auth_lifecycle') on conflict do nothing;
+          SQL
+          DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade.log"
+          local upgrade_first
+          upgrade_first="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
+          test "$upgrade_first" = "$expected"
+          DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade-replay.log"
+          local upgrade_replay
+          upgrade_replay="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
+          test "$upgrade_replay" = "$expected"
+          test "$upgrade_replay" = "$upgrade_first"
+
+          printf 'expected=%s\nfresh_first=%s\nfresh_replay=%s\nupgrade_first=%s\nupgrade_replay=%s\n' \
+            "$expected" "$fresh_first" "$fresh_replay" "$upgrade_first" "$upgrade_replay" \
+            | tee "$EVIDENCE_DIR/migration-counts.txt"
+
+          '''
+          matrix_path.write_text(matrix[:start] + replacement + matrix[end:])
+
+          verifier_path = Path('.github/scripts/verify-wos01a-controller-v2.mjs')
+          verifier = verifier_path.read_text()
+          needle = "assert.match(matrix, /migrate-fresh\\.log/);\n"
+          if verifier.count(needle) != 1:
+              raise SystemExit('unexpected migrate-fresh assertion count')
+          addition = needle + '''const migration = matrix.match(/migration_acceptance\\(\\) \\{[\\s\\S]*?\\n\\}/)?.[0];
+          assert.ok(migration, 'migration acceptance function must exist');
+          assert.match(migration, /test "\\$fresh_first" = "\\$expected"/);
+          assert.match(migration, /test "\\$fresh_replay" = "\\$expected"/);
+          assert.match(migration, /test "\\$fresh_replay" = "\\$fresh_first"/);
+          const firstUpgradeRun = migration.indexOf('migrate-upgrade.log');
+          const firstUpgradeCount = migration.indexOf('upgrade_first=');
+          const firstUpgradeAssert = migration.indexOf('test "$upgrade_first" = "$expected"');
+          const replayUpgradeRun = migration.indexOf('migrate-upgrade-replay.log');
+          assert.ok(firstUpgradeRun >= 0, 'first upgrade command must exist');
+          assert.ok(firstUpgradeRun < firstUpgradeCount, 'first upgrade count must follow the first command');
+          assert.ok(firstUpgradeCount < firstUpgradeAssert, 'first upgrade count must be asserted immediately');
+          assert.ok(firstUpgradeAssert < replayUpgradeRun, 'first upgrade must be complete before replay starts');
+          assert.match(migration, /test "\\$upgrade_replay" = "\\$expected"/);
+          assert.match(migration, /test "\\$upgrade_replay" = "\\$upgrade_first"/);
+          '''
+          verifier_path.write_text(verifier.replace(needle, addition))
+          PY
+
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+          git add \
+            .github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            .github/scripts/verify-wos01a-controller-v2.mjs
+          test -n "$(git status --porcelain)"
+          git commit -m 'ci: verify upgrade completion before replay'
+          ACCEPTANCE_NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$ACCEPTANCE_BRANCH" \
+            --force-with-lease="refs/heads/$ACCEPTANCE_BRANCH:$ACCEPTANCE_OLD_HEAD"
+          echo "acceptance_new_head=$ACCEPTANCE_NEW_HEAD" >> "$GITHUB_ENV"
+
+      - name: Harden independent-review authority on PR 28
+        run: |
+          set -euo pipefail
+          git checkout --detach "$MONITOR_OLD_HEAD"
+          git reset --hard "$MONITOR_OLD_HEAD"
+          git clean -fdx
+          test "$(git rev-parse HEAD)" = "$MONITOR_OLD_HEAD"
+          test "$(git rev-parse refs/remotes/origin/$MONITOR_BRANCH)" = "$MONITOR_OLD_HEAD"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          controller_path = Path('.github/scripts/workos-continuous-controller.cjs')
+          controller = controller_path.read_text()
+          start = controller.index("function isExactCleanReview(body = '', headSha = '') {")
+          end = controller.index('\n\nfunction checksAreGreen', start)
+          replacement = '''function authorityTimestamp(value = {}) {
+            const candidates = [
+              value.created_at,
+              value.createdAt,
+              value.updated_at,
+              value.updatedAt,
+              value.submitted_at,
+              value.submittedAt,
+            ]
+              .map((item) => new Date(item || 0).getTime())
+              .filter((time) => Number.isFinite(time) && time > 0);
+            return candidates.length ? Math.max(...candidates) : 0;
+          }
+
+          function occursAfterReviewRequest(candidate, request) {
+            const requestTime = authorityTimestamp(request);
+            const candidateTime = authorityTimestamp(candidate);
+            return requestTime > 0 && candidateTime > requestTime;
+          }
+
+          function isExactCleanReview(body = '', headSha = '') {
+            const text = String(body).replace(/\\s+/g, ' ').trim();
+            const match = text.match(REVIEW_RESULT_PATTERN);
+            if (!headSha || !match || match[1].toLowerCase() !== headSha.toLowerCase()) return false;
+            const outsideMarker = text.replace(REVIEW_RESULT_PATTERN, ' ').trim();
+            if (/\\bp[0-2]\\b/i.test(outsideMarker)) return false;
+            return !CONTRADICTORY_REVIEW_PATTERN.test(outsideMarker);
+          }'''
+          controller = controller[:start] + replacement + controller[end:]
+
+          old_gate = '''  const reviewRequest = comments
+            .filter((comment) =>
+              comment.user?.login === owner
+              && new Date(comment.created_at) >= headTime
+              && isExactReviewRequest(comment.body || '', pr.head.sha)
+            )
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+          if (!reviewRequest) {
+            return {clean: false, reason: 'no owner-authored independent review request marker for the exact head'};
+          }
+          const requestTime = new Date(reviewRequest.created_at);
+          const exactCleanComment = comments.find((comment) =>
+            BOT_LOGINS.has(comment.user?.login)
+            && new Date(comment.created_at) > requestTime
+            && isExactCleanReview(comment.body || '', pr.head.sha)
+          );
+          const exactCleanReview = reviews.find((review) => {
+            const login = review.user?.login || review.author?.login;
+            const submitted = new Date(review.submitted_at || review.submittedAt || 0);
+            return BOT_LOGINS.has(login) && submitted > requestTime && isExactCleanReview(review.body || '', pr.head.sha);
+          });'''
+          new_gate = '''  const reviewRequest = comments
+            .filter((comment) =>
+              comment.user?.login === owner
+              && authorityTimestamp(comment) >= headTime.getTime()
+              && isExactReviewRequest(comment.body || '', pr.head.sha)
+            )
+            .sort((a, b) => authorityTimestamp(b) - authorityTimestamp(a))[0] || null;
+          if (!reviewRequest) {
+            return {clean: false, reason: 'no owner-authored independent review request marker for the exact head'};
+          }
+          const exactCleanComment = comments.find((comment) =>
+            BOT_LOGINS.has(comment.user?.login)
+            && occursAfterReviewRequest(comment, reviewRequest)
+            && isExactCleanReview(comment.body || '', pr.head.sha)
+          );
+          const exactCleanReview = reviews.find((review) => {
+            const login = review.user?.login || review.author?.login;
+            return BOT_LOGINS.has(login)
+              && occursAfterReviewRequest(review, reviewRequest)
+              && isExactCleanReview(review.body || '', pr.head.sha);
+          });'''
+          if controller.count(old_gate) != 1:
+              raise SystemExit('unexpected review gate shape')
+          controller = controller.replace(old_gate, new_gate)
+
+          old_exports = '''  REVIEW_REQUEST_PATTERN,
+            REVIEW_RESULT_PATTERN,
+            checksAreGreen,
+            classifyLatestWorkflowRuns,
+            isExactCleanReview,
+            isExactReviewRequest,
+            latestDecisiveReviews,
+            latestSubmittedReviewAt,
+            parseMergeLease,'''
+          new_exports = '''  REVIEW_REQUEST_PATTERN,
+            REVIEW_RESULT_PATTERN,
+            authorityTimestamp,
+            checksAreGreen,
+            classifyLatestWorkflowRuns,
+            isExactCleanReview,
+            isExactReviewRequest,
+            latestDecisiveReviews,
+            latestSubmittedReviewAt,
+            occursAfterReviewRequest,
+            parseMergeLease,'''
+          if controller.count(old_exports) != 1:
+              raise SystemExit('unexpected export block')
+          controller_path.write_text(controller.replace(old_exports, new_exports))
+
+          test_path = Path('.github/scripts/test-workos-continuous-controller.cjs')
+          test = test_path.read_text()
+          test = test.replace(
+              "const {\n  checksAreGreen,",
+              "const {\n  authorityTimestamp,\n  checksAreGreen,",
+              1,
+          )
+          test = test.replace(
+              "  latestSubmittedReviewAt,\n  parseMergeLease,",
+              "  latestSubmittedReviewAt,\n  occursAfterReviewRequest,\n  parseMergeLease,",
+              1,
+          )
+          marker = "assert.equal(isExactCleanReview(`${cleanResult}\\nP1 remains open.`, HEAD), false);\n"
+          if test.count(marker) != 1:
+              raise SystemExit('unexpected clean-review fixture marker')
+          test = test.replace(marker, marker + '''assert.equal(isExactCleanReview(`${cleanResult}\\n[P1] Merge accepts an unsafe review result.`, HEAD), false);
+          assert.equal(isExactCleanReview(`${cleanResult}\\nThere is an actionable P0 issue.`, HEAD), false);
+          ''')
+
+          time_marker = "assert.equal(latestSubmittedReviewAt([]), 0);\n"
+          if test.count(time_marker) != 1:
+              raise SystemExit('unexpected review timestamp marker')
+          test = test.replace(time_marker, time_marker + '''
+          const editedRequest = {
+            created_at: '2026-08-28T00:00:00Z',
+            updated_at: '2026-08-28T00:10:00Z',
+          };
+          const preEditResult = {
+            created_at: '2026-08-28T00:05:00Z',
+            updated_at: '2026-08-28T00:05:00Z',
+          };
+          const postEditResult = {
+            created_at: '2026-08-28T00:11:00Z',
+            updated_at: '2026-08-28T00:11:00Z',
+          };
+          assert.equal(authorityTimestamp(editedRequest), new Date('2026-08-28T00:10:00Z').getTime());
+          assert.equal(occursAfterReviewRequest(preEditResult, editedRequest), false);
+          assert.equal(occursAfterReviewRequest(postEditResult, editedRequest), true);
+          ''')
+
+          test = test.replace(
+              "assert.match(source, /new Date\\(comment\\.created_at\\) > requestTime/);",
+              "assert.match(source, /occursAfterReviewRequest\\(comment, reviewRequest\\)/);\nassert.match(source, /authorityTimestamp\\(comment\\) >= headTime\\.getTime\\(\\)/);",
+              1,
+          )
+          test = test.replace(
+              "  structuredIndependentReview: true,",
+              "  structuredIndependentReview: true,\n  editedRequestOrdering: true,\n  findingBearingResultRejected: true,",
+              1,
+          )
+          test_path.write_text(test)
+          PY
+
+          node .github/scripts/test-workos-continuous-controller.cjs
+          git diff --check
+          git add \
+            .github/scripts/workos-continuous-controller.cjs \
+            .github/scripts/test-workos-continuous-controller.cjs
+          test -n "$(git status --porcelain)"
+          git commit -m 'ci: harden independent review ordering and result parsing'
+          MONITOR_NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$MONITOR_BRANCH" \
+            --force-with-lease="refs/heads/$MONITOR_BRANCH:$MONITOR_OLD_HEAD"
+          echo "monitor_new_head=$MONITOR_NEW_HEAD" >> "$GITHUB_ENV"
+
+      - name: Publish exact resulting heads
+        run: |
+          set -euo pipefail
+          {
+            echo '## WorkOS exact-head blocker publication'
+            echo
+            echo "- PR #26 controller: \`$acceptance_new_head\`"
+            echo "- PR #28 continuous monitor: \`$monitor_new_head\`"
+            echo '- Both updates used exact-old-head force-with-lease guards.'
+          } >> "$GITHUB_STEP_SUMMARY"
