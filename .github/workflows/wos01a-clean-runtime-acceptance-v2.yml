@@ -230,7 +230,7 @@ jobs:
             if (failures.length) core.setFailed(`WOS-01A final authority failed: ${failures.join(', ')}`);
 
       - name: Upload exact-head acceptance evidence
-        id: evidence_upload
+        id: artifact_upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -239,6 +239,24 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+
+      - name: Verify retained evidence artifact publication
+        id: evidence_upload
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_CONCLUSION: ${{ steps.artifact_upload.conclusion }}
+          ARTIFACT_ID: ${{ steps.artifact_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact_upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ARTIFACT_CONCLUSION" = success
+          test -n "$ARTIFACT_ID"
+          test -n "$ARTIFACT_DIGEST"
+          case "$ARTIFACT_DIGEST" in
+            sha256:*) ;;
+            *) echo 'Artifact digest is not SHA-256 evidence' >&2; exit 1 ;;
+          esac
 
       - name: Aggregate fail-closed result
         if: always()
