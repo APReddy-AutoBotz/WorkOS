@@ -1,0 +1,275 @@
+name: WorkOS PR28 Final Gates Publisher v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/workos-pr28-final-gates-publisher-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: workos-pr28-final-gates-publisher-v1
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: controller/workos-continuous-controller-v2
+  TARGET_OLD_HEAD: 2a2f83196aa89d74a54879142576a12eaee9fd1c
+
+jobs:
+  publish:
+    name: Publish exact PR28 merge-gate hardening
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Patch, test and publish under exact-old-head lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin "$TARGET_BRANCH"
+          test "$(git rev-parse refs/remotes/origin/$TARGET_BRANCH)" = "$TARGET_OLD_HEAD"
+          git checkout --detach "$TARGET_OLD_HEAD"
+          git reset --hard "$TARGET_OLD_HEAD"
+          git clean -fdx
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          controller_path = Path('.github/scripts/workos-continuous-controller.cjs')
+          controller = controller_path.read_text()
+
+          old_pattern = "const REVIEW_RESULT_PATTERN = /\\[WORKOS-INDEPENDENT-REVIEW-RESULT\\s+head=([0-9a-f]{40})\\s+result=clean\\s+p0=0\\s+p1=0\\s+p2=0\\]/i;"
+          new_pattern = "const REVIEW_RESULT_PATTERN = /^\\[WORKOS-INDEPENDENT-REVIEW-RESULT\\s+head=([0-9a-f]{40})\\s+result=clean\\s+p0=0\\s+p1=0\\s+p2=0\\]$/i;\nconst NON_AUTHORITATIVE_REVIEW_PATTERN = /\\b(?:do not accept|do not use|not authoritative|quoted example|example only|illustrative example|for example)\\b/i;"
+          if controller.count(old_pattern) != 1:
+              raise SystemExit('unexpected review result pattern shape')
+          controller = controller.replace(old_pattern, new_pattern, 1)
+
+          clean_start = controller.index("function isExactCleanReview(body = '', headSha = '') {")
+          clean_end = controller.index('\n\nfunction checksAreGreen', clean_start)
+          clean_replacement = r'''function findStandaloneCleanResult(body = '', headSha = '') {
+            const lines = String(body).replace(/\r/g, '').split('\n');
+            let inFence = false;
+            let result = null;
+            for (let index = 0; index < lines.length; index += 1) {
+              const raw = lines[index];
+              const trimmed = raw.trim();
+              if (/^```/.test(trimmed)) {
+                inFence = !inFence;
+                continue;
+              }
+              const match = trimmed.match(REVIEW_RESULT_PATTERN);
+              if (!match) continue;
+              if (inFence || raw !== trimmed || result) return null;
+              if (!headSha || match[1].toLowerCase() !== headSha.toLowerCase()) return null;
+              result = {lines, index};
+            }
+            return result;
+          }
+
+          function isExactCleanReview(body = '', headSha = '') {
+            const result = findStandaloneCleanResult(body, headSha);
+            if (!result) return false;
+            const outsideMarker = result.lines.filter((_line, index) => index !== result.index).join('\n').trim();
+            if (NON_AUTHORITATIVE_REVIEW_PATTERN.test(outsideMarker)) return false;
+            if (/\bp[0-2]\b/i.test(outsideMarker)) return false;
+            return !CONTRADICTORY_REVIEW_PATTERN.test(outsideMarker);
+          }'''
+          controller = controller[:clean_start] + clean_replacement + controller[clean_end:]
+
+          checks_start = controller.index('function checksAreGreen(')
+          checks_end = controller.index('\n\nfunction workflowRunTimestamp', checks_start)
+          checks_replacement = r'''function checksAreGreen(checkRuns = [], statuses = [], aggregateState = '') {
+            if (!Array.isArray(checkRuns) || checkRuns.length === 0) {
+              return {green: false, reason: 'no check runs exist for the exact head'};
+            }
+            const badCheck = checkRuns.find((check) =>
+              check.status !== 'completed' || check.conclusion !== 'success'
+            );
+            if (badCheck) {
+              return {
+                green: false,
+                reason: `check ${badCheck.name || badCheck.id} is ${badCheck.status}/${badCheck.conclusion || 'none'}`,
+              };
+            }
+            if (aggregateState !== 'success') {
+              return {green: false, reason: `combined status is ${aggregateState || 'missing'}`};
+            }
+            const badStatus = (statuses || []).find((status) => status.state !== 'success');
+            if (badStatus) {
+              return {green: false, reason: `status ${badStatus.context || 'unknown'} is ${badStatus.state}`};
+            }
+            return {green: true, reason: 'all exact-head check runs and statuses succeeded'};
+          }'''
+          controller = controller[:checks_start] + checks_replacement + controller[checks_end:]
+
+          old_check_call = '  return checksAreGreen(checks, combined.data.statuses || []);'
+          new_check_call = '  return checksAreGreen(checks, combined.data.statuses || [], combined.data.state);'
+          if controller.count(old_check_call) != 1:
+              raise SystemExit('unexpected inspectChecks call shape')
+          controller = controller.replace(old_check_call, new_check_call, 1)
+
+          final_lease = '''  if (!finalLease || finalLease.head !== final.head.sha.toLowerCase() || finalLease.base !== final.base.sha.toLowerCase()) {
+            return {performed: false, classification: 'merge-blocked', detail: 'final merge lease is not exact'};
+          }
+          '''
+          final_revalidation = final_lease + '''
+          const finalChecks = await inspectChecks({github, owner, repo, sha: final.head.sha});
+          if (!finalChecks.green) {
+            return {performed: false, classification: 'merge-blocked', detail: `final ${finalChecks.reason}`};
+          }
+          const finalReview = await inspectReviewGate({github, owner, repo, pr: final});
+          if (!finalReview.clean) {
+            return {performed: false, classification: 'merge-blocked', detail: `final ${finalReview.reason}`};
+          }
+          '''
+          if controller.count(final_lease) != 1:
+              raise SystemExit('unexpected final lease shape')
+          controller = controller.replace(final_lease, final_revalidation, 1)
+          controller_path.write_text(controller)
+
+          test_path = Path('.github/scripts/test-workos-continuous-controller.cjs')
+          test = test_path.read_text()
+
+          fixture_marker = "assert.equal(isExactCleanReview(`${cleanResult}\\nThere is an actionable P0 issue.`, HEAD), false);\n"
+          fixture_addition = fixture_marker + '''assert.equal(isExactCleanReview(`DO NOT ACCEPT THIS RESULT:\n${cleanResult}`, HEAD), false);
+          assert.equal(isExactCleanReview(`Quoted example only:\n\`${cleanResult}\``, HEAD), false);
+          assert.equal(isExactCleanReview(````text\n${cleanResult}\n````, HEAD), false);
+          assert.equal(isExactCleanReview(`> ${cleanResult}`, HEAD), false);
+          assert.equal(isExactCleanReview(`  ${cleanResult}`, HEAD), false);
+          '''
+          if test.count(fixture_marker) != 1:
+              raise SystemExit('unexpected review fixture marker')
+          test = test.replace(fixture_marker, fixture_addition, 1)
+
+          old_success = '''  ], [{context: 'legacy', state: 'success'}]),
+            {green: true, reason: 'all exact-head check runs and statuses succeeded'},
+          );'''
+          new_success = '''  ], [{context: 'legacy', state: 'success'}], 'success'),
+            {green: true, reason: 'all exact-head check runs and statuses succeeded'},
+          );'''
+          if test.count(old_success) != 1:
+              raise SystemExit('unexpected green-check fixture')
+          test = test.replace(old_success, new_success, 1)
+
+          old_negatives = '''assert.equal(checksAreGreen([], []).green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'skipped'}], []).green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'in_progress', conclusion: null}], []).green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'pending'}]).green, false);
+          '''
+          new_negatives = '''assert.equal(checksAreGreen([], [], 'success').green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'skipped'}], [], 'success').green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'in_progress', conclusion: null}], [], 'success').green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'pending'}], 'pending').green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'success'}], 'pending').green, false);
+          assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'success'}], 'failure').green, false);
+          '''
+          if test.count(old_negatives) != 1:
+              raise SystemExit('unexpected negative check fixtures')
+          test = test.replace(old_negatives, new_negatives, 1)
+
+          source_marker = "assert.match(source, /CONTRADICTORY_REVIEW_PATTERN/);\n"
+          source_addition = source_marker + '''assert.match(source, /NON_AUTHORITATIVE_REVIEW_PATTERN/);
+          assert.match(source, /findStandaloneCleanResult/);
+          assert.match(source, /combined\.data\.state/);
+          '''
+          if test.count(source_marker) != 1:
+              raise SystemExit('unexpected source assertion marker')
+          test = test.replace(source_marker, source_addition, 1)
+
+          merge_marker = "assert.match(source, /merge_method: 'squash'/);\n"
+          merge_addition = merge_marker + '''const finalValidationStart = source.indexOf('const final =');
+          const finalMergeStart = source.indexOf('const result = await github.rest.pulls.merge', finalValidationStart);
+          assert.ok(finalValidationStart >= 0 && finalMergeStart > finalValidationStart);
+          const finalValidation = source.slice(finalValidationStart, finalMergeStart);
+          assert.match(finalValidation, /finalChecks = await inspectChecks/);
+          assert.match(finalValidation, /finalReview = await inspectReviewGate/);
+          '''
+          if test.count(merge_marker) != 1:
+              raise SystemExit('unexpected merge assertion marker')
+          test = test.replace(merge_marker, merge_addition, 1)
+
+          report_marker = '  structuredIndependentReview: true,'
+          if test.count(report_marker) != 1:
+              raise SystemExit('unexpected report marker')
+          test = test.replace(
+              report_marker,
+              report_marker + '\n  standaloneReviewResult: true,\n  aggregateCommitStatus: true,\n  finalMutableGateRevalidation: true,',
+              1,
+          )
+          test_path.write_text(test)
+
+          docs_path = Path('docs/tasks/WOS-CONTINUOUS-CONTROLLER.md')
+          docs = docs_path.read_text()
+          old_review = '''A later Codex response or submitted Codex review must contain the exact, unambiguous result marker:
+
+          ```text
+          [WORKOS-INDEPENDENT-REVIEW-RESULT head=<40-character-head-sha> result=clean p0=0 p1=0 p2=0]
+          ```
+
+          Natural-language self-reports, implementation completion comments, responses before the marked request, wrong-head markers, question-form claims, negated clean language or any contradictory P0/P1/P2 wording do not satisfy the review gate.
+          '''
+          new_review = '''A later Codex response or submitted Codex review must contain the exact, unambiguous result marker as one affirmative, unquoted standalone line:
+
+          ```text
+          [WORKOS-INDEPENDENT-REVIEW-RESULT head=<40-character-head-sha> result=clean p0=0 p1=0 p2=0]
+          ```
+
+          Inline, prefixed, backtick-quoted, blockquoted or fenced example markers do not qualify. Natural-language self-reports, implementation completion comments, responses before the marked request, wrong-head markers, question-form claims, negated clean language, non-authoritative example language or any contradictory P0/P1/P2 wording do not satisfy the review gate.
+          '''
+          if docs.count(old_review) != 1:
+              raise SystemExit('unexpected docs review section')
+          docs = docs.replace(old_review, new_review, 1)
+
+          old_items = '''3. at least one exact-head check run exists and every check run/status is completed successfully, with no pending, neutral, skipped, cancelled or unexecuted result accepted;
+          4. no unresolved review thread remains;
+          5. neither GitHub's aggregate review decision nor any reviewer's latest decisive review is `CHANGES_REQUESTED`; a later `COMMENTED` review cannot hide an earlier change request;
+          6. an owner-authored exact-head independent-review request exists after the head commit;
+          7. a Codex structured clean result exists after that distinct request and is bound to the same exact SHA;
+          8. a final live re-fetch proves that Draft/state/head/base and the body lease did not move;
+          9. the merge API receives the exact expected head SHA.
+          '''
+          new_items = '''3. at least one exact-head check run exists, every check run/status is completed successfully, and GitHub's aggregate commit-status state is exactly `success`, with no pending, neutral, skipped, cancelled, omitted or unexecuted result accepted;
+          4. no unresolved review thread remains;
+          5. neither GitHub's aggregate review decision nor any reviewer's latest decisive review is `CHANGES_REQUESTED`; a later `COMMENTED` review cannot hide an earlier change request;
+          6. an owner-authored exact-head independent-review request exists after the head commit;
+          7. a Codex structured clean result exists after that distinct request, is bound to the same exact SHA and appears as an affirmative standalone line;
+          8. a final live re-fetch proves that Draft/state/head/base and the body lease did not move;
+          9. immediately after that final fetch, the controller reruns the complete mutable check/status and review/thread gates and fails closed if any changed;
+          10. the merge API receives the exact expected head SHA.
+          '''
+          if docs.count(old_items) != 1:
+              raise SystemExit('unexpected docs merge list')
+          docs_path.write_text(docs.replace(old_items, new_items, 1))
+          PY
+
+          node .github/scripts/test-workos-continuous-controller.cjs
+          node --check .github/scripts/workos-continuous-controller.cjs
+          git diff --check
+          if git diff -- . ':!*.lock' | grep -E 'Boundaryless|BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|gh[pousr]_[A-Za-z0-9_]{20,}' | grep -v 'APReddy-AutoBotz/Boundaryless-WorkOS'; then
+            echo 'Unexpected prohibited material in PR28 patch' >&2
+            exit 1
+          fi
+          git add \
+            .github/scripts/workos-continuous-controller.cjs \
+            .github/scripts/test-workos-continuous-controller.cjs \
+            docs/tasks/WOS-CONTINUOUS-CONTROLLER.md
+          test -n "$(git status --porcelain)"
+          git commit -m 'ci: close final continuous-controller merge gates'
+          NEW_HEAD="$(git rev-parse HEAD)"
+          git push origin \
+            HEAD:"refs/heads/$TARGET_BRANCH" \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$TARGET_OLD_HEAD"
+          echo "Published PR #28 exact head $NEW_HEAD" >> "$GITHUB_STEP_SUMMARY"
