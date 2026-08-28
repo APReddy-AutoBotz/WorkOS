@@ -7,7 +7,7 @@ const matrix = readFileSync(new URL('./wos01a-clean-runtime-matrix-v2.sh', impor
 assert.match(workflow, /permissions:\n  contents: read\n  pull-requests: read/);
 assert.doesNotMatch(workflow, /contents: write|pull-requests: write/);
 assert.match(workflow, /CONTROLLER_PR: '26'/);
-assert.match(workflow, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: b826476c2bb15446959ca1787b5208f9f95765c6/);
+assert.match(workflow, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 738dec377726b557776366d38a57157c1953a791/);
 assert.match(workflow, /PARENT_PR: '16'[\s\S]*PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60/);
 assert.match(workflow, /EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42/);
 assert.match(workflow, /ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea/);
