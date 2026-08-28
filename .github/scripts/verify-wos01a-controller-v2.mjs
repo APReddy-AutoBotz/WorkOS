@@ -84,9 +84,9 @@ assert.match(matrix, /npm run test:production-identity/);
 assert.match(matrix, /WOS_PRODUCTION_IDENTITY_EVIDENCE/);
 assert.match(matrix, /production-identity-summary\.json/);
 assert.match(matrix, /configured-provider-ready-then-unavailable/);
-assert.match(matrix, /\.localLogin[\s\S]*= 404/);
-assert.match(matrix, /\.protectedApi[\s\S]*= 401/);
-assert.match(matrix, /\.outageReadiness[\s\S]*= closed/);
+assert.match(matrix, /\.localLogin[\s\S]*== 404/);
+assert.match(matrix, /\.protectedApi[\s\S]*== 401/);
+assert.match(matrix, /\.outageReadiness[\s\S]*== "closed"/);
 assert.match(matrix, /wos01a-browser-acceptance-v2\.mjs/);
 assert.match(matrix, /WOS-01A exact-head acceptance failed closed/);
 
@@ -95,5 +95,29 @@ assert.ok(production, 'production acceptance function must exist');
 assert.doesNotMatch(production, /VITE_APP_MODE=test|VITE_ALLOW_TEST_FALLBACK=true/);
 assert.match(production, /test:production-identity/);
 assert.match(production, /readiness == \"closed\"/);
+assert.doesNotMatch(production, /readiness == \"closed\"[^\n]*length[^\n]*-eq 4/);
+assert.match(production, /length >= 4/);
+assert.match(production, /length == \(unique \| length\)/);
+assert.match(production, /length == 1/);
+assert.match(production, /all\(\.readiness == \"closed\"\)/);
+
+const positive = {name: 'configured-provider-ready-then-unavailable', startup: 'ready', localLogin: 404, protectedApi: 401, seededUsers: 0, seededEmployees: 0, outageReadiness: 'closed'};
+const negatives = ['missing-setting', 'local-provider', 'discovery-unavailable', 'invalid-discovery'].map((name) => ({name, readiness: 'closed'}));
+const identityContract = (cases) => {
+  const names = cases.map(({name}) => name);
+  const configured = cases.filter(({name}) => name === positive.name);
+  const closed = cases.filter(({name}) => name !== positive.name);
+  return new Set(names).size === names.length && configured.length === 1 && closed.length >= 4
+    && closed.every(({readiness}) => readiness === 'closed')
+    && ['startup', 'localLogin', 'protectedApi', 'seededUsers', 'seededEmployees', 'outageReadiness'].every((key) => configured[0][key] === positive[key]);
+};
+assert.ok(identityContract([...negatives, positive]));
+assert.ok(identityContract([...negatives, {name: 'new-negative', readiness: 'closed'}, positive]));
+assert.equal(identityContract([...negatives.slice(1), positive]), false);
+assert.equal(identityContract([negatives[0], negatives[0], ...negatives.slice(2), positive]), false);
+assert.equal(identityContract([{...negatives[0], readiness: 'ready'}, ...negatives.slice(1), positive]), false);
+for (const [key, value] of [['startup', 'closed'], ['localLogin', 200], ['protectedApi', 200], ['seededUsers', 1], ['seededEmployees', 1], ['outageReadiness', 'ready']]) {
+  assert.equal(identityContract([...negatives, {...positive, [key]: value}]), false);
+}
 
 console.log('WOS-01A token isolation, final authority, identity and evidence assertions passed.');

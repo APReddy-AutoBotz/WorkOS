@@ -272,11 +272,21 @@ production_acceptance() {
 
   test -s "$EVIDENCE_DIR/production-identity-summary.json"
   test "$(jq -r .status "$EVIDENCE_DIR/production-identity-summary.json")" = passed
-  test "$(jq -r '[.cases[] | select(.readiness == "closed")] | length' "$EVIDENCE_DIR/production-identity-summary.json")" -eq 4
-  test "$(jq -r '.cases[] | select(.name == "configured-provider-ready-then-unavailable") | .startup' "$EVIDENCE_DIR/production-identity-summary.json")" = ready
-  test "$(jq -r '.cases[] | select(.name == "configured-provider-ready-then-unavailable") | .localLogin' "$EVIDENCE_DIR/production-identity-summary.json")" = 404
-  test "$(jq -r '.cases[] | select(.name == "configured-provider-ready-then-unavailable") | .protectedApi' "$EVIDENCE_DIR/production-identity-summary.json")" = 401
-  test "$(jq -r '.cases[] | select(.name == "configured-provider-ready-then-unavailable") | .outageReadiness' "$EVIDENCE_DIR/production-identity-summary.json")" = closed
+  jq -e '
+    (.cases | type == "array") and
+    ([.cases[].name] | all(type == "string") and length == (unique | length)) and
+    ([.cases[] | select(.name == "configured-provider-ready-then-unavailable")] | length == 1) and
+    ([.cases[] | select(.name != "configured-provider-ready-then-unavailable")] as $negative |
+      ($negative | length >= 4) and
+      ($negative | all(.readiness == "closed"))) and
+    ([.cases[] | select(.name == "configured-provider-ready-then-unavailable")][0] |
+      .startup == "ready" and
+      .localLogin == 404 and
+      .protectedApi == 401 and
+      ((.seededUsers // .users) == 0) and
+      ((.seededEmployees // .employees) == 0) and
+      .outageReadiness == "closed")
+  ' "$EVIDENCE_DIR/production-identity-summary.json" >/dev/null
 }
 
 browser_acceptance() {
