@@ -421,7 +421,7 @@ const getSetting = async (key, fallback) => {
   return raw === undefined ? fallback : raw;
 };
 
-const getRequestIp = (req) => String(req.headers['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '').split(',')[0].trim();
+const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '').split(',')[0].trim();
 
 const audit = async (client, req, { module, action, entityType, entityId, oldValue, newValue, details, reason, source = 'Web' }) => {
   await client.query(`
@@ -1149,7 +1149,8 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
         groupOverage: Boolean(claims._claim_names?.groups),
       },
     });
-    await audit(client, { ...req, user: { sub: user.id, username: user.username, activeRole: session.activeRole } }, {
+    req.user = { sub: user.id, username: user.username, activeRole: session.activeRole };
+    await audit(client, req, {
       module: 'Auth',
       action: 'Entra Login',
       entityType: 'User',
