@@ -198,6 +198,7 @@ const signIdToken = (nonce) => {
     exp: Math.floor(Date.now() / 1000) + 300,
     oid: 'synthetic-provider-subject',
     preferred_username: 'synthetic.user@example.test',
+    groups: ['mock-entra-group-employee'],
   });
   const signer = createSign('RSA-SHA256');
   signer.update(`${header}.${claims}`);
@@ -360,7 +361,11 @@ try {
   await pool.query('insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1', [syntheticUser.rows[0].id]);
   const callback = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`, {redirect: 'manual'}, 2000);
   assert.equal(callback.status, 302);
-  assert.equal(callback.headers.get('location'), `${rootOrigin}/auth/entra/complete`);
+  assert.equal(
+    callback.headers.get('location'),
+    `${rootOrigin}/auth/entra/complete`,
+    `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
+  );
   await pool.query("delete from users where username = 'synthetic-user'");
 
   await closeDiscovery();
