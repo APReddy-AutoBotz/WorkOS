@@ -32,7 +32,6 @@ export PGPASSWORD
 declare -A GATE_STATUS=()
 GATE_ORDER=()
 FAILED=0
-BROWSER_BUNDLE_DIR="$TARGET_ROOT/.browser-bundle"
 
 require_gate() {
   local name="$1"
@@ -382,29 +381,7 @@ production_acceptance() {
   ' "$EVIDENCE_DIR/production-identity-summary.json" >/dev/null
 }
 
-browser_bundle() {
-  set -euo pipefail
-  require_gate engineering_controls
-  cd "$TARGET_ROOT"
-  rm -rf dist
-  VITE_APP_MODE=test \
-  VITE_ALLOW_TEST_FALLBACK=true \
-  VITE_PRODUCT_NAME=WorkOS \
-  VITE_ORGANIZATION_NAME='Acceptance Organization' \
-  VITE_PRODUCT_LOGO_URL=/workos-mark.svg \
-  VITE_SUPPORT_EMAIL=support@example.test \
-    npm run build 2>&1 | tee "$EVIDENCE_DIR/browser-build.log"
-  rm -rf "$BROWSER_BUNDLE_DIR"
-  mkdir -p "$BROWSER_BUNDLE_DIR/dist"
-  cp -a dist/. "$BROWSER_BUNDLE_DIR/dist/"
-  (cd "$BROWSER_BUNDLE_DIR/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) \
-    > "$BROWSER_BUNDLE_DIR/files.sha256"
-  printf 'controller=%s\ntarget=%s\n' "$CONTROLLER_HEAD" "$TARGET_HEAD" \
-    > "$BROWSER_BUNDLE_DIR/authority.txt"
-  (cd "$BROWSER_BUNDLE_DIR" && sha256sum files.sha256 authority.txt > bundle.sha256)
-}
-
-rm -rf "$TARGET_ROOT/dist" "$EVIDENCE_DIR" "$BROWSER_BUNDLE_DIR"
+rm -rf "$TARGET_ROOT/dist" "$EVIDENCE_DIR"
 mkdir -p "$EVIDENCE_DIR"
 
 run_gate repository_boundary repository_boundary
@@ -417,7 +394,6 @@ run_gate build_acceptance build_acceptance
 run_gate postgres_client postgres_client
 run_gate migration_acceptance migration_acceptance
 run_gate production_acceptance production_acceptance
-run_gate browser_bundle browser_bundle
 
 local_status=0
 set +e

@@ -177,17 +177,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload digest-bound browser bundle
-        id: browser_bundle_upload
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wos01a-browser-bundle-${{ env.TARGET_HEAD }}
-          path: target/.browser-bundle
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-
       - name: Verify retained matrix evidence publication
         id: evidence_upload
         if: always()
@@ -196,20 +185,15 @@ jobs:
           ARTIFACT_CONCLUSION: ${{ steps.artifact_upload.conclusion }}
           ARTIFACT_ID: ${{ steps.artifact_upload.outputs.artifact-id }}
           ARTIFACT_DIGEST: ${{ steps.artifact_upload.outputs.artifact-digest }}
-          BUNDLE_ID: ${{ steps.browser_bundle_upload.outputs.artifact-id }}
-          BUNDLE_DIGEST: ${{ steps.browser_bundle_upload.outputs.artifact-digest }}
         run: |
           set -euo pipefail
           test "$ARTIFACT_CONCLUSION" = success
           test -n "$ARTIFACT_ID"
           test -n "$ARTIFACT_DIGEST"
-          test -n "$BUNDLE_ID"
-          test -n "$BUNDLE_DIGEST"
           if [[ ! "$ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]; then
             echo 'Artifact digest is not valid SHA-256 evidence' >&2
             exit 1
           fi
-          [[ "$BUNDLE_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]
 
       - name: Aggregate target-controlled matrix result
         if: always()
@@ -219,10 +203,9 @@ jobs:
           test '${{ steps.authority.outcome }}' = success
           test '${{ steps.matrix.outcome }}' = success
           test '${{ steps.evidence_upload.outcome }}' = success
-          test '${{ steps.browser_bundle_upload.outcome }}' = success
 
-  browser_acceptance:
-    name: Isolated browser authority
+  browser_bundle:
+    name: Pristine exact-head browser bundle producer
     needs: acceptance
     if: always()
     permissions:
@@ -237,6 +220,110 @@ jobs:
       - name: Require target matrix success
         shell: bash
         run: test "$ACCEPTANCE_RESULT" = success
+
+      - name: Checkout immutable controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: controller
+          persist-credentials: false
+
+      - name: Checkout fresh exact product producer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: producer
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: producer/package-lock.json
+
+      - name: Install locked producer dependencies without lifecycle scripts
+        working-directory: producer
+        shell: bash
+        run: npm ci --ignore-scripts
+
+      - name: Restore and prove pristine exact-head build inputs
+        working-directory: producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_HEAD"
+          git reset --hard "$TARGET_HEAD"
+          git clean -ffdx -e node_modules/
+          test "$(git write-tree)" = "$(git rev-parse "$TARGET_HEAD^{tree}")"
+          unexpected="$(git status --porcelain=v1 --untracked-files=all --ignored=no | grep -vE '^\?\? node_modules/' || true)"
+          test -z "$unexpected"
+          printf 'target=%s\ntree=%s\nstatus=pristine\n' \
+            "$TARGET_HEAD" "$(git rev-parse "$TARGET_HEAD^{tree}")" > "$RUNNER_TEMP/producer-authority.txt"
+
+      - name: Build digest-bound browser bundle from pristine producer
+        working-directory: producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git write-tree)" = "$(git rev-parse "$TARGET_HEAD^{tree}")"
+          rm -rf dist "$RUNNER_TEMP/browser-bundle"
+          VITE_APP_MODE=test \
+          VITE_ALLOW_TEST_FALLBACK=true \
+          VITE_PRODUCT_NAME=WorkOS \
+          VITE_ORGANIZATION_NAME='Acceptance Organization' \
+          VITE_PRODUCT_LOGO_URL=/workos-mark.svg \
+          VITE_SUPPORT_EMAIL=support@example.test \
+            npm run build
+          mkdir -p "$RUNNER_TEMP/browser-bundle/dist"
+          cp -a dist/. "$RUNNER_TEMP/browser-bundle/dist/"
+          (cd "$RUNNER_TEMP/browser-bundle/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) \
+            > "$RUNNER_TEMP/browser-bundle/files.sha256"
+          cat "$RUNNER_TEMP/producer-authority.txt" > "$RUNNER_TEMP/browser-bundle/authority.txt"
+          printf 'controller=%s\n' "$CONTROLLER_HEAD" >> "$RUNNER_TEMP/browser-bundle/authority.txt"
+          (cd "$RUNNER_TEMP/browser-bundle" && sha256sum files.sha256 authority.txt > bundle.sha256)
+
+      - name: Upload pristine digest-bound browser bundle
+        id: browser_bundle_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-browser-bundle-${{ env.TARGET_HEAD }}
+          path: ${{ runner.temp }}/browser-bundle
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Aggregate pristine bundle producer result
+        if: always()
+        shell: bash
+        env:
+          BUNDLE_ID: ${{ steps.browser_bundle_upload.outputs.artifact-id }}
+          BUNDLE_DIGEST: ${{ steps.browser_bundle_upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ACCEPTANCE_RESULT" = success
+          test '${{ steps.browser_bundle_upload.outcome }}' = success
+          test -n "$BUNDLE_ID"
+          [[ "$BUNDLE_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]
+
+  browser_acceptance:
+    name: Isolated browser authority
+    needs: [acceptance, browser_bundle]
+    if: always()
+    permissions:
+      contents: read
+    env:
+      ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
+      BUNDLE_RESULT: ${{ needs.browser_bundle.result }}
+      CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+      TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require target matrix success
+        shell: bash
+        run: test "$ACCEPTANCE_RESULT" = success && test "$BUNDLE_RESULT" = success
 
       - name: Checkout immutable controller browser authority
         uses: actions/checkout@v4
@@ -258,6 +345,8 @@ jobs:
           test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_HEAD"
           grep -Fx "controller=$CONTROLLER_HEAD" browser-bundle/authority.txt
           grep -Fx "target=$TARGET_HEAD" browser-bundle/authority.txt
+          grep -Fx "status=pristine" browser-bundle/authority.txt
+          grep -Eq '^tree=[0-9a-f]{40}$' browser-bundle/authority.txt
           (cd browser-bundle/dist && sha256sum -c ../files.sha256)
           (cd browser-bundle && sha256sum -c bundle.sha256)
 

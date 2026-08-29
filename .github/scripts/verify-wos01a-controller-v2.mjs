@@ -1,14 +1,21 @@
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
 const workflow = readFileSync(new URL('../workflows/wos01a-clean-runtime-acceptance-v2.yml', import.meta.url), 'utf8');
 const matrix = readFileSync(new URL('./wos01a-clean-runtime-matrix-v2.sh', import.meta.url), 'utf8');
 
 const acceptanceJob = workflow.match(/\n  acceptance:\n[\s\S]*?\n  browser_acceptance:/)?.[0];
+const browserBundleJob = workflow.match(/\n  browser_bundle:\n[\s\S]*?\n  browser_acceptance:/)?.[0];
+const acceptanceOnlyJob = workflow.match(/\n  acceptance:\n[\s\S]*?\n  browser_bundle:/)?.[0];
 const browserJob = workflow.match(/\n  browser_acceptance:\n[\s\S]*?\n  final_authority:/)?.[0];
 const finalAuthorityJob = workflow.match(/\n  final_authority:\n[\s\S]*?\n  aggregate:/)?.[0];
 const aggregateJob = workflow.match(/\n  aggregate:\n[\s\S]*$/)?.[0];
 assert.ok(acceptanceJob, 'acceptance job must exist');
+assert.ok(acceptanceOnlyJob, 'target matrix job must exist');
+assert.ok(browserBundleJob, 'pristine browser bundle producer job must exist');
 assert.ok(browserJob, 'isolated browser job must exist');
 assert.ok(finalAuthorityJob, 'isolated final-authority job must exist');
 assert.ok(aggregateJob, 'aggregate job must exist');
@@ -32,17 +39,31 @@ assert.match(acceptanceJob, /id: artifact_upload[\s\S]*include-hidden-files: tru
 assert.match(acceptanceJob, /test '\$\{\{ steps\.authority\.outcome \}\}' = success/);
 assert.match(acceptanceJob, /test '\$\{\{ steps\.matrix\.outcome \}\}' = success/);
 assert.match(acceptanceJob, /test '\$\{\{ steps\.evidence_upload\.outcome \}\}' = success/);
-assert.match(acceptanceJob, /id: browser_bundle_upload[\s\S]*if-no-files-found: error/);
-assert.match(acceptanceJob, /test '\$\{\{ steps\.browser_bundle_upload\.outcome \}\}' = success/);
-assert.match(acceptanceJob, /BUNDLE_ID: \$\{\{ steps\.browser_bundle_upload\.outputs\.artifact-id \}\}/);
-assert.match(acceptanceJob, /BUNDLE_DIGEST: \$\{\{ steps\.browser_bundle_upload\.outputs\.artifact-digest \}\}/);
+assert.doesNotMatch(acceptanceOnlyJob, /browser_bundle_upload|npm ci --ignore-scripts/);
 
-assert.match(browserJob, /needs: acceptance/);
+assert.match(browserBundleJob, /needs: acceptance/);
+assert.match(browserBundleJob, /runs-on: ubuntu-latest/);
+assert.match(browserBundleJob, /ref: \$\{\{ env\.TARGET_HEAD \}\}[\s\S]*path: producer[\s\S]*persist-credentials: false/);
+assert.match(browserBundleJob, /npm ci --ignore-scripts/);
+assert.match(browserBundleJob, /git reset --hard "\$TARGET_HEAD"/);
+assert.match(browserBundleJob, /git clean -ffdx -e node_modules\//);
+assert.match(browserBundleJob, /git write-tree/);
+assert.match(browserBundleJob, /git rev-parse "\$TARGET_HEAD\^\{tree\}"/);
+assert.match(browserBundleJob, /unexpected=.*git status --porcelain=v1 --untracked-files=all/);
+assert.match(browserBundleJob, /status=pristine/);
+assert.match(browserBundleJob, /tree=%s/);
+assert.match(browserBundleJob, /id: browser_bundle_upload[\s\S]*if-no-files-found: error/);
+assert.match(browserBundleJob, /test '\$\{\{ steps\.browser_bundle_upload\.outcome \}\}' = success/);
+assert.doesNotMatch(browserBundleJob, /npm (?:test|run (?!build))|test:production-identity|vite preview/);
+
+assert.match(browserJob, /needs: \[acceptance, browser_bundle\]/);
+assert.match(browserJob, /BUNDLE_RESULT: \$\{\{ needs\.browser_bundle\.result \}\}/);
 assert.match(browserJob, /runs-on: ubuntu-latest/);
 assert.match(browserJob, /persist-credentials: false/);
 assert.match(browserJob, /actions\/download-artifact@v4/);
 assert.match(browserJob, /grep -Fx "controller=\$CONTROLLER_HEAD"/);
 assert.match(browserJob, /grep -Fx "target=\$TARGET_HEAD"/);
+assert.match(browserJob, /grep -Fx "status=pristine"/);
 assert.match(browserJob, /sha256sum -c \.\.\/files\.sha256/);
 assert.match(browserJob, /--user 101:101/);
 assert.match(browserJob, /--read-only --cap-drop ALL --security-opt no-new-privileges/);
@@ -141,10 +162,7 @@ for (const gate of [
 }
 assert.doesNotMatch(matrix, /run_gate final_authority|final_authority\(\)/);
 assert.doesNotMatch(matrix, /preload_browser_driver|BROWSER_DRIVER_PID|vite preview/);
-assert.match(matrix, /run_gate browser_bundle browser_bundle/);
-assert.match(matrix, /\.browser-bundle/);
-assert.match(matrix, /find \. -type f -print0[\s\S]*sha256sum/);
-assert.match(matrix, /printf 'controller=%s\\ntarget=%s\\n'/);
+assert.doesNotMatch(matrix, /browser_bundle|\.browser-bundle/);
 assert.match(matrix, /pipeline_status=\("\$\{PIPESTATUS\[@\]\}"\)/);
 assert.match(matrix, /command_rc="\$\{pipeline_status\[0\]:-1\}"/);
 assert.match(matrix, /tee_rc="\$\{pipeline_status\[1\]:-1\}"/);
@@ -284,6 +302,40 @@ for (const [key, value] of [
   ['sessionCookie', true],
 ]) {
   assert.equal(callbackRejectionContract([{...emailOnlyRejection, [key]: value}]), false);
+}
+
+// Model the producer restoration boundary: both tracked and untracked mutations
+// must disappear, while a mismatched expected head must fail provenance.
+const producerFixture = mkdtempSync(join(tmpdir(), 'wos01a-producer-'));
+const git = (...args) => execFileSync('git', args, {
+  cwd: producerFixture,
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe'],
+}).trim();
+try {
+  git('init', '-q');
+  git('config', 'user.email', 'controller@example.test');
+  git('config', 'user.name', 'WOS-01A Controller');
+  writeFileSync(join(producerFixture, 'source.txt'), 'authorized\n');
+  git('add', 'source.txt');
+  git('commit', '-qm', 'authorized producer');
+  const authorizedHead = git('rev-parse', 'HEAD');
+  const authorizedTree = git('rev-parse', `${authorizedHead}^{tree}`);
+
+  writeFileSync(join(producerFixture, 'source.txt'), 'tracked mutation\n');
+  writeFileSync(join(producerFixture, 'stale-input.txt'), 'untracked mutation\n');
+  git('reset', '--hard', authorizedHead);
+  git('clean', '-ffdx');
+  assert.equal(readFileSync(join(producerFixture, 'source.txt'), 'utf8'), 'authorized\n');
+  assert.equal(git('write-tree'), authorizedTree);
+  assert.equal(git('status', '--porcelain=v1', '--untracked-files=all'), '');
+  assert.throws(
+    () => assert.equal(git('write-tree'), git('rev-parse', `${authorizedHead}^1^{tree}`)),
+    /Command failed|unknown revision|ambiguous argument/,
+    'unprovable or failed restoration must not authenticate a producer tree',
+  );
+} finally {
+  rmSync(producerFixture, {recursive: true, force: true});
 }
 
 console.log('WOS-01A isolated final authority, exact migration ledger and evidence logging assertions passed.');
