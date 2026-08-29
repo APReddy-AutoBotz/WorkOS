@@ -90,7 +90,7 @@ chrome.stderr.on('data', appendChromeOutput);
 let client;
 let targetId;
 let sessionId;
-let sleanupPromise;
+let cleanupPromise;
 const cleanup = () => cleanupPromise ||= (async () => {
   if (client) {
     if (sessionId) await client.send('Target.detachFromTarget', { sessionId }).catch(() => {});
