@@ -107,3 +107,84 @@ export class CdpClient {
     await Promise.race([closed, new Promise(resolve => setTimeout(resolve, this.commandTimeoutMs))]);
   }
 }
+
+export class PipeCdpClient {
+  constructor(readable, writable, { commandTimeoutMs = 10_000, maxBufferBytes = 1_048_576 } = {}) {
+    this.readable = readable;
+    this.writable = writable;
+    this.commandTimeoutMs = commandTimeoutMs;
+    this.maxBufferBytes = maxBufferBytes;
+    this.sequence = 0;
+    this.pending = new Map();
+    this.buffer = Buffer.alloc(0);
+    this.closed = false;
+    readable.on('data', chunk => this.#receive(chunk));
+    readable.on('error', error => this.#fail(`failed: ${error.message}`));
+    readable.on('close', () => this.#fail('closed'));
+    writable.on('error', error => this.#fail(`failed: ${error.message}`));
+    writable.on('close', () => this.#fail('closed'));
+  }
+
+  #fail(reason) {
+    if (this.closed) return;
+    this.closed = true;
+    for (const waiter of this.pending.values()) {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error(`CDP pipe ${reason} while awaiting ${waiter.method}`));
+    }
+    this.pending.clear();
+  }
+
+  #receive(chunk) {
+    if (this.closed) return;
+    this.buffer = Buffer.concat([this.buffer, Buffer.from(chunk)]);
+    if (this.buffer.length > this.maxBufferBytes) {
+      this.#fail(`exceeded ${this.maxBufferBytes} buffered bytes`);
+      return;
+    }
+    for (;;) {
+      const boundary = this.buffer.indexOf(0);
+      if (boundary < 0) return;
+      const frame = this.buffer.subarray(0, boundary).toString('utf8');
+      this.buffer = this.buffer.subarray(boundary + 1);
+      if (!frame) continue;
+      let message;
+      try { message = JSON.parse(frame); } catch { this.#fail('returned malformed protocol data'); return; }
+      if (!Number.isSafeInteger(message.id)) continue;
+      const waiter = this.pending.get(message.id);
+      if (!waiter) continue;
+      this.pending.delete(message.id);
+      clearTimeout(waiter.timer);
+      if (message.error) waiter.reject(new Error(`${waiter.method}: ${message.error.message || 'protocol error'}`));
+      else waiter.resolve(message.result || {});
+    }
+  }
+
+  send(method, params = {}, sessionId) {
+    if (this.closed || this.writable.destroyed || !this.writable.writable) {
+      return Promise.reject(new Error(`CDP pipe is not open for ${method}`));
+    }
+    const id = ++this.sequence;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`${method} timed out after ${this.commandTimeoutMs}ms`));
+      }, this.commandTimeoutMs);
+      this.pending.set(id, { resolve, reject, timer, method });
+      const message = JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) });
+      this.writable.write(`${message}\0`, error => {
+        if (!error) return;
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      });
+    });
+  }
+
+  async close() {
+    if (this.closed) return;
+    this.#fail('closed by controller');
+    this.writable.end();
+    this.readable.destroy();
+  }
+}

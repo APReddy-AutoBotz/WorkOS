@@ -148,6 +148,14 @@ const browserDriver = readFileSync(new URL('./wos01a-browser-acceptance-v2.mjs',
 assert.match(browserDriver, /WOS_BROWSER_DRIVER_READY_FILE/);
 assert.match(browserDriver, /await writeFile\(driverReadyFile/);
 assert.match(browserDriver, /await waitForApplication\(\)/);
+assert.match(browserDriver, /--remote-debugging-pipe/);
+assert.match(browserDriver, /new PipeCdpClient\(chrome\.stdio\[4\], chrome\.stdio\[3\]/);
+assert.match(browserDriver, /status: 'control-ready'/);
+assert.doesNotMatch(browserDriver, /remote-debugging-port|WOS_CHROME_DEBUG_PORT|\/json\/version|\/json\/new|webSocketDebuggerUrl/);
+assert.ok(browserDriver.indexOf("client.send('Browser.getVersion')") < browserDriver.indexOf('await writeFile(driverReadyFile'));
+assert.ok(browserDriver.indexOf("client.send('Target.attachToTarget'") < browserDriver.indexOf('await writeFile(driverReadyFile'));
+assert.match(matrix, /payload\.status !== 'control-ready'/);
+assert.match(matrix, /payload\.transport !== 'pipe'/);
 assert.match(matrix, /WOS-01A exact-head acceptance failed closed/);
 
 const production = matrix.match(/production_acceptance\(\) \{[\s\S]*?\n\}/)?.[0];

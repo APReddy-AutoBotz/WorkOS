@@ -187,7 +187,12 @@ preload_browser_driver() {
   node --input-type=module - "$BROWSER_DRIVER_READY" "$BROWSER_DRIVER_PID" <<'NODE'
   import {readFileSync} from 'node:fs';
   const payload = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-  if (payload.pid !== Number(process.argv[3]) || payload.status !== 'loaded') process.exit(1);
+  if (payload.pid !== Number(process.argv[3])
+    || payload.status !== 'control-ready'
+    || payload.transport !== 'pipe'
+    || !Number.isSafeInteger(payload.chromePid)
+    || typeof payload.targetId !== 'string'
+    || typeof payload.sessionId !== 'string') process.exit(1);
 NODE
   printf 'driver_pid=%s
 driver_blob=%s
