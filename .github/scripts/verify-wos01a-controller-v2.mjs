@@ -96,27 +96,41 @@ assert.doesNotMatch(production, /VITE_APP_MODE=test|VITE_ALLOW_TEST_FALLBACK=tru
 assert.match(production, /test:production-identity/);
 assert.match(production, /readiness == \"closed\"/);
 assert.doesNotMatch(production, /readiness == \"closed\"[^\n]*length[^\n]*-eq 4/);
-assert.match(production, /length >= 4/);
+assert.doesNotMatch(production, /length >=/);
 assert.match(production, /length == \(unique \| length\)/);
 assert.match(production, /length == 1/);
 assert.match(production, /all\(\.readiness == \"closed\"\)/);
+for (const key of ['database', 'usersBefore', 'usersAfter', 'employeesBefore', 'employeesAfter']) {
+  assert.match(production, new RegExp(`\\.${key} ==`), `runtime contract must consume producer field ${key}`);
+}
+assert.doesNotMatch(production, /seededUsers|seededEmployees|\/\/ \.users|\/\/ \.employees/);
 
-const positive = {name: 'configured-provider-ready-then-unavailable', startup: 'ready', localLogin: 404, protectedApi: 401, seededUsers: 0, seededEmployees: 0, outageReadiness: 'closed'};
-const negatives = ['missing-setting', 'local-provider', 'discovery-unavailable', 'invalid-discovery'].map((name) => ({name, readiness: 'closed'}));
+const positive = {name: 'configured-provider-ready-then-unavailable', startup: 'ready', database: 'connected', localLogin: 404, protectedApi: 401, usersBefore: 0, usersAfter: 0, employeesBefore: 0, employeesAfter: 0, outageReadiness: 'closed'};
+const mandatoryNegativeNames = ['missing-app-url', 'http-app-url', 'loopback-callback', 'wrong-callback-route', 'missing-identity-setting', 'local-provider-prohibited', 'unavailable-discovery', 'invalid-discovery-document'];
+const negatives = mandatoryNegativeNames.map((name) => ({name, readiness: 'closed'}));
 const identityContract = (cases) => {
+  if (!Array.isArray(cases) || cases.length === 0 || cases.some((entry) => !entry || typeof entry.name !== 'string' || entry.name.length === 0)) return false;
   const names = cases.map(({name}) => name);
   const configured = cases.filter(({name}) => name === positive.name);
   const closed = cases.filter(({name}) => name !== positive.name);
-  return new Set(names).size === names.length && configured.length === 1 && closed.length >= 4
+  return new Set(names).size === names.length && configured.length === 1
+    && mandatoryNegativeNames.every((name) => closed.filter((entry) => entry.name === name).length === 1)
     && closed.every(({readiness}) => readiness === 'closed')
-    && ['startup', 'localLogin', 'protectedApi', 'seededUsers', 'seededEmployees', 'outageReadiness'].every((key) => configured[0][key] === positive[key]);
+    && ['startup', 'database', 'localLogin', 'protectedApi', 'usersBefore', 'usersAfter', 'employeesBefore', 'employeesAfter', 'outageReadiness'].every((key) => configured[0][key] === positive[key]);
 };
 assert.ok(identityContract([...negatives, positive]));
 assert.ok(identityContract([...negatives, {name: 'new-negative', readiness: 'closed'}, positive]));
-assert.equal(identityContract([...negatives.slice(1), positive]), false);
-assert.equal(identityContract([negatives[0], negatives[0], ...negatives.slice(2), positive]), false);
+for (let index = 0; index < negatives.length; index += 1) {
+  assert.equal(identityContract([...negatives.slice(0, index), ...negatives.slice(index + 1), positive]), false);
+}
+assert.equal(identityContract([negatives[0], negatives[0], ...negatives.slice(1), positive]), false);
 assert.equal(identityContract([{...negatives[0], readiness: 'ready'}, ...negatives.slice(1), positive]), false);
-for (const [key, value] of [['startup', 'closed'], ['localLogin', 200], ['protectedApi', 200], ['seededUsers', 1], ['seededEmployees', 1], ['outageReadiness', 'ready']]) {
+assert.equal(identityContract(/** @type {any} */ (undefined)), false);
+assert.equal(identityContract(/** @type {any} */ ({})), false);
+assert.equal(identityContract([]), false);
+assert.equal(identityContract([...negatives]), false);
+assert.equal(identityContract([...negatives, positive, {...positive}]), false);
+for (const [key, value] of [['startup', 'closed'], ['database', 'disconnected'], ['localLogin', 200], ['protectedApi', 200], ['usersBefore', 1], ['usersAfter', 1], ['employeesBefore', 1], ['employeesAfter', 1], ['outageReadiness', 'ready']]) {
   assert.equal(identityContract([...negatives, {...positive, [key]: value}]), false);
 }
 

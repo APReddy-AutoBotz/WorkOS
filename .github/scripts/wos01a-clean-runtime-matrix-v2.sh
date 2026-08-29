@@ -273,18 +273,25 @@ production_acceptance() {
   test -s "$EVIDENCE_DIR/production-identity-summary.json"
   test "$(jq -r .status "$EVIDENCE_DIR/production-identity-summary.json")" = passed
   jq -e '
+    ["missing-app-url", "http-app-url", "loopback-callback", "wrong-callback-route",
+     "missing-identity-setting", "local-provider-prohibited", "unavailable-discovery",
+     "invalid-discovery-document"] as $required_negative |
     (.cases | type == "array") and
-    ([.cases[].name] | all(type == "string") and length == (unique | length)) and
+    (.cases | length > 0) and
+    ([.cases[].name] | all(type == "string" and length > 0) and length == (unique | length)) and
     ([.cases[] | select(.name == "configured-provider-ready-then-unavailable")] | length == 1) and
     ([.cases[] | select(.name != "configured-provider-ready-then-unavailable")] as $negative |
-      ($negative | length >= 4) and
+      ($required_negative | all(. as $name | [$negative[] | select(.name == $name)] | length == 1)) and
       ($negative | all(.readiness == "closed"))) and
     ([.cases[] | select(.name == "configured-provider-ready-then-unavailable")][0] |
       .startup == "ready" and
+      .database == "connected" and
       .localLogin == 404 and
       .protectedApi == 401 and
-      ((.seededUsers // .users) == 0) and
-      ((.seededEmployees // .employees) == 0) and
+      .usersBefore == 0 and
+      .usersAfter == 0 and
+      .employeesBefore == 0 and
+      .employeesAfter == 0 and
       .outageReadiness == "closed")
   ' "$EVIDENCE_DIR/production-identity-summary.json" >/dev/null
 }
