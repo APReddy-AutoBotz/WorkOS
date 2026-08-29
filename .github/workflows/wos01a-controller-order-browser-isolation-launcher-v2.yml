@@ -1,0 +1,99 @@
+name: WOS-01A Controller Order Browser Isolation Launcher v2
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+
+concurrency:
+  group: wos01a-controller-order-browser-isolation-launcher-v2
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  OLD_CONTROLLER_HEAD: 621ae545fdb3ccc729246b21d3b2a50fcdc423d8
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  SOURCE_WORKFLOW: publisher/.github/workflows/wos01a-controller-order-browser-isolation-v1.yml
+
+jobs:
+  publish:
+    name: Execute registered deterministic correction
+    permissions:
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Verify exact live controller, target, parent and main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
+            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
+            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            if (controller.state !== 'open' || !controller.draft) failures.push(`controller=${controller.state}/${controller.draft}`);
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.OLD_CONTROLLER_HEAD) failures.push(`controller.head=${controller.head.ref}@${controller.head.sha}`);
+            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base=${controller.base.ref}@${controller.base.sha}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`target=${target.state}/${target.draft}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head=${target.head.ref}@${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}@${target.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft) failures.push(`parent=${parent.state}/${parent.draft}`);
+            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head=${parent.head.ref}@${parent.head.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(failures.join(', '));
+
+      - name: Checkout registered publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/workos-root-publisher-v1
+          path: publisher
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout exact controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.OLD_CONTROLLER_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Extract registered deterministic scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e '
+            document = YAML.load_file(ARGV.fetch(0), aliases: true)
+            steps = document.fetch("jobs").fetch("publish").fetch("steps")
+            apply = steps.find { |step| step["name"] == "Apply deterministic order and preload isolation correction" }
+            publish = steps.find { |step| step["name"] == "Commit and push under exact-old-head lease" }
+            abort("registered apply script missing") unless apply && apply["run"]
+            abort("registered publish script missing") unless publish && publish["run"]
+            File.write("/tmp/workos-apply.sh", apply.fetch("run"))
+            File.write("/tmp/workos-publish.sh", publish.fetch("run"))
+          ' "$SOURCE_WORKFLOW"
+          chmod 700 /tmp/workos-apply.sh /tmp/workos-publish.sh
+          grep -q 'migration application order' /tmp/workos-apply.sh
+          grep -q 'browser preload' /tmp/workos-apply.sh
+          grep -q -- '--force-with-lease' /tmp/workos-publish.sh
+
+      - name: Apply and validate correction on exact controller checkout
+        shell: bash
+        working-directory: target
+        run: /tmp/workos-apply.sh
+
+      - name: Publish corrected controller under exact-old-head lease
+        shell: bash
+        working-directory: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: /tmp/workos-publish.sh
