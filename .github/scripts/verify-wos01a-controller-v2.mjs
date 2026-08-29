@@ -53,6 +53,12 @@ assert.match(browserJob, /--tmpfs \/tmp:rw,noexec,nosuid,size=1m,uid=101,gid=101
 assert.match(browserJob, /nginx:1\.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10/);
 assert.match(browserJob, /pid \/var\/run\/nginx\.pid;/);
 assert.match(browserJob, /client_body_temp_path \/var\/cache\/nginx\/client_temp;/);
+assert.match(browserJob, /include \/etc\/nginx\/mime\.types;/);
+assert.match(browserJob, /default_type application\/octet-stream;/);
+assert.match(browserJob, /mapfile -t main_assets/);
+assert.match(browserJob, /main-asset-headers\.txt/);
+assert.match(browserJob, /grep -Eiq/);
+assert.match(browserJob, /javascript\|ecmascript/);
 assert.match(browserJob, /\.State\.Running == true/);
 assert.match(browserJob, /\.Config\.User == "101:101"/);
 assert.match(browserJob, /\.HostConfig\.CapDrop == \["ALL"\]/);
