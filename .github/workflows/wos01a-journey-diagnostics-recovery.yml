@@ -1,0 +1,83 @@
+name: WOS-01A Journey Diagnostics Publication Recovery
+
+on:
+  push:
+    branches:
+      - controller/wos01a-clean-runtime-acceptance-v2
+    paths:
+      - '.github/workflows/wos01a-journey-diagnostics-recovery.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wos01a-journey-diagnostics-publication-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Publish bounded journey diagnostics correction
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      EXPECTED_PARENT: 2c39f68521b159e35268385094c1c4502476e5db
+      EXPECTED_ACCEPTANCE_BASE_BLOB: ca3566a31792fd5bb4222097e42493e68844bd51
+      EXPECTED_TEST_BASE_BLOB: acbf8cc84870be49468c4e30987012ab3bca4986
+      PATCH_GZIP_SHA256: 85779e98555a3e80d79aa734614a4e36b398eb4a354834cd36d028c82eae1ec5
+      PATCH_SHA256: 56f56eefd86434b67d2329c8ebef257c9d11c6e3c0b9792a754bd93661264125
+      EXPECTED_ACCEPTANCE_FINAL_BLOB: 551000fe2831e67719f72e947369b2bfa05922b5
+      EXPECTED_TEST_FINAL_BLOB: caf8e294e6940254d44d92cf51c71adc60f575e3
+
+    steps:
+      - name: Checkout exact recovery trigger
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: true
+
+      - name: Verify lease, apply patch and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/wos01a-journey-diagnostics-recovery.yml'
+          acceptance='.github/scripts/wos01a-browser-acceptance-v2.mjs'
+          regression='.github/scripts/test-wos01a-browser-lifecycle-v2.mjs'
+
+          test "$GITHUB_REF" = "refs/heads/$BRANCH"
+          trigger_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(git diff --name-only HEAD^ HEAD)" = "$workflow"
+          test "$(git hash-object "$acceptance")" = "$EXPECTED_ACCEPTANCE_BASE_BLOB"
+          test "$(git hash-object "$regression")" = "$EXPECTED_TEST_BASE_BLOB"
+
+          base64 -d > /tmp/wos01a-journey-diagnostics.patch.gz <<'BASE64'
+H4sIAAAAAAACA8Vba3PbthL97l+BdjIleSVQsmO7uXJT106Uxp34MZbTzJ26Y1EkZDGmCA0JWVZt/fe7APgAH6Io2UmnM5EJArvAYvfsWYB13OEQYXzrMmS1TPgZTQet0A7cCQtbjIQMz2jY3rbwIKCzkATYc4fEntsewfc75vhriAYbDdtyfYc8IMseDN/Ytmna1vAN2fkv2m6393d3tzDGG85nq9FobDqn335DeLu929xHDf6zvYugxQqhLzPHFrNHumXbZMIs3yZN1MI4IGPKCHbIYHp76/q3eOJOSMs42IpHOZSEZ5SdFgcXh9KAPX057928+3h5ftq9ed89/vz7zcX55dXTdetrSP3r1j0JQpf6ybNPZk8zMuhR+46w90ISCT4HnjoDeqfoNYXVz4f6j7bnEp+ZIfEdXTuWBjFvCftTqtCMHw30CyoZqVkzC5xlFriMfHA9ojuBC/O6JJYz58+asabyKysAvabFmGWPrqh81J6lvlGtHiHNHgV07E7HWnOZIt7rltJb8A7RmfCuiuwSf/hKp4FP5hcjKyRX7pjQKTsNW7XGXFFmeXXHBMSmgfOHHNm9dx0C7SvG6Icdj4KfPQWggRhn1r17azHY6WuTBAENrsgDWyEi8hI0oZ5rz9HA427nID8RtWJ8yCw2DTtIY3Kd2or+14tr41q/Npqo1EhN1L9+df0YUI9cL+Iu/WvjQHj/Fmq10BFiwpuwTX0GHT2YLhlPPYvRAFEfsRFBQxqMYVFD94G/9J0JdX2GxtOQoQFBbhAQj9xbPusIiXyEnCT0ZoHlhzxsEew48im6eneBHDe0KXjkHIEO0Dt0b6cBcUR4o4nFRuaWU4W5OYxKLbIcb1cNibDWtl7v7e9bprm3ByjbHlZj7Uqh5Ti7cpjA2NcCYl8333CAdcfCNo9b3Fxgdhq44KjoLZoE1CZhaBL/3uTAeHx5/qXXvbw5vzz5/eQMPT0hbcTYpNNqbe/8bLbhv+3O7vbPr7WDWJRNx2PLdxKfAaFn0/GABHpe9rv3FzdXJ6fd889XN6c9Lnu7fQNWMhJZsROulvXH+efLs+7/cvJ29iJ5jYy8LFqsFnrx8ajXzYnOT62gJBs5NWZ+fnX0KadEL5/wf9AOaiC5ttRY1mQiILmGzqOLi5vL7tH7gr3aIHuf/7Od2Ycc4IPgHgsggerL3OX95cmf8CN1fDj51BWeoxkmDBvrqeAReEo4su5IDKlZ8cJzd9vN7TZq7O7wH2iQI3lK+kCDo8kEkFFAIQyzwrlvI91Ab3/lvp24pEgm70CX61jASqDnX1sIZZw9YgDHJ2fNLVzMQ8U2DNg68PgrlElumcc4KKG5USK0USH0b3Poegw275gC3Fp+ajTZ9ZKE1JvGCxcZOuBN9+SdeN99IPZUSNPz68+LOhahnxdrkkTCgdiIfQEh+3vN7R1lHzgr+JjfxnQvJjzJwOPjIt4VhPJ8otQLINe8evyjd35mhsIZ3OG82LGJ/KnnNdGOsbj2+030OKYO6aA23W+3F3yZC56XsoGpzPGvv5OoLU3w6TKAOwXzaAWwazlR5mQajvRH0zRFvyayWAcBU0Tvwdw6eD096Z1HPm3weTUyRiiYT3+MFEDqzqkSo2FVjewWwkzDiTXz9WRHm9LHNYxHELce+PlbmFHknxj7FIegdkAfoEkmiL3mzi6kiF3Y5p/TDYZM7E1hGaktJJVsIvIwAY/j1LWJQvnHiZPuckAYzJw75dRjpvw5NLk0Em8MzsTyhXVbroXYkPovII83EVPArQDB0fZIoW4YkacLwZ2OOXWCQXroW5NwRJnoHcWWzjckfsH//uknQd/cMKZcTzH1GswRvJiDamQcWs7Y9V3wT85ujJZr8pIn0QBPDywCPkUoDW4t3/1HYNZTRsKTpHmJIAiAElkLpDa7DABTtvdBC/eO2AJrmFU4dYlts4lHABYnf9BBm/p3Pp35EsUmvB9vDQljAr8ai1zQyzkBvgWcx70VoWGCBJENEPIIS3ZAiY/SsNQFA21KrU2UkFw+AkJMW+o0C6lrNuJZRk9ngHAysV/S3gZMHGA/9YwEaOOYSKzZ16Ou3O0hS3aQQ+3pmFdc4rkHUyTNuAunpB0EDiV8wOSPvjVO3/O9ViQMqDM/hCLJJ6JkkLudduYeoPQWz9HbhdFXQ1PYtd5y9BTrULw7Us6l3H+Ouwfxa8A89JjrIKB7YgUh0aMXPXBx8EVe8p4wMta1GQ3uaHgTvdYMsTIuWDMOTeFn0CAUoUWsyhb5JK9Mc31Yg+toSs8If5I1VG9N0mkUkKGyOfxReSuJsvJeNig9lm5u0kNur169v4YZAhYQvQ3JjXMxdYZs7Knj4z+6HuE/hyYvN4OPV6efVopa4jzJe8XKSesi2vaFoZe6lztEehn4pshrpJuyQZRLkMQRIBeCPdayMFL3hJw4E/m4y+tuvb+yrEaMqijLnYDbUtW06KAcPKdm3gMrAxzHhtpCsV3i/ofS99Dbt+C7UDFNIMCIxjNEVqJH/Fs2Qr/CxiVoJCX9oM6Fzy0ZyD1OCK7sYQrAC79AKcnzTGZlrT5sURQ+GUz+bsqVoK30kLSbTExNtUE6jtqS+JBMU46WeZvxo8wLD+ZOnFMYWZYzsiqidSqNiieipWaNnCT6kYsOPUIm+s5eW6atxcq0KIUphlBNUDgLitpLll1vwZmlRqm1EGqXHIxQdo8FLOmWPzeAzEBNgnzK0wvfEhN9ssKUCfAYy9UACYqIAIsIfkyGIzAC1sOpHjeEyGO6YCCu00H9+JTklUAXYOaf6IwE78BMwMz7gh1P4f0ZQHaN3pw477zebu69QY2dN1ChytJI5EOl0inUqro8L0P8KAw4mZj7XxLuxGHh34gOYw4WJuEgxWaQcwYhFPEzXc+Wv/UiSMFYcI1IpabAbbTnWjSzjDPLiYtDzvR0M6EVmSNnzkLNCGCBH0IGnwaQxSD6ZQZdtISYPlqUpJQYd3Ka0mNUo+h4cssWcnYqtA8tYH8O96yl4lLsXtN+QiJOlWUMCcaA5/RlJ2+5RVGrwuETdqZJU3EjlmmPKHjJRkV2jcmZElNJ2MiYKQ51/a8ifNfgjAp/iJmfDcVWoKvSkWBKXtyB39Dckww7tKZspGWH5KSGS/hkswQ85CtjkRUY1yY0ECt8HnXNSI5J6DJWGCnlBKsT/Z2lvosDNZGUM66EdUWbdGimUtEPkIwlEGZ2Zmm8AIawEWGunbjLTJy08whgluvL0MnZNdZsZCNnsVEQRXqxFJqPIrEyaIlVlvi5AKpnAxI3CAe8akjK6aoFSWJMOSQtFbcxJAmJ1ZAkumSRKTePMjDJV5FlUBVJLp1SGU6pHDnlkjHgVZiU+yj4hRtIlAL6LnGf59dkI/OaWuJohLv2kE59p/T8xqjaR3AkwiHjjMLKQcIKdT06JmwEIYNmYB00C6h/+/TZ56easP1P6lm22PdlE6oXyMnsLJ/fDWRFZ2Zau5LZPKZLiMWEX0M6qfuVFG7S1zjzgt3U+xdHvR6KlxdPHuFf1elzp1EnzDFz+W1mLCy+ykxKtuicQRfGqluvKiw/W4sUrKBU2LE5JAaor6Rd0mcxlw569AU3FU+HpswiY4An8OWkNXoW1rbvkmbxtEgr+XyJLLolVWtD/MP/QymjrUE8sWqqFyGBuC4lSvuuz3gySor0JjmAilKMPHfqQulO54RoB/n3U3FkrrXECW/6eo2YgUbX8upx8e/HxNfl4bGFkFzOs/n4BrxYasbL6HF0zxHNs1fDZdJtN/Ji1iHKK2ny2iQZvyxFTsSxgF/aRI/9iuB8IYqFN2Ma6chvTiTwv0IjNt/WnHsbZYzuxeufF6x+ltc+lZWPEqkqbVqJUs+tfRYb4z3euPx5yeJHpq2qHLBO4ZO37nMLoPWN+tJVUNVtpnpnlj/mrb56LL11zThuvatIpTyovs6qc131/Aur1fdMi+pzjbq3Setc9uR9svLyZ+MSqZiHBCpFrHDFhc8gINZdoepXbwXyaCMuZxIfKb2YiXXXxMMYALmVwGpy8Mpj+bJ5lZkBdnxNYI6vC6YhkV+GAvMBzPqHzw2kAZJ43kDUPBtMccNMrhXwLZ/RtZTMvfBJAP63zgFWg3yV3jqqkmjCzz0LwMWTgBqHAM8s1mqcbxRXlDFiEm+VZxyVJxwF14yPIOToJecctU45AsHaUoKVwHneJHH70qMOYaBOgkxJ+wsfeCSGzxx2yEtX7iL1DjZe+lij/qHGc+tUXHm8gatLUbxRIfqy9QouFKP9pQZ9EbqLV1E9XCR6uDbNuyp8aFaT3y0lbbW+HCuSLfxyXAUvYypYgfI1WQr+NhwlP6MqfoK/NzvJT+6bMhP87XjJt2cJqqWem0/xcpZQlUhx7qP2ku+5i6wg/urLOar4VrwZfd59PmWTKbuCvNnJtERf3ajr1r6c93B7+wgN+PbyL5aj+if9/4KQnIQpWGmRAvwftkI7uqA6AAA=
+BASE64
+          printf '%s  %s\n' "$PATCH_GZIP_SHA256" /tmp/wos01a-journey-diagnostics.patch.gz | sha256sum -c -
+          gzip -dc /tmp/wos01a-journey-diagnostics.patch.gz > /tmp/wos01a-journey-diagnostics.patch
+          printf '%s  %s\n' "$PATCH_SHA256" /tmp/wos01a-journey-diagnostics.patch | sha256sum -c -
+
+          git apply --check /tmp/wos01a-journey-diagnostics.patch
+          git apply /tmp/wos01a-journey-diagnostics.patch
+          rm "$workflow"
+
+          node --check "$acceptance"
+          node --check "$regression"
+          node "$regression"
+          git diff --check
+          test "$(git hash-object "$acceptance")" = "$EXPECTED_ACCEPTANCE_FINAL_BLOB"
+          test "$(git hash-object "$regression")" = "$EXPECTED_TEST_FINAL_BLOB"
+
+          actual_paths="$(git diff --name-only "$EXPECTED_PARENT" | LC_ALL=C sort)"
+          expected_paths="$(printf '%s\n' "$acceptance" "$regression" | LC_ALL=C sort)"
+          test "$actual_paths" = "$expected_paths"
+
+          git config user.name 'WorkOS Journey Diagnostics Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'ci: expose bounded browser journey phases'
+          final_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$trigger_head"
+          test "$(git diff --name-only "$EXPECTED_PARENT" "$final_head" | LC_ALL=C sort)" = "$expected_paths"
+          git push --force-with-lease="refs/heads/$BRANCH:$trigger_head" origin "HEAD:refs/heads/$BRANCH"
