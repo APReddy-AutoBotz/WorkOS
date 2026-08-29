@@ -1,6 +1,111 @@
-import { rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { constants as fsConstants } from 'node:fs';
+import { access, readFile, readlink, realpath, rm } from 'node:fs/promises';
+import path from 'node:path';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const defaultVersionRunner = (executable) => {
+  const result = spawnSync(executable, ['--version'], {
+    encoding: 'utf8',
+    timeout: 5_000,
+    windowsHide: true,
+  });
+  return {
+    status: result.status,
+    stdout: String(result.stdout || ''),
+    stderr: String(result.stderr || ''),
+    error: result.error,
+  };
+};
+
+const chromeIdentity = /\b(?:Google Chrome|Chrome for Testing|Chromium)\b/i;
+
+export async function resolveChromeExecutable(candidates, {
+  pathEnv = process.env.PATH || '',
+  canExecute = async (candidate) => {
+    try {
+      await access(candidate, fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  canonicalize = async (candidate) => {
+    try { return await realpath(candidate); } catch { return path.resolve(candidate); }
+  },
+  runVersion = defaultVersionRunner,
+} = {}) {
+  const attempted = [];
+  for (const requested of candidates.filter(Boolean)) {
+    const locations = requested.includes(path.sep)
+      ? [requested]
+      : pathEnv.split(path.delimiter).map(entry => path.join(entry || '.', requested));
+    for (const location of locations) {
+      if (!await canExecute(location)) continue;
+      const canonicalPath = await canonicalize(location);
+      const adjacentBinary = /^(?:google-chrome(?:-stable)?|chrome-wrapper)$/i.test(path.basename(canonicalPath))
+        ? path.join(path.dirname(canonicalPath), 'chrome')
+        : null;
+      const launchCandidates = [];
+      if (adjacentBinary && await canExecute(adjacentBinary)) {
+        launchCandidates.push({executable: await canonicalize(adjacentBinary), wrapperBypassed: true});
+      }
+      launchCandidates.push({executable: canonicalPath, wrapperBypassed: false});
+
+      for (const launch of launchCandidates) {
+        const versionResult = runVersion(launch.executable);
+        const version = `${versionResult?.stdout || ''}\n${versionResult?.stderr || ''}`.trim();
+        attempted.push({requested, location, executable: launch.executable, status: versionResult?.status, version});
+        if (!versionResult?.error && versionResult?.status === 0 && chromeIdentity.test(version)) {
+          return {
+            requested,
+            locatedPath: location,
+            canonicalPath,
+            executable: launch.executable,
+            wrapperBypassed: launch.wrapperBypassed,
+            version,
+          };
+        }
+      }
+    }
+  }
+  const detail = attempted.length
+    ? attempted.map(item => `${item.executable} status=${item.status ?? 'none'} version=${JSON.stringify(item.version)}`).join('; ')
+    : 'no executable candidate was found on PATH';
+  throw new Error(`No trusted Chrome/Chromium executable could be resolved: ${detail}`);
+}
+
+export async function readChromeProcessDiagnostics(pid, {
+  readText = readFile,
+  readLink = readlink,
+} = {}) {
+  const safeText = async (file, maxBytes = 16_384) => {
+    try {
+      const value = await readText(file);
+      return Buffer.from(value).subarray(0, maxBytes).toString('utf8');
+    } catch (error) {
+      return `<unavailable:${error?.code || error}>`;
+    }
+  };
+  const safeLink = async (file) => {
+    try { return await readLink(file); } catch (error) { return `<unavailable:${error?.code || error}>`; }
+  };
+  const root = `/proc/${pid}`;
+  const status = await safeText(`${root}/status`);
+  const selectedStatus = status
+    .split('\n')
+    .filter(line => /^(?:Name|State|Pid|PPid|NSpid|Uid|Gid|Threads):/.test(line))
+    .join('\n');
+  return {
+    pid,
+    executable: await safeLink(`${root}/exe`),
+    commandLine: (await safeText(`${root}/cmdline`)).replaceAll('\0', ' ').trim(),
+    fd3: await safeLink(`${root}/fd/3`),
+    fd4: await safeLink(`${root}/fd/4`),
+    status: selectedStatus,
+  };
+}
 
 export async function terminateProcessTree(child, {
   waitMs = 3_000,

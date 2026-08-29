@@ -2,7 +2,59 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { PassThrough } from 'node:stream';
-import { CdpClient, PipeCdpClient, removeProfile, terminateProcessTree } from './wos01a-browser-lifecycle-v2.mjs';
+import {
+  CdpClient,
+  PipeCdpClient,
+  readChromeProcessDiagnostics,
+  removeProfile,
+  resolveChromeExecutable,
+  terminateProcessTree,
+} from './wos01a-browser-lifecycle-v2.mjs';
+
+const wrapperResolution = await resolveChromeExecutable(['google-chrome'], {
+  pathEnv: '/usr/bin',
+  canExecute: async candidate => new Set([
+    '/usr/bin/google-chrome',
+    '/opt/google/chrome/chrome',
+  ]).has(candidate),
+  canonicalize: async candidate => candidate === '/usr/bin/google-chrome'
+    ? '/opt/google/chrome/google-chrome'
+    : candidate,
+  runVersion: executable => executable === '/opt/google/chrome/chrome'
+    ? {status: 0, stdout: 'Google Chrome 144.0.0.0', stderr: ''}
+    : {status: 1, stdout: '', stderr: 'wrapper must not be selected'},
+});
+assert.equal(wrapperResolution.executable, '/opt/google/chrome/chrome');
+assert.equal(wrapperResolution.wrapperBypassed, true);
+assert.match(wrapperResolution.version, /Google Chrome/);
+
+const directResolution = await resolveChromeExecutable(['/trusted/chromium'], {
+  canExecute: async candidate => candidate === '/trusted/chromium',
+  canonicalize: async candidate => candidate,
+  runVersion: () => ({status: 0, stdout: 'Chromium 144.0.0.0', stderr: ''}),
+});
+assert.equal(directResolution.executable, '/trusted/chromium');
+assert.equal(directResolution.wrapperBypassed, false);
+await assert.rejects(resolveChromeExecutable(['/untrusted/browser'], {
+  canExecute: async () => true,
+  canonicalize: async candidate => candidate,
+  runVersion: () => ({status: 0, stdout: 'Not A Browser 1.0', stderr: ''}),
+}), /No trusted Chrome\/Chromium executable/);
+
+const diagnostics = await readChromeProcessDiagnostics(77, {
+  readText: async file => file.endsWith('/cmdline')
+    ? Buffer.from('chrome\0--remote-debugging-pipe\0')
+    : Buffer.from('Name:\tchrome\nState:\tS (sleeping)\nPid:\t77\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\n'),
+  readLink: async file => ({
+    '/proc/77/exe': '/opt/google/chrome/chrome',
+    '/proc/77/fd/3': 'pipe:[3003]',
+    '/proc/77/fd/4': 'pipe:[4004]',
+  })[file],
+});
+assert.equal(diagnostics.executable, '/opt/google/chrome/chrome');
+assert.equal(diagnostics.fd3, 'pipe:[3003]');
+assert.equal(diagnostics.fd4, 'pipe:[4004]');
+assert.match(diagnostics.commandLine, /--remote-debugging-pipe/);
 
 const child = { pid: 42, exitCode: null, signalCode: null };
 const signals = [];
@@ -45,6 +97,9 @@ for (const event of ['error', 'invalid']) {
 }
 
 const acceptance = await readFile(new URL('./wos01a-browser-acceptance-v2.mjs', import.meta.url), 'utf8');
+assert.match(acceptance, /resolveChromeExecutable/);
+assert.match(acceptance, /readChromeProcessDiagnostics/);
+assert.match(acceptance, /chrome-handshake\.json/);
 assert.match(acceptance, /--remote-debugging-pipe/);
 assert.doesNotMatch(acceptance, /remote-debugging-port|WOS_CHROME_DEBUG_PORT|\/json\/version|\/json\/new|webSocketDebuggerUrl/);
 assert.ok(acceptance.indexOf("client.send('Browser.getVersion')") < acceptance.indexOf('await writeFile(driverReadyFile'));
@@ -62,6 +117,7 @@ const pipeClient = new PipeCdpClient(chromeToController, controllerToChrome, { c
 let sent;
 controllerToChrome.once('data', chunk => {
   sent = JSON.parse(chunk.toString().replace(/\0$/, ''));
+  chromeToController.write(`${JSON.stringify({id: sent.id + 100, result: {targetId: 'wrong-channel'}})}\0`);
   chromeToController.write(`${JSON.stringify({id: sent.id, result: {targetId: 'trusted-target'}})}\0`);
 });
 assert.deepEqual(await pipeClient.send('Target.createTarget', {url: 'about:blank'}), {targetId: 'trusted-target'});

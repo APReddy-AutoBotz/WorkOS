@@ -1,14 +1,24 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { PipeCdpClient, removeProfile, terminateProcessTree } from './wos01a-browser-lifecycle-v2.mjs';
+import {
+  PipeCdpClient,
+  readChromeProcessDiagnostics,
+  removeProfile,
+  resolveChromeExecutable,
+  terminateProcessTree,
+} from './wos01a-browser-lifecycle-v2.mjs';
 
 const origin = process.env.WOS_BROWSER_ORIGIN || 'http://127.0.0.1:4173';
 const commandTimeoutMs = Number(process.env.WOS_CDP_TIMEOUT_MS || 10_000);
 const journeyTimeoutMs = Number(process.env.WOS_JOURNEY_TIMEOUT_MS || 25_000);
 const appReadyTimeoutMs = Number(process.env.WOS_APP_READY_TIMEOUT_MS || 20 * 60 * 1000);
 const driverReadyFile = String(process.env.WOS_BROWSER_DRIVER_READY_FILE || '').trim();
+const handshakeEvidenceFile = String(
+  process.env.WOS_CHROME_HANDSHAKE_EVIDENCE
+  || path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'wos01a-browser-evidence', 'chrome-handshake.json'),
+).trim();
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -35,15 +45,24 @@ const chromeCandidates = [
   'chromium',
   'chromium-browser',
 ].filter(Boolean);
-
-const chromeBin = chromeCandidates.find(candidate =>
-  spawnSync('bash', ['-lc', `command -v ${JSON.stringify(candidate)}`], { stdio: 'ignore' }).status === 0
-);
-
-if (!chromeBin) {
-  throw new Error(`No supported Chrome/Chromium executable found (${chromeCandidates.join(', ')})`);
-}
+const chromeResolution = await resolveChromeExecutable(chromeCandidates);
+const chromeBin = chromeResolution.executable;
 const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'workos-chrome-'));
+
+const handshakeEvidence = {
+  status: 'launching',
+  startedAt: new Date().toISOString(),
+  node: process.version,
+  platform: `${process.platform}/${process.arch}`,
+  origin,
+  chromeResolution,
+};
+const writeHandshakeEvidence = async (patch = {}) => {
+  Object.assign(handshakeEvidence, patch, {updatedAt: new Date().toISOString()});
+  await mkdir(path.dirname(handshakeEvidenceFile), {recursive: true});
+  await writeFile(handshakeEvidenceFile, `${JSON.stringify(handshakeEvidence, null, 2)}\n`, {mode: 0o600});
+};
+
 const chrome = spawn(chromeBin, [
   '--headless=new',
   '--no-sandbox',
@@ -62,13 +81,16 @@ const chrome = spawn(chromeBin, [
 ], { stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'], detached: true });
 
 let chromeOutput = '';
-chrome.stdout.on('data', chunk => { chromeOutput += chunk.toString(); });
-chrome.stderr.on('data', chunk => { chromeOutput += chunk.toString(); });
+const appendChromeOutput = (chunk) => {
+  chromeOutput = `${chromeOutput}${chunk.toString()}`.slice(-65_536);
+};
+chrome.stdout.on('data', appendChromeOutput);
+chrome.stderr.on('data', appendChromeOutput);
 
 let client;
 let targetId;
 let sessionId;
-let cleanupPromise;
+let sleanupPromise;
 const cleanup = () => cleanupPromise ||= (async () => {
   if (client) {
     if (sessionId) await client.send('Target.detachFromTarget', { sessionId }).catch(() => {});
@@ -152,15 +174,57 @@ const journeys = [
 ];
 
 try {
+  await new Promise((resolve, reject) => {
+    chrome.once('spawn', resolve);
+    chrome.once('error', reject);
+  });
+  await sleep(100);
+  const processDiagnostics = await readChromeProcessDiagnostics(chrome.pid);
+  const actualExecutable = processDiagnostics.executable.replace(/ \(deleted\)$/, '');
+  const actualVersionResult = !actualExecutable.startsWith('<unavailable:')
+    ? spawnSync(actualExecutable, ['--version'], {encoding: 'utf8', timeout: 5_000})
+    : null;
+  const actualVersion = `${actualVersionResult?.stdout || ''}\n${actualVersionResult?.stderr || ''}`.trim();
+  if (!actualVersionResult || actualVersionResult.error || actualVersionResult.status !== 0
+      || !/\b(?:Google Chrome|Chrome for Testing|Chromium)\b/i.test(actualVersion)) {
+    throw new Error(`Spawned process is not a trusted Chrome/Chromium executable: ${JSON.stringify({processDiagnostics, actualVersion})}`);
+  }
+  if (!/^(?:pipe|socket):\[\d+\]$/.test(processDiagnostics.fd3)
+      || !/^(?:pipe|socket):\[\d+\]$/.test(processDiagnostics.fd4)
+      || processDiagnostics.fd3 === processDiagnostics.fd4) {
+    throw new Error(`Chrome DevTools pipe descriptors are not distinct open kernel channels: ${JSON.stringify(processDiagnostics)}`);
+  }
+  await writeHandshakeEvidence({
+    status: 'spawned',
+    controllerPid: process.pid,
+    chromePid: chrome.pid,
+    processDiagnostics,
+    actualVersion,
+  });
+
   // Chromium reads controller commands on fd 3 and writes responses on fd 4.
   client = new PipeCdpClient(chrome.stdio[4], chrome.stdio[3], { commandTimeoutMs });
-  chrome.once('exit', (code, signal) => client?.close().catch(() => {}) && console.error(`Chrome exited code=${code} signal=${signal}`));
-  await withTimeout(client.send('Browser.getVersion'), 15_000, 'trusted Chrome pipe handshake');
+  chrome.once('exit', (code, signal) => {
+    handshakeEvidence.chromeExit = {code, signal, at: new Date().toISOString()};
+    void client?.close().catch(() => {});
+    console.error(`Chrome exited code=${code} signal=${signal}`);
+  });
+  const browserVersion = await withTimeout(client.send('Browser.getVersion'), 15_000, 'trusted Chrome pipe handshake');
+  if (!browserVersion?.protocolVersion || !/\b(?:Chrome|Chromium)\//i.test(String(browserVersion.product || ''))) {
+    throw new Error(`Chrome returned an invalid Browser.getVersion identity: ${JSON.stringify(browserVersion)}`);
+  }
   ({ targetId } = await client.send('Target.createTarget', { url: 'about:blank' }));
   ({ sessionId } = await client.send('Target.attachToTarget', { targetId, flatten: true }));
   await client.send('Page.enable', {}, sessionId);
   await client.send('Runtime.enable', {}, sessionId);
   if (!targetId || !sessionId || chrome.exitCode !== null) throw new Error('Trusted Chrome target/session establishment failed');
+  await writeHandshakeEvidence({
+    status: 'control-ready',
+    browserVersion,
+    targetId,
+    sessionId,
+    chromeOutputTail: chromeOutput,
+  });
   if (driverReadyFile) {
     await writeFile(driverReadyFile, `${JSON.stringify({status: 'control-ready', pid: process.pid, chromePid: chrome.pid, transport: 'pipe', targetId, sessionId})}\n`, {mode: 0o600});
   }
@@ -219,7 +283,18 @@ try {
     console.log(`PASS Employee denied /admin -> ${snapshot.path}`);
   })(), journeyTimeoutMs, 'Employee denial journey');
 
+  await writeHandshakeEvidence({status: 'passed', completedAt: new Date().toISOString(), chromeOutputTail: chromeOutput});
   console.log('WOS-01A bounded browser acceptance passed.');
+} catch (error) {
+  const processDiagnostics = chrome.pid ? await readChromeProcessDiagnostics(chrome.pid) : null;
+  await writeHandshakeEvidence({
+    status: 'failed',
+    error: {name: error?.name, message: error?.message, stack: error?.stack},
+    processDiagnostics,
+    chromeOutputTail: chromeOutput,
+  }).catch(recordError => console.error('Unable to retain Chrome handshake evidence', recordError));
+  console.error('WOS-01A Chrome handshake diagnostics:', JSON.stringify({chromeResolution, processDiagnostics, chromeOutputTail: chromeOutput}, null, 2));
+  throw error;
 } finally {
   await cleanup();
 }
