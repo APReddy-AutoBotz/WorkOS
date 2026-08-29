@@ -32,6 +32,25 @@ export PGPASSWORD
 declare -A GATE_STATUS=()
 GATE_ORDER=()
 FAILED=0
+BROWSER_DRIVER_PID=''
+BROWSER_DRIVER_READY="$EVIDENCE_DIR/browser-driver-loaded.json"
+BROWSER_DRIVER_LOG="$EVIDENCE_DIR/browser-journeys.log"
+
+cleanup_preloaded_browser() {
+  if [[ -n "${BROWSER_DRIVER_PID:-}" ]] && kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
+    kill -TERM "$BROWSER_DRIVER_PID" 2>/dev/null || true
+    for _attempt in $(seq 1 50); do
+      if ! kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then break; fi
+      sleep 0.1
+    done
+    if kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
+      kill -KILL "$BROWSER_DRIVER_PID" 2>/dev/null || true
+    fi
+    wait "$BROWSER_DRIVER_PID" 2>/dev/null || true
+  fi
+  BROWSER_DRIVER_PID=''
+}
+trap cleanup_preloaded_browser EXIT INT TERM
 
 require_gate() {
   local name="$1"
@@ -74,6 +93,38 @@ run_gate() {
   fi
 }
 
+run_gate_parent() {
+  local name="$1"
+  shift
+  local log="$EVIDENCE_DIR/${name}.log"
+  local command_rc=1
+  local cat_rc=1
+  local rc=1
+  GATE_ORDER+=("$name")
+  echo "===== START $name ====="
+  set +e
+  "$@" > "$log" 2>&1
+  command_rc=$?
+  cat "$log"
+  cat_rc=$?
+  set -e
+  if [[ "$command_rc" -eq 0 && "$cat_rc" -eq 0 ]]; then
+    rc=0
+  elif [[ "$command_rc" -ne 0 ]]; then
+    rc="$command_rc"
+  else
+    rc="$cat_rc"
+  fi
+  if [[ $rc -eq 0 ]]; then
+    GATE_STATUS[$name]="PASS"
+    echo "===== PASS $name ====="
+  else
+    GATE_STATUS[$name]="FAIL"
+    FAILED=1
+    echo "===== FAIL $name command_rc=$command_rc evidence_rc=$cat_rc =====" >&2
+  fi
+}
+
 repository_boundary() {
   set -euo pipefail
   test "$(git -C "$CONTROLLER_ROOT" rev-parse HEAD)" = "$CONTROLLER_HEAD"
@@ -107,6 +158,41 @@ browser_lifecycle_regression() {
   set -euo pipefail
   cd "$CONTROLLER_ROOT"
   node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
+}
+
+preload_browser_driver() {
+  set -euo pipefail
+  local driver_rel='.github/scripts/wos01a-browser-acceptance-v2.mjs'
+  local lifecycle_rel='.github/scripts/wos01a-browser-lifecycle-v2.mjs'
+  local expected_driver expected_lifecycle actual_driver actual_lifecycle
+  expected_driver="$(git -C "$CONTROLLER_ROOT" rev-parse "$CONTROLLER_HEAD:$driver_rel")"
+  expected_lifecycle="$(git -C "$CONTROLLER_ROOT" rev-parse "$CONTROLLER_HEAD:$lifecycle_rel")"
+  actual_driver="$(git -C "$CONTROLLER_ROOT" hash-object "$CONTROLLER_ROOT/$driver_rel")"
+  actual_lifecycle="$(git -C "$CONTROLLER_ROOT" hash-object "$CONTROLLER_ROOT/$lifecycle_rel")"
+  test "$expected_driver" = "$actual_driver"
+  test "$expected_lifecycle" = "$actual_lifecycle"
+  rm -f "$BROWSER_DRIVER_READY" "$BROWSER_DRIVER_LOG"
+  WOS_BROWSER_ORIGIN=http://127.0.0.1:4173   WOS_BROWSER_DRIVER_READY_FILE="$BROWSER_DRIVER_READY"   WOS_APP_READY_TIMEOUT_MS=1200000     node "$CONTROLLER_ROOT/$driver_rel" > "$BROWSER_DRIVER_LOG" 2>&1 &
+  BROWSER_DRIVER_PID=$!
+  for _attempt in $(seq 1 300); do
+    if [[ -s "$BROWSER_DRIVER_READY" ]]; then break; fi
+    if ! kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
+      cat "$BROWSER_DRIVER_LOG" >&2 || true
+      wait "$BROWSER_DRIVER_PID" || true
+      return 1
+    fi
+    sleep 0.1
+  done
+  test -s "$BROWSER_DRIVER_READY"
+  node --input-type=module - "$BROWSER_DRIVER_READY" "$BROWSER_DRIVER_PID" <<'NODE'
+  import {readFileSync} from 'node:fs';
+  const payload = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+  if (payload.pid !== Number(process.argv[3]) || payload.status !== 'loaded') process.exit(1);
+NODE
+  printf 'driver_pid=%s
+driver_blob=%s
+lifecycle_blob=%s
+'     "$BROWSER_DRIVER_PID" "$actual_driver" "$actual_lifecycle"
 }
 
 locked_install() {
@@ -230,11 +316,10 @@ migration_acceptance() {
   done
 
   local expected_ids="$EVIDENCE_DIR/expected-migration-ids.txt"
-  {
-    printf '%s\n' '005_auth_lifecycle'
-    find server/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' \
-      | sed 's/\.sql$//'
-  } | LC_ALL=C sort > "$expected_ids"
+  printf '%s\n' '005_auth_lifecycle' > "$expected_ids"
+  find server/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' \
+    | sed 's/\.sql$//' \
+    | LC_ALL=C sort >> "$expected_ids"
   test -s "$expected_ids"
 
   local expected
@@ -244,10 +329,14 @@ migration_acceptance() {
   verify_ledger() {
     local database_url="$1"
     local label="$2"
+    local ordered="$EVIDENCE_DIR/${label}-migration-order.txt"
     local actual="$EVIDENCE_DIR/${label}-migration-ids.txt"
-    psql "$database_url" -Atc 'select id from schema_migrations order by id' > "$actual"
+    psql "$database_url" -At -F '|' -c \
+      'select id, applied_at, xmin::text::bigint, ctid from schema_migrations order by applied_at asc, xmin::text::bigint asc, ctid asc' \
+      > "$ordered"
+    cut -d'|' -f1 "$ordered" > "$actual"
     if ! cmp -s "$expected_ids" "$actual"; then
-      echo "Migration ledger mismatch for $label" >&2
+      echo "Migration application order mismatch for $label" >&2
       diff -u "$expected_ids" "$actual" >&2 || true
       return 1
     fi
@@ -373,13 +462,19 @@ browser_acceptance() {
     sleep 0.5
   done
   test "$ready" = true
-  WOS_BROWSER_ORIGIN=http://127.0.0.1:4173 \
-    node "$CONTROLLER_ROOT/.github/scripts/wos01a-browser-acceptance-v2.mjs" \
-    2>&1 | tee "$EVIDENCE_DIR/browser-journeys.log"
+  test -n "$BROWSER_DRIVER_PID"
+  local driver_rc=1
+  set +e
+  wait "$BROWSER_DRIVER_PID"
+  driver_rc=$?
+  set -e
+  BROWSER_DRIVER_PID=''
+  test "$driver_rc" -eq 0
+  grep -q 'WOS-01A bounded browser acceptance passed.' "$BROWSER_DRIVER_LOG"
   test -z "$(git status --porcelain --untracked-files=no)"
   cleanup_preview
   preview_pid=''
-  trap - EXIT
+  trap cleanup_preloaded_browser EXIT INT TERM
 }
 
 rm -rf "$TARGET_ROOT/dist" "$EVIDENCE_DIR"
@@ -388,6 +483,7 @@ mkdir -p "$EVIDENCE_DIR"
 run_gate repository_boundary repository_boundary
 run_gate controller_regression controller_regression
 run_gate browser_lifecycle_regression browser_lifecycle_regression
+run_gate_parent browser_driver_preload preload_browser_driver
 run_gate locked_install locked_install
 run_gate engineering_controls engineering_controls
 run_gate dependency_classification dependency_classification
@@ -395,7 +491,7 @@ run_gate build_acceptance build_acceptance
 run_gate postgres_client postgres_client
 run_gate migration_acceptance migration_acceptance
 run_gate production_acceptance production_acceptance
-run_gate browser_acceptance browser_acceptance
+run_gate_parent browser_acceptance browser_acceptance
 
 local_status=0
 set +e

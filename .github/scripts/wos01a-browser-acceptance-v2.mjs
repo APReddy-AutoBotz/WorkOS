@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { CdpClient, removeProfile, terminateProcessTree } from './wos01a-browser-lifecycle-v2.mjs';
@@ -8,8 +8,26 @@ const origin = process.env.WOS_BROWSER_ORIGIN || 'http://127.0.0.1:4173';
 const debugPort = Number(process.env.WOS_CHROME_DEBUG_PORT || 9222);
 const commandTimeoutMs = Number(process.env.WOS_CDP_TIMEOUT_MS || 10_000);
 const journeyTimeoutMs = Number(process.env.WOS_JOURNEY_TIMEOUT_MS || 25_000);
+const appReadyTimeoutMs = Number(process.env.WOS_APP_READY_TIMEOUT_MS || 20 * 60 * 1000);
+const driverReadyFile = String(process.env.WOS_BROWSER_DRIVER_READY_FILE || '').trim();
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const waitForApplication = async () => {
+  const started = Date.now();
+  let lastError;
+  while (Date.now() - started < appReadyTimeoutMs) {
+    try {
+      const response = await fetch(`${origin}/login`, { signal: AbortSignal.timeout(2_000) });
+      if (response.ok) return;
+      lastError = new Error(`application returned ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(250);
+  }
+  throw new Error(`Application did not become ready within ${appReadyTimeoutMs}ms: ${lastError?.message || 'unknown error'}`);
+};
 
 const chromeCandidates = [
   process.env.CHROME_BIN,
@@ -29,6 +47,11 @@ if (!chromeBin) {
 if (typeof WebSocket !== 'function') {
   throw new Error('Node runtime does not provide the WebSocket API required for bounded CDP acceptance');
 }
+
+if (driverReadyFile) {
+  await writeFile(driverReadyFile, `${JSON.stringify({status: 'loaded', pid: process.pid, origin})}\n`, {mode: 0o600});
+}
+await waitForApplication();
 
 const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'workos-chrome-'));
 const chrome = spawn(chromeBin, [

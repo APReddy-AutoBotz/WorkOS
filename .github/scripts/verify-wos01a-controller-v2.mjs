@@ -88,11 +88,16 @@ for (const gate of [
   'postgres_client',
   'migration_acceptance',
   'production_acceptance',
-  'browser_acceptance',
 ]) {
   assert.match(matrix, new RegExp(`run_gate ${gate} ${gate}`), `matrix must retain ${gate}`);
 }
 assert.doesNotMatch(matrix, /run_gate final_authority|final_authority\(\)/);
+assert.match(matrix, /run_gate_parent browser_driver_preload preload_browser_driver/);
+assert.match(matrix, /run_gate_parent browser_acceptance browser_acceptance/);
+assert.match(matrix, /rev-parse "\$CONTROLLER_HEAD:\$driver_rel"/);
+assert.match(matrix, /hash-object "\$CONTROLLER_ROOT\/\$driver_rel"/);
+assert.match(matrix, /wait "\$BROWSER_DRIVER_PID"/);
+assert.match(matrix, /browser-driver-loaded\.json/);
 assert.match(matrix, /pipeline_status=\("\$\{PIPESTATUS\[@\]\}"\)/);
 assert.match(matrix, /command_rc="\$\{pipeline_status\[0\]:-1\}"/);
 assert.match(matrix, /tee_rc="\$\{pipeline_status\[1\]:-1\}"/);
@@ -112,8 +117,11 @@ assert.ok(migration, 'migration acceptance function must exist');
 assert.match(migration, /expected-migration-ids\.txt/);
 assert.match(migration, /printf '%s\\n' '005_auth_lifecycle'/);
 assert.match(migration, /find server\/migrations[\s\S]*sed 's\/\\\.sql\$\/\/'/);
-assert.match(migration, /select id from schema_migrations order by id/);
+assert.match(migration, /select id, applied_at, xmin::text::bigint, ctid from schema_migrations order by applied_at asc, xmin::text::bigint asc, ctid asc/);
+assert.match(migration, /migration-order\.txt/);
 assert.match(migration, /cmp -s "\$expected_ids" "\$actual"/);
+assert.match(migration, /printf '%s\\n' '005_auth_lifecycle' > "\$expected_ids"/);
+assert.match(migration, /LC_ALL=C sort >> "\$expected_ids"/);
 for (const ledger of ['fresh-first', 'fresh-replay', 'upgrade-first', 'upgrade-replay', 'production-fixture']) {
   assert.ok(migration.includes(`verify_ledger "$${ledger.startsWith('fresh') ? 'fresh_url' : ledger.startsWith('upgrade') ? 'upgrade_url' : 'prod_url'}" ${ledger}`));
 }
@@ -136,6 +144,10 @@ assert.match(matrix, /\.localLogin[\s\S]*== 404/);
 assert.match(matrix, /\.protectedApi[\s\S]*== 401/);
 assert.match(matrix, /\.outageReadiness[\s\S]*== "closed"/);
 assert.match(matrix, /wos01a-browser-acceptance-v2\.mjs/);
+const browserDriver = readFileSync(new URL('./wos01a-browser-acceptance-v2.mjs', import.meta.url), 'utf8');
+assert.match(browserDriver, /WOS_BROWSER_DRIVER_READY_FILE/);
+assert.match(browserDriver, /await writeFile\(driverReadyFile/);
+assert.match(browserDriver, /await waitForApplication\(\)/);
 assert.match(matrix, /WOS-01A exact-head acceptance failed closed/);
 
 const production = matrix.match(/production_acceptance\(\) \{[\s\S]*?\n\}/)?.[0];
