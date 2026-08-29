@@ -1,4 +1,4 @@
-name: WOS-01A Subject-Only Identity Launcher v2
+name: WOS-01A Subject-Only Identity Launcher v3
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - controller/workos-root-publisher-v1
 
 concurrency:
-  group: wos01a-subject-only-identity-launcher-v2
+  group: wos01a-subject-only-identity-launcher-v3
   cancel-in-progress: false
 
 env:
@@ -17,14 +17,13 @@ env:
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
   EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
-  SOURCE_WORKFLOW: publisher/.github/workflows/wos01a-rebind-callback-coverage-v1.yml
   SERVER_PATH: server/index.mjs
   TEST_PATH: tests/production-identity-smoke.mjs
   EVIDENCE_PATH: docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
 
 jobs:
   publish:
-    name: Execute registered subject-only correction
+    name: Publish exact subject-only identity closure
     permissions:
       contents: write
       pull-requests: read
@@ -36,80 +35,170 @@ jobs:
         with:
           script: |
             const failures = [];
-            const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
-            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
-            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            const {data: target} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
+            });
+            const {data: parent} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PARENT_PR),
+            });
+            const {data: main} = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
             if (target.state !== 'open' || !target.draft) failures.push(`target=${target.state}/${target.draft}`);
             if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.OLD_TARGET_HEAD) failures.push(`target.head=${target.head.ref}@${target.head.sha}`);
             if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}@${target.base.sha}`);
             if (parent.state !== 'open' || !parent.draft) failures.push(`parent=${parent.state}/${parent.draft}`);
             if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head=${parent.head.ref}@${parent.head.sha}`);
+            if (parent.base.ref !== 'main') failures.push(`parent.base.ref=${parent.base.ref}`);
             if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
             if (failures.length) core.setFailed(failures.join(', '));
 
-      - name: Checkout registered publisher authority
-        uses: actions/checkout@v4
-        with:
-          ref: controller/workos-root-publisher-v1
-          path: publisher
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Checkout exact product head
+      - name: Checkout exact product head without persistent credentials
         uses: actions/checkout@v4
         with:
           ref: ${{ env.OLD_TARGET_HEAD }}
-          path: target
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Extract registered deterministic scripts
+      - name: Apply deterministic subject-only linking correction
         shell: bash
         run: |
           set -euo pipefail
-          python3 - "$SOURCE_WORKFLOW" <<'PY'
+          test "$(git rev-parse HEAD)" = "$OLD_TARGET_HEAD"
+          python3 - <<'PY'
           from pathlib import Path
-          import sys
 
-          source = Path(sys.argv[1]).read_text()
+          server_path = Path('server/index.mjs')
+          test_path = Path('tests/production-identity-smoke.mjs')
+          evidence_path = Path('docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md')
 
-          def extract(step_name: str, next_step: str | None) -> str:
-              start_marker = f"      - name: {step_name}\n"
-              step_start = source.index(start_marker)
-              run_marker = "        run: |\n"
-              body_start = source.index(run_marker, step_start) + len(run_marker)
-              body_end = len(source) if next_step is None else source.index(f"      - name: {next_step}\n", body_start)
-              output = []
-              for line in source[body_start:body_end].splitlines():
-                  output.append(line[10:] if line.startswith('          ') else line)
-              while output and not output[-1].strip():
-                  output.pop()
-              return '\n'.join(output) + '\n'
+          server = server_path.read_text()
+          subject_gate = "    if (!providerSubject && !upn) {\n"
+          if server.count(subject_gate) != 1:
+              raise SystemExit(f'provider subject requirement: expected one match, found {server.count(subject_gate)}')
+          server = server.replace(subject_gate, "    if (!providerSubject) {\n", 1)
 
-          Path('/tmp/workos-apply.sh').write_text(extract(
-              'Apply deterministic subject-only linking correction',
-              'Commit and publish under exact-old-head lease',
-          ))
-          Path('/tmp/workos-publish.sh').write_text(extract(
-              'Commit and publish under exact-old-head lease',
-              None,
-          ))
+          fallback_start_marker = "    if (!user && upn) {\n"
+          active_user_marker = "    if (!user || user.status !== 'Active') {\n"
+          if server.count(fallback_start_marker) != 1:
+              raise SystemExit(f'email fallback start: expected one match, found {server.count(fallback_start_marker)}')
+          fallback_start = server.index(fallback_start_marker)
+          fallback_end = server.index(active_user_marker, fallback_start)
+          fallback = server[fallback_start:fallback_end]
+          required_fragments = [
+              'fetchUserAuthRowByWhere',
+              'lower(u.email)',
+              'lower(ipl.provider_upn)',
+              'lower(e.email)',
+              '[upn]',
+          ]
+          missing = [fragment for fragment in required_fragments if fragment not in fallback]
+          if missing:
+              raise SystemExit(f'email fallback structure mismatch: missing {missing}')
+          server = server[:fallback_start] + server[fallback_end:]
+          if fallback_start_marker in server or 'where lower(u.email) = lower($1)' in server:
+              raise SystemExit('email fallback remained after structural removal')
+          server_path.write_text(server)
+
+          test = test_path.read_text()
+          insertion_marker = "  const afterRejectedUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);\n"
+          if test.count(insertion_marker) != 1:
+              raise SystemExit(f'email-only fixture insertion point: expected one match, found {test.count(insertion_marker)}')
+          if "name: 'email-only-unlinked-identity'" in test:
+              raise SystemExit('email-only fixture already exists')
+          fixture = """  const emailOnlyAddress = 'email-only.user@example.test';
+  const emailOnlySubject = 'email-only-provider-subject';
+  const emailOnlyUser = await pool.query(`
+    insert into users (username, email, status)
+    values ('email-only-user', $1, 'Active')
+    returning id
+  `, [emailOnlyAddress]);
+  await pool.query(
+    'insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1',
+    [emailOnlyUser.rows[0].id],
+  );
+
+  await assertCallbackRejected({
+    name: 'email-only-unlinked-identity',
+    claimOverrides: {
+      oid: emailOnlySubject,
+      preferred_username: emailOnlyAddress,
+    },
+    expectedLocation: '/login?error=entra_unlinked_user',
+  });
+
+  const emailOnlyUserState = await pool.query(
+    'select entra_object_id from users where id = $1',
+    [emailOnlyUser.rows[0].id],
+  );
+  const emailOnlyLinks = await pool.query(`
+    select count(*)::int as count
+    from identity_provider_links
+    where provider = 'entra'
+      and (provider_subject = $1 or lower(provider_upn) = lower($2))
+  `, [emailOnlySubject, emailOnlyAddress]);
+  assert.equal(emailOnlyUserState.rows[0]?.entra_object_id, null, 'email-only rejection must not link the user');
+  assert.equal(Number(emailOnlyLinks.rows[0]?.count || 0), 0, 'email-only rejection must not create an identity-provider link');
+  await pool.query('delete from users where id = $1', [emailOnlyUser.rows[0].id]);
+
+"""
+          test = test.replace(insertion_marker, fixture + insertion_marker, 1)
+          test_path.write_text(test)
+
+          evidence = evidence_path.read_text().rstrip()
+          heading = '## WOS-01A Entra subject-only account-linking closure'
+          if heading in evidence:
+              raise SystemExit('subject-only evidence section already exists')
+          evidence_path.write_text(evidence + """
+
+## WOS-01A Entra subject-only account-linking closure
+
+Interactive Entra login resolves only a pre-provisioned Entra provider subject or object identifier. A token UPN or email address is audit context only and cannot select an otherwise unlinked WorkOS user, create an identity-provider link, or authorize a session.
+
+The retained production identity fixture provisions an active user whose email matches a valid signed Entra token but whose provider subject is not linked. The callback must return `entra_unlinked_user`, emit no WorkOS session cookie, leave the user Entra object identifier empty, create no `identity_provider_links` row, and leave user/employee counts unchanged after fixture cleanup. The separate linked-subject case remains the only successful callback path.
+""" + '\n')
           PY
-          chmod 700 /tmp/workos-apply.sh /tmp/workos-publish.sh
-          bash -n /tmp/workos-apply.sh
-          bash -n /tmp/workos-publish.sh
-          grep -q 'email fallback removal' /tmp/workos-apply.sh
-          grep -q 'email-only retained rejection' /tmp/workos-apply.sh
-          grep -q -- '--force-with-lease' /tmp/workos-publish.sh
 
-      - name: Apply and validate exact product correction
-        shell: bash
-        working-directory: target
-        run: /tmp/workos-apply.sh
+          node --check "$SERVER_PATH"
+          node --check "$TEST_PATH"
+          node scripts/verify-baseline.mjs
+          node scripts/scan-bootstrap.mjs --self-test
+          node scripts/scan-bootstrap.mjs
+          git diff --check
+          mapfile -t changed < <(git status --porcelain | sed 's/^...//' | sort)
+          printf '%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 3
+          test "${changed[0]}" = "$EVIDENCE_PATH"
+          test "${changed[1]}" = "$SERVER_PATH"
+          test "${changed[2]}" = "$TEST_PATH"
 
-      - name: Publish corrected product under exact-old-head lease
+      - name: Commit and publish under exact-old-head lease
         shell: bash
-        working-directory: target
         env:
           GH_TOKEN: ${{ github.token }}
-        run: /tmp/workos-publish.sh
+        run: |
+          set -euo pipefail
+          trusted_origin="https://github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "$trusted_origin"
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          git config --local core.hooksPath /dev/null
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$OLD_TARGET_HEAD"
+          git checkout -B "$TARGET_BRANCH" "$OLD_TARGET_HEAD"
+          git add "$SERVER_PATH" "$TEST_PATH" "$EVIDENCE_PATH"
+          git diff --cached --check
+          git commit --no-verify -m "fix: require subject-linked Entra identities"
+          new_head="$(git rev-parse HEAD)"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$OLD_TARGET_HEAD" \
+            origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo "Published subject-only identity closure: $new_head"
