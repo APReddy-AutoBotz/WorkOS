@@ -19,10 +19,10 @@ concurrency:
 env:
   CONTROLLER_PR: '26'
   CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
-  CONTROLLER_HEAD: 03e09079a709aeef37fff883a41b798ce7c65c3f
+  CONTROLLER_HEAD: 9ce9b1da1d76fce82b8e96e8bc763d113cadd6b0
   TARGET_PR: '27'
   TARGET_BRANCH: codex/wos01a-acceptance-closure
-  TARGET_HEAD: 53dd7b8d372cae9cd3480d39d549a709a12c4c90
+  TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
   PARENT_PR: '16'
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
@@ -34,8 +34,11 @@ env:
   PGPASSWORD: workos
 
 jobs:
-  proof:
-    name: Exact token-isolated acceptance proof
+  acceptance:
+    name: Exact token-isolated acceptance matrix
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -64,19 +67,19 @@ jobs:
             const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
             const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
             const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
-            if (controller.state !== 'open' || !controller.draft) failures.push('controller state/draft');
-            if (controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push('controller head');
-            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('controller base');
-            if (target.state !== 'open' || !target.draft) failures.push('target state/draft');
-            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push('target head');
-            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push('target base');
-            if (parent.state !== 'open' || !parent.draft) failures.push('parent state/draft');
-            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push('parent head');
-            if (parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push('parent base');
-            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('main head');
+            if (controller.state !== 'open' || !controller.draft) failures.push(`controller=${controller.state}/${controller.draft}`);
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push(`controller.head=${controller.head.ref}@${controller.head.sha}`);
+            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base=${controller.base.ref}@${controller.base.sha}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`target=${target.state}/${target.draft}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head=${target.head.ref}@${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}@${target.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft) failures.push(`parent=${parent.state}/${parent.draft}`);
+            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head=${parent.head.ref}@${parent.head.sha}`);
+            if (parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent.base=${parent.base.ref}@${parent.base.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
             if (failures.length) core.setFailed(failures.join(', '));
 
-      - name: Checkout exact controller
+      - name: Checkout exact controller without persistent credentials
         uses: actions/checkout@v4
         with:
           ref: ${{ env.CONTROLLER_HEAD }}
@@ -84,7 +87,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Checkout exact product closure
+      - name: Checkout exact product closure without persistent credentials
         uses: actions/checkout@v4
         with:
           ref: ${{ env.TARGET_HEAD }}
@@ -92,7 +95,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Checkout exact current main
+      - name: Checkout exact current main without persistent credentials
         uses: actions/checkout@v4
         with:
           ref: ${{ env.EXPECTED_MAIN_HEAD }}
@@ -112,61 +115,139 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
+          set -euo pipefail
+          test -z "${GH_TOKEN:-}"
+          test -z "${GITHUB_TOKEN:-}"
           chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
           bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh \
             "$GITHUB_WORKSPACE/controller" \
             "$GITHUB_WORKSPACE/target" \
             "$GITHUB_WORKSPACE/current-main"
 
-      - name: Verify final live authority without exposing token to target commands
-        id: final_authority
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            const evidence = path.join(process.env.GITHUB_WORKSPACE, 'target', '.acceptance-evidence');
-            fs.mkdirSync(evidence, {recursive: true});
-            const failures = [];
-            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
-            const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
-            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
-            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
-            if (controller.state !== 'open' || !controller.draft) failures.push('controller state/draft');
-            if (controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push('controller head');
-            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('controller base');
-            if (target.state !== 'open' || !target.draft) failures.push('target state/draft');
-            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push('target head');
-            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push('target base');
-            if (parent.state !== 'open' || !parent.draft) failures.push('parent state/draft');
-            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push('parent head');
-            if (parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push('parent base');
-            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push('main head');
-            fs.writeFileSync(path.join(evidence, 'final-controller-pr.json'), `${JSON.stringify(controller, null, 2)}\n`);
-            fs.writeFileSync(path.join(evidence, 'final-target-pr.json'), `${JSON.stringify(target, null, 2)}\n`);
-            fs.writeFileSync(path.join(evidence, 'final-parent-pr.json'), `${JSON.stringify(parent, null, 2)}\n`);
-            fs.writeFileSync(path.join(evidence, 'final-main.json'), `${JSON.stringify(main, null, 2)}\n`);
-            fs.appendFileSync(path.join(evidence, 'gate-outcomes.txt'), `final_authority=${failures.length ? 'FAIL' : 'PASS'}\n`);
-            if (failures.length) core.setFailed(failures.join(', '));
-
-      - name: Upload exact proof evidence
-        id: evidence_upload
+      - name: Upload exact matrix evidence
+        id: artifact_upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: workos-pr26-token-isolated-${{ env.CONTROLLER_HEAD }}-${{ env.TARGET_HEAD }}
+          name: workos-pr26-matrix-${{ env.CONTROLLER_HEAD }}-${{ env.TARGET_HEAD }}
           path: target/.acceptance-evidence
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
-      - name: Aggregate exact proof
+      - name: Verify exact matrix evidence publication
+        id: evidence_upload
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_CONCLUSION: ${{ steps.artifact_upload.conclusion }}
+          ARTIFACT_ID: ${{ steps.artifact_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact_upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ARTIFACT_CONCLUSION" = success
+          test -n "$ARTIFACT_ID"
+          test -n "$ARTIFACT_DIGEST"
+          [[ "$ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]
+          printf 'artifact_id=%s\nartifact_digest=%s\n' "$ARTIFACT_ID" "$ARTIFACT_DIGEST"
+
+      - name: Aggregate target matrix
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           test '${{ steps.authority.outcome }}' = success
           test '${{ steps.matrix.outcome }}' = success
-          test '${{ steps.final_authority.outcome }}' = success
           test '${{ steps.evidence_upload.outcome }}' = success
+
+  final_authority:
+    name: Fresh-runner exact authority lease
+    needs: acceptance
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify final live authority on isolated runner
+        id: authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const evidence = path.join(process.env.RUNNER_TEMP, 'workos-final-authority');
+            fs.mkdirSync(evidence, {recursive: true});
+            const failures = [];
+            if ('${{ needs.acceptance.result }}' !== 'success') failures.push(`acceptance=${{ needs.acceptance.result }}`);
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
+            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
+            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            if (controller.state !== 'open' || !controller.draft) failures.push(`controller=${controller.state}/${controller.draft}`);
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push(`controller.head=${controller.head.ref}@${controller.head.sha}`);
+            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base=${controller.base.ref}@${controller.base.sha}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`target=${target.state}/${target.draft}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head=${target.head.ref}@${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}@${target.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft) failures.push(`parent=${parent.state}/${parent.draft}`);
+            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head=${parent.head.ref}@${parent.head.sha}`);
+            if (parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent.base=${parent.base.ref}@${parent.base.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            for (const [name, value] of Object.entries({controller, target, parent, main})) {
+              fs.writeFileSync(path.join(evidence, `${name}.json`), `${JSON.stringify(value, null, 2)}\n`);
+            }
+            fs.writeFileSync(path.join(evidence, 'result.json'), `${JSON.stringify({status: failures.length ? 'failed' : 'passed', controllerHead: process.env.CONTROLLER_HEAD, targetHead: process.env.TARGET_HEAD, parentHead: process.env.PARENT_HEAD, mainHead: process.env.EXPECTED_MAIN_HEAD, failures}, null, 2)}\n`);
+            if (failures.length) core.setFailed(failures.join(', '));
+
+      - name: Upload isolated final-authority evidence
+        id: artifact_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-pr26-final-authority-${{ env.CONTROLLER_HEAD }}-${{ env.TARGET_HEAD }}
+          path: ${{ runner.temp }}/workos-final-authority
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify isolated evidence publication
+        id: evidence_upload
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_CONCLUSION: ${{ steps.artifact_upload.conclusion }}
+          ARTIFACT_ID: ${{ steps.artifact_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact_upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ARTIFACT_CONCLUSION" = success
+          test -n "$ARTIFACT_ID"
+          test -n "$ARTIFACT_DIGEST"
+          [[ "$ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]
+          printf 'artifact_id=%s\nartifact_digest=%s\n' "$ARTIFACT_ID" "$ARTIFACT_DIGEST"
+
+      - name: Aggregate isolated authority
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ needs.acceptance.result }}' = success
+          test '${{ steps.authority.outcome }}' = success
+          test '${{ steps.evidence_upload.outcome }}' = success
+
+  aggregate:
+    name: Aggregate exact WOS-01A proof
+    needs: [acceptance, final_authority]
+    if: always()
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail closed unless both isolated jobs passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ needs.acceptance.result }}' = success
+          test '${{ needs.final_authority.result }}' = success
