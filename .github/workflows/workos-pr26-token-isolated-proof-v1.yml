@@ -22,7 +22,7 @@ env:
   CONTROLLER_HEAD: 9ce9b1da1d76fce82b8e96e8bc763d113cadd6b0
   TARGET_PR: '27'
   TARGET_BRANCH: codex/wos01a-acceptance-closure
-  TARGET_HEAD: 97025973c56b53a983ec85bac10344c85e13a96c
+  TARGET_HEAD: b4d0a37322c428035122306fd3b77e35f5dffb7a
   PARENT_PR: '16'
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
