@@ -1,0 +1,1 @@
+Trigger the registered WOS-01A order/browser isolation launcher after workflow registration.
