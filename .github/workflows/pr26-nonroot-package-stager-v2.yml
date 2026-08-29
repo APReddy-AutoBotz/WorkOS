@@ -1,0 +1,110 @@
+name: PR26 Verified Non-Root Package Stager v2
+
+on:
+  push:
+    branches:
+      - controller/pr26-isolation-recovery-20260829
+    paths:
+      - '.github/workflows/pr26-nonroot-package-stager-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: pr26-verified-nonroot-package-stager-v2
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  CONTROLLER_HEAD: 135ef6e96e23eb3430138ebefcaf24da6a85d975
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  EXPECTED_CURRENT_WORKFLOW_BLOB: 3efa09ba52a6b87fc690346f2724ab07db4a4046
+  EXPECTED_CURRENT_VERIFIER_BLOB: ae6b14b5c9a4afe9e35cf70e1dbccd47d4b8da0c
+  EXPECTED_FINAL_WORKFLOW_SHA256: c1d131012cc40c9836e56ef7b7b066af0b3097c30a0859daf9171ff37c132455
+
+jobs:
+  stage:
+    name: Patch, verify and stage exact target bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact live authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
+            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
+            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.CONTROLLER_HEAD || controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller=${controller.state}/${controller.draft}/${controller.head.ref}/${controller.head.sha}/${controller.base.ref}/${controller.base.sha}`);
+            if (target.state !== 'open' || !target.draft || target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD || target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target=${target.state}/${target.draft}/${target.head.ref}/${target.head.sha}/${target.base.ref}/${target.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft || parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD || parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent=${parent.state}/${parent.draft}/${parent.head.ref}/${parent.head.sha}/${parent.base.ref}/${parent.base.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(`PR26 non-root staging v2 start gate failed: ${failures.join(', ')}`);
+
+      - name: Checkout staging branch with bounded write credential
+        uses: actions/checkout@v4
+        with:
+          ref: controller/pr26-isolation-recovery-20260829
+          path: stage
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Checkout exact PR26 head without persisted credential
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply and verify exact non-root correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_HEAD"
+          test "$(git -C controller hash-object .github/workflows/wos01a-clean-runtime-acceptance-v2.yml)" = "$EXPECTED_CURRENT_WORKFLOW_BLOB"
+          test "$(git -C controller hash-object .github/scripts/verify-wos01a-controller-v2.mjs)" = "$EXPECTED_CURRENT_VERIFIER_BLOB"
+          python3 stage/recovery/pr26-nonroot/apply.py controller
+          test "$(sha256sum controller/.github/workflows/wos01a-clean-runtime-acceptance-v2.yml | cut -d' ' -f1)" = "$EXPECTED_FINAL_WORKFLOW_SHA256"
+          node --check controller/.github/scripts/verify-wos01a-controller-v2.mjs
+          node controller/.github/scripts/verify-wos01a-controller-v2.mjs
+          bash -n controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          ruby -e "require 'yaml'; YAML.parse_file('controller/.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'); puts 'YAML syntax passed'"
+          git -C controller diff --check
+          git -C controller diff --name-only | LC_ALL=C sort > "$RUNNER_TEMP/actual-paths.txt"
+          printf '%s\n' '.github/scripts/verify-wos01a-controller-v2.mjs' '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml' > "$RUNNER_TEMP/expected-paths.txt"
+          diff -u "$RUNNER_TEMP/expected-paths.txt" "$RUNNER_TEMP/actual-paths.txt"
+
+      - name: Commit staged non-workflow package bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=stage/recovery/pr26-nonroot/package
+          rm -rf "$out"
+          mkdir -p "$out"
+          cp controller/.github/workflows/wos01a-clean-runtime-acceptance-v2.yml "$out/wos01a-clean-runtime-acceptance-v2.yml.txt"
+          cp controller/.github/scripts/verify-wos01a-controller-v2.mjs "$out/verify-wos01a-controller-v2.mjs.txt"
+          workflow_sha="$(sha256sum "$out/wos01a-clean-runtime-acceptance-v2.yml.txt" | cut -d' ' -f1)"
+          verifier_sha="$(sha256sum "$out/verify-wos01a-controller-v2.mjs.txt" | cut -d' ' -f1)"
+          workflow_blob="$(git -C stage hash-object recovery/pr26-nonroot/package/wos01a-clean-runtime-acceptance-v2.yml.txt)"
+          verifier_blob="$(git -C stage hash-object recovery/pr26-nonroot/package/verify-wos01a-controller-v2.mjs.txt)"
+          printf '{"controllerHead":"%s","targetHead":"%s","parentHead":"%s","mainHead":"%s","workflowSha256":"%s","verifierSha256":"%s","workflowBlob":"%s","verifierBlob":"%s"}\n' \
+            "$CONTROLLER_HEAD" "$TARGET_HEAD" "$PARENT_HEAD" "$EXPECTED_MAIN_HEAD" "$workflow_sha" "$verifier_sha" "$workflow_blob" "$verifier_blob" > "$out/manifest.json"
+          git -C stage config user.name 'github-actions[bot]'
+          git -C stage config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C stage add recovery/pr26-nonroot/package
+          git -C stage commit -m 'chore: stage verified PR26 non-root package'
+          git -C stage push origin HEAD:controller/pr26-isolation-recovery-20260829
+          cat "$out/manifest.json"
