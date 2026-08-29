@@ -105,3 +105,10 @@ Discovery, token and JWKS JSON bodies are consumed incrementally. The reader is 
 | Browser journeys and audit evidence | NOT RUN | These remain controller-only exact-head gates. |
 
 Security rollback is a normal revert of the closure commit, but rollback reopens authority substitution, OAuth URL downgrade and unbounded-response risks. No schema migration or persisted-data rollback is required.
+
+## WOS-01A Entra subject-only account-linking closure
+
+Interactive Entra login resolves only a pre-provisioned Entra provider subject or object identifier. A token UPN or email address is audit context only and cannot select an otherwise unlinked WorkOS user, create an identity-provider link, or authorize a session.
+
+The retained production identity fixture provisions an active user whose email matches a valid signed Entra token but whose provider subject is not linked. The callback must return `entra_unlinked_user`, emit no WorkOS session cookie, leave the user Entra object identifier empty, create no `identity_provider_links` row, and leave user/employee counts unchanged after fixture cleanup. The separate linked-subject case remains the only successful callback path.
+

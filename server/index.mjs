@@ -1089,7 +1089,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
     const claims = await verifyEntraIdToken(tokenPayload.id_token, { nonce: state.nonce, config });
     const providerSubject = claims.oid || claims.sub;
     const upn = claims.preferred_username || claims.upn || claims.email;
-    if (!providerSubject && !upn) {
+    if (!providerSubject) {
       res.redirect('/login?error=entra_missing_identity');
       return;
     }
@@ -1100,14 +1100,6 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
         or u.entra_object_id = $1
         or e.entra_object_id = $1
     `, [providerSubject]);
-    if (!user && upn) {
-      user = await fetchUserAuthRowByWhere(client, `
-        left join identity_provider_links ipl on ipl.employee_id = e.id and ipl.provider = 'entra' and ipl.status = 'Linked'
-        where lower(u.email) = lower($1)
-          or lower(ipl.provider_upn) = lower($1)
-          or lower(e.email) = lower($1)
-      `, [upn]);
-    }
     if (!user || user.status !== 'Active') {
       await logIntegrationEvent(client, {
         provider: 'entra',

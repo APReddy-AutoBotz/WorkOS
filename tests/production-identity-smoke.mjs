@@ -416,6 +416,41 @@ try {
     expectedLocation: '/login?error=entra_unlinked_user',
   });
 
+  const emailOnlyAddress = 'email-only.user@example.test';
+  const emailOnlySubject = 'email-only-provider-subject';
+  const emailOnlyUser = await pool.query(`
+    insert into users (username, email, status)
+    values ('email-only-user', $1, 'Active')
+    returning id
+  `, [emailOnlyAddress]);
+  await pool.query(
+    'insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1',
+    [emailOnlyUser.rows[0].id],
+  );
+
+  await assertCallbackRejected({
+    name: 'email-only-unlinked-identity',
+    claimOverrides: {
+      oid: emailOnlySubject,
+      preferred_username: emailOnlyAddress,
+    },
+    expectedLocation: '/login?error=entra_unlinked_user',
+  });
+
+  const emailOnlyUserState = await pool.query(
+    'select entra_object_id from users where id = $1',
+    [emailOnlyUser.rows[0].id],
+  );
+  const emailOnlyLinks = await pool.query(`
+    select count(*)::int as count
+    from identity_provider_links
+    where provider = 'entra'
+      and (provider_subject = $1 or lower(provider_upn) = lower($2))
+  `, [emailOnlySubject, emailOnlyAddress]);
+  assert.equal(emailOnlyUserState.rows[0]?.entra_object_id, null, 'email-only rejection must not link the user');
+  assert.equal(Number(emailOnlyLinks.rows[0]?.count || 0), 0, 'email-only rejection must not create an identity-provider link');
+  await pool.query('delete from users where id = $1', [emailOnlyUser.rows[0].id]);
+
   const afterRejectedUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);
   const afterRejectedEmployees = Number((await pool.query('select count(*)::int as count from employees')).rows[0].count);
   assert.equal(afterRejectedUsers, beforeUsers, 'rejected callbacks must not create users');
