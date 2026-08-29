@@ -104,6 +104,14 @@ assert.match(acceptance, /--remote-debugging-pipe/);
 assert.doesNotMatch(acceptance, /remote-debugging-port|WOS_CHROME_DEBUG_PORT|\/json\/version|\/json\/new|webSocketDebuggerUrl/);
 assert.ok(acceptance.indexOf("client.send('Browser.getVersion')") < acceptance.indexOf('await writeFile(driverReadyFile'));
 assert.ok(acceptance.indexOf("client.send('Target.attachToTarget'") < acceptance.indexOf('await writeFile(driverReadyFile'));
+assert.ok(acceptance.indexOf("  'chromium',") < acceptance.indexOf("  'google-chrome',"));
+assert.match(acceptance, /journeyPhaseTimeoutMs/);
+assert.match(acceptance, /journeyTotalTimeoutMs/);
+assert.match(acceptance, /recordJourneyEvidence/);
+assert.match(acceptance, /(?:login|route)Navigation\.errorText/);
+assert.match(acceptance, /Browser policy blocked navigation/);
+assert.match(acceptance, /status: 'timeout'/);
+assert.match(acceptance, /\}\)\(\), journeyTotalTimeoutMs, `\$\{role\} journey`\);/);
 
 // A target-controlled emulator on the former fixed endpoint must be irrelevant:
 // the accepted transport has no TCP discovery or configured-port path.

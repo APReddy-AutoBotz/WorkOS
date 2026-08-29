@@ -13,6 +13,8 @@ import {
 const origin = process.env.WOS_BROWSER_ORIGIN || 'http://127.0.0.1:4173';
 const commandTimeoutMs = Number(process.env.WOS_CDP_TIMEOUT_MS || 10_000);
 const journeyTimeoutMs = Number(process.env.WOS_JOURNEY_TIMEOUT_MS || 25_000);
+const journeyPhaseTimeoutMs = Number(process.env.WOS_JOURNEY_PHASE_TIMEOUT_MS || journeyTimeoutMs);
+const journeyTotalTimeoutMs = Number(process.env.WOS_JOURNEY_TOTAL_TIMEOUT_MS || (journeyPhaseTimeoutMs * 2 + 5_000));
 const appReadyTimeoutMs = Number(process.env.WOS_APP_READY_TIMEOUT_MS || 20 * 60 * 1000);
 const driverReadyFile = String(process.env.WOS_BROWSER_DRIVER_READY_FILE || '').trim();
 const handshakeEvidenceFile = String(
@@ -40,10 +42,10 @@ const waitForApplication = async () => {
 
 const chromeCandidates = [
   process.env.CHROME_BIN,
-  'google-chrome',
-  'google-chrome-stable',
   'chromium',
   'chromium-browser',
+  'google-chrome',
+  'google-chrome-stable',
 ].filter(Boolean);
 const chromeResolution = await resolveChromeExecutable(chromeCandidates);
 const chromeBin = chromeResolution.executable;
@@ -61,6 +63,12 @@ const writeHandshakeEvidence = async (patch = {}) => {
   Object.assign(handshakeEvidence, patch, {updatedAt: new Date().toISOString()});
   await mkdir(path.dirname(handshakeEvidenceFile), {recursive: true});
   await writeFile(handshakeEvidenceFile, `${JSON.stringify(handshakeEvidence, null, 2)}\n`, {mode: 0o600});
+};
+
+const journeyEvidence = [];
+const recordJourneyEvidence = async (entry) => {
+  journeyEvidence.push({...entry, at: new Date().toISOString()});
+  await writeHandshakeEvidence({journeys: journeyEvidence});
 };
 
 const chrome = spawn(chromeBin, [
@@ -135,23 +143,66 @@ const evaluate = async (client, expression, sessionId) => {
   return result.result?.value;
 };
 
-const waitForPage = async (client, expectedPath, timeoutMs = journeyTimeoutMs) => {
+const isBrowserPolicyBlock = (snapshot) => Boolean(
+  snapshot
+  && /(?:is blocked|blocked by (?:your )?administrator)/i.test(snapshot.text || '')
+  && /(?:organization|administrator|policy)/i.test(`${snapshot.text || ''} ${snapshot.title || ''}`)
+);
+
+const waitForPage = async (client, expectedPath, {
+  timeoutMs = journeyPhaseTimeoutMs,
+  role = 'unknown',
+  phase = 'settle',
+} = {}) => {
   const started = Date.now();
   let snapshot;
+  await recordJourneyEvidence({role, phase, status: 'waiting', expectedPath, timeoutMs});
   while (Date.now() - started < timeoutMs) {
-    snapshot = await evaluate(client, `({
-      ready: document.readyState,
-      path: location.pathname,
-      text: document.body?.innerText || '',
-      title: document.title,
-    })`, sessionId);
+    snapshot = await evaluate(client, `(() => {
+      let sessionRole = null;
+      try { sessionRole = JSON.parse(sessionStorage.getItem('workos_session') || 'null')?.role || null; }
+      catch { sessionRole = 'invalid'; }
+      return {
+        ready: document.readyState,
+        href: location.href,
+        origin: location.origin,
+        path: location.pathname,
+        text: (document.body?.innerText || '').slice(0, 2000),
+        html: (document.documentElement?.outerHTML || '').slice(0, 2000),
+        title: document.title,
+        sessionRole,
+      };
+    })()`, sessionId);
+    if (isBrowserPolicyBlock(snapshot)) {
+      await recordJourneyEvidence({role, phase, status: 'policy-blocked', expectedPath, snapshot});
+      throw new Error(`Browser policy blocked navigation to ${snapshot.href || expectedPath}: ${snapshot.text.slice(0, 500)}`);
+    }
     if (snapshot?.ready === 'complete' && snapshot.text.length > 20) {
-      if (!expectedPath || snapshot.path === expectedPath || snapshot.path.startsWith(`${expectedPath}/`)) return snapshot;
+      if (!expectedPath || snapshot.path === expectedPath || snapshot.path.startsWith(`${expectedPath}/`)) {
+        await recordJourneyEvidence({
+          role,
+          phase,
+          status: 'settled',
+          expectedPath,
+          elapsedMs: Date.now() - started,
+          snapshot,
+        });
+        return snapshot;
+      }
     }
     await sleep(250);
   }
+  await recordJourneyEvidence({
+    role,
+    phase,
+    status: 'timeout',
+    expectedPath,
+    elapsedMs: Date.now() - started,
+    snapshot,
+  });
   throw new Error(`Route ${expectedPath || '(any)'} did not settle. Last snapshot: ${JSON.stringify(snapshot)}`);
 };
+
 
 const sessionFor = (role) => ({
   id: `browser-${role.toLowerCase()}`,
@@ -231,57 +282,111 @@ try {
   await waitForApplication();
 
   for (const [role, route] of journeys) {
-    await withTimeout((async () => {
-      await client.send('Page.navigate', { url: `${origin}/login` }, sessionId);
-      await waitForPage(client, '/login');
-      const session = JSON.stringify(sessionFor(role));
-      await evaluate(client, `
-        sessionStorage.clear();
-        localStorage.removeItem('workos_auth');
-        sessionStorage.setItem('workos_session', ${JSON.stringify(session)});
-        true;
-      `, sessionId);
-      await client.send('Page.navigate', { url: `${origin}${route}` }, sessionId);
-      const snapshot = await waitForPage(client, route);
-      if (snapshot.path === '/login') throw new Error(`${role} was redirected to login for ${route}`);
-      if (/Page not found/i.test(snapshot.text)) throw new Error(`${role} rendered NotFound for ${route}`);
-      if (/Something went wrong|Unhandled|Application error/i.test(snapshot.text)) {
-        throw new Error(`${role} rendered an application error for ${route}: ${snapshot.text.slice(0, 500)}`);
-      }
-      console.log(`PASS ${role} ${route} -> ${snapshot.path}`);
-    })(), journeyTimeoutMs, `${role} journey`);
+    try {
+      await withTimeout((async () => {
+        await recordJourneyEvidence({role, phase: 'journey', status: 'started', route});
+        const loginNavigation = await client.send('Page.navigate', { url: `${origin}/login` }, sessionId);
+        if (loginNavigation.errorText) throw new Error(`${role} login navigation failed: ${loginNavigation.errorText}`);
+        await recordJourneyEvidence({role, phase: 'login-navigation', status: 'sent', navigation: loginNavigation});
+        await waitForPage(client, '/login', {role, phase: 'login-settle'});
+        const session = JSON.stringify(sessionFor(role));
+        const injected = await evaluate(client, `(() => {
+          sessionStorage.clear();
+          localStorage.removeItem('workos_auth');
+          sessionStorage.setItem('workos_session', ${JSON.stringify(session)});
+          const stored = JSON.parse(sessionStorage.getItem('workos_session') || 'null');
+          return {path: location.pathname, storedRole: stored?.role || null};
+        })()`, sessionId);
+        if (injected?.storedRole !== role) {
+          throw new Error(`${role} synthetic session was not retained: ${JSON.stringify(injected)}`);
+        }
+        await recordJourneyEvidence({role, phase: 'session-injection', status: 'stored', injected});
+        const routeNavigation = await client.send('Page.navigate', { url: `${origin}${route}` }, sessionId);
+        if (routeNavigation.errorText) throw new Error(`${role} route navigation failed: ${routeNavigation.errorText}`);
+        await recordJourneyEvidence({role, phase: 'route-navigation', status: 'sent', route, navigation: routeNavigation});
+        const snapshot = await waitForPage(client, route, {role, phase: 'route-settle'});
+        if (snapshot.path === '/login') throw new Error(`${role} was redirected to login for ${route}`);
+        if (/Page not found/i.test(snapshot.text)) throw new Error(`${role} rendered NotFound for ${route}`);
+        if (/Something went wrong|Unhandled|Application error/i.test(snapshot.text)) {
+          throw new Error(`${role} rendered an application error for ${route}: ${snapshot.text.slice(0, 500)}`);
+        }
+        await recordJourneyEvidence({role, phase: 'journey', status: 'passed', route, snapshot});
+        console.log(`PASS ${role} ${route} -> ${snapshot.path}`);
+      })(), journeyTotalTimeoutMs, `${role} journey`);
+    } catch (error) {
+      await recordJourneyEvidence({
+        role,
+        phase: 'journey',
+        status: 'failed',
+        route,
+        error: {name: error?.name, message: error?.message, stack: error?.stack},
+      });
+      throw error;
+    }
   }
 
-  await withTimeout((async () => {
-    await client.send('Page.navigate', { url: `${origin}/login` }, sessionId);
-    await waitForPage(client, '/login');
-    const employeeSession = JSON.stringify(sessionFor('Employee'));
-    await evaluate(client, `
-      sessionStorage.clear();
-      localStorage.removeItem('workos_auth');
-      sessionStorage.setItem('workos_session', ${JSON.stringify(employeeSession)});
-      true;
-    `, sessionId);
-    await client.send('Page.navigate', { url: `${origin}/admin` }, sessionId);
-    const started = Date.now();
-    let snapshot;
-    while (Date.now() - started < journeyTimeoutMs) {
-      snapshot = await evaluate(client, `({ path: location.pathname, text: document.body?.innerText || '' })`, sessionId);
-      if (snapshot.path !== '/admin' && snapshot.text.length > 20) break;
-      await sleep(250);
-    }
-    if (!snapshot || snapshot.path === '/admin') {
-      throw new Error(`Employee was not denied /admin: ${JSON.stringify(snapshot)}`);
-    }
-    if (snapshot.path !== '/ess') {
-      throw new Error(`Employee denial did not use the authorized /ess fallback: ${JSON.stringify(snapshot)}`);
-    }
-    if (/Page not found/i.test(snapshot.text)) throw new Error('Employee denial rendered NotFound');
-    if (/Something went wrong|Unhandled|Application error/i.test(snapshot.text)) {
-      throw new Error(`Employee denial rendered an application error: ${snapshot.text.slice(0, 500)}`);
-    }
-    console.log(`PASS Employee denied /admin -> ${snapshot.path}`);
-  })(), journeyTimeoutMs, 'Employee denial journey');
+
+  try {
+    await withTimeout((async () => {
+      const role = 'Employee';
+      const route = '/admin';
+      await recordJourneyEvidence({role, phase: 'denial', status: 'started', route});
+      const loginNavigation = await client.send('Page.navigate', { url: `${origin}/login` }, sessionId);
+      if (loginNavigation.errorText) throw new Error(`Employee denial login navigation failed: ${loginNavigation.errorText}`);
+      await waitForPage(client, '/login', {role, phase: 'denial-login-settle'});
+      const employeeSession = JSON.stringify(sessionFor('Employee'));
+      const injected = await evaluate(client, `(() => {
+        sessionStorage.clear();
+        localStorage.removeItem('workos_auth');
+        sessionStorage.setItem('workos_session', ${JSON.stringify(employeeSession)});
+        const stored = JSON.parse(sessionStorage.getItem('workos_session') || 'null');
+        return {path: location.pathname, storedRole: stored?.role || null};
+      })()`, sessionId);
+      if (injected?.storedRole !== 'Employee') {
+        throw new Error(`Employee denial session was not retained: ${JSON.stringify(injected)}`);
+      }
+      await recordJourneyEvidence({role, phase: 'denial-session-injection', status: 'stored', injected});
+      const routeNavigation = await client.send('Page.navigate', { url: `${origin}/admin` }, sessionId);
+      if (routeNavigation.errorText) throw new Error(`Employee denial route navigation failed: ${routeNavigation.errorText}`);
+      await recordJourneyEvidence({role, phase: 'denial-route-navigation', status: 'sent', route, navigation: routeNavigation});
+      const started = Date.now();
+      let snapshot;
+      while (Date.now() - started < journeyPhaseTimeoutMs) {
+        snapshot = await evaluate(client, `({
+          href: location.href,
+          path: location.pathname,
+          text: (document.body?.innerText || '').slice(0, 2000),
+          title: document.title,
+        })`, sessionId);
+        if (isBrowserPolicyBlock(snapshot)) {
+          throw new Error(`Browser policy blocked Employee denial navigation to ${snapshot.href}: ${snapshot.text.slice(0, 500)}`);
+        }
+        if (snapshot.path !== '/admin' && snapshot.text.length > 20) break;
+        await sleep(250);
+      }
+      if (!snapshot || snapshot.path === '/admin') {
+        throw new Error(`Employee was not denied /admin: ${JSON.stringify(snapshot)}`);
+      }
+      if (snapshot.path !== '/ess') {
+        throw new Error(`Employee denial did not use the authorized /ess fallback: ${JSON.stringify(snapshot)}`);
+      }
+      if (/Page not found/i.test(snapshot.text)) throw new Error('Employee denial rendered NotFound');
+      if (/Something went wrong|Unhandled|Application error/i.test(snapshot.text)) {
+        throw new Error(`Employee denial rendered an application error: ${snapshot.text.slice(0, 500)}`);
+      }
+      await recordJourneyEvidence({role, phase: 'denial', status: 'passed', route, snapshot});
+      console.log(`PASS Employee denied /admin -> ${snapshot.path}`);
+    })(), journeyTotalTimeoutMs, 'Employee denial journey');
+  } catch (error) {
+    await recordJourneyEvidence({
+      role: 'Employee',
+      phase: 'denial',
+      status: 'failed',
+      route: '/admin',
+      error: {name: error?.name, message: error?.message, stack: error?.stack},
+    });
+    throw error;
+  }
 
   await writeHandshakeEvidence({status: 'passed', completedAt: new Date().toISOString(), chromeOutputTail: chromeOutput});
   console.log('WOS-01A bounded browser acceptance passed.');
