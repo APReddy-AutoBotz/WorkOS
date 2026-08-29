@@ -30,7 +30,7 @@ jobs:
       CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
       TARGET_PR: '27'
       TARGET_BRANCH: codex/wos01a-acceptance-closure
-      TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
+      TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
       PARENT_PR: '16'
       PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
       PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
@@ -218,7 +218,7 @@ jobs:
       CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
       TARGET_PR: '27'
       TARGET_BRANCH: codex/wos01a-acceptance-closure
-      TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
+      TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
       PARENT_PR: '16'
       PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
       PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60

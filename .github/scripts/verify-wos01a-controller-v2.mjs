@@ -18,7 +18,7 @@ assert.doesNotMatch(matrix, /GH_TOKEN|Authorization: Bearer/);
 
 assert.match(acceptanceJob, /CONTROLLER_PR: '26'/);
 assert.match(acceptanceJob, /CONTROLLER_BRANCH: controller\/wos01a-clean-runtime-acceptance-v2/);
-assert.match(acceptanceJob, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573/);
+assert.match(acceptanceJob, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50/);
 assert.match(acceptanceJob, /PARENT_PR: '16'[\s\S]*PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60/);
 assert.match(acceptanceJob, /EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42/);
 assert.match(acceptanceJob, /ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea/);
@@ -41,7 +41,7 @@ for (const required of [
   'CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2',
   "TARGET_PR: '27'",
   'TARGET_BRANCH: codex/wos01a-acceptance-closure',
-  'TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573',
+  'TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50',
   "PARENT_PR: '16'",
   'PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2',
   'PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60',
@@ -164,6 +164,12 @@ for (const key of ['database', 'usersBefore', 'usersAfter', 'employeesBefore', '
   assert.match(production, new RegExp(`\\.${key} ==`), `runtime contract must consume producer field ${key}`);
 }
 assert.doesNotMatch(production, /seededUsers|seededEmployees|\/\/ \.users|\/\/ \.employees/);
+assert.match(production, /\.callbackRejections \| type == "array"/);
+assert.match(production, /\[\.callbackRejections\[\]\.name\]/);
+assert.match(production, /email-only-unlinked-identity/);
+assert.match(production, /\.status == 302/);
+assert.match(production, /\.location == "\/login\?error=entra_unlinked_user"/);
+assert.match(production, /\.sessionCookie == false/);
 
 const positive = {name: 'configured-provider-ready-then-unavailable', startup: 'ready', database: 'connected', localLogin: 404, protectedApi: 401, usersBefore: 0, usersAfter: 0, employeesBefore: 0, employeesAfter: 0, outageReadiness: 'closed'};
 const mandatoryNegativeNames = ['missing-app-url', 'http-app-url', 'loopback-callback', 'wrong-callback-route', 'missing-identity-setting', 'local-provider-prohibited', 'unavailable-discovery', 'invalid-discovery-document'];
@@ -192,6 +198,38 @@ assert.equal(identityContract([...negatives]), false);
 assert.equal(identityContract([...negatives, positive, {...positive}]), false);
 for (const [key, value] of [['startup', 'closed'], ['database', 'disconnected'], ['localLogin', 200], ['protectedApi', 200], ['usersBefore', 1], ['usersAfter', 1], ['employeesBefore', 1], ['employeesAfter', 1], ['outageReadiness', 'ready']]) {
   assert.equal(identityContract([...negatives, {...positive, [key]: value}]), false);
+}
+
+const emailOnlyRejection = {name: 'email-only-unlinked-identity', status: 302, location: '/login?error=entra_unlinked_user', sessionCookie: false};
+const callbackRejectionContract = (callbackRejections) => {
+  if (!Array.isArray(callbackRejections)
+    || callbackRejections.some((entry) => !entry || typeof entry.name !== 'string' || entry.name.length === 0)) return false;
+  const names = callbackRejections.map(({name}) => name);
+  const emailOnly = callbackRejections.filter(({name}) => name === emailOnlyRejection.name);
+  return new Set(names).size === names.length
+    && emailOnly.length === 1
+    && ['status', 'location', 'sessionCookie'].every((key) => emailOnly[0][key] === emailOnlyRejection[key]);
+};
+assert.ok(callbackRejectionContract([emailOnlyRejection]));
+assert.ok(callbackRejectionContract([
+  emailOnlyRejection,
+  {name: 'future-governed-rejection', status: 302, location: '/login?error=future', sessionCookie: false},
+]));
+assert.equal(callbackRejectionContract(undefined), false);
+assert.equal(callbackRejectionContract({}), false);
+assert.equal(callbackRejectionContract([]), false);
+assert.equal(callbackRejectionContract([{status: 302}]), false);
+assert.equal(callbackRejectionContract([{name: ''}, emailOnlyRejection]), false);
+assert.equal(callbackRejectionContract([
+  emailOnlyRejection,
+  {...emailOnlyRejection},
+]), false);
+for (const [key, value] of [
+  ['status', 401],
+  ['location', '/login?error=wrong'],
+  ['sessionCookie', true],
+]) {
+  assert.equal(callbackRejectionContract([{...emailOnlyRejection, [key]: value}]), false);
 }
 
 console.log('WOS-01A isolated final authority, exact migration ledger and evidence logging assertions passed.');

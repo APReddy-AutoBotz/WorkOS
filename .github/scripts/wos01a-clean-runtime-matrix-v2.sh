@@ -422,7 +422,16 @@ production_acceptance() {
       .usersAfter == 0 and
       .employeesBefore == 0 and
       .employeesAfter == 0 and
-      .outageReadiness == "closed")
+      .outageReadiness == "closed") and
+    (.callbackRejections | type == "array") and
+    ([.callbackRejections[].name] |
+      all(type == "string" and length > 0) and
+      length == (unique | length)) and
+    ([.callbackRejections[] | select(.name == "email-only-unlinked-identity")] | length == 1) and
+    ([.callbackRejections[] | select(.name == "email-only-unlinked-identity")][0] |
+      .status == 302 and
+      .location == "/login?error=entra_unlinked_user" and
+      .sessionCookie == false)
   ' "$EVIDENCE_DIR/production-identity-summary.json" >/dev/null
 }
 
