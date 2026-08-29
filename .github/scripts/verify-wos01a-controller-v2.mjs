@@ -30,7 +30,7 @@ assert.match(workflow, /EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc7
 assert.match(workflow, /ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea/g);
 assert.match(workflow, /image: postgres:16/);
 
-assert.match(acceptance, /controller\.state !== 'open'/);
+assert.match(acceptance, /controller\?\.state !== 'open'/);
 assert.match(acceptance, /!controller\?\.draft/);
 assert.match(acceptance, /target\.state !== 'open'/);
 assert.match(acceptance, /!target\.draft/);
