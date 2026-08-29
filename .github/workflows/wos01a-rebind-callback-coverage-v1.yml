@@ -1,0 +1,123 @@
+name: WOS-01A Rebind Callback Coverage v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/wos01a-rebind-callback-coverage-v1.yml'
+
+concurrency:
+  group: wos01a-rebind-callback-coverage-v1
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  OLD_CONTROLLER_HEAD: 6e037361a98b0c13a321e53d2c920f53878e98e5
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  OLD_TARGET_HEAD: 17ac76595ec8bfe58564fa899bf0425816575a87
+  NEW_TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  WORKFLOW_PATH: .github/workflows/wos01a-clean-runtime-acceptance-v2.yml
+  VERIFIER_PATH: .github/scripts/verify-wos01a-controller-v2.mjs
+
+jobs:
+  publish:
+    name: Rebind exact product head under lease
+    permissions:
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live controller, target, parent and main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.CONTROLLER_PR),
+            });
+            const {data: target} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
+            });
+            const {data: parent} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PARENT_PR),
+            });
+            const {data: main} = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+            if (controller.state !== 'open' || !controller.draft) failures.push(`controller=${controller.state}/${controller.draft}`);
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.ref=${controller.head.ref}`);
+            if (controller.head.sha !== process.env.OLD_CONTROLLER_HEAD) failures.push(`controller.head=${controller.head.sha}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`target=${target.state}/${target.draft}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.NEW_TARGET_HEAD) failures.push(`target.head=${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}@${target.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft) failures.push(`parent=${parent.state}/${parent.draft}`);
+            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head=${parent.head.ref}@${parent.head.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(failures.join(', '));
+
+      - name: Checkout exact controller head without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.OLD_CONTROLLER_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply deterministic two-file target rebind
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OLD_CONTROLLER_HEAD"
+          old_count="$(grep -F "$OLD_TARGET_HEAD" "$WORKFLOW_PATH" "$VERIFIER_PATH" | wc -l | tr -d '[:space:]')"
+          test "$old_count" -eq 4
+          sed -i "s/$OLD_TARGET_HEAD/$NEW_TARGET_HEAD/g" "$WORKFLOW_PATH" "$VERIFIER_PATH"
+          test -z "$(grep -F "$OLD_TARGET_HEAD" "$WORKFLOW_PATH" "$VERIFIER_PATH" || true)"
+          new_count="$(grep -F "$NEW_TARGET_HEAD" "$WORKFLOW_PATH" "$VERIFIER_PATH" | wc -l | tr -d '[:space:]')"
+          test "$new_count" -eq 4
+          node --check "$VERIFIER_PATH"
+          node "$VERIFIER_PATH"
+          ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' "$WORKFLOW_PATH"
+          git diff --check
+          mapfile -t changed < <(git status --porcelain | sed 's/^...//' | sort)
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = "$VERIFIER_PATH"
+          test "${changed[1]}" = "$WORKFLOW_PATH"
+
+      - name: Commit and publish under exact-old-head lease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          trusted_origin="https://github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "$trusted_origin"
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          git config --local core.hooksPath /dev/null
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$CONTROLLER_BRANCH" | cut -f1)"
+          test "$remote_head" = "$OLD_CONTROLLER_HEAD"
+          git checkout -B "$CONTROLLER_BRANCH" "$OLD_CONTROLLER_HEAD"
+          git add "$WORKFLOW_PATH" "$VERIFIER_PATH"
+          git diff --cached --check
+          git commit --no-verify -m "ci: rebind WOS-01A acceptance to callback coverage"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+            --force-with-lease="refs/heads/$CONTROLLER_BRANCH:$OLD_CONTROLLER_HEAD" \
+            origin "HEAD:refs/heads/$CONTROLLER_BRANCH"
