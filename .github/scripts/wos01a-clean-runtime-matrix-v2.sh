@@ -45,19 +45,32 @@ run_gate() {
   local name="$1"
   shift
   local log="$EVIDENCE_DIR/${name}.log"
+  local -a pipeline_status=()
+  local command_rc=1
+  local tee_rc=1
+  local rc=1
   GATE_ORDER+=("$name")
   echo "===== START $name ====="
   set +e
   ( "$@" ) 2>&1 | tee "$log"
-  local rc=${PIPESTATUS[0]}
+  pipeline_status=("${PIPESTATUS[@]}")
   set -e
+  command_rc="${pipeline_status[0]:-1}"
+  tee_rc="${pipeline_status[1]:-1}"
+  if [[ "$command_rc" -eq 0 && "$tee_rc" -eq 0 ]]; then
+    rc=0
+  elif [[ "$command_rc" -ne 0 ]]; then
+    rc="$command_rc"
+  else
+    rc="$tee_rc"
+  fi
   if [[ $rc -eq 0 ]]; then
     GATE_STATUS[$name]="PASS"
     echo "===== PASS $name ====="
   else
     GATE_STATUS[$name]="FAIL"
     FAILED=1
-    echo "===== FAIL $name rc=$rc =====" >&2
+    echo "===== FAIL $name command_rc=$command_rc tee_rc=$tee_rc =====" >&2
   fi
 }
 
@@ -216,15 +229,39 @@ migration_acceptance() {
     createdb "$db"
   done
 
+  local expected_ids="$EVIDENCE_DIR/expected-migration-ids.txt"
+  {
+    printf '%s\n' '005_auth_lifecycle'
+    find server/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' \
+      | sed 's/\.sql$//'
+  } | LC_ALL=C sort > "$expected_ids"
+  test -s "$expected_ids"
+
   local expected
-  expected="$((1 + $(find server/migrations -maxdepth 1 -type f -name '*.sql' | wc -l)))"
+  expected="$(wc -l < "$expected_ids" | tr -d '[:space:]')"
+  test "$expected" -gt 1
+
+  verify_ledger() {
+    local database_url="$1"
+    local label="$2"
+    local actual="$EVIDENCE_DIR/${label}-migration-ids.txt"
+    psql "$database_url" -Atc 'select id from schema_migrations order by id' > "$actual"
+    if ! cmp -s "$expected_ids" "$actual"; then
+      echo "Migration ledger mismatch for $label" >&2
+      diff -u "$expected_ids" "$actual" >&2 || true
+      return 1
+    fi
+  }
 
   local fresh_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_fresh"
   DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-fresh.log"
+  verify_ledger "$fresh_url" fresh-first
   local fresh_first
   fresh_first="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
   test "$fresh_first" = "$expected"
+
   DATABASE_URL="$fresh_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-replay.log"
+  verify_ledger "$fresh_url" fresh-replay
   local fresh_replay
   fresh_replay="$(psql "$fresh_url" -Atc 'select count(*) from schema_migrations')"
   test "$fresh_replay" = "$expected"
@@ -240,10 +277,13 @@ migration_acceptance() {
   insert into schema_migrations (id) values ('005_auth_lifecycle') on conflict do nothing;
 SQL
   DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade.log"
+  verify_ledger "$upgrade_url" upgrade-first
   local upgrade_first
   upgrade_first="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
   test "$upgrade_first" = "$expected"
+
   DATABASE_URL="$upgrade_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-upgrade-replay.log"
+  verify_ledger "$upgrade_url" upgrade-replay
   local upgrade_replay
   upgrade_replay="$(psql "$upgrade_url" -Atc 'select count(*) from schema_migrations')"
   test "$upgrade_replay" = "$expected"
@@ -255,6 +295,7 @@ SQL
 
   local prod_url="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/workos_prod"
   DATABASE_URL="$prod_url" node server/migrate.mjs 2>&1 | tee "$EVIDENCE_DIR/migrate-production-fixture.log"
+  verify_ledger "$prod_url" production-fixture
 }
 
 production_acceptance() {
@@ -356,13 +397,21 @@ run_gate migration_acceptance migration_acceptance
 run_gate production_acceptance production_acceptance
 run_gate browser_acceptance browser_acceptance
 
+local_status=0
+set +e
 {
   for name in "${GATE_ORDER[@]}"; do
     printf '%s=%s\n' "$name" "${GATE_STATUS[$name]}"
   done
 } | tee "$EVIDENCE_DIR/gate-outcomes.txt"
+summary_status=("${PIPESTATUS[@]}")
+set -e
+if [[ "${summary_status[0]:-1}" -ne 0 || "${summary_status[1]:-1}" -ne 0 ]]; then
+  echo "Failed to retain gate outcome evidence." >&2
+  local_status=1
+fi
 
-if [[ $FAILED -ne 0 ]]; then
+if [[ $FAILED -ne 0 || $local_status -ne 0 ]]; then
   echo "WOS-01A exact-head acceptance failed closed." >&2
   exit 1
 fi
