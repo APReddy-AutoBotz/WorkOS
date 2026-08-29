@@ -1,0 +1,523 @@
+name: WOS-01A Clean Runtime Acceptance v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'
+      - '.github/scripts/wos01a-clean-runtime-matrix-v2.sh'
+      - '.github/scripts/wos01a-browser-acceptance-v2.mjs'
+      - '.github/scripts/wos01a-browser-lifecycle-v2.mjs'
+      - '.github/scripts/test-wos01a-browser-lifecycle-v2.mjs'
+      - '.github/scripts/verify-wos01a-controller-v2.mjs'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: wos01a-clean-runtime-acceptance-v2
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    name: Exact-head clean-runtime matrix
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      CONTROLLER_PR: '26'
+      CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      TARGET_PR: '27'
+      TARGET_BRANCH: codex/wos01a-acceptance-closure
+      TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+      PARENT_PR: '16'
+      PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+      EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: workos
+      PGPASSWORD: workos
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Verify exact controller, target, parent and main authority
+        id: authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const controller = context.payload.pull_request;
+            const failures = [];
+            if (controller.number !== Number(process.env.CONTROLLER_PR)) failures.push(`controller.number=${controller.number}`);
+            if (controller.state !== 'open') failures.push(`controller.state=${controller.state}`);
+            if (!controller.draft) failures.push('controller is not Draft');
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.head.sha !== context.payload.pull_request.head.sha) failures.push(`controller.head.sha=${controller.head.sha}`);
+            if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
+            if (controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base.sha=${controller.base.sha}`);
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: controller.number,
+              per_page: 100,
+            });
+            const actual = files.map(file => file.filename).sort();
+            const expected = [
+              '.github/scripts/test-wos01a-browser-lifecycle-v2.mjs',
+              '.github/scripts/verify-wos01a-controller-v2.mjs',
+              '.github/scripts/wos01a-browser-acceptance-v2.mjs',
+              '.github/scripts/wos01a-browser-lifecycle-v2.mjs',
+              '.github/scripts/wos01a-clean-runtime-matrix-v2.sh',
+              '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml',
+            ].sort();
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`controller.paths=${JSON.stringify(actual)}`);
+
+            const {data: target} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
+            });
+            if (target.state !== 'open') failures.push(`target.state=${target.state}`);
+            if (!target.draft) failures.push('target is not Draft');
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH) failures.push(`target.base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base.sha=${target.base.sha}`);
+
+            const {data: parent} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PARENT_PR),
+            });
+            if (parent.state !== 'open') failures.push(`parent.state=${parent.state}`);
+            if (!parent.draft) failures.push('parent is not Draft');
+            if (parent.head.ref !== process.env.PARENT_BRANCH) failures.push(`parent.head.ref=${parent.head.ref}`);
+            if (parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head.sha=${parent.head.sha}`);
+            if (parent.base.ref !== 'main') failures.push(`parent.base.ref=${parent.base.ref}`);
+            if (parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent.base.sha=${parent.base.sha}`);
+
+            const {data: main} = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(`WOS-01A exact authority failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact corrected product head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: current-main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+
+      - name: Run complete fail-closed acceptance matrix
+        id: matrix
+        continue-on-error: true
+        shell: bash
+        env:
+          CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          chmod +x controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash controller/.github/scripts/wos01a-clean-runtime-matrix-v2.sh \
+            "$GITHUB_WORKSPACE/controller" \
+            "$GITHUB_WORKSPACE/target" \
+            "$GITHUB_WORKSPACE/current-main"
+
+      - name: Upload exact-head matrix evidence
+        id: artifact_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-clean-runtime-${{ env.TARGET_HEAD }}
+          path: target/.acceptance-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload digest-bound browser bundle
+        id: browser_bundle_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-browser-bundle-${{ env.TARGET_HEAD }}
+          path: target/.browser-bundle
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Verify retained matrix evidence publication
+        id: evidence_upload
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_CONCLUSION: ${{ steps.artifact_upload.conclusion }}
+          ARTIFACT_ID: ${{ steps.artifact_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact_upload.outputs.artifact-digest }}
+          BUNDLE_ID: ${{ steps.browser_bundle_upload.outputs.artifact-id }}
+          BUNDLE_DIGEST: ${{ steps.browser_bundle_upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ARTIFACT_CONCLUSION" = success
+          test -n "$ARTIFACT_ID"
+          test -n "$ARTIFACT_DIGEST"
+          test -n "$BUNDLE_ID"
+          test -n "$BUNDLE_DIGEST"
+          if [[ ! "$ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]; then
+            echo 'Artifact digest is not valid SHA-256 evidence' >&2
+            exit 1
+          fi
+          [[ "$BUNDLE_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]
+
+      - name: Aggregate target-controlled matrix result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test '${{ steps.authority.outcome }}' = success
+          test '${{ steps.matrix.outcome }}' = success
+          test '${{ steps.evidence_upload.outcome }}' = success
+          test '${{ steps.browser_bundle_upload.outcome }}' = success
+
+  browser_acceptance:
+    name: Isolated browser authority
+    needs: acceptance
+    if: always()
+    permissions:
+      contents: read
+    env:
+      ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
+      CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+      TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require target matrix success
+        shell: bash
+        run: test "$ACCEPTANCE_RESULT" = success
+
+      - name: Checkout immutable controller browser authority
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: controller
+          persist-credentials: false
+
+      - name: Download exact browser bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: wos01a-browser-bundle-${{ env.TARGET_HEAD }}
+          path: browser-bundle
+
+      - name: Verify browser bundle authority and integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_HEAD"
+          grep -Fx "controller=$CONTROLLER_HEAD" browser-bundle/authority.txt
+          grep -Fx "target=$TARGET_HEAD" browser-bundle/authority.txt
+          (cd browser-bundle/dist && sha256sum -c ../files.sha256)
+          (cd browser-bundle && sha256sum -c bundle.sha256)
+
+      - name: Run Chrome outside isolated static target container
+        id: browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/wos01a-browser-evidence"
+          mkdir -p "$evidence"
+          config="$RUNNER_TEMP/wos01a-nginx.conf"
+          cat > "$config" <<'NGINX'
+          events {}
+          pid /var/run/nginx.pid;
+          error_log /dev/stderr notice;
+          http {
+            access_log off;
+            client_body_temp_path /var/cache/nginx/client_temp;
+            proxy_temp_path /var/cache/nginx/proxy_temp;
+            fastcgi_temp_path /var/cache/nginx/fastcgi_temp;
+            uwsgi_temp_path /var/cache/nginx/uwsgi_temp;
+            scgi_temp_path /var/cache/nginx/scgi_temp;
+            server {
+              listen 8080;
+              root /srv/workos;
+              location / { try_files $uri $uri/ /index.html; }
+            }
+          }
+          NGINX
+          cleanup() {
+            local rc=0
+            timeout 20s docker rm -f wos01a-static-target >/dev/null 2>&1 || rc=$?
+            if [[ "$rc" -ne 0 ]]; then echo "target container cleanup failed rc=$rc" >&2; return "$rc"; fi
+          }
+          trap cleanup EXIT
+          docker run --detach --name wos01a-static-target \
+            --user 101:101 \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 64 --memory 128m --network bridge \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=700 \
+            --tmpfs /var/run:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=700 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=700 \
+            --publish 127.0.0.1:4173:8080 \
+            --mount "type=bind,src=$PWD/browser-bundle/dist,dst=/srv/workos,readonly" \
+            --mount "type=bind,src=$config,dst=/etc/nginx/nginx.conf,readonly" \
+            nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 \
+            > "$evidence/container-id.txt"
+          docker inspect wos01a-static-target > "$evidence/container-inspect.json"
+          docker logs wos01a-static-target > "$evidence/container-startup.log" 2>&1 || true
+          inspect="$(cat "$evidence/container-inspect.json")"
+          jq -e '.[0].State.Running == true
+            and .[0].Config.User == "101:101"
+            and .[0].HostConfig.Privileged == false
+            and .[0].HostConfig.PidMode == ""
+            and .[0].HostConfig.ReadonlyRootfs == true
+            and .[0].HostConfig.Binds == null
+            and .[0].HostConfig.SecurityOpt == ["no-new-privileges"]
+            and .[0].HostConfig.CapDrop == ["ALL"]
+            and .[0].HostConfig.Memory == 134217728
+            and .[0].HostConfig.PidsLimit == 64
+            and .[0].HostConfig.NetworkMode == "bridge"
+            and ([.[0].Mounts[] | select(.Type == "bind")] | length == 2)
+            and ([.[0].Mounts[] | select(.Type == "bind") | .RW] | all(. == false))' <<<"$inspect" >/dev/null
+          for _ in $(seq 1 40); do
+            curl --fail --silent http://127.0.0.1:4173/login >/dev/null && break
+            docker inspect -f '{{.State.Running}}' wos01a-static-target | grep -Fx true
+            sleep 0.25
+          done
+          curl --fail --silent http://127.0.0.1:4173/login >/dev/null
+          WOS_BROWSER_ORIGIN=http://127.0.0.1:4173 \
+            timeout 8m node controller/.github/scripts/wos01a-browser-acceptance-v2.mjs \
+            2>&1 | tee "$evidence/browser-journeys.log"
+          grep -q 'WOS-01A bounded browser acceptance passed.' "$evidence/browser-journeys.log"
+          cp browser-bundle/authority.txt browser-bundle/bundle.sha256 "$evidence/"
+          docker inspect wos01a-static-target > "$evidence/container-inspect.json"
+          cleanup
+          trap - EXIT
+
+      - name: Upload isolated browser evidence
+        id: browser_artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-browser-authority-${{ env.TARGET_HEAD }}
+          path: ${{ runner.temp }}/wos01a-browser-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Aggregate isolated browser result
+        if: always()
+        shell: bash
+        env:
+          BROWSER_ARTIFACT_ID: ${{ steps.browser_artifact.outputs.artifact-id }}
+          BROWSER_ARTIFACT_DIGEST: ${{ steps.browser_artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ACCEPTANCE_RESULT" = success
+          test '${{ steps.browser.outcome }}' = success
+          test '${{ steps.browser_artifact.outcome }}' = success
+          test -n "$BROWSER_ARTIFACT_ID"
+          [[ "$BROWSER_ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]
+
+  final_authority:
+    name: Fresh-runner final authority lease
+    needs: [acceptance, browser_acceptance]
+    if: always()
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
+      BROWSER_RESULT: ${{ needs.browser_acceptance.result }}
+      CONTROLLER_PR: '26'
+      CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+      TARGET_PR: '27'
+      TARGET_BRANCH: codex/wos01a-acceptance-closure
+      TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+      PARENT_PR: '16'
+      PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+      EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify final live authority on isolated runner
+        id: final_authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const evidence = path.join(process.env.RUNNER_TEMP, 'wos01a-final-authority');
+            fs.mkdirSync(evidence, {recursive: true});
+            const failures = [];
+            if (process.env.ACCEPTANCE_RESULT !== 'success') {
+              failures.push(`acceptance.result=${process.env.ACCEPTANCE_RESULT}`);
+            }
+            if (process.env.BROWSER_RESULT !== 'success') failures.push(`browser.result=${process.env.BROWSER_RESULT}`);
+
+            const {data: controller} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.CONTROLLER_PR),
+            });
+            const {data: target} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.TARGET_PR),
+            });
+            const {data: parent} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PARENT_PR),
+            });
+            const {data: main} = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+            });
+
+            if (controller.state !== 'open') failures.push(`controller.state=${controller.state}`);
+            if (!controller.draft) failures.push('controller is not Draft');
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.head.ref=${controller.head.ref}`);
+            if (controller.head.sha !== process.env.CONTROLLER_HEAD) failures.push(`controller.head.sha=${controller.head.sha}`);
+            if (controller.base.ref !== 'main') failures.push(`controller.base.ref=${controller.base.ref}`);
+            if (controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base.sha=${controller.base.sha}`);
+
+            if (target.state !== 'open') failures.push(`target.state=${target.state}`);
+            if (!target.draft) failures.push('target is not Draft');
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.head.ref=${target.head.ref}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head.sha=${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH) failures.push(`target.base.ref=${target.base.ref}`);
+            if (target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base.sha=${target.base.sha}`);
+
+            if (parent.state !== 'open') failures.push(`parent.state=${parent.state}`);
+            if (!parent.draft) failures.push('parent is not Draft');
+            if (parent.head.ref !== process.env.PARENT_BRANCH) failures.push(`parent.head.ref=${parent.head.ref}`);
+            if (parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head.sha=${parent.head.sha}`);
+            if (parent.base.ref !== 'main') failures.push(`parent.base.ref=${parent.base.ref}`);
+            if (parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent.base.sha=${parent.base.sha}`);
+
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+
+            fs.writeFileSync(path.join(evidence, 'final-controller-pr.json'), `${JSON.stringify(controller, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-target-pr.json'), `${JSON.stringify(target, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-parent-pr.json'), `${JSON.stringify(parent, null, 2)}\n`);
+            fs.writeFileSync(path.join(evidence, 'final-main.json'), `${JSON.stringify(main, null, 2)}\n`);
+            fs.writeFileSync(
+              path.join(evidence, 'final-authority-result.json'),
+              `${JSON.stringify({
+                status: failures.length ? 'failed' : 'passed',
+                acceptanceResult: process.env.ACCEPTANCE_RESULT,
+                browserResult: process.env.BROWSER_RESULT,
+                controllerHead: process.env.CONTROLLER_HEAD,
+                targetHead: process.env.TARGET_HEAD,
+                parentHead: process.env.PARENT_HEAD,
+                mainHead: process.env.EXPECTED_MAIN_HEAD,
+                failures,
+              }, null, 2)}\n`,
+            );
+            if (failures.length) core.setFailed(`WOS-01A final authority failed: ${failures.join(', ')}`);
+
+      - name: Upload isolated final-authority evidence
+        id: final_artifact_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-final-authority-${{ env.TARGET_HEAD }}
+          path: ${{ runner.temp }}/wos01a-final-authority
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify final-authority evidence publication
+        id: final_evidence_upload
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_CONCLUSION: ${{ steps.final_artifact_upload.conclusion }}
+          ARTIFACT_ID: ${{ steps.final_artifact_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.final_artifact_upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ARTIFACT_CONCLUSION" = success
+          test -n "$ARTIFACT_ID"
+          test -n "$ARTIFACT_DIGEST"
+          if [[ ! "$ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]; then
+            echo 'Final-authority artifact digest is not valid SHA-256 evidence' >&2
+            exit 1
+          fi
+
+      - name: Aggregate isolated final-authority result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$ACCEPTANCE_RESULT" = success
+          test "$BROWSER_RESULT" = success
+          test '${{ steps.final_authority.outcome }}' = success
+          test '${{ steps.final_evidence_upload.outcome }}' = success
+
+  aggregate:
+    name: Aggregate WOS-01A acceptance
+    needs: [acceptance, browser_acceptance, final_authority]
+    if: always()
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail closed unless both isolated jobs passed
+        shell: bash
+        env:
+          ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
+          BROWSER_RESULT: ${{ needs.browser_acceptance.result }}
+          FINAL_AUTHORITY_RESULT: ${{ needs.final_authority.result }}
+        run: |
+          set -euo pipefail
+          test "$ACCEPTANCE_RESULT" = success
+          test "$BROWSER_RESULT" = success
+          test "$FINAL_AUTHORITY_RESULT" = success
