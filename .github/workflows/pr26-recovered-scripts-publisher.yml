@@ -1,0 +1,149 @@
+name: PR26 Recovered Scripts Publisher
+
+on:
+  push:
+    branches:
+      - controller/pr26-isolation-recovery-20260829
+    paths:
+      - '.github/workflows/pr26-recovered-scripts-publisher.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: pr26-recovered-scripts-publisher
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  OLD_HEAD: cdef93344825b23e459cc384e27a67e346e24c0e
+  PRODUCT_PR: '27'
+  PRODUCT_BRANCH: codex/wos01a-acceptance-closure
+  PRODUCT_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  RECOVERY_COMMENT_ID: '5463459529'
+  EXPECTED_LOCAL_COMMIT: b6ac73233fce0012fed380d878ee2490507f635f
+  EXPECTED_TREE: da84d44f9fce28faf3fe85acaaaf82038e19b357
+  EXPECTED_GZIP_BYTES: '6426'
+  EXPECTED_GZIP_SHA256: 4afb1b2fcf6d1d02dbf6dd9a7354ea92fa117898b9fc73283e7fe26add18705f
+  EXPECTED_PATCH_BYTES: '24120'
+  EXPECTED_PATCH_SHA256: 6426e6642e37dc61eb4a2afef8b490f3881e061c06d1b0028946d8dd915aabdd
+  OLD_WORKFLOW_BLOB: e41cd7265019f8d9e2258743afbe96facce126af
+
+jobs:
+  publish:
+    name: Publish exact two-script intermediate commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Verify live authority and materialize exact payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const crypto = require('crypto');
+            const fs = require('fs');
+            const path = require('path');
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            const {data: product} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PRODUCT_PR)});
+            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
+            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.OLD_HEAD || controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller=${controller.state}/${controller.draft}/${controller.head.ref}/${controller.head.sha}/${controller.base.ref}/${controller.base.sha}`);
+            if (product.state !== 'open' || !product.draft || product.head.ref !== process.env.PRODUCT_BRANCH || product.head.sha !== process.env.PRODUCT_HEAD || product.base.ref !== process.env.PARENT_BRANCH || product.base.sha !== process.env.PARENT_HEAD) failures.push(`product=${product.state}/${product.draft}/${product.head.ref}/${product.head.sha}/${product.base.ref}/${product.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft || parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD || parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent=${parent.state}/${parent.draft}/${parent.head.ref}/${parent.head.sha}/${parent.base.ref}/${parent.base.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            const {data: comment} = await github.rest.issues.getComment({owner: context.repo.owner, repo: context.repo.repo, comment_id: Number(process.env.RECOVERY_COMMENT_ID)});
+            const body = String(comment.body || '');
+            if (!['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector'].includes(comment.user?.login)) failures.push(`comment.author=${comment.user?.login || 'missing'}`);
+            if (!String(comment.issue_url || '').endsWith(`/issues/${process.env.CONTROLLER_PR}`)) failures.push(`comment.issue=${comment.issue_url}`);
+            for (const required of [process.env.OLD_HEAD, process.env.EXPECTED_LOCAL_COMMIT, process.env.EXPECTED_TREE, process.env.EXPECTED_GZIP_SHA256, process.env.EXPECTED_PATCH_SHA256]) if (!body.includes(required)) failures.push(`comment missing ${required}`);
+            const match = body.match(/base64 -d > controller\.patch\.gz <<'BASE64'\r?\n([A-Za-z0-9+/=\r\n]+?)\r?\nBASE64/);
+            if (!match) failures.push('exact recovery Base64 block was not found');
+            if (failures.length) { core.setFailed(`PR26 scripts start gate failed: ${failures.join(', ')}`); return; }
+            const encoded = match[1].replace(/\s+/g, '');
+            const gzip = Buffer.from(encoded, 'base64');
+            const digest = crypto.createHash('sha256').update(gzip).digest('hex');
+            if (gzip.length !== Number(process.env.EXPECTED_GZIP_BYTES) || digest !== process.env.EXPECTED_GZIP_SHA256) { core.setFailed(`Recovery gzip mismatch bytes=${gzip.length} sha256=${digest}`); return; }
+            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'controller.patch.gz'), gzip, {mode: 0o600});
+
+      - name: Checkout exact old controller head with bounded write credential
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.OLD_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct final package and create exact scripts-only commit
+        id: prepare
+        working-directory: controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          gzip -dc "$RUNNER_TEMP/controller.patch.gz" > "$RUNNER_TEMP/controller.patch"
+          test "$(wc -c < "$RUNNER_TEMP/controller.patch" | tr -d '[:space:]')" = "$EXPECTED_PATCH_BYTES"
+          printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" "$RUNNER_TEMP/controller.patch" | sha256sum -c -
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git am --committer-date-is-author-date "$RUNNER_TEMP/controller.patch"
+          test "$(git rev-parse HEAD^)" = "$OLD_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git hash-object .github/scripts/verify-wos01a-controller-v2.mjs)" = 'ae6b14b5c9a4afe9e35cf70e1dbccd47d4b8da0c'
+          test "$(git hash-object .github/scripts/wos01a-clean-runtime-matrix-v2.sh)" = '73b0e98a45351432d8eca762e22f6133b0ba2bd7'
+          test "$(git hash-object .github/workflows/wos01a-clean-runtime-acceptance-v2.yml)" = '3efa09ba52a6b87fc690346f2724ab07db4a4046'
+
+          git checkout "$OLD_HEAD" -- .github/workflows/wos01a-clean-runtime-acceptance-v2.yml
+          git reset --soft "$OLD_HEAD"
+          git add .github/scripts/verify-wos01a-controller-v2.mjs .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          git commit -m 'ci: prepare isolated browser authority support'
+
+          test "$(git rev-parse HEAD^)" = "$OLD_HEAD"
+          test "$(git hash-object .github/scripts/verify-wos01a-controller-v2.mjs)" = 'ae6b14b5c9a4afe9e35cf70e1dbccd47d4b8da0c'
+          test "$(git hash-object .github/scripts/wos01a-clean-runtime-matrix-v2.sh)" = '73b0e98a45351432d8eca762e22f6133b0ba2bd7'
+          test "$(git hash-object .github/workflows/wos01a-clean-runtime-acceptance-v2.yml)" = "$OLD_WORKFLOW_BLOB"
+          git diff --name-only "$OLD_HEAD..HEAD" | LC_ALL=C sort > "$RUNNER_TEMP/actual-paths.txt"
+          cat > "$RUNNER_TEMP/expected-paths.txt" <<'PATHS'
+          .github/scripts/verify-wos01a-controller-v2.mjs
+          .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          PATHS
+          diff -u "$RUNNER_TEMP/expected-paths.txt" "$RUNNER_TEMP/actual-paths.txt"
+          node --check .github/scripts/verify-wos01a-controller-v2.mjs
+          bash -n .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          git diff --check "$OLD_HEAD..HEAD"
+          test -z "$(git status --porcelain)"
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate exact live leases before scripts publication
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.OLD_HEAD || controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) core.setFailed(`Final scripts lease failed: ${controller.state}/${controller.draft}/${controller.head.ref}/${controller.head.sha}/${controller.base.ref}/${controller.base.sha}`);
+
+      - name: Fast-forward existing PR26 branch with scripts only
+        working-directory: controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force-with-lease="refs/heads/${CONTROLLER_BRANCH}:${OLD_HEAD}" origin "HEAD:refs/heads/${CONTROLLER_BRANCH}"
+
+      - name: Verify scripts-only publication and record outcome
+        env:
+          NEW_HEAD: ${{ steps.prepare.outputs.head }}
+          NEW_TREE: ${{ steps.prepare.outputs.tree }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.NEW_HEAD) { core.setFailed(`Scripts publication mismatch: ${controller.head.sha}`); return; }
+            await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.CONTROLLER_PR), body: `[PR26-SCRIPTS-PUBLISHED]\n\n- Old head: \`${process.env.OLD_HEAD}\`\n- Scripts head: \`${process.env.NEW_HEAD}\`\n- Intermediate tree: \`${process.env.NEW_TREE}\`\n- Exact recovered script blobs: \`ae6b14b5c9a4afe9e35cf70e1dbccd47d4b8da0c\`, \`73b0e98a45351432d8eca762e22f6133b0ba2bd7\`\n- Workflow remains at old blob \`${process.env.OLD_WORKFLOW_BLOB}\` pending connector-authorized replacement.\n\nPR #26 remains Draft. No product branch, main, deployment, provider, secret, customer data or reference repository was changed.`});
