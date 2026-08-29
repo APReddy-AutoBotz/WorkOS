@@ -1,4 +1,4 @@
-name: WOS-01A Rebind Callback Coverage v1
+name: WOS-01A Subject-Only Identity Linking v1
 
 on:
   push:
@@ -8,43 +8,35 @@ on:
       - '.github/workflows/wos01a-rebind-callback-coverage-v1.yml'
 
 concurrency:
-  group: wos01a-rebind-callback-coverage-v1
+  group: wos01a-subject-only-identity-linking-v1
   cancel-in-progress: false
 
 env:
-  CONTROLLER_PR: '26'
-  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
-  OLD_CONTROLLER_HEAD: 9ce9b1da1d76fce82b8e96e8bc763d113cadd6b0
   TARGET_PR: '27'
   TARGET_BRANCH: codex/wos01a-acceptance-closure
-  OLD_TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
-  NEW_TARGET_HEAD: 97025973c56b53a983ec85bac10344c85e13a96c
+  OLD_TARGET_HEAD: b4d0a37322c428035122306fd3b77e35f5dffb7a
   PARENT_PR: '16'
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
   EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
-  WORKFLOW_PATH: .github/workflows/wos01a-clean-runtime-acceptance-v2.yml
-  VERIFIER_PATH: .github/scripts/verify-wos01a-controller-v2.mjs
+  SERVER_PATH: server/index.mjs
+  TEST_PATH: tests/production-identity-smoke.mjs
+  EVIDENCE_PATH: docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
 
 jobs:
   publish:
-    name: Rebind exact product head under lease
+    name: Publish exact subject-only identity closure
     permissions:
       contents: write
       pull-requests: read
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Verify exact live controller, target, parent and main
+      - name: Verify exact target, parent and main authority
         uses: actions/github-script@v7
         with:
           script: |
             const failures = [];
-            const {data: controller} = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number(process.env.CONTROLLER_PR),
-            });
             const {data: target} = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -60,44 +52,172 @@ jobs:
               repo: context.repo.repo,
               branch: 'main',
             });
-            if (controller.state !== 'open' || !controller.draft) failures.push(`controller=${controller.state}/${controller.draft}`);
-            if (controller.head.ref !== process.env.CONTROLLER_BRANCH) failures.push(`controller.ref=${controller.head.ref}`);
-            if (controller.head.sha !== process.env.OLD_CONTROLLER_HEAD) failures.push(`controller.head=${controller.head.sha}`);
             if (target.state !== 'open' || !target.draft) failures.push(`target=${target.state}/${target.draft}`);
-            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target.ref=${target.head.ref}`);
-            if (target.head.sha !== process.env.NEW_TARGET_HEAD) failures.push(`target.head=${target.head.sha}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.OLD_TARGET_HEAD) failures.push(`target.head=${target.head.ref}@${target.head.sha}`);
             if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}@${target.base.sha}`);
             if (parent.state !== 'open' || !parent.draft) failures.push(`parent=${parent.state}/${parent.draft}`);
             if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head=${parent.head.ref}@${parent.head.sha}`);
             if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
             if (failures.length) core.setFailed(failures.join(', '));
 
-      - name: Checkout exact controller head without persistent credentials
+      - name: Checkout exact product head without persistent credentials
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.OLD_CONTROLLER_HEAD }}
+          ref: ${{ env.OLD_TARGET_HEAD }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Apply deterministic two-file target rebind
+      - name: Apply deterministic subject-only linking correction
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$OLD_CONTROLLER_HEAD"
-          old_count="$(grep -F "$OLD_TARGET_HEAD" "$WORKFLOW_PATH" "$VERIFIER_PATH" | wc -l | tr -d '[:space:]')"
-          test "$old_count" -eq 4
-          sed -i "s/$OLD_TARGET_HEAD/$NEW_TARGET_HEAD/g" "$WORKFLOW_PATH" "$VERIFIER_PATH"
-          test -z "$(grep -F "$OLD_TARGET_HEAD" "$WORKFLOW_PATH" "$VERIFIER_PATH" || true)"
-          new_count="$(grep -F "$NEW_TARGET_HEAD" "$WORKFLOW_PATH" "$VERIFIER_PATH" | wc -l | tr -d '[:space:]')"
-          test "$new_count" -eq 4
-          node --check "$VERIFIER_PATH"
-          node "$VERIFIER_PATH"
-          ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' "$WORKFLOW_PATH"
+          test "$(git rev-parse HEAD)" = "$OLD_TARGET_HEAD"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          server_path = Path('server/index.mjs')
+          test_path = Path('tests/production-identity-smoke.mjs')
+          evidence_path = Path('docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md')
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
+
+          server = server_path.read_text()
+          server = replace_once(
+              server,
+              """    if (!providerSubject && !upn) {
+      res.redirect('/login?error=entra_missing_identity');
+      return;
+    }
+""",
+              """    if (!providerSubject) {
+      res.redirect('/login?error=entra_missing_identity');
+      return;
+    }
+""",
+              'provider subject requirement',
+          )
+          server = replace_once(
+              server,
+              """    if (!user && upn) {
+      user = await fetchUserAuthRowByWhere(client, `
+        left join identity_provider_links ipl on ipl.employee_id = e.id and ipl.provider = 'entra' and ipl.status = 'Linked'
+        where lower(u.email) = lower($1)
+          or lower(ipl.provider_upn) = lower($1)
+          or lower(e.email) = lower($1)
+      `, [upn]);
+    }
+""",
+              "",
+              'email fallback removal',
+          )
+          server_path.write_text(server)
+
+          test = test_path.read_text()
+          test = replace_once(
+              test,
+              """  await assertCallbackRejected({
+    name: 'unlinked-identity',
+    claimOverrides: {
+      oid: 'unlinked-provider-subject',
+      preferred_username: 'unlinked.user@example.test',
+    },
+    expectedLocation: '/login?error=entra_unlinked_user',
+  });
+
+  const afterRejectedUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);
+""",
+              """  const emailOnlyDirectorId = 'synthetic-email-only-director';
+  const emailOnlyEmployeeId = 'synthetic-email-only-employee';
+  const emailOnlyEmployeeCode = 'SYNTH-EMAIL-ONLY';
+  const emailOnlyAddress = 'email-only.user@example.test';
+  const emailOnlySubject = 'email-only-provider-subject';
+  await pool.query(
+    `insert into country_directors (id, name, region) values ($1, 'Synthetic Email-Only Director', 'Synthetic')`,
+    [emailOnlyDirectorId],
+  );
+  await pool.query(`
+    insert into employees (
+      id, employee_id, name, email, designation, department, country,
+      region, primary_country_director_id, status
+    ) values ($1, $2, 'Synthetic Email-Only User', $3, 'Consultant', 'Delivery',
+      'Synthetic', 'Synthetic', $4, 'Active')
+  `, [emailOnlyEmployeeId, emailOnlyEmployeeCode, emailOnlyAddress, emailOnlyDirectorId]);
+  const emailOnlyUser = await pool.query(`
+    insert into users (username, employee_id, email, status)
+    values ('email-only-user', $1, $2, 'Active')
+    returning id
+  `, [emailOnlyEmployeeCode, emailOnlyAddress]);
+  await pool.query(
+    'insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1',
+    [emailOnlyUser.rows[0].id],
+  );
+
+  await assertCallbackRejected({
+    name: 'email-only-unlinked-identity',
+    claimOverrides: {
+      oid: emailOnlySubject,
+      preferred_username: emailOnlyAddress,
+    },
+    expectedLocation: '/login?error=entra_unlinked_user',
+  });
+
+  const emailOnlyUserState = await pool.query(
+    'select entra_object_id from users where id = $1',
+    [emailOnlyUser.rows[0].id],
+  );
+  const emailOnlyEmployeeState = await pool.query(
+    'select entra_object_id from employees where id = $1',
+    [emailOnlyEmployeeId],
+  );
+  const emailOnlyLinks = await pool.query(`
+    select count(*)::int as count
+    from identity_provider_links
+    where provider = 'entra'
+      and (provider_subject = $1 or lower(provider_upn) = lower($2))
+  `, [emailOnlySubject, emailOnlyAddress]);
+  assert.equal(emailOnlyUserState.rows[0]?.entra_object_id, null, 'email-only rejection must not link the user');
+  assert.equal(emailOnlyEmployeeState.rows[0]?.entra_object_id, null, 'email-only rejection must not link the employee');
+  assert.equal(Number(emailOnlyLinks.rows[0]?.count || 0), 0, 'email-only rejection must not create an identity-provider link');
+  await pool.query('delete from users where id = $1', [emailOnlyUser.rows[0].id]);
+  await pool.query('delete from employees where id = $1', [emailOnlyEmployeeId]);
+  await pool.query('delete from country_directors where id = $1', [emailOnlyDirectorId]);
+
+  const afterRejectedUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);
+""",
+              'email-only retained rejection',
+          )
+          test_path.write_text(test)
+
+          evidence = evidence_path.read_text().rstrip()
+          section = """
+
+## WOS-01A Entra subject-only account-linking closure
+
+Interactive Entra login now resolves only a pre-provisioned Entra provider subject or object identifier. A token UPN or email address is audit context only and can no longer select an otherwise unlinked WorkOS user, create an identity-provider link, or authorize a session.
+
+The retained production identity fixture provisions an active employee and user whose email matches a valid signed Entra token but whose provider subject is not linked. The callback must return `entra_unlinked_user`, emit no WorkOS session cookie, leave both user and employee Entra object identifiers empty, create no `identity_provider_links` row, and leave user/employee counts unchanged after fixture cleanup. The separate linked-subject case remains the only successful callback path.
+"""
+          if '## WOS-01A Entra subject-only account-linking closure' in evidence:
+              raise SystemExit('subject-only evidence section already exists')
+          evidence_path.write_text(evidence + section + '\n')
+          PY
+
+          node --check "$SERVER_PATH"
+          node --check "$TEST_PATH"
+          node scripts/verify-baseline.mjs
+          node scripts/scan-bootstrap.mjs --self-test
+          node scripts/scan-bootstrap.mjs
           git diff --check
           mapfile -t changed < <(git status --porcelain | sed 's/^...//' | sort)
-          test "${#changed[@]}" -eq 2
-          test "${changed[0]}" = "$VERIFIER_PATH"
-          test "${changed[1]}" = "$WORKFLOW_PATH"
+          printf '%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 3
+          test "${changed[0]}" = "$EVIDENCE_PATH"
+          test "${changed[1]}" = "$SERVER_PATH"
+          test "${changed[2]}" = "$TEST_PATH"
 
       - name: Commit and publish under exact-old-head lease
         shell: bash
@@ -112,12 +232,12 @@ jobs:
           git config user.name "WorkOS Implementation Controller"
           git config user.email "actions@users.noreply.github.com"
           auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$CONTROLLER_BRANCH" | cut -f1)"
-          test "$remote_head" = "$OLD_CONTROLLER_HEAD"
-          git checkout -B "$CONTROLLER_BRANCH" "$OLD_CONTROLLER_HEAD"
-          git add "$WORKFLOW_PATH" "$VERIFIER_PATH"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
+          test "$remote_head" = "$OLD_TARGET_HEAD"
+          git checkout -B "$TARGET_BRANCH" "$OLD_TARGET_HEAD"
+          git add "$SERVER_PATH" "$TEST_PATH" "$EVIDENCE_PATH"
           git diff --cached --check
-          git commit --no-verify -m "ci: rebind WOS-01A acceptance to loopback closure"
+          git commit --no-verify -m "fix: require subject-linked Entra identities"
           git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
-            --force-with-lease="refs/heads/$CONTROLLER_BRANCH:$OLD_CONTROLLER_HEAD" \
-            origin "HEAD:refs/heads/$CONTROLLER_BRANCH"
+            --force-with-lease="refs/heads/$TARGET_BRANCH:$OLD_TARGET_HEAD" \
+            origin "HEAD:refs/heads/$TARGET_BRANCH"
