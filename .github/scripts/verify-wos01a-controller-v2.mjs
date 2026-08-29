@@ -18,7 +18,7 @@ assert.doesNotMatch(matrix, /GH_TOKEN|Authorization: Bearer/);
 
 assert.match(acceptanceJob, /CONTROLLER_PR: '26'/);
 assert.match(acceptanceJob, /CONTROLLER_BRANCH: controller\/wos01a-clean-runtime-acceptance-v2/);
-assert.match(acceptanceJob, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 17ac76595ec8bfe58564fa899bf0425816575a87/);
+assert.match(acceptanceJob, /TARGET_PR: '27'[\s\S]*TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573/);
 assert.match(acceptanceJob, /PARENT_PR: '16'[\s\S]*PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60/);
 assert.match(acceptanceJob, /EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42/);
 assert.match(acceptanceJob, /ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea/);
@@ -41,7 +41,7 @@ for (const required of [
   'CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2',
   "TARGET_PR: '27'",
   'TARGET_BRANCH: codex/wos01a-acceptance-closure',
-  'TARGET_HEAD: 17ac76595ec8bfe58564fa899bf0425816575a87',
+  'TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573',
   "PARENT_PR: '16'",
   'PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2',
   'PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60',
