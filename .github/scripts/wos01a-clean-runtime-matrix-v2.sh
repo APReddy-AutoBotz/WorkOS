@@ -401,8 +401,7 @@ browser_bundle() {
     > "$BROWSER_BUNDLE_DIR/files.sha256"
   printf 'controller=%s\ntarget=%s\n' "$CONTROLLER_HEAD" "$TARGET_HEAD" \
     > "$BROWSER_BUNDLE_DIR/authority.txt"
-  sha256sum "$BROWSER_BUNDLE_DIR/files.sha256" "$BROWSER_BUNDLE_DIR/authority.txt" \
-    > "$BROWSER_BUNDLE_DIR/bundle.sha256"
+  (cd "$BROWSER_BUNDLE_DIR" && sha256sum files.sha256 authority.txt > bundle.sha256)
 }
 
 rm -rf "$TARGET_ROOT/dist" "$EVIDENCE_DIR" "$BROWSER_BUNDLE_DIR"
