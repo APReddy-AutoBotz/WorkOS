@@ -1,0 +1,507 @@
+name: WOS-01A Controller Order Browser Isolation v1
+
+on:
+  push:
+    branches:
+      - controller/workos-root-publisher-v1
+    paths:
+      - '.github/workflows/wos01a-controller-order-browser-isolation-v1.yml'
+
+concurrency:
+  group: wos01a-controller-order-browser-isolation-v1
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  OLD_CONTROLLER_HEAD: 621ae545fdb3ccc729246b21d3b2a50fcdc423d8
+  TARGET_PR: '27'
+  TARGET_BRANCH: codex/wos01a-acceptance-closure
+  TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  MATRIX_PATH: .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+  DRIVER_PATH: .github/scripts/wos01a-browser-acceptance-v2.mjs
+  VERIFIER_PATH: .github/scripts/verify-wos01a-controller-v2.mjs
+
+jobs:
+  publish:
+    name: Publish exact controller correction
+    permissions:
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact live controller, target, parent and main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
+            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
+            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            if (controller.state !== 'open' || !controller.draft) failures.push(`controller=${controller.state}/${controller.draft}`);
+            if (controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.OLD_CONTROLLER_HEAD) failures.push(`controller.head=${controller.head.ref}@${controller.head.sha}`);
+            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base=${controller.base.ref}@${controller.base.sha}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`target=${target.state}/${target.draft}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head=${target.head.ref}@${target.head.sha}`);
+            if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}@${target.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft) failures.push(`parent=${parent.state}/${parent.draft}`);
+            if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head=${parent.head.ref}@${parent.head.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(failures.join(', '));
+
+      - name: Checkout exact controller head without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.OLD_CONTROLLER_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply deterministic order and preload isolation correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OLD_CONTROLLER_HEAD"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          matrix_path = Path('.github/scripts/wos01a-clean-runtime-matrix-v2.sh')
+          driver_path = Path('.github/scripts/wos01a-browser-acceptance-v2.mjs')
+          verifier_path = Path('.github/scripts/verify-wos01a-controller-v2.mjs')
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
+
+          matrix = matrix_path.read_text()
+          matrix = replace_once(
+              matrix,
+              "FAILED=0\n\nrequire_gate() {",
+              """FAILED=0
+BROWSER_DRIVER_PID=''
+BROWSER_DRIVER_READY="$EVIDENCE_DIR/browser-driver-loaded.json"
+BROWSER_DRIVER_LOG="$EVIDENCE_DIR/browser-journeys.log"
+
+cleanup_preloaded_browser() {
+  if [[ -n "${BROWSER_DRIVER_PID:-}" ]] && kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
+    kill -TERM "$BROWSER_DRIVER_PID" 2>/dev/null || true
+    for _attempt in $(seq 1 50); do
+      if ! kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then break; fi
+      sleep 0.1
+    done
+    if kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
+      kill -KILL "$BROWSER_DRIVER_PID" 2>/dev/null || true
+    fi
+    wait "$BROWSER_DRIVER_PID" 2>/dev/null || true
+  fi
+  BROWSER_DRIVER_PID=''
+}
+trap cleanup_preloaded_browser EXIT INT TERM
+
+require_gate() {""",
+              'matrix browser globals',
+          )
+          matrix = replace_once(
+              matrix,
+              """run_gate() {
+  local name="$1"
+  shift
+  local log="$EVIDENCE_DIR/${name}.log"
+  local -a pipeline_status=()
+  local command_rc=1
+  local tee_rc=1
+  local rc=1
+  GATE_ORDER+=("$name")
+  echo "===== START $name ====="
+  set +e
+  ( "$@" ) 2>&1 | tee "$log"
+  pipeline_status=("${PIPESTATUS[@]}")
+  set -e
+  command_rc="${pipeline_status[0]:-1}"
+  tee_rc="${pipeline_status[1]:-1}"
+  if [[ "$command_rc" -eq 0 && "$tee_rc" -eq 0 ]]; then
+    rc=0
+  elif [[ "$command_rc" -ne 0 ]]; then
+    rc="$command_rc"
+  else
+    rc="$tee_rc"
+  fi
+  if [[ $rc -eq 0 ]]; then
+    GATE_STATUS[$name]="PASS"
+    echo "===== PASS $name ====="
+  else
+    GATE_STATUS[$name]="FAIL"
+    FAILED=1
+    echo "===== FAIL $name command_rc=$command_rc tee_rc=$tee_rc =====" >&2
+  fi
+}
+""",
+              """run_gate() {
+  local name="$1"
+  shift
+  local log="$EVIDENCE_DIR/${name}.log"
+  local -a pipeline_status=()
+  local command_rc=1
+  local tee_rc=1
+  local rc=1
+  GATE_ORDER+=("$name")
+  echo "===== START $name ====="
+  set +e
+  ( "$@" ) 2>&1 | tee "$log"
+  pipeline_status=("${PIPESTATUS[@]}")
+  set -e
+  command_rc="${pipeline_status[0]:-1}"
+  tee_rc="${pipeline_status[1]:-1}"
+  if [[ "$command_rc" -eq 0 && "$tee_rc" -eq 0 ]]; then
+    rc=0
+  elif [[ "$command_rc" -ne 0 ]]; then
+    rc="$command_rc"
+  else
+    rc="$tee_rc"
+  fi
+  if [[ $rc -eq 0 ]]; then
+    GATE_STATUS[$name]="PASS"
+    echo "===== PASS $name ====="
+  else
+    GATE_STATUS[$name]="FAIL"
+    FAILED=1
+    echo "===== FAIL $name command_rc=$command_rc tee_rc=$tee_rc =====" >&2
+  fi
+}
+
+run_gate_parent() {
+  local name="$1"
+  shift
+  local log="$EVIDENCE_DIR/${name}.log"
+  local command_rc=1
+  local cat_rc=1
+  local rc=1
+  GATE_ORDER+=("$name")
+  echo "===== START $name ====="
+  set +e
+  "$@" > "$log" 2>&1
+  command_rc=$?
+  cat "$log"
+  cat_rc=$?
+  set -e
+  if [[ "$command_rc" -eq 0 && "$cat_rc" -eq 0 ]]; then
+    rc=0
+  elif [[ "$command_rc" -ne 0 ]]; then
+    rc="$command_rc"
+  else
+    rc="$cat_rc"
+  fi
+  if [[ $rc -eq 0 ]]; then
+    GATE_STATUS[$name]="PASS"
+    echo "===== PASS $name ====="
+  else
+    GATE_STATUS[$name]="FAIL"
+    FAILED=1
+    echo "===== FAIL $name command_rc=$command_rc evidence_rc=$cat_rc =====" >&2
+  fi
+}
+""",
+              'matrix parent gate runner',
+          )
+          matrix = replace_once(
+              matrix,
+              """browser_lifecycle_regression() {
+  set -euo pipefail
+  cd "$CONTROLLER_ROOT"
+  node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
+}
+
+locked_install() {""",
+              """browser_lifecycle_regression() {
+  set -euo pipefail
+  cd "$CONTROLLER_ROOT"
+  node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
+}
+
+preload_browser_driver() {
+  set -euo pipefail
+  local driver_rel='.github/scripts/wos01a-browser-acceptance-v2.mjs'
+  local lifecycle_rel='.github/scripts/wos01a-browser-lifecycle-v2.mjs'
+  local expected_driver expected_lifecycle actual_driver actual_lifecycle
+  expected_driver="$(git -C "$CONTROLLER_ROOT" rev-parse "$CONTROLLER_HEAD:$driver_rel")"
+  expected_lifecycle="$(git -C "$CONTROLLER_ROOT" rev-parse "$CONTROLLER_HEAD:$lifecycle_rel")"
+  actual_driver="$(git -C "$CONTROLLER_ROOT" hash-object "$CONTROLLER_ROOT/$driver_rel")"
+  actual_lifecycle="$(git -C "$CONTROLLER_ROOT" hash-object "$CONTROLLER_ROOT/$lifecycle_rel")"
+  test "$expected_driver" = "$actual_driver"
+  test "$expected_lifecycle" = "$actual_lifecycle"
+  rm -f "$BROWSER_DRIVER_READY" "$BROWSER_DRIVER_LOG"
+  WOS_BROWSER_ORIGIN=http://127.0.0.1:4173 \
+  WOS_BROWSER_DRIVER_READY_FILE="$BROWSER_DRIVER_READY" \
+  WOS_APP_READY_TIMEOUT_MS=1200000 \
+    node "$CONTROLLER_ROOT/$driver_rel" > "$BROWSER_DRIVER_LOG" 2>&1 &
+  BROWSER_DRIVER_PID=$!
+  for _attempt in $(seq 1 300); do
+    if [[ -s "$BROWSER_DRIVER_READY" ]]; then break; fi
+    if ! kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
+      cat "$BROWSER_DRIVER_LOG" >&2 || true
+      wait "$BROWSER_DRIVER_PID" || true
+      return 1
+    fi
+    sleep 0.1
+  done
+  test -s "$BROWSER_DRIVER_READY"
+  node --input-type=module - "$BROWSER_DRIVER_READY" "$BROWSER_DRIVER_PID" <<'NODE'
+  import {readFileSync} from 'node:fs';
+  const payload = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+  if (payload.pid !== Number(process.argv[3]) || payload.status !== 'loaded') process.exit(1);
+NODE
+  printf 'driver_pid=%s\ndriver_blob=%s\nlifecycle_blob=%s\n' \
+    "$BROWSER_DRIVER_PID" "$actual_driver" "$actual_lifecycle"
+}
+
+locked_install() {""",
+              'matrix browser preload',
+          )
+          matrix = replace_once(
+              matrix,
+              """  local expected_ids="$EVIDENCE_DIR/expected-migration-ids.txt"
+  {
+    printf '%s\\n' '005_auth_lifecycle'
+    find server/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\\n' \\
+      | sed 's/\\.sql$//'
+  } | LC_ALL=C sort > "$expected_ids"
+  test -s "$expected_ids"
+""",
+              """  local expected_ids="$EVIDENCE_DIR/expected-migration-ids.txt"
+  printf '%s\\n' '005_auth_lifecycle' > "$expected_ids"
+  find server/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\\n' \\
+    | sed 's/\\.sql$//' \\
+    | LC_ALL=C sort >> "$expected_ids"
+  test -s "$expected_ids"
+""",
+              'matrix expected migration order',
+          )
+          matrix = replace_once(
+              matrix,
+              """  verify_ledger() {
+    local database_url="$1"
+    local label="$2"
+    local actual="$EVIDENCE_DIR/${label}-migration-ids.txt"
+    psql "$database_url" -Atc 'select id from schema_migrations order by id' > "$actual"
+    if ! cmp -s "$expected_ids" "$actual"; then
+      echo "Migration ledger mismatch for $label" >&2
+      diff -u "$expected_ids" "$actual" >&2 || true
+      return 1
+    fi
+  }
+""",
+              """  verify_ledger() {
+    local database_url="$1"
+    local label="$2"
+    local ordered="$EVIDENCE_DIR/${label}-migration-order.txt"
+    local actual="$EVIDENCE_DIR/${label}-migration-ids.txt"
+    psql "$database_url" -At -F '|' -c \\
+      'select id, applied_at, xmin::text::bigint, ctid from schema_migrations order by applied_at asc, xmin::text::bigint asc, ctid asc' \\
+      > "$ordered"
+    cut -d'|' -f1 "$ordered" > "$actual"
+    if ! cmp -s "$expected_ids" "$actual"; then
+      echo "Migration application order mismatch for $label" >&2
+      diff -u "$expected_ids" "$actual" >&2 || true
+      return 1
+    fi
+  }
+""",
+              'matrix migration application order',
+          )
+          matrix = replace_once(
+              matrix,
+              """  WOS_BROWSER_ORIGIN=http://127.0.0.1:4173 \\
+    node "$CONTROLLER_ROOT/.github/scripts/wos01a-browser-acceptance-v2.mjs" \\
+    2>&1 | tee "$EVIDENCE_DIR/browser-journeys.log"
+  test -z "$(git status --porcelain --untracked-files=no)"
+  cleanup_preview
+  preview_pid=''
+  trap - EXIT
+}
+""",
+              """  test -n "$BROWSER_DRIVER_PID"
+  local driver_rc=1
+  set +e
+  wait "$BROWSER_DRIVER_PID"
+  driver_rc=$?
+  set -e
+  BROWSER_DRIVER_PID=''
+  test "$driver_rc" -eq 0
+  grep -q 'WOS-01A bounded browser acceptance passed.' "$BROWSER_DRIVER_LOG"
+  test -z "$(git status --porcelain --untracked-files=no)"
+  cleanup_preview
+  preview_pid=''
+  trap cleanup_preloaded_browser EXIT INT TERM
+}
+""",
+              'matrix browser completion',
+          )
+          matrix = replace_once(
+              matrix,
+              """run_gate controller_regression controller_regression
+run_gate browser_lifecycle_regression browser_lifecycle_regression
+run_gate locked_install locked_install""",
+              """run_gate controller_regression controller_regression
+run_gate browser_lifecycle_regression browser_lifecycle_regression
+run_gate_parent browser_driver_preload preload_browser_driver
+run_gate locked_install locked_install""",
+              'matrix preload gate invocation',
+          )
+          matrix = replace_once(
+              matrix,
+              "run_gate browser_acceptance browser_acceptance",
+              "run_gate_parent browser_acceptance browser_acceptance",
+              'matrix parent browser invocation',
+          )
+          matrix_path.write_text(matrix)
+
+          driver = driver_path.read_text()
+          driver = replace_once(
+              driver,
+              "import { mkdtemp } from 'node:fs/promises';",
+              "import { mkdtemp, writeFile } from 'node:fs/promises';",
+              'driver import',
+          )
+          driver = replace_once(
+              driver,
+              """const commandTimeoutMs = Number(process.env.WOS_CDP_TIMEOUT_MS || 10_000);
+const journeyTimeoutMs = Number(process.env.WOS_JOURNEY_TIMEOUT_MS || 25_000);
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+""",
+              """const commandTimeoutMs = Number(process.env.WOS_CDP_TIMEOUT_MS || 10_000);
+const journeyTimeoutMs = Number(process.env.WOS_JOURNEY_TIMEOUT_MS || 25_000);
+const appReadyTimeoutMs = Number(process.env.WOS_APP_READY_TIMEOUT_MS || 20 * 60 * 1000);
+const driverReadyFile = String(process.env.WOS_BROWSER_DRIVER_READY_FILE || '').trim();
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const waitForApplication = async () => {
+  const started = Date.now();
+  let lastError;
+  while (Date.now() - started < appReadyTimeoutMs) {
+    try {
+      const response = await fetch(`${origin}/login`, { signal: AbortSignal.timeout(2_000) });
+      if (response.ok) return;
+      lastError = new Error(`application returned ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(250);
+  }
+  throw new Error(`Application did not become ready within ${appReadyTimeoutMs}ms: ${lastError?.message || 'unknown error'}`);
+};
+""",
+              'driver readiness function',
+          )
+          driver = replace_once(
+              driver,
+              """if (typeof WebSocket !== 'function') {
+  throw new Error('Node runtime does not provide the WebSocket API required for bounded CDP acceptance');
+}
+
+const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'workos-chrome-'));
+""",
+              """if (typeof WebSocket !== 'function') {
+  throw new Error('Node runtime does not provide the WebSocket API required for bounded CDP acceptance');
+}
+
+if (driverReadyFile) {
+  await writeFile(driverReadyFile, `${JSON.stringify({status: 'loaded', pid: process.pid, origin})}\\n`, {mode: 0o600});
+}
+await waitForApplication();
+
+const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'workos-chrome-'));
+""",
+              'driver preload handshake',
+          )
+          driver_path.write_text(driver)
+
+          verifier = verifier_path.read_text()
+          verifier = replace_once(
+              verifier,
+              "  'browser_acceptance',\n",
+              "",
+              'verifier parent browser loop removal',
+          )
+          verifier = replace_once(
+              verifier,
+              "assert.doesNotMatch(matrix, /run_gate final_authority|final_authority\\(\\)/);",
+              """assert.doesNotMatch(matrix, /run_gate final_authority|final_authority\\(\\)/);
+assert.match(matrix, /run_gate_parent browser_driver_preload preload_browser_driver/);
+assert.match(matrix, /run_gate_parent browser_acceptance browser_acceptance/);
+assert.match(matrix, /rev-parse \"\\$CONTROLLER_HEAD:\\$driver_rel\"/);
+assert.match(matrix, /hash-object \"\\$CONTROLLER_ROOT\\/\\$driver_rel\"/);
+assert.match(matrix, /wait \"\\$BROWSER_DRIVER_PID\"/);
+assert.match(matrix, /browser-driver-loaded\\.json/);""",
+              'verifier browser isolation assertions',
+          )
+          verifier = replace_once(
+              verifier,
+              "assert.match(migration, /select id from schema_migrations order by id/);",
+              """assert.match(migration, /select id, applied_at, xmin::text::bigint, ctid from schema_migrations order by applied_at asc, xmin::text::bigint asc, ctid asc/);
+assert.match(migration, /migration-order\\.txt/);""",
+              'verifier migration order query',
+          )
+          verifier = replace_once(
+              verifier,
+              "assert.match(migration, /cmp -s \"\\$expected_ids\" \"\\$actual\"/);",
+              """assert.match(migration, /cmp -s \"\\$expected_ids\" \"\\$actual\"/);
+assert.match(migration, /printf '%s\\\\n' '005_auth_lifecycle' > \"\\$expected_ids\"/);
+assert.match(migration, /LC_ALL=C sort >> \"\\$expected_ids\"/);""",
+              'verifier migration expected sequence',
+          )
+          verifier = replace_once(
+              verifier,
+              "assert.match(matrix, /wos01a-browser-acceptance-v2\\.mjs/);",
+              """assert.match(matrix, /wos01a-browser-acceptance-v2\\.mjs/);
+const browserDriver = readFileSync(new URL('./wos01a-browser-acceptance-v2.mjs', import.meta.url), 'utf8');
+assert.match(browserDriver, /WOS_BROWSER_DRIVER_READY_FILE/);
+assert.match(browserDriver, /await writeFile\\(driverReadyFile/);
+assert.match(browserDriver, /await waitForApplication\\(\\)/);""",
+              'verifier driver readiness assertions',
+          )
+          verifier_path.write_text(verifier)
+          PY
+
+          node --check "$DRIVER_PATH"
+          node --check "$VERIFIER_PATH"
+          bash -n "$MATRIX_PATH"
+          node "$VERIFIER_PATH"
+          git diff --check
+          mapfile -t changed < <(git status --porcelain | sed 's/^...//' | sort)
+          printf '%s\n' "${changed[@]}"
+          test "${#changed[@]}" -eq 3
+          test "${changed[0]}" = "$DRIVER_PATH"
+          test "${changed[1]}" = "$MATRIX_PATH"
+          test "${changed[2]}" = "$VERIFIER_PATH"
+
+      - name: Commit and push under exact-old-head lease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          trusted_origin="https://github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "$trusted_origin"
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+          git config --local core.hooksPath /dev/null
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "actions@users.noreply.github.com"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$CONTROLLER_BRANCH" | cut -f1)"
+          test "$remote_head" = "$OLD_CONTROLLER_HEAD"
+          git checkout -B "$CONTROLLER_BRANCH" "$OLD_CONTROLLER_HEAD"
+          git add "$MATRIX_PATH" "$DRIVER_PATH" "$VERIFIER_PATH"
+          git diff --cached --check
+          git commit --no-verify -m "ci: isolate browser driver and prove migration order"
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
+            --force-with-lease="refs/heads/$CONTROLLER_BRANCH:$OLD_CONTROLLER_HEAD" \
+            origin "HEAD:refs/heads/$CONTROLLER_BRANCH"
