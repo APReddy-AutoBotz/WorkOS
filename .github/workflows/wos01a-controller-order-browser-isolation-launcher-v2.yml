@@ -67,21 +67,47 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Extract registered deterministic scripts
+      - name: Extract registered deterministic scripts from raw source
         shell: bash
         run: |
           set -euo pipefail
-          ruby -ryaml -e '
-            document = YAML.load_file(ARGV.fetch(0), aliases: true)
-            steps = document.fetch("jobs").fetch("publish").fetch("steps")
-            apply = steps.find { |step| step["name"] == "Apply deterministic order and preload isolation correction" }
-            publish = steps.find { |step| step["name"] == "Commit and push under exact-old-head lease" }
-            abort("registered apply script missing") unless apply && apply["run"]
-            abort("registered publish script missing") unless publish && publish["run"]
-            File.write("/tmp/workos-apply.sh", apply.fetch("run"))
-            File.write("/tmp/workos-publish.sh", publish.fetch("run"))
-          ' "$SOURCE_WORKFLOW"
+          python3 - "$SOURCE_WORKFLOW" <<'PY'
+          from pathlib import Path
+          import sys
+
+          source = Path(sys.argv[1]).read_text()
+
+          def extract(step_name: str, next_step: str | None) -> str:
+              step_marker = f"      - name: {step_name}\n"
+              step_start = source.index(step_marker)
+              run_marker = "        run: |\n"
+              body_start = source.index(run_marker, step_start) + len(run_marker)
+              if next_step is None:
+                  body_end = len(source)
+              else:
+                  body_end = source.index(f"      - name: {next_step}\n", body_start)
+              output = []
+              for line in source[body_start:body_end].splitlines():
+                  if line.startswith("          "):
+                      output.append(line[10:])
+                  else:
+                      output.append(line)
+              while output and not output[-1].strip():
+                  output.pop()
+              return "\n".join(output) + "\n"
+
+          Path('/tmp/workos-apply.sh').write_text(extract(
+              'Apply deterministic order and preload isolation correction',
+              'Commit and push under exact-old-head lease',
+          ))
+          Path('/tmp/workos-publish.sh').write_text(extract(
+              'Commit and push under exact-old-head lease',
+              None,
+          ))
+          PY
           chmod 700 /tmp/workos-apply.sh /tmp/workos-publish.sh
+          bash -n /tmp/workos-apply.sh
+          bash -n /tmp/workos-publish.sh
           grep -q 'migration application order' /tmp/workos-apply.sh
           grep -q 'browser preload' /tmp/workos-apply.sh
           grep -q -- '--force-with-lease' /tmp/workos-publish.sh
