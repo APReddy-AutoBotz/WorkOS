@@ -1,0 +1,77 @@
+name: WOS-01A Exact Tree Restore
+
+on:
+  push:
+    branches:
+      - controller/wos01a-clean-runtime-acceptance-v2
+    paths:
+      - '.github/workflows/wos01a-exact-tree-restore.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wos01a-exact-tree-restore
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Restore verified controller tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      EXPECTED_PARENT: 77c5deb008eb5bab950ce795f0ac696ee629705e
+      TARGET_TREE: 61c348cbb193c45798e5aed446062215f61bb865
+    steps:
+      - name: Checkout exact restore trigger
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify trigger lease and restore exact tree
+        id: restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "$BRANCH"
+          trigger_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/wos01a-exact-tree-restore.yml'
+          git cat-file -e "$TARGET_TREE^{tree}"
+
+          git config user.name 'WorkOS Exact Tree Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git read-tree --reset -u "$TARGET_TREE"
+          test "$(git write-tree)" = "$TARGET_TREE"
+          test ! -e .github/workflows/wos01a-exact-tree-restore.yml
+          test ! -e .github/workflows/wos01a-handshake-publication-recovery.yml
+
+          actual_paths="$(git diff --name-only 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42 | LC_ALL=C sort)"
+          expected_paths="$(printf '%s\n' \
+            '.github/scripts/test-wos01a-browser-lifecycle-v2.mjs' \
+            '.github/scripts/verify-wos01a-controller-v2.mjs' \
+            '.github/scripts/wos01a-browser-acceptance-v2.mjs' \
+            '.github/scripts/wos01a-browser-lifecycle-v2.mjs' \
+            '.github/scripts/wos01a-clean-runtime-matrix-v2.sh' \
+            '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml' | LC_ALL=C sort)"
+          test "$actual_paths" = "$expected_paths"
+
+          git commit -m 'ci: restore exact WOS-01A controller tree'
+          restored_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^{tree})" = "$TARGET_TREE"
+          echo "trigger_head=$trigger_head" >> "$GITHUB_OUTPUT"
+          echo "restored_head=$restored_head" >> "$GITHUB_OUTPUT"
+
+      - name: Publish under exact trigger lease
+        shell: bash
+        env:
+          TRIGGER_HEAD: ${{ steps.restore.outputs.trigger_head }}
+          RESTORED_HEAD: ${{ steps.restore.outputs.restored_head }}
+        run: |
+          set -euo pipefail
+          git push --force-with-lease="refs/heads/$BRANCH:$TRIGGER_HEAD" origin "HEAD:refs/heads/$BRANCH"
+          remote_head="$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)"
+          test "$remote_head" = "$RESTORED_HEAD"
+          echo "Restored exact WorkOS controller head $remote_head"
