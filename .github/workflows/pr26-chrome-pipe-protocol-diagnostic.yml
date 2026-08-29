@@ -1,0 +1,162 @@
+name: PR26 Chrome Pipe Protocol Diagnostic
+
+on:
+  push:
+    branches:
+      - controller/pr26-isolation-recovery-20260829
+    paths:
+      - '.github/workflows/pr26-chrome-pipe-protocol-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Probe exact Chrome FD protocol
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Record installed Chrome candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/chrome-pipe-diagnostic"
+          mkdir -p "$out"
+          {
+            uname -a
+            node --version
+            for candidate in "${CHROME_BIN:-}" google-chrome google-chrome-stable chromium chromium-browser; do
+              [[ -n "$candidate" ]] || continue
+              printf '\nCANDIDATE %s\n' "$candidate"
+              command -v "$candidate" || true
+              resolved="$(command -v "$candidate" 2>/dev/null || true)"
+              if [[ -n "$resolved" ]]; then
+                readlink -f "$resolved" || true
+                file "$resolved" || true
+                "$resolved" --version || true
+              fi
+            done
+          } | tee "$out/environment.txt"
+
+      - name: Run raw NUL-framed pipe probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/chrome-pipe-diagnostic"
+          cat > "$RUNNER_TEMP/probe.mjs" <<'NODE'
+          import { spawn, spawnSync } from 'node:child_process';
+          import { mkdtemp, rm } from 'node:fs/promises';
+          import os from 'node:os';
+          import path from 'node:path';
+
+          const candidates = [process.env.CHROME_BIN, 'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'].filter(Boolean);
+          const found = [];
+          for (const candidate of candidates) {
+            const result = spawnSync('bash', ['-lc', `command -v ${JSON.stringify(candidate)}`], { encoding: 'utf8' });
+            const resolved = result.status === 0 ? result.stdout.trim() : '';
+            if (resolved && !found.some(item => item.resolved === resolved)) found.push({candidate, resolved});
+          }
+          if (!found.length) throw new Error('No Chrome candidate found');
+
+          async function probe({candidate, resolved}, headless, detached) {
+            const profile = await mkdtemp(path.join(os.tmpdir(), 'workos-pipe-probe-'));
+            const args = [
+              headless,
+              '--no-sandbox',
+              '--disable-dev-shm-usage',
+              '--disable-gpu',
+              '--disable-background-networking',
+              '--disable-component-update',
+              '--disable-default-apps',
+              '--disable-extensions',
+              '--disable-sync',
+              '--metrics-recording-only',
+              '--no-first-run',
+              '--remote-debugging-pipe',
+              `--user-data-dir=${profile}`,
+              'about:blank',
+            ];
+            const child = spawn(resolved, args, {stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'], detached});
+            let stdout = '';
+            let stderr = '';
+            let fd3Data = '';
+            let fd4Data = Buffer.alloc(0);
+            child.stdout.on('data', chunk => { stdout += chunk; });
+            child.stderr.on('data', chunk => { stderr += chunk; });
+            child.stdio[3].on('data', chunk => { fd3Data += chunk; });
+            child.stdio[4].on('data', chunk => { fd4Data = Buffer.concat([fd4Data, Buffer.from(chunk)]); });
+            const exit = new Promise(resolve => child.once('exit', (code, signal) => resolve({code, signal})));
+            const result = await new Promise(resolve => {
+              const timer = setTimeout(() => resolve({status: 'timeout'}), 7000);
+              const inspect = () => {
+                const boundary = fd4Data.indexOf(0);
+                if (boundary >= 0) {
+                  clearTimeout(timer);
+                  resolve({status: 'response', frame: fd4Data.subarray(0, boundary).toString('utf8')});
+                }
+              };
+              child.stdio[4].on('data', inspect);
+              child.once('exit', async (code, signal) => {
+                clearTimeout(timer);
+                resolve({status: 'exit', code, signal});
+              });
+              const message = `${JSON.stringify({id: 1, method: 'Browser.getVersion', params: {}})}\0`;
+              child.stdio[3].write(message, error => {
+                if (error) {
+                  clearTimeout(timer);
+                  resolve({status: 'write-error', error: String(error)});
+                }
+              });
+            });
+            if (child.exitCode === null && child.signalCode === null) {
+              try { process.kill(detached ? -child.pid : child.pid, 'SIGTERM'); } catch {}
+              await Promise.race([exit, new Promise(resolve => setTimeout(resolve, 2000))]);
+              if (child.exitCode === null && child.signalCode === null) {
+                try { process.kill(detached ? -child.pid : child.pid, 'SIGKILL'); } catch {}
+              }
+            }
+            child.stdio[3].destroy();
+            child.stdio[4].destroy();
+            await rm(profile, {recursive: true, force: true});
+            return {
+              candidate,
+              resolved,
+              headless,
+              detached,
+              pid: child.pid,
+              stream3: {readable: child.stdio[3].readable, writable: child.stdio[3].writable},
+              stream4: {readable: child.stdio[4].readable, writable: child.stdio[4].writable},
+              result,
+              fd3Data: fd3Data.slice(-2000),
+              fd4Bytes: fd4Data.length,
+              fd4Tail: fd4Data.subarray(Math.max(0, fd4Data.length - 2000)).toString('utf8'),
+              stdout: stdout.slice(-4000),
+              stderr: stderr.slice(-8000),
+              finalExitCode: child.exitCode,
+              finalSignal: child.signalCode,
+            };
+          }
+
+          const results = [];
+          for (const browser of found) {
+            for (const headless of ['--headless=new', '--headless']) {
+              for (const detached of [true, false]) {
+                results.push(await probe(browser, headless, detached));
+              }
+            }
+          }
+          console.log(JSON.stringify(results, null, 2));
+          if (!results.some(result => result.result.status === 'response')) process.exitCode = 1;
+          NODE
+          node "$RUNNER_TEMP/probe.mjs" | tee "$out/probe-results.json"
+
+      - name: Upload protocol evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr26-chrome-pipe-protocol-diagnostic
+          path: ${{ runner.temp }}/chrome-pipe-diagnostic
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
