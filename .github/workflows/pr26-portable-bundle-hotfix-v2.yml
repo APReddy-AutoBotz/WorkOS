@@ -1,0 +1,120 @@
+name: PR26 Portable Browser Bundle Digest Hotfix v2
+
+on:
+  push:
+    branches:
+      - controller/pr26-isolation-recovery-20260829
+    paths:
+      - '.github/workflows/pr26-portable-bundle-hotfix-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: pr26-portable-browser-bundle-hotfix-v2
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  OLD_HEAD: 9b8356be9d3404e34bae05e35098e73b22699b8d
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  PRODUCT_PR: '27'
+  PRODUCT_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+  PARENT_PR: '16'
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+
+jobs:
+  publish:
+    name: Publish exact portable-digest correction
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            const {data: product} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PRODUCT_PR)});
+            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
+            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.OLD_HEAD || controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller=${controller.state}/${controller.draft}/${controller.head.ref}/${controller.head.sha}/${controller.base.ref}/${controller.base.sha}`);
+            if (product.state !== 'open' || !product.draft || product.head.sha !== process.env.PRODUCT_HEAD) failures.push(`product=${product.state}/${product.draft}/${product.head.sha}`);
+            if (parent.state !== 'open' || !parent.draft || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent=${parent.state}/${parent.draft}/${parent.head.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (failures.length) core.setFailed(`Hotfix v2 start gate failed: ${failures.join(', ')}`);
+
+      - name: Checkout exact controller head with bounded write credential
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.OLD_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply and verify exact two-line correction
+        id: prepare
+        working-directory: controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OLD_HEAD"
+          test "$(git hash-object .github/scripts/wos01a-clean-runtime-matrix-v2.sh)" = '73b0e98a45351432d8eca762e22f6133b0ba2bd7'
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/wos01a-clean-runtime-matrix-v2.sh')
+          lines = path.read_text().splitlines()
+          first = '  sha256sum "$BROWSER_BUNDLE_DIR/files.sha256" "$BROWSER_BUNDLE_DIR/authority.txt" \\'
+          second = '    > "$BROWSER_BUNDLE_DIR/bundle.sha256"'
+          matches = [i for i, line in enumerate(lines[:-1]) if line == first and lines[i + 1] == second]
+          if len(matches) != 1:
+              raise SystemExit(f'expected one exact checksum pair, found {len(matches)}')
+          i = matches[0]
+          lines[i:i + 2] = ['  (cd "$BROWSER_BUNDLE_DIR" && sha256sum files.sha256 authority.txt > bundle.sha256)']
+          path.write_text('\n'.join(lines) + '\n')
+          PY
+          grep -Fx '  (cd "$BROWSER_BUNDLE_DIR" && sha256sum files.sha256 authority.txt > bundle.sha256)' .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          ! grep -F 'sha256sum "$BROWSER_BUNDLE_DIR/files.sha256"' .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          bash -n .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+          test "$(git diff --name-only)" = '.github/scripts/wos01a-clean-runtime-matrix-v2.sh'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          git commit -m 'ci: make browser bundle digest portable'
+          test "$(git rev-parse HEAD^)" = "$OLD_HEAD"
+          test -z "$(git status --porcelain)"
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+          echo "blob=$(git hash-object .github/scripts/wos01a-clean-runtime-matrix-v2.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate controller head before publication
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.OLD_HEAD || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) core.setFailed(`Final hotfix v2 lease failed: ${controller.state}/${controller.draft}/${controller.head.ref}/${controller.head.sha}/${controller.base.sha}`);
+
+      - name: Fast-forward existing PR26 branch under exact lease
+        working-directory: controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force-with-lease="refs/heads/${CONTROLLER_BRANCH}:${OLD_HEAD}" origin "HEAD:refs/heads/${CONTROLLER_BRANCH}"
+
+      - name: Verify exact published head and record outcome
+        env:
+          NEW_HEAD: ${{ steps.prepare.outputs.head }}
+          NEW_TREE: ${{ steps.prepare.outputs.tree }}
+          NEW_BLOB: ${{ steps.prepare.outputs.blob }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.NEW_HEAD) { core.setFailed(`Published hotfix mismatch: ${controller.head.sha}/${process.env.NEW_HEAD}`); return; }
+            await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.CONTROLLER_PR), body: `[PR26-PORTABLE-BUNDLE-HOTFIX-V2]\n\n- Parent: \`${process.env.OLD_HEAD}\`\n- New head: \`${process.env.NEW_HEAD}\`\n- Tree: \`${process.env.NEW_TREE}\`\n- Matrix blob: \`${process.env.NEW_BLOB}\`\n\nOnly the browser-bundle checksum entries changed from absolute to relative paths. PR #26 remains Draft; product, parent and main were not changed.`});
