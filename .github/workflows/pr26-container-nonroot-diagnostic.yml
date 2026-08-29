@@ -1,0 +1,95 @@
+name: PR26 Non-Root Container Diagnostic
+
+on:
+  push:
+    branches:
+      - controller/pr26-isolation-recovery-20260829
+    paths:
+      - '.github/workflows/pr26-container-nonroot-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Verify UID-101 isolated static server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run exact non-root hardened configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/pr26-container-nonroot"
+          mkdir -p "$root/dist"
+          printf '<!doctype html><title>WorkOS diagnostic</title>\n' > "$root/dist/index.html"
+          chmod -R a+rX "$root/dist"
+          config="$root/nginx.conf"
+          cat > "$config" <<'NGINX'
+          events {}
+          pid /var/run/nginx.pid;
+          error_log /dev/stderr notice;
+          http {
+            access_log off;
+            client_body_temp_path /var/cache/nginx/client_temp;
+            proxy_temp_path /var/cache/nginx/proxy_temp;
+            fastcgi_temp_path /var/cache/nginx/fastcgi_temp;
+            uwsgi_temp_path /var/cache/nginx/uwsgi_temp;
+            scgi_temp_path /var/cache/nginx/scgi_temp;
+            server {
+              listen 8080;
+              root /srv/workos;
+              location / { try_files $uri $uri/ /index.html; }
+            }
+          }
+          NGINX
+          chmod a+r "$config"
+          cleanup() { docker rm -f wos01a-static-target >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run --detach --name wos01a-static-target \
+            --user 101:101 \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 64 --memory 128m --network bridge \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=700 \
+            --tmpfs /var/run:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=700 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=700 \
+            --publish 127.0.0.1:4173:8080 \
+            --mount "type=bind,src=$root/dist,dst=/srv/workos,readonly" \
+            --mount "type=bind,src=$config,dst=/etc/nginx/nginx.conf,readonly" \
+            nginx:1.27-alpine | tee "$root/container-id.txt"
+          ready=false
+          for _ in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:4173/ > "$root/curl.out"; then ready=true; break; fi
+            docker inspect -f '{{.State.Running}}' wos01a-static-target | grep -Fx true
+            sleep 0.25
+          done
+          test "$ready" = true
+          docker inspect wos01a-static-target > "$root/container-inspect.json"
+          jq -e '.[0].State.Running == true
+            and .[0].Config.User == "101:101"
+            and .[0].HostConfig.Privileged == false
+            and .[0].HostConfig.PidMode == ""
+            and .[0].HostConfig.ReadonlyRootfs == true
+            and .[0].HostConfig.Binds == null
+            and .[0].HostConfig.SecurityOpt == ["no-new-privileges"]
+            and .[0].HostConfig.CapDrop == ["ALL"]
+            and .[0].HostConfig.Memory == 134217728
+            and .[0].HostConfig.PidsLimit == 64
+            and .[0].HostConfig.NetworkMode == "bridge"
+            and ([.[0].Mounts[] | select(.Type == "bind")] | length == 2)
+            and ([.[0].Mounts[] | select(.Type == "bind") | .RW] | all(. == false))' "$root/container-inspect.json"
+          docker logs wos01a-static-target 2>&1 | tee "$root/container.log"
+          grep -F 'WorkOS diagnostic' "$root/curl.out"
+          docker rm -f wos01a-static-target >/dev/null
+          trap - EXIT
+
+      - name: Upload exact diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr26-container-nonroot-diagnostic
+          path: ${{ runner.temp }}/pr26-container-nonroot
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
