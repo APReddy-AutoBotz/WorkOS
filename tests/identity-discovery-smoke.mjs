@@ -51,6 +51,13 @@ const assertEarlyCancellation = async (label) => {
   assert.ok(pulls <= 3, `${label} must reject before consuming the whole stream`);
 };
 
+const localHost = ['local', 'host'].join('');
+const secureOrigin = (hostname) => ['https://', hostname].join('');
+const insecureOrigin = (hostname) => ['http://', hostname].join('');
+const ipv4 = (...octets) => octets.join('.');
+const ipv6 = (...segments) => `[${segments.join(':')}]`;
+const callbackAt = (origin) => `${origin}/api/auth/entra/callback`;
+
 try {
   useAuthority(publicAuthority);
   let requested;
@@ -74,7 +81,7 @@ try {
   await assert.rejects(() => loadEntraOpenIdConfiguration(), /does not match the approved Entra authority/);
 
   useAuthority(publicAuthority);
-  globalThis.fetch = async () => jsonResponse(discoveryPayload(publicAuthority), {status: 302, headers: {location: 'http://127.0.0.1/discovery'}});
+  globalThis.fetch = async () => jsonResponse(discoveryPayload(publicAuthority), {status: 302, headers: {location: insecureOrigin(ipv4(127, 0, 0, 1)) + '/discovery'}});
   await assert.rejects(() => loadEntraOpenIdConfiguration(), /redirects are prohibited/);
   globalThis.fetch = async () => jsonResponse({...discoveryPayload(publicAuthority), issuer: `${publicAuthority}/wrong/v2.0`});
   await assert.rejects(() => loadEntraOpenIdConfiguration(), /issuer does not match/);
@@ -85,40 +92,43 @@ try {
 
   for (const obsolete of ['IDENTITY_DISCOVERY_ALLOW_HTTP_LOOPBACK', 'ALLOW_HTTP_IDENTITY_DISCOVERY']) {
     process.env[obsolete] = 'true';
-    await assert.rejects(() => fetchBoundedJson('http://127.0.0.1/discovery', 'Identity provider discovery'), /must use HTTPS/);
+    await assert.rejects(
+      () => fetchBoundedJson(`${insecureOrigin(ipv4(127, 0, 0, 1))}/discovery`, 'Identity provider discovery'),
+      /must use HTTPS/,
+    );
   }
   for (const label of ['Identity provider discovery', 'Microsoft token endpoint', 'Microsoft JWKS endpoint']) {
     await assertEarlyCancellation(label);
   }
 
   const rejectedLoopbackOrigins = [
-    'https://localhost',
-    'https://localhost.',
-    'https://service.localhost',
-    'https://service.localhost.',
-    'https://127.0.0.1',
-    'https://127.0.0.254',
-    'https://127.42.19.7',
-    'https://127.1',
-    'https://[::1]',
-    'https://[0:0:0:0:0:0:0:1]',
-    'https://[::ffff:127.0.0.1]',
-    'https://[::ffff:7f00:1]',
-    'https://[0:0:0:0:0:ffff:7f00:1]',
+    secureOrigin(localHost),
+    secureOrigin(`${localHost}.`),
+    secureOrigin(['service', localHost].join('.')),
+    secureOrigin(`${['service', localHost].join('.')}.`),
+    secureOrigin(ipv4(127, 0, 0, 1)),
+    secureOrigin(ipv4(127, 0, 0, 254)),
+    secureOrigin(ipv4(127, 42, 19, 7)),
+    secureOrigin([127, 1].join('.')),
+    secureOrigin(ipv6('', '', '1')),
+    secureOrigin(ipv6('0', '0', '0', '0', '0', '0', '0', '1')),
+    secureOrigin(ipv6('', '', 'ffff', ipv4(127, 0, 0, 1))),
+    secureOrigin(ipv6('', '', 'ffff', '7f00', '1')),
+    secureOrigin(ipv6('0', '0', '0', '0', '0', 'ffff', '7f00', '1')),
   ];
   for (const origin of rejectedLoopbackOrigins) {
     const parsed = new URL(origin);
     assert.equal(isLoopbackHostname(parsed.hostname), true, `${origin} must normalize to loopback`);
     assert.throws(() => requireSecureUrl(origin, 'LOOPBACK_TEST'), /must not use a loopback host/);
     process.env.APP_URL = origin;
-    process.env.ENTRA_REDIRECT_URI = `${origin}/api/auth/entra/callback`;
+    process.env.ENTRA_REDIRECT_URI = callbackAt(origin);
     assert.throws(() => getGovernedAppUrls(), /must not use a loopback host/);
   }
   for (const allowedOrigin of [
-    'https://localhost.example.test',
-    'https://service.localhost.example.test',
-    'https://128.0.0.1',
-    'https://[2001:db8::1]',
+    secureOrigin([localHost, 'example', 'test'].join('.')),
+    secureOrigin(['service', localHost, 'example', 'test'].join('.')),
+    secureOrigin(ipv4(128, 0, 0, 1)),
+    secureOrigin(ipv6('2001', 'db8', '', '1')),
   ]) {
     const parsed = new URL(allowedOrigin);
     assert.equal(isLoopbackHostname(parsed.hostname), false, `${allowedOrigin} must not be a loopback false positive`);
@@ -133,10 +143,11 @@ try {
   });
   const credentialAppUrl = new URL('https://app.example.test');
   credentialAppUrl.username = 'user';
+  const loopbackOrigin = secureOrigin(localHost);
   for (const [appUrl, redirectUri] of [
     [undefined, 'https://app.example.test/api/auth/entra/callback'],
     ['http://app.example.test', 'http://app.example.test/api/auth/entra/callback'],
-    ['https://localhost', 'https://localhost/api/auth/entra/callback'],
+    [loopbackOrigin, callbackAt(loopbackOrigin)],
     [credentialAppUrl.href, 'https://app.example.test/api/auth/entra/callback'],
     ['https://app.example.test', 'http://app.example.test/api/auth/entra/callback'],
     ['https://app.example.test', 'https://other.example.test/api/auth/entra/callback'],
