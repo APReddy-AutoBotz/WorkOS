@@ -1,0 +1,82 @@
+name: PR26 Container Isolation Diagnostic
+
+on:
+  push:
+    branches:
+      - controller/pr26-isolation-recovery-20260829
+    paths:
+      - '.github/workflows/pr26-container-isolation-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Inspect exact static-container runtime fields
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Reproduce container configuration and print exact evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/pr26-container-diagnostic"
+          mkdir -p "$root/dist"
+          printf '<!doctype html><title>WorkOS diagnostic</title>\n' > "$root/dist/index.html"
+          config="$root/nginx.conf"
+          cat > "$config" <<'NGINX'
+          events {}
+          http {
+            access_log off;
+            server {
+              listen 8080;
+              root /srv/workos;
+              location / { try_files $uri $uri/ /index.html; }
+            }
+          }
+          NGINX
+          cleanup() { docker rm -f wos01a-static-target >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run --detach --name wos01a-static-target \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 64 --memory 128m --network bridge \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m \
+            --tmpfs /var/run:rw,noexec,nosuid,size=1m \
+            --tmpfs /tmp:rw,noexec,nosuid,size=1m \
+            --publish 127.0.0.1:4173:8080 \
+            --mount "type=bind,src=$root/dist,dst=/srv/workos,readonly" \
+            --mount "type=bind,src=$config,dst=/etc/nginx/nginx.conf,readonly" \
+            nginx:1.27-alpine | tee "$root/container-id.txt"
+          sleep 1
+          docker inspect wos01a-static-target > "$root/container-inspect.json"
+          jq '.[0] | {
+            state: .State,
+            privileged: .HostConfig.Privileged,
+            pidMode: .HostConfig.PidMode,
+            readonlyRootfs: .HostConfig.ReadonlyRootfs,
+            binds: .HostConfig.Binds,
+            securityOpt: .HostConfig.SecurityOpt,
+            capDrop: .HostConfig.CapDrop,
+            memory: .HostConfig.Memory,
+            pidsLimit: .HostConfig.PidsLimit,
+            networkMode: .HostConfig.NetworkMode,
+            mounts: .Mounts
+          }' "$root/container-inspect.json" | tee "$root/inspect-summary.json"
+          docker logs wos01a-static-target 2>&1 | tee "$root/container.log" || true
+          set +e
+          curl --fail --silent --show-error http://127.0.0.1:4173/ | tee "$root/curl.out"
+          curl_rc=$?
+          set -e
+          printf 'curl_rc=%s\n' "$curl_rc" | tee "$root/result.txt"
+          test "$curl_rc" -eq 0
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr26-container-isolation-diagnostic
+          path: ${{ runner.temp }}/pr26-container-diagnostic
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
