@@ -14,11 +14,11 @@ concurrency:
 env:
   CONTROLLER_PR: '26'
   CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
-  OLD_CONTROLLER_HEAD: 6e037361a98b0c13a321e53d2c920f53878e98e5
+  OLD_CONTROLLER_HEAD: 9ce9b1da1d76fce82b8e96e8bc763d113cadd6b0
   TARGET_PR: '27'
   TARGET_BRANCH: codex/wos01a-acceptance-closure
-  OLD_TARGET_HEAD: 17ac76595ec8bfe58564fa899bf0425816575a87
-  NEW_TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
+  OLD_TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
+  NEW_TARGET_HEAD: 97025973c56b53a983ec85bac10344c85e13a96c
   PARENT_PR: '16'
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
@@ -117,7 +117,7 @@ jobs:
           git checkout -B "$CONTROLLER_BRANCH" "$OLD_CONTROLLER_HEAD"
           git add "$WORKFLOW_PATH" "$VERIFIER_PATH"
           git diff --cached --check
-          git commit --no-verify -m "ci: rebind WOS-01A acceptance to callback coverage"
+          git commit --no-verify -m "ci: rebind WOS-01A acceptance to loopback closure"
           git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="$auth_header" push --no-verify \
             --force-with-lease="refs/heads/$CONTROLLER_BRANCH:$OLD_CONTROLLER_HEAD" \
             origin "HEAD:refs/heads/$CONTROLLER_BRANCH"
