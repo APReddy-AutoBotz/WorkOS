@@ -177,6 +177,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Upload digest-bound browser bundle
+        id: browser_bundle_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-browser-bundle-${{ env.TARGET_HEAD }}
+          path: target/.browser-bundle
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Verify retained matrix evidence publication
         id: evidence_upload
         if: always()
@@ -185,15 +196,20 @@ jobs:
           ARTIFACT_CONCLUSION: ${{ steps.artifact_upload.conclusion }}
           ARTIFACT_ID: ${{ steps.artifact_upload.outputs.artifact-id }}
           ARTIFACT_DIGEST: ${{ steps.artifact_upload.outputs.artifact-digest }}
+          BUNDLE_ID: ${{ steps.browser_bundle_upload.outputs.artifact-id }}
+          BUNDLE_DIGEST: ${{ steps.browser_bundle_upload.outputs.artifact-digest }}
         run: |
           set -euo pipefail
           test "$ARTIFACT_CONCLUSION" = success
           test -n "$ARTIFACT_ID"
           test -n "$ARTIFACT_DIGEST"
+          test -n "$BUNDLE_ID"
+          test -n "$BUNDLE_DIGEST"
           if [[ ! "$ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]; then
             echo 'Artifact digest is not valid SHA-256 evidence' >&2
             exit 1
           fi
+          [[ "$BUNDLE_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]
 
       - name: Aggregate target-controlled matrix result
         if: always()
@@ -203,16 +219,139 @@ jobs:
           test '${{ steps.authority.outcome }}' = success
           test '${{ steps.matrix.outcome }}' = success
           test '${{ steps.evidence_upload.outcome }}' = success
+          test '${{ steps.browser_bundle_upload.outcome }}' = success
+
+  browser_acceptance:
+    name: Isolated browser authority
+    needs: acceptance
+    if: always()
+    permissions:
+      contents: read
+    env:
+      ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
+      CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
+      TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require target matrix success
+        shell: bash
+        run: test "$ACCEPTANCE_RESULT" = success
+
+      - name: Checkout immutable controller browser authority
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: controller
+          persist-credentials: false
+
+      - name: Download exact browser bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: wos01a-browser-bundle-${{ env.TARGET_HEAD }}
+          path: browser-bundle
+
+      - name: Verify browser bundle authority and integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_HEAD"
+          grep -Fx "controller=$CONTROLLER_HEAD" browser-bundle/authority.txt
+          grep -Fx "target=$TARGET_HEAD" browser-bundle/authority.txt
+          (cd browser-bundle/dist && sha256sum -c ../files.sha256)
+          (cd browser-bundle && sha256sum -c bundle.sha256)
+
+      - name: Run Chrome outside isolated static target container
+        id: browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/wos01a-browser-evidence"
+          mkdir -p "$evidence"
+          config="$RUNNER_TEMP/wos01a-nginx.conf"
+          cat > "$config" <<'NGINX'
+          events {}
+          http {
+            access_log off;
+            server {
+              listen 8080;
+              root /srv/workos;
+              location / { try_files $uri $uri/ /index.html; }
+            }
+          }
+          NGINX
+          cleanup() {
+            local rc=0
+            timeout 20s docker rm -f wos01a-static-target >/dev/null 2>&1 || rc=$?
+            if [[ "$rc" -ne 0 ]]; then echo "target container cleanup failed rc=$rc" >&2; return "$rc"; fi
+          }
+          trap cleanup EXIT
+          docker run --detach --name wos01a-static-target \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --pids-limit 64 --memory 128m --network bridge \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m \
+            --tmpfs /var/run:rw,noexec,nosuid,size=1m \
+            --tmpfs /tmp:rw,noexec,nosuid,size=1m \
+            --publish 127.0.0.1:4173:8080 \
+            --mount "type=bind,src=$PWD/browser-bundle/dist,dst=/srv/workos,readonly" \
+            --mount "type=bind,src=$config,dst=/etc/nginx/nginx.conf,readonly" \
+            nginx:1.27-alpine > "$evidence/container-id.txt"
+          inspect="$(docker inspect wos01a-static-target)"
+          jq -e '.[0].HostConfig.Privileged == false
+            and .[0].HostConfig.PidMode == ""
+            and .[0].HostConfig.ReadonlyRootfs == true
+            and .[0].HostConfig.Binds == null
+            and .[0].HostConfig.SecurityOpt == ["no-new-privileges"]' <<<"$inspect" >/dev/null
+          for _ in $(seq 1 40); do
+            curl --fail --silent http://127.0.0.1:4173/login >/dev/null && break
+            docker inspect -f '{{.State.Running}}' wos01a-static-target | grep -Fx true
+            sleep 0.25
+          done
+          curl --fail --silent http://127.0.0.1:4173/login >/dev/null
+          WOS_BROWSER_ORIGIN=http://127.0.0.1:4173 \
+            timeout 8m node controller/.github/scripts/wos01a-browser-acceptance-v2.mjs \
+            2>&1 | tee "$evidence/browser-journeys.log"
+          grep -q 'WOS-01A bounded browser acceptance passed.' "$evidence/browser-journeys.log"
+          cp browser-bundle/authority.txt browser-bundle/bundle.sha256 "$evidence/"
+          docker inspect wos01a-static-target > "$evidence/container-inspect.json"
+          cleanup
+          trap - EXIT
+
+      - name: Upload isolated browser evidence
+        id: browser_artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-browser-authority-${{ env.TARGET_HEAD }}
+          path: ${{ runner.temp }}/wos01a-browser-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Aggregate isolated browser result
+        if: always()
+        shell: bash
+        env:
+          BROWSER_ARTIFACT_ID: ${{ steps.browser_artifact.outputs.artifact-id }}
+          BROWSER_ARTIFACT_DIGEST: ${{ steps.browser_artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test "$ACCEPTANCE_RESULT" = success
+          test '${{ steps.browser.outcome }}' = success
+          test '${{ steps.browser_artifact.outcome }}' = success
+          test -n "$BROWSER_ARTIFACT_ID"
+          [[ "$BROWSER_ARTIFACT_DIGEST" =~ ^([0-9A-Fa-f]{64}|sha256:[0-9A-Fa-f]{64})$ ]]
 
   final_authority:
     name: Fresh-runner final authority lease
-    needs: acceptance
+    needs: [acceptance, browser_acceptance]
     if: always()
     permissions:
       contents: read
       pull-requests: read
     env:
       ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
+      BROWSER_RESULT: ${{ needs.browser_acceptance.result }}
       CONTROLLER_PR: '26'
       CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
       CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -240,6 +379,7 @@ jobs:
             if (process.env.ACCEPTANCE_RESULT !== 'success') {
               failures.push(`acceptance.result=${process.env.ACCEPTANCE_RESULT}`);
             }
+            if (process.env.BROWSER_RESULT !== 'success') failures.push(`browser.result=${process.env.BROWSER_RESULT}`);
 
             const {data: controller} = await github.rest.pulls.get({
               owner: context.repo.owner,
@@ -294,6 +434,7 @@ jobs:
               `${JSON.stringify({
                 status: failures.length ? 'failed' : 'passed',
                 acceptanceResult: process.env.ACCEPTANCE_RESULT,
+                browserResult: process.env.BROWSER_RESULT,
                 controllerHead: process.env.CONTROLLER_HEAD,
                 targetHead: process.env.TARGET_HEAD,
                 parentHead: process.env.PARENT_HEAD,
@@ -338,12 +479,13 @@ jobs:
         run: |
           set -euo pipefail
           test "$ACCEPTANCE_RESULT" = success
+          test "$BROWSER_RESULT" = success
           test '${{ steps.final_authority.outcome }}' = success
           test '${{ steps.final_evidence_upload.outcome }}' = success
 
   aggregate:
     name: Aggregate WOS-01A acceptance
-    needs: [acceptance, final_authority]
+    needs: [acceptance, browser_acceptance, final_authority]
     if: always()
     permissions: {}
     runs-on: ubuntu-latest
@@ -353,8 +495,10 @@ jobs:
         shell: bash
         env:
           ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
+          BROWSER_RESULT: ${{ needs.browser_acceptance.result }}
           FINAL_AUTHORITY_RESULT: ${{ needs.final_authority.result }}
         run: |
           set -euo pipefail
           test "$ACCEPTANCE_RESULT" = success
+          test "$BROWSER_RESULT" = success
           test "$FINAL_AUTHORITY_RESULT" = success
