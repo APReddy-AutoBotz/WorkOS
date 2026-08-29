@@ -21,6 +21,9 @@ env:
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
   EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
   SOURCE_WORKFLOW: publisher/.github/workflows/wos01a-controller-order-browser-isolation-v1.yml
+  MATRIX_PATH: .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+  DRIVER_PATH: .github/scripts/wos01a-browser-acceptance-v2.mjs
+  VERIFIER_PATH: .github/scripts/verify-wos01a-controller-v2.mjs
 
 jobs:
   publish:
