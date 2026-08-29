@@ -1,0 +1,80 @@
+name: WOS-01A Journey Diagnostics Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos01a-clean-runtime-acceptance-v2
+    paths:
+      - '.github/workflows/wos01a-publish-journey-diagnostics.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wos01a-journey-diagnostics-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish bounded journey diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      WORKFLOW_FILE: .github/workflows/wos01a-publish-journey-diagnostics.yml
+      ACCEPTANCE_FILE: .github/scripts/wos01a-browser-acceptance-v2.mjs
+      EXPECTED_BASE_BLOB: ca3566a31792fd5bb4222097e42493e68844bd51
+      TARGET_BLOB: c91d6ec2bbeac99f1320b24a2af3ac3854d9ae6d
+
+    steps:
+      - name: Checkout exact publisher trigger
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: true
+
+      - name: Verify lease and materialize exact diagnostic controller
+        id: prepare
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "$BRANCH"
+          trigger_head="$(git rev-parse HEAD)"
+          test "$(git diff --name-only HEAD^ HEAD)" = "$WORKFLOW_FILE"
+          test "$(git rev-parse HEAD^:"$ACCEPTANCE_FILE")" = "$EXPECTED_BASE_BLOB"
+
+          gh api "repos/$GITHUB_REPOSITORY/git/blobs/$TARGET_BLOB" --jq .content \
+            | tr -d '\n' \
+            | base64 -d > "$ACCEPTANCE_FILE"
+          test "$(git hash-object "$ACCEPTANCE_FILE")" = "$TARGET_BLOB"
+
+          node --check "$ACCEPTANCE_FILE"
+          node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          git diff --check
+
+          rm "$WORKFLOW_FILE"
+          test "$(git diff --name-only HEAD | LC_ALL=C sort)" = "$(printf '%s\n' "$ACCEPTANCE_FILE" "$WORKFLOW_FILE" | LC_ALL=C sort)"
+
+          git config user.name 'WorkOS Journey Diagnostics Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'ci: expose bounded WOS-01A browser journey phases'
+          final_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$trigger_head"
+          echo "trigger_head=$trigger_head" >> "$GITHUB_OUTPUT"
+          echo "final_head=$final_head" >> "$GITHUB_OUTPUT"
+
+      - name: Publish under exact trigger lease
+        shell: bash
+        env:
+          TRIGGER_HEAD: ${{ steps.prepare.outputs.trigger_head }}
+          FINAL_HEAD: ${{ steps.prepare.outputs.final_head }}
+        run: |
+          set -euo pipefail
+          git push --force-with-lease="refs/heads/$BRANCH:$TRIGGER_HEAD" origin "HEAD:refs/heads/$BRANCH"
+          remote_head="$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)"
+          test "$remote_head" = "$FINAL_HEAD"
+          echo "Published WOS-01A journey diagnostics at $remote_head"
