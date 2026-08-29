@@ -99,10 +99,20 @@ jobs:
                   output.pop()
               return "\n".join(output) + "\n"
 
-          Path('/tmp/workos-apply.sh').write_text(extract(
+          apply_path = Path('/tmp/workos-apply.sh')
+          apply_script = extract(
               'Apply deterministic order and preload isolation correction',
               'Commit and push under exact-old-head lease',
-          ))
+          )
+          old_order = '''test "${changed[0]}" = "$DRIVER_PATH"
+          test "${changed[1]}" = "$MATRIX_PATH"
+          test "${changed[2]}" = "$VERIFIER_PATH"'''
+          new_order = '''test "${changed[0]}" = "$VERIFIER_PATH"
+          test "${changed[1]}" = "$DRIVER_PATH"
+          test "${changed[2]}" = "$MATRIX_PATH"'''
+          if apply_script.count(old_order) != 1:
+              raise SystemExit('registered changed-path assertion did not match exactly once')
+          apply_path.write_text(apply_script.replace(old_order, new_order, 1))
           Path('/tmp/workos-publish.sh').write_text(extract(
               'Commit and push under exact-old-head lease',
               None,
