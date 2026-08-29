@@ -32,25 +32,7 @@ export PGPASSWORD
 declare -A GATE_STATUS=()
 GATE_ORDER=()
 FAILED=0
-BROWSER_DRIVER_PID=''
-BROWSER_DRIVER_READY="$EVIDENCE_DIR/browser-driver-loaded.json"
-BROWSER_DRIVER_LOG="$EVIDENCE_DIR/browser-journeys.log"
-
-cleanup_preloaded_browser() {
-  if [[ -n "${BROWSER_DRIVER_PID:-}" ]] && kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
-    kill -TERM "$BROWSER_DRIVER_PID" 2>/dev/null || true
-    for _attempt in $(seq 1 50); do
-      if ! kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then break; fi
-      sleep 0.1
-    done
-    if kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
-      kill -KILL "$BROWSER_DRIVER_PID" 2>/dev/null || true
-    fi
-    wait "$BROWSER_DRIVER_PID" 2>/dev/null || true
-  fi
-  BROWSER_DRIVER_PID=''
-}
-trap cleanup_preloaded_browser EXIT INT TERM
+BROWSER_BUNDLE_DIR="$TARGET_ROOT/.browser-bundle"
 
 require_gate() {
   local name="$1"
@@ -158,46 +140,6 @@ browser_lifecycle_regression() {
   set -euo pipefail
   cd "$CONTROLLER_ROOT"
   node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
-}
-
-preload_browser_driver() {
-  set -euo pipefail
-  local driver_rel='.github/scripts/wos01a-browser-acceptance-v2.mjs'
-  local lifecycle_rel='.github/scripts/wos01a-browser-lifecycle-v2.mjs'
-  local expected_driver expected_lifecycle actual_driver actual_lifecycle
-  expected_driver="$(git -C "$CONTROLLER_ROOT" rev-parse "$CONTROLLER_HEAD:$driver_rel")"
-  expected_lifecycle="$(git -C "$CONTROLLER_ROOT" rev-parse "$CONTROLLER_HEAD:$lifecycle_rel")"
-  actual_driver="$(git -C "$CONTROLLER_ROOT" hash-object "$CONTROLLER_ROOT/$driver_rel")"
-  actual_lifecycle="$(git -C "$CONTROLLER_ROOT" hash-object "$CONTROLLER_ROOT/$lifecycle_rel")"
-  test "$expected_driver" = "$actual_driver"
-  test "$expected_lifecycle" = "$actual_lifecycle"
-  rm -f "$BROWSER_DRIVER_READY" "$BROWSER_DRIVER_LOG"
-  WOS_BROWSER_ORIGIN=http://127.0.0.1:4173   WOS_BROWSER_DRIVER_READY_FILE="$BROWSER_DRIVER_READY"   WOS_APP_READY_TIMEOUT_MS=1200000     node "$CONTROLLER_ROOT/$driver_rel" > "$BROWSER_DRIVER_LOG" 2>&1 &
-  BROWSER_DRIVER_PID=$!
-  for _attempt in $(seq 1 300); do
-    if [[ -s "$BROWSER_DRIVER_READY" ]]; then break; fi
-    if ! kill -0 "$BROWSER_DRIVER_PID" 2>/dev/null; then
-      cat "$BROWSER_DRIVER_LOG" >&2 || true
-      wait "$BROWSER_DRIVER_PID" || true
-      return 1
-    fi
-    sleep 0.1
-  done
-  test -s "$BROWSER_DRIVER_READY"
-  node --input-type=module - "$BROWSER_DRIVER_READY" "$BROWSER_DRIVER_PID" <<'NODE'
-  import {readFileSync} from 'node:fs';
-  const payload = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-  if (payload.pid !== Number(process.argv[3])
-    || payload.status !== 'control-ready'
-    || payload.transport !== 'pipe'
-    || !Number.isSafeInteger(payload.chromePid)
-    || typeof payload.targetId !== 'string'
-    || typeof payload.sessionId !== 'string') process.exit(1);
-NODE
-  printf 'driver_pid=%s
-driver_blob=%s
-lifecycle_blob=%s
-'     "$BROWSER_DRIVER_PID" "$actual_driver" "$actual_lifecycle"
 }
 
 locked_install() {
@@ -440,20 +382,10 @@ production_acceptance() {
   ' "$EVIDENCE_DIR/production-identity-summary.json" >/dev/null
 }
 
-browser_acceptance() {
+browser_bundle() {
   set -euo pipefail
   require_gate engineering_controls
   cd "$TARGET_ROOT"
-
-  local preview_pid=''
-  cleanup_preview() {
-    if [[ -n "$preview_pid" ]]; then
-      kill "$preview_pid" 2>/dev/null || true
-      wait "$preview_pid" 2>/dev/null || true
-    fi
-  }
-  trap cleanup_preview EXIT
-
   rm -rf dist
   VITE_APP_MODE=test \
   VITE_ALLOW_TEST_FALLBACK=true \
@@ -462,42 +394,23 @@ browser_acceptance() {
   VITE_PRODUCT_LOGO_URL=/workos-mark.svg \
   VITE_SUPPORT_EMAIL=support@example.test \
     npm run build 2>&1 | tee "$EVIDENCE_DIR/browser-build.log"
-
-  ./node_modules/.bin/vite preview --host 127.0.0.1 --port 4173 > "$EVIDENCE_DIR/browser-server.log" 2>&1 &
-  preview_pid=$!
-  echo "$preview_pid" > "$EVIDENCE_DIR/browser-server.pid"
-  local ready=false attempt
-  for attempt in $(seq 1 40); do
-    if curl --silent --fail http://127.0.0.1:4173/login >/dev/null; then
-      ready=true
-      break
-    fi
-    kill -0 "$preview_pid"
-    sleep 0.5
-  done
-  test "$ready" = true
-  test -n "$BROWSER_DRIVER_PID"
-  local driver_rc=1
-  set +e
-  wait "$BROWSER_DRIVER_PID"
-  driver_rc=$?
-  set -e
-  BROWSER_DRIVER_PID=''
-  test "$driver_rc" -eq 0
-  grep -q 'WOS-01A bounded browser acceptance passed.' "$BROWSER_DRIVER_LOG"
-  test -z "$(git status --porcelain --untracked-files=no)"
-  cleanup_preview
-  preview_pid=''
-  trap cleanup_preloaded_browser EXIT INT TERM
+  rm -rf "$BROWSER_BUNDLE_DIR"
+  mkdir -p "$BROWSER_BUNDLE_DIR/dist"
+  cp -a dist/. "$BROWSER_BUNDLE_DIR/dist/"
+  (cd "$BROWSER_BUNDLE_DIR/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) \
+    > "$BROWSER_BUNDLE_DIR/files.sha256"
+  printf 'controller=%s\ntarget=%s\n' "$CONTROLLER_HEAD" "$TARGET_HEAD" \
+    > "$BROWSER_BUNDLE_DIR/authority.txt"
+  sha256sum "$BROWSER_BUNDLE_DIR/files.sha256" "$BROWSER_BUNDLE_DIR/authority.txt" \
+    > "$BROWSER_BUNDLE_DIR/bundle.sha256"
 }
 
-rm -rf "$TARGET_ROOT/dist" "$EVIDENCE_DIR"
+rm -rf "$TARGET_ROOT/dist" "$EVIDENCE_DIR" "$BROWSER_BUNDLE_DIR"
 mkdir -p "$EVIDENCE_DIR"
 
 run_gate repository_boundary repository_boundary
 run_gate controller_regression controller_regression
 run_gate browser_lifecycle_regression browser_lifecycle_regression
-run_gate_parent browser_driver_preload preload_browser_driver
 run_gate locked_install locked_install
 run_gate engineering_controls engineering_controls
 run_gate dependency_classification dependency_classification
@@ -505,7 +418,7 @@ run_gate build_acceptance build_acceptance
 run_gate postgres_client postgres_client
 run_gate migration_acceptance migration_acceptance
 run_gate production_acceptance production_acceptance
-run_gate_parent browser_acceptance browser_acceptance
+run_gate browser_bundle browser_bundle
 
 local_status=0
 set +e

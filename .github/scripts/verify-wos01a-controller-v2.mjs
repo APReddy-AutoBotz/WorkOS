@@ -4,10 +4,12 @@ import {readFileSync} from 'node:fs';
 const workflow = readFileSync(new URL('../workflows/wos01a-clean-runtime-acceptance-v2.yml', import.meta.url), 'utf8');
 const matrix = readFileSync(new URL('./wos01a-clean-runtime-matrix-v2.sh', import.meta.url), 'utf8');
 
-const acceptanceJob = workflow.match(/\n  acceptance:\n[\s\S]*?\n  final_authority:/)?.[0];
+const acceptanceJob = workflow.match(/\n  acceptance:\n[\s\S]*?\n  browser_acceptance:/)?.[0];
+const browserJob = workflow.match(/\n  browser_acceptance:\n[\s\S]*?\n  final_authority:/)?.[0];
 const finalAuthorityJob = workflow.match(/\n  final_authority:\n[\s\S]*?\n  aggregate:/)?.[0];
 const aggregateJob = workflow.match(/\n  aggregate:\n[\s\S]*$/)?.[0];
 assert.ok(acceptanceJob, 'acceptance job must exist');
+assert.ok(browserJob, 'isolated browser job must exist');
 assert.ok(finalAuthorityJob, 'isolated final-authority job must exist');
 assert.ok(aggregateJob, 'aggregate job must exist');
 
@@ -30,11 +32,33 @@ assert.match(acceptanceJob, /id: artifact_upload[\s\S]*include-hidden-files: tru
 assert.match(acceptanceJob, /test '\$\{\{ steps\.authority\.outcome \}\}' = success/);
 assert.match(acceptanceJob, /test '\$\{\{ steps\.matrix\.outcome \}\}' = success/);
 assert.match(acceptanceJob, /test '\$\{\{ steps\.evidence_upload\.outcome \}\}' = success/);
+assert.match(acceptanceJob, /id: browser_bundle_upload[\s\S]*if-no-files-found: error/);
+assert.match(acceptanceJob, /test '\$\{\{ steps\.browser_bundle_upload\.outcome \}\}' = success/);
+assert.match(acceptanceJob, /BUNDLE_ID: \$\{\{ steps\.browser_bundle_upload\.outputs\.artifact-id \}\}/);
+assert.match(acceptanceJob, /BUNDLE_DIGEST: \$\{\{ steps\.browser_bundle_upload\.outputs\.artifact-digest \}\}/);
 
-assert.match(finalAuthorityJob, /needs: acceptance/);
+assert.match(browserJob, /needs: acceptance/);
+assert.match(browserJob, /runs-on: ubuntu-latest/);
+assert.match(browserJob, /persist-credentials: false/);
+assert.match(browserJob, /actions\/download-artifact@v4/);
+assert.match(browserJob, /grep -Fx "controller=\$CONTROLLER_HEAD"/);
+assert.match(browserJob, /grep -Fx "target=\$TARGET_HEAD"/);
+assert.match(browserJob, /sha256sum -c \.\.\/files\.sha256/);
+assert.match(browserJob, /--read-only --cap-drop ALL --security-opt no-new-privileges/);
+assert.match(browserJob, /--pids-limit 64 --memory 128m --network bridge/);
+assert.match(browserJob, /type=bind,src=\$PWD\/browser-bundle\/dist,dst=\/srv\/workos,readonly/);
+assert.match(browserJob, /timeout 8m node controller\/\.github\/scripts\/wos01a-browser-acceptance-v2\.mjs/);
+assert.match(browserJob, /docker rm -f wos01a-static-target/);
+assert.doesNotMatch(browserJob, /npm (?:ci|run)|node_modules|vite preview|--privileged|--pid=host|\/var\/run\/docker\.sock/);
+assert.match(browserJob, /test '\$\{\{ steps\.browser\.outcome \}\}' = success/);
+assert.match(browserJob, /test '\$\{\{ steps\.browser_artifact\.outcome \}\}' = success/);
+assert.match(browserJob, /BROWSER_ARTIFACT_DIGEST: \$\{\{ steps\.browser_artifact\.outputs\.artifact-digest \}\}/);
+
+assert.match(finalAuthorityJob, /needs: \[acceptance, browser_acceptance\]/);
 assert.match(finalAuthorityJob, /if: always\(\)/);
 assert.match(finalAuthorityJob, /runs-on: ubuntu-latest/);
 assert.match(finalAuthorityJob, /ACCEPTANCE_RESULT: \$\{\{ needs\.acceptance\.result \}\}/);
+assert.match(finalAuthorityJob, /BROWSER_RESULT: \$\{\{ needs\.browser_acceptance\.result \}\}/);
 assert.match(finalAuthorityJob, /CONTROLLER_HEAD: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
 for (const required of [
   "CONTROLLER_PR: '26'",
@@ -69,13 +93,13 @@ assert.match(finalAuthorityJob, /test "\$ACCEPTANCE_RESULT" = success/);
 assert.match(finalAuthorityJob, /test '\$\{\{ steps\.final_authority\.outcome \}\}' = success/);
 assert.match(finalAuthorityJob, /test '\$\{\{ steps\.final_evidence_upload\.outcome \}\}' = success/);
 
-assert.match(aggregateJob, /needs: \[acceptance, final_authority\]/);
+assert.match(aggregateJob, /needs: \[acceptance, browser_acceptance, final_authority\]/);
 assert.match(aggregateJob, /permissions: \{\}/);
 assert.match(aggregateJob, /test "\$ACCEPTANCE_RESULT" = success/);
 assert.match(aggregateJob, /test "\$FINAL_AUTHORITY_RESULT" = success/);
 
 const digestPattern = /\^\(\[0-9A-Fa-f\]\{64\}\|sha256:\[0-9A-Fa-f\]\{64\}\)\$/g;
-assert.equal((workflow.match(digestPattern) || []).length, 2, 'both evidence artifacts must require exact SHA-256 digests');
+assert.equal((workflow.match(digestPattern) || []).length, 4, 'all evidence and bundle artifacts must require exact SHA-256 digests');
 
 for (const gate of [
   'repository_boundary',
@@ -92,12 +116,11 @@ for (const gate of [
   assert.match(matrix, new RegExp(`run_gate ${gate} ${gate}`), `matrix must retain ${gate}`);
 }
 assert.doesNotMatch(matrix, /run_gate final_authority|final_authority\(\)/);
-assert.match(matrix, /run_gate_parent browser_driver_preload preload_browser_driver/);
-assert.match(matrix, /run_gate_parent browser_acceptance browser_acceptance/);
-assert.match(matrix, /rev-parse "\$CONTROLLER_HEAD:\$driver_rel"/);
-assert.match(matrix, /hash-object "\$CONTROLLER_ROOT\/\$driver_rel"/);
-assert.match(matrix, /wait "\$BROWSER_DRIVER_PID"/);
-assert.match(matrix, /browser-driver-loaded\.json/);
+assert.doesNotMatch(matrix, /preload_browser_driver|BROWSER_DRIVER_PID|vite preview/);
+assert.match(matrix, /run_gate browser_bundle browser_bundle/);
+assert.match(matrix, /\.browser-bundle/);
+assert.match(matrix, /find \. -type f -print0[\s\S]*sha256sum/);
+assert.match(matrix, /printf 'controller=%s\\ntarget=%s\\n'/);
 assert.match(matrix, /pipeline_status=\("\$\{PIPESTATUS\[@\]\}"\)/);
 assert.match(matrix, /command_rc="\$\{pipeline_status\[0\]:-1\}"/);
 assert.match(matrix, /tee_rc="\$\{pipeline_status\[1\]:-1\}"/);
@@ -143,7 +166,7 @@ assert.match(matrix, /configured-provider-ready-then-unavailable/);
 assert.match(matrix, /\.localLogin[\s\S]*== 404/);
 assert.match(matrix, /\.protectedApi[\s\S]*== 401/);
 assert.match(matrix, /\.outageReadiness[\s\S]*== "closed"/);
-assert.match(matrix, /wos01a-browser-acceptance-v2\.mjs/);
+assert.match(browserJob, /wos01a-browser-acceptance-v2\.mjs/);
 const browserDriver = readFileSync(new URL('./wos01a-browser-acceptance-v2.mjs', import.meta.url), 'utf8');
 assert.match(browserDriver, /WOS_BROWSER_DRIVER_READY_FILE/);
 assert.match(browserDriver, /await writeFile\(driverReadyFile/);
@@ -154,8 +177,7 @@ assert.match(browserDriver, /status: 'control-ready'/);
 assert.doesNotMatch(browserDriver, /remote-debugging-port|WOS_CHROME_DEBUG_PORT|\/json\/version|\/json\/new|webSocketDebuggerUrl/);
 assert.ok(browserDriver.indexOf("client.send('Browser.getVersion')") < browserDriver.indexOf('await writeFile(driverReadyFile'));
 assert.ok(browserDriver.indexOf("client.send('Target.attachToTarget'") < browserDriver.indexOf('await writeFile(driverReadyFile'));
-assert.match(matrix, /payload\.status !== 'control-ready'/);
-assert.match(matrix, /payload\.transport !== 'pipe'/);
+assert.doesNotMatch(browserJob, /browser-driver-loaded\.json|chromePid|\/proc\//);
 assert.match(matrix, /WOS-01A exact-head acceptance failed closed/);
 
 const production = matrix.match(/production_acceptance\(\) \{[\s\S]*?\n\}/)?.[0];
