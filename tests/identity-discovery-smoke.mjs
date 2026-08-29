@@ -3,7 +3,9 @@ import {
   fetchBoundedJson,
   getApprovedEntraAuthority,
   getGovernedAppUrls,
+  isLoopbackHostname,
   loadEntraOpenIdConfiguration,
+  requireSecureUrl,
 } from '../server/identity-discovery.mjs';
 
 const tenant = '00000000-0000-0000-0000-000000000001';
@@ -87,6 +89,40 @@ try {
   }
   for (const label of ['Identity provider discovery', 'Microsoft token endpoint', 'Microsoft JWKS endpoint']) {
     await assertEarlyCancellation(label);
+  }
+
+  const rejectedLoopbackOrigins = [
+    'https://localhost',
+    'https://localhost.',
+    'https://service.localhost',
+    'https://service.localhost.',
+    'https://127.0.0.1',
+    'https://127.0.0.254',
+    'https://127.42.19.7',
+    'https://127.1',
+    'https://[::1]',
+    'https://[0:0:0:0:0:0:0:1]',
+    'https://[::ffff:127.0.0.1]',
+    'https://[::ffff:7f00:1]',
+    'https://[0:0:0:0:0:ffff:7f00:1]',
+  ];
+  for (const origin of rejectedLoopbackOrigins) {
+    const parsed = new URL(origin);
+    assert.equal(isLoopbackHostname(parsed.hostname), true, `${origin} must normalize to loopback`);
+    assert.throws(() => requireSecureUrl(origin, 'LOOPBACK_TEST'), /must not use a loopback host/);
+    process.env.APP_URL = origin;
+    process.env.ENTRA_REDIRECT_URI = `${origin}/api/auth/entra/callback`;
+    assert.throws(() => getGovernedAppUrls(), /must not use a loopback host/);
+  }
+  for (const allowedOrigin of [
+    'https://localhost.example.test',
+    'https://service.localhost.example.test',
+    'https://128.0.0.1',
+    'https://[2001:db8::1]',
+  ]) {
+    const parsed = new URL(allowedOrigin);
+    assert.equal(isLoopbackHostname(parsed.hostname), false, `${allowedOrigin} must not be a loopback false positive`);
+    assert.equal(requireSecureUrl(allowedOrigin, 'ALLOWED_TEST').origin, parsed.origin);
   }
 
   process.env.APP_URL = 'https://app.example.test';
