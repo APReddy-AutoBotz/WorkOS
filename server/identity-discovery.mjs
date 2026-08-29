@@ -1,3 +1,5 @@
+import {isIP} from 'node:net';
+
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_BYTES = 256 * 1024;
 const ENTRA_PUBLIC_AUTHORITY = 'https://login.microsoftonline.com';
@@ -13,6 +15,72 @@ const boundedNumber = (value, fallback, minimum, maximum) => {
   return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, Math.trunc(parsed))) : fallback;
 };
 
+const normalizeHostname = (value) => {
+  let hostname = String(value || '').trim().toLowerCase();
+  while (hostname.endsWith('.')) hostname = hostname.slice(0, -1);
+  if (hostname.startsWith('[') && hostname.endsWith(']')) hostname = hostname.slice(1, -1);
+  return hostname;
+};
+
+const parseIpv4Octets = (value) => {
+  const parts = String(value || '').split('.');
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return null;
+  const octets = parts.map(Number);
+  return octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+    ? octets
+    : null;
+};
+
+const expandIpv6 = (value) => {
+  let source = String(value || '').toLowerCase();
+  if (source.includes('.')) {
+    const lastColon = source.lastIndexOf(':');
+    if (lastColon < 0) return null;
+    const octets = parseIpv4Octets(source.slice(lastColon + 1));
+    if (!octets) return null;
+    source = `${source.slice(0, lastColon)}:${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+  }
+
+  const halves = source.split('::');
+  if (halves.length > 2) return null;
+  const parseHalf = (half) => {
+    if (!half) return [];
+    const groups = half.split(':');
+    if (groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+    return groups.map((group) => Number.parseInt(group, 16));
+  };
+  const left = parseHalf(halves[0]);
+  const right = parseHalf(halves[1] || '');
+  if (!left || !right) return null;
+  if (halves.length === 1) return left.length === 8 ? left : null;
+  const omitted = 8 - left.length - right.length;
+  if (omitted < 1) return null;
+  return [...left, ...Array(omitted).fill(0), ...right];
+};
+
+export const isLoopbackHostname = (value) => {
+  const hostname = normalizeHostname(value);
+  if (!hostname) return false;
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) return true;
+
+  const version = isIP(hostname);
+  if (version === 4) {
+    const octets = parseIpv4Octets(hostname);
+    return Boolean(octets && octets[0] === 127);
+  }
+  if (version !== 6) return false;
+
+  const groups = expandIpv6(hostname);
+  if (!groups || groups.length !== 8) return false;
+  const ipv6Loopback = groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1;
+  if (ipv6Loopback) return true;
+
+  const ipv4FirstOctet = groups[6] >>> 8;
+  const ipv4Compatible = groups.slice(0, 6).every((group) => group === 0);
+  const ipv4Mapped = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+  return (ipv4Compatible || ipv4Mapped) && ipv4FirstOctet === 127;
+};
+
 const exactOrigin = (value, label) => {
   const url = requireSecureUrl(value, label);
   if (url.pathname !== '/' || url.search || url.hash) throw new Error(`${label} must be an origin without a path, query or fragment.`);
@@ -25,7 +93,7 @@ export const requireSecureUrl = (value, label) => {
   if (url.protocol !== 'https:' || url.username || url.password) {
     throw new Error(`${label} must use HTTPS without embedded credentials.`);
   }
-  if (['localhost', '127.0.0.1', '::1'].includes(url.hostname.toLowerCase())) {
+  if (isLoopbackHostname(url.hostname)) {
     throw new Error(`${label} must not use a loopback host.`);
   }
   return url;
