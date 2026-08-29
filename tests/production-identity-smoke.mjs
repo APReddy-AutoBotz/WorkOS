@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
 import {createPrivateKey, createPublicKey, createSign} from 'node:crypto';
 import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {createServer} from 'node:https';
@@ -188,7 +187,7 @@ const publicJwk = createPublicKey(signingKey).export({format: 'jwk'});
 publicJwk.kid = 'synthetic-key';
 publicJwk.use = 'sig';
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-const signIdToken = (nonce) => {
+const signIdToken = (nonce, overrides = {}) => {
   const header = encode({alg: 'RS256', kid: publicJwk.kid});
   const claims = encode({
     aud: '00000000-0000-0000-0000-000000000002',
@@ -199,6 +198,7 @@ const signIdToken = (nonce) => {
     oid: 'synthetic-provider-subject',
     preferred_username: 'synthetic.user@example.test',
     groups: ['mock-entra-group-employee'],
+    ...overrides,
   });
   const signer = createSign('RSA-SHA256');
   signer.update(`${header}.${claims}`);
@@ -209,12 +209,15 @@ const signIdToken = (nonce) => {
 let invalidDiscovery = false;
 let discoveryRequests = 0;
 let callbackNonce = '';
+let nextTokenClaimOverrides = {};
 const discoveryServer = createServer({key: readFileSync(privateKeyPath), cert: readFileSync(certificatePath)}, async (request, response) => {
   discoveryRequests += 1;
   response.statusCode = 200;
   response.setHeader('content-type', 'application/json');
   if (request.url?.endsWith('/oauth2/v2.0/token')) {
-    response.end(JSON.stringify({id_token: signIdToken(callbackNonce)}));
+    const claimOverrides = nextTokenClaimOverrides;
+    nextTokenClaimOverrides = {};
+    response.end(JSON.stringify({id_token: signIdToken(callbackNonce, claimOverrides)}));
   } else if (request.url?.endsWith('/discovery/v2.0/keys')) {
     response.end(JSON.stringify({keys: [publicJwk]}));
   } else {
@@ -229,6 +232,43 @@ await new Promise((resolve, reject) => {
 const closeDiscovery = async () => {
   if (!discoveryServer.listening) return;
   await new Promise((resolve) => discoveryServer.close(resolve));
+};
+
+const beginAuthorization = async () => {
+  const discoveryRequestsBeforeAuth = discoveryRequests;
+  const response = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/start`, {redirect: 'manual'}, 1000);
+  assert.equal(response.status, 302);
+  assert.ok(discoveryRequests > discoveryRequestsBeforeAuth, 'authentication initiation must use configured discovery');
+  const authorizationLocation = new URL(response.headers.get('location') || '');
+  assert.equal(authorizationLocation.origin, entraAuthority);
+  callbackNonce = authorizationLocation.searchParams.get('nonce') || '';
+  const state = authorizationLocation.searchParams.get('state') || '';
+  assert.ok(callbackNonce && state, 'authentication initiation must issue nonce and state');
+  return {nonce: callbackNonce, state};
+};
+
+const callbackRejections = [];
+const assertCallbackRejected = async ({name, claimOverrides, expectedLocation = '/login?error=entra_callback_failed'}) => {
+  const {nonce, state} = await beginAuthorization();
+  nextTokenClaimOverrides = typeof claimOverrides === 'function'
+    ? claimOverrides({nonce})
+    : {...claimOverrides};
+  const callback = await fetchWithTimeout(
+    `${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`,
+    {redirect: 'manual'},
+    2000,
+  );
+  const location = callback.headers.get('location');
+  const setCookie = callback.headers.get('set-cookie') || '';
+  assert.equal(callback.status, 302, `${name} must terminate through a redirect`);
+  assert.equal(location, expectedLocation, `${name} must fail closed at the governed error route`);
+  assert.doesNotMatch(setCookie, /(?:^|;)\s*workos_session=/i, `${name} must not create a WorkOS session`);
+  callbackRejections.push({
+    name,
+    status: callback.status,
+    location,
+    sessionCookie: false,
+  });
 };
 
 const results = [];
@@ -332,16 +372,6 @@ try {
   assert.equal(identityConfigBody.enabled, true);
   assert.equal(identityConfigBody.provider, 'entra');
 
-  const discoveryRequestsBeforeAuth = discoveryRequests;
-  const authStart = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/start`, {redirect: 'manual'}, 1000);
-  assert.equal(authStart.status, 302);
-  assert.ok(discoveryRequests > discoveryRequestsBeforeAuth, 'authentication initiation must use configured discovery');
-  const authorizationLocation = new URL(authStart.headers.get('location') || '');
-  assert.equal(authorizationLocation.origin, entraAuthority);
-  callbackNonce = authorizationLocation.searchParams.get('nonce') || '';
-  const state = authorizationLocation.searchParams.get('state') || '';
-  assert.ok(callbackNonce && state, 'authentication initiation must issue nonce and state');
-
   const localLogin = await fetchWithTimeout(`${serviceOrigin}/api/auth/login`, {
     method: 'POST',
     headers: {'content-type': 'application/json'},
@@ -357,8 +387,44 @@ try {
   assert.equal(afterUsers, beforeUsers, 'production startup must not auto-seed users');
   assert.equal(afterEmployees, beforeEmployees, 'production startup must not auto-seed employees');
 
+  await assertCallbackRejected({
+    name: 'wrong-issuer',
+    claimOverrides: {iss: `${entraAuthority}/wrong-tenant/v2.0`},
+  });
+  await assertCallbackRejected({
+    name: 'wrong-tenant',
+    claimOverrides: {tid: '00000000-0000-0000-0000-000000000099'},
+  });
+  await assertCallbackRejected({
+    name: 'wrong-audience',
+    claimOverrides: {aud: '00000000-0000-0000-0000-000000000099'},
+  });
+  await assertCallbackRejected({
+    name: 'mismatched-nonce',
+    claimOverrides: ({nonce}) => ({nonce: `${nonce}-mismatch`}),
+  });
+  await assertCallbackRejected({
+    name: 'expired-token',
+    claimOverrides: {exp: Math.floor(Date.now() / 1000) - 60},
+  });
+  await assertCallbackRejected({
+    name: 'unlinked-identity',
+    claimOverrides: {
+      oid: 'unlinked-provider-subject',
+      preferred_username: 'unlinked.user@example.test',
+    },
+    expectedLocation: '/login?error=entra_unlinked_user',
+  });
+
+  const afterRejectedUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);
+  const afterRejectedEmployees = Number((await pool.query('select count(*)::int as count from employees')).rows[0].count);
+  assert.equal(afterRejectedUsers, beforeUsers, 'rejected callbacks must not create users');
+  assert.equal(afterRejectedEmployees, beforeEmployees, 'rejected callbacks must not create employees');
+
   const syntheticUser = await pool.query("insert into users (username, email, entra_object_id, status) values ('synthetic-user', 'synthetic.user@example.test', 'synthetic-provider-subject', 'Active') returning id");
   await pool.query('insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1', [syntheticUser.rows[0].id]);
+  const {state} = await beginAuthorization();
+  nextTokenClaimOverrides = {};
   const callback = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`, {redirect: 'manual'}, 2000);
   assert.equal(callback.status, 302);
   assert.equal(
@@ -366,6 +432,7 @@ try {
     `${rootOrigin}/auth/entra/complete`,
     `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
   );
+  assert.match(callback.headers.get('set-cookie') || '', /(?:^|;)\s*workos_session=/i, 'valid linked callback must create a WorkOS session');
   await pool.query("delete from users where username = 'synthetic-user'");
 
   await closeDiscovery();
@@ -382,9 +449,9 @@ try {
     localLogin: localLogin.status,
     protectedApi: protectedApi.status,
     usersBefore: beforeUsers,
-    usersAfter: afterUsers,
+    usersAfter: afterRejectedUsers,
     employeesBefore: beforeEmployees,
-    employeesAfter: afterEmployees,
+    employeesAfter: afterRejectedEmployees,
     outageReadiness: 'closed',
   });
 } finally {
@@ -397,6 +464,7 @@ try {
 const report = {
   status: 'passed',
   cases: results,
+  callbackRejections,
 };
 const evidencePath = String(process.env.WOS_PRODUCTION_IDENTITY_EVIDENCE || '').trim();
 if (evidencePath) writeFileSync(evidencePath, `${JSON.stringify(report, null, 2)}\n`);
