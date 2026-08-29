@@ -271,8 +271,15 @@ jobs:
           config="$RUNNER_TEMP/wos01a-nginx.conf"
           cat > "$config" <<'NGINX'
           events {}
+          pid /var/run/nginx.pid;
+          error_log /dev/stderr notice;
           http {
             access_log off;
+            client_body_temp_path /var/cache/nginx/client_temp;
+            proxy_temp_path /var/cache/nginx/proxy_temp;
+            fastcgi_temp_path /var/cache/nginx/fastcgi_temp;
+            uwsgi_temp_path /var/cache/nginx/uwsgi_temp;
+            scgi_temp_path /var/cache/nginx/scgi_temp;
             server {
               listen 8080;
               root /srv/workos;
@@ -287,21 +294,33 @@ jobs:
           }
           trap cleanup EXIT
           docker run --detach --name wos01a-static-target \
+            --user 101:101 \
             --read-only --cap-drop ALL --security-opt no-new-privileges \
             --pids-limit 64 --memory 128m --network bridge \
-            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m \
-            --tmpfs /var/run:rw,noexec,nosuid,size=1m \
-            --tmpfs /tmp:rw,noexec,nosuid,size=1m \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=700 \
+            --tmpfs /var/run:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=700 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=700 \
             --publish 127.0.0.1:4173:8080 \
             --mount "type=bind,src=$PWD/browser-bundle/dist,dst=/srv/workos,readonly" \
             --mount "type=bind,src=$config,dst=/etc/nginx/nginx.conf,readonly" \
-            nginx:1.27-alpine > "$evidence/container-id.txt"
-          inspect="$(docker inspect wos01a-static-target)"
-          jq -e '.[0].HostConfig.Privileged == false
+            nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 \
+            > "$evidence/container-id.txt"
+          docker inspect wos01a-static-target > "$evidence/container-inspect.json"
+          docker logs wos01a-static-target > "$evidence/container-startup.log" 2>&1 || true
+          inspect="$(cat "$evidence/container-inspect.json")"
+          jq -e '.[0].State.Running == true
+            and .[0].Config.User == "101:101"
+            and .[0].HostConfig.Privileged == false
             and .[0].HostConfig.PidMode == ""
             and .[0].HostConfig.ReadonlyRootfs == true
             and .[0].HostConfig.Binds == null
-            and .[0].HostConfig.SecurityOpt == ["no-new-privileges"]' <<<"$inspect" >/dev/null
+            and .[0].HostConfig.SecurityOpt == ["no-new-privileges"]
+            and .[0].HostConfig.CapDrop == ["ALL"]
+            and .[0].HostConfig.Memory == 134217728
+            and .[0].HostConfig.PidsLimit == 64
+            and .[0].HostConfig.NetworkMode == "bridge"
+            and ([.[0].Mounts[] | select(.Type == "bind")] | length == 2)
+            and ([.[0].Mounts[] | select(.Type == "bind") | .RW] | all(. == false))' <<<"$inspect" >/dev/null
           for _ in $(seq 1 40); do
             curl --fail --silent http://127.0.0.1:4173/login >/dev/null && break
             docker inspect -f '{{.State.Running}}' wos01a-static-target | grep -Fx true
