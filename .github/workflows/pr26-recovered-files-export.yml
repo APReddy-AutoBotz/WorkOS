@@ -1,0 +1,155 @@
+name: PR26 Recovered Controller Files Export
+
+on:
+  push:
+    branches:
+      - controller/pr26-isolation-recovery-20260829
+    paths:
+      - '.github/workflows/pr26-recovered-files-export.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: pr26-recovered-controller-files-export
+  cancel-in-progress: false
+
+env:
+  CONTROLLER_PR: '26'
+  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+  OLD_HEAD: cdef93344825b23e459cc384e27a67e346e24c0e
+  EXPECTED_TREE: da84d44f9fce28faf3fe85acaaaf82038e19b357
+  PRODUCT_PR: '27'
+  PRODUCT_BRANCH: codex/wos01a-acceptance-closure
+  PRODUCT_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+  PARENT_PR: '16'
+  PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
+  ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+  EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  RECOVERY_COMMENT_ID: '5463459529'
+  EXPECTED_LOCAL_COMMIT: b6ac73233fce0012fed380d878ee2490507f635f
+  EXPECTED_GZIP_BYTES: '6426'
+  EXPECTED_GZIP_SHA256: 4afb1b2fcf6d1d02dbf6dd9a7354ea92fa117898b9fc73283e7fe26add18705f
+  EXPECTED_PATCH_BYTES: '24120'
+  EXPECTED_PATCH_SHA256: 6426e6642e37dc61eb4a2afef8b490f3881e061c06d1b0028946d8dd915aabdd
+
+jobs:
+  export:
+    name: Reconstruct, verify and export exact files
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Verify live authority and materialize the exact Codex payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const crypto = require('crypto');
+            const fs = require('fs');
+            const path = require('path');
+            const failures = [];
+            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
+            const {data: product} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PRODUCT_PR)});
+            const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
+            const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
+            if (controller.state !== 'open' || !controller.draft || controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.OLD_HEAD || controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller=${controller.state}/${controller.draft}/${controller.head.ref}/${controller.head.sha}/${controller.base.ref}/${controller.base.sha}`);
+            if (product.state !== 'open' || !product.draft || product.head.ref !== process.env.PRODUCT_BRANCH || product.head.sha !== process.env.PRODUCT_HEAD || product.base.ref !== process.env.PARENT_BRANCH || product.base.sha !== process.env.PARENT_HEAD) failures.push(`product=${product.state}/${product.draft}/${product.head.ref}/${product.head.sha}/${product.base.ref}/${product.base.sha}`);
+            if (parent.state !== 'open' || !parent.draft || parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD || parent.base.ref !== 'main' || parent.base.sha !== process.env.ACCEPTED_WOS00_BASE) failures.push(`parent=${parent.state}/${parent.draft}/${parent.head.ref}/${parent.head.sha}/${parent.base.ref}/${parent.base.sha}`);
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            const {data: comment} = await github.rest.issues.getComment({owner: context.repo.owner, repo: context.repo.repo, comment_id: Number(process.env.RECOVERY_COMMENT_ID)});
+            const body = String(comment.body || '');
+            if (!['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector'].includes(comment.user?.login)) failures.push(`comment.author=${comment.user?.login || 'missing'}`);
+            if (!String(comment.issue_url || '').endsWith(`/issues/${process.env.CONTROLLER_PR}`)) failures.push(`comment.issue=${comment.issue_url}`);
+            for (const required of [process.env.OLD_HEAD, process.env.EXPECTED_LOCAL_COMMIT, process.env.EXPECTED_TREE, process.env.EXPECTED_GZIP_SHA256, process.env.EXPECTED_PATCH_SHA256]) if (!body.includes(required)) failures.push(`comment missing ${required}`);
+            const match = body.match(/base64 -d > controller\.patch\.gz <<'BASE64'\r?\n([A-Za-z0-9+/=\r\n]+?)\r?\nBASE64/);
+            if (!match) failures.push('exact recovery Base64 block was not found');
+            if (failures.length) { core.setFailed(`PR26 export start gate failed: ${failures.join(', ')}`); return; }
+            const encoded = match[1].replace(/\s+/g, '');
+            if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 !== 0) { core.setFailed('Recovery payload is not canonical Base64'); return; }
+            const gzip = Buffer.from(encoded, 'base64');
+            const digest = crypto.createHash('sha256').update(gzip).digest('hex');
+            if (gzip.length !== Number(process.env.EXPECTED_GZIP_BYTES) || digest !== process.env.EXPECTED_GZIP_SHA256) { core.setFailed(`Recovery gzip mismatch bytes=${gzip.length} sha256=${digest}`); return; }
+            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'controller.patch.gz'), gzip, {mode: 0o600});
+
+      - name: Checkout exact old controller head without persisted credential
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.OLD_HEAD }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply, verify and prepare exact export
+        id: prepare
+        working-directory: controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OLD_HEAD"
+          test -z "$(git status --porcelain)"
+          gzip -dc "$RUNNER_TEMP/controller.patch.gz" > "$RUNNER_TEMP/controller.patch"
+          test "$(wc -c < "$RUNNER_TEMP/controller.patch" | tr -d '[:space:]')" = "$EXPECTED_PATCH_BYTES"
+          printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" "$RUNNER_TEMP/controller.patch" | sha256sum -c -
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git am --committer-date-is-author-date "$RUNNER_TEMP/controller.patch"
+          test "$(git rev-parse HEAD^)" = "$OLD_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          git diff --name-only "$OLD_HEAD..HEAD" | LC_ALL=C sort > "$RUNNER_TEMP/actual-paths.txt"
+          cat > "$RUNNER_TEMP/expected-paths.txt" <<'PATHS'
+          .github/scripts/verify-wos01a-controller-v2.mjs
+          .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          .github/workflows/wos01a-clean-runtime-acceptance-v2.yml
+          PATHS
+          diff -u "$RUNNER_TEMP/expected-paths.txt" "$RUNNER_TEMP/actual-paths.txt"
+          verify_file() {
+            local file="$1" bytes="$2" sha256="$3" blob="$4"
+            test "$(wc -c < "$file" | tr -d '[:space:]')" = "$bytes"
+            printf '%s  %s\n' "$sha256" "$file" | sha256sum -c -
+            test "$(git hash-object "$file")" = "$blob"
+          }
+          verify_file '.github/scripts/verify-wos01a-controller-v2.mjs' '17613' '765a36718b0884d1b2532612ab043ce2929e1ebd4a6dc53608bbab657c41e4c9' 'ae6b14b5c9a4afe9e35cf70e1dbccd47d4b8da0c'
+          verify_file '.github/scripts/wos01a-clean-runtime-matrix-v2.sh' '16296' 'a24b5d8c04290cc808efe184df5528bde3a1cb4f487e746e1e6de56ba82c57c9' '73b0e98a45351432d8eca762e22f6133b0ba2bd7'
+          verify_file '.github/workflows/wos01a-clean-runtime-acceptance-v2.yml' '22332' 'ac1c99806ae5913cbbe4c04ca80d8c8ce393ca1683e485efdc060a7d1a054fd2' '3efa09ba52a6b87fc690346f2724ab07db4a4046'
+          node --check .github/scripts/verify-wos01a-controller-v2.mjs
+          node .github/scripts/verify-wos01a-controller-v2.mjs
+          bash -n .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-clean-runtime-acceptance-v2.yml'); puts 'YAML syntax passed'"
+          git diff --check "$OLD_HEAD..HEAD"
+          export_dir="$RUNNER_TEMP/pr26-recovered-controller"
+          mkdir -p "$export_dir/.github/scripts" "$export_dir/.github/workflows"
+          cp .github/scripts/verify-wos01a-controller-v2.mjs "$export_dir/.github/scripts/"
+          cp .github/scripts/wos01a-clean-runtime-matrix-v2.sh "$export_dir/.github/scripts/"
+          cp .github/workflows/wos01a-clean-runtime-acceptance-v2.yml "$export_dir/.github/workflows/"
+          cat > "$export_dir/manifest.json" <<EOF
+          {"oldHead":"$OLD_HEAD","recoveredHead":"$(git rev-parse HEAD)","tree":"$(git rev-parse HEAD^{tree})","sourceComment":$RECOVERY_COMMENT_ID,"gzipSha256":"$EXPECTED_GZIP_SHA256","patchSha256":"$EXPECTED_PATCH_SHA256"}
+          EOF
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact recovered controller files
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr26-recovered-controller-${{ steps.prepare.outputs.tree }}
+          path: ${{ runner.temp }}/pr26-recovered-controller
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify artifact publication
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          test -n "$ARTIFACT_ID"
+          test -n "$ARTIFACT_DIGEST"
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9A-Fa-f]{64}$ ]]
+          printf 'artifact_id=%s\nartifact_digest=%s\n' "$ARTIFACT_ID" "$ARTIFACT_DIGEST"
