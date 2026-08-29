@@ -1,4 +1,4 @@
-name: WOS-01A Controller Order Browser Isolation Launcher v2
+name: WOS-01A Subject-Only Identity Launcher v2
 
 on:
   push:
@@ -6,48 +6,41 @@ on:
       - controller/workos-root-publisher-v1
 
 concurrency:
-  group: wos01a-controller-order-browser-isolation-launcher-v2
+  group: wos01a-subject-only-identity-launcher-v2
   cancel-in-progress: false
 
 env:
-  CONTROLLER_PR: '26'
-  CONTROLLER_BRANCH: controller/wos01a-clean-runtime-acceptance-v2
-  OLD_CONTROLLER_HEAD: 621ae545fdb3ccc729246b21d3b2a50fcdc423d8
   TARGET_PR: '27'
   TARGET_BRANCH: codex/wos01a-acceptance-closure
-  TARGET_HEAD: 00ec5b275fc826b4613aa7fdf16f9ff3cb2f4573
+  OLD_TARGET_HEAD: b4d0a37322c428035122306fd3b77e35f5dffb7a
   PARENT_PR: '16'
   PARENT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   PARENT_HEAD: 590bc6a6d28ac185e4c4a0dd486649f3a8c9cc60
   EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
-  SOURCE_WORKFLOW: publisher/.github/workflows/wos01a-controller-order-browser-isolation-v1.yml
-  MATRIX_PATH: .github/scripts/wos01a-clean-runtime-matrix-v2.sh
-  DRIVER_PATH: .github/scripts/wos01a-browser-acceptance-v2.mjs
-  VERIFIER_PATH: .github/scripts/verify-wos01a-controller-v2.mjs
+  SOURCE_WORKFLOW: publisher/.github/workflows/wos01a-rebind-callback-coverage-v1.yml
+  SERVER_PATH: server/index.mjs
+  TEST_PATH: tests/production-identity-smoke.mjs
+  EVIDENCE_PATH: docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
 
 jobs:
   publish:
-    name: Execute registered deterministic correction
+    name: Execute registered subject-only correction
     permissions:
       contents: write
       pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Verify exact live controller, target, parent and main
+      - name: Verify exact target, parent and main authority
         uses: actions/github-script@v7
         with:
           script: |
             const failures = [];
-            const {data: controller} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.CONTROLLER_PR)});
             const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
             const {data: parent} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PARENT_PR)});
             const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
-            if (controller.state !== 'open' || !controller.draft) failures.push(`controller=${controller.state}/${controller.draft}`);
-            if (controller.head.ref !== process.env.CONTROLLER_BRANCH || controller.head.sha !== process.env.OLD_CONTROLLER_HEAD) failures.push(`controller.head=${controller.head.ref}@${controller.head.sha}`);
-            if (controller.base.ref !== 'main' || controller.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller.base=${controller.base.ref}@${controller.base.sha}`);
             if (target.state !== 'open' || !target.draft) failures.push(`target=${target.state}/${target.draft}`);
-            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.TARGET_HEAD) failures.push(`target.head=${target.head.ref}@${target.head.sha}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH || target.head.sha !== process.env.OLD_TARGET_HEAD) failures.push(`target.head=${target.head.ref}@${target.head.sha}`);
             if (target.base.ref !== process.env.PARENT_BRANCH || target.base.sha !== process.env.PARENT_HEAD) failures.push(`target.base=${target.base.ref}@${target.base.sha}`);
             if (parent.state !== 'open' || !parent.draft) failures.push(`parent=${parent.state}/${parent.draft}`);
             if (parent.head.ref !== process.env.PARENT_BRANCH || parent.head.sha !== process.env.PARENT_HEAD) failures.push(`parent.head=${parent.head.ref}@${parent.head.sha}`);
@@ -62,15 +55,15 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Checkout exact controller head
+      - name: Checkout exact product head
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.OLD_CONTROLLER_HEAD }}
+          ref: ${{ env.OLD_TARGET_HEAD }}
           path: target
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Extract registered deterministic scripts from raw source
+      - name: Extract registered deterministic scripts
         shell: bash
         run: |
           set -euo pipefail
@@ -81,56 +74,40 @@ jobs:
           source = Path(sys.argv[1]).read_text()
 
           def extract(step_name: str, next_step: str | None) -> str:
-              step_marker = f"      - name: {step_name}\n"
-              step_start = source.index(step_marker)
+              start_marker = f"      - name: {step_name}\n"
+              step_start = source.index(start_marker)
               run_marker = "        run: |\n"
               body_start = source.index(run_marker, step_start) + len(run_marker)
-              if next_step is None:
-                  body_end = len(source)
-              else:
-                  body_end = source.index(f"      - name: {next_step}\n", body_start)
+              body_end = len(source) if next_step is None else source.index(f"      - name: {next_step}\n", body_start)
               output = []
               for line in source[body_start:body_end].splitlines():
-                  if line.startswith("          "):
-                      output.append(line[10:])
-                  else:
-                      output.append(line)
+                  output.append(line[10:] if line.startswith('          ') else line)
               while output and not output[-1].strip():
                   output.pop()
-              return "\n".join(output) + "\n"
+              return '\n'.join(output) + '\n'
 
-          apply_path = Path('/tmp/workos-apply.sh')
-          apply_script = extract(
-              'Apply deterministic order and preload isolation correction',
-              'Commit and push under exact-old-head lease',
-          )
-          old_order = '''test "${changed[0]}" = "$DRIVER_PATH"
-          test "${changed[1]}" = "$MATRIX_PATH"
-          test "${changed[2]}" = "$VERIFIER_PATH"'''
-          new_order = '''test "${changed[0]}" = "$VERIFIER_PATH"
-          test "${changed[1]}" = "$DRIVER_PATH"
-          test "${changed[2]}" = "$MATRIX_PATH"'''
-          if apply_script.count(old_order) != 1:
-              raise SystemExit('registered changed-path assertion did not match exactly once')
-          apply_path.write_text(apply_script.replace(old_order, new_order, 1))
+          Path('/tmp/workos-apply.sh').write_text(extract(
+              'Apply deterministic subject-only linking correction',
+              'Commit and publish under exact-old-head lease',
+          ))
           Path('/tmp/workos-publish.sh').write_text(extract(
-              'Commit and push under exact-old-head lease',
+              'Commit and publish under exact-old-head lease',
               None,
           ))
           PY
           chmod 700 /tmp/workos-apply.sh /tmp/workos-publish.sh
           bash -n /tmp/workos-apply.sh
           bash -n /tmp/workos-publish.sh
-          grep -q 'migration application order' /tmp/workos-apply.sh
-          grep -q 'browser preload' /tmp/workos-apply.sh
+          grep -q 'email fallback removal' /tmp/workos-apply.sh
+          grep -q 'email-only retained rejection' /tmp/workos-apply.sh
           grep -q -- '--force-with-lease' /tmp/workos-publish.sh
 
-      - name: Apply and validate correction on exact controller checkout
+      - name: Apply and validate exact product correction
         shell: bash
         working-directory: target
         run: /tmp/workos-apply.sh
 
-      - name: Publish corrected controller under exact-old-head lease
+      - name: Publish corrected product under exact-old-head lease
         shell: bash
         working-directory: target
         env:
