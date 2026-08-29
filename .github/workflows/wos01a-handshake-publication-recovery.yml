@@ -1,0 +1,101 @@
+name: WOS-01A Handshake Publication Recovery
+
+on:
+  push:
+    branches:
+      - controller/wos01a-clean-runtime-acceptance-v2
+    paths:
+      - '.github/workflows/wos01a-handshake-publication-recovery.yml'
+
+permissions:
+  contents: write
+  issues: read
+
+concurrency:
+  group: wos01a-handshake-publication-recovery
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish exact Codex recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BRANCH: controller/wos01a-clean-runtime-acceptance-v2
+      EXPECTED_BASE: 523eb774cf98114a37ccda73b9b73643b47e0b4c
+      COMMENT_ID: '5463987732'
+      EXPECTED_GZIP_SHA256: 4ed340c7abbeaaeab2dc894be290909e2e2e673fe73f2274611624e1caf839b8
+      EXPECTED_PATCH_SHA256: 3b5ccbd1252cde5a0110a4bb17f82110811dc401041ce4c85a582f253dc102e5
+      EXPECTED_PATCH_BYTES: '24563'
+      EXPECTED_TREE: 61c348cbb193c45798e5aed446062215f61bb865
+      EXPECTED_DRIVER_BLOB: de292165f1f6bd020a70a363b4507f999495a5b6
+      EXPECTED_LIFECYCLE_TEST_BLOB: 44f4206823a9cb12d25a76150fd554b0f0a56f49
+      EXPECTED_VERIFIER_BLOB: 222468bc0a9f1ff8cc837082d41905dc9afbd5ed
+      EXPECTED_MATRIX_BLOB: 14bfed909453001bc389cb52174c11f3ca875640
+      EXPECTED_WORKFLOW_BLOB: e8d79c1e0c534896632a41ab67e2d563b8ad5a5d
+    steps:
+      - name: Checkout recovery trigger head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify exact recovery lease
+        id: lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "$BRANCH"
+          recovery_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
+          test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/wos01a-handshake-publication-recovery.yml'
+          git cat-file -e "$EXPECTED_BASE^{commit}"
+          echo "recovery_head=$recovery_head" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch and verify exact Codex patch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" --jq .body > /tmp/codex-comment.md
+          awk '
+            /^base64 -d > wos01a-chrome-handshake\.patch\.gz <<'\''BASE64'\''$/ { capture=1; next }
+            capture && /^BASE64$/ { exit }
+            capture { print }
+          ' /tmp/codex-comment.md | tr -d '[:space:]' > /tmp/controller.patch.gz.b64
+          test -s /tmp/controller.patch.gz.b64
+          base64 -d /tmp/controller.patch.gz.b64 > /tmp/controller.patch.gz
+          printf '%s  %s\n' "$EXPECTED_GZIP_SHA256" /tmp/controller.patch.gz | sha256sum -c -
+          gzip -dc /tmp/controller.patch.gz > /tmp/controller.patch
+          printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" /tmp/controller.patch | sha256sum -c -
+          test "$(wc -c < /tmp/controller.patch | tr -d '[:space:]')" = "$EXPECTED_PATCH_BYTES"
+
+      - name: Apply exact patch and verify target tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'WorkOS Recovery Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git reset --hard "$EXPECTED_BASE"
+          git clean -fdx
+          git am /tmp/controller.patch
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD:.github/scripts/wos01a-browser-acceptance-v2.mjs)" = "$EXPECTED_DRIVER_BLOB"
+          test "$(git rev-parse HEAD:.github/scripts/test-wos01a-browser-lifecycle-v2.mjs)" = "$EXPECTED_LIFECYCLE_TEST_BLOB"
+          test "$(git rev-parse HEAD:.github/scripts/verify-wos01a-controller-v2.mjs)" = "$EXPECTED_VERIFIER_BLOB"
+          test "$(git rev-parse HEAD:.github/scripts/wos01a-clean-runtime-matrix-v2.sh)" = "$EXPECTED_MATRIX_BLOB"
+          test "$(git rev-parse HEAD:.github/workflows/wos01a-clean-runtime-acceptance-v2.yml)" = "$EXPECTED_WORKFLOW_BLOB"
+          test -z "$(git status --porcelain)"
+          echo "published_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish existing PR branch under exact lease
+        shell: bash
+        env:
+          RECOVERY_HEAD: ${{ steps.lease.outputs.recovery_head }}
+        run: |
+          set -euo pipefail
+          git push --force-with-lease="refs/heads/$BRANCH:$RECOVERY_HEAD" origin "HEAD:refs/heads/$BRANCH"
+          remote_head="$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)"
+          test "$remote_head" = "$(git rev-parse HEAD)"
+          echo "Published exact WorkOS controller head $remote_head"
