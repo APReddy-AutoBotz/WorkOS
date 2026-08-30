@@ -12,6 +12,9 @@ const producer = job('browser_bundle', 'browser_acceptance');
 const browser = job('browser_acceptance', 'final_authority');
 const finalAuthority = job('final_authority', 'aggregate');
 const aggregate = workflow.match(/\n  aggregate:\n[\s\S]*$/)?.[0];
+const targetHeadDeclarations = [...workflow.matchAll(/^\s+TARGET_HEAD:\s*([0-9a-f]{40})\s*$/gm)];
+const targetHeads = targetHeadDeclarations.map(([, head]) => head);
+const targetHeadJobs = [acceptance, producer, browser, finalAuthority];
 
 assert.ok(acceptance, 'integrated acceptance job must exist');
 assert.ok(producer, 'pristine producer job must exist');
@@ -19,13 +22,21 @@ assert.ok(browser, 'isolated browser job must exist');
 assert.ok(finalAuthority, 'final live-authority job must exist');
 assert.ok(aggregate, 'aggregate job must exist');
 
+assert.equal(targetHeads.length, targetHeadJobs.length, 'every target-bound job must declare a plain 40-hex TARGET_HEAD');
+assert.ok(targetHeadJobs.every(section => /^\s+TARGET_HEAD:\s*[0-9a-f]{40}\s*$/m.test(section)), 'the complete target-bound job family must declare TARGET_HEAD');
+assert.equal(new Set(targetHeads).size, 1, 'all TARGET_HEAD declarations must be identical');
+const [targetHead] = targetHeads;
+assert.match(targetHead, /^[0-9a-f]{40}$/, 'TARGET_HEAD must be a valid lowercase 40-hex SHA');
+if (process.env.TARGET_HEAD !== undefined) {
+  assert.equal(targetHead, process.env.TARGET_HEAD, 'workflow TARGET_HEAD must equal inherited runtime authority');
+}
+
 assert.match(workflow, /permissions:\n  contents: read\n  pull-requests: read/);
 assert.doesNotMatch(workflow, /contents: write|pull-requests: write|GH_TOKEN:/);
 assert.match(workflow, /concurrency:\n  group: wos01a-final-integration-acceptance\n  cancel-in-progress: true/);
 assert.match(workflow, /CONTROLLER_BRANCH: controller\/wos01a-final-integration-acceptance/);
 assert.match(workflow, /TARGET_PR: '16'/);
 assert.match(workflow, /TARGET_BRANCH: codex\/wos-01-authorized-source-bootstrap-v2/);
-assert.match(workflow, /TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50/g);
 assert.match(workflow, /EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42/g);
 assert.match(workflow, /ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea/g);
 assert.match(workflow, /image: postgres:16/);
