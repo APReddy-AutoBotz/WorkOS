@@ -1,0 +1,621 @@
+name: WOS-01A Final Lifecycle Controller
+
+on:
+  push:
+    branches:
+      - controller/wos01a-fullstack-publication-watch
+    paths:
+      - '.github/workflows/wos01a-final-lifecycle-controller.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  issues: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: wos01a-final-lifecycle-controller
+  cancel-in-progress: false
+
+jobs:
+  transition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 58
+    outputs:
+      merge_sha: ${{ steps.merge.outputs.merge_sha }}
+      product_head: ${{ steps.merge.outputs.product_head }}
+      controller_head: ${{ steps.merge.outputs.controller_head }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      PRODUCT_PR: '16'
+      PRODUCT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      CONTROLLER_PR: '30'
+      CONTROLLER_BRANCH: controller/wos01a-final-integration-acceptance
+      EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
+      VALIDATED_TAG: controller-wos01a-fullstack-validated
+      VALIDATION_CONTEXT: workos/wos01a-post-publication-controller
+      REVIEW_MARKER: WORKOS-WOS01A-FINAL-VALIDATED-FULLSTACK-REVIEW
+      CODEX_BOT: chatgpt-codex-connector[bot]
+      MERGE_CONTEXT: workos/wos01a-final-lifecycle
+
+    steps:
+      - name: Wait for validated exact-head review authority
+        id: authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime as dt
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          api = 'https://api.github.com'
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          owner, name = repo.split('/', 1)
+          product_pr_number = int(os.environ['PRODUCT_PR'])
+          controller_pr_number = int(os.environ['CONTROLLER_PR'])
+          product_branch = os.environ['PRODUCT_BRANCH']
+          controller_branch = os.environ['CONTROLLER_BRANCH']
+          expected_main = os.environ['EXPECTED_MAIN']
+          accepted_base = os.environ['ACCEPTED_WOS00_BASE']
+          tag_name = os.environ['VALIDATED_TAG']
+          validation_context = os.environ['VALIDATION_CONTEXT']
+          review_marker = os.environ['REVIEW_MARKER']
+          codex_bot = os.environ['CODEX_BOT']
+          output_file = os.environ['GITHUB_OUTPUT']
+
+          class GateError(RuntimeError):
+              pass
+
+          def request(method, path, payload=None):
+              url = path if path.startswith('http') else api + path
+              headers = {
+                  'Authorization': f'Bearer {token}',
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'WorkOS-WOS01A-Final-Lifecycle',
+              }
+              data = None
+              if payload is not None:
+                  data = json.dumps(payload).encode('utf-8')
+                  headers['Content-Type'] = 'application/json'
+              req = urllib.request.Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      body = response.read().decode('utf-8')
+                      return json.loads(body) if body else None
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode('utf-8', errors='replace')
+                  if error.code == 404:
+                      return None
+                  raise GateError(f'GitHub API {method} {url} failed: HTTP {error.code}: {body[:1000]}') from error
+
+          def get(path):
+              return request('GET', path)
+
+          def post(path, payload):
+              return request('POST', path, payload)
+
+          def paginate(path):
+              separator = '&' if '?' in path else '?'
+              values = []
+              for page in range(1, 21):
+                  chunk = get(f'{path}{separator}per_page=100&page={page}')
+                  if not isinstance(chunk, list):
+                      raise GateError(f'Expected list while paging {path}')
+                  values.extend(chunk)
+                  if len(chunk) < 100:
+                      return values
+              raise GateError(f'Pagination bound exceeded for {path}')
+
+          def parse_time(value):
+              if not value:
+                  return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+              return dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
+
+          def latest_status(sha, context):
+              statuses = get(f'/repos/{repo}/commits/{sha}/statuses?per_page=100') or []
+              matches = [item for item in statuses if item.get('context') == context]
+              return sorted(matches, key=lambda item: item.get('created_at') or '', reverse=True)[0] if matches else None
+
+          def graphql(query, variables):
+              result = post('/graphql', {'query': query, 'variables': variables})
+              if result.get('errors'):
+                  raise GateError(f'GraphQL failed: {result["errors"]}')
+              return result.get('data', {})
+
+          authority = None
+          for attempt in range(104):
+              main = get(f'/repos/{repo}/branches/main')
+              if not main or main.get('commit', {}).get('sha') != expected_main:
+                  raise GateError('main lease moved before final transition')
+
+              tag = get(f'/repos/{repo}/git/ref/tags/{tag_name}')
+              if not tag:
+                  if attempt < 103:
+                      time.sleep(30)
+                      continue
+                  raise GateError('validated product tag is absent')
+              product_head = tag.get('object', {}).get('sha')
+
+              product_pr = get(f'/repos/{repo}/pulls/{product_pr_number}')
+              controller_pr = get(f'/repos/{repo}/pulls/{controller_pr_number}')
+              if not product_pr or not controller_pr:
+                  raise GateError('product or controller PR is unavailable')
+              if product_pr.get('state') != 'open' or product_pr.get('merged'):
+                  raise GateError('PR #16 is not open/unmerged')
+              if product_pr.get('draft') is not True:
+                  raise GateError('PR #16 left Draft before the guarded transition')
+              if product_pr.get('head', {}).get('ref') != product_branch:
+                  raise GateError('PR #16 branch changed')
+              if product_pr.get('head', {}).get('sha') != product_head:
+                  raise GateError('validated tag does not equal current PR #16 head')
+              if product_pr.get('base', {}).get('ref') != 'main':
+                  raise GateError('PR #16 base branch changed')
+
+              controller_head = controller_pr.get('head', {}).get('sha')
+              if controller_pr.get('state') != 'open' or controller_pr.get('draft') is not True:
+                  raise GateError('PR #30 is not open/Draft')
+              if controller_pr.get('head', {}).get('ref') != controller_branch:
+                  raise GateError('PR #30 branch changed')
+
+              product_status = latest_status(product_head, validation_context)
+              controller_status = latest_status(controller_head, validation_context)
+              if not product_status or product_status.get('state') != 'success':
+                  if attempt < 103:
+                      time.sleep(30)
+                      continue
+                  raise GateError('product validation status is not successful')
+              if not controller_status or controller_status.get('state') != 'success':
+                  if attempt < 103:
+                      time.sleep(30)
+                      continue
+                  raise GateError('controller validation status is not successful')
+
+              workflow_content = get(
+                  f'/repos/{repo}/contents/.github/workflows/wos01a-final-integration-acceptance.yml?ref={controller_head}'
+              )
+              if not workflow_content:
+                  raise GateError('PR #30 workflow authority is unavailable')
+              import base64
+              workflow_text = base64.b64decode(workflow_content['content']).decode('utf-8')
+              if product_head not in workflow_text:
+                  raise GateError('PR #30 workflow does not target current product head')
+
+              comparison = get(f'/repos/{repo}/compare/{expected_main}...{product_head}')
+              if comparison.get('merge_base_commit', {}).get('sha') != accepted_base:
+                  raise GateError('accepted WOS-00 merge base changed')
+
+              comments = paginate(f'/repos/{repo}/issues/{product_pr_number}/comments')
+              review_requests = [
+                  item for item in comments
+                  if review_marker in (item.get('body') or '')
+                  and item.get('user', {}).get('login') == owner
+              ]
+              if not review_requests:
+                  if attempt < 103:
+                      time.sleep(30)
+                      continue
+                  raise GateError('owner final review request is absent')
+              review_request = sorted(review_requests, key=lambda item: item.get('created_at') or '')[-1]
+              requested_at = parse_time(review_request.get('created_at'))
+
+              reactions = paginate(f'/repos/{repo}/issues/comments/{review_request["id"]}/reactions')
+              bot_reactions = [
+                  item for item in reactions
+                  if item.get('user', {}).get('login') in {codex_bot, 'chatgpt-codex-connector'}
+              ]
+              if any(item.get('content') in {'-1', 'confused'} for item in bot_reactions):
+                  raise GateError('Codex returned a negative final-review marker')
+              clean_reaction = next((item for item in bot_reactions if item.get('content') == '+1'), None)
+              if not clean_reaction:
+                  if attempt < 103:
+                      time.sleep(30)
+                      continue
+                  raise GateError('Codex final clean-review reaction is absent')
+
+              inline_comments = paginate(f'/repos/{repo}/pulls/{product_pr_number}/comments')
+              new_inline = [
+                  item for item in inline_comments
+                  if parse_time(item.get('created_at')) >= requested_at
+                  and item.get('user', {}).get('login') in {codex_bot, 'chatgpt-codex-connector'}
+              ]
+              if new_inline:
+                  raise GateError(f'Codex created {len(new_inline)} new inline finding(s) after the final request')
+
+              reviews = paginate(f'/repos/{repo}/pulls/{product_pr_number}/reviews')
+              later_reviews = [
+                  review for review in reviews
+                  if parse_time(review.get('submitted_at')) >= requested_at
+                  and review.get('user', {}).get('login') in {codex_bot, 'chatgpt-codex-connector'}
+              ]
+              if any(review.get('state') == 'CHANGES_REQUESTED' for review in later_reviews):
+                  raise GateError('Codex final review requested changes')
+
+              later_bot_comments = [
+                  item for item in comments
+                  if parse_time(item.get('created_at')) >= requested_at
+                  and item.get('id') != review_request.get('id')
+                  and item.get('user', {}).get('login') in {codex_bot, 'chatgpt-codex-connector'}
+              ]
+              for comment in later_bot_comments:
+                  body = (comment.get('body') or '').lower()
+                  finding_tokens = ['[p0]', '[p1]', '[p2]', 'p0 badge', 'p1 badge', 'p2 badge']
+                  if any(token in body for token in finding_tokens) and 'no actionable p0/p1/p2' not in body:
+                      raise GateError(f'Codex final review comment {comment.get("id")} contains an actionable finding marker')
+
+              authority = {
+                  'product_head': product_head,
+                  'controller_head': controller_head,
+                  'review_request_id': review_request.get('id'),
+                  'review_request_url': review_request.get('html_url'),
+                  'product_validation_url': product_status.get('target_url'),
+                  'controller_validation_url': controller_status.get('target_url'),
+                  'main': expected_main,
+                  'accepted_base': accepted_base,
+              }
+              break
+
+          if not authority:
+              raise GateError('final review authority did not converge')
+          with open(output_file, 'a', encoding='utf-8') as output:
+              for key, value in authority.items():
+                  output.write(f'{key}={value}\n')
+          print(json.dumps(authority, indent=2, sort_keys=True))
+          PY
+
+      - name: Resolve reviewed historical threads at exact clean head
+        shell: bash
+        env:
+          PRODUCT_HEAD: ${{ steps.authority.outputs.product_head }}
+          REVIEW_REQUEST_URL: ${{ steps.authority.outputs.review_request_url }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          owner, name = repo.split('/', 1)
+          pr = int(os.environ['PRODUCT_PR'])
+          head = os.environ['PRODUCT_HEAD']
+          review_url = os.environ['REVIEW_REQUEST_URL']
+
+          def call(query, variables):
+              payload = json.dumps({'query': query, 'variables': variables}).encode('utf-8')
+              request = urllib.request.Request(
+                  'https://api.github.com/graphql', data=payload, method='POST',
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Accept': 'application/vnd.github+json',
+                      'Content-Type': 'application/json',
+                      'X-GitHub-Api-Version': '2022-11-28',
+                      'User-Agent': 'WorkOS-WOS01A-Thread-Closure',
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.loads(response.read().decode('utf-8'))
+              if result.get('errors'):
+                  raise RuntimeError(result['errors'])
+              return result['data']
+
+          query = '''query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated comments(first:1){nodes{databaseId}}}}}}}'''
+          data = call(query, {'owner': owner, 'name': name, 'number': pr})
+          threads = data['repository']['pullRequest']['reviewThreads']['nodes']
+          unresolved = [thread for thread in threads if not thread['isResolved']]
+          for thread in unresolved:
+              database_id = (thread.get('comments', {}).get('nodes') or [{}])[0].get('databaseId')
+              if database_id:
+                  body = (
+                      f'Addressed and revalidated at exact head `{head}`. '
+                      f'The fresh independent full-stack review is clean: {review_url}. '
+                      'Resolving this historical thread under the guarded WOS-01A lifecycle authority.'
+                  )
+                  url = f'https://api.github.com/repos/{repo}/pulls/{pr}/comments/{database_id}/replies'
+                  request = urllib.request.Request(
+                      url,
+                      data=json.dumps({'body': body}).encode('utf-8'),
+                      method='POST',
+                      headers={
+                          'Authorization': f'Bearer {token}',
+                          'Accept': 'application/vnd.github+json',
+                          'Content-Type': 'application/json',
+                          'X-GitHub-Api-Version': '2022-11-28',
+                          'User-Agent': 'WorkOS-WOS01A-Thread-Closure',
+                      },
+                  )
+                  try:
+                      with urllib.request.urlopen(request, timeout=30):
+                          pass
+                  except urllib.error.HTTPError as error:
+                      if error.code not in {404, 422}:
+                          raise
+              mutation = '''mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}'''
+              resolved = call(mutation, {'id': thread['id']})['resolveReviewThread']['thread']
+              if not resolved['isResolved']:
+                  raise RuntimeError(f'thread {thread["id"]} did not resolve')
+
+          final = call(query, {'owner': owner, 'name': name, 'number': pr})
+          remaining = [
+              thread for thread in final['repository']['pullRequest']['reviewThreads']['nodes']
+              if not thread['isResolved']
+          ]
+          if remaining:
+              raise RuntimeError(f'{len(remaining)} unresolved thread(s) remain')
+          print(json.dumps({'resolved': len(unresolved), 'remaining': 0}, indent=2))
+          PY
+
+      - name: Re-lease exact authority, mark Ready and merge
+        id: merge
+        shell: bash
+        env:
+          PRODUCT_HEAD: ${{ steps.authority.outputs.product_head }}
+          CONTROLLER_HEAD: ${{ steps.authority.outputs.controller_head }}
+          REVIEW_REQUEST_URL: ${{ steps.authority.outputs.review_request_url }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime as dt
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          api = 'https://api.github.com'
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          owner, name = repo.split('/', 1)
+          pr_number = int(os.environ['PRODUCT_PR'])
+          product_head = os.environ['PRODUCT_HEAD']
+          controller_head = os.environ['CONTROLLER_HEAD']
+          expected_main = os.environ['EXPECTED_MAIN']
+          validation_context = os.environ['VALIDATION_CONTEXT']
+          merge_context = os.environ['MERGE_CONTEXT']
+          run_url = f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'
+          output_file = os.environ['GITHUB_OUTPUT']
+
+          class GateError(RuntimeError):
+              pass
+
+          def request(method, path, payload=None):
+              url = path if path.startswith('http') else api + path
+              headers = {
+                  'Authorization': f'Bearer {token}',
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'WorkOS-WOS01A-Exact-Merge',
+              }
+              data = None
+              if payload is not None:
+                  data = json.dumps(payload).encode('utf-8')
+                  headers['Content-Type'] = 'application/json'
+              req = urllib.request.Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      body = response.read().decode('utf-8')
+                      return json.loads(body) if body else None
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode('utf-8', errors='replace')
+                  raise GateError(f'{method} {url} failed: HTTP {error.code}: {body[:1000]}') from error
+
+          def get(path): return request('GET', path)
+          def post(path, payload): return request('POST', path, payload)
+          def put(path, payload): return request('PUT', path, payload)
+
+          main = get(f'/repos/{repo}/branches/main')['commit']['sha']
+          if main != expected_main:
+              raise GateError(f'main moved before transition: {main}')
+          pr = get(f'/repos/{repo}/pulls/{pr_number}')
+          if pr.get('head', {}).get('sha') != product_head or pr.get('draft') is not True:
+              raise GateError('PR #16 exact Draft/head lease moved')
+          if get(f'/repos/{repo}/pulls/{os.environ["CONTROLLER_PR"]}').get('head', {}).get('sha') != controller_head:
+              raise GateError('PR #30 exact controller lease moved')
+
+          tag = get(f'/repos/{repo}/git/ref/tags/{os.environ["VALIDATED_TAG"]}')
+          if tag.get('object', {}).get('sha') != product_head:
+              raise GateError('validated tag moved')
+
+          for sha in [product_head, controller_head]:
+              combined = get(f'/repos/{repo}/commits/{sha}/status')
+              status = next((item for item in combined.get('statuses', []) if item.get('context') == validation_context), None)
+              if not status or status.get('state') != 'success':
+                  raise GateError(f'validation status missing on {sha}')
+
+          gql = post('/graphql', {
+              'query': 'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id isDraft headRefOid reviewThreads(first:100){nodes{isResolved}}}}}',
+              'variables': {'owner': owner, 'name': name, 'number': pr_number},
+          })
+          if gql.get('errors'):
+              raise GateError(str(gql['errors']))
+          pull = gql['data']['repository']['pullRequest']
+          if pull['headRefOid'] != product_head or any(not node['isResolved'] for node in pull['reviewThreads']['nodes']):
+              raise GateError('GraphQL exact head/thread lease failed')
+          if pull['isDraft']:
+              ready = post('/graphql', {
+                  'query': 'mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft headRefOid}}}',
+                  'variables': {'id': pull['id']},
+              })
+              if ready.get('errors'):
+                  raise GateError(str(ready['errors']))
+              transitioned = ready['data']['markPullRequestReadyForReview']['pullRequest']
+              if transitioned['isDraft'] or transitioned['headRefOid'] != product_head:
+                  raise GateError('Ready transition verification failed')
+
+          clean_pr = None
+          for _ in range(10):
+              clean_pr = get(f'/repos/{repo}/pulls/{pr_number}')
+              if clean_pr.get('mergeable') is not None:
+                  break
+              time.sleep(3)
+          if clean_pr.get('head', {}).get('sha') != product_head:
+              raise GateError('PR head moved after Ready')
+          if clean_pr.get('mergeable') is not True or clean_pr.get('mergeable_state') != 'clean':
+              raise GateError(f'GitHub merge state is not clean: {clean_pr.get("mergeable_state")}')
+
+          post(f'/repos/{repo}/statuses/{product_head}', {
+              'state': 'pending', 'context': merge_context,
+              'description': 'Exact clean WOS-01A authority leased; merge in progress',
+              'target_url': run_url,
+          })
+          merged = put(f'/repos/{repo}/pulls/{pr_number}/merge', {
+              'sha': product_head,
+              'merge_method': 'merge',
+              'commit_title': 'WOS-01A: accept authorized WorkOS source baseline (#16)',
+              'commit_message': (
+                  'Merge the exact full-stack WOS-01A baseline after bounded implementation, '
+                  'post-publication engineering validation, fresh independent clean review, '
+                  'resolved review threads and an exact expected-head lifecycle lease.'
+              ),
+          })
+          if merged.get('merged') is not True or not merged.get('sha'):
+              raise GateError(f'GitHub merge failed: {merged.get("message")}')
+          merge_sha = merged['sha']
+          live_main = get(f'/repos/{repo}/branches/main')['commit']['sha']
+          if live_main != merge_sha:
+              raise GateError(f'main does not equal merge SHA: {live_main} != {merge_sha}')
+          with open(output_file, 'a', encoding='utf-8') as output:
+              output.write(f'merge_sha={merge_sha}\n')
+              output.write(f'product_head={product_head}\n')
+              output.write(f'controller_head={controller_head}\n')
+          print(json.dumps({'merge_sha': merge_sha, 'product_head': product_head, 'controller_head': controller_head}, indent=2))
+          PY
+
+  postmerge:
+    needs: transition
+    if: needs.transition.outputs.merge_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      MERGE_SHA: ${{ needs.transition.outputs.merge_sha }}
+      PRODUCT_HEAD: ${{ needs.transition.outputs.product_head }}
+      CONTROLLER_HEAD: ${{ needs.transition.outputs.controller_head }}
+      MERGE_CONTEXT: workos/wos01a-final-lifecycle
+      ACCEPTED_TAG: workos-01a-accepted
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MERGE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Verify exact merge ancestry and locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$MERGE_SHA"
+          parents="$(git rev-list --parents -n 1 HEAD)"
+          test "$(wc -w <<<"$parents" | tr -d '[:space:]')" = 3
+          grep -F "$PRODUCT_HEAD" <<<"$parents" >/dev/null
+          test -z "$(git status --porcelain)"
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high
+
+      - name: Complete post-merge source and build acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in server/*.mjs tests/*.mjs scripts/*.mjs; do [[ -f "$file" ]] && node --check "$file"; done
+          node --check tests/browser-ux-smoke.cjs
+          npm run test:wos00-baseline
+          npm run test:bootstrap-scan
+          node tests/authorization-convergence-smoke.mjs
+          node tests/runtime-closure-smoke.mjs
+          node tests/browser-ux-smoke.cjs
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run clean --if-present
+          npm run build
+          ! grep -R '%VITE_' dist
+          npm run clean --if-present
+          VITE_PRODUCT_NAME='WorkOS' VITE_PRODUCT_LOGO_URL='/favicon.svg' npm run build
+          ! grep -R '%VITE_' dist
+          test -z "$(git status --porcelain)"
+
+      - name: Complete post-merge database and identity acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          createdb -h 127.0.0.1 -U postgres wos_fresh
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_fresh' PGSSLMODE=disable node server/migrate.mjs
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_fresh' PGSSLMODE=disable node server/migrate.mjs
+          createdb -h 127.0.0.1 -U postgres wos_legacy
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_legacy' PGSSLMODE=disable node tests/migration-legacy-identity-smoke.mjs
+          createdb -h 127.0.0.1 -U postgres wos_identity
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_identity' PGSSLMODE=disable node tests/production-identity-smoke.mjs
+
+      - name: Record accepted baseline and retire superseded WOS-01A controllers
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          live_main="$(gh api "repos/$REPOSITORY/branches/main" --jq .commit.sha)"
+          test "$live_main" = "$MERGE_SHA"
+          existing="$(gh api "repos/$REPOSITORY/git/ref/tags/$ACCEPTED_TAG" --jq .object.sha 2>/dev/null || true)"
+          if [[ -z "$existing" ]]; then
+            gh api --method POST "repos/$REPOSITORY/git/refs" -f ref="refs/tags/$ACCEPTED_TAG" -f sha="$MERGE_SHA" >/dev/null
+          else
+            test "$existing" = "$MERGE_SHA"
+          fi
+          gh api --method POST "repos/$REPOSITORY/statuses/$MERGE_SHA" \
+            -f state=success -f context="$MERGE_CONTEXT" \
+            -f description='WOS-01A merge and exact-main post-merge acceptance passed' \
+            -f target_url="https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+
+          for pr in 30 26; do
+            state="$(gh api "repos/$REPOSITORY/pulls/$pr" --jq .state)"
+            merged="$(gh api "repos/$REPOSITORY/pulls/$pr" --jq .merged)"
+            if [[ "$state" = open && "$merged" = false ]]; then
+              gh api --method PATCH "repos/$REPOSITORY/pulls/$pr" -f state=closed >/dev/null
+            fi
+          done
+
+          gh api --method POST "repos/$REPOSITORY/issues/3/comments" \
+            -f body="## WOS-01A accepted on main\n\n- Product head: \`$PRODUCT_HEAD\`\n- Merge commit / current main: \`$MERGE_SHA\`\n- Controller head: \`$CONTROLLER_HEAD\`\n- Accepted tag: \`$ACCEPTED_TAG\`\n- Post-merge run: https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID\n\nExact merge ancestry, locked install, runtime audit, baseline/security scans, authorization/runtime/browser regressions, typecheck, lint, retained tests, default/configured builds, fresh/replay migrations, legacy upgrade and production identity acceptance all passed. Superseded WOS-01A controller PRs #30 and #26 were closed unmerged."
+          gh api --method PATCH "repos/$REPOSITORY/issues/3" -f state=closed -f state_reason=completed >/dev/null
+
+      - name: Publish failure status when merge occurred but validation failed
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$REPOSITORY/statuses/$MERGE_SHA" \
+            -f state=failure -f context="$MERGE_CONTEXT" \
+            -f description='WOS-01A merged but exact-main post-merge acceptance failed' \
+            -f target_url="https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null || true
