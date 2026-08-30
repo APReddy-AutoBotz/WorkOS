@@ -1,0 +1,116 @@
+name: WOS-01A Final Controller Authority Materialization v3
+
+on:
+  push:
+    branches:
+      - controller/wos01a-final-authority-materialize-v3
+    paths:
+      - '.github/workflows/wos01a-final-authority-materialize-v3.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: wos01a-final-authority-materialize-v3
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    name: Materialize exact verified controller files
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CONTROLLER_BRANCH: controller/wos01a-final-integration-acceptance
+      CONTROLLER_PR: '30'
+      PRODUCT_PR: '16'
+      PRODUCT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      EXPECTED_PARENT: 24145c27ccb943ea78cfedee346a361ae819f10e
+      EXPECTED_PARENT_TREE: f44863f7eb3a6df2c7d864ba08965efa335f91c8
+      EXPECTED_PRODUCT_HEAD: bc28bcdc141774563078dab4537eb00a40155889
+      EXPECTED_FINAL_TREE: 26b1511b0bda4eebee639e6f2701b9d300463b47
+      EXPECTED_B64_BYTES: '2224'
+      EXPECTED_B64_SHA256: d8ced5b3c6262ca774529554ce6be264ec2dcc1bbdc0d823e3347ee980800e90
+      EXPECTED_XZ_BYTES: '1668'
+      EXPECTED_XZ_SHA256: 1278a42a5db48c3fc0070a09a006e85d69963e74a44e737894fe58afdc89fb20
+      EXPECTED_PATCH_BYTES: '4984'
+      EXPECTED_PATCH_SHA256: 5751372f29c05f47d4c5c17849fba4d383ae001c8c0594800633ee15956eb966
+      EXPECTED_VERIFIER_BYTES: '8559'
+      EXPECTED_VERIFIER_SHA256: 131471413c10f6c861be100c170495beb2d7805a5dc65e54ffbd06f9306b3624
+      EXPECTED_WORKFLOW_BYTES: '27736'
+      EXPECTED_WORKFLOW_SHA256: 74d2c6ab599a32639d177587944fb10ff5a6b71b2fdf1d7d2cecde82bab0e53e
+      EXPECTED_VERIFIER_BLOB: 158f86010caefd6bea467a00a3668b4e018e62b2
+      EXPECTED_WORKFLOW_BLOB: 931b7a0e0fb94a3ba11b677aef9aa5af32734917
+      MATERIALIZER_PATH: .github/workflows/wos01a-final-authority-materialize-v3.yml
+
+    steps:
+      - name: Checkout exact materializer trigger
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Recover exact payload and verify leases
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'controller/wos01a-final-authority-materialize-v3'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_MAIN"
+          test "$(git diff --name-only HEAD^ HEAD)" = "$MATERIALIZER_PATH"
+          printf '%s' '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' > /tmp/recovery.b64
+          test "$(wc -c < /tmp/recovery.b64 | tr -d '[:space:]')" = "$EXPECTED_B64_BYTES"
+          printf '%s  %s\n' "$EXPECTED_B64_SHA256" /tmp/recovery.b64 | sha256sum -c -
+          base64 -d /tmp/recovery.b64 > /tmp/recovery.patch.xz
+          test "$(wc -c < /tmp/recovery.patch.xz | tr -d '[:space:]')" = "$EXPECTED_XZ_BYTES"
+          printf '%s  %s\n' "$EXPECTED_XZ_SHA256" /tmp/recovery.patch.xz | sha256sum -c -
+          xz -dc /tmp/recovery.patch.xz > /tmp/recovery.patch
+          test "$(wc -c < /tmp/recovery.patch | tr -d '[:space:]')" = "$EXPECTED_PATCH_BYTES"
+          printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" /tmp/recovery.patch | sha256sum -c -
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$CONTROLLER_PR" --jq .head.sha)" = "$EXPECTED_PARENT"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$CONTROLLER_PR" --jq .draft)" = 'true'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PRODUCT_PR" --jq .head.sha)" = "$EXPECTED_PRODUCT_HEAD"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PRODUCT_PR" --jq .draft)" = 'true'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$EXPECTED_MAIN"
+
+      - name: Apply, verify and stage materialized files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$EXPECTED_PARENT"
+          git checkout --detach "$EXPECTED_PARENT"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PARENT_TREE"
+          test -z "$(git status --porcelain)"
+          git apply --check /tmp/recovery.patch
+          git apply --index /tmp/recovery.patch
+          actual_paths="$(git diff --cached --name-only | LC_ALL=C sort)"
+          expected_paths="$(printf '%s\n' '.github/scripts/verify-wos01a-controller-v2.mjs' '.github/workflows/wos01a-final-integration-acceptance.yml' | LC_ALL=C sort)"
+          test "$actual_paths" = "$expected_paths"
+          test "$(git write-tree)" = "$EXPECTED_FINAL_TREE"
+          test "$(git hash-object .github/scripts/verify-wos01a-controller-v2.mjs)" = "$EXPECTED_VERIFIER_BLOB"
+          test "$(git hash-object .github/workflows/wos01a-final-integration-acceptance.yml)" = "$EXPECTED_WORKFLOW_BLOB"
+          test "$(wc -c < .github/scripts/verify-wos01a-controller-v2.mjs | tr -d '[:space:]')" = "$EXPECTED_VERIFIER_BYTES"
+          test "$(wc -c < .github/workflows/wos01a-final-integration-acceptance.yml | tr -d '[:space:]')" = "$EXPECTED_WORKFLOW_BYTES"
+          printf '%s  %s\n' "$EXPECTED_VERIFIER_SHA256" .github/scripts/verify-wos01a-controller-v2.mjs | sha256sum -c -
+          printf '%s  %s\n' "$EXPECTED_WORKFLOW_SHA256" .github/workflows/wos01a-final-integration-acceptance.yml | sha256sum -c -
+          node --check .github/scripts/verify-wos01a-controller-v2.mjs
+          TARGET_HEAD="$EXPECTED_PRODUCT_HEAD" node .github/scripts/verify-wos01a-controller-v2.mjs
+          env -u TARGET_HEAD node .github/scripts/verify-wos01a-controller-v2.mjs
+          node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
+          bash -n .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-final-integration-acceptance.yml'); puts 'YAML parse passed.'"
+          git diff --cached --check
+          mkdir -p materialized
+          cp .github/scripts/verify-wos01a-controller-v2.mjs materialized/verify-wos01a-controller-v2.mjs
+          cp .github/workflows/wos01a-final-integration-acceptance.yml materialized/wos01a-final-integration-acceptance.yml
+          printf '%s\n' "parent=$EXPECTED_PARENT" "parent_tree=$EXPECTED_PARENT_TREE" "product_head=$EXPECTED_PRODUCT_HEAD" "expected_tree=$EXPECTED_FINAL_TREE" "verifier_blob=$EXPECTED_VERIFIER_BLOB" "workflow_blob=$EXPECTED_WORKFLOW_BLOB" > materialized/AUTHORITY.txt
+          sha256sum materialized/verify-wos01a-controller-v2.mjs materialized/wos01a-final-integration-acceptance.yml > materialized/SHA256SUMS
+
+      - name: Upload exact materialized controller files
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-final-authority-materialized
+          path: materialized/
+          if-no-files-found: error
+          retention-days: 1
