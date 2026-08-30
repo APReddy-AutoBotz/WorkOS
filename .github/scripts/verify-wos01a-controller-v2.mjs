@@ -12,9 +12,14 @@ const producer = job('browser_bundle', 'browser_acceptance');
 const browser = job('browser_acceptance', 'final_authority');
 const finalAuthority = job('final_authority', 'aggregate');
 const aggregate = workflow.match(/\n  aggregate:\n[\s\S]*$/)?.[0];
-const targetHeadDeclarations = [...workflow.matchAll(/^\s+TARGET_HEAD:\s*([0-9a-f]{40})\s*$/gm)];
-const targetHeads = targetHeadDeclarations.map(([, head]) => head);
 const targetHeadJobs = [acceptance, producer, browser, finalAuthority];
+const targetHeadDeclarations = [...workflow.matchAll(/^\s+TARGET_HEAD:(.*)$/gm)];
+assert.equal(targetHeadDeclarations.length, targetHeadJobs.length, 'workflow must contain exactly four plain TARGET_HEAD keys');
+const targetHeads = targetHeadDeclarations.map(([, rawValue]) => {
+  const declaration = rawValue.trim();
+  assert.match(declaration, /^[0-9a-f]{40}$/, 'every TARGET_HEAD value must be an unquoted lowercase 40-hex SHA');
+  return declaration;
+});
 
 assert.ok(acceptance, 'integrated acceptance job must exist');
 assert.ok(producer, 'pristine producer job must exist');
@@ -22,12 +27,12 @@ assert.ok(browser, 'isolated browser job must exist');
 assert.ok(finalAuthority, 'final live-authority job must exist');
 assert.ok(aggregate, 'aggregate job must exist');
 
-assert.equal(targetHeads.length, targetHeadJobs.length, 'every target-bound job must declare a plain 40-hex TARGET_HEAD');
 assert.ok(targetHeadJobs.every(section => /^\s+TARGET_HEAD:\s*[0-9a-f]{40}\s*$/m.test(section)), 'the complete target-bound job family must declare TARGET_HEAD');
 assert.equal(new Set(targetHeads).size, 1, 'all TARGET_HEAD declarations must be identical');
 const [targetHead] = targetHeads;
 assert.match(targetHead, /^[0-9a-f]{40}$/, 'TARGET_HEAD must be a valid lowercase 40-hex SHA');
 if (process.env.TARGET_HEAD !== undefined) {
+  assert.match(process.env.TARGET_HEAD, /^[0-9a-f]{40}$/, 'inherited TARGET_HEAD must be a lowercase 40-hex SHA');
   assert.equal(targetHead, process.env.TARGET_HEAD, 'workflow TARGET_HEAD must equal inherited runtime authority');
 }
 
