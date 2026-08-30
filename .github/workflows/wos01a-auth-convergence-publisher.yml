@@ -1,0 +1,85 @@
+name: WOS-01A Authorization Convergence Validation
+
+on:
+  push:
+    branches:
+      - controller/wos01a-auth-convergence-publisher-20260830
+    paths:
+      - '.github/workflows/wos01a-auth-convergence-publisher.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wos01a-auth-convergence-validation
+  cancel-in-progress: false
+
+jobs:
+  validate-and-publish:
+    name: Validate exact correction and publish isolated head
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: workos_authorization
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d workos_authorization"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      BASE_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+      BASE_TREE: ec12c8fded36755184d88cac039b816df8b3ea13
+      PRODUCT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      VALIDATION_BRANCH: controller/wos01a-auth-convergence-validation-20260830
+      RECOVERY_PREFIX: .github/controller/wos01a-auth-convergence.patch.br.b64.part
+      VALIDATOR_PREFIX: .github/controller/wos01a-auth-convergence-validator.sh.part
+      VALIDATOR_SHA256: 70830c917c2a81126f457f12d4ad19f94bef4f3e48958276be062f27cde839a3
+      PATCH_COMPRESSED_SHA256: ca72d69e6d7ca0d9b29afefd05549f0fe8b37bdd13c6f1947d22e567f152b6e9
+      PATCH_COMPRESSED_BYTES: '16077'
+      PATCH_SHA256: ee1ae14d6185ab4bdc5004f78fec36089b7f6a6aa70201c47101cd64c25350c3
+      PATCH_BYTES: '81599'
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workos_authorization
+      PGSSLMODE: disable
+      PGPASSWORD: postgres
+      API_SESSION_SECRET: workos-test-only
+      APP_MODE: test
+      NODE_ENV: test
+      AUTO_SEED_DEMO: 'false'
+      LOGIN_RATE_LIMIT: '100'
+
+    steps:
+      - name: Checkout isolated publisher authority
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Reconstruct and execute exact validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat "${VALIDATOR_PREFIX}"* > /tmp/wos01a-validator.sh
+          echo "$VALIDATOR_SHA256  /tmp/wos01a-validator.sh" | sha256sum -c -
+          bash -n /tmp/wos01a-validator.sh
+          bash /tmp/wos01a-validator.sh
+
+      - name: Upload retained validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-authorization-convergence-${{ github.sha }}
+          path: /tmp/wos01a-evidence
+          if-no-files-found: error
+          retention-days: 14
