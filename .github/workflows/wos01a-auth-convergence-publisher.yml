@@ -41,10 +41,10 @@ jobs:
       RECOVERY_PREFIX: .github/controller/wos01a-auth-convergence.patch.br.b64.part
       VALIDATOR_PREFIX: .github/controller/wos01a-auth-convergence-validator.sh.part
       VALIDATOR_SHA256: 70830c917c2a81126f457f12d4ad19f94bef4f3e48958276be062f27cde839a3
-      PATCH_COMPRESSED_SHA256: ca72d69e6d7ca0d9b29afefd05549f0fe8b37bdd13c6f1947d22e567f152b6e9
-      PATCH_COMPRESSED_BYTES: '16077'
-      PATCH_SHA256: ee1ae14d6185ab4bdc5004f78fec36089b7f6a6aa70201c47101cd64c25350c3
-      PATCH_BYTES: '81599'
+      PATCH_COMPRESSED_SHA256: b6d82e3f3a9a9b0d3dcc775f3cf16ede61975d089f072541b3aa64c7396434c8
+      PATCH_COMPRESSED_BYTES: '16289'
+      PATCH_SHA256: 63fc08a68747c4175c0214b712e8fcc60c2233124c4699ebae758020b730ec5c
+      PATCH_BYTES: '82571'
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workos_authorization
       PGSSLMODE: disable
       PGPASSWORD: postgres
