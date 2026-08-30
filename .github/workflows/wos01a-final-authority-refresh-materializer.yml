@@ -1,0 +1,128 @@
+name: WOS-01A final authority refresh materializer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: wos01a-final-authority-refresh-materializer
+  cancel-in-progress: false
+
+env:
+  SOURCE_CONTROLLER_PR: '30'
+  SOURCE_CONTROLLER_BRANCH: controller/wos01a-final-integration-acceptance
+  SOURCE_CONTROLLER_HEAD: 9040705fc306bd889cc71a95f4ab56c969e793bb
+  SOURCE_WORKFLOW_BLOB: 122d54896d21c1488e767dc083f50f7aad7fa8b0
+  TARGET_PR: '16'
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  OLD_TARGET_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+  NEW_TARGET_HEAD: 5fb6cd405ea06bc20be2a6c85a3617f653923051
+  EXPECTED_TARGET_TREE: 230431e2cf9a60b11e8ca123073cf4a8d699a56e
+  EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  SCRATCH_BRANCH: controller/wos01a-final-integration-acceptance-materialized-5fb6
+
+jobs:
+  materialize:
+    if: >-
+      github.repository == 'APReddy-AutoBotz/WorkOS' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'controller/wos01a-final-authority-refresh-materializer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Freeze exact live authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          c="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_CONTROLLER_PR}")"
+          test "$(jq -r '.state' <<<"$c")" = open
+          test "$(jq -r '.draft' <<<"$c")" = true
+          test "$(jq -r '.head.ref' <<<"$c")" = "$SOURCE_CONTROLLER_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$c")" = "$SOURCE_CONTROLLER_HEAD"
+          t="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          test "$(jq -r '.state' <<<"$t")" = open
+          test "$(jq -r '.draft' <<<"$t")" = true
+          test "$(jq -r '.head.ref' <<<"$t")" = "$TARGET_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$t")" = "$NEW_TARGET_HEAD"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${NEW_TARGET_HEAD}" --jq '.tree.sha')" = "$EXPECTED_TARGET_TREE"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "$EXPECTED_MAIN"
+
+      - name: Checkout exact accepted controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_CONTROLLER_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Change only the exact target-head lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/wos01a-final-integration-acceptance.yml
+          test "$(git rev-parse HEAD)" = "$SOURCE_CONTROLLER_HEAD"
+          test "$(git hash-object "$workflow")" = "$SOURCE_WORKFLOW_BLOB"
+          test "$(grep -oF "$OLD_TARGET_HEAD" "$workflow" | wc -l | tr -d ' ')" = 4
+          test "$(grep -oF "$NEW_TARGET_HEAD" "$workflow" | wc -l | tr -d ' ')" = 0
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path('.github/workflows/wos01a-final-integration-acceptance.yml')
+          s = p.read_text()
+          old = os.environ['OLD_TARGET_HEAD']
+          new = os.environ['NEW_TARGET_HEAD']
+          if s.count(old) != 4 or new in s:
+              raise SystemExit('unexpected target-head lease count')
+          s = s.replace(old, new)
+          if s.count(new) != 4 or old in s:
+              raise SystemExit('target-head lease replacement incomplete')
+          p.write_text(s)
+          PY
+          test "$(git diff --name-only | wc -l | tr -d ' ')" = 1
+          test "$(git diff --name-only)" = "$workflow"
+          test "$(grep -oF "$NEW_TARGET_HEAD" "$workflow" | wc -l | tr -d ' ')" = 4
+          test "$(grep -oF "$OLD_TARGET_HEAD" "$workflow" | wc -l | tr -d ' ')" = 0
+          git diff --check
+          git diff -- "$workflow"
+
+      - name: Commit exact authority refresh
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'WorkOS Implementation Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/wos01a-final-integration-acceptance.yml
+          git commit -m 'CTRL: bind final acceptance to corrected PR16 head'
+          test "$(git rev-parse HEAD^)" = "$SOURCE_CONTROLLER_HEAD"
+          test "$(git diff --name-only "$SOURCE_CONTROLLER_HEAD"..HEAD)" = '.github/workflows/wos01a-final-integration-acceptance.yml'
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Re-freeze leases and publish materialized controller commit to scratch ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          c="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_CONTROLLER_PR}")"
+          test "$(jq -r '.head.sha' <<<"$c")" = "$SOURCE_CONTROLLER_HEAD"
+          test "$(jq -r '.draft' <<<"$c")" = true
+          t="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          test "$(jq -r '.head.sha' <<<"$t")" = "$NEW_TARGET_HEAD"
+          test "$(jq -r '.draft' <<<"$t")" = true
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "$EXPECTED_MAIN"
+          materialized="$(git rev-parse HEAD)"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --porcelain origin "HEAD:refs/heads/${SCRATCH_BRANCH}"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          for _ in $(seq 1 10); do
+            remote="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${SCRATCH_BRANCH}" --jq '.object.sha' 2>/dev/null || true)"
+            [[ "$remote" = "$materialized" ]] && break
+            sleep 1
+          done
+          test "$remote" = "$materialized"
+          printf 'Materialized controller commit: %s\nScratch ref: %s\n' "$materialized" "$SCRATCH_BRANCH" >> "$GITHUB_STEP_SUMMARY"
