@@ -128,4 +128,6 @@ Employee data scope is self-only, TeamLead timesheet decisions require a direct 
 | Fresh/replay/upgrade migration and production identity fixture | NOT RUN | Require a disposable PostgreSQL service. |
 | Browser role journeys | NOT RUN | Require the isolated browser acceptance harness. |
 
+The exact-head production identity acceptance contract recognizes a session only when `workos_session` is the cookie name at a real `Set-Cookie` entry boundary. This preserves the successful linked-callback session requirement when the state-cookie deletion precedes the session entry in a combined header, while malformed or substring-only occurrences still fail and state deletion/replay assertions remain unchanged.
+
 The bounded A–I adversarial pass found no remaining source-level P0/P1/P2 in this authorization/lifecycle family: normal paths retain server authority; identity and permission failures fail closed; state consumption and allocation capacity are serialized; callback replay and invalid lifecycle changes are rejected; hierarchy and request sizes are bounded; production fallback protections are unchanged; and focused negative tests are retained. No real identity provider, credential, customer data, deployment or hosted system is used.

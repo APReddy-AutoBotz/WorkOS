@@ -12,6 +12,26 @@ const {Pool} = pg;
 const databaseUrl = String(process.env.DATABASE_URL || '').trim();
 assert.ok(databaseUrl, 'DATABASE_URL is required for production identity acceptance');
 
+const hasSetCookie = (headers, expectedName) => {
+  const values = typeof headers.getSetCookie === 'function'
+    ? headers.getSetCookie()
+    : [headers.get('set-cookie') || ''];
+  return values.some((value) => value
+    .split(/,\s*(?=[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/)
+    .some((entry) => entry.slice(0, entry.indexOf('=')).trim().toLowerCase() === expectedName.toLowerCase()));
+};
+
+assert.equal(
+  hasSetCookie({get: () => 'workos_entra_state=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/, workos_session=signed; HttpOnly'}, 'workos_session'),
+  true,
+  'combined Set-Cookie headers must recognize a session entry after an expiring state cookie',
+);
+assert.equal(
+  hasSetCookie({get: () => 'notice=prefix-workos_session=signed; Path=/'}, 'workos_session'),
+  false,
+  'cookie-value substrings must not satisfy the session-cookie contract',
+);
+
 const host = '127.0.0.1';
 const positivePort = Number(process.env.WOS_PRODUCTION_IDENTITY_PORT || 4010);
 const discoveryPort = Number(process.env.WOS_IDENTITY_DISCOVERY_PORT || 4011);
@@ -261,10 +281,9 @@ const assertCallbackRejected = async ({name, claimOverrides, expectedLocation = 
     2000,
   );
   const location = callback.headers.get('location');
-  const setCookie = callback.headers.get('set-cookie') || '';
   assert.equal(callback.status, 302, `${name} must terminate through a redirect`);
   assert.equal(location, expectedLocation, `${name} must fail closed at the governed error route`);
-  assert.doesNotMatch(setCookie, /(?:^|;)\s*workos_session=/i, `${name} must not create a WorkOS session`);
+  assert.equal(hasSetCookie(callback.headers, 'workos_session'), false, `${name} must not create a WorkOS session`);
   callbackRejections.push({
     name,
     status: callback.status,
@@ -470,7 +489,7 @@ try {
     `${rootOrigin}/auth/entra/complete`,
     `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
   );
-  assert.match(callback.headers.get('set-cookie') || '', /(?:^|;)\s*workos_session=/i, 'valid linked callback must create a WorkOS session');
+  assert.equal(hasSetCookie(callback.headers, 'workos_session'), true, 'valid linked callback must create a WorkOS session');
   const replay = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
   assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');
   await pool.query("delete from users where username = 'synthetic-user'");
