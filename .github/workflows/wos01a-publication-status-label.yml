@@ -1,0 +1,69 @@
+name: WOS-01A Publication State Signal
+
+on:
+  push:
+    branches:
+      - controller/wos01a-fullstack-publication-watch
+    paths:
+      - '.github/workflows/wos01a-publication-status-label.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: wos01a-publication-state-signal
+  cancel-in-progress: false
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      PR_NUMBER: '16'
+      EXPECTED_OLD_HEAD: bc28bcdc141774563078dab4537eb00a40155889
+      ACTIVE_TASK_COMMENT: '5468504369'
+
+    steps:
+      - name: Wait and signal terminal publication state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ensure_label() {
+            local name="$1" description="$2"
+            gh api --method POST "repos/$REPOSITORY/labels" \
+              -f name="$name" -f color='BFDADC' -f description="$description" >/dev/null 2>&1 || true
+          }
+          apply_label() {
+            local name="$1"
+            gh api --method POST "repos/$REPOSITORY/issues/$PR_NUMBER/labels" -f "labels[]=$name" >/dev/null
+          }
+
+          ensure_label 'workos-controller-published' 'Exact bounded WOS-01A package was published.'
+          ensure_label 'workos-controller-nonterminal' 'WOS-01A task completed without materializable publication.'
+          ensure_label 'workos-controller-wait-expired' 'WOS-01A bounded watcher expired before terminal publication.'
+
+          task_created="$(gh api "repos/$REPOSITORY/issues/comments/$ACTIVE_TASK_COMMENT" --jq .created_at)"
+          for attempt in {1..100}; do
+            pr="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+            head="$(jq -r .head.sha <<<"$pr")"
+            if [[ "$head" != "$EXPECTED_OLD_HEAD" ]]; then
+              apply_label 'workos-controller-published'
+              exit 0
+            fi
+
+            nonterminal="$(gh api "repos/$REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" --paginate --slurp \
+              --jq --arg created "$task_created" '[.[][] | select(.created_at > $created and (.user.login == "chatgpt-codex-connector[bot]" or .user.login == "chatgpt-codex-connector")) | select((.body | contains("### Summary")) and ((.body | contains("RECOVERY_B64_BEGIN")) | not))] | length')"
+            if [[ "$nonterminal" -gt 0 ]]; then
+              apply_label 'workos-controller-nonterminal'
+              exit 1
+            fi
+            [[ "$attempt" -lt 100 ]] && sleep 30
+          done
+
+          apply_label 'workos-controller-wait-expired'
+          exit 1
