@@ -51,6 +51,7 @@ jobs:
       API_SESSION_SECRET: workos-test-only
       APP_MODE: test
       NODE_ENV: test
+      ALLOW_TEST_FALLBACK: 'true'
       AUTO_SEED_DEMO: 'false'
       LOGIN_RATE_LIMIT: '100'
 
