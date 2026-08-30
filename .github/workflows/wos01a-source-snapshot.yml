@@ -1,0 +1,44 @@
+name: WOS-01A Exact Source Snapshot
+
+on:
+  push:
+    branches:
+      - controller/wos01a-source-snapshot-20260830
+    paths:
+      - '.github/workflows/wos01a-source-snapshot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact product authority
+        uses: actions/checkout@v4
+        with:
+          ref: 60a6a8da861f505c17f043c7439bdd40df992b50
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify and package exact tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "60a6a8da861f505c17f043c7439bdd40df992b50"
+          test -z "$(git status --porcelain)"
+          printf '%s\n' "$(git rev-parse HEAD)" > WOS01A_SOURCE_HEAD
+          printf '%s\n' "$(git rev-parse HEAD^{tree})" > WOS01A_SOURCE_TREE
+          git archive --format=tar.gz --output=/tmp/workos-wos01a-source.tar.gz HEAD
+          sha256sum /tmp/workos-wos01a-source.tar.gz > /tmp/workos-wos01a-source.tar.gz.sha256
+
+      - name: Upload exact source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: workos-wos01a-source-60a6a8da
+          path: |
+            /tmp/workos-wos01a-source.tar.gz
+            /tmp/workos-wos01a-source.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
