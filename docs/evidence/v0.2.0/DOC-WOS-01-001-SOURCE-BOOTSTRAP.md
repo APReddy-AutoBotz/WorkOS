@@ -112,3 +112,20 @@ Interactive Entra login resolves only a pre-provisioned Entra provider subject o
 
 The retained production identity fixture provisions an active user whose email matches a valid signed Entra token but whose provider subject is not linked. The callback must return `entra_unlinked_user`, emit no WorkOS session cookie, leave the user Entra object identifier empty, create no `identity_provider_links` row, and leave user/employee counts unchanged after fixture cleanup. The separate linked-subject case remains the only successful callback path.
 
+## WOS-01A authorization convergence
+
+This correction is parented to exact published head `60a6a8da861f505c17f043c7439bdd40df992b50` and addresses WOS-NFR-SEC-001, WOS-NFR-SEC-002 and the approval self-decision rule. Entra authorization state is now bound to an initiating-browser HttpOnly cookie and a hashed, expiring PostgreSQL transaction. Atomic deletion makes every callback state single-use before provider token exchange. The append-only migration is safe to roll forward; rollback requires reverting the application and migration before deployment, or retaining the otherwise inert table.
+
+Employee data scope is self-only, TeamLead timesheet decisions require a direct report, generic approval and rejection deny requester/subject self-decisions for every role, and configured role permission rows remain authoritative even when all rows are disabled. Timesheet saves accept only draft/submitted input, lock an existing weekly record, limit payloads to 100 entries, require active date-effective project allocations, and enforce active-role row scope. Blocking allocation checks use a transaction-scoped employee advisory lock in both interactive and import paths.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Focused authorization convergence contract | PASS | Dependency-free retained checks cover ten corrected authorization, lifecycle, replay and concurrency controls. |
+| Server and production identity fixture syntax | PASS | `node --check` completed for both modules. |
+| WOS-00 verifier and bootstrap scanner | PASS | Exact 126 requirements, 81 NFRs and ADR-001..008 remain intact; governed-source scan passes. |
+| Locked install and typecheck | FAIL | Registry transport left an incomplete dependency tree; typecheck consequently reported missing React/Vite packages. |
+| Full retained suite and production build | NOT RUN | The incomplete locked dependency tree did not provide `tsx` or Vite; focused dependency-free checks ran separately. |
+| Fresh/replay/upgrade migration and production identity fixture | NOT RUN | Require a disposable PostgreSQL service. |
+| Browser role journeys | NOT RUN | Require the isolated browser acceptance harness. |
+
+The bounded A–I adversarial pass found no remaining source-level P0/P1/P2 in this authorization/lifecycle family: normal paths retain server authority; identity and permission failures fail closed; state consumption and allocation capacity are serialized; callback replay and invalid lifecycle changes are rejected; hierarchy and request sizes are bounded; production fallback protections are unchanged; and focused negative tests are retained. No real identity provider, credential, customer data, deployment or hosted system is used.

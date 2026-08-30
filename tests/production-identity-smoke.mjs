@@ -243,19 +243,21 @@ const beginAuthorization = async () => {
   assert.equal(authorizationLocation.origin, entraAuthority);
   callbackNonce = authorizationLocation.searchParams.get('nonce') || '';
   const state = authorizationLocation.searchParams.get('state') || '';
+  const stateCookie = (response.headers.get('set-cookie') || '').split(';', 1)[0];
   assert.ok(callbackNonce && state, 'authentication initiation must issue nonce and state');
-  return {nonce: callbackNonce, state};
+  assert.match(stateCookie, /^workos_entra_state=/, 'authentication initiation must bind state to an HttpOnly cookie');
+  return {nonce: callbackNonce, state, stateCookie};
 };
 
 const callbackRejections = [];
 const assertCallbackRejected = async ({name, claimOverrides, expectedLocation = '/login?error=entra_callback_failed'}) => {
-  const {nonce, state} = await beginAuthorization();
+  const {nonce, state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = typeof claimOverrides === 'function'
     ? claimOverrides({nonce})
     : {...claimOverrides};
   const callback = await fetchWithTimeout(
     `${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`,
-    {redirect: 'manual'},
+    {redirect: 'manual', headers: {cookie: stateCookie}},
     2000,
   );
   const location = callback.headers.get('location');
@@ -458,9 +460,10 @@ try {
 
   const syntheticUser = await pool.query("insert into users (username, email, entra_object_id, status) values ('synthetic-user', 'synthetic.user@example.test', 'synthetic-provider-subject', 'Active') returning id");
   await pool.query('insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1', [syntheticUser.rows[0].id]);
-  const {state} = await beginAuthorization();
+  const {state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = {};
-  const callback = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`, {redirect: 'manual'}, 2000);
+  const callbackUrl = `${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`;
+  const callback = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
   assert.equal(callback.status, 302);
   assert.equal(
     callback.headers.get('location'),
@@ -468,6 +471,8 @@ try {
     `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
   );
   assert.match(callback.headers.get('set-cookie') || '', /(?:^|;)\s*workos_session=/i, 'valid linked callback must create a WorkOS session');
+  const replay = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
+  assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');
   await pool.query("delete from users where username = 'synthetic-user'");
 
   await closeDiscovery();

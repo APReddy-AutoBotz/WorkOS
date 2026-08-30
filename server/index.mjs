@@ -174,11 +174,11 @@ const getDefaultPermissionsForRole = (roleName) => defaultRolePermissions[roleNa
 const getEffectivePermissionsForUser = async (client, userId, activeRole) => {
   try {
     const roleResult = await client.query(
-      'select permission_key from role_permissions where role_name = $1 and enabled = true',
+      'select permission_key, enabled from role_permissions where role_name = $1',
       [activeRole],
     );
     const rolePermissions = roleResult.rows.length > 0
-      ? roleResult.rows.map(row => row.permission_key)
+      ? roleResult.rows.filter(row => row.enabled).map(row => row.permission_key)
       : getDefaultPermissionsForRole(activeRole);
     const grantResult = await client.query(
       'select permission_key from user_permission_grants where user_id = $1',
@@ -341,7 +341,11 @@ const collectDuplicateImportRows = (rows, getKeys) => {
 };
 
 const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e') => {
-  if (req.user.activeRole === 'Employee' || req.user.activeRole === 'TeamLead') {
+  if (req.user.activeRole === 'Employee') {
+    params.push(req.user.employeeRecordId, req.user.employeeId);
+    return `(${employeeAlias}.id = $${params.length - 1} or ${employeeAlias}.employee_id = $${params.length})`;
+  }
+  if (req.user.activeRole === 'TeamLead') {
     params.push(req.user.employeeRecordId, req.user.employeeId);
     return `(
       ${employeeAlias}.id = $${params.length - 1}
@@ -680,6 +684,22 @@ const verifyEntraState = (state) => {
   const payload = verifyToken(state);
   if (!payload || payload.kind !== 'entra_auth_state') return null;
   return payload;
+};
+
+const entraStateCookieName = 'workos_entra_state';
+const hashEntraState = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const entraStateCookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax',
+  path: '/api/auth/entra/callback',
+  maxAge: 10 * 60 * 1000,
+};
+const entraStateCookieClearOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax',
+  path: '/api/auth/entra/callback',
 };
 
 const getMicrosoftOpenIdConfiguration = async () => {
@@ -1052,11 +1072,20 @@ app.get('/api/auth/entra/start', requireDatabase, async (req, res) => {
     }
     const config = await getMicrosoftOpenIdConfiguration();
     const nonce = crypto.randomUUID();
+    const browserBinding = crypto.randomBytes(32).toString('base64url');
+    const transactionId = crypto.randomUUID();
     const state = signEntraState({
+      transactionId,
       nonce,
       requestedRole: req.query.role ? String(req.query.role) : null,
       returnTo: req.query.returnTo ? String(req.query.returnTo) : '/',
     });
+    await pool.query('delete from entra_auth_transactions where expires_at <= now()');
+    await pool.query(`
+      insert into entra_auth_transactions (id, state_hash, browser_binding_hash, expires_at)
+      values ($1, $2, $3, now() + interval '10 minutes')
+    `, [transactionId, hashEntraState(state), hashEntraState(browserBinding)]);
+    res.cookie(entraStateCookieName, browserBinding, entraStateCookieOptions);
     const url = new URL(config.authorization_endpoint);
     url.searchParams.set('client_id', getEntraClientId());
     url.searchParams.set('response_type', 'code');
@@ -1075,14 +1104,28 @@ app.get('/api/auth/entra/start', requireDatabase, async (req, res) => {
 app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req, res) => {
   const client = await pool.connect();
   try {
-    if (req.query.error) {
-      res.redirect(`/login?error=${encodeURIComponent(String(req.query.error))}`);
-      return;
-    }
     const code = req.query.code ? String(req.query.code) : '';
     const state = verifyEntraState(req.query.state ? String(req.query.state) : '');
-    if (!code || !state) {
+    const browserBinding = readCookie(req, entraStateCookieName);
+    res.clearCookie(entraStateCookieName, entraStateCookieClearOptions);
+    if ((!code && !req.query.error) || !state || !browserBinding || !state.transactionId) {
       res.redirect('/login?error=entra_invalid_state');
+      return;
+    }
+    await client.query('begin');
+    const consumed = (await client.query(`
+      delete from entra_auth_transactions
+      where id = $1 and state_hash = $2 and browser_binding_hash = $3 and expires_at > now()
+      returning id
+    `, [state.transactionId, hashEntraState(String(req.query.state)), hashEntraState(browserBinding)])).rows[0];
+    if (!consumed) {
+      await client.query('rollback');
+      res.redirect('/login?error=entra_invalid_state');
+      return;
+    }
+    await client.query('commit');
+    if (req.query.error) {
+      res.redirect(`/login?error=${encodeURIComponent(String(req.query.error))}`);
       return;
     }
     const { config, tokenPayload } = await exchangeEntraCode(code);
@@ -2263,6 +2306,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
 
     const blockOverAllocation = await getSetting('blockOverAllocation', false);
     if (blockOverAllocation && parsed.data.status === 'Active') {
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [parsed.data.employee_id]);
       const loadResult = await client.query(`
         select coalesce(sum(percentage), 0) as total
         from project_allocations
@@ -2354,6 +2398,7 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
         return;
       }
     }
+
     if (req.user.activeRole === 'CountryDirector') {
       const scoped = (await client.query(`
         select 1
@@ -2473,9 +2518,9 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
   const schema = z.object({
     employee_id: z.string().min(1),
     week_ending: strictIsoDateSchema,
-    status: z.enum(['Draft', 'Submitted', 'Approved', 'Rejected']).default('Draft'),
+    status: z.enum(['Draft', 'Submitted']).default('Draft'),
     rejection_reason: z.string().optional().nullable(),
-    entries: z.array(entrySchema).min(1),
+    entries: z.array(entrySchema).min(1).max(100),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -2491,10 +2536,6 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     res.status(422).json({
       error: `Entry work date ${outOfWeekEntry.work_date} must fall within the seven-day period ending ${parsed.data.week_ending}`,
     });
-    return;
-  }
-  if (parsed.data.status === 'Approved' && !req.user.permissions?.includes('timesheets.approve')) {
-    res.status(403).json({ error: 'Employees cannot directly approve timesheets' });
     return;
   }
   const invalidProjectEntry = parsed.data.entries.find(entry => entry.work_type === 'Project Work' && !entry.project_id);
@@ -2517,13 +2558,13 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       res.status(422).json({ error: 'Timesheet must reference an active employee' });
       return;
     }
-    if (
-      req.user.activeRole === 'Employee' &&
-      employee.id !== req.user.employeeRecordId &&
-      employee.employee_id !== req.user.employeeId
-    ) {
+    const writeScopeParams = [employee.id];
+    const inWriteScope = isGlobalRole(req) || (await client.query(`
+      select 1 from employees e where e.id = $1 and ${buildEmployeeScopeWhere(req, writeScopeParams, 'e')} limit 1
+    `, writeScopeParams)).rows[0];
+    if (!inWriteScope) {
       await client.query('rollback');
-      res.status(403).json({ error: 'Employees can submit only their own timesheets' });
+      res.status(403).json({ error: 'Timesheet is outside active-role data scope' });
       return;
     }
 
@@ -2537,11 +2578,31 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
         res.status(422).json({ error: 'Timesheet project entries must reference active, proposed, or on-hold projects' });
         return;
       }
+      const unassignedEntry = (await client.query(`
+        select input.project_id, input.work_date
+        from jsonb_to_recordset($1::jsonb) as input(project_id text, work_date date)
+        where input.project_id is not null and not exists (
+          select 1 from project_allocations pa
+          where pa.employee_id = $2 and pa.project_id = input.project_id
+            and pa.status = 'Active' and input.work_date between pa.start_date and pa.end_date
+        )
+        limit 1
+      `, [JSON.stringify(parsed.data.entries), employee.id])).rows[0];
+      if (unassignedEntry) {
+        await client.query('rollback');
+        res.status(422).json({ error: 'Project work requires an active allocation covering the entry date' });
+        return;
+      }
     }
 
     const totalHours = round1(parsed.data.entries.reduce((sum, entry) => sum + entry.hours, 0));
     const billableHours = round1(parsed.data.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + entry.hours, 0));
-    const previous = (await client.query('select * from timesheets where employee_id = $1 and week_ending = $2', [parsed.data.employee_id, parsed.data.week_ending])).rows[0];
+    const previous = (await client.query('select * from timesheets where employee_id = $1 and week_ending = $2 for update', [parsed.data.employee_id, parsed.data.week_ending])).rows[0];
+    if (previous && !['Draft', 'Rejected'].includes(previous.status)) {
+      await client.query('rollback');
+      res.status(422).json({ error: 'Only draft or rejected timesheets can be edited or submitted' });
+      return;
+    }
     const timesheetResult = await client.query(`
       insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at)
       values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end)
@@ -2670,6 +2731,19 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
       if (!managed) {
         await client.query('rollback');
         res.status(403).json({ error: 'Project Managers can approve only timesheets containing their projects' });
+        return;
+      }
+    }
+
+    if (req.user.activeRole === 'TeamLead') {
+      const directReport = (await client.query(`
+        select 1 from employees
+        where id = $1 and (reporting_manager_id = $2 or reporting_manager_id = $3)
+        limit 1
+      `, [previous.employee_id, req.user.employeeRecordId, req.user.employeeId])).rows[0];
+      if (!directReport) {
+        await client.query('rollback');
+        res.status(403).json({ error: 'Team Leads can approve only direct-report timesheets' });
         return;
       }
     }
@@ -3647,6 +3721,15 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     if (!scoped) {
       await client.query('rollback');
       res.status(403).json({ error: 'Approval is outside active-role data scope' });
+      return;
+    }
+    const actorEmployeeIds = new Set([req.user.employeeRecordId, req.user.employeeId].filter(Boolean).map(String));
+    if (
+      parsed.data.status !== 'Cancelled' &&
+      (actorEmployeeIds.has(String(approval.requester_id)) || actorEmployeeIds.has(String(approval.subject_employee_id)))
+    ) {
+      await client.query('rollback');
+      res.status(403).json({ error: 'Users cannot decide their own approval requests' });
       return;
     }
 
@@ -6478,6 +6561,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
       }
 
       if (blockOverAllocation && employee && row.status !== 'Paused' && row.status !== 'Completed') {
+        await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [employee.id]);
         const loadResult = await client.query(`
           select coalesce(sum(percentage), 0) as total
           from project_allocations

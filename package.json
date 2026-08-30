@@ -42,6 +42,7 @@
     "test:prod-readiness": "node tests/prod-readiness.mjs",
     "test:production-identity": "node tests/production-identity-smoke.mjs",
     "test:identity-discovery": "node tests/identity-discovery-smoke.mjs",
+    "test:authorization-convergence": "node tests/authorization-convergence-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",
