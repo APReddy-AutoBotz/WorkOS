@@ -1,0 +1,139 @@
+name: WOS-01A final authority refresh materializer ef841d
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: wos01a-final-authority-refresh-materializer-ef841d
+  cancel-in-progress: false
+
+env:
+  SOURCE_CONTROLLER_PR: '30'
+  SOURCE_CONTROLLER_BRANCH: controller/wos01a-final-integration-acceptance
+  SOURCE_CONTROLLER_HEAD: 5512a346aca3297deaa9cd8841ff3ff67720adfb
+  SOURCE_WORKFLOW_BLOB: e68b16ef56ef8b40ce8042322ca040bd7ab2a840
+  TARGET_PR: '16'
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  OLD_TARGET_HEAD: 5fb6cd405ea06bc20be2a6c85a3617f653923051
+  NEW_TARGET_HEAD: ef841d4b716b0ed021381e61433158426eb380dc
+  EXPECTED_TARGET_TREE: 196594feef3556c24b9ed50f04140dbae7e265e4
+  EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  SCRATCH_BRANCH: controller/wos01a-final-integration-acceptance-materialized-ef841d
+  PAYLOAD_PATH: controller-payload/wos01a-final-integration-acceptance-ef841d.yml
+
+jobs:
+  materialize:
+    if: >-
+      github.repository == 'APReddy-AutoBotz/WorkOS' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'controller/wos01a-final-authority-refresh-materializer-ef841d'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Freeze exact live authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          c="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_CONTROLLER_PR}")"
+          test "$(jq -r '.state' <<<"$c")" = open
+          test "$(jq -r '.draft' <<<"$c")" = true
+          test "$(jq -r '.head.ref' <<<"$c")" = "$SOURCE_CONTROLLER_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$c")" = "$SOURCE_CONTROLLER_HEAD"
+          t="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          test "$(jq -r '.state' <<<"$t")" = open
+          test "$(jq -r '.draft' <<<"$t")" = true
+          test "$(jq -r '.head.ref' <<<"$t")" = "$TARGET_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$t")" = "$NEW_TARGET_HEAD"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${NEW_TARGET_HEAD}" --jq '.tree.sha')" = "$EXPECTED_TARGET_TREE"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "$EXPECTED_MAIN"
+
+      - name: Checkout exact accepted controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_CONTROLLER_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Materialize exact refreshed workflow bytes at safe payload path
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/wos01a-final-integration-acceptance.yml
+          test "$(git rev-parse HEAD)" = "$SOURCE_CONTROLLER_HEAD"
+          test "$(git hash-object "$workflow")" = "$SOURCE_WORKFLOW_BLOB"
+          test "$(grep -oF "$OLD_TARGET_HEAD" "$workflow" | wc -l | tr -d ' ')" = 4
+          test "$(grep -oF "$NEW_TARGET_HEAD" "$workflow" | wc -l | tr -d ' ')" = 0
+          mkdir -p "$(dirname "$PAYLOAD_PATH")"
+          cp "$workflow" "$PAYLOAD_PATH"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path(os.environ['PAYLOAD_PATH'])
+          s = p.read_text()
+          old = os.environ['OLD_TARGET_HEAD']
+          new = os.environ['NEW_TARGET_HEAD']
+          if s.count(old) != 4 or new in s:
+              raise SystemExit('unexpected target-head lease count')
+          s = s.replace(old, new)
+          if s.count(new) != 4 or old in s:
+              raise SystemExit('target-head lease replacement incomplete')
+          p.write_text(s)
+          PY
+          test "$(grep -oF "$NEW_TARGET_HEAD" "$PAYLOAD_PATH" | wc -l | tr -d ' ')" = 4
+          test "$(grep -oF "$OLD_TARGET_HEAD" "$PAYLOAD_PATH" | wc -l | tr -d ' ')" = 0
+          test "$(git hash-object "$workflow")" = "$SOURCE_WORKFLOW_BLOB"
+          test -z "$(git diff --name-only)"
+          desired_blob="$(git hash-object "$PAYLOAD_PATH")"
+          test -n "$desired_blob"
+          printf 'desired-workflow-blob=%s\n' "$desired_blob" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit only the safe payload file
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'WorkOS Implementation Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git add "$PAYLOAD_PATH"
+          git commit -m 'CTRL: materialize ef841d final authority workflow payload'
+          test "$(git rev-parse HEAD^)" = "$SOURCE_CONTROLLER_HEAD"
+          test "$(git diff --name-only "$SOURCE_CONTROLLER_HEAD"..HEAD)" = "$PAYLOAD_PATH"
+          test "$(git rev-parse "HEAD:${PAYLOAD_PATH}")" = "$(git hash-object "$PAYLOAD_PATH")"
+          test "$(git rev-parse "HEAD:.github/workflows/wos01a-final-integration-acceptance.yml")" = "$SOURCE_WORKFLOW_BLOB"
+          git diff "$SOURCE_CONTROLLER_HEAD"..HEAD --check
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Re-freeze leases and publish safe materialized payload to scratch ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          c="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${SOURCE_CONTROLLER_PR}")"
+          test "$(jq -r '.head.sha' <<<"$c")" = "$SOURCE_CONTROLLER_HEAD"
+          test "$(jq -r '.draft' <<<"$c")" = true
+          t="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          test "$(jq -r '.head.sha' <<<"$t")" = "$NEW_TARGET_HEAD"
+          test "$(jq -r '.draft' <<<"$t")" = true
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "$EXPECTED_MAIN"
+          materialized="$(git rev-parse HEAD)"
+          desired_blob="$(git rev-parse "HEAD:${PAYLOAD_PATH}")"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --porcelain origin "HEAD:refs/heads/${SCRATCH_BRANCH}"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          remote=''
+          for _ in $(seq 1 10); do
+            remote="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${SCRATCH_BRANCH}" --jq '.object.sha' 2>/dev/null || true)"
+            [[ "$remote" = "$materialized" ]] && break
+            sleep 1
+          done
+          test "$remote" = "$materialized"
+          remote_blob="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${PAYLOAD_PATH}?ref=${SCRATCH_BRANCH}" --jq '.sha')"
+          test "$remote_blob" = "$desired_blob"
+          printf 'Materialized payload commit: %s\nScratch ref: %s\nDesired workflow blob: %s\n' "$materialized" "$SCRATCH_BRANCH" "$desired_blob" >> "$GITHUB_STEP_SUMMARY"
