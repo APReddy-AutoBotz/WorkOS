@@ -1,0 +1,395 @@
+name: WOS-01A Full-Stack Publication Watch
+
+on:
+  push:
+    branches:
+      - controller/wos01a-fullstack-publication-watch
+    paths:
+      - '.github/workflows/wos01a-fullstack-publication-watch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: wos01a-fullstack-publication-watch
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Wait for Sol completion and publish exact bounded package
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      PRODUCT_PR: '16'
+      PRODUCT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      EXPECTED_OLD_HEAD: bc28bcdc141774563078dab4537eb00a40155889
+      EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      ACTIVE_TASK_COMMENT: '5468504369'
+      RESULT_PATH: ${{ runner.temp }}/wos01a-fullstack-publication.json
+      COMPLETION_PATH: ${{ runner.temp }}/wos01a-completion.md
+      PAYLOAD_PATH: ${{ runner.temp }}/wos01a-recovery.b64
+
+    steps:
+      - name: Checkout exact pre-convergence product authority
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_OLD_HEAD }}
+          path: product
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Wait for exact Sol task completion or same-branch publication
+        id: watch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime as dt
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          API = 'https://api.github.com'
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          pr_number = int(os.environ['PRODUCT_PR'])
+          product_branch = os.environ['PRODUCT_BRANCH']
+          expected_old = os.environ['EXPECTED_OLD_HEAD']
+          expected_main = os.environ['EXPECTED_MAIN']
+          active_comment_id = int(os.environ['ACTIVE_TASK_COMMENT'])
+          result_path = Path(os.environ['RESULT_PATH'])
+          completion_path = Path(os.environ['COMPLETION_PATH'])
+          payload_path = Path(os.environ['PAYLOAD_PATH'])
+          bot_logins = {'chatgpt-codex-connector[bot]', 'chatgpt-codex-connector'}
+
+          class GateError(RuntimeError):
+              pass
+
+          def request(method, path, payload=None):
+              url = path if path.startswith('http') else API + path
+              headers = {
+                  'Authorization': f'Bearer {token}',
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'WorkOS-WOS01A-FullStack-Watch',
+              }
+              data = None
+              if payload is not None:
+                  data = json.dumps(payload).encode('utf-8')
+                  headers['Content-Type'] = 'application/json'
+              req = urllib.request.Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      body = response.read().decode('utf-8')
+                      return json.loads(body) if body else None
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode('utf-8', errors='replace')
+                  raise GateError(f'GitHub API {method} {url} failed: HTTP {error.code}: {body[:1000]}') from error
+
+          def get(path):
+              return request('GET', path)
+
+          def paginate(path):
+              separator = '&' if '?' in path else '?'
+              values = []
+              for page in range(1, 21):
+                  chunk = get(f'{path}{separator}per_page=100&page={page}')
+                  if not isinstance(chunk, list):
+                      raise GateError(f'Expected list while paging {path}')
+                  values.extend(chunk)
+                  if len(chunk) < 100:
+                      return values
+              raise GateError(f'Pagination bound exceeded for {path}')
+
+          def parse_time(value):
+              return dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
+
+          active = get(f'/repos/{repo}/issues/comments/{active_comment_id}')
+          active_created = parse_time(active['created_at'])
+          result = {
+              'schema': 'workos.wos01a.fullstack-publication-watch.v1',
+              'repository': repo,
+              'pr': pr_number,
+              'expected_old_head': expected_old,
+              'expected_main': expected_main,
+              'active_task_comment': active_comment_id,
+              'started_at': dt.datetime.now(dt.timezone.utc).isoformat(),
+              'state': 'waiting',
+          }
+          result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+
+          for attempt in range(100):
+              main = get(f'/repos/{repo}/branches/main')['commit']['sha']
+              if main != expected_main:
+                  raise GateError(f'main lease moved: {main}')
+
+              pr = get(f'/repos/{repo}/pulls/{pr_number}')
+              if pr.get('state') != 'open' or pr.get('merged'):
+                  raise GateError('PR #16 is not open/unmerged')
+              if pr.get('draft') is not True:
+                  raise GateError('PR #16 unexpectedly left Draft')
+              if pr.get('head', {}).get('ref') != product_branch:
+                  raise GateError(f'PR #16 head branch moved: {pr.get("head", {}).get("ref")}')
+              live_head = pr.get('head', {}).get('sha')
+
+              if live_head != expected_old:
+                  result.update({
+                      'state': 'published',
+                      'published_by': 'sol-task-or-existing-controller',
+                      'product_head': live_head,
+                      'completed_at': dt.datetime.now(dt.timezone.utc).isoformat(),
+                  })
+                  result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+                  print(json.dumps(result, indent=2, sort_keys=True))
+                  raise SystemExit(0)
+
+              comments = paginate(f'/repos/{repo}/issues/{pr_number}/comments')
+              candidates = []
+              for comment in comments:
+                  login = comment.get('user', {}).get('login')
+                  created = parse_time(comment.get('created_at'))
+                  body = comment.get('body') or ''
+                  if login in bot_logins and created > active_created:
+                      if ('### Summary' in body or 'RECOVERY_B64_BEGIN' in body or 'expected_tree=' in body):
+                          candidates.append(comment)
+
+              if candidates:
+                  completion = sorted(candidates, key=lambda item: item['created_at'])[-1]
+                  body = completion.get('body') or ''
+                  completion_path.write_text(body, encoding='utf-8')
+                  if 'RECOVERY_B64_BEGIN' in body and 'RECOVERY_B64_END' in body:
+                      between = body.split('RECOVERY_B64_BEGIN', 1)[1].split('RECOVERY_B64_END', 1)[0]
+                      between = between.replace('```text', '').replace('```', '')
+                      payload = ''.join(between.split())
+                      if not payload:
+                          raise GateError('completion contains empty recovery payload')
+                      payload_path.write_text(payload + '\n', encoding='ascii')
+                      result.update({
+                          'state': 'payload',
+                          'completion_comment_id': completion.get('id'),
+                          'completion_url': completion.get('html_url'),
+                          'base64_chars': len(payload),
+                          'completed_at': dt.datetime.now(dt.timezone.utc).isoformat(),
+                      })
+                      result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+                      print(json.dumps(result, indent=2, sort_keys=True))
+                      raise SystemExit(0)
+                  raise GateError(
+                      f'Codex completion {completion.get("id")} is non-terminal: branch unchanged and no literal recovery payload'
+                  )
+
+              result['attempt'] = attempt + 1
+              result['checked_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+              result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+              if attempt < 99:
+                  time.sleep(30)
+
+          raise GateError('bounded wait expired before publication or complete payload')
+          PY
+
+      - name: Decode, verify and apply literal recovery when required
+        id: materialize
+        if: success()
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          state="$(python3 -c 'import json,os; print(json.load(open(os.environ["RESULT_PATH"]))["state"])')"
+          if [[ "$state" = published ]]; then
+            echo 'mode=published' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$state" = payload
+          payload="$(tr -d '[:space:]' < "$PAYLOAD_PATH")"
+          printf '%s' "$payload" > "$RUNNER_TEMP/wos01a-recovery.compact.b64"
+
+          completion="$COMPLETION_PATH"
+          expected_b64_chars="$(grep -Eo 'base64_(chars|characters)=[0-9]+' "$completion" | tail -1 | cut -d= -f2 || true)"
+          expected_b64_sha="$(grep -Eo 'base64_sha256=[0-9a-f]{64}' "$completion" | tail -1 | cut -d= -f2 || true)"
+          expected_xz_bytes="$(grep -Eo 'xz_bytes=[0-9]+' "$completion" | tail -1 | cut -d= -f2 || true)"
+          expected_xz_sha="$(grep -Eo 'xz_sha256=[0-9a-f]{64}' "$completion" | tail -1 | cut -d= -f2 || true)"
+          expected_patch_bytes="$(grep -Eo '(raw_)?patch_bytes=[0-9]+' "$completion" | tail -1 | cut -d= -f2 || true)"
+          expected_patch_sha="$(grep -Eo '(raw_)?patch_sha256=[0-9a-f]{64}' "$completion" | tail -1 | cut -d= -f2 || true)"
+          expected_tree="$(grep -Eo '(expected_|final_)?tree=[0-9a-f]{40}' "$completion" | tail -1 | cut -d= -f2 || true)"
+          local_commit="$(grep -Eo '(local_)?commit=[0-9a-f]{40}' "$completion" | tail -1 | cut -d= -f2 || true)"
+
+          actual_b64_chars="$(wc -c < "$RUNNER_TEMP/wos01a-recovery.compact.b64" | tr -d '[:space:]')"
+          actual_b64_sha="$(sha256sum "$RUNNER_TEMP/wos01a-recovery.compact.b64" | cut -d' ' -f1)"
+          [[ -z "$expected_b64_chars" || "$actual_b64_chars" = "$expected_b64_chars" ]]
+          [[ -z "$expected_b64_sha" || "$actual_b64_sha" = "$expected_b64_sha" ]]
+
+          base64 -d "$RUNNER_TEMP/wos01a-recovery.compact.b64" > "$RUNNER_TEMP/wos01a-recovery.patch.xz"
+          actual_xz_bytes="$(wc -c < "$RUNNER_TEMP/wos01a-recovery.patch.xz" | tr -d '[:space:]')"
+          actual_xz_sha="$(sha256sum "$RUNNER_TEMP/wos01a-recovery.patch.xz" | cut -d' ' -f1)"
+          [[ -z "$expected_xz_bytes" || "$actual_xz_bytes" = "$expected_xz_bytes" ]]
+          [[ -z "$expected_xz_sha" || "$actual_xz_sha" = "$expected_xz_sha" ]]
+
+          xz -dc "$RUNNER_TEMP/wos01a-recovery.patch.xz" > "$RUNNER_TEMP/wos01a-recovery.patch"
+          actual_patch_bytes="$(wc -c < "$RUNNER_TEMP/wos01a-recovery.patch" | tr -d '[:space:]')"
+          actual_patch_sha="$(sha256sum "$RUNNER_TEMP/wos01a-recovery.patch" | cut -d' ' -f1)"
+          [[ -z "$expected_patch_bytes" || "$actual_patch_bytes" = "$expected_patch_bytes" ]]
+          [[ -z "$expected_patch_sha" || "$actual_patch_sha" = "$expected_patch_sha" ]]
+
+          test "$(git rev-parse HEAD)" = "$EXPECTED_OLD_HEAD"
+          test -z "$(git status --porcelain)"
+          git apply --check "$RUNNER_TEMP/wos01a-recovery.patch"
+          git apply --index "$RUNNER_TEMP/wos01a-recovery.patch"
+          git diff --cached --check
+
+          mapfile -t actual_paths < <(git diff --cached --name-only | LC_ALL=C sort)
+          mapfile -t allowed_paths < <(printf '%s\n' \
+            'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md' \
+            'package.json' \
+            'server/index.mjs' \
+            'server/migrations/022_identity_subject_and_seed_cleanup.sql' \
+            'server/product-metadata.mjs' \
+            'server/schema.sql' \
+            'server/seed-demo.mjs' \
+            'src/App.tsx' \
+            'tests/authorization-convergence-smoke.mjs' \
+            'tests/browser-ux-smoke.cjs' \
+            'tests/migration-legacy-identity-smoke.mjs' \
+            'tests/production-identity-smoke.mjs' \
+            'tests/runtime-closure-smoke.mjs' | LC_ALL=C sort)
+          test "${#actual_paths[@]}" -ge 10
+          test "${#actual_paths[@]}" -le 14
+          for path in "${actual_paths[@]}"; do
+            printf '%s\n' "${allowed_paths[@]}" | grep -Fx "$path" >/dev/null
+          done
+
+          materialized_tree="$(git write-tree)"
+          [[ -z "$expected_tree" || "$materialized_tree" = "$expected_tree" ]]
+
+          for file in tests/*.mjs server/*.mjs; do node --check "$file"; done
+          node --check tests/browser-ux-smoke.cjs
+          node tests/authorization-convergence-smoke.mjs
+          node tests/runtime-closure-smoke.mjs
+          if [[ -f tests/migration-legacy-identity-smoke.mjs ]]; then node --check tests/migration-legacy-identity-smoke.mjs; fi
+          npm run test:wos00-baseline
+          npm run test:bootstrap-scan
+
+          git config user.name 'WorkOS Full-Stack Publication Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          commit_message="$(grep -E '^commit_message=' "$completion" | tail -1 | cut -d= -f2- || true)"
+          [[ -n "$commit_message" ]] || commit_message='fix: converge WOS-01A full-stack release blockers'
+          git commit -m "$commit_message"
+          new_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_OLD_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$materialized_tree"
+          [[ -z "$local_commit" || "$new_head" = "$local_commit" || "$materialized_tree" = "$expected_tree" ]]
+
+          echo "mode=materialized" >> "$GITHUB_OUTPUT"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+          echo "new_tree=$materialized_tree" >> "$GITHUB_OUTPUT"
+
+      - name: Publish materialized correction under exact lease
+        if: steps.materialize.outputs.mode == 'materialized'
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          live_main="$(gh api "repos/$REPOSITORY/branches/main" --jq .commit.sha)"
+          live_pr="$(gh api "repos/$REPOSITORY/pulls/$PRODUCT_PR")"
+          test "$live_main" = "$EXPECTED_MAIN"
+          test "$(jq -r .state <<<"$live_pr")" = open
+          test "$(jq -r .draft <<<"$live_pr")" = true
+          test "$(jq -r .head.ref <<<"$live_pr")" = "$PRODUCT_BRANCH"
+          test "$(jq -r .head.sha <<<"$live_pr")" = "$EXPECTED_OLD_HEAD"
+          git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
+
+          expected="$(git rev-parse HEAD)"
+          for attempt in {1..20}; do
+            live="$(gh api "repos/$REPOSITORY/pulls/$PRODUCT_PR" --jq .head.sha)"
+            [[ "$live" = "$expected" ]] && exit 0
+            sleep 3
+          done
+          echo 'Published branch head did not converge within bounded verification window' >&2
+          exit 1
+
+      - name: Verify final live product authority and bounded scope
+        id: final
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/$REPOSITORY/pulls/$PRODUCT_PR")"
+          test "$(jq -r .state <<<"$pr")" = open
+          test "$(jq -r .draft <<<"$pr")" = true
+          test "$(jq -r .head.ref <<<"$pr")" = "$PRODUCT_BRANCH"
+          final_head="$(jq -r .head.sha <<<"$pr")"
+          test "$final_head" != "$EXPECTED_OLD_HEAD"
+
+          commit="$(gh api "repos/$REPOSITORY/commits/$final_head")"
+          test "$(jq -r '.parents | length' <<<"$commit")" = 1
+          test "$(jq -r '.parents[0].sha' <<<"$commit")" = "$EXPECTED_OLD_HEAD"
+          final_tree="$(jq -r '.commit.tree.sha' <<<"$commit")"
+          mapfile -t paths < <(jq -r '.files[].filename' <<<"$commit" | LC_ALL=C sort)
+          test "${#paths[@]}" -ge 10
+          test "${#paths[@]}" -le 14
+          allowed="$(printf '%s\n' \
+            'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md' \
+            'package.json' \
+            'server/index.mjs' \
+            'server/migrations/022_identity_subject_and_seed_cleanup.sql' \
+            'server/product-metadata.mjs' \
+            'server/schema.sql' \
+            'server/seed-demo.mjs' \
+            'src/App.tsx' \
+            'tests/authorization-convergence-smoke.mjs' \
+            'tests/browser-ux-smoke.cjs' \
+            'tests/migration-legacy-identity-smoke.mjs' \
+            'tests/production-identity-smoke.mjs' \
+            'tests/runtime-closure-smoke.mjs' | LC_ALL=C sort)"
+          for path in "${paths[@]}"; do grep -Fx "$path" <<<"$allowed" >/dev/null; done
+
+          jq --arg head "$final_head" --arg tree "$final_tree" \
+            '.state="published" | .product_head=$head | .product_tree=$tree | .verified_at=(now|todateiso8601)' \
+            "$RESULT_PATH" > "$RESULT_PATH.tmp"
+          mv "$RESULT_PATH.tmp" "$RESULT_PATH"
+          echo "product_head=$final_head" >> "$GITHUB_OUTPUT"
+          echo "product_tree=$final_tree" >> "$GITHUB_OUTPUT"
+
+      - name: Record controller-owned publication result
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          head='${{ steps.final.outputs.product_head }}'
+          tree='${{ steps.final.outputs.product_tree }}'
+          gh api --method POST "repos/$REPOSITORY/issues/$PRODUCT_PR/comments" \
+            -f body="## WOS-01A full-stack convergence published\n\nThe exact bounded full-stack correction is now published on the existing Draft branch.\n\n- Parent: \`$EXPECTED_OLD_HEAD\`\n- Product head: \`$head\`\n- Product tree: \`$tree\`\n- Controller run: https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID\n\nThe commit is limited to the approved full-stack convergence family. PR #16 remains Draft. PR #30 must now be refreshed to this exact head and rerun before any final review or lifecycle transition."
+
+      - name: Upload publication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-fullstack-publication-watch
+          path: |
+            ${{ env.RESULT_PATH }}
+            ${{ env.COMPLETION_PATH }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## WOS-01A full-stack publication watch'
+            echo
+            if [[ -f "$RESULT_PATH" ]]; then
+              echo '```json'
+              cat "$RESULT_PATH"
+              echo '```'
+            else
+              echo 'No result JSON was produced.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
