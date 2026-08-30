@@ -1,0 +1,172 @@
+name: WOS-01A PR16 test-contract publication recovery
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: wos01a-pr16-test-contract-publication-recovery
+  cancel-in-progress: false
+
+env:
+  TARGET_PR: '16'
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  TARGET_OLD_HEAD: 5fb6cd405ea06bc20be2a6c85a3617f653923051
+  TARGET_OLD_TREE: 230431e2cf9a60b11e8ca123073cf4a8d699a56e
+  EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  EXPECTED_TREE: 196594feef3556c24b9ed50f04140dbae7e265e4
+  PAYLOAD_COMMENT_ID: '5467300799'
+  EVIDENCE_B64_LENGTH: '11232'
+  EVIDENCE_B64_SHA256: af81c35f29dc18a56a61aca0f21f134be580125245aa3d36ee5a6b0f44078781
+  EVIDENCE_XZ_LENGTH: '8424'
+  EVIDENCE_XZ_SHA256: 1c0be1ab8d1e089e7d383b602083f56acbe34e9785c5078efa097638c1a13c4f
+  EVIDENCE_RAW_LENGTH: '31355'
+  EVIDENCE_RAW_SHA256: 23f4e435a73e18db445cb46888b86ef15574269327685564ef37e1200cff100d
+  EVIDENCE_BLOB_SHA: e699f79d2670bb209654ffb3700441af9eb43b5b
+  SMOKE_RAW_LENGTH: '21432'
+  SMOKE_RAW_SHA256: f1e1fab11892b621471a761044ed492bd9426d745f3309b04aa07d2d39b79976
+  SMOKE_BLOB_SHA: d026bbacdf4de51804e34542f716f732ed559d6f
+
+jobs:
+  publish-exact-test-contract:
+    if: >-
+      github.repository == 'APReddy-AutoBotz/WorkOS' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'controller/wos01a-pr16-test-contract-publication-recovery'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Freeze live authority before materialization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          test "$(jq -r '.state' <<<"$pr_json")" = open
+          test "$(jq -r '.draft' <<<"$pr_json")" = true
+          test "$(jq -r '.merged' <<<"$pr_json")" = false
+          test "$(jq -r '.head.ref' <<<"$pr_json")" = "$TARGET_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$pr_json")" = "$TARGET_OLD_HEAD"
+          test "$(jq -r '.base.ref' <<<"$pr_json")" = main
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          test "$main_sha" = "$EXPECTED_MAIN"
+
+      - name: Checkout exact frozen PR16 parent
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_OLD_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Materialize exact evidence bytes from completed recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_OLD_HEAD"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_OLD_TREE"
+          test -z "$(git status --porcelain=v1)"
+          git config --local core.hooksPath /dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${PAYLOAD_COMMENT_ID}" --jq '.body' > /tmp/recovery-comment.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import os
+          text = Path('/tmp/recovery-comment.txt').read_text(encoding='utf-8')
+          begin = 'EVIDENCE_XZ_B64_BEGIN\n'
+          end = '\nEVIDENCE_XZ_B64_END'
+          if begin not in text or end not in text:
+              raise SystemExit('evidence payload markers missing')
+          payload = text.split(begin, 1)[1].split(end, 1)[0].strip()
+          if '\n' in payload or '\r' in payload:
+              raise SystemExit('evidence Base64 is not one exact line')
+          raw = payload.encode('ascii')
+          if len(raw) != int(os.environ['EVIDENCE_B64_LENGTH']):
+              raise SystemExit('evidence Base64 length mismatch')
+          if hashlib.sha256(raw).hexdigest() != os.environ['EVIDENCE_B64_SHA256']:
+              raise SystemExit('evidence Base64 SHA-256 mismatch')
+          Path('/tmp/evidence.b64').write_bytes(raw)
+          PY
+          base64 --decode /tmp/evidence.b64 > /tmp/evidence.xz
+          test "$(wc -c < /tmp/evidence.xz | tr -d ' ')" = "$EVIDENCE_XZ_LENGTH"
+          test "$(sha256sum /tmp/evidence.xz | awk '{print $1}')" = "$EVIDENCE_XZ_SHA256"
+          xz --decompress --stdout /tmp/evidence.xz > /tmp/evidence.md
+          test "$(wc -c < /tmp/evidence.md | tr -d ' ')" = "$EVIDENCE_RAW_LENGTH"
+          test "$(sha256sum /tmp/evidence.md | awk '{print $1}')" = "$EVIDENCE_RAW_SHA256"
+          test "$(git hash-object /tmp/evidence.md)" = "$EVIDENCE_BLOB_SHA"
+          cp /tmp/evidence.md docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
+
+      - name: Materialize exact smoke-test blob from GitHub object authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/${SMOKE_BLOB_SHA}" --jq '.content' | tr -d '\n' | base64 --decode > /tmp/production-identity-smoke.mjs
+          test "$(wc -c < /tmp/production-identity-smoke.mjs | tr -d ' ')" = "$SMOKE_RAW_LENGTH"
+          test "$(sha256sum /tmp/production-identity-smoke.mjs | awk '{print $1}')" = "$SMOKE_RAW_SHA256"
+          test "$(git hash-object /tmp/production-identity-smoke.mjs)" = "$SMOKE_BLOB_SHA"
+          cp /tmp/production-identity-smoke.mjs tests/production-identity-smoke.mjs
+
+      - name: Prove exact two-file frozen tree and retained dependency-free checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md tests/production-identity-smoke.mjs
+          cat > /tmp/expected-files.txt <<'EOF'
+          docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
+          tests/production-identity-smoke.mjs
+          EOF
+          git diff --cached --name-only | LC_ALL=C sort > /tmp/actual-files.txt
+          diff -u /tmp/expected-files.txt /tmp/actual-files.txt
+          git diff --cached --check
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          node --check tests/production-identity-smoke.mjs
+          node tests/authorization-convergence-smoke.mjs
+          node scripts/verify-baseline.mjs
+          node scripts/scan-bootstrap.mjs
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+
+      - name: Commit exact frozen tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'WorkOS Publication Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'test: recognize session Set-Cookie boundaries'
+          test "$(git rev-parse HEAD^)" = "$TARGET_OLD_HEAD"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Re-freeze lease and publish exact tree to existing Draft PR16
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          test "$(jq -r '.state' <<<"$pr_json")" = open
+          test "$(jq -r '.draft' <<<"$pr_json")" = true
+          test "$(jq -r '.merged' <<<"$pr_json")" = false
+          test "$(jq -r '.head.ref' <<<"$pr_json")" = "$TARGET_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$pr_json")" = "$TARGET_OLD_HEAD"
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          test "$main_sha" = "$EXPECTED_MAIN"
+          publish_sha="$(git rev-parse HEAD)"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --porcelain origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          published_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}" --jq '.head.sha')"
+          test "$published_head" = "$publish_sha"
+          published_tree="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${published_head}" --jq '.tree.sha')"
+          test "$published_tree" = "$EXPECTED_TREE"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}" --jq '.draft')" = true
+          printf 'Published PR16 head: %s\nPublished tree: %s\n' "$published_head" "$published_tree" >> "$GITHUB_STEP_SUMMARY"
