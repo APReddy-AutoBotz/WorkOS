@@ -1,0 +1,333 @@
+name: WOS-01A Post-Publication Controller
+
+on:
+  push:
+    branches:
+      - controller/wos01a-fullstack-publication-watch
+    paths:
+      - '.github/workflows/wos01a-post-publication-controller.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  issues: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: wos01a-post-publication-controller
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      PRODUCT_PR: '16'
+      PRODUCT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      EXPECTED_OLD_HEAD: bc28bcdc141774563078dab4537eb00a40155889
+      EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      CONTROLLER_PR: '30'
+      CONTROLLER_BRANCH: controller/wos01a-final-integration-acceptance
+      PREVIOUS_CONTROLLER_TARGET: bc28bcdc141774563078dab4537eb00a40155889
+      VALIDATED_TAG: controller-wos01a-fullstack-validated
+      RESULT_PATH: ${{ runner.temp }}/wos01a-post-publication-controller.json
+      PGPASSWORD: postgres
+
+    steps:
+      - name: Wait for exact bounded product publication
+        id: authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..100}; do
+            main="$(gh api "repos/$REPOSITORY/branches/main" --jq .commit.sha)"
+            test "$main" = "$EXPECTED_MAIN"
+            pr="$(gh api "repos/$REPOSITORY/pulls/$PRODUCT_PR")"
+            test "$(jq -r .state <<<"$pr")" = open
+            test "$(jq -r .draft <<<"$pr")" = true
+            test "$(jq -r .head.ref <<<"$pr")" = "$PRODUCT_BRANCH"
+            head="$(jq -r .head.sha <<<"$pr")"
+            if [[ "$head" != "$EXPECTED_OLD_HEAD" ]]; then
+              commit="$(gh api "repos/$REPOSITORY/commits/$head")"
+              test "$(jq -r '.parents | length' <<<"$commit")" = 1
+              test "$(jq -r '.parents[0].sha' <<<"$commit")" = "$EXPECTED_OLD_HEAD"
+              tree="$(jq -r '.commit.tree.sha' <<<"$commit")"
+              mapfile -t paths < <(jq -r '.files[].filename' <<<"$commit" | LC_ALL=C sort)
+              test "${#paths[@]}" -ge 10
+              test "${#paths[@]}" -le 14
+              allowed="$(printf '%s\n' \
+                'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md' \
+                'package.json' \
+                'server/index.mjs' \
+                'server/migrations/022_identity_subject_and_seed_cleanup.sql' \
+                'server/product-metadata.mjs' \
+                'server/schema.sql' \
+                'server/seed-demo.mjs' \
+                'src/App.tsx' \
+                'tests/authorization-convergence-smoke.mjs' \
+                'tests/browser-ux-smoke.cjs' \
+                'tests/migration-legacy-identity-smoke.mjs' \
+                'tests/production-identity-smoke.mjs' \
+                'tests/runtime-closure-smoke.mjs' | LC_ALL=C sort)"
+              for path in "${paths[@]}"; do grep -Fx "$path" <<<"$allowed" >/dev/null; done
+              echo "product_head=$head" >> "$GITHUB_OUTPUT"
+              echo "product_tree=$tree" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            [[ "$attempt" -lt 100 ]] && sleep 30
+          done
+          echo 'Product branch did not publish within the bounded wait' >&2
+          exit 1
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Checkout exact published product
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.authority.outputs.product_head }}
+          path: product
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout current controller branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_BRANCH }}
+          path: controller
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Refresh PR #30 target authority under exact lease
+        id: refresh
+        working-directory: controller
+        shell: bash
+        env:
+          PRODUCT_HEAD: ${{ steps.authority.outputs.product_head }}
+        run: |
+          set -euo pipefail
+          main="$(gh api "repos/$REPOSITORY/branches/main" --jq .commit.sha)"
+          test "$main" = "$EXPECTED_MAIN"
+          pr="$(gh api "repos/$REPOSITORY/pulls/$CONTROLLER_PR")"
+          test "$(jq -r .state <<<"$pr")" = open
+          test "$(jq -r .draft <<<"$pr")" = true
+          test "$(jq -r .head.ref <<<"$pr")" = "$CONTROLLER_BRANCH"
+          old_controller_head="$(jq -r .head.sha <<<"$pr")"
+          test "$(git rev-parse HEAD)" = "$old_controller_head"
+          test -z "$(git status --porcelain)"
+
+          workflow='.github/workflows/wos01a-final-integration-acceptance.yml'
+          test -f "$workflow"
+          occurrences="$(grep -o "$PREVIOUS_CONTROLLER_TARGET" "$workflow" | wc -l | tr -d '[:space:]')"
+          test "$occurrences" -ge 1
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path('.github/workflows/wos01a-final-integration-acceptance.yml')
+          text = path.read_text(encoding='utf-8')
+          old = os.environ['PREVIOUS_CONTROLLER_TARGET']
+          new = os.environ['PRODUCT_HEAD']
+          if old not in text:
+              raise SystemExit('old target authority is absent')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+
+          test "$(git diff --name-only)" = "$workflow"
+          git diff --check
+          node --check .github/scripts/verify-wos01a-controller-v2.mjs
+          TARGET_PR_NUMBER="$PRODUCT_PR" TARGET_BRANCH="$PRODUCT_BRANCH" TARGET_HEAD="$PRODUCT_HEAD" \
+            CONTROLLER_PR_NUMBER="$CONTROLLER_PR" CONTROLLER_BRANCH="$CONTROLLER_BRANCH" \
+            EXPECTED_MAIN_HEAD="$EXPECTED_MAIN" \
+            node .github/scripts/verify-wos01a-controller-v2.mjs
+          ruby -e "require 'yaml'; YAML.parse_file('$workflow'); puts 'YAML passed'"
+
+          git config user.name 'WorkOS Post-Publication Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git add "$workflow"
+          git commit -m "ci: retarget final WOS-01A authority to ${PRODUCT_HEAD:0:12}"
+          new_controller_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$old_controller_head"
+
+          latest="$(gh api "repos/$REPOSITORY/pulls/$CONTROLLER_PR" --jq .head.sha)"
+          test "$latest" = "$old_controller_head"
+          git push origin "HEAD:refs/heads/$CONTROLLER_BRANCH"
+          for attempt in {1..20}; do
+            live="$(gh api "repos/$REPOSITORY/pulls/$CONTROLLER_PR" --jq .head.sha)"
+            [[ "$live" = "$new_controller_head" ]] && break
+            sleep 3
+          done
+          test "$(gh api "repos/$REPOSITORY/pulls/$CONTROLLER_PR" --jq .head.sha)" = "$new_controller_head"
+          echo "controller_head=$new_controller_head" >> "$GITHUB_OUTPUT"
+          echo "previous_controller_head=$old_controller_head" >> "$GITHUB_OUTPUT"
+
+      - name: Locked installation and dependency authority
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '${{ steps.authority.outputs.product_head }}'
+          test -z "$(git status --porcelain)"
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high
+
+      - name: Syntax, baseline, security and runtime closure
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in server/*.mjs tests/*.mjs scripts/*.mjs; do
+            [[ -f "$file" ]] && node --check "$file"
+          done
+          node --check tests/browser-ux-smoke.cjs
+          npm run test:wos00-baseline
+          npm run test:bootstrap-scan
+          node tests/authorization-convergence-smoke.mjs
+          node tests/runtime-closure-smoke.mjs
+          node tests/browser-ux-smoke.cjs
+          git diff --check "$EXPECTED_OLD_HEAD" HEAD
+
+      - name: Type, lint and retained test matrix
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run lint
+          npm test
+
+      - name: Default and configured production builds
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run clean --if-present
+          npm run build
+          test -f dist/index.html
+          ! grep -R '%VITE_' dist
+          npm run clean --if-present
+          VITE_PRODUCT_NAME='WorkOS' VITE_PRODUCT_LOGO_URL='/favicon.svg' npm run build
+          test -f dist/index.html
+          ! grep -R '%VITE_' dist
+
+      - name: Fresh and replay PostgreSQL migrations
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          createdb -h 127.0.0.1 -U postgres wos_fresh
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_fresh' PGSSLMODE=disable node server/migrate.mjs
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_fresh' PGSSLMODE=disable node server/migrate.mjs
+          psql -h 127.0.0.1 -U postgres -d wos_fresh -Atc "select count(*) from schema_migrations" | grep -E '^[1-9][0-9]*$'
+
+      - name: Legacy upgrade and production identity acceptance
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          createdb -h 127.0.0.1 -U postgres wos_legacy
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_legacy' PGSSLMODE=disable node tests/migration-legacy-identity-smoke.mjs
+          createdb -h 127.0.0.1 -U postgres wos_identity
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_identity' PGSSLMODE=disable node tests/production-identity-smoke.mjs
+
+      - name: Verify immutable exact authority after checks
+        id: final
+        shell: bash
+        env:
+          PRODUCT_HEAD: ${{ steps.authority.outputs.product_head }}
+          CONTROLLER_HEAD: ${{ steps.refresh.outputs.controller_head }}
+        run: |
+          set -euo pipefail
+          main="$(gh api "repos/$REPOSITORY/branches/main" --jq .commit.sha)"
+          product="$(gh api "repos/$REPOSITORY/pulls/$PRODUCT_PR")"
+          controller="$(gh api "repos/$REPOSITORY/pulls/$CONTROLLER_PR")"
+          test "$main" = "$EXPECTED_MAIN"
+          test "$(jq -r .head.sha <<<"$product")" = "$PRODUCT_HEAD"
+          test "$(jq -r .draft <<<"$product")" = true
+          test "$(jq -r .head.sha <<<"$controller")" = "$CONTROLLER_HEAD"
+          test "$(jq -r .draft <<<"$controller")" = true
+
+          jq -n \
+            --arg repository "$REPOSITORY" \
+            --arg main "$main" \
+            --arg product_head "$PRODUCT_HEAD" \
+            --arg product_tree '${{ steps.authority.outputs.product_tree }}' \
+            --arg controller_head "$CONTROLLER_HEAD" \
+            --arg previous_controller '${{ steps.refresh.outputs.previous_controller_head }}' \
+            --arg run_url "https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{schema:"workos.wos01a.post-publication-controller.v1",status:"passed",repository:$repository,main:$main,product_head:$product_head,product_tree:$product_tree,controller_head:$controller_head,previous_controller_head:$previous_controller,run_url:$run_url}' \
+            > "$RESULT_PATH"
+
+      - name: Publish validation tag and exact-head statuses
+        if: success()
+        shell: bash
+        env:
+          PRODUCT_HEAD: ${{ steps.authority.outputs.product_head }}
+          CONTROLLER_HEAD: ${{ steps.refresh.outputs.controller_head }}
+        run: |
+          set -euo pipefail
+          existing="$(gh api "repos/$REPOSITORY/git/ref/tags/$VALIDATED_TAG" --jq .object.sha 2>/dev/null || true)"
+          if [[ -z "$existing" ]]; then
+            gh api --method POST "repos/$REPOSITORY/git/refs" \
+              -f ref="refs/tags/$VALIDATED_TAG" -f sha="$PRODUCT_HEAD" >/dev/null
+          else
+            test "$existing" = "$PRODUCT_HEAD"
+          fi
+          gh api --method POST "repos/$REPOSITORY/statuses/$PRODUCT_HEAD" \
+            -f state=success \
+            -f context='workos/wos01a-post-publication-controller' \
+            -f description='Full-stack product/controller validation passed' \
+            -f target_url="https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          gh api --method POST "repos/$REPOSITORY/statuses/$CONTROLLER_HEAD" \
+            -f state=success \
+            -f context='workos/wos01a-post-publication-controller' \
+            -f description='Controller retarget and full validation passed' \
+            -f target_url="https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+
+          gh api --method POST "repos/$REPOSITORY/issues/$PRODUCT_PR/comments" \
+            -f body="## WOS-01A post-publication validation passed\n\n- Product head: \`$PRODUCT_HEAD\`\n- Controller head: \`$CONTROLLER_HEAD\`\n- Main lease: \`$EXPECTED_MAIN\`\n- Validation tag: \`$VALIDATED_TAG\`\n- Run: https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID\n\nLocked install, runtime audit, syntax, WOS-00 baseline, bootstrap scan, authorization/runtime/browser regressions, typecheck, lint, full retained tests, default/configured builds, fresh/replay migrations, legacy upgrade and production identity acceptance all passed. Both PRs remain Draft. Fresh exact-head independent review is still required."
+
+      - name: Upload controller evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos01a-post-publication-controller
+          path: ${{ env.RESULT_PATH }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## WOS-01A post-publication controller'
+            echo
+            if [[ -f "$RESULT_PATH" ]]; then
+              echo '```json'
+              cat "$RESULT_PATH"
+              echo '```'
+            else
+              echo 'Validation did not produce a PASS record.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
