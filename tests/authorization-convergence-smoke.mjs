@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 
 const source = readFileSync(new URL('../server/index.mjs', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../server/migrations/021_entra_auth_transactions.sql', import.meta.url), 'utf8');
+const identityFixture = readFileSync(new URL('./production-identity-smoke.mjs', import.meta.url), 'utf8');
 
 const contracts = [
   ['configured deny-all remains empty', /select permission_key, enabled from role_permissions[\s\S]*filter\(row => row\.enabled\)/],
@@ -20,4 +21,6 @@ const contracts = [
 for (const [name, pattern] of contracts) assert.match(source, pattern, name);
 assert.match(migration, /state_hash text not null unique/);
 assert.match(migration, /expires_at timestamptz not null/);
+assert.match(source, /process\.env\.LOGIN_RATE_LIMIT \|\| 8/, 'production login rate limiting must retain its default of eight attempts');
+assert.match(identityFixture, /LOGIN_RATE_LIMIT: '9'/, 'the nine-callback identity fixture must use an explicit bounded allowance');
 console.log(`Authorization convergence smoke passed (${contracts.length} controls).`);

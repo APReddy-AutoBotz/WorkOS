@@ -75,6 +75,7 @@ const testKeys = [
   'IDENTITY_DISCOVERY_TIMEOUT_MS',
   'IDENTITY_DISCOVERY_RECHECK_MS',
   'LOCAL_LOGIN_ENABLED',
+  'LOGIN_RATE_LIMIT',
   'EMAIL_PROVIDER',
   'TEAMS_PROVIDER',
 ];
@@ -102,6 +103,8 @@ const cleanEnvironment = (overrides = {}) => {
     WOS_ENTRA_FIXTURE_ORIGIN: `https://localhost:${discoveryPort}`,
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
     IDENTITY_DISCOVERY_RECHECK_MS: '5000',
+    // This fixture makes exactly nine callback requests in one loopback-IP bucket.
+    LOGIN_RATE_LIMIT: '9',
     EMAIL_PROVIDER: 'mock',
     TEAMS_PROVIDER: 'mock',
     ...overrides,
@@ -491,6 +494,7 @@ try {
   );
   assert.equal(hasSetCookie(callback.headers, 'workos_session'), true, 'valid linked callback must create a WorkOS session');
   const replay = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
+  assert.equal(replay.status, 302, 'consumed callback replay must reach the OAuth state handler');
   assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');
   await pool.query("delete from users where username = 'synthetic-user'");
 
