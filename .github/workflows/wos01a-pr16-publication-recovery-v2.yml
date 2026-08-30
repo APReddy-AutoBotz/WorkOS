@@ -1,0 +1,164 @@
+name: WOS-01A PR16 exact publication recovery v2
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: wos01a-pr16-publication-recovery-v2
+  cancel-in-progress: false
+
+env:
+  TARGET_PR: '16'
+  TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+  TARGET_OLD_HEAD: 60a6a8da861f505c17f043c7439bdd40df992b50
+  TARGET_OLD_TREE: ec12c8fded36755184d88cac039b816df8b3ea13
+  EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+  EXPECTED_TREE: 230431e2cf9a60b11e8ca123073cf4a8d699a56e
+  PAYLOAD_COMMENT_ID: '5466612295'
+  B64_LENGTH: '9376'
+  B64_SHA256: f0e276ec60528de2b2d3f1990eeccccca59c9858b9f44c084a79154981b87f10
+  XZ_LENGTH: '7032'
+  XZ_SHA256: a73cf965ae7702f04306a60231f1271ec81df1f19aa99f0650cf747ed12df6a9
+  PATCH_LENGTH: '23209'
+  PATCH_SHA256: 8d9bcccb3f977e6377d4105461d9a6a29cc0d81029c9aa9614d93b78d38347e8
+
+jobs:
+  publish-frozen-tree:
+    if: >-
+      github.repository == 'APReddy-AutoBotz/WorkOS' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'controller/wos01a-pr16-publication-recovery-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Freeze live authority before materialization
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          state="$(jq -r '.state' <<<"$pr_json")"
+          draft="$(jq -r '.draft' <<<"$pr_json")"
+          merged="$(jq -r '.merged' <<<"$pr_json")"
+          head_ref="$(jq -r '.head.ref' <<<"$pr_json")"
+          head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+          base_ref="$(jq -r '.base.ref' <<<"$pr_json")"
+          test "$state" = open
+          test "$draft" = true
+          test "$merged" = false
+          test "$head_ref" = "$TARGET_BRANCH"
+          test "$head_sha" = "$TARGET_OLD_HEAD"
+          test "$base_ref" = main
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          test "$main_sha" = "$EXPECTED_MAIN"
+
+      - name: Checkout exact frozen PR16 parent
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_OLD_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove exact parent and recover verified patch bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_OLD_HEAD"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_OLD_TREE"
+          test -z "$(git status --porcelain=v1)"
+          git config --local core.hooksPath /dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${PAYLOAD_COMMENT_ID}" --jq '.body' > /tmp/recovery-comment.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import os
+          text = Path('/tmp/recovery-comment.txt').read_text(encoding='utf-8')
+          begin = 'RECOVERY_B64_BEGIN\n'
+          end = '\nRECOVERY_B64_END'
+          if begin not in text or end not in text:
+              raise SystemExit('recovery payload markers missing')
+          payload = text.split(begin, 1)[1].split(end, 1)[0].strip()
+          if '\n' in payload or '\r' in payload:
+              raise SystemExit('recovery Base64 is not one exact line')
+          raw = payload.encode('ascii')
+          if len(raw) != int(os.environ['B64_LENGTH']):
+              raise SystemExit('Base64 length mismatch')
+          if hashlib.sha256(raw).hexdigest() != os.environ['B64_SHA256']:
+              raise SystemExit('Base64 SHA-256 mismatch')
+          Path('/tmp/recovery.b64').write_bytes(raw)
+          PY
+          base64 --decode /tmp/recovery.b64 > /tmp/recovery.patch.xz
+          test "$(wc -c < /tmp/recovery.patch.xz | tr -d ' ')" = "$XZ_LENGTH"
+          test "$(sha256sum /tmp/recovery.patch.xz | awk '{print $1}')" = "$XZ_SHA256"
+          xz --decompress --stdout /tmp/recovery.patch.xz > /tmp/recovery.patch
+          test "$(wc -c < /tmp/recovery.patch | tr -d ' ')" = "$PATCH_LENGTH"
+          test "$(sha256sum /tmp/recovery.patch | awk '{print $1}')" = "$PATCH_SHA256"
+
+      - name: Materialize exact frozen correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'WorkOS Publication Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git am --3way /tmp/recovery.patch
+          test "$(git rev-parse HEAD^)" = "$TARGET_OLD_HEAD"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain=v1)"
+          cat > /tmp/expected-files.txt <<'EOF'
+          docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
+          package.json
+          server/index.mjs
+          server/migrations/021_entra_auth_transactions.sql
+          tests/authorization-convergence-smoke.mjs
+          tests/production-identity-smoke.mjs
+          EOF
+          git diff --name-only "$TARGET_OLD_HEAD"..HEAD | LC_ALL=C sort > /tmp/actual-files.txt
+          diff -u /tmp/expected-files.txt /tmp/actual-files.txt
+          git diff "$TARGET_OLD_HEAD"..HEAD --check
+
+      - name: Retained publication-integrity acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN GITHUB_TOKEN
+          node tests/authorization-convergence-smoke.mjs
+          npm run lint
+          node scripts/verify-baseline.mjs
+          node scripts/scan-bootstrap.mjs
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Re-freeze lease and publish exact tree to existing Draft PR16
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          test "$(jq -r '.state' <<<"$pr_json")" = open
+          test "$(jq -r '.draft' <<<"$pr_json")" = true
+          test "$(jq -r '.merged' <<<"$pr_json")" = false
+          test "$(jq -r '.head.ref' <<<"$pr_json")" = "$TARGET_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$pr_json")" = "$TARGET_OLD_HEAD"
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          test "$main_sha" = "$EXPECTED_MAIN"
+          publish_sha="$(git rev-parse HEAD)"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --porcelain origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          published_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}" --jq '.head.sha')"
+          test "$published_head" = "$publish_sha"
+          published_tree="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${published_head}" --jq '.tree.sha')"
+          test "$published_tree" = "$EXPECTED_TREE"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}" --jq '.draft')" = true
+          printf 'Published PR16 head: %s\nPublished tree: %s\n' "$published_head" "$published_tree" >> "$GITHUB_STEP_SUMMARY"
