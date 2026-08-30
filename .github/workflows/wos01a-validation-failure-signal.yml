@@ -1,0 +1,88 @@
+name: WOS-01A Validation Failure Signal
+
+on:
+  push:
+    branches:
+      - controller/wos01a-fullstack-publication-watch
+    paths:
+      - '.github/workflows/wos01a-validation-failure-signal.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: wos01a-validation-failure-signal
+  cancel-in-progress: false
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      PRODUCT_PR: '16'
+      OLD_PRODUCT_HEAD: bc28bcdc141774563078dab4537eb00a40155889
+      WORKFLOW_PATH: .github/workflows/wos01a-post-publication-controller.yml
+      VALIDATION_CONTEXT: workos/wos01a-post-publication-controller
+
+    steps:
+      - name: Wait for terminal post-publication controller run
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..280}; do
+            pr="$(gh api "repos/$REPOSITORY/pulls/$PRODUCT_PR")"
+            test "$(jq -r .state <<<"$pr")" = open
+            test "$(jq -r .draft <<<"$pr")" = true
+            product_head="$(jq -r .head.sha <<<"$pr")"
+            if [[ "$product_head" = "$OLD_PRODUCT_HEAD" ]]; then
+              [[ "$attempt" -lt 280 ]] && sleep 60
+              continue
+            fi
+
+            runs="$(gh api "repos/$REPOSITORY/actions/runs?branch=controller/wos01a-fullstack-publication-watch&per_page=100")"
+            run="$(jq -c --arg path "$WORKFLOW_PATH" '[.workflow_runs[] | select(.path == $path)] | sort_by(.created_at) | reverse | .[0] // empty' <<<"$runs")"
+            if [[ -z "$run" ]]; then
+              [[ "$attempt" -lt 280 ]] && sleep 60
+              continue
+            fi
+            status="$(jq -r .status <<<"$run")"
+            conclusion="$(jq -r '.conclusion // empty' <<<"$run")"
+            run_id="$(jq -r .id <<<"$run")"
+            run_url="$(jq -r .html_url <<<"$run")"
+            if [[ "$status" != completed ]]; then
+              [[ "$attempt" -lt 280 ]] && sleep 60
+              continue
+            fi
+
+            if [[ "$conclusion" = success ]]; then
+              existing="$(gh api "repos/$REPOSITORY/commits/$product_head/status" --jq --arg context "$VALIDATION_CONTEXT" '[.statuses[] | select(.context == $context)][0].state // empty')"
+              test "$existing" = success
+              exit 0
+            fi
+
+            case "$conclusion" in
+              failure|timed_out|cancelled|action_required|startup_failure)
+                gh api --method POST "repos/$REPOSITORY/statuses/$product_head" \
+                  -f state=failure \
+                  -f context="$VALIDATION_CONTEXT" \
+                  -f description="Post-publication controller ended $conclusion" \
+                  -f target_url="$run_url" >/dev/null
+                gh api --method POST "repos/$REPOSITORY/issues/$PRODUCT_PR/comments" \
+                  -f body="## WOS-01A post-publication controller failed\n\n- Product head: \`$product_head\`\n- Run: $run_url\n- Run ID: \`$run_id\`\n- Conclusion: \`$conclusion\`\n\nThe exact-head failure status \`$VALIDATION_CONTEXT\` has been published so the owner-authorized Sol recovery controller can inspect and correct the real failed family. PR #16 remains Draft." >/dev/null
+                exit 0
+                ;;
+              *)
+                echo "Unsupported terminal conclusion: $conclusion" >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo 'No terminal post-publication run appeared in the bounded window' >&2
+          exit 1
