@@ -1,6 +1,6 @@
 name: WOS-01A Identity Fixture Publication Recovery
 
-on:
+"on":
   push:
     branches:
       - controller/wos01a-rate-limit-publication
@@ -35,12 +35,6 @@ jobs:
       EXPECTED_XZ_SHA256: 4a158b88ded74fad0734526ce09f7b67226ee8e88b0e4be90bdc0c0719e61ad5
       EXPECTED_PATCH_BYTES: '4919'
       EXPECTED_PATCH_SHA256: 4a0692ae4d6e86269711d7443d286d664bce9f13a2e2a8b916d09e9d8e9bfbb9
-      EXPECTED_DOC_BYTES: '31975'
-      EXPECTED_DOC_SHA256: ee90042010df25d7595d4676fd619860da8521f5d6f239f4ea6c9a86ae4f141e
-      EXPECTED_AUTH_BYTES: '2020'
-      EXPECTED_AUTH_SHA256: 124db5f97c53e924007e4ccd9fc0061ddfdd29ed093b4cd68755c63ab00fc717
-      EXPECTED_IDENTITY_BYTES: '21664'
-      EXPECTED_IDENTITY_SHA256: 1a74580c3e2341b3fcd3f527e1b0fd7a7f814b38e740271d8f12b31ebca6c8cf
       RECOVERY_PATH: .github/workflows/wos01a-rate-limit-publication.yml
 
     steps:
@@ -50,21 +44,16 @@ jobs:
           fetch-depth: 2
           persist-credentials: true
 
-      - name: Verify controller trigger and recover exact payload
-        id: trigger
+      - name: Verify, apply, validate and publish
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = 'controller/wos01a-rate-limit-publication'
           trigger_head="$(git rev-parse HEAD)"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse HEAD^)" = '52c4aa58260097864cc6c575c1e2fcbf42b8f531'
           test "$(git diff --name-only HEAD^ HEAD)" = "$RECOVERY_PATH"
-          echo "trigger_head=$trigger_head" >> "$GITHUB_OUTPUT"
 
-          cat > /tmp/recovery.b64.raw <<'RECOVERY_B64'
-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
-RECOVERY_B64
-          tr -d '[:space:]' < /tmp/recovery.b64.raw > /tmp/recovery.b64
+          printf '%s' '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' > /tmp/recovery.b64
           test "$(wc -c < /tmp/recovery.b64 | tr -d '[:space:]')" = "$EXPECTED_B64_CHARS"
           printf '%s  %s\n' "$EXPECTED_B64_SHA256" /tmp/recovery.b64 | sha256sum -c -
           base64 -d /tmp/recovery.b64 > /tmp/recovery.patch.xz
@@ -74,10 +63,6 @@ RECOVERY_B64
           test "$(wc -c < /tmp/recovery.patch | tr -d '[:space:]')" = "$EXPECTED_PATCH_BYTES"
           printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" /tmp/recovery.patch | sha256sum -c -
 
-      - name: Verify live PR and branch leases
-        shell: bash
-        run: |
-          set -euo pipefail
           test "$(git ls-remote origin "refs/heads/$PRODUCT_BRANCH" | cut -f1)" = "$EXPECTED_PARENT"
           test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$EXPECTED_MAIN"
           test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .state)" = 'open'
@@ -86,37 +71,28 @@ RECOVERY_B64
           test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)" = "$EXPECTED_PARENT"
           test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .base.ref)" = 'main'
 
-      - name: Apply exact correction and verify final tree
-        shell: bash
-        run: |
-          set -euo pipefail
           git fetch --no-tags origin "$EXPECTED_PARENT"
           git checkout --detach "$EXPECTED_PARENT"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_PARENT"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PARENT_TREE"
           git reset --hard "$EXPECTED_PARENT"
           git clean -ffdx
-
           git apply --check /tmp/recovery.patch
           git apply --index /tmp/recovery.patch
 
           actual_paths="$(git diff --cached --name-only | LC_ALL=C sort)"
-          expected_paths="$(printf '%s\n' \
-            'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md' \
-            'tests/authorization-convergence-smoke.mjs' \
-            'tests/production-identity-smoke.mjs' | LC_ALL=C sort)"
+          expected_paths="$(printf '%s\n' 'docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md' 'tests/authorization-convergence-smoke.mjs' 'tests/production-identity-smoke.mjs' | LC_ALL=C sort)"
           test "$actual_paths" = "$expected_paths"
           test "$(git write-tree)" = "$EXPECTED_FINAL_TREE"
           test "$(git hash-object docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md)" = '3db9a206dcda46980edc6a0bc75ca6c57223e195'
           test "$(git hash-object tests/authorization-convergence-smoke.mjs)" = 'aed1ac45d95d726487dfcc85d67d443b278e0e6c'
           test "$(git hash-object tests/production-identity-smoke.mjs)" = 'dca7f7a20799b2a4ffc9cd2a34e7a8d562fd387a'
 
-          test "$(wc -c < docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md | tr -d '[:space:]')" = "$EXPECTED_DOC_BYTES"
-          printf '%s  %s\n' "$EXPECTED_DOC_SHA256" docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md | sha256sum -c -
-          test "$(wc -c < tests/authorization-convergence-smoke.mjs | tr -d '[:space:]')" = "$EXPECTED_AUTH_BYTES"
-          printf '%s  %s\n' "$EXPECTED_AUTH_SHA256" tests/authorization-convergence-smoke.mjs | sha256sum -c -
-          test "$(wc -c < tests/production-identity-smoke.mjs | tr -d '[:space:]')" = "$EXPECTED_IDENTITY_BYTES"
-          printf '%s  %s\n' "$EXPECTED_IDENTITY_SHA256" tests/production-identity-smoke.mjs | sha256sum -c -
+          printf '%s  %s\n' 'ee90042010df25d7595d4676fd619860da8521f5d6f239f4ea6c9a86ae4f141e' docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md | sha256sum -c -
+          printf '%s  %s\n' '124db5f97c53e924007e4ccd9fc0061ddfdd29ed093b4cd68755c63ab00fc717' tests/authorization-convergence-smoke.mjs | sha256sum -c -
+          printf '%s  %s\n' '1a74580c3e2341b3fcd3f527e1b0fd7a7f814b38e740271d8f12b31ebca6c8cf' tests/production-identity-smoke.mjs | sha256sum -c -
+          test "$(wc -c < docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md | tr -d '[:space:]')" = '31975'
+          test "$(wc -c < tests/authorization-convergence-smoke.mjs | tr -d '[:space:]')" = '2020'
+          test "$(wc -c < tests/production-identity-smoke.mjs | tr -d '[:space:]')" = '21664'
 
           node --check tests/production-identity-smoke.mjs
           node --check tests/authorization-convergence-smoke.mjs
@@ -129,37 +105,38 @@ RECOVERY_B64
           git config user.name 'WorkOS Identity Fixture Controller'
           git config user.email 'actions@users.noreply.github.com'
           git commit -m 'test: isolate identity replay from rate limit'
+          final_head="$(git rev-parse HEAD)"
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_FINAL_TREE"
           test -z "$(git status --porcelain)"
 
-      - name: Re-lease and publish normal fast-forward
-        shell: bash
-        run: |
-          set -euo pipefail
-          final_head="$(git rev-parse HEAD)"
           test "$(git ls-remote origin "refs/heads/$PRODUCT_BRANCH" | cut -f1)" = "$EXPECTED_PARENT"
           test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$EXPECTED_MAIN"
-          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .state)" = 'open'
-          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .draft)" = 'true'
           test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)" = "$EXPECTED_PARENT"
           git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
           test "$(git ls-remote origin "refs/heads/$PRODUCT_BRANCH" | cut -f1)" = "$final_head"
+          for attempt in 1 2 3 4 5; do
+            if test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)" = "$final_head"; then
+              break
+            fi
+            test "$attempt" != '5'
+            sleep 3
+          done
           test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)" = "$final_head"
-          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_FINAL_TREE"
-          echo "final_head=$final_head" >> "$GITHUB_OUTPUT"
 
-          cat > /tmp/comment.md <<EOF
+          comment="$(cat <<EOF
 ## WOS-01A exact identity-fixture correction published
 
-The verified Codex recovery payload from comment `5468063739` was decoded, hash-checked, independently applied to exact parent `$EXPECTED_PARENT`, and normal-fast-forward published to the existing PR #16 branch.
+The verified Codex recovery payload from comment \`5468063739\` was decoded, hash-checked, independently applied to exact parent \`$EXPECTED_PARENT\`, and normal-fast-forward published to the existing PR #16 branch.
 
-- Published head: `$final_head`
-- Exact tree: `$EXPECTED_FINAL_TREE`
+- Published head: \`$final_head\`
+- Exact tree: \`$EXPECTED_FINAL_TREE\`
 - Changed files: exactly three retained test/evidence files
 - Production server, schema, migrations, limiter default and OAuth state behavior: unchanged
 - Controller run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
 PR #16 remains Draft. PR #30 must now be refreshed coherently to this exact product head before authoritative acceptance is rerun.
 EOF
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --method POST --input /tmp/comment.md >/dev/null
+)"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --method POST -f body="$comment" >/dev/null
+          echo "Published $final_head with tree $EXPECTED_FINAL_TREE"
