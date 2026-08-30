@@ -29,7 +29,7 @@ jobs:
       CONTROLLER_BRANCH: controller/wos01a-final-integration-acceptance
       TARGET_PR: '16'
       TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
-      TARGET_HEAD: 5fb6cd405ea06bc20be2a6c85a3617f653923051
+      TARGET_HEAD: ef841d4b716b0ed021381e61433158426eb380dc
       PARENT_PR: '0'
       PARENT_BRANCH: accepted/wos00-base
       PARENT_HEAD: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
@@ -215,7 +215,7 @@ jobs:
     env:
       ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
       CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
-      TARGET_HEAD: 5fb6cd405ea06bc20be2a6c85a3617f653923051
+      TARGET_HEAD: ef841d4b716b0ed021381e61433158426eb380dc
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -319,7 +319,7 @@ jobs:
       ACCEPTANCE_RESULT: ${{ needs.acceptance.result }}
       BUNDLE_RESULT: ${{ needs.browser_bundle.result }}
       CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
-      TARGET_HEAD: 5fb6cd405ea06bc20be2a6c85a3617f653923051
+      TARGET_HEAD: ef841d4b716b0ed021381e61433158426eb380dc
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -481,7 +481,7 @@ jobs:
       CONTROLLER_HEAD: ${{ github.event.pull_request.head.sha }}
       TARGET_PR: '16'
       TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
-      TARGET_HEAD: 5fb6cd405ea06bc20be2a6c85a3617f653923051
+      TARGET_HEAD: ef841d4b716b0ed021381e61433158426eb380dc
       EXPECTED_MAIN_HEAD: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
       ACCEPTED_WOS00_BASE: 1aa8d1fb7ea1a013b07cb282a9bf3941bf851dea
     runs-on: ubuntu-latest
