@@ -1,0 +1,190 @@
+name: WOS-01A Independent Post-Merge Finalizer
+
+on:
+  push:
+    branches:
+      - controller/wos01a-fullstack-publication-watch
+    paths:
+      - '.github/workflows/wos01a-postmerge-finalizer.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  issues: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: wos01a-postmerge-finalizer
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      PRODUCT_PR: '16'
+      CONTROLLER_PR: '30'
+      LEGACY_CONTROLLER_PR: '26'
+      OLD_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      VALIDATED_TAG: controller-wos01a-fullstack-validated
+      ACCEPTED_TAG: workos-01a-accepted
+      FINAL_CONTEXT: workos/wos01a-final-lifecycle-v2
+      PGPASSWORD: postgres
+
+    steps:
+      - name: Wait for an exact verified PR #16 merge
+        id: authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..280}; do
+            pr="$(gh api "repos/$REPOSITORY/pulls/$PRODUCT_PR")"
+            state="$(jq -r .state <<<"$pr")"
+            merged="$(jq -r .merged <<<"$pr")"
+            if [[ "$state" = closed && "$merged" = true ]]; then
+              product_head="$(jq -r .head.sha <<<"$pr")"
+              merge_sha="$(jq -r .merge_commit_sha <<<"$pr")"
+              test -n "$product_head"
+              test -n "$merge_sha"
+              main="$(gh api "repos/$REPOSITORY/branches/main" --jq .commit.sha)"
+              test "$main" = "$merge_sha"
+              test "$main" != "$OLD_MAIN"
+              validated="$(gh api "repos/$REPOSITORY/git/ref/tags/$VALIDATED_TAG" --jq .object.sha)"
+              test "$validated" = "$product_head"
+              commit="$(gh api "repos/$REPOSITORY/commits/$merge_sha")"
+              test "$(jq -r '.parents | length' <<<"$commit")" = 2
+              jq -r '.parents[].sha' <<<"$commit" | grep -Fx "$product_head" >/dev/null
+              echo "product_head=$product_head" >> "$GITHUB_OUTPUT"
+              echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            [[ "$attempt" -lt 280 ]] && sleep 60
+          done
+          echo 'No verified WOS-01A merge appeared in the bounded finalization window' >&2
+          exit 1
+
+      - name: Checkout exact merged main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.authority.outputs.merge_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Re-run complete post-merge engineering acceptance
+        shell: bash
+        env:
+          MERGE_SHA: ${{ steps.authority.outputs.merge_sha }}
+          PRODUCT_HEAD: ${{ steps.authority.outputs.product_head }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$MERGE_SHA"
+          parents="$(git rev-list --parents -n 1 HEAD)"
+          test "$(wc -w <<<"$parents" | tr -d '[:space:]')" = 3
+          grep -F "$PRODUCT_HEAD" <<<"$parents" >/dev/null
+          test -z "$(git status --porcelain)"
+
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high
+          for file in server/*.mjs tests/*.mjs scripts/*.mjs; do [[ -f "$file" ]] && node --check "$file"; done
+          node --check tests/browser-ux-smoke.cjs
+          npm run test:wos00-baseline
+          npm run test:bootstrap-scan
+          node tests/authorization-convergence-smoke.mjs
+          node tests/runtime-closure-smoke.mjs
+          node tests/browser-ux-smoke.cjs
+          npm run typecheck
+          npm run lint
+          npm test
+
+          npm run clean --if-present
+          npm run build
+          test -f dist/index.html
+          ! grep -R '%VITE_' dist
+          npm run clean --if-present
+          VITE_PRODUCT_NAME=WorkOS VITE_PRODUCT_LOGO_URL=/favicon.svg npm run build
+          test -f dist/index.html
+          ! grep -R '%VITE_' dist
+
+          createdb -h 127.0.0.1 -U postgres wos_fresh
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_fresh' PGSSLMODE=disable node server/migrate.mjs
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_fresh' PGSSLMODE=disable node server/migrate.mjs
+          createdb -h 127.0.0.1 -U postgres wos_legacy
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_legacy' PGSSLMODE=disable node tests/migration-legacy-identity-smoke.mjs
+          createdb -h 127.0.0.1 -U postgres wos_identity
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/wos_identity' PGSSLMODE=disable node tests/production-identity-smoke.mjs
+
+          test -z "$(git status --porcelain)"
+          test "$(gh api "repos/$REPOSITORY/branches/main" --jq .commit.sha)" = "$MERGE_SHA"
+
+      - name: Atomically record accepted baseline and governance closure
+        shell: bash
+        env:
+          MERGE_SHA: ${{ steps.authority.outputs.merge_sha }}
+          PRODUCT_HEAD: ${{ steps.authority.outputs.product_head }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$REPOSITORY/branches/main" --jq .commit.sha)" = "$MERGE_SHA"
+          pr="$(gh api "repos/$REPOSITORY/pulls/$PRODUCT_PR")"
+          test "$(jq -r .merged <<<"$pr")" = true
+          test "$(jq -r .head.sha <<<"$pr")" = "$PRODUCT_HEAD"
+
+          existing="$(gh api "repos/$REPOSITORY/git/ref/tags/$ACCEPTED_TAG" --jq .object.sha 2>/dev/null || true)"
+          if [[ -z "$existing" ]]; then
+            gh api --method POST "repos/$REPOSITORY/git/refs" -f ref="refs/tags/$ACCEPTED_TAG" -f sha="$MERGE_SHA" >/dev/null
+          else
+            test "$existing" = "$MERGE_SHA"
+          fi
+
+          gh api --method POST "repos/$REPOSITORY/statuses/$MERGE_SHA" \
+            -f state=success \
+            -f context="$FINAL_CONTEXT" \
+            -f description='WOS-01A merge and independent post-merge finalization passed' \
+            -f target_url="https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+
+          for controller_pr in "$CONTROLLER_PR" "$LEGACY_CONTROLLER_PR"; do
+            controller="$(gh api "repos/$REPOSITORY/pulls/$controller_pr")"
+            if [[ "$(jq -r .state <<<"$controller")" = open && "$(jq -r .merged <<<"$controller")" = false ]]; then
+              gh api --method PATCH "repos/$REPOSITORY/pulls/$controller_pr" -f state=closed >/dev/null
+            fi
+          done
+
+          gh api --method POST "repos/$REPOSITORY/issues/3/comments" \
+            -f body="## WOS-01A accepted and independently finalized\n\n- Accepted product head: \`$PRODUCT_HEAD\`\n- Merge commit/current main: \`$MERGE_SHA\`\n- Accepted tag: \`$ACCEPTED_TAG\`\n- Finalizer run: https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID\n\nThe independent finalizer re-ran locked installation, runtime audit, syntax, WOS-00 and bootstrap scans, authorization/runtime/browser regressions, typecheck, lint, all retained tests, both production builds, fresh/replay migrations, legacy upgrade and production identity acceptance. Controller PRs #30 and #26 were closed unmerged." >/dev/null
+          gh api --method PATCH "repos/$REPOSITORY/issues/3" -f state=closed -f state_reason=completed >/dev/null
+
+      - name: Fail closed if a merged baseline does not pass finalization
+        if: failure() && steps.authority.outputs.merge_sha != ''
+        shell: bash
+        env:
+          MERGE_SHA: ${{ steps.authority.outputs.merge_sha }}
+        run: |
+          gh api --method POST "repos/$REPOSITORY/statuses/$MERGE_SHA" \
+            -f state=failure \
+            -f context="$FINAL_CONTEXT" \
+            -f description='WOS-01A merged, but independent finalization failed' \
+            -f target_url="https://github.com/$REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null || true
