@@ -1,0 +1,125 @@
+name: WOS-01A Target-Key Parser Publication
+
+on:
+  push:
+    branches:
+      - controller/wos01a-target-key-parser-publication
+    paths:
+      - '.github/workflows/wos01a-target-key-parser-publication.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: wos01a-target-key-parser-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish exact parser correction
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CONTROLLER_BRANCH: controller/wos01a-final-integration-acceptance
+      CONTROLLER_PR: '30'
+      PRODUCT_PR: '16'
+      PRODUCT_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
+      EXPECTED_MAIN: 44aeaa8eb5ba67692cbcb7fef48239dbbfc77a42
+      EXPECTED_PARENT: d70aae6bca7f8319d29b1edbd61705f1ea0dd983
+      EXPECTED_PARENT_TREE: 26b1511b0bda4eebee639e6f2701b9d300463b47
+      EXPECTED_PRODUCT_HEAD: bc28bcdc141774563078dab4537eb00a40155889
+      EXPECTED_FINAL_TREE: d334de468e87e0226a6846335b98cb99108f9b69
+      EXPECTED_B64_BYTES: '1292'
+      EXPECTED_B64_SHA256: 08f392711dda53f206b3d3cf7194ab93b1b28ffcfefd950b0362a06ccaa52031
+      EXPECTED_XZ_BYTES: '968'
+      EXPECTED_XZ_SHA256: cc9e9dd6f14b18441365bb7a60aeddaa7073085cda6b195df34cbf613dc422ba
+      EXPECTED_PATCH_BYTES: '2412'
+      EXPECTED_PATCH_SHA256: 72a4d40d460d55bff0b3196467dc23771b1d29d2ef552962ed1cb123c7c317a0
+      EXPECTED_FILE_BYTES: '8843'
+      EXPECTED_FILE_SHA256: a0d612ffbccb1d105591286dbe95ecf570b30ff7c38e2ca81fef123427d5f51c
+      EXPECTED_FILE_BLOB: 41703db692e9c20b5af46a6bc46628ab1b57a182
+      HELPER_PATH: .github/workflows/wos01a-target-key-parser-publication.yml
+
+    steps:
+      - name: Checkout exact helper trigger
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: true
+
+      - name: Recover exact verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'controller/wos01a-target-key-parser-publication'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_MAIN"
+          test "$(git diff --name-only HEAD^ HEAD)" = "$HELPER_PATH"
+          printf '%s' '/Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4AlrA4hdADIaSQnC/BF9UN4KT0fM8VPxtdoVrw2gT8G03Zk25gxwHsQ7v8LhSyRvGSR0EBWnr8QoHlMKu24e4pnZ7yJFblNXvftnfFv+5voxiEiRTOMI2y2feNET+RtLYgG0Ws9Mo+64hrEYbk047syThAmvI1uMnd2ZYgPk/5ThhYtztJXuAjPLc1d2nYc4eAJdSlEdk9kJctiANadgbsHJLXWHcevRUhQyfe3XlC4unMtuiv3ED9ZJnfedxkbXfSPkuCtgxdJnmKeBJGPegIu4vDedLFDhChT4kPz6KqjyyTGayESWStDbmNkeuVCFGyRoEHYdnmVMp7XiSgP3qkIzB9qlJ66tOCTGE573cHQJInfOjyYHPp18aDg/OFfzsD+Qtxs4xkG2NbR98Hd+c4vYFfmk5a8QPQYL133dRCSNrRfBkwR8gkg5Ic1lftdpRy/dOp1pnDaX4VjjJ18yFjo5lLU3Tt1Z9y3fvEEXz4Fe9Xgh3KeAsyb988HIz6QCQ9MBxvlH1bIQY5NKssROAetNkhbhapisIXCwAx7oDGTbkyd2zSWEIywwvoaMuJuSwfldKokh8lbmMdtCq3W0KaGerBrcG/D9HgIpQ3MHgG3pCzbTu7xUAi2BRk3zccgOHVHGQOTVwa2wIdOTi7uR3boYRolODsr5SgQNwDwBmxmeDuWjkqygQNhp3bZSMI4RY+d4b1vq71DJ9vkFQaapGlplkZbVON/EAaCNXIBnrqeAwXOKjIf7NZ2gIeMZ1Y9eUgWYG5Az+9fglTe+SeXzSN+F1qcCi7wqoX2pODf6mkvx/FEuxObCWjmdTHA435mf/mKmK7l0C1pmh0Fn3MRxX/7fzsMBpi4E3GHuEzJNAKciEbzcZ1GvEsPqnDDbPWacaFnwbbseFTvNV/GouBWwio1e2Bc1RE0Qv6DguMyhxQBZlIFH0Vu4aQfKLEIqF2BG1TNuH4Zh4HfSYrvMhBUwraRpRjrP+/vsI2RbI5LeLjPcbc1ICcR2t2KHzeiuIFfSLgI35WOj+WwL8o+cUDNaEZGxCvkEibHc0w4ZCVvWzYnTxgK/Ndl3FdWVpKGwixlJCipMkndFacy8Akeo690tawUVGCJBBgzUu21xS881w/VFFPzLnl5/rUrFjtnmP0Fvo8D4xdvky+ppymLyVD5lHaTTSocQTrE4pDYj/x3PhzMnGqTE/A/YjC+cvaLu/mQA8xsX4ySaUooAAaQH7BIAAKvS83CxxGf7AgAAAAAEWVo=' > /tmp/recovery.b64
+          test "$(wc -c < /tmp/recovery.b64 | tr -d '[:space:]')" = "$EXPECTED_B64_BYTES"
+          printf '%s  %s\n' "$EXPECTED_B64_SHA256" /tmp/recovery.b64 | sha256sum -c -
+          base64 -d /tmp/recovery.b64 > /tmp/recovery.patch.xz
+          test "$(wc -c < /tmp/recovery.patch.xz | tr -d '[:space:]')" = "$EXPECTED_XZ_BYTES"
+          printf '%s  %s\n' "$EXPECTED_XZ_SHA256" /tmp/recovery.patch.xz | sha256sum -c -
+          xz -dc /tmp/recovery.patch.xz > /tmp/recovery.patch
+          test "$(wc -c < /tmp/recovery.patch | tr -d '[:space:]')" = "$EXPECTED_PATCH_BYTES"
+          printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" /tmp/recovery.patch | sha256sum -c -
+
+      - name: Verify exact live leases
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$CONTROLLER_PR" --jq .state)" = 'open'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$CONTROLLER_PR" --jq .draft)" = 'true'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$CONTROLLER_PR" --jq .head.ref)" = "$CONTROLLER_BRANCH"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$CONTROLLER_PR" --jq .head.sha)" = "$EXPECTED_PARENT"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PRODUCT_PR" --jq .state)" = 'open'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PRODUCT_PR" --jq .draft)" = 'true'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PRODUCT_PR" --jq .head.ref)" = "$PRODUCT_BRANCH"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PRODUCT_PR" --jq .head.sha)" = "$EXPECTED_PRODUCT_HEAD"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$EXPECTED_MAIN"
+          test "$(git ls-remote origin "refs/heads/$CONTROLLER_BRANCH" | cut -f1)" = "$EXPECTED_PARENT"
+
+      - name: Apply exact parser correction and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$EXPECTED_PARENT"
+          git checkout --detach "$EXPECTED_PARENT"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PARENT_TREE"
+          test -z "$(git status --porcelain)"
+          git apply --check /tmp/recovery.patch
+          git apply --index /tmp/recovery.patch
+          test "$(git diff --cached --name-only)" = '.github/scripts/verify-wos01a-controller-v2.mjs'
+          test "$(git write-tree)" = "$EXPECTED_FINAL_TREE"
+          test "$(git hash-object .github/scripts/verify-wos01a-controller-v2.mjs)" = "$EXPECTED_FILE_BLOB"
+          test "$(wc -c < .github/scripts/verify-wos01a-controller-v2.mjs | tr -d '[:space:]')" = "$EXPECTED_FILE_BYTES"
+          printf '%s  %s\n' "$EXPECTED_FILE_SHA256" .github/scripts/verify-wos01a-controller-v2.mjs | sha256sum -c -
+          node --check .github/scripts/verify-wos01a-controller-v2.mjs
+          TARGET_HEAD="$EXPECTED_PRODUCT_HEAD" node .github/scripts/verify-wos01a-controller-v2.mjs
+          env -u TARGET_HEAD node .github/scripts/verify-wos01a-controller-v2.mjs
+          node .github/scripts/test-wos01a-browser-lifecycle-v2.mjs
+          bash -n .github/scripts/wos01a-clean-runtime-matrix-v2.sh
+          ruby -e "require 'yaml'; YAML.parse_file('.github/workflows/wos01a-final-integration-acceptance.yml'); puts 'YAML parse passed.'"
+          git diff --cached --check
+
+      - name: Commit and normal-fast-forward publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'WorkOS Target Authority Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'CTRL: validate every target authority declaration'
+          published_head="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_FINAL_TREE"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$CONTROLLER_PR" --jq .head.sha)" = "$EXPECTED_PARENT"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PRODUCT_PR" --jq .head.sha)" = "$EXPECTED_PRODUCT_HEAD"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$EXPECTED_MAIN"
+          test "$(git ls-remote origin "refs/heads/$CONTROLLER_BRANCH" | cut -f1)" = "$EXPECTED_PARENT"
+          git push origin "HEAD:refs/heads/$CONTROLLER_BRANCH"
+          remote_head="$(git ls-remote origin "refs/heads/$CONTROLLER_BRANCH" | cut -f1)"
+          test "$remote_head" = "$published_head"
+          echo "Published exact target-key parser correction $published_head"
