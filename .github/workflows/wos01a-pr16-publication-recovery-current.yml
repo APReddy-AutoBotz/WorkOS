@@ -4,16 +4,15 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-permissions:
-  contents: write
-  pull-requests: read
-  issues: read
+permissions: {}
 
 concurrency:
   group: wos01a-pr16-publication-recovery-current
   cancel-in-progress: false
 
 env:
+  CONTROLLER_PR: '36'
+  CONTROLLER_BRANCH: controller/wos01a-pr16-publication-recovery-current
   TARGET_PR: '16'
   TARGET_BRANCH: codex/wos-01-authorized-source-bootstrap-v2
   TARGET_OLD_HEAD: bc28bcdc141774563078dab4537eb00a40155889
@@ -27,44 +26,134 @@ env:
   XZ_SHA256: fc389f4b46b124ee625384699d42421f45a847bc98dca367dbc2e1120c4c4a74
   PATCH_LENGTH: '14575'
   PATCH_SHA256: 971420235bf53fa6167f2cf9fa8ffdcd036f2672908a11b61482d99f06a1a304
+  EVIDENCE_BLOB: 8f8f4fd9612e8ae6147e4339754ac41c2d1d6043
+  MAX_BUNDLE_BYTES: '20000000'
+  MAX_SOURCE_ARCHIVE_BYTES: '20000000'
 
 jobs:
-  publish-frozen-tree:
+  prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      candidate_sha: ${{ steps.meta.outputs.candidate_sha }}
+      bundle_sha256: ${{ steps.meta.outputs.bundle_sha256 }}
+      source_sha256: ${{ steps.meta.outputs.source_sha256 }}
     steps:
-      - name: Freeze live authority before materialization
+      - name: Checkout trusted controller exact head without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Assert controller DAG and permission boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby <<'RUBY'
+          require 'yaml'
+          path = '.github/workflows/wos01a-pr16-publication-recovery-current.yml'
+          graph = YAML.safe_load_file(path, aliases: true)
+          jobs = graph.fetch('jobs')
+          raise 'unexpected job graph' unless jobs.keys.sort == %w[prepare publish retained-tests]
+          raise 'workflow permissions must default to none' unless graph.fetch('permissions') == {}
+          needs = jobs.fetch('publish').fetch('needs')
+          raise 'publish dependency graph is not exact' unless needs == %w[prepare retained-tests]
+          retained_permissions = jobs.fetch('retained-tests').fetch('permissions')
+          raise 'retained tests are not explicitly tokenless' unless retained_permissions == {}
+          effective = jobs.to_h do |name, job|
+            permissions = job.fetch('permissions', graph.fetch('permissions'))
+            [name, permissions.fetch('contents', 'none')]
+          end
+          expected = {'prepare' => 'read', 'retained-tests' => 'none', 'publish' => 'write'}
+          raise 'effective contents permission mismatch' unless effective == expected
+          writers = jobs.select { |_name, job| job.fetch('permissions', {}).values.include?('write') }.keys
+          raise 'publish must be sole writer' unless writers == ['publish']
+          if graph.key?('pull_request_target') || graph.fetch(true, {}).key?('pull_request_target')
+            raise 'unsafe trigger'
+          end
+          jobs.each_value do |job|
+            job.fetch('steps').select { |step| step['uses'].to_s.start_with?('actions/checkout@') }.each do |step|
+              raise 'persisted checkout credentials enabled' unless step.fetch('with', {}).fetch('persist-credentials') == false
+            end
+          end
+          privileged = jobs.fetch('publish').fetch('steps').filter_map { |step| step['run'] }.join("\n")
+          if privileged.match?(/\b(?:npm|node)\b|git\s+(?:am|checkout)\b|recovery\.patch/)
+            raise 'privileged job executes product/recovery-controlled code'
+          end
+          puts "publish.needs=#{needs.inspect}"
+          puts "retained-tests.permissions=#{retained_permissions.inspect}"
+          effective.each { |job, value| puts "effective contents #{job}=#{value}" }
+          RUBY
+          ruby <<'RUBY'
+          require 'yaml'
+          require 'tempfile'
+          graph = YAML.safe_load_file('.github/workflows/wos01a-pr16-publication-recovery-current.yml', aliases: true)
+          count = 0
+          graph.fetch('jobs').each_value do |job|
+            job.fetch('steps').each do |step|
+              next unless step['run']
+              Tempfile.create(['workos-run-', '.sh']) do |file|
+                file.write(step['run'])
+                file.flush
+                raise "embedded bash syntax failed: #{step['name']}" unless system('bash', '-n', file.path)
+              end
+              count += 1
+            end
+          end
+          puts "embedded bash syntax ok: #{count} blocks"
+          RUBY
+
+      - name: Freeze controller product and main authority
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'APReddy-AutoBotz/WorkOS'
+          test "${{ github.event.pull_request.number }}" = "$CONTROLLER_PR"
           test "${{ github.event.pull_request.head.repo.full_name }}" = "$GITHUB_REPOSITORY"
-          test "${{ github.event.pull_request.head.ref }}" = 'controller/wos01a-pr16-publication-recovery-current'
+          test "${{ github.event.pull_request.head.ref }}" = "$CONTROLLER_BRANCH"
+          controller_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${CONTROLLER_PR}")"
+          test "$(jq -r '.state' <<<"$controller_json")" = open
+          test "$(jq -r '.draft' <<<"$controller_json")" = true
+          test "$(jq -r '.merged' <<<"$controller_json")" = false
+          test "$(jq -r '.head.ref' <<<"$controller_json")" = "$CONTROLLER_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$controller_json")" = "${{ github.event.pull_request.head.sha }}"
+          test "$(jq -r '.base.ref' <<<"$controller_json")" = main
           pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
           test "$(jq -r '.state' <<<"$pr_json")" = open
           test "$(jq -r '.draft' <<<"$pr_json")" = true
           test "$(jq -r '.merged' <<<"$pr_json")" = false
           test "$(jq -r '.head.ref' <<<"$pr_json")" = "$TARGET_BRANCH"
-          test "$(jq -r '.head.sha' <<<"$pr_json")" = "$TARGET_OLD_HEAD"
           test "$(jq -r '.base.ref' <<<"$pr_json")" = main
-          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-          test "$main_sha" = "$EXPECTED_MAIN"
+          current_head="$(jq -r '.head.sha' <<<"$pr_json")"
+          if test "$current_head" != "$TARGET_OLD_HEAD"; then
+            commit_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${current_head}")"
+            test "$(jq '.parents | length' <<<"$commit_json")" = 1
+            test "$(jq -r '.parents[0].sha' <<<"$commit_json")" = "$TARGET_OLD_HEAD"
+            test "$(jq -r '.tree.sha' <<<"$commit_json")" = "$EXPECTED_TREE"
+          fi
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "$EXPECTED_MAIN"
 
-      - name: Checkout exact frozen PR16 parent
+      - name: Checkout exact frozen PR16 parent without credentials
         uses: actions/checkout@v4
         with:
           ref: ${{ env.TARGET_OLD_HEAD }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Prove parent and recover exact verified patch
+      - name: Recover and materialize exact bounded candidate
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          git config --local core.hooksPath /dev/null
           test "$(git rev-parse HEAD)" = "$TARGET_OLD_HEAD"
           test "$(git rev-parse 'HEAD^{tree}')" = "$TARGET_OLD_TREE"
           test -z "$(git status --porcelain=v1)"
@@ -75,8 +164,8 @@ jobs:
           text = Path('/tmp/recovery-comment.txt').read_text(encoding='utf-8')
           begin = 'RECOVERY_B64_PART_1_OF_1_BEGIN\n'
           end = '\nRECOVERY_B64_PART_1_OF_1_END'
-          if begin not in text or end not in text:
-              raise SystemExit('recovery payload markers missing')
+          if text.count(begin) != 1 or text.count(end) != 1:
+              raise SystemExit('recovery payload markers missing or repeated')
           payload = text.split(begin, 1)[1].split(end, 1)[0].strip()
           if '\n' in payload or '\r' in payload:
               raise SystemExit('recovery Base64 is not one exact line')
@@ -93,16 +182,12 @@ jobs:
           xz --decompress --stdout /tmp/recovery.patch.xz > /tmp/recovery.patch
           test "$(wc -c < /tmp/recovery.patch | tr -d ' ')" = "$PATCH_LENGTH"
           test "$(sha256sum /tmp/recovery.patch | awk '{print $1}')" = "$PATCH_SHA256"
-
-      - name: Materialize exact bounded correction
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name 'WorkOS Publication Recovery'
           git config user.email 'actions@users.noreply.github.com'
           git am --3way /tmp/recovery.patch
           test "$(git rev-parse HEAD^)" = "$TARGET_OLD_HEAD"
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git ls-tree HEAD docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md | awk '{print $3}')" = "$EVIDENCE_BLOB"
           test -z "$(git status --porcelain=v1)"
           cat > /tmp/expected-files.txt <<'EOF'
           docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md
@@ -114,44 +199,153 @@ jobs:
           src/main.tsx
           src/pages/Login.tsx
           EOF
+          LC_ALL=C sort -o /tmp/expected-files.txt /tmp/expected-files.txt
           git diff --name-only "$TARGET_OLD_HEAD"..HEAD | LC_ALL=C sort > /tmp/actual-files.txt
           diff -u /tmp/expected-files.txt /tmp/actual-files.txt
           git diff "$TARGET_OLD_HEAD"..HEAD --check
 
-      - name: Retained source-only publication integrity checks
+      - name: Build bounded immutable candidate artifacts
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$(git rev-parse HEAD)"
+          git bundle create /tmp/pr16-candidate.bundle HEAD
+          git bundle verify /tmp/pr16-candidate.bundle
+          git archive --format=tar HEAD | gzip -n > /tmp/pr16-candidate.tar.gz
+          bundle_bytes="$(wc -c < /tmp/pr16-candidate.bundle | tr -d ' ')"
+          source_bytes="$(wc -c < /tmp/pr16-candidate.tar.gz | tr -d ' ')"
+          test "$bundle_bytes" -gt 0
+          test "$bundle_bytes" -le "$MAX_BUNDLE_BYTES"
+          test "$source_bytes" -gt 0
+          test "$source_bytes" -le "$MAX_SOURCE_ARCHIVE_BYTES"
+          bundle_sha="$(sha256sum /tmp/pr16-candidate.bundle | awk '{print $1}')"
+          source_sha="$(sha256sum /tmp/pr16-candidate.tar.gz | awk '{print $1}')"
+          printf 'candidate_sha=%s\nbundle_sha256=%s\nsource_sha256=%s\n' "$candidate" "$bundle_sha" "$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr16-candidate-objects
+          path: |
+            /tmp/pr16-candidate.bundle
+            /tmp/pr16-candidate.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  retained-tests:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Download immutable candidate artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pr16-candidate-objects
+          path: /tmp/candidate
+
+      - name: Restore exact candidate source and run retained checks tokenless
         shell: bash
         run: |
           set -euo pipefail
           unset GH_TOKEN GITHUB_TOKEN
+          test "$(sha256sum /tmp/candidate/pr16-candidate.bundle | awk '{print $1}')" = "${{ needs.prepare.outputs.bundle_sha256 }}"
+          test "$(sha256sum /tmp/candidate/pr16-candidate.tar.gz | awk '{print $1}')" = "${{ needs.prepare.outputs.source_sha256 }}"
+          test "$(wc -c < /tmp/candidate/pr16-candidate.bundle | tr -d ' ')" -le "$MAX_BUNDLE_BYTES"
+          test "$(wc -c < /tmp/candidate/pr16-candidate.tar.gz | tr -d ' ')" -le "$MAX_SOURCE_ARCHIVE_BYTES"
+          mkdir -p /tmp/product
+          tar -xzf /tmp/candidate/pr16-candidate.tar.gz -C /tmp/product
+          cd /tmp/product
           node --check server/migrate.mjs
           node tests/authorization-convergence-smoke.mjs
           npm run test:wos00-baseline
           npm run test:bootstrap-scan
-          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
-          test -z "$(git status --porcelain=v1)"
 
-      - name: Re-freeze exact-old-head lease and publish only existing PR16 branch
+  publish:
+    needs: [prepare, retained-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Download immutable candidate objects
+        uses: actions/download-artifact@v4
+        with:
+          name: pr16-candidate-objects
+          path: /tmp/candidate
+
+      - name: Verify leases and publish exact candidate only
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'APReddy-AutoBotz/WorkOS'
+          test "$(sha256sum /tmp/candidate/pr16-candidate.bundle | awk '{print $1}')" = "${{ needs.prepare.outputs.bundle_sha256 }}"
+          test "$(wc -c < /tmp/candidate/pr16-candidate.bundle | tr -d ' ')" -le "$MAX_BUNDLE_BYTES"
+          git init --bare --quiet /tmp/publish.git
+          git -C /tmp/publish.git config core.hooksPath /dev/null
+          git -C /tmp/publish.git fetch --quiet /tmp/candidate/pr16-candidate.bundle HEAD:refs/heads/candidate
+          candidate="${{ needs.prepare.outputs.candidate_sha }}"
+          test "$(git -C /tmp/publish.git rev-parse refs/heads/candidate)" = "$candidate"
+          test "$(git -C /tmp/publish.git rev-parse "${candidate}^")" = "$TARGET_OLD_HEAD"
+          test "$(git -C /tmp/publish.git rev-parse "${candidate}^{tree}")" = "$EXPECTED_TREE"
+          test "$(git -C /tmp/publish.git ls-tree "$candidate" docs/evidence/v0.2.0/DOC-WOS-01-001-SOURCE-BOOTSTRAP.md | awk '{print $3}')" = "$EVIDENCE_BLOB"
+
+          controller_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${CONTROLLER_PR}")"
+          test "$(jq -r '.state' <<<"$controller_json")" = open
+          test "$(jq -r '.draft' <<<"$controller_json")" = true
+          test "$(jq -r '.merged' <<<"$controller_json")" = false
+          test "$(jq -r '.head.ref' <<<"$controller_json")" = "$CONTROLLER_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$controller_json")" = "${{ github.event.pull_request.head.sha }}"
+          test "$(jq -r '.base.ref' <<<"$controller_json")" = main
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "$EXPECTED_MAIN"
+
           pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
           test "$(jq -r '.state' <<<"$pr_json")" = open
           test "$(jq -r '.draft' <<<"$pr_json")" = true
           test "$(jq -r '.merged' <<<"$pr_json")" = false
           test "$(jq -r '.head.ref' <<<"$pr_json")" = "$TARGET_BRANCH"
-          test "$(jq -r '.head.sha' <<<"$pr_json")" = "$TARGET_OLD_HEAD"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "$EXPECTED_MAIN"
-          publish_sha="$(git rev-parse HEAD)"
-          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          remote_head="$(git -c http.https://github.com/.extraheader="$auth_header" ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
-          test "$remote_head" = "$TARGET_OLD_HEAD"
-          git -c http.https://github.com/.extraheader="$auth_header" push --porcelain origin "HEAD:refs/heads/${TARGET_BRANCH}"
-          published_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}" --jq '.head.sha')"
-          test "$published_head" = "$publish_sha"
-          published_tree="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${published_head}" --jq '.tree.sha')"
-          test "$published_tree" = "$EXPECTED_TREE"
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}" --jq '.draft')" = true
-          printf 'Published PR16 head: %s\nPublished tree: %s\n' "$published_head" "$published_tree" >> "$GITHUB_STEP_SUMMARY"
+          test "$(jq -r '.base.ref' <<<"$pr_json")" = main
+          current_head="$(jq -r '.head.sha' <<<"$pr_json")"
+
+          if test "$current_head" = "$candidate"; then
+            outcome='already published exact candidate'
+            final_head="$current_head"
+          elif test "$current_head" = "$TARGET_OLD_HEAD"; then
+            auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+            git -C /tmp/publish.git -c http.https://github.com/.extraheader="$auth_header" push --porcelain "https://github.com/${GITHUB_REPOSITORY}.git" "refs/heads/candidate:refs/heads/${TARGET_BRANCH}"
+            outcome='published exact candidate'
+            final_head=''
+            for attempt in 1 2 3 4 5 6; do
+              observed="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}" --jq '.head.sha')"
+              if test "$observed" = "$candidate"; then
+                final_head="$observed"
+                break
+              fi
+              sleep 3
+            done
+            test "$final_head" = "$candidate"
+          else
+            moved_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${current_head}")"
+            test "$(jq '.parents | length' <<<"$moved_json")" = 1
+            test "$(jq -r '.parents[0].sha' <<<"$moved_json")" = "$TARGET_OLD_HEAD"
+            test "$(jq -r '.tree.sha' <<<"$moved_json")" = "$EXPECTED_TREE"
+            outcome='already published exact recovered child'
+            final_head="$current_head"
+          fi
+
+          final_pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
+          test "$(jq -r '.state' <<<"$final_pr")" = open
+          test "$(jq -r '.draft' <<<"$final_pr")" = true
+          test "$(jq -r '.merged' <<<"$final_pr")" = false
+          test "$(jq -r '.head.ref' <<<"$final_pr")" = "$TARGET_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$final_pr")" = "$final_head"
+          final_commit="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${final_head}")"
+          test "$(jq '.parents | length' <<<"$final_commit")" = 1
+          test "$(jq -r '.parents[0].sha' <<<"$final_commit")" = "$TARGET_OLD_HEAD"
+          test "$(jq -r '.tree.sha' <<<"$final_commit")" = "$EXPECTED_TREE"
+          printf '%s: %s\nPublished tree: %s\n' "$outcome" "$final_head" "$EXPECTED_TREE" >> "$GITHUB_STEP_SUMMARY"
