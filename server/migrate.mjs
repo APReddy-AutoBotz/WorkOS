@@ -63,7 +63,7 @@ try {
 } catch (error) {
   await client.query('rollback');
   console.error('Migration failed:', error);
-  process.exitCode = 1;
+  throw error;
 } finally {
   client.release();
   await pool.end();

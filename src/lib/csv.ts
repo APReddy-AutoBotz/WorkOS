@@ -8,7 +8,11 @@ export const toCsv = (rows: object[]) => {
     const record = row as Record<string, unknown>;
     return headers.map(header => record[header] ?? '');
   })]
-    .map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(','))
+    .map(row => row.map(value => {
+      const text = String(value);
+      const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${safe.replace(/"/g, '""')}"`;
+    }).join(','))
     .join('\n');
 };
 

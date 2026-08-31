@@ -4,7 +4,9 @@ import App from './App.tsx';
 import {DataStorage} from './services/storage';
 import './index.css';
 
-DataStorage.initialize();
+if (import.meta.env.MODE === 'test' && import.meta.env.VITE_ENABLE_TEST_FALLBACK === 'true') {
+  DataStorage.initialize();
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

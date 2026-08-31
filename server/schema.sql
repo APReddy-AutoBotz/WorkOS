@@ -267,10 +267,23 @@ create table if not exists integration_event_logs (
   created_at timestamptz not null default now()
 );
 
+alter table employees add column if not exists utilization_eligible boolean not null default true;
+alter table employees add column if not exists reporting_manager_id text references employees(id) on delete set null;
+alter table employees add column if not exists region text;
+alter table employees add column if not exists business_unit text;
+alter table employees add column if not exists joining_date date;
+alter table employees add column if not exists exit_date date;
+alter table employees add column if not exists standard_weekly_hours numeric not null default 40;
+alter table employees add column if not exists capacity_type text not null default 'Delivery';
+alter table employees add column if not exists contract_type text not null default 'Permanent';
+alter table employees add column if not exists leave_policy_id text;
+alter table employees add column if not exists entra_object_id text;
+alter table employees add column if not exists teams_user_id text;
+
 create index if not exists idx_employee_cd_map_cd on employee_country_director_map(country_director_id);
 create index if not exists idx_employees_reporting_manager on employees(reporting_manager_id);
 create index if not exists idx_employees_teams_user_id on employees(teams_user_id);
-create index if not exists idx_employees_entra_object_id on employees(entra_object_id);
+create unique index if not exists idx_employees_entra_object_id on employees(entra_object_id) where entra_object_id is not null;
 create index if not exists idx_client_cd_map_cd on client_country_director_map(country_director_id);
 create index if not exists idx_catalog_items_type_active on catalog_items(catalog_type, active, name);
 create index if not exists idx_projects_client_id on projects(client_id);
@@ -288,19 +301,6 @@ create index if not exists idx_integration_event_logs_created on integration_eve
 
 alter table users add column if not exists must_change_password boolean not null default false;
 alter table users add column if not exists entra_object_id text;
-
-alter table employees add column if not exists utilization_eligible boolean not null default true;
-alter table employees add column if not exists reporting_manager_id text references employees(id) on delete set null;
-alter table employees add column if not exists region text;
-alter table employees add column if not exists business_unit text;
-alter table employees add column if not exists joining_date date;
-alter table employees add column if not exists exit_date date;
-alter table employees add column if not exists standard_weekly_hours numeric not null default 40;
-alter table employees add column if not exists capacity_type text not null default 'Delivery';
-alter table employees add column if not exists contract_type text not null default 'Permanent';
-alter table employees add column if not exists leave_policy_id text;
-alter table employees add column if not exists entra_object_id text;
-alter table employees add column if not exists teams_user_id text;
 
 alter table audit_logs add column if not exists active_role text;
 alter table audit_logs add column if not exists source text not null default 'Web';

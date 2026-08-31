@@ -51,7 +51,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const RoleRoute = ({ children, roles }: { children: React.ReactNode; roles: readonly UserRole[] }) => {
   const user = authService.getCurrentUser();
   if (!hasRouteRole(user, roles)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/no-access" replace />;
   }
   return <>{children}</>;
 };
@@ -82,7 +82,7 @@ const DashboardRoute = () => {
   const user = authService.getCurrentUser();
   if (!user) return <Navigate to="/login" replace />;
   if (!hasRouteRole(user, ROUTE_ROLES.dashboard)) {
-    return <Navigate to={getRoleHomePath(user.role) || '/timesheets'} replace />;
+    return <Navigate to={getRoleHomePath(user.role) || '/no-access'} replace />;
   }
   return <Dashboard />;
 };
@@ -107,6 +107,13 @@ const NotFound = () => (
   </div>
 );
 
+const NoAccess = () => (
+  <div className="h-[60vh] flex flex-col items-center justify-center text-center px-6">
+    <h1 className="text-3xl font-black text-heading">Access denied</h1>
+    <p className="text-sm text-body/60 mt-2 max-w-md">Your active role does not grant access to this page.</p>
+  </div>
+);
+
 const RouteFallback = () => (
   <div className="h-[50vh] flex items-center justify-center">
     <div className="h-8 w-8 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
@@ -125,6 +132,7 @@ export default function App() {
             <ProtectedRoute>
               <AppLayout>
                 <Routes>
+                  <Route path="/no-access" element={<NoAccess />} />
                   <Route path="/" element={<DashboardRoute />} />
                   <Route path="/dashboard" element={<Navigate to="/" replace />} />
 

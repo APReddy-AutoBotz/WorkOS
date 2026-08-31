@@ -129,7 +129,7 @@ export const Login = () => {
 
               <div className="mt-8 space-y-3">
                 {[
-                  { icon: Users, label: 'People data', text: 'Employees, roles, {productConfig.terminology.regionalOwner} mappings, and active assignments.' },
+                  { icon: Users, label: 'People data', text: `Employees, roles, ${productConfig.terminology.regionalOwner} mappings, and active assignments.` },
                   { icon: Briefcase, label: 'Delivery data', text: 'Clients, projects, allocations, PM ownership, and project staffing.' },
                   { icon: Database, label: 'Audit data', text: 'Timesheet approvals, master-data changes, imports, exports, and governance events.' },
                 ].map(item => (
@@ -186,9 +186,10 @@ export const Login = () => {
               )}
 
               <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Username</label>
+                <label htmlFor="login-identifier" className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Username</label>
                 <div className="relative">
                   <input
+                    id="login-identifier"
                     type="text"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
@@ -209,9 +210,10 @@ export const Login = () => {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Password</label>
+                <label htmlFor="login-password" className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Password</label>
                 <div className="relative">
                   <input
+                    id="login-password"
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
