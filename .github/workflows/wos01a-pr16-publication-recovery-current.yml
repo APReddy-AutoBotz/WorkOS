@@ -30,10 +30,6 @@ env:
 
 jobs:
   publish-frozen-tree:
-    if: >-
-      github.repository == 'APReddy-AutoBotz/WorkOS' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'controller/wos01a-pr16-publication-recovery-current'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -43,6 +39,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'APReddy-AutoBotz/WorkOS'
+          test "${{ github.event.pull_request.head.repo.full_name }}" = "$GITHUB_REPOSITORY"
+          test "${{ github.event.pull_request.head.ref }}" = 'controller/wos01a-pr16-publication-recovery-current'
           pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${TARGET_PR}")"
           test "$(jq -r '.state' <<<"$pr_json")" = open
           test "$(jq -r '.draft' <<<"$pr_json")" = true
