@@ -40,8 +40,8 @@ assert.match(server, /must_change_password/, 'user password lifecycle flag must 
 assert.match(server, /Production startup blocked/, 'production env validation must exist');
 assert.match(server, /app\.use\(express\.static\(distDir/, 'server must serve built frontend in production');
 assert.match(server, /app\.use\('\/assets', express\.static\(join\(distDir, 'assets'\)/, 'server must serve hashed assets with immutable caching');
-assert.equal(packageJson.scripts.start, 'node server/start-production.mjs', 'production start script must be configured');
-assert.equal(packageJson.scripts['api:seed:demo'], 'node server/seed-demo.mjs', 'demo seed script must be configured');
+assert.equal(packageJson.scripts.start, 'node server/start-production.mjs', 'production start script must use the native Node runtime');
+assert.equal(packageJson.scripts['api:seed:demo'], 'node server/seed-demo.mjs', 'demo seed script must use the native Node runtime');
 assert.match(seedDemo, /generateDemoDataset/, 'demo seed must reuse canonical demo data generator');
 assert.match(seedDemo, /insert into users/, 'demo seed must provision user accounts');
 assert.match(seedDemo, /insert into user_roles/, 'demo seed must provision user roles');
