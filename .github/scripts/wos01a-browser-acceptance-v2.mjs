@@ -367,10 +367,13 @@ try {
       if (!snapshot || snapshot.path === '/admin') {
         throw new Error(`Employee was not denied /admin: ${JSON.stringify(snapshot)}`);
       }
-      if (snapshot.path !== '/ess') {
-        throw new Error(`Employee denial did not use the authorized /ess fallback: ${JSON.stringify(snapshot)}`);
+      if (snapshot.path !== '/no-access') {
+        throw new Error(`Employee denial did not settle at /no-access: ${JSON.stringify(snapshot)}`);
       }
       if (/Page not found/i.test(snapshot.text)) throw new Error('Employee denial rendered NotFound');
+      if (!/(?:^|\n)\s*Access denied\s*(?:\n|$)/i.test(snapshot.text)) {
+        throw new Error(`Employee denial did not render the explicit Access denied view: ${snapshot.text.slice(0, 500)}`);
+      }
       if (/Something went wrong|Unhandled|Application error/i.test(snapshot.text)) {
         throw new Error(`Employee denial rendered an application error: ${snapshot.text.slice(0, 500)}`);
       }

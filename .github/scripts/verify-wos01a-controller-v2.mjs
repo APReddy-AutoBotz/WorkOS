@@ -139,7 +139,8 @@ for (const [role, route] of [
   assert.ok(browserDriver.includes(`['${role}', '${route}']`), `browser driver must retain ${role} ${route}`);
 }
 assert.match(browserDriver, /Employee was not denied \/admin/);
-assert.match(browserDriver, /snapshot\.path !== '\/ess'/);
+assert.match(browserDriver, /snapshot\.path !== '\/no-access'/);
+assert.match(browserDriver, /Employee denial did not render the explicit Access denied view/);
 assert.match(browserDriver, /WOS-01A bounded browser acceptance passed\./);
 
 assert.match(browserLifecycle, /class PipeCdpClient/);
