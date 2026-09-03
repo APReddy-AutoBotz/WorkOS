@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: write
-  issues: read
 
 concurrency:
   group: wos02-exact-payload-publisher
@@ -23,40 +22,29 @@ jobs:
       - name: Checkout helper head
         uses: actions/checkout@v4
         with:
-          fetch-depth: 4
+          fetch-depth: 8
           persist-credentials: true
 
-      - name: Apply controller-verified recovery payload
+      - name: Apply exact controller-verified payload
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           EXPECTED_BASE: 072a1f1f6c7826f4c2b62566a033a32fa507a981
           EXPECTED_TREE: 799fb8711d7d770ac3a6ee67f7267100d3aa184d
           EXPECTED_GZIP_SHA256: 25bb7e6b32fdf5b45cd43009e18cb55149592e31b2128f817a59df2047fd041b
           EXPECTED_RAW_SHA256: d04b45e71fee7e2db9e2a5594af2e4d15991a0113b0fc1a365bb7aae3178dda6
           EXPECTED_GZIP_SIZE: "11169"
           EXPECTED_RAW_SIZE: "47824"
-          RECOVERY_COMMENT: "5530383474"
           HELPER_PATH: .github/workflows/wos02-exact-payload-publisher.yml
+          PAYLOAD_PATH: .github/wos02-recovery-payload.b64
         run: |
           set -euo pipefail
           test "${GITHUB_REF_NAME}" = "codex/wos-02-organization-setup-foundation"
           test "$(git merge-base HEAD "$EXPECTED_BASE")" = "$EXPECTED_BASE"
-          test "$(git diff --name-only "$EXPECTED_BASE" HEAD)" = "$HELPER_PATH"
+          actual_pre="$(git diff --name-only "$EXPECTED_BASE" HEAD | sort)"
+          expected_pre="$(printf '%s\n%s\n' "$HELPER_PATH" "$PAYLOAD_PATH" | sort)"
+          test "$actual_pre" = "$expected_pre"
 
-          gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${RECOVERY_COMMENT}" --jq .body > /tmp/comment.txt
-          python3 - <<'PY'
-          import re
-          body = open('/tmp/comment.txt', encoding='utf-8').read()
-          matches = re.findall(r'```(?:text)?\s*\n([A-Za-z0-9+/=\s]+?)\n```', body, flags=re.S)
-          if not matches:
-              raise SystemExit('recovery payload code block not found')
-          payload = max(matches, key=len)
-          payload = ''.join(payload.split())
-          open('/tmp/payload.b64', 'w', encoding='ascii').write(payload)
-          PY
-
-          base64 -d /tmp/payload.b64 > /tmp/payload.gz
+          base64 -d "$PAYLOAD_PATH" > /tmp/payload.gz
           test "$(wc -c < /tmp/payload.gz | tr -d ' ')" = "$EXPECTED_GZIP_SIZE"
           test "$(sha256sum /tmp/payload.gz | awk '{print $1}')" = "$EXPECTED_GZIP_SHA256"
           gzip -dc /tmp/payload.gz > /tmp/wos02.diff
@@ -66,14 +54,13 @@ jobs:
           git apply --check --binary /tmp/wos02.diff
           git apply --binary /tmp/wos02.diff
           git add -A
-
           test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = "9"
 
-          git update-index --force-remove "$HELPER_PATH"
-          product_tree="$(git write-tree)"
-          test "$product_tree" = "$EXPECTED_TREE"
-          git reset HEAD -- "$HELPER_PATH"
+          git update-index --force-remove "$HELPER_PATH" "$PAYLOAD_PATH"
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          git reset HEAD -- "$HELPER_PATH" "$PAYLOAD_PATH"
           test -f "$HELPER_PATH"
+          test -f "$PAYLOAD_PATH"
 
           git config user.name "WorkOS WOS-02 Controller"
           git config user.email "actions@users.noreply.github.com"
