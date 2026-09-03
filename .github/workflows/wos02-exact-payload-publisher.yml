@@ -22,7 +22,7 @@ jobs:
       - name: Checkout helper head
         uses: actions/checkout@v4
         with:
-          fetch-depth: 8
+          fetch-depth: 16
           persist-credentials: true
 
       - name: Apply exact controller-verified payload
@@ -34,17 +34,26 @@ jobs:
           EXPECTED_RAW_SHA256: d04b45e71fee7e2db9e2a5594af2e4d15991a0113b0fc1a365bb7aae3178dda6
           EXPECTED_GZIP_SIZE: "11169"
           EXPECTED_RAW_SIZE: "47824"
-          HELPER_PATH: .github/workflows/wos02-exact-payload-publisher.yml
-          PAYLOAD_PATH: .github/wos02-recovery-payload.b64
         run: |
           set -euo pipefail
+          helpers=(
+            .github/workflows/wos02-exact-payload-publisher.yml
+            .github/wos02-recovery-payload.b64
+            .github/wos02-payload.part0
+            .github/wos02-payload.part1
+            .github/wos02-payload.part2
+            .github/wos02-payload.part3
+            .github/wos02-payload.part4
+          )
           test "${GITHUB_REF_NAME}" = "codex/wos-02-organization-setup-foundation"
           test "$(git merge-base HEAD "$EXPECTED_BASE")" = "$EXPECTED_BASE"
           actual_pre="$(git diff --name-only "$EXPECTED_BASE" HEAD | sort)"
-          expected_pre="$(printf '%s\n%s\n' "$HELPER_PATH" "$PAYLOAD_PATH" | sort)"
+          expected_pre="$(printf '%s\n' "${helpers[@]}" | sort)"
           test "$actual_pre" = "$expected_pre"
 
-          base64 -d "$PAYLOAD_PATH" > /tmp/payload.gz
+          cat .github/wos02-payload.part0 .github/wos02-payload.part1 .github/wos02-payload.part2 .github/wos02-payload.part3 .github/wos02-payload.part4 > /tmp/payload.b64
+          test "$(wc -c < /tmp/payload.b64 | tr -d ' ')" = "14892"
+          base64 -d /tmp/payload.b64 > /tmp/payload.gz
           test "$(wc -c < /tmp/payload.gz | tr -d ' ')" = "$EXPECTED_GZIP_SIZE"
           test "$(sha256sum /tmp/payload.gz | awk '{print $1}')" = "$EXPECTED_GZIP_SHA256"
           gzip -dc /tmp/payload.gz > /tmp/wos02.diff
@@ -56,11 +65,10 @@ jobs:
           git add -A
           test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = "9"
 
-          git update-index --force-remove "$HELPER_PATH" "$PAYLOAD_PATH"
+          git update-index --force-remove "${helpers[@]}"
           test "$(git write-tree)" = "$EXPECTED_TREE"
-          git reset HEAD -- "$HELPER_PATH" "$PAYLOAD_PATH"
-          test -f "$HELPER_PATH"
-          test -f "$PAYLOAD_PATH"
+          git reset HEAD -- "${helpers[@]}"
+          for helper in "${helpers[@]}"; do test -f "$helper"; done
 
           git config user.name "WorkOS WOS-02 Controller"
           git config user.email "actions@users.noreply.github.com"
