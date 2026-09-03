@@ -1,0 +1,195 @@
+import { PermissionDefinition, PermissionKey, UserPermissionGrant, UserRole, UserSession } from '../types';
+
+import { productConfig } from '../config/productConfig';
+export const SYSTEM_ROLES: UserRole[] = ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead', 'Employee'];
+
+export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
+  { key: 'dashboard.view', module: 'Home', label: 'Overview Dashboard', description: 'Open the executive operations dashboard.' },
+  { key: 'employee_workspace.view', module: 'Workforce', label: `My ${productConfig.productName} Hub`, description: 'Open the unified employee self-service workspace.' },
+  { key: 'pm_workspace.view', module: 'Delivery', label: 'PM Workspace', description: 'Open the project manager workspace.' },
+  { key: 'employees.view', module: 'Workforce', label: 'Employee Directory', description: 'View employee master data inside data scope.' },
+  { key: 'employees.manage', module: 'Workforce', label: 'Manage Employees', description: 'Create and update employee master records.' },
+  { key: 'employees.password_reset', module: 'Admin', label: 'Reset Employee Passwords', description: 'Reset user passwords for supported accounts.' },
+  { key: 'projects.view', module: 'Delivery', label: 'Project Master', description: 'View projects inside data scope.' },
+  { key: 'projects.manage', module: 'Delivery', label: 'Manage Projects', description: 'Create and update project master records.' },
+  { key: 'projects.status_update', module: 'Delivery', label: 'Update Project Status', description: 'Move scoped projects between proposed, active, on-hold, and completed states.' },
+  { key: 'clients.view', module: 'Delivery', label: 'Client Portfolio', description: 'View client portfolio records inside data scope.' },
+  { key: 'clients.manage', module: 'Delivery', label: 'Manage Clients', description: 'Create and update client portfolio records.' },
+  { key: 'allocations.view', module: 'Planning', label: 'Planning Workspace', description: 'View planning signals and allocation records inside data scope.' },
+  { key: 'allocations.manage', module: 'Planning', label: 'Manage Allocations', description: 'Create, edit, and end allocations inside data scope.' },
+  { key: 'timesheets.submit', module: 'Timesheets', label: 'Submit Timesheets', description: 'Create and submit own or scoped timesheets.' },
+  { key: 'timesheets.approve', module: 'Timesheets', label: 'Approve Timesheets', description: 'Approve or reject submitted timesheets inside data scope.' },
+  { key: 'reports.view_utilization', module: 'Reports', label: 'Utilization Reports', description: 'View planned, current, and forecast utilization reports.' },
+  { key: 'reports.export', module: 'Reports', label: 'Reports Center', description: 'Download approved report exports.' },
+  { key: 'reports.data_quality', module: 'Reports', label: 'Data Quality', description: 'View workforce data-quality issues inside data scope.' },
+  { key: 'governance.brd_traceability', module: 'Governance', label: 'BRD Traceability', description: 'View implementation traceability evidence.' },
+  { key: 'leave.self_service', module: 'Leave', label: 'Leave Self-Service', description: 'View balances and submit leave requests.' },
+  { key: 'leave.team', module: 'Leave', label: 'Team Leave Calendar', description: 'View team leave and scoped leave calendars.' },
+  { key: 'leave.approve', module: 'Leave', label: 'Approve Leave', description: 'Approve, reject, or cancel scoped leave requests.' },
+  { key: 'leave.admin', module: 'Leave', label: 'Leave Administration', description: 'Manage leave policies, balances, and holiday calendars.' },
+  { key: 'approvals.view', module: 'Approvals', label: 'Approvals Inbox', description: 'View approval inbox, history, delegations, and SLA signals.' },
+  { key: 'notifications.view', module: 'Notifications', label: 'Notifications', description: 'View notifications, preferences, templates, and delivery monitoring where allowed.' },
+  { key: 'notifications.manage', module: 'Notifications', label: 'Manage Notifications', description: 'Manage notification templates and delivery monitoring.' },
+  { key: 'integrations.identity', module: 'Integrations', label: 'Identity Mapping', description: 'Manage identity and Entra-ready mappings.' },
+  { key: 'integrations.teams', module: 'Integrations', label: 'Teams Mapping', description: 'Manage Teams-ready user links and deterministic action health.' },
+  { key: 'integrations.teams_actions', module: 'Integrations', label: 'Teams Actions', description: 'Create and execute deterministic Teams approval action tokens.' },
+  { key: 'imports.manage', module: 'Admin', label: 'Import / Export', description: 'Run controlled CSV imports and view import/export history.' },
+  { key: 'audit.view', module: 'Admin', label: 'Audit Trail', description: 'View immutable platform audit logs.', protected: true },
+  { key: 'settings.manage', module: 'Admin', label: 'Governance Settings', description: 'Manage business settings and catalogs.' },
+  { key: 'permissions.manage', module: 'Admin', label: 'Permission Settings', description: 'Manage role permissions and user-specific permission grants.', protected: true },
+];
+
+export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, PermissionKey[]> = {
+  Admin: PERMISSION_DEFINITIONS.map(permission => permission.key),
+  HR: [
+    'dashboard.view',
+    'employees.view',
+    'employees.manage',
+    'employees.password_reset',
+    'projects.view',
+    'projects.manage',
+    'projects.status_update',
+    'clients.view',
+    'clients.manage',
+    'allocations.view',
+    'allocations.manage',
+    'timesheets.submit',
+    'reports.view_utilization',
+    'reports.export',
+    'reports.data_quality',
+    'governance.brd_traceability',
+    'leave.self_service',
+    'leave.team',
+    'leave.approve',
+    'leave.admin',
+    'approvals.view',
+    'notifications.view',
+    'notifications.manage',
+    'integrations.identity',
+    'integrations.teams',
+    'integrations.teams_actions',
+    'settings.manage',
+  ],
+  CountryDirector: [
+    'dashboard.view',
+    'employees.view',
+    'projects.view',
+    'clients.view',
+    'allocations.view',
+    'allocations.manage',
+    'timesheets.submit',
+    'timesheets.approve',
+    'reports.view_utilization',
+    'reports.export',
+    'reports.data_quality',
+    'governance.brd_traceability',
+    'leave.self_service',
+    'leave.team',
+    'leave.approve',
+    'approvals.view',
+    'notifications.view',
+    'integrations.teams_actions',
+  ],
+  ProjectManager: [
+    'pm_workspace.view',
+    'employees.view',
+    'projects.view',
+    'projects.status_update',
+    'allocations.view',
+    'allocations.manage',
+    'timesheets.submit',
+    'timesheets.approve',
+    'reports.view_utilization',
+    'reports.export',
+    'reports.data_quality',
+    'governance.brd_traceability',
+    'leave.self_service',
+    'leave.team',
+    'leave.approve',
+    'approvals.view',
+    'notifications.view',
+    'integrations.teams_actions',
+  ],
+  TeamLead: [
+    'employees.view',
+    'projects.view',
+    'allocations.view',
+    'timesheets.submit',
+    'timesheets.approve',
+    'reports.view_utilization',
+    'reports.export',
+    'reports.data_quality',
+    'governance.brd_traceability',
+    'leave.self_service',
+    'leave.team',
+    'leave.approve',
+    'approvals.view',
+    'notifications.view',
+    'integrations.teams_actions',
+  ],
+  Employee: [
+    'employee_workspace.view',
+    'employees.view',
+    'projects.view',
+    'timesheets.submit',
+    'leave.self_service',
+    'notifications.view',
+  ],
+};
+
+export const ROUTE_PERMISSION_KEYS = {
+  dashboard: 'dashboard.view',
+  employeeWorkspace: 'employee_workspace.view',
+  projectManagerWorkspace: 'pm_workspace.view',
+  planningWorkspace: 'allocations.view',
+  actionCenter: 'timesheets.submit',
+  employees: 'employees.view',
+  projects: 'projects.view',
+  clients: 'clients.view',
+  allocations: 'allocations.view',
+  timesheets: 'timesheets.submit',
+  timesheetApproval: 'timesheets.approve',
+  utilization: 'reports.view_utilization',
+  reportsCenter: 'reports.export',
+  dataQuality: 'reports.data_quality',
+  brdTraceability: 'governance.brd_traceability',
+  ess: 'employee_workspace.view',
+  leaveSelfService: 'leave.self_service',
+  leaveTeam: 'leave.team',
+  leaveAdmin: 'leave.admin',
+  approvals: 'approvals.view',
+  notifications: 'notifications.view',
+  identityIntegrations: 'integrations.identity',
+  teamsIntegrations: 'integrations.teams',
+  teamsActions: 'integrations.teams_actions',
+  resourcePlanning: 'allocations.view',
+  workforceCommandCenter: 'reports.data_quality',
+  importExport: 'imports.manage',
+  auditTrail: 'audit.view',
+  adminSettings: 'settings.manage',
+} satisfies Record<string, PermissionKey>;
+
+export const PROTECTED_PERMISSION_KEYS = new Set<PermissionKey>(
+  PERMISSION_DEFINITIONS.filter(permission => permission.protected).map(permission => permission.key)
+);
+
+export const getDefaultPermissionsForRole = (role: UserRole): PermissionKey[] =>
+  DEFAULT_ROLE_PERMISSIONS[role] || [];
+
+export const getEffectivePermissions = (
+  user: Pick<UserSession, 'role' | 'permissions' | 'permissionRole' | 'id' | 'employeeId'> | null | undefined,
+  grants: UserPermissionGrant[] = []
+): PermissionKey[] => {
+  if (!user) return [];
+  const defaults = getDefaultPermissionsForRole(user.role);
+  const sessionPermissions = !user.permissionRole || user.permissionRole === user.role ? user.permissions || defaults : defaults;
+  const userGrants = grants
+    .filter(grant => grant.userId === user.id || grant.employeeId === user.employeeId)
+    .map(grant => grant.permissionKey);
+  return [...new Set([...sessionPermissions, ...userGrants])];
+};
+
+export const hasPermission = (
+  user: Pick<UserSession, 'role' | 'permissions' | 'permissionRole' | 'id' | 'employeeId'> | null | undefined,
+  permissionKey: PermissionKey
+) => getEffectivePermissions(user).includes(permissionKey);

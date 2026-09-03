@@ -1,0 +1,4 @@
+employeeId,name,email,designation,department,country,region,businessUnit,reportingManagerId,primaryCountryDirectorId,mappedCountryDirectorIds,utilizationEligible,joiningDate,exitDate,standardWeeklyHours,capacityType,contractType,entraObjectId,teamsUserId,roles,initialPassword,status
+EMP-9001,Example Consultant,example.consultant@company.com,Consultant,Technology Consulting,United Kingdom,United Kingdom,Other,PM-9001,cd-4,cd-4|cd-14,true,2026-01-01,,40,Delivery,Permanent,,,Employee,,Active
+PM-9001,Example Project Manager,example.pm@company.com,Project Manager,Delivery Management,United Kingdom,,cd-1,cd-1,true,2026-01-01,,40,Delivery,Permanent,,,ProjectManager|Employee,,Active
+ADMIN-9001,Example Admin,example.admin@company.com,System Administrator,Administration,United Kingdom,,cd-1,cd-1,false,2026-01-01,,40,Governance,Permanent,,,Admin,,Active
