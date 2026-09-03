@@ -29,7 +29,7 @@ import { PermissionSettings } from '../components/admin/PermissionSettings';
 import { adminService, clientService, employeeService } from '../services/api';
 import { authService } from '../services/authService';
 import { canManagePermissions } from '../services/accessControl';
-import { CatalogItem, Client, CountryDirector, Employee, RoleDefinition, SystemSettings } from '../types';
+import { CatalogItem, Client, CountryDirector, Employee, OrganizationSetupReadiness, RoleDefinition, SystemSettings } from '../types';
 
 import { productConfig } from '../config/productConfig';
 type NoticeState = { type: 'success' | 'warning' | 'danger' | 'info'; message: string };
@@ -59,6 +59,7 @@ export const AdminSettings = () => {
   const [newIndustryName, setNewIndustryName] = useState('');
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success'>('idle');
+  const [setupReadiness, setSetupReadiness] = useState<OrganizationSetupReadiness | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmState | null>(null);
   const currentUser = authService.getCurrentUser();
@@ -66,7 +67,7 @@ export const AdminSettings = () => {
 
   useEffect(() => {
     const load = async () => {
-      const [setts, roles, cds, depts, ctrs, inds, employeeRows, clientRows] = await Promise.all([
+      const [setts, roles, cds, depts, ctrs, inds, employeeRows, clientRows, readiness] = await Promise.all([
         adminService.getSettings(),
         adminService.getRoleDefinitions(),
         adminService.getCountryDirectors(),
@@ -75,6 +76,7 @@ export const AdminSettings = () => {
         adminService.getIndustries(),
         employeeService.getAll(),
         clientService.getAll(),
+        adminService.getOrganizationSetupReadiness(),
       ]);
       setSettings(setts);
       setRoleDefinitions(roles);
@@ -84,6 +86,7 @@ export const AdminSettings = () => {
       setIndustries(inds);
       setEmployees(employeeRows);
       setClients(clientRows);
+      setSetupReadiness(readiness);
       setLoading(false);
     };
     load();
@@ -322,6 +325,26 @@ export const AdminSettings = () => {
       />
 
       {canOpenPermissionSettings && <PermissionSettings onNotice={setNotice} />}
+
+      {setupReadiness && (
+        <section className="mt-8 bg-white border border-border-light rounded-3xl p-6 shadow-sm" aria-labelledby="setup-readiness-title">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <h2 id="setup-readiness-title" className="text-lg font-bold text-heading">Organization setup readiness</h2>
+              <p className="text-xs text-body opacity-70">Calculated from persisted server configuration for {setupReadiness.organizationId} / {setupReadiness.legalEntityId}.</p>
+            </div>
+            <Badge variant={setupReadiness.ready ? 'success' : 'warning'}>{setupReadiness.ready ? 'Ready' : 'Action required'}</Badge>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {Object.entries(setupReadiness.checks).map(([key, complete]) => (
+              <div key={key} className="rounded-xl border border-slate-200 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">{key.replaceAll('_', ' ')}</p>
+                <p className="text-sm font-semibold text-heading">{complete ? 'Configured' : 'Required'}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
          {/* Main Settings Grid */}

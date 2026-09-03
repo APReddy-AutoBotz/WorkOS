@@ -3,7 +3,7 @@
  * AUTO-DETECTS backend: if /api/health returns database:connected → uses REST API.
  * Otherwise → falls back to localStorage (demo mode). Zero code change needed to switch.
  */
-import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportExportLog, SystemSettings, CountryDirector, RoleDefinition, Client, CatalogItem, UtilizationReport, UtilizationReportMode, UserAccount, DataQualityReport, DashboardReport, LeaveType, LeavePolicy, HolidayCalendar, LeaveBalance, LeaveRequest, LeaveAvailabilityEntry, ApprovalRecord, ApprovalDelegation, ApprovalSlaReport, NotificationEvent, NotificationTemplate, NotificationPreference, NotificationDeliveryAttempt, IdentityProviderLink, EntraRoleMapping, TeamsUserLink, TeamsActionToken, IntegrationEventLog, IntegrationHealthReport, ResourcePlanningReport, WorkforceCommandCenterReport, PermissionConfig, PermissionDefinition, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant } from '../types';
+import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportExportLog, SystemSettings, CountryDirector, RoleDefinition, Client, CatalogItem, UtilizationReport, UtilizationReportMode, UserAccount, DataQualityReport, DashboardReport, LeaveType, LeavePolicy, HolidayCalendar, LeaveBalance, LeaveRequest, LeaveAvailabilityEntry, ApprovalRecord, ApprovalDelegation, ApprovalSlaReport, NotificationEvent, NotificationTemplate, NotificationPreference, NotificationDeliveryAttempt, IdentityProviderLink, EntraRoleMapping, TeamsUserLink, TeamsActionToken, IntegrationEventLog, IntegrationHealthReport, ResourcePlanningReport, WorkforceCommandCenterReport, PermissionConfig, PermissionDefinition, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant, OrganizationSetupReadiness } from '../types';
 import { DataStorage, STORAGE_KEYS } from './storage';
 import { authService } from './authService';
 import {
@@ -1671,6 +1671,10 @@ export const integrationService = {
 };
 
 export const adminService = {
+  getOrganizationSetupReadiness: async (): Promise<OrganizationSetupReadiness | null> => {
+    if (!(await checkBackend())) return null;
+    return api.get<OrganizationSetupReadiness>('/api/organization-setup/readiness');
+  },
   getAuditLogs: async (): Promise<AuditLog[]> => {
     if (!hasPermission(authService.getCurrentUser(), 'audit.view')) {
       return [];

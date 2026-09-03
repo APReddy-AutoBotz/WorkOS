@@ -8,6 +8,7 @@ import express from 'express';
 import pg from 'pg';
 import { z } from 'zod';
 import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
+import { registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
 
 const { Pool } = pg;
 
@@ -93,7 +94,7 @@ const readCookie = (req, name) => {
     ?.slice(name.length + 1);
 };
 
-const requireAuth = (req, res, next) => {
+const requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization || '';
   const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
   const cookieToken = readCookie(req, 'workos_session');
@@ -103,7 +104,21 @@ const requireAuth = (req, res, next) => {
     return;
   }
   req.user = payload;
-  next();
+  try {
+    const scope = await resolveOrganizationScope(pool, req);
+    req.organizationScope = scope;
+    req.user.organizationId = scope.organizationId;
+    req.user.legalEntityId = scope.legalEntityId;
+    next();
+  } catch (error) {
+    const allowFallback = process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true';
+    if (allowFallback && error?.code === '42P01') {
+      req.organizationScope = { organizationId: 'org-default', legalEntityId: 'legal-default' };
+      next();
+      return;
+    }
+    res.status(error?.statusCode || 503).json({ error: 'Authoritative organization scope is unavailable', code: error?.code || 'ORG_SCOPE_UNAVAILABLE' });
+  }
 };
 
 const requireRoles = (...roles) => (req, res, next) => {
@@ -341,13 +356,15 @@ const collectDuplicateImportRows = (rows, getKeys) => {
 };
 
 const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e') => {
+  params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
+  const ownership = `${employeeAlias}.organization_id = $${params.length - 1} and ${employeeAlias}.legal_entity_id = $${params.length}`;
   if (req.user.activeRole === 'Employee') {
     params.push(req.user.employeeRecordId, req.user.employeeId);
-    return `(${employeeAlias}.id = $${params.length - 1} or ${employeeAlias}.employee_id = $${params.length})`;
+    return `(${ownership}) and (${employeeAlias}.id = $${params.length - 1} or ${employeeAlias}.employee_id = $${params.length})`;
   }
   if (req.user.activeRole === 'TeamLead') {
     params.push(req.user.employeeRecordId, req.user.employeeId);
-    return `(
+    return `(${ownership}) and (
       ${employeeAlias}.id = $${params.length - 1}
       or ${employeeAlias}.employee_id = $${params.length}
       or ${employeeAlias}.reporting_manager_id = $${params.length - 1}
@@ -366,7 +383,7 @@ const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e') => {
   }
   if (req.user.activeRole === 'CountryDirector') {
     params.push(req.user.countryDirectorId);
-    return `(
+    return `(${ownership}) and (
       ${employeeAlias}.primary_country_director_id = $${params.length}
       or exists (
         select 1 from employee_country_director_map scope
@@ -376,7 +393,7 @@ const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e') => {
   }
   if (req.user.activeRole === 'ProjectManager') {
     params.push(req.user.employeeRecordId, req.user.employeeId);
-    return `(
+    return `(${ownership}) and (
       ${employeeAlias}.id = $${params.length - 1}
       or ${employeeAlias}.employee_id = $${params.length}
       or exists (
@@ -388,14 +405,16 @@ const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e') => {
       )
     )`;
   }
-  return 'true';
+  return ownership;
 };
 
 const buildProjectScopeWhere = (req, params, projectAlias = 'p') => {
-  if (isGlobalRole(req)) return 'true';
+  params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
+  const ownership = `${projectAlias}.organization_id = $${params.length - 1} and ${projectAlias}.legal_entity_id = $${params.length}`;
+  if (isGlobalRole(req)) return ownership;
   if (req.user.activeRole === 'Employee' || req.user.activeRole === 'TeamLead') {
     params.push(req.user.employeeRecordId, req.user.employeeId);
-    return `exists (
+    return `(${ownership}) and exists (
       select 1 from project_allocations scope_pa
       where scope_pa.project_id = ${projectAlias}.id
         and (scope_pa.employee_id = $${params.length - 1} or scope_pa.employee_id = $${params.length})
@@ -403,11 +422,11 @@ const buildProjectScopeWhere = (req, params, projectAlias = 'p') => {
   }
   if (req.user.activeRole === 'ProjectManager') {
     params.push(req.user.employeeRecordId, req.user.employeeId);
-    return `(${projectAlias}.manager_id = $${params.length - 1} or ${projectAlias}.manager_id = $${params.length})`;
+    return `(${ownership}) and (${projectAlias}.manager_id = $${params.length - 1} or ${projectAlias}.manager_id = $${params.length})`;
   }
   if (req.user.activeRole === 'CountryDirector') {
     params.push(req.user.countryDirectorId);
-    return `exists (
+    return `(${ownership}) and exists (
       select 1
       from project_allocations scope_pa
       join employees scope_e on scope_e.id = scope_pa.employee_id
@@ -1579,6 +1598,8 @@ app.get('/api/employees', requireDatabase, requireAuth, requirePermission('emplo
         )
     `;
   }
+  params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
+  where = `where e.organization_id = $${params.length - 1} and e.legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `
     select e.*, coalesce(json_agg(ecdm.country_director_id) filter (where ecdm.country_director_id is not null), '[]') as mapped_country_director_ids
     from employees e
@@ -1888,6 +1909,8 @@ app.get('/api/projects', requireDatabase, requireAuth, requirePermission('projec
       )
     `;
   }
+  params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
+  where = `where projects.organization_id = $${params.length - 1} and projects.legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `select * from projects ${where} order by name`, params);
 });
 app.post('/api/projects', requireDatabase, requireAuth, requirePermission('projects.manage'), async (req, res) => {
@@ -2080,6 +2103,8 @@ app.get('/api/clients', requireDatabase, requireAuth, requirePermission('clients
       )
     `;
   }
+  params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
+  where = `where c.organization_id = $${params.length - 1} and c.legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `
     select c.*, coalesce(json_agg(ccdm.country_director_id) filter (where ccdm.country_director_id is not null), '[]') as country_director_ids
     from clients c
@@ -6853,6 +6878,8 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     client.release();
   }
 });
+
+registerOrganizationSetupRoutes({ app, pool, requireDatabase, requireAuth, requirePermission, audit });
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });

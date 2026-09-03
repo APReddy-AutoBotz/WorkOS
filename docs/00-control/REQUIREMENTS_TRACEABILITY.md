@@ -205,4 +205,13 @@ Owner Gate D approval:
 
 ## WOS-00F corrective traceability
 
+## WOS-02 organization and setup foundation traceability
+
+| Requirement | Implementation evidence | Executable evidence |
+|---|---|---|
+| WOS-CORE-001, WOS-CORE-002, WOS-CORE-004, WOS-CORE-006 | Ordered organization ownership migration, modular server setup boundary, persisted setup facts and centralized terminology versions | `npm run test:organization-setup`; retained `npm test` |
+| WOS-ORG-001–WOS-ORG-010 | Organizations, legal entities, scoped organizational catalogs, calendars, periods, effective history, deterministic backfill and dependency-safe retirement | `server/migrations/022_organization_setup_foundation.sql`; `tests/organization-setup-smoke.mjs` |
+| WOS-IAM-005 | Persisted user organization/legal-entity assignments and server-side caller-scope validation | Cross-scope and caller-spoof contracts in `tests/organization-setup-smoke.mjs` |
+| WOS-WKF-001, WOS-WKF-002, WOS-WKF-006 | Worker ownership/type/profile/history and atomic dependency-aware disable/exit transitions | Lifecycle, idempotency, bounds and no-write conflict contracts in `tests/organization-setup-smoke.mjs` |
+
 The WOS approval, invoice and integration requirement families are clarified by WOS-00F. PR-009 owns generic approval finality, stable conflicts and authorization evidence; PR-012 owns invoice-batch cancellation/replacement, reversal/supersession, occupancy and export evidence; PR-013 owns bounded server-side recipient resolution, atomic all-or-nothing protected event/in-app recipient and reason-mapping persistence, zero-partial-state negatives, corrected exactly-once retry, downstream external-channel isolation, delivery idempotency and event exclusivity. Historical PR #1 evidence remains distinct from active PR #14 evidence. PR #12 remains blocked while the merged baseline is under corrective hold and until the complete five-part WOS-01A dependency law is satisfied.

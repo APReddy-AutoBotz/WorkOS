@@ -126,6 +126,14 @@ export interface SystemSettings {
   currency: string;
 }
 
+export interface OrganizationSetupReadiness {
+  organizationId: string;
+  legalEntityId: string;
+  checks: Record<'organization' | 'legal_entity' | 'worker_type' | 'calendar' | 'reporting_period', boolean>;
+  ready: boolean;
+  authority: 'persisted-server-state';
+}
+
 export interface DataQualityIssue {
   entityType: string;
   entityId: string;
