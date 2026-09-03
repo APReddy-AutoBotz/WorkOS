@@ -34,6 +34,7 @@ export const resolveOrganizationScope = async (database, request) => {
 
 const asOfPredicate = (alias, parameter) =>
   `${alias}.effective_from <= ${parameter} and (${alias}.effective_to is null or ${alias}.effective_to >= ${parameter})`;
+const dateOnly = value => value instanceof Date ? value.toISOString().slice(0, 10) : String(value);
 
 export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, requireAuth, requirePermission, audit }) => {
   const router = Router();
@@ -59,8 +60,9 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     if (!catalogTypes.includes(req.params.type)) return res.status(404).json({ error: 'Unknown organization catalog' });
     const asOf = String(req.query.asOf || new Date().toISOString().slice(0, 10));
     const result = await pool.query(`select * from organization_catalog_items i where i.organization_id=$1
-      and i.catalog_type=$2 and ${asOfPredicate('i', '$3')} order by i.name limit $4`,
-    [req.organizationScope.organizationId, req.params.type, asOf, MAX_SETUP_ROWS]);
+      and i.catalog_type=$2 and (i.legal_entity_id is null or i.legal_entity_id=$3)
+      and ${asOfPredicate('i', '$4')} order by i.name, i.code, i.effective_from desc limit $5`,
+    [req.organizationScope.organizationId, req.params.type, req.organizationScope.legalEntityId, asOf, MAX_SETUP_ROWS]);
     res.json(result.rows);
   });
 
@@ -74,11 +76,30 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     const client = await pool.connect();
     try {
       await client.query('begin');
-      await client.query('select pg_advisory_xact_lock(hashtext($1))', [`${req.organizationScope.organizationId}:${req.params.type}:${parsed.data.code}`]);
+      await client.query('select pg_advisory_xact_lock(hashtext($1))',
+        [`${req.organizationScope.organizationId}:${legalEntityId}:${req.params.type}:${parsed.data.code}`]);
       if (parsed.data.parentId) {
-        const parent = await client.query('select 1 from organization_catalog_items where id=$1 and organization_id=$2 and catalog_type=$3 and active=true',
-          [parsed.data.parentId, req.organizationScope.organizationId, req.params.type]);
+        const parent = await client.query(`select 1 from organization_catalog_items where id=$1 and organization_id=$2
+          and catalog_type=$3 and active=true and (legal_entity_id is null or legal_entity_id=$4)`,
+        [parsed.data.parentId, req.organizationScope.organizationId, req.params.type, req.organizationScope.legalEntityId]);
         if (!parent.rowCount) { await client.query('rollback'); return res.status(409).json({ error:'Parent is unavailable in this scope', code:'INVALID_CATALOG_PARENT' }); }
+      }
+      const latest = (await client.query(`select effective_from,effective_to from organization_catalog_items
+        where organization_id=$1 and catalog_type=$2 and code=$3 and legal_entity_id=$4
+        order by effective_from desc limit 1 for update`,
+      [req.organizationScope.organizationId, req.params.type, parsed.data.code, legalEntityId])).rows[0];
+      if (latest && parsed.data.effectiveFrom <= dateOnly(latest.effective_from)) {
+        await client.query('rollback');
+        return res.status(409).json({ error:'Catalog versions must be added after the latest version', code:'CATALOG_VERSION_CONFLICT' });
+      }
+      if (latest?.effective_to && parsed.data.effectiveFrom <= dateOnly(latest.effective_to)) {
+        await client.query('rollback');
+        return res.status(409).json({ error:'Catalog version overlaps existing history', code:'CATALOG_VERSION_CONFLICT' });
+      }
+      if (latest?.effective_to == null && latest) {
+        await client.query(`update organization_catalog_items set effective_to=$4::date-1,updated_at=now()
+          where organization_id=$1 and catalog_type=$2 and code=$3 and legal_entity_id=$5 and effective_to is null`,
+        [req.organizationScope.organizationId, req.params.type, parsed.data.code, parsed.data.effectiveFrom, legalEntityId]);
       }
       const result = await client.query(`insert into organization_catalog_items
         (organization_id,legal_entity_id,catalog_type,code,name,parent_id,effective_from)
@@ -89,7 +110,7 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       await client.query('commit'); res.status(201).json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
-      if (error.code === '23505') return res.status(409).json({ error:'Catalog code already exists for this effective date', code:'CATALOG_VERSION_CONFLICT' });
+      if (['23P01','23505','23514'].includes(error.code)) return res.status(409).json({ error:'Catalog version conflicts with existing history', code:'CATALOG_VERSION_CONFLICT' });
       console.error(error); res.status(500).json({ error:'Catalog item creation failed' });
     } finally { client.release(); }
   });
@@ -99,12 +120,15 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const item = (await client.query('select * from organization_catalog_items where id=$1 and organization_id=$2 for update',
-        [req.params.id, req.organizationScope.organizationId])).rows[0];
+      const item = (await client.query(`select * from organization_catalog_items where id=$1 and organization_id=$2
+        and catalog_type=$3 and (legal_entity_id is null or legal_entity_id=$4) for update`,
+      [req.params.id, req.organizationScope.organizationId, req.params.type, req.organizationScope.legalEntityId])).rows[0];
       if (!item) { await client.query('rollback'); return res.status(404).json({ error:'Catalog item not found' }); }
-      const dependencies = await client.query(`select 'child' dependency,id from organization_catalog_items where parent_id=$1 and active=true
-        union all select 'worker',employee_id from worker_profiles where worker_type_id=$1 and lifecycle_status in ('Active','On Leave') limit $2`,
-      [item.id, MAX_DEPENDENCIES + 1]);
+      const dependencies = await client.query(`select 'child' dependency,id from organization_catalog_items
+        where parent_id=$1 and active=true and organization_id=$2 and (legal_entity_id is null or legal_entity_id=$3)
+        union all select 'worker',employee_id from worker_profiles where worker_type_id=$1 and organization_id=$2
+          and legal_entity_id=$3 and lifecycle_status in ('Active','On Leave') limit $4`,
+      [item.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId, MAX_DEPENDENCIES + 1]);
       if (dependencies.rows.length) { await client.query('rollback'); return res.status(409).json({ error:'Active dependencies prevent retirement', code:'CATALOG_IN_USE', dependencies:dependencies.rows.slice(0,MAX_DEPENDENCIES), truncated:dependencies.rows.length>MAX_DEPENDENCIES }); }
       const result = await client.query('update organization_catalog_items set active=false,effective_to=coalesce(effective_to,current_date),updated_at=now() where id=$1 returning *',[item.id]);
       await audit(client,req,{module:'Organization Setup',action:'Retire Catalog Item',entityType:req.params.type,entityId:item.id,oldValue:item,newValue:result.rows[0],details:'Retired catalog item after dependency analysis'});
@@ -114,11 +138,15 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
 
   router.get('/calendars', async (req,res) => {
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
-    const result=await pool.query(`select * from working_calendars c where c.organization_id=$1 and ${asOfPredicate('c','$2')} order by code limit $3`,[req.organizationScope.organizationId,asOf,MAX_SETUP_ROWS]);
+    const result=await pool.query(`select * from working_calendars c where c.organization_id=$1
+      and (c.legal_entity_id is null or c.legal_entity_id=$2) and ${asOfPredicate('c','$3')} order by code limit $4`,
+    [req.organizationScope.organizationId,req.organizationScope.legalEntityId,asOf,MAX_SETUP_ROWS]);
     res.json(result.rows);
   });
   router.get('/reporting-periods', async (req,res) => {
-    const result=await pool.query('select * from reporting_periods where organization_id=$1 order by starts_on desc limit $2',[req.organizationScope.organizationId,MAX_SETUP_ROWS]); res.json(result.rows);
+    const result=await pool.query(`select * from reporting_periods where organization_id=$1
+      and (legal_entity_id is null or legal_entity_id=$2) order by starts_on desc limit $3`,
+    [req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_SETUP_ROWS]); res.json(result.rows);
   });
   router.get('/terminology', async (req,res) => {
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
@@ -131,24 +159,29 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     const facts=await pool.query(`select
       exists(select 1 from organizations where id=$1 and status='Active') organization,
       exists(select 1 from legal_entities where id=$2 and organization_id=$1 and status='Active') legal_entity,
-      exists(select 1 from organization_catalog_items where organization_id=$1 and catalog_type='worker_type' and active) worker_type,
-      exists(select 1 from working_calendars where organization_id=$1 and active) calendar,
-      exists(select 1 from reporting_periods where organization_id=$1) reporting_period`,[org,req.organizationScope.legalEntityId]);
+      exists(select 1 from organization_catalog_items where organization_id=$1 and catalog_type='worker_type' and active
+        and (legal_entity_id is null or legal_entity_id=$2)) worker_type,
+      exists(select 1 from working_calendars where organization_id=$1 and active
+        and (legal_entity_id is null or legal_entity_id=$2)) calendar,
+      exists(select 1 from reporting_periods where organization_id=$1
+        and (legal_entity_id is null or legal_entity_id=$2)) reporting_period`,[org,req.organizationScope.legalEntityId]);
     const checks=facts.rows[0];
     res.json({ organizationId:org, legalEntityId:req.organizationScope.legalEntityId, checks,
       ready:Object.values(checks).every(Boolean), authority:'persisted-server-state' });
   });
 
   router.get('/workers/:id/dependencies', async (req,res) => {
-    const e=(await pool.query('select id from employees where id=$1 and organization_id=$2',[req.params.id,req.organizationScope.organizationId])).rows[0];
+    const e=(await pool.query('select id from employees where id=$1 and organization_id=$2 and legal_entity_id=$3',
+      [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
     if(!e) return res.status(404).json({error:'Worker not found'});
     const result=await pool.query(`select kind,id from (
-      select 'active_assignment' kind,id from project_allocations where employee_id=$1 and status='Active'
+      select 'active_assignment' kind,a.id from project_allocations a join projects p on p.id=a.project_id and p.organization_id=a.organization_id
+        where a.employee_id=$1 and a.status='Active' and p.organization_id=$2 and p.legal_entity_id=$3
       union all select 'pending_approval',id::text from approval_records where subject_employee_id=$1 and status='Pending'
-      union all select 'open_work',id::text from timesheets where employee_id=$1 and status in ('Draft','Submitted')
-      union all select 'project_owner',id from projects where manager_id=$1 and status in ('Proposed','Active','On Hold')
-      union all select 'direct_report',id from employees where reporting_manager_id=$1 and status<>'Exited'
-    ) d limit $2`,[req.params.id,MAX_DEPENDENCIES+1]);
+      union all select 'open_work',id::text from timesheets where employee_id=$1 and organization_id=$2 and status in ('Draft','Submitted')
+      union all select 'project_owner',id from projects where manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status in ('Proposed','Active','On Hold')
+      union all select 'direct_report',id from employees where reporting_manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status<>'Exited'
+    ) d limit $4`,[req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_DEPENDENCIES+1]);
     res.json({dependencies:result.rows.slice(0,MAX_DEPENDENCIES),truncated:result.rows.length>MAX_DEPENDENCIES});
   });
 
@@ -159,16 +192,26 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     try {
       await client.query('begin'); await client.query('select pg_advisory_xact_lock(hashtext($1))',[`worker:${req.params.id}`]);
       const worker=(await client.query(`select e.*,wp.lifecycle_status from employees e join worker_profiles wp on wp.employee_id=e.id
-        where e.id=$1 and e.organization_id=$2 for update`,[req.params.id,req.organizationScope.organizationId])).rows[0];
+        where e.id=$1 and e.organization_id=$2 and e.legal_entity_id=$3 and wp.organization_id=$2 and wp.legal_entity_id=$3 for update`,
+      [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
       if(!worker){await client.query('rollback');return res.status(404).json({error:'Worker not found'});}
       const replay=await client.query("select snapshot from worker_history where employee_id=$1 and snapshot->>'idempotencyKey'=$2",[worker.id,parsed.data.idempotencyKey]);
       if(replay.rowCount){await client.query('rollback');return res.json({worker:replay.rows[0].snapshot,replayed:true});}
+      const latestHistory=(await client.query(`select effective_from from worker_history where employee_id=$1
+        and organization_id=$2 order by effective_from desc limit 1 for update`,[worker.id,req.organizationScope.organizationId])).rows[0];
+      if(latestHistory && parsed.data.effectiveFrom <= dateOnly(latestHistory.effective_from)) {
+        await client.query('rollback');
+        return res.status(409).json({error:'Worker transition conflicts with existing history',code:'WORKER_VERSION_CONFLICT'});
+      }
       if(['Disabled','Exited'].includes(parsed.data.status)) {
-        const deps=await client.query(`select kind,id from (select 'active_assignment' kind,id from project_allocations where employee_id=$1 and status='Active'
+        const deps=await client.query(`select kind,id from (select 'active_assignment' kind,a.id from project_allocations a
+          join projects p on p.id=a.project_id and p.organization_id=a.organization_id
+          where a.employee_id=$1 and a.status='Active' and p.organization_id=$2 and p.legal_entity_id=$3
           union all select 'pending_approval',id::text from approval_records where subject_employee_id=$1 and status='Pending'
-          union all select 'open_work',id::text from timesheets where employee_id=$1 and status in ('Draft','Submitted')
-          union all select 'project_owner',id from projects where manager_id=$1 and status in ('Proposed','Active','On Hold')
-          union all select 'direct_report',id from employees where reporting_manager_id=$1 and status<>'Exited') d limit $2`,[worker.id,MAX_DEPENDENCIES+1]);
+          union all select 'open_work',id::text from timesheets where employee_id=$1 and organization_id=$2 and status in ('Draft','Submitted')
+          union all select 'project_owner',id from projects where manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status in ('Proposed','Active','On Hold')
+          union all select 'direct_report',id from employees where reporting_manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status<>'Exited') d limit $4`,
+        [worker.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_DEPENDENCIES+1]);
         if(deps.rowCount){await client.query('rollback');return res.status(409).json({error:'Worker has active dependencies',code:'WORKER_DEPENDENCY_CONFLICT',dependencies:deps.rows.slice(0,MAX_DEPENDENCIES),truncated:deps.rows.length>MAX_DEPENDENCIES});}
       }
       await client.query('update worker_history set effective_to=$2::date-1 where employee_id=$1 and effective_to is null',[worker.id,parsed.data.effectiveFrom]);
@@ -178,9 +221,12 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       await client.query('update employees set status=$2,exit_date=case when $2=\'Exited\' then $3 else exit_date end,updated_at=now() where id=$1',[worker.id,parsed.data.status==='Disabled'?'Exited':parsed.data.status,parsed.data.effectiveFrom]);
       await audit(client,req,{module:'Workforce',action:'Worker Lifecycle Transition',entityType:'Employee',entityId:worker.id,oldValue:{status:worker.lifecycle_status},newValue:snapshot,reason:parsed.data.reason,details:'Applied dependency-safe worker transition'});
       await client.query('commit');res.json({worker:snapshot,replayed:false});
-    } catch(error){await client.query('rollback');if(error.code==='23505')return res.status(409).json({error:'A worker history version already exists for this date',code:'WORKER_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Worker transition failed'});}finally{client.release();}
+    } catch(error){await client.query('rollback');if(['23P01','23505','23514'].includes(error.code))return res.status(409).json({error:'Worker transition conflicts with existing history',code:'WORKER_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Worker transition failed'});}finally{client.release();}
   });
 
-  router.get('/workers/:id/history', async(req,res)=>{const result=await pool.query('select * from worker_history where employee_id=$1 and organization_id=$2 order by effective_from desc limit $3',[req.params.id,req.organizationScope.organizationId,MAX_HISTORY_ROWS]);res.json(result.rows);});
+  router.get('/workers/:id/history', async(req,res)=>{const result=await pool.query(`select h.* from worker_history h
+    join employees e on e.id=h.employee_id and e.organization_id=h.organization_id
+    where h.employee_id=$1 and h.organization_id=$2 and e.legal_entity_id=$3 order by h.effective_from desc limit $4`,
+  [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_HISTORY_ROWS]);res.json(result.rows);});
   app.use('/api/organization-setup',router);
 };

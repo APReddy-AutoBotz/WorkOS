@@ -210,7 +210,7 @@ Owner Gate D approval:
 | Requirement | Implementation evidence | Executable evidence |
 |---|---|---|
 | WOS-CORE-001, WOS-CORE-002, WOS-CORE-004, WOS-CORE-006 | Ordered organization ownership migration, modular server setup boundary, persisted setup facts and centralized terminology versions | `npm run test:organization-setup`; retained `npm test` |
-| WOS-ORG-001–WOS-ORG-010 | Organizations, legal entities, scoped organizational catalogs, calendars, periods, effective history, deterministic backfill and dependency-safe retirement | `server/migrations/022_organization_setup_foundation.sql`; `tests/organization-setup-smoke.mjs` |
+| WOS-ORG-001–WOS-ORG-010 | Organizations, legal entities, scoped organizational catalogs, calendars, periods, effective history, deterministic backfill, database-enforced composite ownership, non-overlapping versions and dependency-safe retirement | `server/migrations/022_organization_setup_foundation.sql`; `server/migrations/023_wos02_scope_lifecycle_integrity.sql`; `tests/organization-setup-smoke.mjs` |
 | WOS-IAM-005 | Persisted user organization/legal-entity assignments and server-side caller-scope validation | Cross-scope and caller-spoof contracts in `tests/organization-setup-smoke.mjs` |
 | WOS-WKF-001, WOS-WKF-002, WOS-WKF-006 | Worker ownership/type/profile/history and atomic dependency-aware disable/exit transitions | Lifecycle, idempotency, bounds and no-write conflict contracts in `tests/organization-setup-smoke.mjs` |
 
