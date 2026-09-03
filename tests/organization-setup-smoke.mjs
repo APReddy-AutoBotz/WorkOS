@@ -42,6 +42,8 @@ assert.match(service, /Catalog versions must be added after the latest version/,
 assert.match(service, /Worker transition conflicts with existing history/, 'backdated worker transitions must return a stable conflict');
 assert.match(service, /catalog_type=\$3 and \(legal_entity_id is null or legal_entity_id=\$4\) for update/, 'catalog retirement must match type and legal scope');
 assert.match(service, /e\.legal_entity_id=\$3 and wp\.organization_id=\$2 and wp\.legal_entity_id=\$3/, 'worker mutations must match persisted legal scope');
+assert.match(service, /router\.get\('\/workers\/:id\/history'[\s\S]*join worker_profiles wp on wp\.employee_id=e\.id[\s\S]*if\(!worker\) return res\.status\(404\)/, 'worker history must fail closed unless the employee profile belongs to the persisted legal scope');
+assert.match(service, /select h\.\* from worker_history h[\s\S]*join employees e[\s\S]*join worker_profiles wp[\s\S]*e\.legal_entity_id=\$3/, 'worker history rows must be resolved through authoritative employee and profile ownership');
 assert.match(server, /registerOrganizationSetupRoutes/, 'canonical API must register the setup module');
 assert.match(ui, /Organization setup readiness/, 'governance UI must expose setup readiness');
 assert.match(ui, /setupReadiness\.checks/, 'UI must render server-derived checks');

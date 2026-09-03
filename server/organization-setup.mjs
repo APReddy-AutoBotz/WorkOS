@@ -224,9 +224,20 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     } catch(error){await client.query('rollback');if(['23P01','23505','23514'].includes(error.code))return res.status(409).json({error:'Worker transition conflicts with existing history',code:'WORKER_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Worker transition failed'});}finally{client.release();}
   });
 
-  router.get('/workers/:id/history', async(req,res)=>{const result=await pool.query(`select h.* from worker_history h
-    join employees e on e.id=h.employee_id and e.organization_id=h.organization_id
-    where h.employee_id=$1 and h.organization_id=$2 and e.legal_entity_id=$3 order by h.effective_from desc limit $4`,
-  [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_HISTORY_ROWS]);res.json(result.rows);});
+  router.get('/workers/:id/history', async(req,res)=>{
+    const worker=(await pool.query(`select e.id from employees e join worker_profiles wp on wp.employee_id=e.id
+      and wp.organization_id=e.organization_id and wp.legal_entity_id=e.legal_entity_id
+      where e.id=$1 and e.organization_id=$2 and e.legal_entity_id=$3`,
+    [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
+    if(!worker) return res.status(404).json({error:'Worker not found'});
+    const result=await pool.query(`select h.* from worker_history h
+      join employees e on e.id=h.employee_id and e.organization_id=h.organization_id
+      join worker_profiles wp on wp.employee_id=e.id and wp.organization_id=e.organization_id
+        and wp.legal_entity_id=e.legal_entity_id
+      where h.employee_id=$1 and h.organization_id=$2 and e.legal_entity_id=$3
+      order by h.effective_from desc limit $4`,
+    [worker.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_HISTORY_ROWS]);
+    res.json(result.rows);
+  });
   app.use('/api/organization-setup',router);
 };
