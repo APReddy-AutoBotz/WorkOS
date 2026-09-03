@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  issues: read
 
 concurrency:
   group: wos02-exact-payload-publisher
@@ -19,86 +20,62 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout exact helper head
+      - name: Checkout helper head
         uses: actions/checkout@v4
         with:
           fetch-depth: 4
           persist-credentials: true
 
-      - name: Verify lease and apply exact verified payload
+      - name: Apply controller-verified recovery payload
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           EXPECTED_BASE: 072a1f1f6c7826f4c2b62566a033a32fa507a981
           EXPECTED_TREE: 799fb8711d7d770ac3a6ee67f7267100d3aa184d
           EXPECTED_GZIP_SHA256: 25bb7e6b32fdf5b45cd43009e18cb55149592e31b2128f817a59df2047fd041b
           EXPECTED_RAW_SHA256: d04b45e71fee7e2db9e2a5594af2e4d15991a0113b0fc1a365bb7aae3178dda6
           EXPECTED_GZIP_SIZE: "11169"
           EXPECTED_RAW_SIZE: "47824"
+          RECOVERY_COMMENT: "5530383474"
+          HELPER_PATH: .github/workflows/wos02-exact-payload-publisher.yml
         run: |
           set -euo pipefail
           test "${GITHUB_REF_NAME}" = "codex/wos-02-organization-setup-foundation"
           test "$(git merge-base HEAD "$EXPECTED_BASE")" = "$EXPECTED_BASE"
-          test "$(git diff --name-only "$EXPECTED_BASE" HEAD)" = ".github/workflows/wos02-exact-payload-publisher.yml"
+          test "$(git diff --name-only "$EXPECTED_BASE" HEAD)" = "$HELPER_PATH"
 
-          cat > /tmp/payload.b64 <<'PAYLOAD'
-          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
-          Bu+5/CutgydNcE8NXH...
+          gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${RECOVERY_COMMENT}" --jq .body > /tmp/comment.txt
+          python3 - <<'PY'
+          import re
+          body = open('/tmp/comment.txt', encoding='utf-8').read()
+          matches = re.findall(r'```(?:text)?\s*\n([A-Za-z0-9+/=\s]+?)\n```', body, flags=re.S)
+          if not matches:
+              raise SystemExit('recovery payload code block not found')
+          payload = max(matches, key=len)
+          payload = ''.join(payload.split())
+          open('/tmp/payload.b64', 'w', encoding='ascii').write(payload)
+          PY
+
+          base64 -d /tmp/payload.b64 > /tmp/payload.gz
+          test "$(wc -c < /tmp/payload.gz | tr -d ' ')" = "$EXPECTED_GZIP_SIZE"
+          test "$(sha256sum /tmp/payload.gz | awk '{print $1}')" = "$EXPECTED_GZIP_SHA256"
+          gzip -dc /tmp/payload.gz > /tmp/wos02.diff
+          test "$(wc -c < /tmp/wos02.diff | tr -d ' ')" = "$EXPECTED_RAW_SIZE"
+          test "$(sha256sum /tmp/wos02.diff | awk '{print $1}')" = "$EXPECTED_RAW_SHA256"
+
+          git apply --check --binary /tmp/wos02.diff
+          git apply --binary /tmp/wos02.diff
+          git add -A
+
+          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = "9"
+
+          git update-index --force-remove "$HELPER_PATH"
+          product_tree="$(git write-tree)"
+          test "$product_tree" = "$EXPECTED_TREE"
+          git reset HEAD -- "$HELPER_PATH"
+          test -f "$HELPER_PATH"
+
+          git config user.name "WorkOS WOS-02 Controller"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "feat: add organization setup foundation"
+          git push origin HEAD:refs/heads/codex/wos-02-organization-setup-foundation
