@@ -85,7 +85,7 @@ jobs:
           test "$(wc -c < "$RUNNER_TEMP/correction.diff")" = "$RAW_BYTES"
           echo "$RAW_SHA  $RUNNER_TEMP/correction.diff" | sha256sum -c -
           git apply --binary "$RUNNER_TEMP/correction.diff"
-          actual="$(git diff --name-only | sort | tr '\n' ' ')"
+          actual="$(git status --porcelain=v1 | cut -c4- | sort | tr '\n' ' ')"
           expected="docs/00-control/REQUIREMENTS_TRACEABILITY.md server/index.mjs server/migrations/027_wos02_reporting_period_authority.sql server/organization-setup.mjs server/reporting-periods.mjs tests/organization-setup-smoke.mjs "
           test "$actual" = "$expected"
           git diff --check
