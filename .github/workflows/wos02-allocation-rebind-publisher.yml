@@ -1,0 +1,96 @@
+name: WOS-02 Allocation Acceptance Rebind Publisher
+
+on:
+  push:
+    branches: [controller/wos02-migration-publisher-temp2]
+    paths: ['.github/workflows/wos02-allocation-rebind-publisher.yml']
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 7a7db8ade43600ede187e379b0b8c1f96aeac53d
+  EXPECTED_PRODUCT_TREE: 78bc027edc4f44b2e4e5c8a773c1b0e75cd4af3e
+  EXPECTED_CONTROLLER: ae83661ae7782743e880f51cae04c6f80e1e1eda
+  OLD_PRODUCT: 031be9e18b6871594f0cfef25f8b098741dde74c
+  OLD_TREE: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1
+  CONTROLLER_BRANCH: controller/wos02-exact-acceptance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.state!=='open'||!product.draft||product.head.sha!==process.env.EXPECTED_PRODUCT) failures.push(`product=${product.state}/draft:${product.draft}/head:${product.head.sha}`);
+            const {data:pc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:product.head.sha});
+            if(pc.commit.tree.sha!==process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${pc.commit.tree.sha}`);
+            if(controller.state!=='open'||!controller.draft||controller.head.sha!==process.env.EXPECTED_CONTROLLER) failures.push(`controller=${controller.state}/draft:${controller.draft}/head:${controller.head.sha}`);
+            if(controller.head.ref!==process.env.CONTROLLER_BRANCH) failures.push(`controller branch=${controller.head.ref}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Rebind only exact product head and tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CONTROLLER"
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/wos02-final-review-acceptance.yml')
+          s=p.read_text()
+          old_head='031be9e18b6871594f0cfef25f8b098741dde74c'
+          new_head='7a7db8ade43600ede187e379b0b8c1f96aeac53d'
+          old_tree='6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1'
+          new_tree='78bc027edc4f44b2e4e5c8a773c1b0e75cd4af3e'
+          assert s.count(old_head)==1, s.count(old_head)
+          assert s.count(old_tree)==1, s.count(old_tree)
+          s=s.replace(old_head,new_head).replace(old_tree,new_tree)
+          assert s.count(new_head)==1 and s.count(new_tree)==1
+          p.write_text(s)
+          PY
+          test "$(git diff --name-only | tr '\n' ' ')" = ".github/workflows/wos02-final-review-acceptance.yml "
+          grep -q "$EXPECTED_PRODUCT" .github/workflows/wos02-final-review-acceptance.yml
+          grep -q "$EXPECTED_PRODUCT_TREE" .github/workflows/wos02-final-review-acceptance.yml
+          ! grep -q "$OLD_PRODUCT" .github/workflows/wos02-final-review-acceptance.yml
+          ! grep -q "$OLD_TREE" .github/workflows/wos02-final-review-acceptance.yml
+          git diff --check
+          git add .github/workflows/wos02-final-review-acceptance.yml
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'CTRL: rebind WOS-02 acceptance to allocation correction'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_CONTROLLER"
+
+      - name: Revalidate live leases before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.head.sha!==process.env.EXPECTED_PRODUCT||!product.draft) failures.push(`product=${product.head.sha}/draft:${product.draft}`);
+            if(controller.head.sha!==process.env.EXPECTED_CONTROLLER||!controller.draft) failures.push(`controller=${controller.head.sha}/draft:${controller.draft}`);
+            if(failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing controller branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"$CONTROLLER_BRANCH"
