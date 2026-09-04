@@ -1,0 +1,4 @@
+WOS-02 five-defect recovery publisher trigger.
+Controller-only. No product authority.
+Expected product base: d3355ea55ae3cd114c54729ad4835a47536cb55a
+Expected result tree: 566ee6a6426e6a41e0783d86c7b3598d9f9c3b05
