@@ -293,8 +293,8 @@ try {
   });
 
   await check('canonical employee deactivation is independently blocked by active dependency with no write', async () => {
-    await pool.query(`insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,status,billable,organization_id)
-      values('alloc-deactivation-final',$1,'project-final',10,'2026-01-01','2026-12-31','Active',true,'org-final')
+    await pool.query(`insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,status,billable,organization_id,legal_entity_id)
+      values('alloc-deactivation-final',$1,'project-final',10,'2026-01-01','2026-12-31','Active',true,'org-final','legal-a')
       on conflict(id) do update set status='Active'`, [scopedEmployee]);
     const before = (await pool.query(`select status from employees where id=$1`, [scopedEmployee])).rows[0].status;
     const response = await call('DELETE', `/api/employees/${scopedEmployee}`, { token: adminToken, scope: scopeA, body: { reason: 'dependency acceptance' } });
@@ -305,8 +305,8 @@ try {
   });
 
   await check('cross-organization timesheet approval is denied with no mutation', async () => {
-    await pool.query(`insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours,submitted_at,organization_id)
-      values($1,'other-e','2026-08-16','Submitted',8,8,now(),'org-other')`, [otherTimesheetId]);
+    await pool.query(`insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours,submitted_at,organization_id,legal_entity_id)
+      values($1,'other-e','2026-08-16','Submitted',8,8,now(),'org-other','legal-other')`, [otherTimesheetId]);
     const response = await call('PATCH', `/api/timesheets/${otherTimesheetId}/status`, { token: adminToken, scope: scopeA, body: { status: 'Approved' } });
     assert.ok([403, 404].includes(response.status), JSON.stringify(response.body));
     assert.equal((await pool.query(`select status from timesheets where id=$1`, [otherTimesheetId])).rows[0].status, 'Submitted');
