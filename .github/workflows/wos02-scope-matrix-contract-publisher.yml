@@ -1,0 +1,146 @@
+name: WOS-02 Scope Matrix Contract Publisher
+
+on:
+  push:
+    branches: [controller/wos02-migration-publisher-temp2]
+    paths: ['.github/workflows/wos02-scope-matrix-contract-publisher.yml']
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 031be9e18b6871594f0cfef25f8b098741dde74c
+  EXPECTED_PRODUCT_TREE: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1
+  EXPECTED_CONTROLLER: 631b8d590ce3245efc4f8c23febf0666ad9d348b
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify exact live leases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)" = "$EXPECTED_MAIN"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq .head.sha)" = "$EXPECTED_PRODUCT"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq .draft)" = "true"
+          test "$(gh api repos/$GITHUB_REPOSITORY/commits/$EXPECTED_PRODUCT --jq .commit.tree.sha)" = "$EXPECTED_PRODUCT_TREE"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq .head.sha)" = "$EXPECTED_CONTROLLER"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq .draft)" = "true"
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Correct only stale scope-write test contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/wos02-scope-write-acceptance.mjs')
+          s = p.read_text()
+          original = s
+
+          def one(old, new, label):
+              global s
+              count = s.count(old)
+              assert count == 1, f'{label}: expected 1 occurrence, found {count}'
+              s = s.replace(old, new, 1)
+
+          one(
+              "await pool.query(`insert into organizations(id,code,name,effective_from) values('org-scope','ORG-SCOPE','Scope Org','2026-01-01') on conflict(id) do nothing`);",
+              "await pool.query(`insert into organizations(id,code,name,effective_from) values\n ('org-scope','ORG-SCOPE','Scope Org','2026-01-01'),\n ('org-duplicate','ORG-DUPLICATE','Duplicate Org','2026-01-01')\n on conflict(id) do nothing`);",
+              'organizations fixture',
+          )
+          one(
+              " ('legal-scope-b','org-scope','LEGAL-SCOPE-B','Scope Legal B','2026-01-01')\n on conflict(id) do nothing`);",
+              " ('legal-scope-b','org-scope','LEGAL-SCOPE-B','Scope Legal B','2026-01-01'),\n ('legal-duplicate','org-duplicate','LEGAL-DUPLICATE','Duplicate Legal','2026-01-01')\n on conflict(id) do nothing`);",
+              'legal entities fixture',
+          )
+          marker = "await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)\n values('admin-scope','ADMIN-SCOPE','Scope Admin','scope-admin@example.test','System Administrator','Administration','Synthetic','cd-scope','Active','org-scope','legal-scope-a')\n on conflict(id) do nothing`);"
+          replacement = "await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)\n values('legal-b-employee','E-LEGAL-B','Legal B Employee','legal-b-employee@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-scope','legal-scope-b')\n on conflict(id) do nothing`);\n" + marker
+          one(marker, replacement, 'legal-B employee fixture')
+
+          one(
+              "values('dup-canon-b','E-DUP-CANON','Duplicate Canon B','dup-canon-b@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-scope','legal-scope-b')`);",
+              "values('dup-canon-other','E-DUP-CANON','Duplicate Canon Other','dup-canon-other@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-duplicate','legal-duplicate')`);",
+              'canonical duplicate preseed',
+          )
+          one(
+              "await check('canonical employee save supports duplicate employee code in another legal entity without ID reuse', async () => {",
+              "await check('canonical employee save supports organization-scoped duplicate employee code without ID reuse', async () => {",
+              'canonical duplicate title',
+          )
+          old = """    const rows = (await pool.query(`select id,legal_entity_id from employees where organization_id='org-scope' and employee_id='E-DUP-CANON' order by legal_entity_id`)).rows;
+    assert.equal(rows.length, 2, JSON.stringify(rows));
+    assert.deepEqual(rows.map(row => row.legal_entity_id), ['legal-scope-a','legal-scope-b']);
+    assert.notEqual(rows[0].id, rows[1].id);
+    employeeA = rows.find(row => row.legal_entity_id === 'legal-scope-a').id;"""
+          new = """    const rows = (await pool.query(`select id,organization_id,legal_entity_id from employees where employee_id='E-DUP-CANON' order by organization_id`)).rows;
+    assert.equal(rows.length, 2, JSON.stringify(rows));
+    assert.deepEqual(rows.map(row => row.organization_id), ['org-duplicate','org-scope']);
+    assert.notEqual(rows[0].id, rows[1].id);
+    employeeA = rows.find(row => row.organization_id === 'org-scope' && row.legal_entity_id === 'legal-scope-a').id;"""
+          one(old, new, 'canonical duplicate assertion')
+
+          one(
+              "values('dup-import-b','E-DUP-IMPORT','Duplicate Import B','dup-import-b@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-scope','legal-scope-b')`);",
+              "values('dup-import-other','E-DUP-IMPORT','Duplicate Import Other','dup-import-other@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-duplicate','legal-duplicate')`);",
+              'import duplicate preseed',
+          )
+          one(
+              "await check('employee import supports duplicate employee code in another legal entity without ID reuse', async () => {",
+              "await check('employee import supports organization-scoped duplicate employee code without ID reuse', async () => {",
+              'import duplicate title',
+          )
+          old = """    const rows = (await pool.query(`select id,legal_entity_id from employees where organization_id='org-scope' and employee_id='E-DUP-IMPORT' order by legal_entity_id`)).rows;
+    assert.equal(rows.length, 2, JSON.stringify(rows));
+    assert.notEqual(rows[0].id, rows[1].id);
+    importedEmployeeA = rows.find(row => row.legal_entity_id === 'legal-scope-a').id;"""
+          new = """    const rows = (await pool.query(`select id,organization_id,legal_entity_id from employees where employee_id='E-DUP-IMPORT' order by organization_id`)).rows;
+    assert.equal(rows.length, 2, JSON.stringify(rows));
+    assert.deepEqual(rows.map(row => row.organization_id), ['org-duplicate','org-scope']);
+    assert.notEqual(rows[0].id, rows[1].id);
+    importedEmployeeA = rows.find(row => row.organization_id === 'org-scope' && row.legal_entity_id === 'legal-scope-a').id;"""
+          one(old, new, 'import duplicate assertion')
+
+          s = s.replace("'dup-canon-b'", "'legal-b-employee'")
+          s = s.replace("'Duplicate Canon B'", "'Legal B Employee'")
+
+          assert s != original
+          assert "org-duplicate" in s and "legal-duplicate" in s
+          assert "canonical employee save supports organization-scoped duplicate employee code" in s
+          assert "employee import supports organization-scoped duplicate employee code" in s
+          assert "values('legal-b-employee','E-LEGAL-B'" in s
+          assert "'dup-canon-b'" not in s
+          p.write_text(s)
+          PY
+          node --check .github/scripts/wos02-scope-write-acceptance.mjs
+          git diff --check
+          test "$(git diff --name-only | wc -l)" = 1
+          test "$(git diff --name-only)" = ".github/scripts/wos02-scope-write-acceptance.mjs"
+          grep -q "organization-scoped duplicate employee code" .github/scripts/wos02-scope-write-acceptance.mjs
+          grep -q "org-duplicate" .github/scripts/wos02-scope-write-acceptance.mjs
+          grep -q "legal-b-employee" .github/scripts/wos02-scope-write-acceptance.mjs
+
+      - name: Revalidate and non-force fast-forward existing controller branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)" = "$EXPECTED_MAIN"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq .head.sha)" = "$EXPECTED_PRODUCT"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq .head.sha)" = "$EXPECTED_CONTROLLER"
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/scripts/wos02-scope-write-acceptance.mjs
+          git commit -m 'test: align duplicate employee scope contract'
+          git push origin HEAD:controller/wos02-exact-acceptance
