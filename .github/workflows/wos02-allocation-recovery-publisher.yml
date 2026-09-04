@@ -1,0 +1,102 @@
+name: WOS-02 Allocation Recovery Publisher
+
+on:
+  push:
+    branches: [controller/wos02-migration-publisher-temp2]
+    paths: ['.github/workflows/wos02-allocation-recovery-publisher.yml']
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 031be9e18b6871594f0cfef25f8b098741dde74c
+  EXPECTED_PRODUCT_TREE: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1
+  RESULT_TREE: 78bc027edc4f44b2e4e5c8a773c1b0e75cd4af3e
+  RAW_BYTES: '4416'
+  RAW_SHA: e5deb0c5f02641d07530445aea32c5e83d53b58a48f6fdd100c59d26d5dd0ffb
+  GZIP_BYTES: '1341'
+  GZIP_SHA: 79651d3456d20ffb3be758977d4bad43c94d1dd44f0740d0020a2c25890b358c
+  TARGET_BRANCH: codex/wos-02-organization-setup-foundation
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data: pr} = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (pr.state !== 'open' || !pr.draft) failures.push(`PR37 lifecycle=${pr.state}/draft:${pr.draft}`);
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`PR37 branch=${pr.head.ref}`);
+            if (pr.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${pr.head.sha}`);
+            if (pr.base.sha !== process.env.EXPECTED_MAIN) failures.push(`PR37 base=${pr.base.sha}`);
+            const {data: commit} = await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.EXPECTED_PRODUCT});
+            if (commit.commit.tree.sha !== process.env.EXPECTED_PRODUCT_TREE) failures.push(`PR37 tree=${commit.commit.tree.sha}`);
+            if (failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact product head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify and apply exact recovery payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_PRODUCT_TREE"
+          cat > "$RUNNER_TEMP/payload.b64" <<'PAYLOAD'
+          H4sIAAAAAAACA71WWXPTSBB+96/oraKwHdvyESeBpLKwBTzkaami9gmlvGOpHQ9IGjEzihMI/317DsmSr2RZWL8kM9Pq4+uvj5gvFjAY3HANbKhQ3qIc8izGuyD9pGC+ddWy/8FigSfsOAqCF/PTeBK9hPFodDqdtgaDwQ49rV6vt0vX69cwmExH0/4Z9Ozf8QjojuV5kAulO+0hy/mQJYmImOYiU+0+SPxScIlvmWZzprC6+KPQy+rwHmXKlaJPOm2WtMD8IvpeQy7xlotCwSXkTCqMg5g0BTx2QgCvoMNWjOCIEo6ZDr4UKO87bYUJRhqOYCFFSlrEJzrOaq7BaokSgcek+dkYWBaDkDcs41/t+8w9TOxDgjcsmZF2ru/9wzEshIQiJ2+QovzYdM4GFtT1fYhEjo2bq71S1tw7a+0qvu52AylW6uPougz5HLIiSS5aA3PgC+g0jcPz5/BbiVsXvrV6azjXAFzF7+640urPQiseo7W8BXJDldPzGOLjJyK+DZqP9I0oMg2/w6i0dw4Llii8cGcT7+EoTMgeqV1+SpEkcxZ9bncvSjGJKlCa6UJ1iNXd4JMiIn4DlFLIc2j/UZmDTGhKfEGc4BnoJQIjGgvJv2KTPmvagKNNG77X7elCZhe+nibH/VNTT5PT/otfV07m52Ik+PEuSoqYoHc3/bVIJNKUPG4IlXc1MUf8eMY0CWZi1emW2XJJ3pH+YLu8KgsbT6UusDDu0rVdkZWujacm5jy7gSN39TcRsHzcYP3Dg62wvk/Q8ZlL0HTSH49/ZYbqblSJqJypAvlJncVrvO7WKosqoUj0ugwvLy9hVPWQxwuq9z8XVK9ZUPb4vVVzlRUx1x3nsEWlv+4OqYiLBBv+UAKr3hGZi/P1BHoF7b8s7WEt36bu1H4jceO234rrc1ojtahhPZyBIo/zgUrFZ/ST+3EhP8vPJov4xfRlEJyMFuPp2bw5y5+gxk33Jwga+p9MDflPqlmvaCvQQcp0tOy4BaEPpgrCIU9zIbUKhw5t+ofqJLn/GKrww/WRnQr+xV8Z260nacQ0T8Q94oZOP3JCP+UrKd+EyrNrEOHeKR/uHfPhs+NhH9qlInAOESW4kAMqEiJUoRDSgkbrHEGZIovtYDkQle9nancQ5Wt9Wv6g67UVxdt675T/eNUZNLyHcPXWK1cOgBize4ikUGpggQCzthAs5AWSpMHjMWhqnbROm0eWiZ8GD8+MZ4SJFjtthh1a7WrkrRnrb9oIuwar9deg2K1nikMHzeJi5pGFyQ46lIruPOBildF5yXPbV3eD9q+WutAOlnBzrWvS8GnrGyFeQrYgVA474JGADFcUdJ7wiNd9NjyysESuja6WPCFCZmuA6pwiYa4M1bgrtD3AkFrCZkG2tM1a2IVY+GQDtTnv/d5lJTywrWy9eWU71exfVLbevJr1ohIeGeAUS9EH3wDNV52PacWpgAttOJRybWFjDeAqONJCuyG1H71blhRo6B4JlqCKMOxQxk0SB20IH8IHuMFsJomzIp0VBcHbCbvn5xrv9AHaU2CM2g19itIsjzYGyoDrQGYxookEgtw35UCvBzy0tHPLSrixrYRdD+TP2DIccyWLNnnY5G9EKxA325yLdMF4QrNOUNFVianDfqgFap6iWiLqRgfcHG3/pe+VdGW7SG76ou1FbBd3w2dTg0jl43ZTq/w0SiJBgVkq1trI/L65xxk8diDCI1qdhzRd5azhpbWjbGFYi+XsJTKI5JYAd/3LtVI6kmJ+k9lV2pj6B/rBDltAEQAA
+          PAYLOAD
+          base64 -d "$RUNNER_TEMP/payload.b64" > "$RUNNER_TEMP/correction.diff.gz"
+          test "$(wc -c < "$RUNNER_TEMP/correction.diff.gz")" = "$GZIP_BYTES"
+          echo "$GZIP_SHA  $RUNNER_TEMP/correction.diff.gz" | sha256sum -c -
+          gzip -dc "$RUNNER_TEMP/correction.diff.gz" > "$RUNNER_TEMP/correction.diff"
+          test "$(wc -c < "$RUNNER_TEMP/correction.diff")" = "$RAW_BYTES"
+          echo "$RAW_SHA  $RUNNER_TEMP/correction.diff" | sha256sum -c -
+          git apply --binary "$RUNNER_TEMP/correction.diff"
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "server/index.mjs tests/organization-setup-smoke.mjs "
+          git diff --check
+          git add server/index.mjs tests/organization-setup-smoke.mjs
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'fix: allow explicit allocation IDs on create'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$RESULT_TREE"
+
+      - name: Revalidate live lease immediately before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data: pr} = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (pr.state !== 'open' || !pr.draft) failures.push(`PR37 lifecycle=${pr.state}/draft:${pr.draft}`);
+            if (pr.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${pr.head.sha}`);
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`PR37 branch=${pr.head.ref}`);
+            if (failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"$TARGET_BRANCH"
+
+      - name: Verify published exact product tree
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {data: pr} = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if (pr.state !== 'open' || !pr.draft) return core.setFailed(`PR37 lifecycle=${pr.state}/draft:${pr.draft}`);
+            const {data: commit} = await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:pr.head.sha});
+            if (commit.commit.tree.sha !== process.env.RESULT_TREE) core.setFailed(`published tree=${commit.commit.tree.sha}`);
+            if (commit.parents?.[0]?.sha !== process.env.EXPECTED_PRODUCT) core.setFailed(`published parent=${commit.parents?.[0]?.sha}`);
