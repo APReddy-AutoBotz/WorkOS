@@ -1,0 +1,115 @@
+name: WOS-02 Worker Controller Rebind Builder
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-worker-controller-rebind-builder.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: a0bf8e2aa9d1160abad981f2df85954c9f8e0987
+  EXPECTED_PRODUCT_TREE: 96869f1ec904b05513384cc5af104d5f78a540c9
+  EXPECTED_CONTROLLER: c387d0a5c4c14870df307122f203267a037ac921
+  OLD_PRODUCT: 7a7db8ade43600ede187e379b0b8c1f96aeac53d
+  OLD_TREE: 78bc027edc4f44b2e4e5c8a773c1b0e75cd4af3e
+  CONTROLLER_BRANCH: controller/wos02-exact-acceptance
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.state!=='open'||!product.draft||product.head.sha!==process.env.EXPECTED_PRODUCT) failures.push(`product=${product.state}/draft:${product.draft}/head:${product.head.sha}`);
+            const {data:pc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:product.head.sha});
+            if(pc.commit.tree.sha!==process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${pc.commit.tree.sha}`);
+            if(controller.state!=='open'||!controller.draft||controller.head.sha!==process.env.EXPECTED_CONTROLLER) failures.push(`controller=${controller.state}/draft:${controller.draft}/head:${controller.head.sha}`);
+            if(controller.head.ref!==process.env.CONTROLLER_BRANCH) failures.push(`controller branch=${controller.head.ref}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rebind and extend exact worker acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/wos02-final-review-acceptance.yml')
+          s=p.read_text()
+          old_head='7a7db8ade43600ede187e379b0b8c1f96aeac53d'
+          new_head='a0bf8e2aa9d1160abad981f2df85954c9f8e0987'
+          old_tree='78bc027edc4f44b2e4e5c8a773c1b0e75cd4af3e'
+          new_tree='96869f1ec904b05513384cc5af104d5f78a540c9'
+          assert s.count(old_head)==1, s.count(old_head)
+          assert s.count(old_tree)==1, s.count(old_tree)
+          assert 'wos02-worker-lifecycle-acceptance.mjs' not in s
+          s=s.replace(old_head,new_head).replace(old_tree,new_tree)
+          s=s.replace("      - '.github/scripts/wos02-scope-write-acceptance.mjs'\n", "      - '.github/scripts/wos02-scope-write-acceptance.mjs'\n      - '.github/scripts/wos02-worker-lifecycle-acceptance.mjs'\n")
+          s=s.replace('Verify exact product controller main and 21-file authority','Verify exact product controller main and 22-file authority')
+          s=s.replace("              'server/organization-setup.mjs',\n", "              'server/organization-setup.mjs',\n              'server/worker-lifecycle.mjs',\n")
+          s=s.replace('          node --check server/organization-setup.mjs\n          node --check server/seed-demo.mjs\n', '          node --check server/organization-setup.mjs\n          node --check server/worker-lifecycle.mjs\n          node --check server/seed-demo.mjs\n')
+          s=s.replace('for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_final_prod; do', 'for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_final_prod; do')
+          marker='''      - name: Verify database ownership constraints and organization-scoped timesheet uniqueness directly\n'''
+          assert marker in s
+          worker='''      - name: Execute worker lifecycle and linked identity acceptance matrix\n        shell: bash\n        working-directory: controller\n        env:\n          TARGET_ROOT: ${{ github.workspace }}/target\n          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_worker_lifecycle\n        run: |\n          set -euo pipefail\n          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)\n          node .github/scripts/wos02-worker-lifecycle-acceptance.mjs\n\n'''
+          s=s.replace(marker,worker+marker,1)
+          assert s.count(new_head)==1 and s.count(new_tree)==1
+          assert s.count("'server/worker-lifecycle.mjs'")==1
+          assert s.count('Execute worker lifecycle and linked identity acceptance matrix')==1
+          assert s.count('wos02_worker_lifecycle')==2
+          p.write_text(s)
+          PY
+          test "$(git diff --name-only | tr '\n' ' ')" = ".github/workflows/wos02-final-review-acceptance.yml "
+          git diff --check
+          grep -q "$EXPECTED_PRODUCT" .github/workflows/wos02-final-review-acceptance.yml
+          grep -q "$EXPECTED_PRODUCT_TREE" .github/workflows/wos02-final-review-acceptance.yml
+          grep -q '22-file authority' .github/workflows/wos02-final-review-acceptance.yml
+          grep -q "'server/worker-lifecycle.mjs'" .github/workflows/wos02-final-review-acceptance.yml
+          grep -q 'wos02-worker-lifecycle-acceptance.mjs' .github/workflows/wos02-final-review-acceptance.yml
+          grep -q 'Execute worker lifecycle and linked identity acceptance matrix' .github/workflows/wos02-final-review-acceptance.yml
+
+      - name: Create detached GitHub commit object
+        id: object
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs');
+            const workflow=fs.readFileSync('.github/workflows/wos02-final-review-acceptance.yml','utf8');
+            const {data:parent}=await github.rest.git.getCommit({owner:context.repo.owner,repo:context.repo.repo,commit_sha:process.env.EXPECTED_CONTROLLER});
+            const {data:blob}=await github.rest.git.createBlob({owner:context.repo.owner,repo:context.repo.repo,content:workflow,encoding:'utf-8'});
+            const {data:tree}=await github.rest.git.createTree({owner:context.repo.owner,repo:context.repo.repo,base_tree:parent.tree.sha,tree:[{path:'.github/workflows/wos02-final-review-acceptance.yml',mode:'100644',type:'blob',sha:blob.sha}]});
+            const {data:commit}=await github.rest.git.createCommit({owner:context.repo.owner,repo:context.repo.repo,message:'CTRL: bind WOS-02 acceptance to worker lifecycle correction',tree:tree.sha,parents:[process.env.EXPECTED_CONTROLLER]});
+            core.setOutput('commit',commit.sha);
+            core.notice(`CONTROLLER_COMMIT=${commit.sha}`);
+            core.notice(`CONTROLLER_TREE=${tree.sha}`);
+
+      - name: Verify detached object parent and controller-only delta
+        uses: actions/github-script@v7
+        env:
+          BUILT_COMMIT: ${{ steps.object.outputs.commit }}
+        with:
+          script: |
+            const {data:c}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.BUILT_COMMIT});
+            if(c.parents?.[0]?.sha!==process.env.EXPECTED_CONTROLLER) core.setFailed(`parent=${c.parents?.[0]?.sha}`);
+            const files=(c.files||[]).map(f=>f.filename);
+            if(JSON.stringify(files)!==JSON.stringify(['.github/workflows/wos02-final-review-acceptance.yml'])) core.setFailed(`files=${JSON.stringify(files)}`);
