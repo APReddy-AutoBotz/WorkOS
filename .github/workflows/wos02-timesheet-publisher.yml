@@ -1,0 +1,76 @@
+name: WOS-02 Guarded Timesheet Publication
+
+on:
+  push:
+    branches:
+      - controller/wos02-exact-acceptance
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout product branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/wos-02-organization-setup-foundation
+          fetch-depth: 0
+
+      - name: Verify exact live leases
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "c623c3336190b34a622be8a8f7c08139ba405e22"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
+          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "c623c3336190b34a622be8a8f7c08139ba405e22"
+          test "$(git rev-parse HEAD^{tree})" = "566ee6a6426e6a41e0783d86c7b3598d9f9c3b05"
+
+      - name: Decode and verify exact recovery payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/payload.b64 <<'PAYLOAD'
+          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
+          PAYLOAD
+          base64 -d /tmp/payload.b64 > /tmp/correction.diff.gz
+          test "$(wc -c < /tmp/correction.diff.gz)" = "3524"
+          echo "c472224848ac61b209a4ccf7314db1fa68c47c8f02e43af0ddba02be6d8396bd  /tmp/correction.diff.gz" | sha256sum -c -
+          gzip -dc /tmp/correction.diff.gz > /tmp/correction.diff
+          test "$(wc -c < /tmp/correction.diff)" = "13467"
+          echo "d1190e3b2b2316bee9b38012154d4c0d3eefeca6059d9456ced12faa67100ea3  /tmp/correction.diff" | sha256sum -c -
+
+      - name: Apply exact payload and verify tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --binary /tmp/correction.diff
+          git diff --check
+          git add -A
+          git config user.name "WorkOS Controller"
+          git config user.email "workos-controller@users.noreply.github.com"
+          git commit -m "fix: scope canonical timesheet imports"
+          test "$(git rev-parse HEAD^{tree})" = "90e2bed5b34f48dd7d0dbd262102a8e032f7a094"
+          test "$(git diff --name-only c623c3336190b34a622be8a8f7c08139ba405e22..HEAD | wc -l | tr -d ' ')" = "5"
+
+      - name: Revalidate lease and publish non-force
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
+          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "c623c3336190b34a622be8a8f7c08139ba405e22"
+          git push origin HEAD:refs/heads/codex/wos-02-organization-setup-foundation
+
+      - name: Verify published head and tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          published=""
+          for i in 1 2 3 4 5; do
+            published="$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)"
+            test "$published" = "$(git rev-parse HEAD)" && break
+            sleep 2
+          done
+          test "$published" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^{tree})" = "90e2bed5b34f48dd7d0dbd262102a8e032f7a094"
