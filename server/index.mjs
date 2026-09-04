@@ -10,6 +10,7 @@ import { z } from 'zod';
 import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
 import { registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
 import { initializeNewWorkerLifecycle } from './worker-lifecycle.mjs';
+import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, sendReportingPeriodError } from './reporting-periods.mjs';
 
 const { Pool } = pg;
 
@@ -2659,6 +2660,12 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await assertReportingPeriodAllows(client, {
+      organizationId: req.organizationScope.organizationId,
+      legalEntityId: req.organizationScope.legalEntityId,
+      relevantDate: parsed.data.week_ending,
+      operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
+    });
     const employee = (await client.query('select * from employees where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     if (!employee || employee.status === 'Exited') {
       await client.query('rollback');
@@ -2775,6 +2782,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     res.json({ ...timesheet, entries: parsed.data.entries });
   } catch (error) {
     await client.query('rollback');
+    if (sendReportingPeriodError(res, error)) return;
     console.error(error);
     res.status(500).json({ error: 'Timesheet save failed' });
   } finally {
@@ -2806,6 +2814,12 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
       res.status(404).json({ error: 'Timesheet not found' });
       return;
     }
+    await assertReportingPeriodAllows(client, {
+      organizationId: previous.organization_id,
+      legalEntityId: previous.legal_entity_id,
+      relevantDate: previous.week_ending,
+      operation: REPORTING_PERIOD_OPERATIONS.DECISION,
+    });
     if (previous.status !== 'Submitted') {
       await client.query('rollback');
       res.status(422).json({ error: 'Only submitted timesheets can be approved or rejected' });
@@ -2890,6 +2904,7 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('rollback');
+    if (sendReportingPeriodError(res, error)) return;
     console.error(error);
     res.status(500).json({ error: 'Timesheet status update failed' });
   } finally {
@@ -3843,12 +3858,18 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     }
 
     if (approval.entity_type === 'Timesheet') {
-      const previous = (await client.query('select * from timesheets where id = $1 for update', [approval.entity_id])).rows[0];
+      const previous = (await client.query('select * from timesheets where id=$1 and organization_id=$2 and legal_entity_id=$3 for update', [approval.entity_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
       if (!previous || previous.status !== 'Submitted') {
         await client.query('rollback');
         res.status(422).json({ error: 'Linked timesheet is not submitted' });
         return;
       }
+      await assertReportingPeriodAllows(client, {
+        organizationId: previous.organization_id,
+        legalEntityId: previous.legal_entity_id,
+        relevantDate: previous.week_ending,
+        operation: REPORTING_PERIOD_OPERATIONS.DECISION,
+      });
       const nextStatus = parsed.data.status === 'Approved' ? 'Approved' : 'Rejected';
       await client.query(`
         update timesheets
@@ -3903,6 +3924,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     res.json(nextApproval);
   } catch (error) {
     await client.query('rollback');
+    if (sendReportingPeriodError(res, error)) return;
     console.error(error);
     res.status(500).json({ error: 'Approval status update failed' });
   } finally {
@@ -6940,6 +6962,12 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     }
 
     for (const group of groups.values()) {
+      await assertReportingPeriodAllows(client, {
+        organizationId: req.organizationScope.organizationId,
+        legalEntityId: req.organizationScope.legalEntityId,
+        relevantDate: group.weekEnding,
+        operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
+      });
       const totalHours = round1(group.entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
       const billableHours = round1(group.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
       const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, group.employee.id, group.weekEnding])).rows[0];
@@ -7019,6 +7047,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     });
   } catch (error) {
     await client.query('rollback');
+    if (sendReportingPeriodError(res, error)) return;
     console.error(error);
     res.status(500).json({ error: 'Timesheet import apply failed' });
   } finally {

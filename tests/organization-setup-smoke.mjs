@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from '../server/worker-lifecycle.mjs';
+import { assertReportingPeriodAllows, canTransitionReportingPeriod, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
 
 const migration = readFileSync('server/migrations/022_organization_setup_foundation.sql', 'utf8');
 const integrityMigration = readFileSync('server/migrations/023_wos02_scope_lifecycle_integrity.sql', 'utf8');
@@ -8,6 +9,7 @@ const closureMigration = readFileSync('server/migrations/024_wos02_final_review_
 const timesheetScopeMigration = readFileSync('server/migrations/025_wos02_timesheet_scope_integrity.sql', 'utf8');
 const projectLegalScopePrerequisite = readFileSync('server/migrations/025a_wos02_project_legal_scope_unique_prerequisite.sql', 'utf8');
 const canonicalScopeMigration = readFileSync('server/migrations/026_wos02_canonical_legal_scope_integrity.sql', 'utf8');
+const reportingPeriodMigration = readFileSync('server/migrations/027_wos02_reporting_period_authority.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
 const server = readFileSync('server/index.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
@@ -51,6 +53,9 @@ assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*insert into timeshee
 assert.match(server, /delete from timesheet_entries where timesheet_id = \$1/, 'timesheet entries must be replaced only through the authorized scoped timesheet');
 assert.match(canonicalScopeMigration, /project_allocations add column if not exists legal_entity_id[\s\S]*project_allocations_employee_legal_scope_fk[\s\S]*project_allocations_project_legal_scope_fk/, 'allocation persistence must enforce employee and project legal ownership');
 assert.match(canonicalScopeMigration, /timesheets add column if not exists legal_entity_id[\s\S]*timesheets_employee_legal_scope_fk/, 'timesheet persistence must enforce employee legal ownership');
+assert.match(reportingPeriodMigration, /drop constraint if exists reporting_periods_status_check[\s\S]*status='Financially Locked' where status='Locked'/, 'legacy Locked periods must be deterministically reconciled before the new state constraint');
+assert.match(reportingPeriodMigration, /Submission Closed[\s\S]*Approval Closed[\s\S]*Financially Locked/, 'reporting periods must persist distinct closure stages');
+assert.match(reportingPeriodMigration, /reporting_period_ranges_no_overlap[\s\S]*exclude using gist[\s\S]*organization_id with =, legal_entity_id with =/, 'same-scope reporting-period ranges must be database non-overlapping while legal entities remain isolated');
 assert.match(server, /api\/imports\/clients\/apply[\s\S]*from clients[\s\S]*organization_id = \$3 and legal_entity_id = \$4[\s\S]*insert into clients \(id, name, industry, account_owner_id, status, organization_id, legal_entity_id\)/, 'client import must resolve and persist authoritative ownership');
 assert.match(server, /api\/imports\/employees\/apply[\s\S]*select \* from employees where employee_id = \$1 and organization_id = \$2 and legal_entity_id = \$3/, 'employee import prior-row reuse must be scoped');
 assert.match(server, /api\/projects[\s\S]*select \* from projects where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*Project not found in the authorized organization and legal entity/, 'project ID updates must deny cross-scope rows before upsert');
@@ -86,6 +91,9 @@ assert.match(service, /FUTURE_TRANSITION_UNSUPPORTED/, 'future lifecycle changes
 assert.match(service, /router\.post\('\/calendars'/, 'calendars must have governed authoring');
 assert.match(service, /Version Calendar'[\s\S]*details:'Created an effective-dated working calendar version'/, 'calendar authoring must satisfy the retained non-null audit detail contract');
 assert.match(service, /router\.post\('\/reporting-periods'/, 'reporting periods must have governed authoring');
+assert.match(service, /reporting-period:\$\{req\.organizationScope\.organizationId\}:\$\{req\.organizationScope\.legalEntityId\}[\s\S]*for update[\s\S]*REPORTING_PERIOD_OVERLAP/, 'reporting-period authoring must serialize and reject overlapping same-scope authority');
+assert.match(service, /Submission Closed','Approval Closed','Financially Locked','Closed'[\s\S]*REPORTING_PERIOD_IMMUTABLE/, 'closed reporting-period identity and boundaries must not be rewritten');
+assert.match(service, /Update Reporting Period':'Create Reporting Period'[\s\S]*oldValue:previous,newValue:result\.rows\[0\]/, 'reporting-period mutations must audit material before and after values in their transaction');
 assert.match(service, /router\.post\('\/terminology'/, 'terminology must have governed authoring');
 assert.match(server, /registerOrganizationSetupRoutes/, 'canonical API must register the setup module');
 assert.match(ui, /Organization setup readiness/, 'governance UI must expose setup readiness');
@@ -98,6 +106,25 @@ assert.match(server, /result\.rows\.length === 1 \? result\.rows\[0\] : null/, '
 assert.match(server, /not exists\(select 1 from direct_users\)[\s\S]*u2\.status='Active'[\s\S]*e2\.status<>'Exited'/, 'employee-code login must be used only for active employee-linked users when no unique username or email matched');
 assert.match(server, /insert into project_allocations[\s\S]*organization_id/, 'allocation imports must persist authoritative organization ownership');
 assert.match(server, /api\/imports\/allocations\/apply[\s\S]*organization_id=\$2 and legal_entity_id=\$3[\s\S]*p\.legal_entity_id=\$3 and e\.legal_entity_id=\$3/, 'allocation imports must resolve and update references only in the authorized organization and legal entity');
+assert.match(server, /api\/timesheets[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT[\s\S]*api\/timesheets\/:id\/status[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'canonical save and direct decision paths must use the shared reporting-period guard');
+assert.match(server, /api\/approvals\/:id\/status[\s\S]*approval\.entity_type === 'Timesheet'[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'generic timesheet approval decisions must use the shared reporting-period guard');
+assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT/, 'all timesheet import statuses must use the shared content-mutation guard');
+
+const periodQuery = status => ({ query: async () => ({ rows: status === null ? [] : Array.isArray(status) ? status : [{ id:'period-1', code:'P1', status }] }) });
+for (const state of ['Planned','Submission Closed','Approval Closed','Financially Locked','Closed']) {
+  await assert.rejects(assertReportingPeriodAllows(periodQuery(state), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }),
+    error => error instanceof ReportingPeriodError && error.code === 'REPORTING_PERIOD_CLOSED', `${state} must block timesheet content mutation`);
+}
+await assert.doesNotReject(assertReportingPeriodAllows(periodQuery('Open'), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }));
+await assert.doesNotReject(assertReportingPeriodAllows(periodQuery('Submission Closed'), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.DECISION }));
+for (const state of ['Planned','Approval Closed','Financially Locked','Closed']) {
+  await assert.rejects(assertReportingPeriodAllows(periodQuery(state), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.DECISION }),
+    error => error.code === 'REPORTING_PERIOD_CLOSED', `${state} must block timesheet decisions`);
+}
+await assert.rejects(assertReportingPeriodAllows(periodQuery(null), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_MISSING');
+await assert.rejects(assertReportingPeriodAllows(periodQuery([{status:'Open'},{status:'Open'}]), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_AMBIGUOUS');
+assert.equal(canTransitionReportingPeriod('Open','Submission Closed'),true);
+assert.equal(canTransitionReportingPeriod('Approval Closed','Open'),false, 'closed approval authority must not silently reopen');
 
 const lifecycleQueries = [];
 const lifecycleClient = { query: async (sql, params) => {

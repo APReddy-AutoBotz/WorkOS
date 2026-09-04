@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { disableLinkedWorkerIdentity } from './worker-lifecycle.mjs';
+import { canTransitionReportingPeriod, REPORTING_PERIOD_STATES } from './reporting-periods.mjs';
 
 export const MAX_SETUP_ROWS = 200;
 export const MAX_DEPENDENCIES = 100;
@@ -163,12 +164,38 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     [req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_SETUP_ROWS]); res.json(result.rows);
   });
   router.post('/reporting-periods', requirePermission('settings.manage'), async(req,res)=>{
-    const parsed=z.object({code:z.string().trim().min(1).max(50),name:z.string().trim().min(1).max(150),startsOn:z.string().date(),endsOn:z.string().date(),status:z.enum(['Planned','Open','Locked','Closed']).default('Open')}).safeParse(req.body);
+    const parsed=z.object({code:z.string().trim().min(1).max(50),name:z.string().trim().min(1).max(150),startsOn:z.string().date(),endsOn:z.string().date(),status:z.enum(REPORTING_PERIOD_STATES).default('Open')}).safeParse(req.body);
     if(!parsed.success||parsed.success&&parsed.data.endsOn<parsed.data.startsOn)return res.status(400).json({error:'Invalid reporting period'});
-    const result=await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status) values($1,$2,$3,$4,$5,$6,$7)
-      on conflict(organization_id,code) do update set name=excluded.name,starts_on=excluded.starts_on,ends_on=excluded.ends_on,status=excluded.status
-      where reporting_periods.legal_entity_id=excluded.legal_entity_id returning *`,[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.name,parsed.data.startsOn,parsed.data.endsOn,parsed.data.status]);
-    if(!result.rowCount)return res.status(409).json({error:'Reporting period scope conflict'});res.status(201).json(result.rows[0]);
+    const client=await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('select pg_advisory_xact_lock(hashtext($1))',[`reporting-period:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}`]);
+      const previous=(await client.query(`select * from reporting_periods where organization_id=$1 and legal_entity_id=$2 and code=$3 for update`,
+        [req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code])).rows[0];
+      if(previous&&!canTransitionReportingPeriod(previous.status,parsed.data.status)){
+        await client.query('rollback');return res.status(409).json({error:'Reporting period state transition is not allowed',code:'REPORTING_PERIOD_TRANSITION_CONFLICT'});
+      }
+      if(previous&&['Submission Closed','Approval Closed','Financially Locked','Closed'].includes(previous.status)
+        && (parsed.data.name!==previous.name||parsed.data.startsOn!==dateOnly(previous.starts_on)||parsed.data.endsOn!==dateOnly(previous.ends_on))){
+        await client.query('rollback');return res.status(409).json({error:'Closed reporting-period boundaries and identity are immutable',code:'REPORTING_PERIOD_IMMUTABLE'});
+      }
+      const overlap=(await client.query(`select id from reporting_periods where organization_id=$1 and legal_entity_id=$2
+        and id<>coalesce($3,'') and daterange(starts_on,ends_on+1,'[)') && daterange($4::date,$5::date+1,'[)') limit 1`,
+      [req.organizationScope.organizationId,req.organizationScope.legalEntityId,previous?.id||null,parsed.data.startsOn,parsed.data.endsOn])).rows[0];
+      if(overlap){await client.query('rollback');return res.status(409).json({error:'Reporting period overlaps existing authority',code:'REPORTING_PERIOD_OVERLAP'});}
+      let result;
+      if(previous) result=await client.query(`update reporting_periods set name=$2,starts_on=$3,ends_on=$4,status=$5 where id=$1 returning *`,
+        [previous.id,parsed.data.name,parsed.data.startsOn,parsed.data.endsOn,parsed.data.status]);
+      else result=await client.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)
+        values($1,$2,$3,$4,$5,$6,$7) returning *`,[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.name,parsed.data.startsOn,parsed.data.endsOn,parsed.data.status]);
+      await audit(client,req,{module:'Organization Setup',action:previous?'Update Reporting Period':'Create Reporting Period',entityType:'Reporting Period',entityId:result.rows[0].id,
+        oldValue:previous,newValue:result.rows[0],details:`${previous?'Updated':'Created'} reporting period ${parsed.data.code} in state ${parsed.data.status}`});
+      await client.query('commit');res.status(previous?200:201).json(result.rows[0]);
+    } catch(error) {
+      await client.query('rollback');
+      if(['23P01','23505','23514'].includes(error.code))return res.status(409).json({error:'Reporting period conflicts with existing authority',code:'REPORTING_PERIOD_CONFLICT'});
+      console.error(error);res.status(500).json({error:'Reporting period mutation failed'});
+    } finally { client.release(); }
   });
   router.get('/terminology', async (req,res) => {
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
@@ -190,7 +217,7 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
         and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) worker_type,
       exists(select 1 from working_calendars where organization_id=$1 and active
         and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) calendar,
-      exists(select 1 from reporting_periods where organization_id=$1 and status in ('Planned','Open')
+      exists(select 1 from reporting_periods where organization_id=$1 and status='Open'
         and current_date between starts_on and ends_on and (legal_entity_id is null or legal_entity_id=$2)) reporting_period`,[org,req.organizationScope.legalEntityId]);
     const checks=facts.rows[0];
     res.json({ organizationId:org, legalEntityId:req.organizationScope.legalEntityId, checks,
