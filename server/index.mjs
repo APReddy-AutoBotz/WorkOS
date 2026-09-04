@@ -2404,7 +2404,10 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
     const previous = parsed.data.id
       ? (await client.query('select * from project_allocations where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0]
       : null;
-    if (parsed.data.id && !previous) {
+    const allocationIdExistsOutsideScope = parsed.data.id && !previous
+      ? (await client.query('select 1 from project_allocations where id = $1', [parsed.data.id])).rowCount > 0
+      : false;
+    if (allocationIdExistsOutsideScope) {
       await client.query('rollback');
       res.status(404).json({ error: 'Allocation not found in the authorized organization and legal entity' });
       return;
@@ -2423,6 +2426,8 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
         status = excluded.status,
         comments = excluded.comments,
         updated_at = now()
+      where project_allocations.organization_id = excluded.organization_id
+        and project_allocations.legal_entity_id = excluded.legal_entity_id
       returning *
     `, [
       parsed.data.id || null,
@@ -2437,6 +2442,11 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       parsed.data.comments || null,
       req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
+    if (result.rowCount === 0) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Allocation not found in the authorized organization and legal entity' });
+      return;
+    }
     await audit(client, req, {
       module: 'Allocations',
       action: previous ? 'Update Allocation' : 'Create Allocation',
