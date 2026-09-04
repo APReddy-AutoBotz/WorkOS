@@ -33,10 +33,17 @@ const scopeA = { 'x-organization-id': 'org-scope', 'x-legal-entity-id': 'legal-s
 const scopeB = { 'x-organization-id': 'org-scope', 'x-legal-entity-id': 'legal-scope-b' };
 
 await pool.query(`insert into country_directors(id,name,region) values('cd-scope','Scope Director','Synthetic') on conflict(id) do nothing`);
-await pool.query(`insert into organizations(id,code,name,effective_from) values('org-scope','ORG-SCOPE','Scope Org','2026-01-01') on conflict(id) do nothing`);
+await pool.query(`insert into organizations(id,code,name,effective_from) values
+ ('org-scope','ORG-SCOPE','Scope Org','2026-01-01'),
+ ('org-duplicate','ORG-DUPLICATE','Duplicate Org','2026-01-01')
+ on conflict(id) do nothing`);
 await pool.query(`insert into legal_entities(id,organization_id,code,name,effective_from) values
  ('legal-scope-a','org-scope','LEGAL-SCOPE-A','Scope Legal A','2026-01-01'),
- ('legal-scope-b','org-scope','LEGAL-SCOPE-B','Scope Legal B','2026-01-01')
+ ('legal-scope-b','org-scope','LEGAL-SCOPE-B','Scope Legal B','2026-01-01'),
+ ('legal-duplicate','org-duplicate','LEGAL-DUPLICATE','Duplicate Legal','2026-01-01')
+ on conflict(id) do nothing`);
+await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+ values('legal-b-employee','E-LEGAL-B','Legal B Employee','legal-b-employee@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-scope','legal-scope-b')
  on conflict(id) do nothing`);
 await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
  values('admin-scope','ADMIN-SCOPE','Scope Admin','scope-admin@example.test','System Administrator','Administration','Synthetic','cd-scope','Active','org-scope','legal-scope-a')
@@ -136,32 +143,33 @@ try {
   });
 
   await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
-    values('dup-canon-b','E-DUP-CANON','Duplicate Canon B','dup-canon-b@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-scope','legal-scope-b')`);
-  await check('canonical employee save supports duplicate employee code in another legal entity without ID reuse', async () => {
+    values('dup-canon-other','E-DUP-CANON','Duplicate Canon Other','dup-canon-other@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-duplicate','legal-duplicate')`);
+  await check('canonical employee save supports organization-scoped duplicate employee code without ID reuse', async () => {
     const response = await call('POST', '/api/employees', { token, scope: scopeA, body: {
       employee_id: 'E-DUP-CANON', name: 'Duplicate Canon A', email: 'dup-canon-a@example.test', designation: 'Engineer', department: 'Delivery', country: 'Synthetic',
       primary_country_director_id: 'cd-scope', mapped_country_director_ids: [], roles: ['Employee'], initial_password: 'Duplicate-Canon-42!', status: 'Active',
     } });
     assert.equal(response.status, 200, JSON.stringify(response.body));
-    const rows = (await pool.query(`select id,legal_entity_id from employees where organization_id='org-scope' and employee_id='E-DUP-CANON' order by legal_entity_id`)).rows;
+    const rows = (await pool.query(`select id,organization_id,legal_entity_id from employees where employee_id='E-DUP-CANON' order by organization_id`)).rows;
     assert.equal(rows.length, 2, JSON.stringify(rows));
-    assert.deepEqual(rows.map(row => row.legal_entity_id), ['legal-scope-a','legal-scope-b']);
+    assert.deepEqual(rows.map(row => row.organization_id), ['org-duplicate','org-scope']);
     assert.notEqual(rows[0].id, rows[1].id);
-    employeeA = rows.find(row => row.legal_entity_id === 'legal-scope-a').id;
+    employeeA = rows.find(row => row.organization_id === 'org-scope' && row.legal_entity_id === 'legal-scope-a').id;
   });
 
   await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
-    values('dup-import-b','E-DUP-IMPORT','Duplicate Import B','dup-import-b@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-scope','legal-scope-b')`);
-  await check('employee import supports duplicate employee code in another legal entity without ID reuse', async () => {
+    values('dup-import-other','E-DUP-IMPORT','Duplicate Import Other','dup-import-other@example.test','Engineer','Delivery','Synthetic','cd-scope','Active','org-duplicate','legal-duplicate')`);
+  await check('employee import supports organization-scoped duplicate employee code without ID reuse', async () => {
     const response = await call('POST', '/api/imports/employees/apply', { token, scope: scopeA, body: {
       fileName: 'scope-employee.csv', rows: [{ employeeId: 'E-DUP-IMPORT', name: 'Duplicate Import A', email: 'dup-import-a@example.test', designation: 'Engineer', department: 'Delivery', country: 'Synthetic', primaryCountryDirectorId: 'cd-scope', roles: ['Employee'], initialPassword: 'Duplicate-Import-42!', status: 'Active' }],
     } });
     assert.equal(response.status, 200, JSON.stringify(response.body));
     assert.equal(response.body.status, 'Success', JSON.stringify(response.body));
-    const rows = (await pool.query(`select id,legal_entity_id from employees where organization_id='org-scope' and employee_id='E-DUP-IMPORT' order by legal_entity_id`)).rows;
+    const rows = (await pool.query(`select id,organization_id,legal_entity_id from employees where employee_id='E-DUP-IMPORT' order by organization_id`)).rows;
     assert.equal(rows.length, 2, JSON.stringify(rows));
+    assert.deepEqual(rows.map(row => row.organization_id), ['org-duplicate','org-scope']);
     assert.notEqual(rows[0].id, rows[1].id);
-    importedEmployeeA = rows.find(row => row.legal_entity_id === 'legal-scope-a').id;
+    importedEmployeeA = rows.find(row => row.organization_id === 'org-scope' && row.legal_entity_id === 'legal-scope-a').id;
   });
 
   await check('project create same-scope positive persists exact ownership', async () => {
@@ -175,7 +183,7 @@ try {
   });
 
   await pool.query(`insert into projects(id,project_code,name,client_id,client,manager_id,manager_name,start_date,end_date,status,billable,organization_id,legal_entity_id)
-    values('project-scope-b','P-SCOPE-B','Project Scope B','client-scope-b','Scope Client B','dup-canon-b','Duplicate Canon B','2026-01-01','2026-12-31','Active',true,'org-scope','legal-scope-b')`);
+    values('project-scope-b','P-SCOPE-B','Project Scope B','client-scope-b','Scope Client B','legal-b-employee','Legal B Employee','2026-01-01','2026-12-31','Active',true,'org-scope','legal-scope-b')`);
   await check('project existing ID cross-legal update is denied with no mutation', async () => {
     const response = await call('POST', '/api/projects', { token, scope: scopeA, body: {
       id: 'project-scope-b', project_code: 'P-HIJACK', name: 'Project Hijack', client_id: clientA, manager_id: 'admin-scope', start_date: '2026-01-01', end_date: '2026-12-31', status: 'Active', billable: true,
@@ -199,21 +207,21 @@ try {
 
   await check('allocation same-org cross-legal references are denied with no write', async () => {
     const response = await call('POST', '/api/allocations', { token, scope: scopeA, body: {
-      id: 'alloc-cross-legal', employee_id: 'dup-canon-b', project_id: 'project-scope-b', percentage: 10, start_date: '2026-01-01', end_date: '2026-12-31', billable: true, status: 'Active',
+      id: 'alloc-cross-legal', employee_id: 'legal-b-employee', project_id: 'project-scope-b', percentage: 10, start_date: '2026-01-01', end_date: '2026-12-31', billable: true, status: 'Active',
     } });
     assert.ok([403,404,422].includes(response.status), JSON.stringify(response.body));
     assert.equal((await pool.query(`select count(*)::int count from project_allocations where id='alloc-cross-legal'`)).rows[0].count, 0);
   });
 
   await pool.query(`insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,status,billable,organization_id,legal_entity_id)
-    values('alloc-scope-b','dup-canon-b','project-scope-b',50,'2026-01-01','2026-12-31','Active',true,'org-scope','legal-scope-b')`);
+    values('alloc-scope-b','legal-b-employee','project-scope-b',50,'2026-01-01','2026-12-31','Active',true,'org-scope','legal-scope-b')`);
   await check('allocation existing ID cross-legal update is denied with no mutation', async () => {
     const response = await call('POST', '/api/allocations', { token, scope: scopeA, body: {
       id: 'alloc-scope-b', employee_id: employeeA, project_id: 'project-scope-a', percentage: 20, start_date: '2026-01-01', end_date: '2026-12-31', billable: true, status: 'Active',
     } });
     assert.ok([403,404].includes(response.status), JSON.stringify(response.body));
     const row = (await pool.query(`select employee_id,project_id,percentage,legal_entity_id from project_allocations where id='alloc-scope-b'`)).rows[0];
-    assert.equal(row.employee_id, 'dup-canon-b');
+    assert.equal(row.employee_id, 'legal-b-employee');
     assert.equal(row.project_id, 'project-scope-b');
     assert.equal(Number(row.percentage), 50);
     assert.equal(row.legal_entity_id, 'legal-scope-b');
@@ -231,10 +239,10 @@ try {
 
   await check('timesheet same-org cross-legal employee reference is denied with no write', async () => {
     const response = await call('POST', '/api/timesheets', { token, scope: scopeA, body: {
-      employee_id: 'dup-canon-b', week_ending: '2026-08-23', status: 'Draft', entries: [{ project_id: 'project-scope-b', work_type: 'Project Work', work_date: '2026-08-17', hours: 8, billable: true }],
+      employee_id: 'legal-b-employee', week_ending: '2026-08-23', status: 'Draft', entries: [{ project_id: 'project-scope-b', work_type: 'Project Work', work_date: '2026-08-17', hours: 8, billable: true }],
     } });
     assert.ok([403,404,422].includes(response.status), JSON.stringify(response.body));
-    assert.equal((await pool.query(`select count(*)::int count from timesheets where employee_id='dup-canon-b' and week_ending='2026-08-23'`)).rows[0].count, 0);
+    assert.equal((await pool.query(`select count(*)::int count from timesheets where employee_id='legal-b-employee' and week_ending='2026-08-23'`)).rows[0].count, 0);
   });
 
   await check('timesheet same-org cross-legal project reference is denied with no write', async () => {
@@ -256,7 +264,7 @@ try {
   await check('database constraints reject alternate cross-legal timesheet writes', async () => {
     await assert.rejects(
       () => pool.query(`insert into timesheets(employee_id,week_ending,status,total_hours,billable_hours,organization_id,legal_entity_id)
-        values('dup-canon-b','2026-08-09','Draft',0,0,'org-scope','legal-scope-a')`),
+        values('legal-b-employee','2026-08-09','Draft',0,0,'org-scope','legal-scope-a')`),
       error => error?.code === '23503',
     );
   });
