@@ -1,0 +1,314 @@
+name: WOS-02 Final-Review Exact-Head Acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/wos02-final-review-acceptance.yml'
+      - '.github/scripts/wos02-final-review-live-acceptance.mjs'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  TARGET_PR: '37'
+  TARGET_BRANCH: codex/wos-02-organization-setup-foundation
+  TARGET_HEAD: d3355ea55ae3cd114c54729ad4835a47536cb55a
+  TARGET_TREE: 9b67fbb9028e3ce1679890ed8ab22ee8e7b778ea
+  EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
+  PGHOST: 127.0.0.1
+  PGPORT: '5432'
+  PGUSER: workos
+  PGPASSWORD: workos
+
+concurrency:
+  group: wos02-final-review-exact-acceptance
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    name: Final-review exact-head WOS-02 acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Verify exact product, controller and main authority
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const controller = context.payload.pull_request;
+            if (!controller?.draft) failures.push('controller is not Draft');
+            if (controller?.head?.ref !== 'controller/wos02-exact-acceptance') failures.push(`controller head=${controller?.head?.ref}`);
+            if (controller?.base?.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller base=${controller?.base?.sha}`);
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data: target} = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR)});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`target lifecycle=${target.state}/draft:${target.draft}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target branch=${target.head.ref}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`target head=${target.head.sha}`);
+            if (target.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`target base=${target.base.sha}`);
+            const {data: commit} = await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.TARGET_HEAD});
+            if (commit.commit.tree.sha !== process.env.TARGET_TREE) failures.push(`target tree=${commit.commit.tree.sha}`);
+            const files = await github.paginate(github.rest.pulls.listFiles,{owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR),per_page:100});
+            const actual=files.map(f=>f.filename).sort();
+            const required=[
+              'docs/00-control/REQUIREMENTS_TRACEABILITY.md',
+              'docs/tasks/WOS-02-ORGANIZATION-SETUP-FOUNDATION.md',
+              'package.json',
+              'server/index.mjs',
+              'server/migrations/022_organization_setup_foundation.sql',
+              'server/migrations/023_wos02_scope_lifecycle_integrity.sql',
+              'server/migrations/024_wos02_final_review_closure.sql',
+              'server/organization-setup.mjs',
+              'src/components/Layout/Header.tsx',
+              'src/pages/AdminSettings.tsx',
+              'src/services/api.ts',
+              'src/services/apiClient.ts',
+              'src/types.ts',
+              'tests/organization-setup-smoke.mjs',
+            ].sort();
+            if (JSON.stringify(actual)!==JSON.stringify(required)) failures.push(`target files=${JSON.stringify(actual)}`);
+            if (failures.length) core.setFailed(`authority failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: controller
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout exact product
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_HEAD }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout accepted WOS-01A main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_HEAD }}
+          path: accepted-main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout retained real-Chrome authority
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RETAINED_WOS01_CONTROLLER }}
+          path: retained-wos01-controller
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            target/package-lock.json
+            accepted-main/package-lock.json
+
+      - name: Verify pristine exact trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C target rev-parse HEAD)" = "$TARGET_HEAD"
+          test "$(git -C target rev-parse 'HEAD^{tree}')" = "$TARGET_TREE"
+          test "$(git -C target write-tree)" = "$TARGET_TREE"
+          test -z "$(git -C target status --porcelain)"
+          test "$(git -C accepted-main rev-parse HEAD)" = "$EXPECTED_MAIN_HEAD"
+
+      - name: Locked install
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix target
+          npm ci --prefix accepted-main
+
+      - name: Static retained build security and hygiene gates
+        shell: bash
+        working-directory: target
+        env:
+          APP_MODE: test
+          VITE_APP_MODE: test
+          ALLOW_TEST_FALLBACK: 'true'
+          VITE_ALLOW_TEST_FALLBACK: 'true'
+        run: |
+          set -euo pipefail
+          npm run test:organization-setup
+          npm test
+          npm run test:backend
+          npm run test:authorization-convergence
+          npm run typecheck
+          npm run lint
+          npm run build
+          npm run test:bootstrap-scan
+          npm run test:wos00-baseline
+          npm audit --omit=dev --audit-level=high
+          git diff --check "$EXPECTED_MAIN_HEAD..$TARGET_HEAD"
+          node --check server/organization-setup.mjs
+
+      - name: Production startup fails closed without required config
+        shell: bash
+        working-directory: target
+        run: |
+          set -euo pipefail
+          set +e
+          env -u DATABASE_URL -u API_SESSION_SECRET NODE_ENV=production timeout 10s node server/start-production.mjs > "$RUNNER_TEMP/prod-fail-closed.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/prod-fail-closed.log"
+          test "$rc" -ne 0
+          grep -Eq 'DATABASE_URL|API_SESSION_SECRET|required' "$RUNNER_TEMP/prod-fail-closed.log"
+
+      - name: Prepare PostgreSQL acceptance databases
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres && break; sleep 1; done
+          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_final_prod; do
+            dropdb --if-exists -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
+            createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
+          done
+
+      - name: Fresh install and replay all WOS-02 migrations
+        shell: bash
+        working-directory: target
+        env:
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_fresh
+        run: |
+          set -euo pipefail
+          node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-first.log"
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ('022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure')")" = 3
+          node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-replay.log"
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ('022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure')")" = 3
+
+      - name: Exact WOS-01A upgrade backfill reconciliation and replay
+        shell: bash
+        env:
+          UPGRADE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_upgrade
+        run: |
+          set -euo pipefail
+          (cd accepted-main && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
+          psql "$UPGRADE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          insert into country_directors(id,name,region) values('cd-final-up','Final Upgrade Director','Synthetic') on conflict(id) do nothing;
+          insert into users(id,username,email,status) values('00000000-0000-0000-0000-000000000801','final-up-user','final-up-user@example.test','Active');
+          insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status)
+            values('e-final-up','E-FINAL-UP','Final Upgrade Employee','final-up-employee@example.test','Engineer','Delivery','Synthetic','cd-final-up','Active');
+          insert into clients(id,name) values('client-final-up','Final Upgrade Client');
+          insert into projects(id,project_code,name,client_id,client,manager_name,start_date,end_date,status)
+            values('p-final-up','P-FINAL-UP','Final Upgrade Project','client-final-up','Final Upgrade Client','Upgrade Manager','2026-01-01','2026-12-31','Active');
+          insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,status)
+            values('a-final-up','e-final-up','p-final-up',100,'2026-01-01','2026-12-31','Active');
+          insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours)
+            values('00000000-0000-0000-0000-000000000802','e-final-up','2026-01-04','Draft',0,0);
+          SQL
+          before="$(psql "$UPGRADE_URL" -Atc "select (select count(*) from employees)||'|'||(select count(*) from clients)||'|'||(select count(*) from projects)||'|'||(select count(*) from project_allocations)||'|'||(select count(*) from timesheets)")"
+          (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
+          after="$(psql "$UPGRADE_URL" -Atc "select (select count(*) from employees)||'|'||(select count(*) from clients)||'|'||(select count(*) from projects)||'|'||(select count(*) from project_allocations)||'|'||(select count(*) from timesheets)")"
+          test "$before" = "$after"
+          test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from employees where id='e-final-up'")" = 'org-default|legal-default'
+          test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from clients where id='client-final-up'")" = 'org-default|legal-default'
+          test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from projects where id='p-final-up'")" = 'org-default|legal-default'
+          test "$(psql "$UPGRADE_URL" -Atc "select organization_id from project_allocations where id='a-final-up'")" = 'org-default'
+          test "$(psql "$UPGRADE_URL" -Atc "select organization_id from timesheets where id='00000000-0000-0000-0000-000000000802'")" = 'org-default'
+          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from worker_history where employee_id='e-final-up' and legal_entity_id='legal-default'")" = 1
+          (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
+          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='024_wos02_final_review_closure'")" = 1
+
+      - name: Execute final-review live API and DB closure matrix
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_live
+        run: |
+          set -euo pipefail
+          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+          node .github/scripts/wos02-final-review-live-acceptance.mjs
+
+      - name: Retained production identity
+        shell: bash
+        working-directory: target
+        env:
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_prod
+          API_SESSION_SECRET: final-acceptance-session-secret
+        run: |
+          set -euo pipefail
+          node server/migrate.mjs
+          npm run test:production-identity
+
+      - name: Build exact browser bundle
+        shell: bash
+        working-directory: target
+        env:
+          VITE_APP_MODE: test
+          VITE_ALLOW_TEST_FALLBACK: 'true'
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          npm run build
+          test -f dist/index.html
+
+      - name: Retained real-Chrome role and denial journeys
+        shell: bash
+        env:
+          WOS_BROWSER_ORIGIN: http://127.0.0.1:4174
+          WOS_APP_READY_TIMEOUT_MS: '120000'
+          WOS_CHROME_HANDSHAKE_EVIDENCE: ${{ runner.temp }}/wos02-final-browser-evidence.json
+        run: |
+          set -euo pipefail
+          (cd target && npm run preview -- --host 127.0.0.1 --port 4174 > "$RUNNER_TEMP/wos02-final-preview.log" 2>&1) &
+          preview_pid=$!
+          cleanup() { kill "$preview_pid" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          timeout 8m node retained-wos01-controller/.github/scripts/wos01a-browser-acceptance-v2.mjs
+          test -s "$WOS_CHROME_HANDSHAKE_EVIDENCE"
+
+      - name: Final exact live authority
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data: main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data: target}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR)});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if(target.head.sha!==process.env.TARGET_HEAD) failures.push(`target=${target.head.sha}`);
+            if(target.state!=='open'||!target.draft) failures.push(`lifecycle=${target.state}/draft:${target.draft}`);
+            const {data: commit}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.TARGET_HEAD});
+            if(commit.commit.tree.sha!==process.env.TARGET_TREE) failures.push(`tree=${commit.commit.tree.sha}`);
+            if(failures.length) core.setFailed(`final authority failed: ${failures.join('; ')}`);
+
+      - name: Upload exact-head acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos02-final-review-acceptance-${{ env.TARGET_HEAD }}
+          path: |
+            ${{ runner.temp }}/prod-fail-closed.log
+            ${{ runner.temp }}/wos02-final-fresh-first.log
+            ${{ runner.temp }}/wos02-final-fresh-replay.log
+            ${{ runner.temp }}/wos02-final-browser-evidence.json
+            ${{ runner.temp }}/wos02-final-preview.log
+          if-no-files-found: warn
+          retention-days: 14
