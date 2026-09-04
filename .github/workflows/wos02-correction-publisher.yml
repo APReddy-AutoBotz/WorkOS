@@ -1,4 +1,4 @@
-name: WOS-02 Guarded Correction Publisher
+name: WOS-02 Guarded Final-Review Closure Publisher
 
 on:
   pull_request:
@@ -14,15 +14,17 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  OLD_TARGET_HEAD: 5fdb5ef950e20382dad02874f6bad97161a350ee
-  OLD_TARGET_TREE: 799fb8711d7d770ac3a6ee67f7267100d3aa184d
-  EXPECTED_RESULT_TREE: 069a7411a61dd0a2bc7e47a742667b7a7fe40c61
+  OLD_TARGET_HEAD: b22e8e9da071d4f17619b1136aa29c9d76d1af86
+  OLD_TARGET_TREE: 73f6a7dd6d18c96b7f8bea5ef8f0bed1eb7b1149
+  EXPECTED_RESULT_TREE: 9b67fbb9028e3ce1679890ed8ab22ee8e7b778ea
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
-  PAYLOAD_COMMENT_ID: '5531282332'
-  EXPECTED_GZIP_BYTES: '5628'
-  EXPECTED_GZIP_SHA256: 4d6dc451dbee4ecef46c5f1e5d42eae40cd19401725a10b78baefc40536a44ae
-  EXPECTED_DIFF_BYTES: '28027'
-  EXPECTED_DIFF_SHA256: ed0575e8b907607264631925a344fd39a1e50ce60acae35479ccfafb1cfe1d44
+  PAYLOAD_COMMENT_ID: '5534545892'
+  EXPECTED_LOCAL_COMMIT: 07817824d8a96871aa25890741466d8ee46b1802
+  EXPECTED_GZIP_BYTES: '10912'
+  EXPECTED_GZIP_SHA256: 384f1a581a58e3d72c7ad0315d371c73197f3f2bc08780ba17ed443cabfb8e77
+  EXPECTED_DIFF_BYTES: '47613'
+  EXPECTED_DIFF_SHA256: 77cef825651f350d962a21e70e60185d02633d011681664a9413b8014058b558
+  EXPECTED_B64_BYTES: '14552'
 
 concurrency:
   group: wos02-correction-publisher
@@ -30,52 +32,61 @@ concurrency:
 
 jobs:
   publish:
-    name: Verify payload and publish exact WOS-02 correction tree
+    name: Verify complete recovery payload and publish exact WOS-02 closure tree
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Verify exact live leases and trusted recovery comment
         id: lease
         uses: actions/github-script@v7
         with:
           script: |
+            const fs = require('fs');
             const failures = [];
             const controller = context.payload.pull_request;
             if (!controller?.draft) failures.push('controller must remain Draft');
             if (controller?.head?.ref !== 'controller/wos02-exact-acceptance') failures.push(`controller head=${controller?.head?.ref}`);
             if (controller?.base?.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`controller base=${controller?.base?.sha}`);
+
             const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
             if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+
             const {data: target} = await github.rest.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.TARGET_PR)});
             if (target.state !== 'open') failures.push(`target state=${target.state}`);
             if (!target.draft) failures.push('target must remain Draft');
             if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target branch=${target.head.ref}`);
             if (target.head.sha !== process.env.OLD_TARGET_HEAD) failures.push(`target head=${target.head.sha}`);
             if (target.base.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`target base=${target.base.sha}`);
+
             const {data: commit} = await github.rest.repos.getCommit({owner: context.repo.owner, repo: context.repo.repo, ref: process.env.OLD_TARGET_HEAD});
             if (commit.commit.tree.sha !== process.env.OLD_TARGET_TREE) failures.push(`target tree=${commit.commit.tree.sha}`);
+
             const {data: comment} = await github.rest.issues.getComment({owner: context.repo.owner, repo: context.repo.repo, comment_id: Number(process.env.PAYLOAD_COMMENT_ID)});
             if (comment.user?.login !== 'chatgpt-codex-connector[bot]') failures.push(`payload author=${comment.user?.login}`);
-            for (const required of [
-              `Base: \`${process.env.OLD_TARGET_HEAD}\``,
-              `Resulting tree: \`${process.env.EXPECTED_RESULT_TREE}\``,
-              `Raw unified binary diff: \`${Number(process.env.EXPECTED_DIFF_BYTES).toLocaleString('en-US')}\` bytes`,
-              `Raw diff SHA-256: \`${process.env.EXPECTED_DIFF_SHA256}\``,
-              `Deterministic gzip (\`gzip -9 -n\`): \`${Number(process.env.EXPECTED_GZIP_BYTES).toLocaleString('en-US')}\` bytes`,
-              `Gzip SHA-256: \`${process.env.EXPECTED_GZIP_SHA256}\``,
-            ]) if (!comment.body.includes(required)) failures.push(`payload metadata missing: ${required}`);
-            const marker = 'The decoded diff SHA-256 must be';
-            const markerIndex = comment.body.indexOf(marker);
-            if (markerIndex < 0) failures.push('payload marker missing');
-            let payload = '';
-            if (markerIndex >= 0) {
-              const tail = comment.body.slice(markerIndex);
-              const match = tail.match(/```text\s*\n([A-Za-z0-9+/=\r\n]+?)\n```/);
-              if (!match) failures.push('base64 payload block missing');
-              else payload = match[1].replace(/\s+/g, '');
+            const required = [
+              `Base commit:      ${process.env.OLD_TARGET_HEAD}`,
+              `Local commit:     ${process.env.EXPECTED_LOCAL_COMMIT}`,
+              `Resulting tree:   ${process.env.EXPECTED_RESULT_TREE}`,
+              `Raw diff size:    ${process.env.EXPECTED_DIFF_BYTES} bytes`,
+              `Raw diff SHA-256: ${process.env.EXPECTED_DIFF_SHA256}`,
+              `Gzip size:        ${process.env.EXPECTED_GZIP_BYTES} bytes`,
+              `Gzip SHA-256:     ${process.env.EXPECTED_GZIP_SHA256}`,
+              `Base64 size:      ${process.env.EXPECTED_B64_BYTES} bytes`,
+            ];
+            for (const text of required) if (!comment.body.includes(text)) failures.push(`payload metadata missing: ${text}`);
+
+            const chunks = [];
+            for (let i = 1; i <= 3; i++) {
+              const re = new RegExp(`#### Chunk ${i}\\/3[^\\n]*\\n\\n\\x60\\x60\\x60text\\n([A-Za-z0-9+/=\\r\\n]+?)\\n\\x60\\x60\\x60`);
+              const m = comment.body.match(re);
+              if (!m) failures.push(`payload chunk ${i}/3 missing`);
+              else chunks.push(m[1].replace(/\s+/g, ''));
             }
+            const payload = chunks.join('');
+            if (Buffer.byteLength(payload, 'utf8') !== Number(process.env.EXPECTED_B64_BYTES)) failures.push(`base64 bytes=${Buffer.byteLength(payload, 'utf8')}`);
+
             if (failures.length) core.setFailed(`publisher lease failed: ${failures.join('; ')}`);
-            else require('fs').writeFileSync(`${process.env.RUNNER_TEMP}/wos02-correction.b64`, payload, 'utf8');
+            else fs.writeFileSync(`${process.env.RUNNER_TEMP}/wos02-correction.b64`, payload, 'utf8');
 
       - name: Checkout exact current product head with publication credential
         uses: actions/checkout@v4
@@ -88,16 +99,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(wc -c < "$RUNNER_TEMP/wos02-correction.b64" | tr -d ' ')" = "$EXPECTED_B64_BYTES"
           base64 --decode "$RUNNER_TEMP/wos02-correction.b64" > "$RUNNER_TEMP/wos02-correction.gz"
           test "$(wc -c < "$RUNNER_TEMP/wos02-correction.gz" | tr -d ' ')" = "$EXPECTED_GZIP_BYTES"
           echo "$EXPECTED_GZIP_SHA256  $RUNNER_TEMP/wos02-correction.gz" | sha256sum -c -
           gzip -dc "$RUNNER_TEMP/wos02-correction.gz" > "$RUNNER_TEMP/wos02-correction.diff"
           test "$(wc -c < "$RUNNER_TEMP/wos02-correction.diff" | tr -d ' ')" = "$EXPECTED_DIFF_BYTES"
           echo "$EXPECTED_DIFF_SHA256  $RUNNER_TEMP/wos02-correction.diff" | sha256sum -c -
-          grep -q '^diff --git a/server/migrations/023_wos02_scope_lifecycle_integrity.sql b/server/migrations/023_wos02_scope_lifecycle_integrity.sql$' "$RUNNER_TEMP/wos02-correction.diff"
-          test "$(grep -c '^diff --git a/' "$RUNNER_TEMP/wos02-correction.diff")" = 4
+          test "$(grep -c '^diff --git a/' "$RUNNER_TEMP/wos02-correction.diff")" = 7
+          grep -q '^diff --git a/server/migrations/024_wos02_final_review_closure.sql b/server/migrations/024_wos02_final_review_closure.sql$' "$RUNNER_TEMP/wos02-correction.diff"
 
-      - name: Apply exact correction and verify expected Git tree before publication
+      - name: Apply exact closure and verify expected Git tree
         shell: bash
         run: |
           set -euo pipefail
@@ -113,11 +125,17 @@ jobs:
           test "$result_tree" = "$EXPECTED_RESULT_TREE"
           changed="$(git diff --cached --name-only)"
           printf '%s\n' "$changed"
-          test "$(printf '%s\n' "$changed" | wc -l | tr -d ' ')" = 4
-          printf '%s\n' "$changed" | grep -Fx 'docs/00-control/REQUIREMENTS_TRACEABILITY.md'
-          printf '%s\n' "$changed" | grep -Fx 'server/migrations/023_wos02_scope_lifecycle_integrity.sql'
-          printf '%s\n' "$changed" | grep -Fx 'server/organization-setup.mjs'
-          printf '%s\n' "$changed" | grep -Fx 'tests/organization-setup-smoke.mjs'
+          test "$(printf '%s\n' "$changed" | wc -l | tr -d ' ')" = 7
+          for path in \
+            'docs/00-control/REQUIREMENTS_TRACEABILITY.md' \
+            'server/index.mjs' \
+            'server/migrations/024_wos02_final_review_closure.sql' \
+            'server/organization-setup.mjs' \
+            'src/components/Layout/Header.tsx' \
+            'src/services/apiClient.ts' \
+            'tests/organization-setup-smoke.mjs'; do
+              printf '%s\n' "$changed" | grep -Fx "$path"
+          done
 
       - name: Revalidate branch lease immediately before commit and push
         uses: actions/github-script@v7
@@ -127,6 +145,7 @@ jobs:
             const {data: main} = await github.rest.repos.getBranch({owner: context.repo.owner, repo: context.repo.repo, branch: 'main'});
             if (target.head.sha !== process.env.OLD_TARGET_HEAD) core.setFailed(`target moved to ${target.head.sha}`);
             if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) core.setFailed(`main moved to ${main.commit.sha}`);
+            if (!target.draft || target.state !== 'open') core.setFailed('target lifecycle moved');
 
       - name: Commit exact tree and non-force publish to existing Draft PR branch
         shell: bash
@@ -134,7 +153,7 @@ jobs:
           set -euo pipefail
           git config user.name 'WorkOS Implementation Controller'
           git config user.email 'actions@users.noreply.github.com'
-          git commit -m 'fix: enforce WOS-02 scope and lifecycle integrity'
+          git commit -m 'fix: close WOS-02 final review findings'
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_RESULT_TREE"
           git push origin "HEAD:$TARGET_BRANCH"
           echo "PUBLISHED_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
@@ -148,4 +167,4 @@ jobs:
             if (target.head.sha !== process.env.PUBLISHED_HEAD) core.setFailed(`published head mismatch ${target.head.sha} != ${process.env.PUBLISHED_HEAD}`);
             const {data: commit} = await github.rest.repos.getCommit({owner: context.repo.owner, repo: context.repo.repo, ref: target.head.sha});
             if (commit.commit.tree.sha !== process.env.EXPECTED_RESULT_TREE) core.setFailed(`published tree mismatch ${commit.commit.tree.sha}`);
-            core.summary.addHeading('WOS-02 correction publication').addRaw(`Published PR #${process.env.TARGET_PR} head ${target.head.sha} at exact tree ${commit.commit.tree.sha}.`).write();
+            core.summary.addHeading('WOS-02 final-review closure publication').addRaw(`Published PR #${process.env.TARGET_PR} head ${target.head.sha} at exact tree ${commit.commit.tree.sha}.`).write();
