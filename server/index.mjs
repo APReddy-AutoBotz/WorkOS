@@ -3823,7 +3823,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const approval = (await client.query(`${approvalSelect} where ar.id = $1 for update`, [req.params.id])).rows[0];
+    const approval = (await client.query('select * from approval_records where id = $1 for update', [req.params.id])).rows[0];
     if (!approval) {
       await client.query('rollback');
       res.status(404).json({ error: 'Approval record not found' });
@@ -3837,7 +3837,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
 
     const scopeParams = [approval.subject_employee_id];
     const scoped = (await client.query(`
-      select 1
+      select e.name as subject_employee_name
       from employees e
       where e.id = $1 and ${buildApprovalScopeWhere(req, scopeParams)}
       limit 1
@@ -3847,6 +3847,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
       res.status(403).json({ error: 'Approval is outside active-role data scope' });
       return;
     }
+    approval.subject_employee_name = scoped.subject_employee_name;
     const actorEmployeeIds = new Set([req.user.employeeRecordId, req.user.employeeId].filter(Boolean).map(String));
     if (
       parsed.data.status !== 'Cancelled' &&

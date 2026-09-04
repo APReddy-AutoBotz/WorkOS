@@ -108,6 +108,11 @@ assert.match(server, /insert into project_allocations[\s\S]*organization_id/, 'a
 assert.match(server, /api\/imports\/allocations\/apply[\s\S]*organization_id=\$2 and legal_entity_id=\$3[\s\S]*p\.legal_entity_id=\$3 and e\.legal_entity_id=\$3/, 'allocation imports must resolve and update references only in the authorized organization and legal entity');
 assert.match(server, /api\/timesheets[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT[\s\S]*api\/timesheets\/:id\/status[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'canonical save and direct decision paths must use the shared reporting-period guard');
 assert.match(server, /api\/approvals\/:id\/status[\s\S]*approval\.entity_type === 'Timesheet'[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'generic timesheet approval decisions must use the shared reporting-period guard');
+assert.match(server, /api\/approvals\/:id\/status[\s\S]*select \* from approval_records where id = \$1 for update/, 'generic approval decisions must lock the authoritative approval row directly');
+assert.doesNotMatch(server, /approvalSelect} where ar\.id = \$1 for update/, 'generic approval locking must not apply FOR UPDATE to the nullable side of an outer join');
+assert.match(server, /select e\.name as subject_employee_name[\s\S]*buildApprovalScopeWhere\(req, scopeParams\)/, 'generic approval scope and display data must be derived separately after locking');
+assert.match(server, /approval\.entity_type === 'Timesheet'[\s\S]*timesheets where id=\$1 and organization_id=\$2 and legal_entity_id=\$3 for update[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'generic timesheet approval must retain linked row scope, locking, and reporting-period authority');
+assert.match(server, /approval\.entity_type === 'LeaveRequest'[\s\S]*leave_requests where id = \$1 for update[\s\S]*decideApprovalRecord/, 'non-timesheet generic approval behavior must remain retained');
 assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT/, 'all timesheet import statuses must use the shared content-mutation guard');
 
 const periodQuery = status => ({ query: async () => ({ rows: status === null ? [] : Array.isArray(status) ? status : [{ id:'period-1', code:'P1', status }] }) });
