@@ -78,9 +78,9 @@ jobs:
           pathlib.Path(os.environ['RUNNER_TEMP']+'/readiness.diff').write_bytes(raw)
           PY
           git apply --binary "$RUNNER_TEMP/readiness.diff"
-          test "$(git diff --name-only | sort | tr '\n' ' ')" = "docs/00-control/REQUIREMENTS_TRACEABILITY.md server/organization-setup.mjs server/setup-readiness.mjs src/types.ts tests/organization-setup-smoke.mjs "
           git diff --check
           git add -A
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = "docs/00-control/REQUIREMENTS_TRACEABILITY.md server/organization-setup.mjs server/setup-readiness.mjs src/types.ts tests/organization-setup-smoke.mjs "
           git config user.name 'WorkOS Controller'
           git config user.email 'actions@users.noreply.github.com'
           git commit -m 'fix: complete guided setup readiness'
