@@ -1,0 +1,203 @@
+name: WOS-02 Scope Recovery Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-exact-acceptance
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: wos02-scope-recovery-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REPO: APReddy-AutoBotz/WorkOS
+      MAIN_SHA: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+      PRODUCT_PR: '37'
+      ISSUE: '4'
+      PRODUCT_BRANCH: codex/wos-02-organization-setup-foundation
+      BASE_SHA: 59c1151ebcb46d3ac2882a046686b9f31a6b432b
+      BASE_TREE: 90e2bed5b34f48dd7d0dbd262102a8e032f7a094
+      SOURCE_COMMENT: '5542551305'
+      LOCAL_COMMIT: a6eb2e0ee42e1f07b8dd6d10591e96fd84f08938
+      TARGET_TREE: f2f7a8e5b2c1f8244e6c7d6bfa8dc8f33d219a17
+      RAW_BYTES: '45896'
+      RAW_SHA256: 83737c75803b13801090a610969d4589b4148ee7873940d91eca5d7233bf9707
+      GZIP_BYTES: '7863'
+      GZIP_SHA256: b505ea995e6829159a846ce357c04746ceeb194d386ceb1e29c0ee3c267418c0
+      B64_BYTES: '10484'
+    steps:
+      - name: Verify live authority before materialization
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const token = process.env.GH_TOKEN;
+          const repo = process.env.REPO;
+          async function get(path) {
+            const r = await fetch(`https://api.github.com/repos/${repo}${path}`, {headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'}});
+            if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
+            return r.json();
+          }
+          const main = await get('/branches/main');
+          const pr = await get(`/pulls/${process.env.PRODUCT_PR}`);
+          const issue = await get(`/issues/${process.env.ISSUE}`);
+          if (main.commit.sha !== process.env.MAIN_SHA) throw new Error(`main moved: ${main.commit.sha}`);
+          if (pr.state !== 'open' || !pr.draft || pr.merged_at) throw new Error(`PR lifecycle changed: state=${pr.state} draft=${pr.draft} merged_at=${pr.merged_at}`);
+          if (pr.head.sha !== process.env.BASE_SHA) throw new Error(`product head moved: ${pr.head.sha}`);
+          if (issue.state !== 'open') throw new Error(`issue #${process.env.ISSUE} not open`);
+          console.log('authority-ok', main.commit.sha, pr.head.sha, issue.state);
+          NODE
+
+      - name: Checkout exact product base
+        uses: actions/checkout@v4
+        with:
+          repository: APReddy-AutoBotz/WorkOS
+          ref: 59c1151ebcb46d3ac2882a046686b9f31a6b432b
+          path: product
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify pristine base tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$BASE_TREE"
+          test -z "$(git status --porcelain)"
+
+      - name: Fetch and verify complete recovery payload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const token = process.env.GH_TOKEN;
+          const repo = process.env.REPO;
+          const comment = process.env.SOURCE_COMMENT;
+          const r = await fetch(`https://api.github.com/repos/${repo}/issues/comments/${comment}`, {headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'}});
+          if (!r.ok) throw new Error(`comment fetch: ${r.status} ${await r.text()}`);
+          const {body} = await r.json();
+          const required = [
+            `Exact base:       ${process.env.BASE_SHA}`,
+            `Local commit:     ${process.env.LOCAL_COMMIT}`,
+            `Resulting tree:   ${process.env.TARGET_TREE}`,
+            `Raw diff bytes:   ${process.env.RAW_BYTES}`,
+            `Raw diff SHA-256: ${process.env.RAW_SHA256}`,
+            `Gzip bytes:       ${process.env.GZIP_BYTES}`,
+            `Gzip SHA-256:     ${process.env.GZIP_SHA256}`,
+            `Base64 bytes:     ${process.env.B64_BYTES}`,
+          ];
+          for (const marker of required) if (!body.includes(marker)) throw new Error(`metadata mismatch/missing: ${marker}`);
+          const marker = 'Complete `base64(gzip -9 -n(git diff --binary 59c1151e…a6eb2e0e…))` payload:';
+          const idx = body.indexOf(marker);
+          if (idx < 0) throw new Error('payload marker missing');
+          const tail = body.slice(idx + marker.length);
+          const m = tail.match(/```text\s*\n([A-Za-z0-9+/=\r\n]+?)\n```/s);
+          if (!m) throw new Error('payload code block missing');
+          const b64 = m[1].replace(/\s+/g, '');
+          if (Buffer.byteLength(b64, 'ascii') !== Number(process.env.B64_BYTES)) throw new Error(`base64 size mismatch ${b64.length}`);
+          fs.writeFileSync('/tmp/correction.diff.gz', Buffer.from(b64, 'base64'));
+          NODE
+          test "$(wc -c < /tmp/correction.diff.gz)" = "$GZIP_BYTES"
+          echo "$GZIP_SHA256  /tmp/correction.diff.gz" | sha256sum -c -
+          gzip -dc /tmp/correction.diff.gz > /tmp/correction.diff
+          test "$(wc -c < /tmp/correction.diff)" = "$RAW_BYTES"
+          echo "$RAW_SHA256  /tmp/correction.diff" | sha256sum -c -
+
+      - name: Reconstruct and verify exact target tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product
+          git apply --binary /tmp/correction.diff
+          git diff --check
+          git add -A
+          mapfile -t files < <(git diff --cached --name-only)
+          expected=(
+            docs/00-control/REQUIREMENTS_TRACEABILITY.md
+            server/index.mjs
+            server/migrations/026_wos02_canonical_legal_scope_integrity.sql
+            server/seed-demo.mjs
+            tests/organization-setup-smoke.mjs
+          )
+          printf '%s\n' "${files[@]}" > /tmp/files.actual
+          printf '%s\n' "${expected[@]}" > /tmp/files.expected
+          diff -u /tmp/files.expected /tmp/files.actual
+          test "$(git write-tree)" = "$TARGET_TREE"
+
+      - name: Revalidate mutable leases immediately before publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const token = process.env.GH_TOKEN;
+          const repo = process.env.REPO;
+          async function get(path) {
+            const r = await fetch(`https://api.github.com/repos/${repo}${path}`, {headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'}});
+            if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
+            return r.json();
+          }
+          const main = await get('/branches/main');
+          const pr = await get(`/pulls/${process.env.PRODUCT_PR}`);
+          if (main.commit.sha !== process.env.MAIN_SHA) throw new Error(`main moved: ${main.commit.sha}`);
+          if (pr.head.sha !== process.env.BASE_SHA || pr.state !== 'open' || !pr.draft || pr.merged_at) throw new Error(`product lease/lifecycle moved: ${pr.head.sha} state=${pr.state} draft=${pr.draft}`);
+          console.log('pre-publish-lease-ok');
+          NODE
+
+      - name: Commit exact tree and non-force fast-forward existing product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product
+          git config user.name 'WorkOS Implementation Controller'
+          git config user.email 'workos-controller@users.noreply.github.com'
+          git commit -m 'fix: enforce canonical ownership scope'
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$TARGET_TREE"
+          echo "PUBLISHED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git push origin HEAD:"$PRODUCT_BRANCH"
+
+      - name: Verify published GitHub head tree and parent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const token = process.env.GH_TOKEN;
+          const repo = process.env.REPO;
+          const expected = process.env.PUBLISHED_SHA;
+          async function get(path) {
+            const r = await fetch(`https://api.github.com/repos/${repo}${path}`, {headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'}});
+            if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
+            return r.json();
+          }
+          let last;
+          for (let i=0;i<15;i++) {
+            const pr = await get(`/pulls/${process.env.PRODUCT_PR}`);
+            last = pr.head.sha;
+            if (last === expected) break;
+            await new Promise(r=>setTimeout(r,2000));
+          }
+          if (last !== expected) throw new Error(`post-push head mismatch: ${last} expected ${expected}`);
+          const commit = await get(`/git/commits/${expected}`);
+          if (commit.tree.sha !== process.env.TARGET_TREE) throw new Error(`tree mismatch ${commit.tree.sha}`);
+          if (commit.parents.length !== 1 || commit.parents[0].sha !== process.env.BASE_SHA) throw new Error(`parent mismatch ${commit.parents.map(p=>p.sha).join(',')}`);
+          console.log('published-ok', expected, commit.tree.sha, commit.parents[0].sha);
+          NODE
