@@ -7,6 +7,7 @@ on:
       - '.github/workflows/wos02-final-review-acceptance.yml'
       - '.github/scripts/wos02-final-review-live-acceptance.mjs'
       - '.github/scripts/wos02-scope-write-acceptance.mjs'
+      - '.github/scripts/wos02-worker-lifecycle-acceptance.mjs'
 
 permissions:
   contents: read
@@ -15,8 +16,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: 7a7db8ade43600ede187e379b0b8c1f96aeac53d
-  TARGET_TREE: 78bc027edc4f44b2e4e5c8a773c1b0e75cd4af3e
+  TARGET_HEAD: a0bf8e2aa9d1160abad981f2df85954c9f8e0987
+  TARGET_TREE: 96869f1ec904b05513384cc5af104d5f78a540c9
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -48,7 +49,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 21-file authority
+      - name: Verify exact product controller main and 22-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -80,6 +81,7 @@ jobs:
               'server/migrations/025a_wos02_project_legal_scope_unique_prerequisite.sql',
               'server/migrations/026_wos02_canonical_legal_scope_integrity.sql',
               'server/organization-setup.mjs',
+              'server/worker-lifecycle.mjs',
               'server/seed-demo.mjs',
               'src/App.tsx',
               'src/components/Layout/Header.tsx',
@@ -175,6 +177,7 @@ jobs:
           git diff --check "$EXPECTED_MAIN_HEAD..$TARGET_HEAD"
           node --check server/index.mjs
           node --check server/organization-setup.mjs
+          node --check server/worker-lifecycle.mjs
           node --check server/seed-demo.mjs
 
       - name: Production startup fails closed without required config
@@ -195,7 +198,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 40); do pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres && break; sleep 1; done
-          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_final_prod; do
+          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_final_prod; do
             dropdb --if-exists -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
             createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
           done
@@ -273,6 +276,17 @@ jobs:
           set -euo pipefail
           (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
           node .github/scripts/wos02-scope-write-acceptance.mjs
+
+      - name: Execute worker lifecycle and linked identity acceptance matrix
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: /home/runner/work/WorkOS/WorkOS/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_worker_lifecycle
+        run: |
+          set -euo pipefail
+          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+          node .github/scripts/wos02-worker-lifecycle-acceptance.mjs
 
       - name: Verify database ownership constraints and organization-scoped timesheet uniqueness directly
         shell: bash
