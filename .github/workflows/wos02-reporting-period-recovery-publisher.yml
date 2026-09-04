@@ -1,0 +1,124 @@
+name: WOS-02 Reporting Period Recovery Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - .github/workflows/wos02-reporting-period-recovery-publisher.yml
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: a0bf8e2aa9d1160abad981f2df85954c9f8e0987
+  EXPECTED_PRODUCT_TREE: 96869f1ec904b05513384cc5af104d5f78a540c9
+  RESULT_TREE: 873559fcbbb9059879586462259046a9da5fd112
+  RAW_BYTES: '28451'
+  RAW_SHA: ef23d03808400a5798ec15d6d4f78012170cacefe235c522c361b7fe0d6c1a02
+  GZIP_BYTES: '6859'
+  GZIP_SHA: ba3be785cab6fa436183ebc6b04db34516d88545b1c849aef2c3c34536f5ae8a
+  BASE64_BYTES: '9148'
+  TARGET_BRANCH: codex/wos-02-organization-setup-foundation
+  RECOVERY_COMMENT: '5545435471'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:pr}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(pr.state!=='open'||!pr.draft) failures.push(`PR37 lifecycle=${pr.state}/draft:${pr.draft}`);
+            if(pr.head.ref!==process.env.TARGET_BRANCH) failures.push(`PR37 branch=${pr.head.ref}`);
+            if(pr.head.sha!==process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${pr.head.sha}`);
+            if(pr.base.sha!==process.env.EXPECTED_MAIN) failures.push(`PR37 base=${pr.base.sha}`);
+            const {data:c}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.EXPECTED_PRODUCT});
+            if(c.commit.tree.sha!==process.env.EXPECTED_PRODUCT_TREE) failures.push(`PR37 tree=${c.commit.tree.sha}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact product head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch and verify exact recovery payload
+        uses: actions/github-script@v7
+        env:
+          PAYLOAD_PATH: ${{ runner.temp }}/payload.b64
+        with:
+          script: |
+            const fs=require('fs');
+            const {data:c}=await github.rest.issues.getComment({owner:context.repo.owner,repo:context.repo.repo,comment_id:Number(process.env.RECOVERY_COMMENT)});
+            const body=String(c.body||'');
+            const marker='Complete `base64(gzip -9 -n(git diff --binary a0bf8e2a…800ea75c…))` payload:';
+            const i=body.indexOf(marker);
+            if(i<0) return core.setFailed('recovery payload marker missing');
+            const tail=body.slice(i+marker.length);
+            const m=tail.match(/```text\s*([A-Za-z0-9+/=\s]+?)\s*```/);
+            if(!m) return core.setFailed('complete recovery payload block missing');
+            const payload=m[1].replace(/\s+/g,'');
+            if(Buffer.byteLength(payload,'utf8')!==Number(process.env.BASE64_BYTES)) return core.setFailed(`base64 bytes=${Buffer.byteLength(payload,'utf8')}`);
+            fs.writeFileSync(process.env.PAYLOAD_PATH,payload+'\n');
+
+      - name: Apply exact recovery and verify resulting tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_PRODUCT_TREE"
+          base64 -d "$RUNNER_TEMP/payload.b64" > "$RUNNER_TEMP/correction.diff.gz"
+          test "$(wc -c < "$RUNNER_TEMP/correction.diff.gz")" = "$GZIP_BYTES"
+          echo "$GZIP_SHA  $RUNNER_TEMP/correction.diff.gz" | sha256sum -c -
+          gzip -dc "$RUNNER_TEMP/correction.diff.gz" > "$RUNNER_TEMP/correction.diff"
+          test "$(wc -c < "$RUNNER_TEMP/correction.diff")" = "$RAW_BYTES"
+          echo "$RAW_SHA  $RUNNER_TEMP/correction.diff" | sha256sum -c -
+          git apply --binary "$RUNNER_TEMP/correction.diff"
+          actual="$(git diff --name-only | sort | tr '\n' ' ')"
+          expected="docs/00-control/REQUIREMENTS_TRACEABILITY.md server/index.mjs server/migrations/027_wos02_reporting_period_authority.sql server/organization-setup.mjs server/reporting-periods.mjs tests/organization-setup-smoke.mjs "
+          test "$actual" = "$expected"
+          git diff --check
+          git add -A
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'fix: enforce authoritative reporting periods'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$RESULT_TREE"
+
+      - name: Revalidate live lease immediately before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:pr}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(pr.state!=='open'||!pr.draft||pr.head.ref!==process.env.TARGET_BRANCH||pr.head.sha!==process.env.EXPECTED_PRODUCT) failures.push(`PR37=${pr.state}/draft:${pr.draft}/branch:${pr.head.ref}/head:${pr.head.sha}`);
+            if(failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"$TARGET_BRANCH"
+
+      - name: Verify remote ref parent and tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_head="$(git rev-parse HEAD)"
+          remote_head="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | awk '{print $1}')"
+          test "$remote_head" = "$local_head"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$RESULT_TREE"
