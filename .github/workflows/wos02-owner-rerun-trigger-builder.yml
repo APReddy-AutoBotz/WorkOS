@@ -1,0 +1,71 @@
+name: WOS-02 Owner Rerun Trigger Builder
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-owner-rerun-trigger-builder.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: a0bf8e2aa9d1160abad981f2df85954c9f8e0987
+  EXPECTED_PRODUCT_TREE: 96869f1ec904b05513384cc5af104d5f78a540c9
+  EXPECTED_CONTROLLER: 1f16c2e070ea84b3c998d84339223beb5ebf4a41
+  CONTROLLER_BRANCH: controller/wos02-exact-acceptance
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.state!=='open'||!product.draft||product.head.sha!==process.env.EXPECTED_PRODUCT) failures.push(`product=${product.state}/draft:${product.draft}/head:${product.head.sha}`);
+            const {data:pc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:product.head.sha});
+            if(pc.commit.tree.sha!==process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${pc.commit.tree.sha}`);
+            if(controller.state!=='open'||!controller.draft||controller.head.sha!==process.env.EXPECTED_CONTROLLER) failures.push(`controller=${controller.state}/draft:${controller.draft}/head:${controller.head.sha}`);
+            if(controller.head.ref!==process.env.CONTROLLER_BRANCH) failures.push(`controller branch=${controller.head.ref}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Add inert watched-path owner rerun marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/wos02-worker-lifecycle-acceptance.mjs')
+          s=p.read_text()
+          marker='// Controller owner-trigger marker: run complete acceptance after date-contract correction.\n'
+          assert marker not in s
+          p.write_text(marker+s)
+          PY
+          test "$(git diff --name-only | tr '\n' ' ')" = ".github/scripts/wos02-worker-lifecycle-acceptance.mjs "
+          git diff --check
+
+      - name: Create exact script blob only
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs');
+            const content=fs.readFileSync('.github/scripts/wos02-worker-lifecycle-acceptance.mjs','utf8');
+            const {data:blob}=await github.rest.git.createBlob({owner:context.repo.owner,repo:context.repo.repo,content,encoding:'utf-8'});
+            core.notice(`OWNER_TRIGGER_BLOB=${blob.sha}`);
