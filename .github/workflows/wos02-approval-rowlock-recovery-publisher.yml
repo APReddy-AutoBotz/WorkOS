@@ -1,0 +1,145 @@
+name: WOS-02 Approval Row-Lock Recovery Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - .github/workflows/wos02-approval-rowlock-recovery-publisher.yml
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: bcf04772b41729051d8a8139c17969bed7f07461
+  EXPECTED_PRODUCT_TREE: 873559fcbbb9059879586462259046a9da5fd112
+  EXPECTED_RESULT_TREE: 9afbfa7eb02067a312cb14b5e17f71424ce807c7
+  RECOVERY_COMMENT: '5546843706'
+  TARGET_BRANCH: codex/wos-02-organization-setup-foundation
+  RAW_BYTES: '6948'
+  RAW_SHA: b91b773e3c97b5998ab428c1534228e4e136f3e6b38166dbf678352336766c35
+  GZIP_BYTES: '2279'
+  GZIP_SHA: 82d897fe2489c0a3a0175c1c15d5f94d050ae970d4432db6ec791b20b0dc5179
+  BASE64_BYTES: '3040'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data: pr} = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (pr.state !== 'open' || !pr.draft) failures.push(`PR37 lifecycle=${pr.state}/draft:${pr.draft}`);
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`PR37 branch=${pr.head.ref}`);
+            if (pr.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${pr.head.sha}`);
+            if (pr.base.sha !== process.env.EXPECTED_MAIN) failures.push(`PR37 base=${pr.base.sha}`);
+            const {data: commit} = await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.EXPECTED_PRODUCT});
+            if (commit.commit.tree.sha !== process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${commit.commit.tree.sha}`);
+            if (failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact product head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch and validate complete Codex recovery handoff
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const {data: comment} = await github.rest.issues.getComment({owner:context.repo.owner,repo:context.repo.repo,comment_id:Number(process.env.RECOVERY_COMMENT)});
+            const body = comment.body || '';
+            const required = [
+              `Exact base:       ${process.env.EXPECTED_PRODUCT}`,
+              `Resulting tree:   ${process.env.EXPECTED_RESULT_TREE}`,
+              `Raw diff bytes:   ${process.env.RAW_BYTES}`,
+              `Raw diff SHA-256: ${process.env.RAW_SHA}`,
+              `Gzip bytes:       ${process.env.GZIP_BYTES}`,
+              `Gzip SHA-256:     ${process.env.GZIP_SHA}`,
+              `Base64 bytes:     ${process.env.BASE64_BYTES}`,
+              'M  docs/00-control/REQUIREMENTS_TRACEABILITY.md',
+              'M  server/index.mjs',
+              'M  tests/organization-setup-smoke.mjs',
+            ];
+            const missing = required.filter(x => !body.includes(x));
+            if (missing.length) return core.setFailed(`handoff metadata missing: ${missing.join(' | ')}`);
+            const marker = 'Complete `base64(gzip -9 -n(git diff --binary bcf04772…1e9828e…))` payload:';
+            const start = body.indexOf(marker);
+            if (start < 0) return core.setFailed('complete payload marker missing');
+            const tail = body.slice(start + marker.length);
+            const match = tail.match(/```text\s*([A-Za-z0-9+/=\r\n]+?)\s*```/);
+            if (!match) return core.setFailed('complete base64 payload block missing');
+            const payload = match[1].replace(/\s+/g, '');
+            if (Buffer.byteLength(payload, 'utf8') !== Number(process.env.BASE64_BYTES)) return core.setFailed(`base64 bytes=${Buffer.byteLength(payload,'utf8')}`);
+            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'payload.b64'), payload);
+
+      - name: Verify payload hashes files and exact result tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_PRODUCT_TREE"
+          base64 -d "$RUNNER_TEMP/payload.b64" > "$RUNNER_TEMP/correction.diff.gz"
+          test "$(wc -c < "$RUNNER_TEMP/correction.diff.gz")" = "$GZIP_BYTES"
+          echo "$GZIP_SHA  $RUNNER_TEMP/correction.diff.gz" | sha256sum -c -
+          gzip -dc "$RUNNER_TEMP/correction.diff.gz" > "$RUNNER_TEMP/correction.diff"
+          test "$(wc -c < "$RUNNER_TEMP/correction.diff")" = "$RAW_BYTES"
+          echo "$RAW_SHA  $RUNNER_TEMP/correction.diff" | sha256sum -c -
+          git apply --check --binary "$RUNNER_TEMP/correction.diff"
+          git apply --binary "$RUNNER_TEMP/correction.diff"
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "docs/00-control/REQUIREMENTS_TRACEABILITY.md server/index.mjs tests/organization-setup-smoke.mjs "
+          read adds dels < <(git diff --numstat | awk '{a+=$1; d+=$2} END {print a,d}')
+          test "$adds" = 9
+          test "$dels" = 3
+          git diff --check
+          git add docs/00-control/REQUIREMENTS_TRACEABILITY.md server/index.mjs tests/organization-setup-smoke.mjs
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'fix: correct generic approval row locking'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_RESULT_TREE"
+
+      - name: Revalidate exact live lease immediately before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data: pr} = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (pr.state !== 'open' || !pr.draft) failures.push(`PR37 lifecycle=${pr.state}/draft:${pr.draft}`);
+            if (pr.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${pr.head.sha}`);
+            if (pr.head.ref !== process.env.TARGET_BRANCH) failures.push(`PR37 branch=${pr.head.ref}`);
+            if (failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing product branch
+        id: push
+        shell: bash
+        run: |
+          set -euo pipefail
+          new_head="$(git rev-parse HEAD)"
+          git push origin HEAD:"$TARGET_BRANCH"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published remote exact lineage and tree
+        shell: bash
+        env:
+          NEW_HEAD: ${{ steps.push.outputs.new_head }}
+        run: |
+          set -euo pipefail
+          remote="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | awk '{print $1}')"
+          test "$remote" = "$NEW_HEAD"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_RESULT_TREE"
