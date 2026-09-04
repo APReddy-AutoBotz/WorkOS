@@ -5,6 +5,7 @@ const migration = readFileSync('server/migrations/022_organization_setup_foundat
 const integrityMigration = readFileSync('server/migrations/023_wos02_scope_lifecycle_integrity.sql', 'utf8');
 const closureMigration = readFileSync('server/migrations/024_wos02_final_review_closure.sql', 'utf8');
 const timesheetScopeMigration = readFileSync('server/migrations/025_wos02_timesheet_scope_integrity.sql', 'utf8');
+const canonicalScopeMigration = readFileSync('server/migrations/026_wos02_canonical_legal_scope_integrity.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
 const server = readFileSync('server/index.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
@@ -35,9 +36,16 @@ assert.match(integrityMigration, /worker_history_versions_no_overlap[\s\S]*exclu
 assert.match(timesheetScopeMigration, /drop constraint if exists timesheets_employee_id_week_ending_key/, 'unsafe global timesheet uniqueness must be removed');
 assert.match(timesheetScopeMigration, /uq_timesheets_org_employee_week[\s\S]*organization_id, employee_id, week_ending/, 'timesheet uniqueness must be organization scoped');
 assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*from employees[\s\S]*organization_id = \$2 and legal_entity_id = \$3[\s\S]*from projects[\s\S]*organization_id = \$2 and legal_entity_id = \$3/, 'timesheet import references must resolve only within authoritative organization and legal scope');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*select \* from timesheets where organization_id = \$1 and employee_id = \$2 and week_ending = \$3 for update/, 'timesheet import prior-row lookup must be organization scoped and locked');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*insert into timesheets \(employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id\)[\s\S]*on conflict \(organization_id, employee_id, week_ending\)/, 'timesheet import must persist authoritative ownership and use the scoped arbiter');
+assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*select \* from timesheets where organization_id = \$1 and legal_entity_id = \$2 and employee_id = \$3 and week_ending = \$4 for update/, 'timesheet import prior-row lookup must be organization/legal scoped and locked');
+assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*insert into timesheets \(employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id\)[\s\S]*on conflict \(organization_id, employee_id, week_ending\)/, 'timesheet import must persist authoritative ownership and use the scoped arbiter');
 assert.match(server, /delete from timesheet_entries where timesheet_id = \$1/, 'timesheet entries must be replaced only through the authorized scoped timesheet');
+assert.match(canonicalScopeMigration, /project_allocations add column if not exists legal_entity_id[\s\S]*project_allocations_employee_legal_scope_fk[\s\S]*project_allocations_project_legal_scope_fk/, 'allocation persistence must enforce employee and project legal ownership');
+assert.match(canonicalScopeMigration, /timesheets add column if not exists legal_entity_id[\s\S]*timesheets_employee_legal_scope_fk/, 'timesheet persistence must enforce employee legal ownership');
+assert.match(server, /api\/imports\/clients\/apply[\s\S]*from clients[\s\S]*organization_id = \$3 and legal_entity_id = \$4[\s\S]*insert into clients \(id, name, industry, account_owner_id, status, organization_id, legal_entity_id\)/, 'client import must resolve and persist authoritative ownership');
+assert.match(server, /api\/imports\/employees\/apply[\s\S]*select \* from employees where employee_id = \$1 and organization_id = \$2 and legal_entity_id = \$3/, 'employee import prior-row reuse must be scoped');
+assert.match(server, /api\/projects[\s\S]*select \* from projects where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*Project not found in the authorized organization and legal entity/, 'project ID updates must deny cross-scope rows before upsert');
+assert.match(server, /api\/allocations[\s\S]*from project_allocations where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*insert into project_allocations \(id,[\s\S]*organization_id, legal_entity_id\)/, 'allocation save must scope existing rows and persist legal ownership');
+assert.match(server, /api\/timesheets[\s\S]*from employees where id = \$1 and organization_id = \$2 and legal_entity_id = \$3[\s\S]*pa\.organization_id = \$3 and pa\.legal_entity_id = \$4/, 'timesheet save must scope employees and covering allocations by legal entity');
 
 assert.match(service, /user_organization_scopes/, 'scope must be resolved from persisted assignments');
 assert.match(service, /ORG_SCOPE_DENIED/, 'unauthorized caller scope must fail closed');

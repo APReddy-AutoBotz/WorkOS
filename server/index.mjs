@@ -1672,7 +1672,18 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from employees where employee_id = $1', [parsed.data.employee_id])).rows[0];
+    const previous = (await client.query(
+      'select * from employees where employee_id = $1 and organization_id = $2 and legal_entity_id = $3',
+      [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
+    )).rows[0];
+    if (parsed.data.id && (!previous || previous.id !== parsed.data.id)) {
+      const unavailableId = (await client.query('select 1 from employees where id = $1', [parsed.data.id])).rows[0];
+      if (unavailableId) {
+        await client.query('rollback');
+        res.status(404).json({ error: 'Employee not found in the authorized organization and legal entity' });
+        return;
+      }
+    }
     const employeeRecordId = parsed.data.id || previous?.id || `e-${crypto.randomUUID()}`;
     if (parsed.data.reporting_manager_id === employeeRecordId) {
       await client.query('rollback');
@@ -1680,7 +1691,10 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       return;
     }
     if (parsed.data.reporting_manager_id) {
-      const manager = (await client.query('select id, status from employees where id = $1', [parsed.data.reporting_manager_id])).rows[0];
+      const manager = (await client.query(
+        'select id, status from employees where id = $1 and organization_id = $2 and legal_entity_id = $3',
+        [parsed.data.reporting_manager_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
+      )).rows[0];
       if (!manager || manager.status === 'Exited') {
         await client.query('rollback');
         res.status(422).json({ error: 'Reporting manager must reference an active employee' });
@@ -1688,15 +1702,15 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       }
       const cycle = (await client.query(`
         with recursive manager_chain as (
-          select id, reporting_manager_id from employees where id = $1
+          select id, reporting_manager_id from employees where id = $1 and organization_id = $3 and legal_entity_id = $4
           union all
           select e.id, e.reporting_manager_id
           from employees e
           join manager_chain chain on e.id = chain.reporting_manager_id
-          where chain.reporting_manager_id is not null
+          where chain.reporting_manager_id is not null and e.organization_id = $3 and e.legal_entity_id = $4
         )
         select 1 from manager_chain where id = $2 limit 1
-      `, [parsed.data.reporting_manager_id, employeeRecordId])).rows[0];
+      `, [parsed.data.reporting_manager_id, employeeRecordId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
       if (cycle) {
         await client.query('rollback');
         res.status(422).json({ error: 'This reporting manager change would create a circular hierarchy' });
@@ -1782,13 +1796,17 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       `, [employee.id, directorId]);
     }
 
-    const existingUser = (await client.query('select id from users where lower(username) = lower($1) or employee_id = $2', [parsed.data.employee_id, parsed.data.employee_id])).rows[0];
+    const existingUser = (await client.query('select id, username from users where employee_record_id = $1', [employee.id])).rows[0];
     if (!existingUser && !parsed.data.initial_password) {
       throw new Error('initial_password is required when creating a new user.');
     }
     const passwordHash = existingUser && !parsed.data.initial_password
       ? null
       : await scryptHash(parsed.data.initial_password);
+    const baseUsername = parsed.data.employee_id.toLowerCase();
+    const username = (existingUser?.username || !(await client.query('select 1 from users where lower(username) = lower($1)', [baseUsername])).rowCount)
+      ? (existingUser?.username || baseUsername)
+      : `${baseUsername}-${req.organizationScope.organizationId}-${req.organizationScope.legalEntityId}`.toLowerCase();
     const userResult = await client.query(`
       insert into users (username, employee_id, employee_record_id, email, password_hash, status, updated_at)
       values ($1,$2,$3,$4,$5,$6,now())
@@ -1801,7 +1819,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
         updated_at = now()
       returning id
     `, [
-      parsed.data.employee_id.toLowerCase(),
+      username,
       parsed.data.employee_id,
       employee.id,
       parsed.data.email,
@@ -1964,14 +1982,14 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const clientResult = await client.query('select id, name, status from clients where id = $1', [parsed.data.client_id]);
+    const clientResult = await client.query('select id, name, status from clients where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.client_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     const clientRecord = clientResult.rows[0];
     if (!clientRecord || clientRecord.status !== 'Active') {
       await client.query('rollback');
       res.status(422).json({ error: 'Project must reference an active client' });
       return;
     }
-    const managerResult = await client.query('select id, name, status from employees where id = $1', [parsed.data.manager_id]);
+    const managerResult = await client.query('select id, name, status from employees where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.manager_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     const manager = managerResult.rows[0];
     if (!manager || manager.status === 'Exited') {
       await client.query('rollback');
@@ -1979,8 +1997,16 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
       return;
     }
     const previous = parsed.data.id
-      ? (await client.query('select * from projects where id = $1', [parsed.data.id])).rows[0]
+      ? (await client.query('select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0]
       : null;
+    if (parsed.data.id && !previous) {
+      const unavailableId = (await client.query('select 1 from projects where id = $1', [parsed.data.id])).rows[0];
+      if (unavailableId) {
+        await client.query('rollback');
+        res.status(404).json({ error: 'Project not found in the authorized organization and legal entity' });
+        return;
+      }
+    }
     const result = await client.query(`
       insert into projects (id, project_code, name, client_id, client, manager_id, manager_name, start_date, end_date, status, billable, project_type, country, notes, organization_id, legal_entity_id)
       values (coalesce($1, 'p-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
@@ -2285,8 +2311,8 @@ app.get('/api/allocations', requireDatabase, requireAuth, requirePermission('tim
       )
     `;
   }
-  params.push(req.organizationScope.organizationId);
-  where = `where organization_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
+  params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
+  where = `where organization_id = $${params.length - 1} and legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `select * from project_allocations ${where} order by start_date desc`, params);
 });
 app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('allocations.manage'), async (req, res) => {
@@ -2315,13 +2341,13 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const employee = (await client.query('select * from employees where id = $1', [parsed.data.employee_id])).rows[0];
+    const employee = (await client.query('select * from employees where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     if (!employee || employee.status === 'Exited') {
       await client.query('rollback');
       res.status(422).json({ error: 'Allocation must reference an active employee' });
       return;
     }
-    const project = (await client.query('select * from projects where id = $1', [parsed.data.project_id])).rows[0];
+    const project = (await client.query('select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.project_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     if (!project || !['Active', 'Proposed'].includes(project.status)) {
       await client.query('rollback');
       res.status(422).json({ error: 'Allocation must reference an active or proposed project' });
@@ -2362,10 +2388,11 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
         select coalesce(sum(percentage), 0) as total
         from project_allocations
         where employee_id = $1
+          and organization_id = $5 and legal_entity_id = $6
           and status = 'Active'
           and id <> coalesce($2, '')
           and daterange(start_date, end_date, '[]') && daterange($3::date, $4::date, '[]')
-      `, [parsed.data.employee_id, parsed.data.id || null, parsed.data.start_date, parsed.data.end_date]);
+      `, [parsed.data.employee_id, parsed.data.id || null, parsed.data.start_date, parsed.data.end_date, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
       const total = parsePercent(loadResult.rows[0]?.total) + parsed.data.percentage;
       if (total > 100) {
         await client.query('rollback');
@@ -2375,11 +2402,16 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
     }
 
     const previous = parsed.data.id
-      ? (await client.query('select * from project_allocations where id = $1', [parsed.data.id])).rows[0]
+      ? (await client.query('select * from project_allocations where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0]
       : null;
+    if (parsed.data.id && !previous) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Allocation not found in the authorized organization and legal entity' });
+      return;
+    }
     const result = await client.query(`
-      insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id)
-      values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id)
+      values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       on conflict (id) do update set
         employee_id = excluded.employee_id,
         project_id = excluded.project_id,
@@ -2403,7 +2435,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       parsed.data.billable,
       parsed.data.status,
       parsed.data.comments || null,
-      req.organizationScope.organizationId,
+      req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
     await audit(client, req, {
       module: 'Allocations',
@@ -2436,7 +2468,7 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from project_allocations where id = $1 for update', [req.params.id])).rows[0];
+    const previous = (await client.query('select * from project_allocations where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     if (!previous) {
       await client.query('rollback');
       res.status(404).json({ error: 'Allocation not found' });
@@ -2470,9 +2502,9 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
       set status = 'Completed',
         end_date = case when end_date > current_date then current_date else end_date end,
         updated_at = now()
-      where id = $1
+      where id = $1 and organization_id = $2 and legal_entity_id = $3
       returning *
-    `, [req.params.id]);
+    `, [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     await audit(client, req, {
       module: 'Allocations',
       action: 'End Allocation',
@@ -2529,7 +2561,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
     `;
   }
   params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
-  where = `where t.organization_id = $${params.length-1} and e.legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
+  where = `where t.organization_id = $${params.length-1} and t.legal_entity_id = $${params.length} and e.legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `
     select
       t.*,
@@ -2606,14 +2638,14 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const employee = (await client.query('select * from employees where id = $1', [parsed.data.employee_id])).rows[0];
+    const employee = (await client.query('select * from employees where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     if (!employee || employee.status === 'Exited') {
       await client.query('rollback');
       res.status(422).json({ error: 'Timesheet must reference an active employee' });
       return;
     }
     const writeScopeParams = [employee.id];
-    const inWriteScope = isGlobalRole(req) || (await client.query(`
+    const inWriteScope = (await client.query(`
       select 1 from employees e where e.id = $1 and ${buildEmployeeScopeWhere(req, writeScopeParams, 'e')} limit 1
     `, writeScopeParams)).rows[0];
     if (!inWriteScope) {
@@ -2624,7 +2656,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
 
     const projectIds = [...new Set(parsed.data.entries.map(entry => entry.project_id).filter(Boolean))];
     if (projectIds.length > 0) {
-      const projectResult = await client.query('select id, status from projects where id = any($1::text[])', [projectIds]);
+      const projectResult = await client.query('select id, status from projects where id = any($1::text[]) and organization_id = $2 and legal_entity_id = $3', [projectIds, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
       const activeProjectIds = new Set(projectResult.rows.filter(project => project.status !== 'Completed').map(project => project.id));
       const missingOrClosed = projectIds.find(projectId => !activeProjectIds.has(projectId));
       if (missingOrClosed) {
@@ -2638,10 +2670,11 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
         where input.project_id is not null and not exists (
           select 1 from project_allocations pa
           where pa.employee_id = $2 and pa.project_id = input.project_id
+            and pa.organization_id = $3 and pa.legal_entity_id = $4
             and pa.status = 'Active' and input.work_date between pa.start_date and pa.end_date
         )
         limit 1
-      `, [JSON.stringify(parsed.data.entries), employee.id])).rows[0];
+      `, [JSON.stringify(parsed.data.entries), employee.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
       if (unassignedEntry) {
         await client.query('rollback');
         res.status(422).json({ error: 'Project work requires an active allocation covering the entry date' });
@@ -2651,15 +2684,15 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
 
     const totalHours = round1(parsed.data.entries.reduce((sum, entry) => sum + entry.hours, 0));
     const billableHours = round1(parsed.data.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + entry.hours, 0));
-    const previous = (await client.query('select * from timesheets where organization_id = $1 and employee_id = $2 and week_ending = $3 for update', [req.organizationScope.organizationId, parsed.data.employee_id, parsed.data.week_ending])).rows[0];
+    const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, parsed.data.employee_id, parsed.data.week_ending])).rows[0];
     if (previous && !['Draft', 'Rejected'].includes(previous.status)) {
       await client.query('rollback');
       res.status(422).json({ error: 'Only draft or rejected timesheets can be edited or submitted' });
       return;
     }
     const timesheetResult = await client.query(`
-      insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id)
-      values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7)
+      insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id)
+      values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7,$8)
       on conflict (organization_id, employee_id, week_ending) do update set
         status = excluded.status,
         total_hours = excluded.total_hours,
@@ -2675,7 +2708,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       totalHours,
       billableHours,
       parsed.data.rejection_reason || null,
-      req.organizationScope.organizationId,
+      req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
     const timesheet = timesheetResult.rows[0];
     await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);
@@ -2746,7 +2779,7 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select t.* from timesheets t join employees e on e.id=t.employee_id where t.id=$1 and t.organization_id=$2 and e.legal_entity_id=$3 for update', [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
+    const previous = (await client.query('select t.* from timesheets t join employees e on e.id=t.employee_id where t.id=$1 and t.organization_id=$2 and t.legal_entity_id=$3 and e.legal_entity_id=$3 for update', [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
     if (!previous) {
       await client.query('rollback');
       res.status(404).json({ error: 'Timesheet not found' });
@@ -6068,27 +6101,31 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         const manager = (await client.query(`
           select id from employees
           where (id = $1 or employee_id = $1) and status <> 'Exited'
+            and organization_id = $2 and legal_entity_id = $3
           limit 1
-        `, [row.reportingManagerId])).rows[0];
+        `, [row.reportingManagerId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
         if (!manager) rowErrors.push({ rowNumber, field: 'reportingManagerId', message: 'Reporting manager employee record does not exist or is exited.' });
         reportingManagerId = manager?.id || null;
       }
-      const previous = (await client.query('select * from employees where employee_id = $1 limit 1', [row.employeeId])).rows[0];
+      const previous = (await client.query(
+        'select * from employees where employee_id = $1 and organization_id = $2 and legal_entity_id = $3 limit 1',
+        [row.employeeId, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
+      )).rows[0];
       if (reportingManagerId && (reportingManagerId === previous?.id || row.reportingManagerId === row.employeeId)) {
         rowErrors.push({ rowNumber, field: 'reportingManagerId', message: 'Employee cannot report to themselves.' });
       }
       if (reportingManagerId && previous?.id) {
         const cycle = (await client.query(`
           with recursive manager_chain as (
-            select id, reporting_manager_id from employees where id = $1
+            select id, reporting_manager_id from employees where id = $1 and organization_id = $3 and legal_entity_id = $4
             union all
             select e.id, e.reporting_manager_id
             from employees e
             join manager_chain chain on e.id = chain.reporting_manager_id
-            where chain.reporting_manager_id is not null
+            where chain.reporting_manager_id is not null and e.organization_id = $3 and e.legal_entity_id = $4
           )
           select 1 from manager_chain where id = $2 limit 1
-        `, [reportingManagerId, previous.id])).rows[0];
+        `, [reportingManagerId, previous.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
         if (cycle) rowErrors.push({ rowNumber, field: 'reportingManagerId', message: 'Reporting manager would create a circular hierarchy.' });
       }
       if (rowErrors.length > 0) {
@@ -6175,11 +6212,15 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         `, [employee.id, directorId]);
       }
 
-      const existingUser = (await client.query('select id from users where lower(username) = lower($1) or employee_id = $2', [row.employeeId, row.employeeId])).rows[0];
+      const existingUser = (await client.query('select id, username from users where employee_record_id = $1', [employee.id])).rows[0];
       if (!existingUser && !row.initialPassword) {
         throw new Error(`initialPassword is required for new user ${row.employeeId}`);
       }
       const passwordHash = existingUser ? null : await scryptHash(row.initialPassword);
+      const baseUsername = row.employeeId.toLowerCase();
+      const username = (existingUser?.username || !(await client.query('select 1 from users where lower(username) = lower($1)', [baseUsername])).rowCount)
+        ? (existingUser?.username || baseUsername)
+        : `${baseUsername}-${req.organizationScope.organizationId}-${req.organizationScope.legalEntityId}`.toLowerCase();
       const userResult = await client.query(`
         insert into users (username, employee_id, employee_record_id, email, password_hash, status, updated_at)
         values ($1,$2,$3,$4,$5,$6,now())
@@ -6192,7 +6233,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
           updated_at = now()
         returning id
       `, [
-        row.employeeId,
+        username,
         row.employeeId,
         employee.id,
         row.email,
@@ -6303,8 +6344,8 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       let accountOwnerId = row.accountOwnerId || null;
       if (accountOwnerId) {
         const owner = (await client.query(
-          'select id from employees where (id = $1 or employee_id = $1) and status <> $2',
-          [accountOwnerId, 'Exited'],
+          'select id from employees where (id = $1 or employee_id = $1) and status <> $2 and organization_id = $3 and legal_entity_id = $4',
+          [accountOwnerId, 'Exited', req.organizationScope.organizationId, req.organizationScope.legalEntityId],
         )).rows[0];
         if (!owner) {
           rowErrors.push({ rowNumber, field: 'accountOwnerId', message: 'Account owner employee record does not exist or is exited.' });
@@ -6320,12 +6361,22 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       const previous = (await client.query(`
         select *
         from clients
+        where (($1::text is not null and id = $1) or lower(name) = lower($2))
+          and organization_id = $3 and legal_entity_id = $4
+        limit 1
+      `, [row.id || null, row.name, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
+      const crossScopeClient = !previous && (await client.query(`
+        select 1 from clients
         where ($1::text is not null and id = $1) or lower(name) = lower($2)
         limit 1
       `, [row.id || null, row.name])).rows[0];
+      if (crossScopeClient) {
+        errors.push({ rowNumber, field: row.id ? 'id' : 'name', message: 'Client is not available in the authorized organization and legal entity.' });
+        continue;
+      }
       const result = await client.query(`
-        insert into clients (id, name, industry, account_owner_id, status)
-        values (coalesce($1, 'client-' || gen_random_uuid()::text), $2, $3, $4, $5)
+        insert into clients (id, name, industry, account_owner_id, status, organization_id, legal_entity_id)
+        values (coalesce($1, 'client-' || gen_random_uuid()::text), $2, $3, $4, $5, $6, $7)
         on conflict (id) do update set
           name = excluded.name,
           industry = excluded.industry,
@@ -6339,6 +6390,8 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
         row.industry || previous?.industry || 'Unclassified',
         accountOwnerId || previous?.account_owner_id || null,
         row.status || previous?.status || 'Active',
+        req.organizationScope.organizationId,
+        req.organizationScope.legalEntityId,
       ]);
       const savedClient = result.rows[0];
       await client.query('delete from client_country_director_map where client_id = $1', [savedClient.id]);
@@ -6350,8 +6403,8 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
         `, [savedClient.id, directorId]);
       }
       await client.query(
-        'update projects set client_id = $1, client = $2, updated_at = now() where client_id = $1 or client = $3',
-        [savedClient.id, savedClient.name, previous?.name || savedClient.name],
+        'update projects set client_id = $1, client = $2, updated_at = now() where organization_id = $4 and legal_entity_id = $5 and (client_id = $1 or client = $3)',
+        [savedClient.id, savedClient.name, previous?.name || savedClient.name, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
       );
       await audit(client, req, {
         module: 'Import',
@@ -6628,11 +6681,11 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
           select coalesce(sum(percentage), 0) as total
           from project_allocations
           where employee_id = $1
-            and organization_id = $5
+            and organization_id = $5 and legal_entity_id = $6
             and id <> coalesce($2, '')
             and status = 'Active'
             and daterange(start_date, end_date, '[]') && daterange($3::date, $4::date, '[]')
-        `, [employee.id, row.id || null, row.startDate, row.endDate,req.organizationScope.organizationId]);
+        `, [employee.id, row.id || null, row.startDate, row.endDate, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
         const total = parsePercent(loadResult.rows[0]?.total) + row.percentage;
         if (total > 100) {
           rowErrors.push({ rowNumber, field: 'percentage', message: `Allocation would exceed 100% for overlapping dates (${total}%).` });
@@ -6648,7 +6701,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
         ? (await client.query(`select pa.* from project_allocations pa
           join projects p on p.id=pa.project_id and p.organization_id=pa.organization_id
           join employees e on e.id=pa.employee_id and e.organization_id=pa.organization_id
-          where pa.id=$1 and pa.organization_id=$2 and p.legal_entity_id=$3 and e.legal_entity_id=$3 limit 1`,
+          where pa.id=$1 and pa.organization_id=$2 and pa.legal_entity_id=$3 and p.legal_entity_id=$3 and e.legal_entity_id=$3 limit 1`,
         [row.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0]
         : null;
       if (row.id && !previous && (await client.query('select 1 from project_allocations where id=$1',[row.id])).rowCount) {
@@ -6656,8 +6709,8 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
         continue;
       }
       const result = await client.query(`
-        insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id)
-        values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id)
+        values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         on conflict (id) do update set
           employee_id = excluded.employee_id,
           project_id = excluded.project_id,
@@ -6669,7 +6722,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
           status = excluded.status,
           comments = excluded.comments,
           updated_at = now()
-        where project_allocations.organization_id=excluded.organization_id
+        where project_allocations.organization_id=excluded.organization_id and project_allocations.legal_entity_id=excluded.legal_entity_id
         returning *
       `, [
         previous?.id || row.id || null,
@@ -6683,6 +6736,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
         row.status || previous?.status || 'Active',
         row.comments || previous?.comments || null,
         req.organizationScope.organizationId,
+        req.organizationScope.legalEntityId,
       ]);
       const allocation = result.rows[0];
       await audit(client, req, {
@@ -6807,6 +6861,14 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
           `, [row.projectId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
           if (!project) {
             rowErrors.push({ rowNumber, field: 'projectId', message: 'Project Work entries must reference active, proposed, or on-hold projects.' });
+          } else if (!(await client.query(`
+            select 1 from project_allocations
+            where employee_id = $1 and project_id = $2
+              and organization_id = $3 and legal_entity_id = $4
+              and status = 'Active' and $5::date between start_date and end_date
+            limit 1
+          `, [employee?.id || '', project.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId, row.date])).rows[0]) {
+            rowErrors.push({ rowNumber, field: 'projectId', message: 'Project work requires an active allocation covering the entry date.' });
           }
         }
       }
@@ -6849,10 +6911,10 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     for (const group of groups.values()) {
       const totalHours = round1(group.entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
       const billableHours = round1(group.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
-      const previous = (await client.query('select * from timesheets where organization_id = $1 and employee_id = $2 and week_ending = $3 for update', [req.organizationScope.organizationId, group.employee.id, group.weekEnding])).rows[0];
+      const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, group.employee.id, group.weekEnding])).rows[0];
       const timesheetResult = await client.query(`
-        insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id)
-        values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7)
+        insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id)
+        values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7,$8)
         on conflict (organization_id, employee_id, week_ending) do update set
           status = excluded.status,
           total_hours = excluded.total_hours,
@@ -6869,6 +6931,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
         billableHours,
         group.rejectionReason,
         req.organizationScope.organizationId,
+        req.organizationScope.legalEntityId,
       ]);
       const timesheet = timesheetResult.rows[0];
       await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);

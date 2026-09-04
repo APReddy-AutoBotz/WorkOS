@@ -247,9 +247,9 @@ const seed = async () => {
       await query(client, `
         insert into project_allocations (
           id, employee_id, project_id, role_on_project, percentage,
-          start_date, end_date, billable, status, updated_at
+          start_date, end_date, billable, status, organization_id, legal_entity_id, updated_at
         )
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,'org-default','legal-default',now())
         on conflict (id) do update set
           employee_id = excluded.employee_id,
           project_id = excluded.project_id,
@@ -309,9 +309,9 @@ const seed = async () => {
         insert into timesheets (
           employee_id, week_ending, status, total_hours, billable_hours,
           rejection_reason, submitted_at, approved_at, approved_by, rejected_at, rejected_by, updated_at,
-          organization_id
+          organization_id, legal_entity_id
         )
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),'org-default')
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),'org-default','legal-default')
         on conflict (organization_id, employee_id, week_ending) do update set
           status = excluded.status,
           total_hours = excluded.total_hours,
