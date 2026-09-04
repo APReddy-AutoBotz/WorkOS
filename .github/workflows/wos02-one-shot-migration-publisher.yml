@@ -1,0 +1,64 @@
+name: WOS-02 One-Shot Migration Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher
+    paths:
+      - .github/workflows/wos02-one-shot-migration-publisher.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact product base
+        uses: actions/checkout@v4
+        with:
+          ref: 7b8200a75e75d24f3c2cc114c5ebe74b789c9fba
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify exact live leases
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "7b8200a75e75d24f3c2cc114c5ebe74b789c9fba"
+          test "$(git rev-parse HEAD^{tree})" = "f2f7a8e5b2c1f8244e6c7d6bfa8dc8f33d219a17"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
+          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "7b8200a75e75d24f3c2cc114c5ebe74b789c9fba"
+
+      - name: Reconstruct and verify exact writer payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/payload.b64 <<'B64'
+          H4sIAAAAAAACA61XS3PiRhC+8yv6kFpgkXgZY+9uNuXTXpKUU+XDHkJKJaQWzDLMyDMjY5LKf0/PaCQLAzYm9sWlefTj6/6+aVKWZRCGC2YgHmhUD6gGa7ZQsWFS6MFwfBlHG6mH4yhX8gcmJuK4iHmkE5ljVAh2XyBtocL7gmlmsK/vOczfzVRL4AYyxhHWMkUYDYfTyaTFRIqPMCz/+v3r7Hr6aZ61wjCEQYoPA1Fw3ur1eu8ZyM0NhMNgCL1RcAk3N60eOft+excOx9A8+5m+5AOjWM0SIZHrXNpl8K5ghVtQmNEFkWAK860954wlsZCCJTEHF07owoFMKmQL4e7FaUpXmIA6GxiOp/1Wr9VLFMbkpQweSnxYBkIawEemjYbivkpXR1ItfM4sbfUAyFC116G9WLC/nXnaDspoIhSGma1bYGn3SyttNo5B8jBo3gw1miIP9VqusL/+oakSrx/ydc3i5Ooqo7pejbP0evKpqrot7ym+fOVPOGhrOgpGrqijka0qMCqYopw0NY6BTMk1tAW13udyZaCNYolpf2mF/uQ/VM44/UYtercVCfzbvJNpOtjbOZgyZc8Fr92CFjWP0KZR6687dzrtQ609jnbq5xKOMlmI1C3YTm4H0C5Mdt2mKnofTBhcKKrv729yduFpVBKHswyTbcIxqs0dcZdwqQuFb3M28c4yJqgdFT4w3ETe0hE/hq1RLxHNnQ3wbe4uvbvahs/yaG690qfn0W+WNM7tHw1xOM3zGep0CORKTs5IfuojqG3sxPBaea1FlhxNdp+RlotH7KA6ZsZpxfObltAXl8EUehfTYDQhRnsm99exSZad/UYPYLCRaoUqWpJMSrWNyLi2OERCRpI+eJz/OdOzu78+4mPCC8vMHZtHuowMp0rmZS4qJs9WkL0Y13d0hOucyy0SrGm0QVyR0qZMLCIS/IHNTOg4Q1hwOaeXob7nlV6g1rAuCKw5Ekxrijd1CJ4YIT0KjVDss1CHY2Pxee89CY2YA2gEbQN+McSmJXDdlDa4U/fgrUrrwnvBPNCo7W6fJgODquMGhK+/uEGhT6Ho78wsO23Xn91uX5P8dqwbj4pcdeyrt+uu7xrqNuu0TyV/F35+ycY5NO7auAA+fHh3wy/G+ha+dwMbY7uaZ5qzip8+ms7LyqtCQJxRpXYml0uIBU1AaEec3ZGmTT4a9Sq7+EVlpV4+fwTybV7tzU6agWZd2+2HYNjP35Ez5/E2dGS2abuc3IzYmAaJ8+29vI8IOWVcNUDMuUxKThxsiqwicnOYPCXLypjN1puoo9VwDl5PocIh6L796hum8uIQ2gG0brJ6nt4XvFIqCKE4Z7NBOX/p2eBJ6ma0k/NtBYudvSpN04dFj9Ro9tPYle5Zcm7nommqAuY8S7si6ofHBuweIC35Awmq4FvYkNrRr4K4MEtJPCVHD8+ktnZWiu7/Rkwjt+DPPpZz69Mx2CwpTjiU8uhoyiUYjUelBMKtNl4Xtzqxv4igyGmexYNI5YpJFSq5AS7lqsgPvj2DBhhpGZdMVofezjcCw4T73UCSKZuozDrHnswANBWs0AEYaQiZpSwUfcwZ5/GcZmn/rdB2lEWTVE5b9utivmbGYBrFJoDXGFjzl5qBHtuMM1u+zskve8nePbAdtrkdmOj/s/7bCFpfstzBW+iSyhXiak5cVhbu/wBf4LABghAAAA==
+          B64
+          test "$(wc -c < /tmp/payload.b64 | tr -d ' ')" = "1705"
+          base64 -d /tmp/payload.b64 > /tmp/correction.diff.gz
+          test "$(wc -c < /tmp/correction.diff.gz | tr -d ' ')" = "1276"
+          echo "508aac7304883e6fd0d1f36cd3dd8dc5f3fc09a183d18bf11db99d7ba92d0a38  /tmp/correction.diff.gz" | sha256sum -c -
+          gzip -dc /tmp/correction.diff.gz > /tmp/correction.diff
+          test "$(wc -c < /tmp/correction.diff | tr -d ' ')" = "4226"
+          echo "3f8519ab24039551cf4fddc0195ad98c469624a7385de42cde15128ae20545bb  /tmp/correction.diff" | sha256sum -c -
+          git apply --binary /tmp/correction.diff
+          git add -A
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = "server/migrations/025a_wos02_project_legal_scope_unique_prerequisite.sql tests/organization-setup-smoke.mjs "
+          git diff --cached --check
+          git config user.name "Avala Parameswara Reddy"
+          git config user.email "avalaparameswarareddy@gmail.com"
+          git commit -m "fix: add project legal scope migration prerequisite"
+          test "$(git rev-parse HEAD^{tree})" = "6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1"
+          test "$(git rev-parse HEAD^)" = "7b8200a75e75d24f3c2cc114c5ebe74b789c9fba"
+
+      - name: Revalidate and non-force publish existing PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
+          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "7b8200a75e75d24f3c2cc114c5ebe74b789c9fba"
+          git push origin HEAD:refs/heads/codex/wos-02-organization-setup-foundation
