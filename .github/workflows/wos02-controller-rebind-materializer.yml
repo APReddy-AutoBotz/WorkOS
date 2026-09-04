@@ -2,10 +2,8 @@ name: WOS-02 Controller Rebind Materializer
 
 on:
   push:
-    branches:
-      - controller/wos02-migration-publisher-temp2
-    paths:
-      - '.github/workflows/wos02-controller-rebind-materializer.yml'
+    branches: [controller/wos02-migration-publisher-temp2]
+    paths: ['.github/workflows/wos02-controller-rebind-materializer.yml']
 
 permissions:
   contents: write
@@ -24,17 +22,16 @@ jobs:
       - name: Verify live leases
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
           test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)" = "$EXPECTED_MAIN"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq .head.sha)" = "$TARGET_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq .draft)" = "true"
+          test "$(gh api repos/$GITHUB_REPOSITORY/commits/$TARGET_HEAD --jq .commit.tree.sha)" = "$TARGET_TREE"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq .head.sha)" = "$OLD_CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq .draft)" = "true"
-          test "$(gh api repos/$GITHUB_REPOSITORY/commits/$TARGET_HEAD --jq .commit.tree.sha)" = "$TARGET_TREE"
 
-      - name: Checkout exact existing controller
+      - name: Checkout exact existing acceptance controller
         uses: actions/checkout@v4
         with:
           ref: ${{ env.OLD_CONTROLLER_HEAD }}
@@ -42,60 +39,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Materialize exact rebound workflow bytes
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('source/.github/workflows/wos02-final-review-acceptance.yml')
-          s = p.read_text()
-          old = s
-          s = s.replace('TARGET_HEAD: 7b8200a75e75d24f3c2cc114c5ebe74b789c9fba', 'TARGET_HEAD: 031be9e18b6871594f0cfef25f8b098741dde74c')
-          s = s.replace('TARGET_TREE: f2f7a8e5b2c1f8244e6c7d6bfa8dc8f33d219a17', 'TARGET_TREE: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1')
-          s = s.replace('Verify exact product controller main and 20-file authority', 'Verify exact product controller main and 21-file authority')
-          needle = "              'server/migrations/025_wos02_timesheet_scope_integrity.sql',\n              'server/migrations/026_wos02_canonical_legal_scope_integrity.sql',"
-          repl = "              'server/migrations/025_wos02_timesheet_scope_integrity.sql',\n              'server/migrations/025a_wos02_project_legal_scope_unique_prerequisite.sql',\n              'server/migrations/026_wos02_canonical_legal_scope_integrity.sql',"
-          assert needle in s
-          s = s.replace(needle, repl, 1)
-          old_ids = "ids=\"'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','026_wos02_canonical_legal_scope_integrity'\""
-          new_ids = "ids=\"'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','025a_wos02_project_legal_scope_unique_prerequisite','026_wos02_canonical_legal_scope_integrity'\""
-          assert old_ids in s
-          s = s.replace(old_ids, new_ids, 1)
-          first_count = '          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 5\n'
-          assert s.count(first_count) == 2, s.count(first_count)
-          lexical = '''          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 6
-          node - <<'NODE'
-          const fs = require('fs');
-          const files = fs.readdirSync('server/migrations').filter(file => file.endsWith('.sql')).sort();
-          const a = files.indexOf('025_wos02_timesheet_scope_integrity.sql');
-          const b = files.indexOf('025a_wos02_project_legal_scope_unique_prerequisite.sql');
-          const c = files.indexOf('026_wos02_canonical_legal_scope_integrity.sql');
-          if (!(a >= 0 && a < b && b < c)) throw new Error(`invalid migration order: ${files.join(',')}`);
-          NODE
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where indexname='uq_projects_org_legal_id'")" = 1
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname='project_allocations_project_legal_scope_fk')" = 1
-'''
-          s = s.replace(first_count, lexical, 1)
-          s = s.replace(first_count, '          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 6\n', 1)
-          final026 = '          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id=\'026_wos02_canonical_legal_scope_integrity\'")" = 1\n'
-          assert final026 in s
-          s = s.replace(final026, '          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id=\'025a_wos02_project_legal_scope_unique_prerequisite\'")" = 1\n' + final026, 1)
-          assert s != old
-          assert '031be9e18b6871594f0cfef25f8b098741dde74c' in s
-          assert '6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1' in s
-          assert '025a_wos02_project_legal_scope_unique_prerequisite.sql' in s
-          Path('rebound.yml').write_text(s)
-          PY
-          ruby -e "require 'yaml'; YAML.load_file('rebound.yml'); puts 'YAML OK'"
-          grep -q 'TARGET_HEAD: 031be9e18b6871594f0cfef25f8b098741dde74c' rebound.yml
-          grep -q 'TARGET_TREE: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1' rebound.yml
-          grep -q '21-file authority' rebound.yml
-          grep -q '025a_wos02_project_legal_scope_unique_prerequisite' rebound.yml
-          sha256sum rebound.yml | tee rebound.sha256
-          wc -c rebound.yml | tee rebound.bytes
-
-      - name: Checkout materializer branch for safe payload publication
+      - name: Checkout materializer branch
         uses: actions/checkout@v4
         with:
           ref: controller/wos02-migration-publisher-temp2
@@ -103,15 +47,22 @@ jobs:
           fetch-depth: 1
           persist-credentials: true
 
-      - name: Publish safe payload bytes only
-        shell: bash
+      - name: Generate and validate safe rebound payload
         run: |
           set -euo pipefail
-          mkdir -p publisher/.controller-payload
-          cp rebound.yml publisher/.controller-payload/wos02-final-review-acceptance.rebound.yml
-          cp rebound.sha256 publisher/.controller-payload/wos02-final-review-acceptance.rebound.sha256
-          cp rebound.bytes publisher/.controller-payload/wos02-final-review-acceptance.rebound.bytes
-          cd publisher
+          node publisher/.github/scripts/wos02-controller-rebind-materialize.mjs \
+            source/.github/workflows/wos02-final-review-acceptance.yml \
+            publisher/.controller-payload/wos02-final-review-acceptance.rebound.yml
+          ruby -e "require 'yaml'; YAML.load_file('publisher/.controller-payload/wos02-final-review-acceptance.rebound.yml'); puts 'YAML OK'"
+          grep -q 'TARGET_HEAD: 031be9e18b6871594f0cfef25f8b098741dde74c' publisher/.controller-payload/wos02-final-review-acceptance.rebound.yml
+          grep -q 'TARGET_TREE: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1' publisher/.controller-payload/wos02-final-review-acceptance.rebound.yml
+          grep -q '21-file authority' publisher/.controller-payload/wos02-final-review-acceptance.rebound.yml
+          grep -q '025a_wos02_project_legal_scope_unique_prerequisite' publisher/.controller-payload/wos02-final-review-acceptance.rebound.yml
+
+      - name: Publish safe payload data
+        working-directory: publisher
+        run: |
+          set -euo pipefail
           git config user.name 'WorkOS Controller'
           git config user.email 'actions@users.noreply.github.com'
           git add .controller-payload
