@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { disableLinkedWorkerIdentity } from './worker-lifecycle.mjs';
 
 export const MAX_SETUP_ROWS = 200;
 export const MAX_DEPENDENCIES = 100;
@@ -246,6 +247,13 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       await client.query('insert into worker_history(employee_id,organization_id,legal_entity_id,effective_from,status,snapshot,actor_id) values($1,$2,$3,$4,$5,$6,$7)',[worker.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.effectiveFrom,parsed.data.status,JSON.stringify(snapshot),req.user.sub]);
       await client.query('update worker_profiles set lifecycle_status=$2,effective_from=$3,updated_at=now() where employee_id=$1',[worker.id,parsed.data.status,parsed.data.effectiveFrom]);
       await client.query('update employees set status=$2,exit_date=case when $2=\'Exited\' then $3 else exit_date end,updated_at=now() where id=$1',[worker.id,parsed.data.status==='Disabled'?'Exited':parsed.data.status,parsed.data.effectiveFrom]);
+      if(['Disabled','Exited'].includes(parsed.data.status)) {
+        await disableLinkedWorkerIdentity(client, {
+          employeeId: worker.id,
+          organizationId: req.organizationScope.organizationId,
+          legalEntityId: req.organizationScope.legalEntityId,
+        });
+      }
       await audit(client,req,{module:'Workforce',action:'Worker Lifecycle Transition',entityType:'Employee',entityId:worker.id,oldValue:{status:worker.lifecycle_status},newValue:snapshot,reason:parsed.data.reason,details:'Applied dependency-safe worker transition'});
       await client.query('commit');res.json({worker:snapshot,replayed:false});
     } catch(error){await client.query('rollback');if(['23P01','23505','23514'].includes(error.code))return res.status(409).json({error:'Worker transition conflicts with existing history',code:'WORKER_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Worker transition failed'});}finally{client.release();}

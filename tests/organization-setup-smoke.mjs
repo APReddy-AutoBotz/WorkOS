@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
+import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from '../server/worker-lifecycle.mjs';
 
 const migration = readFileSync('server/migrations/022_organization_setup_foundation.sql', 'utf8');
 const integrityMigration = readFileSync('server/migrations/023_wos02_scope_lifecycle_integrity.sql', 'utf8');
@@ -97,5 +98,43 @@ assert.match(server, /result\.rows\.length === 1 \? result\.rows\[0\] : null/, '
 assert.match(server, /not exists\(select 1 from direct_users\)[\s\S]*u2\.status='Active'[\s\S]*e2\.status<>'Exited'/, 'employee-code login must be used only for active employee-linked users when no unique username or email matched');
 assert.match(server, /insert into project_allocations[\s\S]*organization_id/, 'allocation imports must persist authoritative organization ownership');
 assert.match(server, /api\/imports\/allocations\/apply[\s\S]*organization_id=\$2 and legal_entity_id=\$3[\s\S]*p\.legal_entity_id=\$3 and e\.legal_entity_id=\$3/, 'allocation imports must resolve and update references only in the authorized organization and legal entity');
+
+const lifecycleQueries = [];
+const lifecycleClient = { query: async (sql, params) => {
+  lifecycleQueries.push({ sql, params });
+  return { rowCount: 1, rows: [] };
+} };
+const workerInput = { employeeId: 'employee-record', organizationId: 'org-a', legalEntityId: 'legal-a', actorId: 'actor-a' };
+assert.equal(await initializeNewWorkerLifecycle(lifecycleClient, { ...workerInput, isNew: true }), true);
+assert.equal(lifecycleQueries.length, 2, 'new employees must receive exactly one profile and one initial history insert');
+assert.match(lifecycleQueries[0].sql, /insert into worker_profiles[\s\S]*case e\.status when 'Exited' then 'Exited' when 'On Leave' then 'On Leave' else 'Active' end[\s\S]*coalesce\(e\.joining_date, e\.created_at::date, current_date\)/, 'initial lifecycle state and effective date must match WOS-02 backfill semantics');
+assert.match(lifecycleQueries[1].sql, /insert into worker_history[\s\S]*organization_id, legal_entity_id[\s\S]*to_jsonb\(e\)/, 'initial history must retain authoritative legal ownership and the employee snapshot');
+assert.deepEqual(lifecycleQueries[1].params, ['employee-record', 'org-a', 'legal-a', 'actor-a']);
+assert.equal(await initializeNewWorkerLifecycle(lifecycleClient, { ...workerInput, isNew: false }), false);
+assert.equal(lifecycleQueries.length, 2, 'employee updates and import replays must not reset or duplicate worker history');
+assert.equal((server.match(/initializeNewWorkerLifecycle\(client,/g) || []).length, 2, 'canonical employee save and import must both initialize new worker state');
+assert.match(server, /employee:\$\{req\.organizationScope\.organizationId\}:\$\{req\.organizationScope\.legalEntityId\}:\$\{parsed\.data\.employee_id\}[\s\S]*isNew: !previous/, 'canonical employee save must serialize new-record detection before worker initialization');
+assert.match(server, /api\/imports\/employees\/apply[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{req\.organizationScope\.legalEntityId\}:\$\{row\.employeeId\}[\s\S]*isNew: !previous/, 'employee import must serialize new-record detection before worker initialization');
+
+const identityQueries = [];
+const identityClient = { query: async (sql, params) => {
+  identityQueries.push({ sql, params });
+  return sql.includes('update users') ? { rowCount: 1, rows: [{ id: '00000000-0000-0000-0000-000000000001' }] } : { rowCount: 1, rows: [] };
+} };
+assert.equal(await disableLinkedWorkerIdentity(identityClient, workerInput), 1);
+assert.match(identityQueries[0].sql, /update users set status='Disabled'[\s\S]*employee_record_id=\$1/, 'leaver identity synchronization must use the unambiguous employee-record link');
+assert.match(identityQueries[1].sql, /update user_organization_scopes set active=false[\s\S]*organization_id=\$2 and legal_entity_id=\$3/, 'leaver scope synchronization must deactivate the applicable persisted scope');
+assert.match(identityQueries[1].sql, /returning user_id/, 'scope synchronization must be verifiable before the transition commits');
+assert.match(service, /if\(\['Disabled','Exited'\]\.includes\(parsed\.data\.status\)\)[\s\S]*disableLinkedWorkerIdentity/, 'only Disabled and Exited transitions may disable linked identity');
+assert.match(service, /if\(deps\.rowCount\)[\s\S]*rollback[\s\S]*WORKER_DEPENDENCY_CONFLICT[\s\S]*disableLinkedWorkerIdentity/, 'dependency conflicts must roll back before identity synchronization');
+assert.match(service, /if\(replay\.rowCount\)[\s\S]*replayed:true[\s\S]*disableLinkedWorkerIdentity/, 'idempotent transition replay must return before repeated identity side effects');
+await assert.rejects(
+  disableLinkedWorkerIdentity({ query: async sql => {
+    if (sql.includes('update users')) return { rowCount: 1, rows: [{ id: '00000000-0000-0000-0000-000000000001' }] };
+    throw new Error('scope synchronization failed');
+  } }, workerInput),
+  /scope synchronization failed/,
+  'identity/scope synchronization failures must propagate to the route transaction rollback',
+);
 
 console.log(JSON.stringify({status:'passed', matrix:{A:true,B:true,C:true,D:true,E:true,F:true,G:true,H:true,I:true}}, null, 2));

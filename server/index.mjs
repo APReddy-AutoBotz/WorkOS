@@ -9,6 +9,7 @@ import pg from 'pg';
 import { z } from 'zod';
 import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
 import { registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
+import { initializeNewWorkerLifecycle } from './worker-lifecycle.mjs';
 
 const { Pool } = pg;
 
@@ -1672,6 +1673,9 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [
+      `employee:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${parsed.data.employee_id}`,
+    ]);
     const previous = (await client.query(
       'select * from employees where employee_id = $1 and organization_id = $2 and legal_entity_id = $3',
       [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
@@ -1786,6 +1790,13 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
     const employee = employeeResult.rows[0];
+    await initializeNewWorkerLifecycle(client, {
+      employeeId: employee.id,
+      organizationId: req.organizationScope.organizationId,
+      legalEntityId: req.organizationScope.legalEntityId,
+      actorId: req.user.sub,
+      isNew: !previous,
+    });
     const mappedIds = Array.from(new Set([parsed.data.primary_country_director_id, ...parsed.data.mapped_country_director_ids].filter(Boolean)));
     await client.query('delete from employee_country_director_map where employee_id = $1', [employee.id]);
     for (const directorId of mappedIds) {
@@ -6098,6 +6109,9 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
     for (const [index, row] of parsed.data.rows.entries()) {
       const rowNumber = index + 2;
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
+      await client.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `employee:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${row.employeeId}`,
+      ]);
       const mappedIds = splitPipeList(row.mappedCountryDirectorIds);
       const primaryDirectorId = row.primaryCountryDirectorId || mappedIds[0] || null;
       const rowErrors = [];
@@ -6212,6 +6226,13 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         req.organizationScope.organizationId, req.organizationScope.legalEntityId,
       ]);
       const employee = employeeResult.rows[0];
+      await initializeNewWorkerLifecycle(client, {
+        employeeId: employee.id,
+        organizationId: req.organizationScope.organizationId,
+        legalEntityId: req.organizationScope.legalEntityId,
+        actorId: req.user.sub,
+        isNew: !previous,
+      });
       const allMappedIds = Array.from(new Set([primaryDirectorId, ...mappedIds].filter(Boolean)));
       await client.query('delete from employee_country_director_map where employee_id = $1', [employee.id]);
       for (const directorId of allMappedIds) {
