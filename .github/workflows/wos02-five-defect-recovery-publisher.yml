@@ -1,0 +1,168 @@
+name: WOS-02 Five-Defect Recovery Publisher
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: wos02-five-defect-recovery-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event.pull_request.number == 38 && github.event.pull_request.head.ref == 'controller/wos02-exact-acceptance'
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+      TARGET_PR: '37'
+      TARGET_BRANCH: codex/wos-02-organization-setup-foundation
+      EXPECTED_BASE: d3355ea55ae3cd114c54729ad4835a47536cb55a
+      EXPECTED_RESULT_TREE: 566ee6a6426e6a41e0783d86c7b3598d9f9c3b05
+      COMMENT_ID: '5535470637'
+      EXPECTED_B64_BYTES: '9600'
+      EXPECTED_GZIP_BYTES: '7199'
+      EXPECTED_GZIP_SHA256: 558e6abab7ae5a7223004cc85ca200cb0ff5bc448993a5a60dcd5a6940e89eba
+      EXPECTED_RAW_BYTES: '23925'
+      EXPECTED_RAW_SHA256: f5af20e119fbff753aa7eb2311724271595fde9ec6b582b66d2de6d79285c7f3
+    steps:
+      - name: Verify controller and exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const ctrl = context.payload.pull_request;
+            if (!ctrl?.draft) failures.push('controller is not Draft');
+            if (ctrl?.head?.ref !== 'controller/wos02-exact-acceptance') failures.push(`controller branch=${ctrl?.head?.ref}`);
+            if (ctrl?.base?.sha !== process.env.EXPECTED_MAIN) failures.push(`controller base=${ctrl?.base?.sha}`);
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner, repo:context.repo.repo, branch:'main'});
+            const {data: target} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:Number(process.env.TARGET_PR)});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`target lifecycle=${target.state}/draft:${target.draft}`);
+            if (target.head.ref !== process.env.TARGET_BRANCH) failures.push(`target branch=${target.head.ref}`);
+            if (target.head.sha !== process.env.EXPECTED_BASE) failures.push(`target head=${target.head.sha}`);
+            if (target.base.sha !== process.env.EXPECTED_MAIN) failures.push(`target base=${target.base.sha}`);
+            const {data: c} = await github.rest.issues.getComment({owner:context.repo.owner, repo:context.repo.repo, comment_id:Number(process.env.COMMENT_ID)});
+            if (c.user?.login !== 'chatgpt-codex-connector[bot]') failures.push(`comment author=${c.user?.login}`);
+            const required = [
+              `Exact base:       ${process.env.EXPECTED_BASE}`,
+              `Resulting tree:   ${process.env.EXPECTED_RESULT_TREE}`,
+              `Raw diff bytes:   ${process.env.EXPECTED_RAW_BYTES}`,
+              `Raw diff SHA-256: ${process.env.EXPECTED_RAW_SHA256}`,
+              `Gzip bytes:       ${process.env.EXPECTED_GZIP_BYTES}`,
+              `Gzip SHA-256:     ${process.env.EXPECTED_GZIP_SHA256}`,
+              `Base64 bytes:     ${process.env.EXPECTED_B64_BYTES}`,
+            ];
+            for (const needle of required) if (!c.body.includes(needle)) failures.push(`comment missing metadata: ${needle}`);
+            if (failures.length) core.setFailed(`lease/metadata verification failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact product base with publication credential
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_BASE }}
+          fetch-depth: 0
+          persist-credentials: true
+          path: target
+
+      - name: Extract exact payload from Codex result comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const {data: c} = await github.rest.issues.getComment({owner:context.repo.owner, repo:context.repo.repo, comment_id:Number(process.env.COMMENT_ID)});
+            const marker = 'Complete `base64(gzip -9 -n(git diff --binary';
+            const p = c.body.indexOf(marker);
+            if (p < 0) return core.setFailed('payload marker missing');
+            const tail = c.body.slice(p);
+            const match = tail.match(/```text\s*\n([A-Za-z0-9+/=\r\n]+)\n```/);
+            if (!match) return core.setFailed('complete base64 payload block missing');
+            const payload = match[1].replace(/\s+/g, '');
+            if (Buffer.byteLength(payload, 'utf8') !== Number(process.env.EXPECTED_B64_BYTES)) {
+              return core.setFailed(`base64 bytes=${Buffer.byteLength(payload, 'utf8')}`);
+            }
+            fs.writeFileSync('target/payload.b64', payload, {encoding:'utf8'});
+
+      - name: Verify payload, apply binary diff and reproduce exact tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd target
+          test "$(git rev-parse HEAD)" = "$EXPECTED_BASE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(wc -c < payload.b64)" = "$EXPECTED_B64_BYTES"
+          base64 -d payload.b64 > correction.diff.gz
+          test "$(wc -c < correction.diff.gz)" = "$EXPECTED_GZIP_BYTES"
+          echo "$EXPECTED_GZIP_SHA256  correction.diff.gz" | sha256sum -c -
+          gzip -dc correction.diff.gz > correction.diff
+          test "$(wc -c < correction.diff)" = "$EXPECTED_RAW_BYTES"
+          echo "$EXPECTED_RAW_SHA256  correction.diff" | sha256sum -c -
+          git apply --binary correction.diff
+          rm -f payload.b64 correction.diff.gz correction.diff
+          git diff --check
+          mapfile -t actual < <(git status --short | sed -E 's/^.. //' | sort)
+          expected=(
+            'docs/00-control/REQUIREMENTS_TRACEABILITY.md'
+            'server/index.mjs'
+            'server/organization-setup.mjs'
+            'src/App.tsx'
+            'src/config/RuntimeTerminology.tsx'
+            'src/config/productConfig.ts'
+            'src/services/apiClient.ts'
+            'tests/organization-setup-smoke.mjs'
+          )
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected[@]}" | sort)
+          test "$(printf '%s\n' "${actual[@]}")" = "$(printf '%s\n' "${expected_sorted[@]}")"
+          git add -A
+          test "$(git write-tree)" = "$EXPECTED_RESULT_TREE"
+
+      - name: Revalidate exact branch lease immediately before publication
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data: main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data: target}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR)});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(target.head.sha!==process.env.EXPECTED_BASE) failures.push(`target=${target.head.sha}`);
+            if(target.state!=='open'||!target.draft) failures.push(`lifecycle=${target.state}/draft:${target.draft}`);
+            if(target.head.ref!==process.env.TARGET_BRANCH) failures.push(`branch=${target.head.ref}`);
+            if(failures.length) core.setFailed(`pre-push lease failed: ${failures.join('; ')}`);
+
+      - name: Commit exact tree and publish non-force to existing product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd target
+          git config user.name 'WorkOS Controller'
+          git config user.email 'controller@users.noreply.github.com'
+          git commit -m 'fix: close WOS-02 acceptance defects'
+          test "$(git rev-parse HEAD^1)" = "$EXPECTED_BASE"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_RESULT_TREE"
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+
+      - name: Verify published exact product authority with bounded retry
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const delay = ms => new Promise(r => setTimeout(r, ms));
+            let last='';
+            for (let i=0;i<8;i++) {
+              const {data: main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+              const {data: target}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR)});
+              last=`main=${main.commit.sha} target=${target.head.sha} lifecycle=${target.state}/draft:${target.draft}`;
+              if(main.commit.sha===process.env.EXPECTED_MAIN && target.head.sha!==process.env.EXPECTED_BASE && target.state==='open' && target.draft) {
+                const {data: commit}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:target.head.sha});
+                const parents=(commit.parents||[]).map(p=>p.sha);
+                if(commit.commit.tree.sha===process.env.EXPECTED_RESULT_TREE && parents.length===1 && parents[0]===process.env.EXPECTED_BASE) {
+                  core.info(`published exact head=${target.head.sha} tree=${commit.commit.tree.sha}`);
+                  return;
+                }
+                last += ` tree=${commit.commit.tree.sha} parents=${parents.join(',')}`;
+              }
+              await delay(2000);
+            }
+            core.setFailed(`published authority not observed: ${last}`);
