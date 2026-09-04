@@ -14,8 +14,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: c623c3336190b34a622be8a8f7c08139ba405e22
-  TARGET_TREE: 566ee6a6426e6a41e0783d86c7b3598d9f9c3b05
+  TARGET_HEAD: 59c1151ebcb46d3ac2882a046686b9f31a6b432b
+  TARGET_TREE: 90e2bed5b34f48dd7d0dbd262102a8e032f7a094
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -47,7 +47,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product, controller and main authority
+      - name: Verify exact product controller main and 19-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -75,7 +75,9 @@ jobs:
               'server/migrations/022_organization_setup_foundation.sql',
               'server/migrations/023_wos02_scope_lifecycle_integrity.sql',
               'server/migrations/024_wos02_final_review_closure.sql',
+              'server/migrations/025_wos02_timesheet_scope_integrity.sql',
               'server/organization-setup.mjs',
+              'server/seed-demo.mjs',
               'src/App.tsx',
               'src/components/Layout/Header.tsx',
               'src/config/RuntimeTerminology.tsx',
@@ -168,7 +170,9 @@ jobs:
           npm run test:wos00-baseline
           npm audit --omit=dev --audit-level=high
           git diff --check "$EXPECTED_MAIN_HEAD..$TARGET_HEAD"
+          node --check server/index.mjs
           node --check server/organization-setup.mjs
+          node --check server/seed-demo.mjs
 
       - name: Production startup fails closed without required config
         shell: bash
@@ -193,19 +197,21 @@ jobs:
             createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
           done
 
-      - name: Fresh install and replay all WOS-02 migrations
+      - name: Fresh install and replay migrations 022 through 025
         shell: bash
         working-directory: target
         env:
           DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_fresh
         run: |
           set -euo pipefail
+          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity'"
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-first.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ('022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure')")" = 3
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 4
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where tablename='timesheets' and indexname='uq_timesheets_org_employee_week'")" = 1
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-replay.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ('022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure')")" = 3
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 4
 
-      - name: Exact WOS-01A upgrade backfill reconciliation and replay
+      - name: Exact WOS-01A upgrade backfill reconciliation and replay through 025
         shell: bash
         env:
           UPGRADE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_upgrade
@@ -235,10 +241,11 @@ jobs:
           test "$(psql "$UPGRADE_URL" -Atc "select organization_id from project_allocations where id='a-final-up'")" = 'org-default'
           test "$(psql "$UPGRADE_URL" -Atc "select organization_id from timesheets where id='00000000-0000-0000-0000-000000000802'")" = 'org-default'
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from worker_history where employee_id='e-final-up' and legal_entity_id='legal-default'")" = 1
+          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from pg_indexes where tablename='timesheets' and indexname='uq_timesheets_org_employee_week'")" = 1
           (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
-          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='024_wos02_final_review_closure'")" = 1
+          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='025_wos02_timesheet_scope_integrity'")" = 1
 
-      - name: Execute final-review live API and DB closure matrix
+      - name: Execute corrected 17-check live API and DB closure matrix
         shell: bash
         working-directory: controller
         env:
@@ -248,6 +255,16 @@ jobs:
           set -euo pipefail
           (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
           node .github/scripts/wos02-final-review-live-acceptance.mjs
+
+      - name: Verify organization-scoped timesheet upsert isolation directly
+        shell: bash
+        working-directory: target
+        env:
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_live
+        run: |
+          set -euo pipefail
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where tablename='timesheets' and indexname='uq_timesheets_org_employee_week'")" = 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where tablename='timesheets' and indexdef ilike '%unique%' and indexdef ilike '%organization_id%employee_id%week_ending%'")" -ge 1
 
       - name: Retained production identity
         shell: bash
@@ -297,16 +314,16 @@ jobs:
             const {data: target} = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR)});
             if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
             if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`target=${target.head.sha}`);
-            if (target.state !== 'open' || !target.draft) failures.push(`lifecycle=${target.state}/draft:${target.draft}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`target lifecycle=${target.state}/draft:${target.draft}`);
             const {data: commit} = await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.TARGET_HEAD});
             if (commit.commit.tree.sha !== process.env.TARGET_TREE) failures.push(`tree=${commit.commit.tree.sha}`);
             if (failures.length) core.setFailed(`final authority failed: ${failures.join('; ')}`);
 
-      - name: Upload exact-head acceptance evidence
+      - name: Upload final acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wos02-final-review-acceptance-${{ env.TARGET_HEAD }}
+          name: wos02-final-review-${{ github.event.pull_request.head.sha }}
           path: |
             ${{ runner.temp }}/prod-fail-closed.log
             ${{ runner.temp }}/wos02-final-fresh-first.log
@@ -314,4 +331,3 @@ jobs:
             ${{ runner.temp }}/wos02-final-browser-evidence.json
             ${{ runner.temp }}/wos02-final-preview.log
           if-no-files-found: warn
-          retention-days: 14
