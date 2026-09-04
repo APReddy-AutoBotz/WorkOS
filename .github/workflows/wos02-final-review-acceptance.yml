@@ -15,8 +15,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: 7b8200a75e75d24f3c2cc114c5ebe74b789c9fba
-  TARGET_TREE: f2f7a8e5b2c1f8244e6c7d6bfa8dc8f33d219a17
+  TARGET_HEAD: 031be9e18b6871594f0cfef25f8b098741dde74c
+  TARGET_TREE: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -48,7 +48,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 20-file authority
+      - name: Verify exact product controller main and 21-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -77,6 +77,7 @@ jobs:
               'server/migrations/023_wos02_scope_lifecycle_integrity.sql',
               'server/migrations/024_wos02_final_review_closure.sql',
               'server/migrations/025_wos02_timesheet_scope_integrity.sql',
+              'server/migrations/025a_wos02_project_legal_scope_unique_prerequisite.sql',
               'server/migrations/026_wos02_canonical_legal_scope_integrity.sql',
               'server/organization-setup.mjs',
               'server/seed-demo.mjs',
@@ -206,13 +207,16 @@ jobs:
           DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_fresh
         run: |
           set -euo pipefail
-          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','026_wos02_canonical_legal_scope_integrity'"
+          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','025a_wos02_project_legal_scope_unique_prerequisite','026_wos02_canonical_legal_scope_integrity'"
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-first.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 5
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 6
+          node -e "const fs=require('fs');const f=fs.readdirSync('server/migrations').filter(x=>x.endsWith('.sql')).sort();const a=f.indexOf('025_wos02_timesheet_scope_integrity.sql'),b=f.indexOf('025a_wos02_project_legal_scope_unique_prerequisite.sql'),c=f.indexOf('026_wos02_canonical_legal_scope_integrity.sql');if(!(a>=0&&a<b&&b<c))throw new Error('invalid migration order '+f.join(','));"
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where indexname='uq_projects_org_legal_id'")" = 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname='project_allocations_project_legal_scope_fk'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from information_schema.columns where table_name='project_allocations' and column_name='legal_entity_id'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from information_schema.columns where table_name='timesheets' and column_name='legal_entity_id'")" = 1
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-replay.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 5
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 6
 
       - name: Exact WOS-01A upgrade backfill reconciliation and replay through 026
         shell: bash
@@ -245,6 +249,7 @@ jobs:
           test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from timesheets where id='00000000-0000-0000-0000-000000000802'")" = 'org-default|legal-default'
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from worker_history where employee_id='e-final-up' and legal_entity_id='legal-default'")" = 1
           (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
+          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='025a_wos02_project_legal_scope_unique_prerequisite'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='026_wos02_canonical_legal_scope_integrity'")" = 1
 
       - name: Execute retained corrected 17-check live API and DB closure matrix
