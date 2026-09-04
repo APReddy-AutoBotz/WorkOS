@@ -774,7 +774,7 @@ const userAuthSelect = `
     e.id as employee_record_id, e.name, cd.id as country_director_id,
     coalesce(json_agg(distinct r.name) filter (where r.name is not null), '[]') as roles
   from users u
-  left join employees e on e.employee_id = u.employee_id
+  left join employees e on e.id = u.employee_record_id
   left join country_directors cd on cd.id = e.primary_country_director_id
     and (
       lower(e.designation) in ('country director', 'regional lead', 'director')
@@ -1245,7 +1245,7 @@ app.post('/api/auth/login', loginRateLimit, requireDatabase, async (req, res) =>
       select u.id, u.username, u.employee_id, u.email, u.password_hash, u.must_change_password, u.status, e.id as employee_record_id, e.name, cd.id as country_director_id,
         coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
       from users u
-      left join employees e on e.employee_id = u.employee_id
+      left join employees e on e.id = u.employee_record_id
       left join country_directors cd on cd.id = e.primary_country_director_id
         and (
           lower(e.designation) in ('country director', 'regional lead', 'director')
@@ -1305,6 +1305,22 @@ app.post('/api/auth/login', loginRateLimit, requireDatabase, async (req, res) =>
 app.post('/api/auth/logout', (_req, res) => {
   res.clearCookie?.('workos_session', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
   res.json({ status: 'ok' });
+});
+
+// Scope discovery deliberately authenticates identity without resolving a
+// context first; it is the only endpoint used to choose among multiple scopes.
+app.get('/api/auth/organization-scopes', requireDatabase, async (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const payload = verifyToken(authHeader.startsWith('Bearer ') ? authHeader.slice(7) : readCookie(req, 'workos_session'));
+  if (!payload) return res.status(401).json({ error: 'Authentication required' });
+  const result = await pool.query(`select s.organization_id "organizationId",s.legal_entity_id "legalEntityId",
+    o.name "organizationName",le.name "legalEntityName" from user_organization_scopes s
+    join organizations o on o.id=s.organization_id join legal_entities le on le.id=s.legal_entity_id and le.organization_id=s.organization_id
+    where s.user_id=$1 and s.active and o.status='Active' and le.status='Active'
+      and current_date between o.effective_from and coalesce(o.effective_to,'infinity'::date)
+      and current_date between le.effective_from and coalesce(le.effective_to,'infinity'::date)
+    order by o.name,le.name limit 100`,[payload.sub]);
+  res.json(result.rows);
 });
 
 app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res) => {
@@ -1378,7 +1394,7 @@ app.get('/api/auth/me', requireDatabase, requireAuth, async (req, res) => {
         e.id as employee_record_id, e.name, cd.id as country_director_id,
         coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
       from users u
-      left join employees e on e.employee_id = u.employee_id
+      left join employees e on e.id = u.employee_record_id
       left join country_directors cd on cd.id = e.primary_country_director_id
         and (
           lower(e.designation) in ('country director', 'regional lead', 'director')
@@ -1695,10 +1711,10 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       insert into employees (
         id, employee_id, name, email, designation, department, country, region, business_unit, reporting_manager_id,
         primary_country_director_id, status, utilization_eligible, joining_date, exit_date,
-        standard_weekly_hours, capacity_type, contract_type, leave_policy_id, entra_object_id, teams_user_id
+        standard_weekly_hours, capacity_type, contract_type, leave_policy_id, entra_object_id, teams_user_id, organization_id, legal_entity_id
       )
-      values ($1, $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-      on conflict (employee_id) do update set
+      values ($1, $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+      on conflict (organization_id, employee_id) do update set
         name = excluded.name,
         email = excluded.email,
         designation = excluded.designation,
@@ -1742,6 +1758,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       parsed.data.leave_policy_id || null,
       parsed.data.entra_object_id || null,
       parsed.data.teams_user_id || null,
+      req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
     const employee = employeeResult.rows[0];
     const mappedIds = Array.from(new Set([parsed.data.primary_country_director_id, ...parsed.data.mapped_country_director_ids].filter(Boolean)));
@@ -1762,22 +1779,25 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       ? null
       : await scryptHash(parsed.data.initial_password);
     const userResult = await client.query(`
-      insert into users (username, employee_id, email, password_hash, status, updated_at)
-      values ($1,$2,$3,$4,$5,now())
+      insert into users (username, employee_id, employee_record_id, email, password_hash, status, updated_at)
+      values ($1,$2,$3,$4,$5,$6,now())
       on conflict (username) do update set
         employee_id = excluded.employee_id,
+        employee_record_id = excluded.employee_record_id,
         email = excluded.email,
-        password_hash = coalesce($4, users.password_hash),
+        password_hash = coalesce($5, users.password_hash),
         status = excluded.status,
         updated_at = now()
       returning id
     `, [
       parsed.data.employee_id.toLowerCase(),
       parsed.data.employee_id,
+      employee.id,
       parsed.data.email,
       passwordHash,
       parsed.data.status === 'Exited' ? 'Disabled' : 'Active',
     ]);
+    await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true) on conflict(user_id,organization_id,legal_entity_id) do update set active=true`,[userResult.rows[0].id,req.organizationScope.organizationId,req.organizationScope.legalEntityId]);
     const defaultRoleNames = employeeCode.startsWith('ADMIN-')
       ? ['Admin']
       : employeeCode.startsWith('HR-')
@@ -1827,21 +1847,20 @@ app.delete('/api/employees/:id', requireDatabase, requireAuth, requirePermission
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from employees where id = $1 for update', [req.params.id])).rows[0];
+    const previous = (await client.query('select * from employees where id=$1 and organization_id=$2 and legal_entity_id=$3 for update', [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
     if (!previous) {
       await client.query('rollback');
       res.status(404).json({ error: 'Employee not found' });
       return;
     }
-    const directReports = Number((await client.query(
-      `select count(*)::int as count from employees where reporting_manager_id = $1 and status <> 'Exited'`,
-      [req.params.id]
-    )).rows[0]?.count || 0);
-    if (directReports > 0 && !parsed.data.confirm_direct_reports) {
-      await client.query('rollback');
-      res.status(409).json({ error: `Employee has ${directReports} active direct reports. Confirm reassignment plan before deactivation.` });
-      return;
-    }
+    const dependencies = await client.query(`select kind,id from (
+      select 'active_assignment' kind,id from project_allocations where employee_id=$1 and organization_id=$2 and status='Active'
+      union all select 'pending_approval',id::text from approval_records where subject_employee_id=$1 and status='Pending'
+      union all select 'open_work',id::text from timesheets where employee_id=$1 and organization_id=$2 and status in ('Draft','Submitted')
+      union all select 'project_owner',id from projects where manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status in ('Proposed','Active','On Hold')
+      union all select 'direct_report',id from employees where reporting_manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status<>'Exited'
+    ) d limit 101`,[req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId]);
+    if(dependencies.rowCount){await client.query('rollback');return res.status(409).json({error:'Worker has active dependencies',code:'WORKER_DEPENDENCY_CONFLICT',dependencies:dependencies.rows.slice(0,100),truncated:dependencies.rows.length>100});}
     const result = await client.query(`
       update employees
       set status = 'Exited', updated_at = now()
@@ -1851,15 +1870,8 @@ app.delete('/api/employees/:id', requireDatabase, requireAuth, requirePermission
     await client.query(`
       update users
       set status = 'Disabled', updated_at = now()
-      where employee_id = $1
-    `, [previous.employee_id]);
-    await client.query(`
-      update project_allocations
-      set status = 'Completed',
-        end_date = case when end_date > current_date then current_date else end_date end,
-        updated_at = now()
-      where employee_id = $1 and status = 'Active'
-    `, [req.params.id]);
+      where employee_record_id = $1
+    `, [previous.id]);
     await audit(client, req, {
       module: 'Employee',
       action: 'Deactivate Employee',
@@ -1959,8 +1971,8 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
       ? (await client.query('select * from projects where id = $1', [parsed.data.id])).rows[0]
       : null;
     const result = await client.query(`
-      insert into projects (id, project_code, name, client_id, client, manager_id, manager_name, start_date, end_date, status, billable, project_type, country, notes)
-      values (coalesce($1, 'p-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      insert into projects (id, project_code, name, client_id, client, manager_id, manager_name, start_date, end_date, status, billable, project_type, country, notes, organization_id, legal_entity_id)
+      values (coalesce($1, 'p-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
       on conflict (id) do update set
         project_code = excluded.project_code,
         name = excluded.name,
@@ -1992,6 +2004,7 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
       parsed.data.project_type || null,
       parsed.data.country || null,
       parsed.data.notes || null,
+      req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
     await audit(client, req, {
       module: 'Projects',
@@ -2139,8 +2152,8 @@ app.post('/api/clients', requireDatabase, requireAuth, requirePermission('client
       : [];
     const previous = previousBase ? { ...previousBase, country_director_ids: previousDirectorIds } : null;
     const result = await client.query(`
-      insert into clients (id, name, industry, account_owner_id, status)
-      values (coalesce($1, 'client-' || gen_random_uuid()::text), $2, $3, $4, $5)
+      insert into clients (id, name, industry, account_owner_id, status, organization_id, legal_entity_id)
+      values (coalesce($1, 'client-' || gen_random_uuid()::text), $2, $3, $4, $5, $6, $7)
       on conflict (id) do update set
         name = excluded.name,
         industry = excluded.industry,
@@ -2148,7 +2161,7 @@ app.post('/api/clients', requireDatabase, requireAuth, requirePermission('client
         status = excluded.status,
         updated_at = now()
       returning *
-    `, [parsed.data.id || null, parsed.data.name, parsed.data.industry, parsed.data.account_owner_id || null, parsed.data.status]);
+    `, [parsed.data.id || null, parsed.data.name, parsed.data.industry, parsed.data.account_owner_id || null, parsed.data.status, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     const saved = result.rows[0];
     await client.query('delete from client_country_director_map where client_id = $1', [saved.id]);
     for (const countryDirectorId of parsed.data.country_director_ids) {
@@ -2261,6 +2274,8 @@ app.get('/api/allocations', requireDatabase, requireAuth, requirePermission('tim
       )
     `;
   }
+  params.push(req.organizationScope.organizationId);
+  where = `where organization_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `select * from project_allocations ${where} order by start_date desc`, params);
 });
 app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('allocations.manage'), async (req, res) => {
@@ -2352,8 +2367,8 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       ? (await client.query('select * from project_allocations where id = $1', [parsed.data.id])).rows[0]
       : null;
     const result = await client.query(`
-      insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments)
-      values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10)
+      insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id)
+      values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       on conflict (id) do update set
         employee_id = excluded.employee_id,
         project_id = excluded.project_id,
@@ -2377,6 +2392,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       parsed.data.billable,
       parsed.data.status,
       parsed.data.comments || null,
+      req.organizationScope.organizationId,
     ]);
     await audit(client, req, {
       module: 'Allocations',
@@ -2501,6 +2517,8 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
       )
     `;
   }
+  params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
+  where = `where t.organization_id = $${params.length-1} and e.legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `
     select
       t.*,
@@ -2629,8 +2647,8 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       return;
     }
     const timesheetResult = await client.query(`
-      insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at)
-      values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end)
+      insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id)
+      values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7)
       on conflict (employee_id, week_ending) do update set
         status = excluded.status,
         total_hours = excluded.total_hours,
@@ -2646,6 +2664,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       totalHours,
       billableHours,
       parsed.data.rejection_reason || null,
+      req.organizationScope.organizationId,
     ]);
     const timesheet = timesheetResult.rows[0];
     await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);
@@ -2716,7 +2735,7 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from timesheets where id = $1 for update', [req.params.id])).rows[0];
+    const previous = (await client.query('select t.* from timesheets t join employees e on e.id=t.employee_id where t.id=$1 and t.organization_id=$2 and e.legal_entity_id=$3 for update', [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
     if (!previous) {
       await client.query('rollback');
       res.status(404).json({ error: 'Timesheet not found' });
@@ -4728,7 +4747,7 @@ app.get('/api/permissions/config', requireDatabase, requireAuth, requirePermissi
         select upg.*, u.username, u.employee_id, e.name as display_name
         from user_permission_grants upg
         join users u on u.id = upg.user_id
-        left join employees e on e.employee_id = u.employee_id
+        left join employees e on e.id = u.employee_record_id
         order by upg.created_at desc
       `),
       pool.query(`
@@ -4741,7 +4760,7 @@ app.get('/api/permissions/config', requireDatabase, requireAuth, requirePermissi
           coalesce(e.name, u.username) as display_name,
           coalesce(json_agg(r.name order by r.name) filter (where r.name is not null), '[]') as roles
         from users u
-        left join employees e on e.employee_id = u.employee_id
+        left join employees e on e.id = u.employee_record_id
         left join user_roles ur on ur.user_id = u.id
         left join roles r on r.id = ur.role_id
         group by u.id, e.id, e.name
@@ -6087,10 +6106,10 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         insert into employees (
           id, employee_id, name, email, designation, department, country, region, business_unit, reporting_manager_id,
           primary_country_director_id, status, utilization_eligible, joining_date, exit_date,
-          standard_weekly_hours, capacity_type, contract_type, entra_object_id, teams_user_id, updated_at
+          standard_weekly_hours, capacity_type, contract_type, entra_object_id, teams_user_id, organization_id, legal_entity_id, updated_at
         )
-        values (coalesce($1, 'e-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,now())
-        on conflict (employee_id) do update set
+        values (coalesce($1, 'e-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,now())
+        on conflict (organization_id,employee_id) do update set
           name = excluded.name,
           email = excluded.email,
           designation = excluded.designation,
@@ -6132,6 +6151,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         row.contractType || previous?.contract_type || 'Permanent',
         row.entraObjectId || previous?.entra_object_id || null,
         row.teamsUserId || previous?.teams_user_id || null,
+        req.organizationScope.organizationId, req.organizationScope.legalEntityId,
       ]);
       const employee = employeeResult.rows[0];
       const allMappedIds = Array.from(new Set([primaryDirectorId, ...mappedIds].filter(Boolean)));
@@ -6150,22 +6170,25 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
       }
       const passwordHash = existingUser ? null : await scryptHash(row.initialPassword);
       const userResult = await client.query(`
-        insert into users (username, employee_id, email, password_hash, status, updated_at)
-        values ($1,$2,$3,$4,$5,now())
+        insert into users (username, employee_id, employee_record_id, email, password_hash, status, updated_at)
+        values ($1,$2,$3,$4,$5,$6,now())
         on conflict (username) do update set
           employee_id = excluded.employee_id,
+          employee_record_id = excluded.employee_record_id,
           email = excluded.email,
-          password_hash = coalesce($4, users.password_hash),
+          password_hash = coalesce($5, users.password_hash),
           status = excluded.status,
           updated_at = now()
         returning id
       `, [
         row.employeeId,
         row.employeeId,
+        employee.id,
         row.email,
         passwordHash,
         employee.status === 'Exited' ? 'Disabled' : 'Active',
       ]);
+      await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true) on conflict(user_id,organization_id,legal_entity_id) do update set active=true`,[userResult.rows[0].id,req.organizationScope.organizationId,req.organizationScope.legalEntityId]);
       const roleNames = splitPipeList(row.roles);
       const requestedRoles = roleNames.length > 0 ? roleNames : ['Employee'];
       const rolesResult = await client.query('select id, name from roles where name = any($1::text[])', [requestedRoles]);
@@ -6438,9 +6461,9 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
 
       const previous = (await client.query('select * from projects where project_code = $1 limit 1', [row.projectCode])).rows[0];
       const result = await client.query(`
-        insert into projects (id, project_code, name, client_id, client, manager_id, manager_name, start_date, end_date, status, billable, project_type, country, notes)
-        values (coalesce($1, 'p-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-        on conflict (project_code) do update set
+        insert into projects (id, project_code, name, client_id, client, manager_id, manager_name, start_date, end_date, status, billable, project_type, country, notes, organization_id, legal_entity_id)
+        values (coalesce($1, 'p-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        on conflict (organization_id,project_code) do update set
           name = excluded.name,
           client_id = excluded.client_id,
           client = excluded.client,
@@ -6470,6 +6493,7 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
         row.projectType || previous?.project_type || null,
         row.country || previous?.country || null,
         row.notes || previous?.notes || null,
+        req.organizationScope.organizationId, req.organizationScope.legalEntityId,
       ]);
       const project = result.rows[0];
       await audit(client, req, {

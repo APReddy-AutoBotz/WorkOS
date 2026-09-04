@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const migration = readFileSync('server/migrations/022_organization_setup_foundation.sql', 'utf8');
 const integrityMigration = readFileSync('server/migrations/023_wos02_scope_lifecycle_integrity.sql', 'utf8');
+const closureMigration = readFileSync('server/migrations/024_wos02_final_review_closure.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
 const server = readFileSync('server/index.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
@@ -43,7 +44,14 @@ assert.match(service, /Worker transition conflicts with existing history/, 'back
 assert.match(service, /catalog_type=\$3 and \(legal_entity_id is null or legal_entity_id=\$4\) for update/, 'catalog retirement must match type and legal scope');
 assert.match(service, /e\.legal_entity_id=\$3 and wp\.organization_id=\$2 and wp\.legal_entity_id=\$3/, 'worker mutations must match persisted legal scope');
 assert.match(service, /router\.get\('\/workers\/:id\/history'[\s\S]*join worker_profiles wp on wp\.employee_id=e\.id[\s\S]*if\(!worker\) return res\.status\(404\)/, 'worker history must fail closed unless the employee profile belongs to the persisted legal scope');
-assert.match(service, /select h\.\* from worker_history h[\s\S]*join employees e[\s\S]*join worker_profiles wp[\s\S]*e\.legal_entity_id=\$3/, 'worker history rows must be resolved through authoritative employee and profile ownership');
+assert.match(service, /select h\.\* from worker_history h[\s\S]*h\.legal_entity_id=\$3/, 'worker history rows must be scoped by version ownership');
+assert.match(closureMigration, /employee_record_id[\s\S]*uq_users_employee_record/, 'identity must use an unambiguous employee record link');
+assert.match(closureMigration, /worker_history add column if not exists legal_entity_id/, 'history versions must persist legal ownership');
+assert.match(closureMigration, /working_calendar_versions_no_overlap[\s\S]*exclude using gist/, 'calendar versions must not overlap');
+assert.match(service, /FUTURE_TRANSITION_UNSUPPORTED/, 'future lifecycle changes must not mutate current state');
+assert.match(service, /router\.post\('\/calendars'/, 'calendars must have governed authoring');
+assert.match(service, /router\.post\('\/reporting-periods'/, 'reporting periods must have governed authoring');
+assert.match(service, /router\.post\('\/terminology'/, 'terminology must have governed authoring');
 assert.match(server, /registerOrganizationSetupRoutes/, 'canonical API must register the setup module');
 assert.match(ui, /Organization setup readiness/, 'governance UI must expose setup readiness');
 assert.match(ui, /setupReadiness\.checks/, 'UI must render server-derived checks');

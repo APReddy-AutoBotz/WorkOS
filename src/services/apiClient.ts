@@ -71,9 +71,19 @@ export const resetBackendCheck = () => {
 // ─── Token management ─────────────────────────────────────────────────────────
 
 const TOKEN_KEY = 'workos_api_token';
+const SCOPE_KEY = 'workos_organization_scope';
+export type OrganizationScope = { organizationId: string; legalEntityId: string; organizationName?: string; legalEntityName?: string };
 export const storeToken = (token: string) => sessionStorage.setItem(TOKEN_KEY, token);
-export const clearToken = () => sessionStorage.removeItem(TOKEN_KEY);
+export const clearToken = () => { sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(SCOPE_KEY); };
 export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
+export const getOrganizationScope = (): OrganizationScope | null => {
+  try { return JSON.parse(sessionStorage.getItem(SCOPE_KEY) || 'null'); } catch { return null; }
+};
+export const selectOrganizationScope = async (scope: OrganizationScope) => {
+  const scopes = await apiFetch<OrganizationScope[]>('GET', '/api/auth/organization-scopes');
+  if (!scopes.some(item => item.organizationId === scope.organizationId && item.legalEntityId === scope.legalEntityId)) throw new Error('Organization scope is not authorized');
+  sessionStorage.setItem(SCOPE_KEY, JSON.stringify(scope));
+};
 
 // ─── Core fetch wrapper ───────────────────────────────────────────────────────
 
@@ -81,9 +91,11 @@ type ApiError = { error: string; reason?: string };
 
 const buildHeaders = (): HeadersInit => {
   const token = getToken();
+  const scope = getOrganizationScope();
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(scope ? { 'X-Organization-Id': scope.organizationId, 'X-Legal-Entity-Id': scope.legalEntityId } : {}),
   };
 };
 

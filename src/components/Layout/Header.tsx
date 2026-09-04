@@ -9,6 +9,7 @@ import { filterEmployeesByOrgVisibility, filterProjectsByOrgVisibility } from '.
 import type { UserRole } from '../../types';
 
 import { productConfig } from '../../config/productConfig';
+import { api, getOrganizationScope, selectOrganizationScope, type OrganizationScope } from '../../services/apiClient';
 type SearchResult = {
   id: string;
   title: string;
@@ -32,9 +33,13 @@ export const Header = () => {
   const [passwordNotice, setPasswordNotice] = useState<{ type: 'success' | 'danger'; message: string } | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [switchingRole, setSwitchingRole] = useState<string | null>(null);
+  const [organizationScopes, setOrganizationScopes] = useState<OrganizationScope[]>([]);
+  const [organizationScope, setOrganizationScopeState] = useState(getOrganizationScope());
   const user = authService.getCurrentUser();
   const navigate = useNavigate();
   const isPasswordChangeRequired = Boolean(user?.mustChangePassword);
+
+  useEffect(() => { api.get<OrganizationScope[]>('/api/auth/organization-scopes').then(setOrganizationScopes).catch(() => setOrganizationScopes([])); }, []);
 
   // Async data for search
   const [allEmployees, setAllEmployees] = useState<any[]>([]);
@@ -315,6 +320,11 @@ export const Header = () => {
       </div>
 
       <div className="flex items-center gap-8">
+        {organizationScopes.length > 1 && <select aria-label="Organization context" value={organizationScope ? `${organizationScope.organizationId}:${organizationScope.legalEntityId}` : ''}
+          onChange={async event => { const next=organizationScopes.find(scope=>`${scope.organizationId}:${scope.legalEntityId}`===event.target.value); if(next){await selectOrganizationScope(next);setOrganizationScopeState(next);window.location.reload();}}}
+          className="rounded-lg border border-border-light bg-white px-3 py-2 text-xs font-semibold">
+          <option value="" disabled>Select organization</option>{organizationScopes.map(scope=><option key={`${scope.organizationId}:${scope.legalEntityId}`} value={`${scope.organizationId}:${scope.legalEntityId}`}>{scope.organizationName || scope.organizationId} / {scope.legalEntityName || scope.legalEntityId}</option>)}
+        </select>}
         <button className="relative text-heading hover:text-primary transition-colors p-2 rounded-full hover:bg-bg-secondary group">
           <Bell size={18} />
           <div className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full border-2 border-white group-hover:scale-110 transition-transform"></div>

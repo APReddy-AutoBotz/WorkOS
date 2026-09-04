@@ -19,6 +19,8 @@ export const resolveOrganizationScope = async (database, request) => {
     join legal_entities le on le.id=s.legal_entity_id and le.organization_id=s.organization_id
     join organizations o on o.id=s.organization_id
     where s.user_id=$1 and s.active=true and o.status='Active' and le.status='Active'
+      and current_date between o.effective_from and coalesce(o.effective_to,'infinity'::date)
+      and current_date between le.effective_from and coalesce(le.effective_to,'infinity'::date)
       and ($2::text='' or s.organization_id=$2)
       and ($3::text='' or s.legal_entity_id=$3)
     order by s.organization_id, s.legal_entity_id limit 2`,
@@ -143,15 +145,39 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     [req.organizationScope.organizationId,req.organizationScope.legalEntityId,asOf,MAX_SETUP_ROWS]);
     res.json(result.rows);
   });
+  router.post('/calendars', requirePermission('settings.manage'), async (req,res) => {
+    const parsed=z.object({code:z.string().trim().min(1).max(50),name:z.string().trim().min(1).max(150),timezone:z.string().trim().min(1).max(80).default('UTC'),workingDays:z.array(z.number().int().min(0).max(6)).min(1),hoursPerDay:z.number().positive().max(24),effectiveFrom:z.string().date()}).safeParse(req.body);
+    if(!parsed.success)return res.status(400).json({error:parsed.error.flatten()});
+    const client=await pool.connect(); try { await client.query('begin'); await client.query('select pg_advisory_xact_lock(hashtext($1))',[`calendar:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${parsed.data.code}`]);
+      const latest=(await client.query('select * from working_calendars where organization_id=$1 and legal_entity_id=$2 and code=$3 order by effective_from desc limit 1 for update',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code])).rows[0];
+      if(latest&&parsed.data.effectiveFrom<=dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});}
+      if(latest?.effective_to==null)await client.query('update working_calendars set effective_to=$4::date-1 where organization_id=$1 and legal_entity_id=$2 and code=$3 and effective_to is null',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.effectiveFrom]);
+      const result=await client.query('insert into working_calendars(organization_id,legal_entity_id,code,name,timezone,working_days,hours_per_day,effective_from) values($1,$2,$3,$4,$5,$6,$7,$8) returning *',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.name,parsed.data.timezone,parsed.data.workingDays,parsed.data.hoursPerDay,parsed.data.effectiveFrom]);
+      await audit(client,req,{module:'Organization Setup',action:'Version Calendar',entityType:'Working Calendar',entityId:result.rows[0].id,newValue:result.rows[0]}); await client.query('commit');res.status(201).json(result.rows[0]);
+    }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});res.status(500).json({error:'Calendar creation failed'});}finally{client.release();}
+  });
   router.get('/reporting-periods', async (req,res) => {
     const result=await pool.query(`select * from reporting_periods where organization_id=$1
       and (legal_entity_id is null or legal_entity_id=$2) order by starts_on desc limit $3`,
     [req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_SETUP_ROWS]); res.json(result.rows);
   });
+  router.post('/reporting-periods', requirePermission('settings.manage'), async(req,res)=>{
+    const parsed=z.object({code:z.string().trim().min(1).max(50),name:z.string().trim().min(1).max(150),startsOn:z.string().date(),endsOn:z.string().date(),status:z.enum(['Planned','Open','Locked','Closed']).default('Open')}).safeParse(req.body);
+    if(!parsed.success||parsed.success&&parsed.data.endsOn<parsed.data.startsOn)return res.status(400).json({error:'Invalid reporting period'});
+    const result=await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status) values($1,$2,$3,$4,$5,$6,$7)
+      on conflict(organization_id,code) do update set name=excluded.name,starts_on=excluded.starts_on,ends_on=excluded.ends_on,status=excluded.status
+      where reporting_periods.legal_entity_id=excluded.legal_entity_id returning *`,[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.name,parsed.data.startsOn,parsed.data.endsOn,parsed.data.status]);
+    if(!result.rowCount)return res.status(409).json({error:'Reporting period scope conflict'});res.status(201).json(result.rows[0]);
+  });
   router.get('/terminology', async (req,res) => {
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
     const result=await pool.query(`select terms,effective_from,effective_to from terminology_versions t where t.organization_id=$1 and ${asOfPredicate('t','$2')} order by effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
     res.json(result.rows[0]||{terms:{}});
+  });
+  router.post('/terminology',requirePermission('settings.manage'),async(req,res)=>{
+    const parsed=z.object({terms:z.record(z.string(),z.string().trim().min(1).max(100)),effectiveFrom:z.string().date()}).safeParse(req.body);if(!parsed.success)return res.status(400).json({error:parsed.error.flatten()});
+    const result=await pool.query(`insert into terminology_versions(organization_id,terms,effective_from,created_by) values($1,$2,$3,$4)
+      on conflict(organization_id,effective_from) do update set terms=excluded.terms where terminology_versions.organization_id=$1 returning *`,[req.organizationScope.organizationId,JSON.stringify(parsed.data.terms),parsed.data.effectiveFrom,req.user.sub]);res.status(201).json(result.rows[0]);
   });
 
   router.get('/readiness', async (req,res) => {
@@ -160,11 +186,11 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       exists(select 1 from organizations where id=$1 and status='Active') organization,
       exists(select 1 from legal_entities where id=$2 and organization_id=$1 and status='Active') legal_entity,
       exists(select 1 from organization_catalog_items where organization_id=$1 and catalog_type='worker_type' and active
-        and (legal_entity_id is null or legal_entity_id=$2)) worker_type,
+        and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) worker_type,
       exists(select 1 from working_calendars where organization_id=$1 and active
-        and (legal_entity_id is null or legal_entity_id=$2)) calendar,
-      exists(select 1 from reporting_periods where organization_id=$1
-        and (legal_entity_id is null or legal_entity_id=$2)) reporting_period`,[org,req.organizationScope.legalEntityId]);
+        and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) calendar,
+      exists(select 1 from reporting_periods where organization_id=$1 and status in ('Planned','Open')
+        and current_date between starts_on and ends_on and (legal_entity_id is null or legal_entity_id=$2)) reporting_period`,[org,req.organizationScope.legalEntityId]);
     const checks=facts.rows[0];
     res.json({ organizationId:org, legalEntityId:req.organizationScope.legalEntityId, checks,
       ready:Object.values(checks).every(Boolean), authority:'persisted-server-state' });
@@ -188,6 +214,7 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
   router.post('/workers/:id/transition', requirePermission('employees.manage'), async (req,res) => {
     const parsed=z.object({status:z.enum(['Active','On Leave','Disabled','Exited']),effectiveFrom:z.string().date(),reason:z.string().trim().min(1).max(500),idempotencyKey:z.string().trim().min(8).max(100)}).safeParse(req.body);
     if(!parsed.success) return res.status(400).json({error:parsed.error.flatten()});
+    if(parsed.data.effectiveFrom>new Date().toISOString().slice(0,10)) return res.status(409).json({error:'Future worker transitions are not supported',code:'FUTURE_TRANSITION_UNSUPPORTED'});
     const client=await pool.connect();
     try {
       await client.query('begin'); await client.query('select pg_advisory_xact_lock(hashtext($1))',[`worker:${req.params.id}`]);
@@ -216,7 +243,7 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       }
       await client.query('update worker_history set effective_to=$2::date-1 where employee_id=$1 and effective_to is null',[worker.id,parsed.data.effectiveFrom]);
       const snapshot={status:parsed.data.status,reason:parsed.data.reason,idempotencyKey:parsed.data.idempotencyKey};
-      await client.query('insert into worker_history(employee_id,organization_id,effective_from,status,snapshot,actor_id) values($1,$2,$3,$4,$5,$6)',[worker.id,req.organizationScope.organizationId,parsed.data.effectiveFrom,parsed.data.status,JSON.stringify(snapshot),req.user.sub]);
+      await client.query('insert into worker_history(employee_id,organization_id,legal_entity_id,effective_from,status,snapshot,actor_id) values($1,$2,$3,$4,$5,$6,$7)',[worker.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.effectiveFrom,parsed.data.status,JSON.stringify(snapshot),req.user.sub]);
       await client.query('update worker_profiles set lifecycle_status=$2,effective_from=$3,updated_at=now() where employee_id=$1',[worker.id,parsed.data.status,parsed.data.effectiveFrom]);
       await client.query('update employees set status=$2,exit_date=case when $2=\'Exited\' then $3 else exit_date end,updated_at=now() where id=$1',[worker.id,parsed.data.status==='Disabled'?'Exited':parsed.data.status,parsed.data.effectiveFrom]);
       await audit(client,req,{module:'Workforce',action:'Worker Lifecycle Transition',entityType:'Employee',entityId:worker.id,oldValue:{status:worker.lifecycle_status},newValue:snapshot,reason:parsed.data.reason,details:'Applied dependency-safe worker transition'});
@@ -231,12 +258,10 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
     if(!worker) return res.status(404).json({error:'Worker not found'});
     const result=await pool.query(`select h.* from worker_history h
-      join employees e on e.id=h.employee_id and e.organization_id=h.organization_id
-      join worker_profiles wp on wp.employee_id=e.id and wp.organization_id=e.organization_id
-        and wp.legal_entity_id=e.legal_entity_id
-      where h.employee_id=$1 and h.organization_id=$2 and e.legal_entity_id=$3
+      where h.employee_id=$1 and h.organization_id=$2 and h.legal_entity_id=$3
       order by h.effective_from desc limit $4`,
-    [worker.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_HISTORY_ROWS]);
+    [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_HISTORY_ROWS]);
+    if(!result.rowCount)return res.status(404).json({error:'Worker history not found'});
     res.json(result.rows);
   });
   app.use('/api/organization-setup',router);
