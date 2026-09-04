@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { disableLinkedWorkerIdentity } from './worker-lifecycle.mjs';
 import { canTransitionReportingPeriod, REPORTING_PERIOD_STATES } from './reporting-periods.mjs';
+import { buildSetupReadiness } from './setup-readiness.mjs';
 
 export const MAX_SETUP_ROWS = 200;
 export const MAX_DEPENDENCIES = 100;
@@ -211,17 +212,38 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
   router.get('/readiness', async (req,res) => {
     const org=req.organizationScope.organizationId;
     const facts=await pool.query(`select
-      exists(select 1 from organizations where id=$1 and status='Active') organization,
-      exists(select 1 from legal_entities where id=$2 and organization_id=$1 and status='Active') legal_entity,
+      exists(select 1 from organizations where id=$1 and status='Active'
+        and current_date between effective_from and coalesce(effective_to,'infinity'::date)) organization,
+      exists(select 1 from legal_entities where id=$2 and organization_id=$1 and status='Active'
+        and current_date between effective_from and coalesce(effective_to,'infinity'::date)) legal_entity,
       exists(select 1 from organization_catalog_items where organization_id=$1 and catalog_type='worker_type' and active
         and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) worker_type,
       exists(select 1 from working_calendars where organization_id=$1 and active
-        and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) calendar,
+        and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) calendars,
       exists(select 1 from reporting_periods where organization_id=$1 and status='Open'
-        and current_date between starts_on and ends_on and (legal_entity_id is null or legal_entity_id=$2)) reporting_period`,[org,req.organizationScope.legalEntityId]);
-    const checks=facts.rows[0];
-    res.json({ organizationId:org, legalEntityId:req.organizationScope.legalEntityId, checks,
-      ready:Object.values(checks).every(Boolean), authority:'persisted-server-state' });
+        and current_date between starts_on and ends_on and legal_entity_id=$2) reporting_period,
+      exists(select 1 from user_organization_scopes s join users u on u.id=s.user_id and u.status='Active'
+        join user_roles ur on ur.user_id=u.id join roles r on r.id=ur.role_id
+        join role_permissions rp on rp.role_name=r.name and rp.enabled=true
+        where s.organization_id=$1 and s.legal_entity_id=$2 and s.active=true) roles,
+      exists(select 1 from user_organization_scopes s join users u on u.id=s.user_id and u.status='Active'
+        join employees e on e.id=u.employee_record_id and e.organization_id=s.organization_id and e.legal_entity_id=s.legal_entity_id
+        where s.organization_id=$1 and s.legal_entity_id=$2 and s.active=true) initial_users,
+      exists(select 1 from user_organization_scopes s join users u on u.id=s.user_id and u.status='Active'
+        join employees e on e.id=u.employee_record_id and e.organization_id=s.organization_id and e.legal_entity_id=s.legal_entity_id
+        join identity_provider_links i on i.employee_id=e.id and i.provider='entra' and i.status='Linked'
+        where s.organization_id=$1 and s.legal_entity_id=$2 and s.active=true) identity,
+      exists(select 1 from audit_logs a where a.module='Import'
+        and a.new_value->>'organization_id'=$1 and a.new_value->>'legal_entity_id'=$2) imports,
+      (select count(*)=3 from system_settings where (key='currency' and jsonb_typeof(value)='string' and length(value#>>'{}')>0)
+        or (key='expectedWeeklyHours' and jsonb_typeof(value)='number' and (value#>>'{}')::numeric>0)
+        or (key='timesheetPolicyMaxHours' and jsonb_typeof(value)='number' and (value#>>'{}')::numeric>0)) commercial_defaults,
+      exists(select 1 from notification_preferences np join employees e on e.id=np.employee_id
+        where e.organization_id=$1 and e.legal_entity_id=$2)
+        and exists(select 1 from notification_templates where active=true and channel='InApp') notifications`,[org,req.organizationScope.legalEntityId]);
+    const readiness=buildSetupReadiness(facts.rows[0]||{});
+    res.json({ organizationId:org, legalEntityId:req.organizationScope.legalEntityId, ...readiness,
+      authority:'persisted-server-state' });
   });
 
   router.get('/workers/:id/dependencies', async (req,res) => {

@@ -129,7 +129,8 @@ export interface SystemSettings {
 export interface OrganizationSetupReadiness {
   organizationId: string;
   legalEntityId: string;
-  checks: Record<'organization' | 'legal_entity' | 'worker_type' | 'calendar' | 'reporting_period', boolean>;
+  checks: Record<'organization' | 'legal_entity' | 'calendars' | 'roles' | 'identity' | 'initial_users' | 'imports' | 'commercial_defaults' | 'notifications' | 'production_readiness' | 'worker_type' | 'reporting_period', boolean>;
+  evidence?: Record<string, string>;
   ready: boolean;
   authority: 'persisted-server-state';
 }

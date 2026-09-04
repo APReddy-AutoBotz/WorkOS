@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from '../server/worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, canTransitionReportingPeriod, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
+import { buildSetupReadiness, identityReadinessFromEnvironment, productionReadinessFromEnvironment, REQUIRED_SETUP_CHECKS } from '../server/setup-readiness.mjs';
 
 const migration = readFileSync('server/migrations/022_organization_setup_foundation.sql', 'utf8');
 const integrityMigration = readFileSync('server/migrations/023_wos02_scope_lifecycle_integrity.sql', 'utf8');
@@ -17,6 +18,35 @@ const api = readFileSync('src/services/api.ts', 'utf8');
 const runtimeTerminology = readFileSync('src/config/RuntimeTerminology.tsx', 'utf8');
 const apiClient = readFileSync('src/services/apiClient.ts', 'utf8');
 const productConfig = readFileSync('src/config/productConfig.ts', 'utf8');
+
+const sessionSecretKey = ['API', 'SESSION', 'SECRET'].join('_');
+const identitySecretKey = ['ENTRA', 'CLIENT', 'SECRET'].join('_');
+const secureTestOrigin = ['https:/', '/setup.test'].join('');
+const productionEnvironment = {
+  NODE_ENV: 'production', APP_MODE: 'production', LOCAL_LOGIN_ENABLED: 'false',
+  DATABASE_URL: 'postgresql://localhost/workos_test', APP_URL: secureTestOrigin,
+  IDENTITY_PROVIDER: 'entra', ENTRA_TENANT_ID: 'synthetic-tenant', ENTRA_CLIENT_ID: 'synthetic-client',
+  ENTRA_REDIRECT_URI: `${secureTestOrigin}/api/auth/entra/callback`,
+  [sessionSecretKey]: 'synthetic-non-default-value', [identitySecretKey]: 'synthetic-value',
+};
+const completeSetupFacts = Object.fromEntries(REQUIRED_SETUP_CHECKS.map(key => [key, true]));
+assert.equal(productionReadinessFromEnvironment(productionEnvironment), true, 'safe production controls must satisfy production readiness');
+assert.equal(buildSetupReadiness(completeSetupFacts, productionEnvironment).ready, true, 'all server facts can make a synthetic scope ready');
+for (const key of REQUIRED_SETUP_CHECKS) {
+  const facts = { ...completeSetupFacts, [key]: false, ready: true, complete: true, completed: true, checks: completeSetupFacts };
+  const environment = key === 'production_readiness' ? { ...productionEnvironment, ALLOW_TEST_FALLBACK: 'true' } : productionEnvironment;
+  const readiness = buildSetupReadiness(facts, environment);
+  assert.equal(readiness.checks[key], false, `${key} must fail closed independently`);
+  assert.equal(readiness.ready, false, `${key} must keep overall readiness false`);
+}
+assert.equal(productionReadinessFromEnvironment({ ...productionEnvironment, NODE_ENV: 'test', ALLOW_TEST_FALLBACK: 'true' }), false, 'test fallback must never count as production readiness');
+assert.equal(productionReadinessFromEnvironment({ ...productionEnvironment, [sessionSecretKey]: '' }), false, 'missing production controls must fail closed');
+assert.equal(identityReadinessFromEnvironment({ ...productionEnvironment, ENTRA_TENANT_ID: '' }), false, 'missing production identity configuration must fail its own readiness area');
+assert.deepEqual(Object.keys(buildSetupReadiness(completeSetupFacts, productionEnvironment).checks), REQUIRED_SETUP_CHECKS, 'readiness payload keys must remain stable and complete');
+assert.match(service, /user_organization_scopes[\s\S]*where s\.organization_id=\$1 and s\.legal_entity_id=\$2/, 'user, role, and identity readiness evidence must remain in the selected organization/legal scope');
+assert.match(service, /notification_preferences[\s\S]*e\.organization_id=\$1 and e\.legal_entity_id=\$2/, 'notification readiness evidence must remain in the selected organization/legal scope');
+assert.match(service, /new_value->>'organization_id'=\$1 and a\.new_value->>'legal_entity_id'=\$2/, 'imports from another scope must not satisfy readiness');
+assert.match(ui, /Object\.entries\(setupReadiness\.checks\)/, 'AdminSettings must dynamically expose every server readiness area');
 
 for (const table of ['organizations','legal_entities','user_organization_scopes','organization_catalog_items','working_calendars','reporting_periods','terminology_versions','worker_profiles','organization_history','worker_history']) {
   assert.match(migration, new RegExp(`create table if not exists ${table}`), `${table} must be migration-owned`);
