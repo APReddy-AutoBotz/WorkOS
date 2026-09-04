@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           node <<'NODE'
-          const fs = require('fs');
+          const fs = await import('node:fs');
           const token = process.env.GH_TOKEN;
           const repo = process.env.REPO;
           const comment = process.env.SOURCE_COMMENT;
