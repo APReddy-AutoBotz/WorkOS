@@ -1,0 +1,90 @@
+name: WOS-02 Worker Acceptance Date Contract Fix
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-worker-acceptance-date-contract-fix.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: a0bf8e2aa9d1160abad981f2df85954c9f8e0987
+  EXPECTED_PRODUCT_TREE: 96869f1ec904b05513384cc5af104d5f78a540c9
+  EXPECTED_CONTROLLER: 3612907a1c91dd3000ed608d702f04e8fdaa076d
+  CONTROLLER_BRANCH: controller/wos02-exact-acceptance
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.state!=='open'||!product.draft||product.head.sha!==process.env.EXPECTED_PRODUCT) failures.push(`product=${product.state}/draft:${product.draft}/head:${product.head.sha}`);
+            const {data:pc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:product.head.sha});
+            if(pc.commit.tree.sha!==process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${pc.commit.tree.sha}`);
+            if(controller.state!=='open'||!controller.draft||controller.head.sha!==process.env.EXPECTED_CONTROLLER) failures.push(`controller=${controller.state}/draft:${controller.draft}/head:${controller.head.sha}`);
+            if(controller.head.ref!==process.env.CONTROLLER_BRANCH) failures.push(`controller branch=${controller.head.ref}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Correct only PostgreSQL date normalization assertion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/wos02-worker-lifecycle-acceptance.mjs')
+          s=p.read_text()
+          old="assert.equal(String(state.profile.effective_from).slice(0, 10), '2026-01-01');"
+          new="assert.equal(new Date(state.profile.effective_from).toISOString().slice(0, 10), '2026-01-01');"
+          assert s.count(old)==1, s.count(old)
+          s=s.replace(old,new)
+          assert s.count(new)==1
+          p.write_text(s)
+          PY
+          test "$(git diff --name-only | tr '\n' ' ')" = ".github/scripts/wos02-worker-lifecycle-acceptance.mjs "
+          git diff --check
+          git diff -- .github/scripts/wos02-worker-lifecycle-acceptance.mjs
+          git add .github/scripts/wos02-worker-lifecycle-acceptance.mjs
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'CTRL: normalize worker acceptance date assertion'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_CONTROLLER"
+
+      - name: Revalidate live leases immediately before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.head.sha!==process.env.EXPECTED_PRODUCT||!product.draft) failures.push(`product=${product.head.sha}/draft:${product.draft}`);
+            if(controller.head.sha!==process.env.EXPECTED_CONTROLLER||!controller.draft) failures.push(`controller=${controller.head.sha}/draft:${controller.draft}`);
+            if(failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward controller branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"$CONTROLLER_BRANCH"
