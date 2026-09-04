@@ -308,10 +308,11 @@ const seed = async () => {
       const result = await query(client, `
         insert into timesheets (
           employee_id, week_ending, status, total_hours, billable_hours,
-          rejection_reason, submitted_at, approved_at, approved_by, rejected_at, rejected_by, updated_at
+          rejection_reason, submitted_at, approved_at, approved_by, rejected_at, rejected_by, updated_at,
+          organization_id
         )
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
-        on conflict (employee_id, week_ending) do update set
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),'org-default')
+        on conflict (organization_id, employee_id, week_ending) do update set
           status = excluded.status,
           total_hours = excluded.total_hours,
           billable_hours = excluded.billable_hours,

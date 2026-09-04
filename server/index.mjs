@@ -2651,7 +2651,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
 
     const totalHours = round1(parsed.data.entries.reduce((sum, entry) => sum + entry.hours, 0));
     const billableHours = round1(parsed.data.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + entry.hours, 0));
-    const previous = (await client.query('select * from timesheets where employee_id = $1 and week_ending = $2 for update', [parsed.data.employee_id, parsed.data.week_ending])).rows[0];
+    const previous = (await client.query('select * from timesheets where organization_id = $1 and employee_id = $2 and week_ending = $3 for update', [req.organizationScope.organizationId, parsed.data.employee_id, parsed.data.week_ending])).rows[0];
     if (previous && !['Draft', 'Rejected'].includes(previous.status)) {
       await client.query('rollback');
       res.status(422).json({ error: 'Only draft or rejected timesheets can be edited or submitted' });
@@ -2660,7 +2660,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     const timesheetResult = await client.query(`
       insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id)
       values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7)
-      on conflict (employee_id, week_ending) do update set
+      on conflict (organization_id, employee_id, week_ending) do update set
         status = excluded.status,
         total_hours = excluded.total_hours,
         billable_hours = excluded.billable_hours,
@@ -6783,9 +6783,11 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
       const employee = (await client.query(`
         select id, employee_id, name, status
         from employees
-        where (id = $1 or employee_id = $1) and status <> 'Exited'
+        where (id = $1 or employee_id = $1)
+          and organization_id = $2 and legal_entity_id = $3
+          and status <> 'Exited'
         limit 1
-      `, [row.employeeId])).rows[0];
+      `, [row.employeeId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
       if (!employee) {
         rowErrors.push({ rowNumber, field: 'employeeId', message: 'Timesheet must reference an active employee.' });
       }
@@ -6798,9 +6800,11 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
           project = (await client.query(`
             select id, name, status
             from projects
-            where (id = $1 or project_code = $1) and status <> 'Completed'
+            where (id = $1 or project_code = $1)
+              and organization_id = $2 and legal_entity_id = $3
+              and status <> 'Completed'
             limit 1
-          `, [row.projectId])).rows[0];
+          `, [row.projectId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
           if (!project) {
             rowErrors.push({ rowNumber, field: 'projectId', message: 'Project Work entries must reference active, proposed, or on-hold projects.' });
           }
@@ -6845,11 +6849,11 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     for (const group of groups.values()) {
       const totalHours = round1(group.entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
       const billableHours = round1(group.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
-      const previous = (await client.query('select * from timesheets where employee_id = $1 and week_ending = $2', [group.employee.id, group.weekEnding])).rows[0];
+      const previous = (await client.query('select * from timesheets where organization_id = $1 and employee_id = $2 and week_ending = $3 for update', [req.organizationScope.organizationId, group.employee.id, group.weekEnding])).rows[0];
       const timesheetResult = await client.query(`
-        insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at)
-        values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end)
-        on conflict (employee_id, week_ending) do update set
+        insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id)
+        values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7)
+        on conflict (organization_id, employee_id, week_ending) do update set
           status = excluded.status,
           total_hours = excluded.total_hours,
           billable_hours = excluded.billable_hours,
@@ -6864,6 +6868,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
         totalHours,
         billableHours,
         group.rejectionReason,
+        req.organizationScope.organizationId,
       ]);
       const timesheet = timesheetResult.rows[0];
       await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);
