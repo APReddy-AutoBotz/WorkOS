@@ -14,8 +14,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: d3355ea55ae3cd114c54729ad4835a47536cb55a
-  TARGET_TREE: 9b67fbb9028e3ce1679890ed8ab22ee8e7b778ea
+  TARGET_HEAD: c623c3336190b34a622be8a8f7c08139ba405e22
+  TARGET_TREE: 566ee6a6426e6a41e0783d86c7b3598d9f9c3b05
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -31,7 +31,7 @@ jobs:
   acceptance:
     name: Final-review exact-head WOS-02 acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16
@@ -66,8 +66,8 @@ jobs:
             const {data: commit} = await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.TARGET_HEAD});
             if (commit.commit.tree.sha !== process.env.TARGET_TREE) failures.push(`target tree=${commit.commit.tree.sha}`);
             const files = await github.paginate(github.rest.pulls.listFiles,{owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR),per_page:100});
-            const actual=files.map(f=>f.filename).sort();
-            const required=[
+            const actual = files.map(f => f.filename).sort();
+            const required = [
               'docs/00-control/REQUIREMENTS_TRACEABILITY.md',
               'docs/tasks/WOS-02-ORGANIZATION-SETUP-FOUNDATION.md',
               'package.json',
@@ -76,14 +76,17 @@ jobs:
               'server/migrations/023_wos02_scope_lifecycle_integrity.sql',
               'server/migrations/024_wos02_final_review_closure.sql',
               'server/organization-setup.mjs',
+              'src/App.tsx',
               'src/components/Layout/Header.tsx',
+              'src/config/RuntimeTerminology.tsx',
+              'src/config/productConfig.ts',
               'src/pages/AdminSettings.tsx',
               'src/services/api.ts',
               'src/services/apiClient.ts',
               'src/types.ts',
               'tests/organization-setup-smoke.mjs',
             ].sort();
-            if (JSON.stringify(actual)!==JSON.stringify(required)) failures.push(`target files=${JSON.stringify(actual)}`);
+            if (JSON.stringify(actual) !== JSON.stringify(required)) failures.push(`target files=${JSON.stringify(actual)}`);
             if (failures.length) core.setFailed(`authority failed: ${failures.join('; ')}`);
 
       - name: Checkout exact controller
@@ -289,15 +292,15 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const failures=[];
-            const {data: main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
-            const {data: target}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR)});
-            if(main.commit.sha!==process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
-            if(target.head.sha!==process.env.TARGET_HEAD) failures.push(`target=${target.head.sha}`);
-            if(target.state!=='open'||!target.draft) failures.push(`lifecycle=${target.state}/draft:${target.draft}`);
-            const {data: commit}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.TARGET_HEAD});
-            if(commit.commit.tree.sha!==process.env.TARGET_TREE) failures.push(`tree=${commit.commit.tree.sha}`);
-            if(failures.length) core.setFailed(`final authority failed: ${failures.join('; ')}`);
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data: target} = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:Number(process.env.TARGET_PR)});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN_HEAD) failures.push(`main=${main.commit.sha}`);
+            if (target.head.sha !== process.env.TARGET_HEAD) failures.push(`target=${target.head.sha}`);
+            if (target.state !== 'open' || !target.draft) failures.push(`lifecycle=${target.state}/draft:${target.draft}`);
+            const {data: commit} = await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.TARGET_HEAD});
+            if (commit.commit.tree.sha !== process.env.TARGET_TREE) failures.push(`tree=${commit.commit.tree.sha}`);
+            if (failures.length) core.setFailed(`final authority failed: ${failures.join('; ')}`);
 
       - name: Upload exact-head acceptance evidence
         if: always()
