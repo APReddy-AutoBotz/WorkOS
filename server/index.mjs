@@ -1242,6 +1242,17 @@ app.post('/api/auth/login', loginRateLimit, requireDatabase, async (req, res) =>
 
   try {
     const result = await pool.query(`
+      with direct_users as (
+        select id from users where lower(username)=lower($1) or lower(email)=lower($1)
+      ), login_candidates as (
+        select id from direct_users
+        union all
+        select u2.id from users u2
+        join employees e2 on e2.id=u2.employee_record_id
+        where not exists(select 1 from direct_users)
+          and lower(u2.employee_id)=lower($1)
+          and u2.status='Active' and e2.status<>'Exited'
+      )
       select u.id, u.username, u.employee_id, u.email, u.password_hash, u.must_change_password, u.status, e.id as employee_record_id, e.name, cd.id as country_director_id,
         coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
       from users u
@@ -1253,11 +1264,11 @@ app.post('/api/auth/login', loginRateLimit, requireDatabase, async (req, res) =>
         )
       left join user_roles ur on ur.user_id = u.id
       left join roles r on r.id = ur.role_id
-      where lower(u.username) = lower($1) or lower(u.email) = lower($1) or lower(u.employee_id) = lower($1)
+      where u.id in (select id from login_candidates)
       group by u.id, e.id, e.name, cd.id
-      limit 1
+      limit 2
     `, [parsed.data.username]);
-    const user = result.rows[0];
+    const user = result.rows.length === 1 ? result.rows[0] : null;
     if (!user || user.status !== 'Active' || !(await verifyPassword(parsed.data.password, user.password_hash))) {
       res.status(401).json({ error: 'Invalid username or password' });
       return;
@@ -6591,8 +6602,9 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
         select *
         from employees
         where (id = $1 or employee_id = $1) and status <> 'Exited'
+          and organization_id=$2 and legal_entity_id=$3
         limit 1
-      `, [row.employeeId])).rows[0];
+      `, [row.employeeId,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
       if (!employee) {
         rowErrors.push({ rowNumber, field: 'employeeId', message: 'Allocation must reference an active employee.' });
       }
@@ -6601,8 +6613,9 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
         select *
         from projects
         where (id = $1 or project_code = $1) and status in ('Active', 'Proposed')
+          and organization_id=$2 and legal_entity_id=$3
         limit 1
-      `, [row.projectId])).rows[0];
+      `, [row.projectId,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
       if (!project) {
         rowErrors.push({ rowNumber, field: 'projectId', message: 'Allocation must reference an active or proposed project.' });
       } else if (row.startDate < toIsoDate(project.start_date) || row.endDate > toIsoDate(project.end_date)) {
@@ -6615,10 +6628,11 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
           select coalesce(sum(percentage), 0) as total
           from project_allocations
           where employee_id = $1
+            and organization_id = $5
             and id <> coalesce($2, '')
             and status = 'Active'
             and daterange(start_date, end_date, '[]') && daterange($3::date, $4::date, '[]')
-        `, [employee.id, row.id || null, row.startDate, row.endDate]);
+        `, [employee.id, row.id || null, row.startDate, row.endDate,req.organizationScope.organizationId]);
         const total = parsePercent(loadResult.rows[0]?.total) + row.percentage;
         if (total > 100) {
           rowErrors.push({ rowNumber, field: 'percentage', message: `Allocation would exceed 100% for overlapping dates (${total}%).` });
@@ -6631,11 +6645,19 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
       }
 
       const previous = row.id
-        ? (await client.query('select * from project_allocations where id = $1 limit 1', [row.id])).rows[0]
+        ? (await client.query(`select pa.* from project_allocations pa
+          join projects p on p.id=pa.project_id and p.organization_id=pa.organization_id
+          join employees e on e.id=pa.employee_id and e.organization_id=pa.organization_id
+          where pa.id=$1 and pa.organization_id=$2 and p.legal_entity_id=$3 and e.legal_entity_id=$3 limit 1`,
+        [row.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0]
         : null;
+      if (row.id && !previous && (await client.query('select 1 from project_allocations where id=$1',[row.id])).rowCount) {
+        errors.push({rowNumber,field:'id',message:'Allocation is not available in the authorized organization and legal entity.'});
+        continue;
+      }
       const result = await client.query(`
-        insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments)
-        values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10)
+        insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id)
+        values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         on conflict (id) do update set
           employee_id = excluded.employee_id,
           project_id = excluded.project_id,
@@ -6647,6 +6669,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
           status = excluded.status,
           comments = excluded.comments,
           updated_at = now()
+        where project_allocations.organization_id=excluded.organization_id
         returning *
       `, [
         previous?.id || row.id || null,
@@ -6659,6 +6682,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
         parseBoolean(row.billable, previous?.billable ?? true),
         row.status || previous?.status || 'Active',
         row.comments || previous?.comments || null,
+        req.organizationScope.organizationId,
       ]);
       const allocation = result.rows[0];
       await audit(client, req, {

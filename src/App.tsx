@@ -5,6 +5,7 @@ import { authService } from './services/authService';
 import { hasRouteRole, ROUTE_ROLES } from './services/accessControl';
 import { UserRole } from './types';
 import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from './config/featureFlags';
+import { RuntimeTerminology } from './config/RuntimeTerminology';
 
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
 const EmployeeMaster = lazy(() => import('./pages/EmployeeMaster').then(module => ({ default: module.EmployeeMaster })));
@@ -123,6 +124,7 @@ const RouteFallback = () => (
 export default function App() {
   return (
     <Router>
+      <RuntimeTerminology>
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -331,6 +333,7 @@ export default function App() {
           } />
         </Routes>
       </Suspense>
+      </RuntimeTerminology>
     </Router>
   );
 }

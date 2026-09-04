@@ -153,7 +153,7 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       if(latest&&parsed.data.effectiveFrom<=dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});}
       if(latest?.effective_to==null)await client.query('update working_calendars set effective_to=$4::date-1 where organization_id=$1 and legal_entity_id=$2 and code=$3 and effective_to is null',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.effectiveFrom]);
       const result=await client.query('insert into working_calendars(organization_id,legal_entity_id,code,name,timezone,working_days,hours_per_day,effective_from) values($1,$2,$3,$4,$5,$6,$7,$8) returning *',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.name,parsed.data.timezone,parsed.data.workingDays,parsed.data.hoursPerDay,parsed.data.effectiveFrom]);
-      await audit(client,req,{module:'Organization Setup',action:'Version Calendar',entityType:'Working Calendar',entityId:result.rows[0].id,newValue:result.rows[0]}); await client.query('commit');res.status(201).json(result.rows[0]);
+      await audit(client,req,{module:'Organization Setup',action:'Version Calendar',entityType:'Working Calendar',entityId:result.rows[0].id,newValue:result.rows[0],details:'Created an effective-dated working calendar version'}); await client.query('commit');res.status(201).json(result.rows[0]);
     }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});res.status(500).json({error:'Calendar creation failed'});}finally{client.release();}
   });
   router.get('/reporting-periods', async (req,res) => {
@@ -252,11 +252,6 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
   });
 
   router.get('/workers/:id/history', async(req,res)=>{
-    const worker=(await pool.query(`select e.id from employees e join worker_profiles wp on wp.employee_id=e.id
-      and wp.organization_id=e.organization_id and wp.legal_entity_id=e.legal_entity_id
-      where e.id=$1 and e.organization_id=$2 and e.legal_entity_id=$3`,
-    [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
-    if(!worker) return res.status(404).json({error:'Worker not found'});
     const result=await pool.query(`select h.* from worker_history h
       where h.employee_id=$1 and h.organization_id=$2 and h.legal_entity_id=$3
       order by h.effective_from desc limit $4`,

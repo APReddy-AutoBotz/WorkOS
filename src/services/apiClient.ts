@@ -83,6 +83,7 @@ export const selectOrganizationScope = async (scope: OrganizationScope) => {
   const scopes = await apiFetch<OrganizationScope[]>('GET', '/api/auth/organization-scopes');
   if (!scopes.some(item => item.organizationId === scope.organizationId && item.legalEntityId === scope.legalEntityId)) throw new Error('Organization scope is not authorized');
   sessionStorage.setItem(SCOPE_KEY, JSON.stringify(scope));
+  window.dispatchEvent(new Event('workos:organization-scope-changed'));
 };
 
 // ─── Core fetch wrapper ───────────────────────────────────────────────────────
@@ -123,6 +124,9 @@ async function apiFetch<T>(
   if (!res.ok) {
     const err = json as ApiError;
     throw new Error(err.error || `API error ${res.status}`);
+  }
+  if (method !== 'GET' && path === '/api/organization-setup/terminology') {
+    window.dispatchEvent(new Event('workos:organization-scope-changed'));
   }
   return json as T;
 }
