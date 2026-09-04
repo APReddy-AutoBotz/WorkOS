@@ -1,0 +1,79 @@
+name: WOS-02 Controller Fixture Publisher
+
+on:
+  push:
+    branches: [controller/wos02-migration-publisher-temp2]
+    paths: ['.github/workflows/wos02-controller-fixture-publisher.yml']
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 031be9e18b6871594f0cfef25f8b098741dde74c
+  EXPECTED_PRODUCT_TREE: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1
+  EXPECTED_CONTROLLER: 5ae9ba74c5ee9357d7dfa3dd72798349fc87e434
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify exact live leases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)" = "$EXPECTED_MAIN"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq .head.sha)" = "$EXPECTED_PRODUCT"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq .draft)" = "true"
+          test "$(gh api repos/$GITHUB_REPOSITORY/commits/$EXPECTED_PRODUCT --jq .commit.tree.sha)" = "$EXPECTED_PRODUCT_TREE"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq .head.sha)" = "$EXPECTED_CONTROLLER"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq .draft)" = "true"
+
+      - name: Checkout exact controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Correct only the two invalid legal-scope fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/wos02-final-review-live-acceptance.mjs')
+          s = p.read_text()
+          old1 = """    await pool.query(`insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,status,billable,organization_id)\n      values('alloc-deactivation-final',$1,'project-final',10,'2026-01-01','2026-12-31','Active',true,'org-final')\n      on conflict(id) do update set status='Active'`, [scopedEmployee]);"""
+          new1 = """    await pool.query(`insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,status,billable,organization_id,legal_entity_id)\n      values('alloc-deactivation-final',$1,'project-final',10,'2026-01-01','2026-12-31','Active',true,'org-final','legal-a')\n      on conflict(id) do update set status='Active'`, [scopedEmployee]);"""
+          old2 = """    await pool.query(`insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours,submitted_at,organization_id)\n      values($1,'other-e','2026-08-16','Submitted',8,8,now(),'org-other')`, [otherTimesheetId]);"""
+          new2 = """    await pool.query(`insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours,submitted_at,organization_id,legal_entity_id)\n      values($1,'other-e','2026-08-16','Submitted',8,8,now(),'org-other','legal-other')`, [otherTimesheetId]);"""
+          assert s.count(old1) == 1, 'deactivation fixture contract changed'
+          assert s.count(old2) == 1, 'approval fixture contract changed'
+          s = s.replace(old1, new1).replace(old2, new2)
+          p.write_text(s)
+          PY
+          git diff --check
+          test "$(git diff --name-only | wc -l)" = 1
+          test "$(git diff --name-only)" = ".github/scripts/wos02-final-review-live-acceptance.mjs"
+          grep -Fq "organization_id,legal_entity_id)" .github/scripts/wos02-final-review-live-acceptance.mjs
+          grep -Fq "'org-final','legal-a'" .github/scripts/wos02-final-review-live-acceptance.mjs
+          grep -Fq "'org-other','legal-other'" .github/scripts/wos02-final-review-live-acceptance.mjs
+          node --check .github/scripts/wos02-final-review-live-acceptance.mjs
+
+      - name: Revalidate and non-force fast-forward existing controller branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)" = "$EXPECTED_MAIN"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq .head.sha)" = "$EXPECTED_PRODUCT"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq .head.sha)" = "$EXPECTED_CONTROLLER"
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/scripts/wos02-final-review-live-acceptance.mjs
+          git commit -m 'test: align WOS-02 live fixtures with legal scope'
+          git push origin HEAD:controller/wos02-exact-acceptance
