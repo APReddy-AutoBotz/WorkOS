@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/wos02-final-review-acceptance.yml'
       - '.github/scripts/wos02-final-review-live-acceptance.mjs'
+      - '.github/scripts/wos02-scope-write-acceptance.mjs'
 
 permissions:
   contents: read
@@ -14,8 +15,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: 59c1151ebcb46d3ac2882a046686b9f31a6b432b
-  TARGET_TREE: 90e2bed5b34f48dd7d0dbd262102a8e032f7a094
+  TARGET_HEAD: 7b8200a75e75d24f3c2cc114c5ebe74b789c9fba
+  TARGET_TREE: f2f7a8e5b2c1f8244e6c7d6bfa8dc8f33d219a17
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -31,7 +32,7 @@ jobs:
   acceptance:
     name: Final-review exact-head WOS-02 acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 70
     services:
       postgres:
         image: postgres:16
@@ -47,7 +48,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 19-file authority
+      - name: Verify exact product controller main and 20-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -76,6 +77,7 @@ jobs:
               'server/migrations/023_wos02_scope_lifecycle_integrity.sql',
               'server/migrations/024_wos02_final_review_closure.sql',
               'server/migrations/025_wos02_timesheet_scope_integrity.sql',
+              'server/migrations/026_wos02_canonical_legal_scope_integrity.sql',
               'server/organization-setup.mjs',
               'server/seed-demo.mjs',
               'src/App.tsx',
@@ -192,26 +194,27 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 40); do pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres && break; sleep 1; done
-          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_final_prod; do
+          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_final_prod; do
             dropdb --if-exists -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
             createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
           done
 
-      - name: Fresh install and replay migrations 022 through 025
+      - name: Fresh install and replay migrations 022 through 026
         shell: bash
         working-directory: target
         env:
           DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_fresh
         run: |
           set -euo pipefail
-          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity'"
+          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','026_wos02_canonical_legal_scope_integrity'"
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-first.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 4
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where tablename='timesheets' and indexname='uq_timesheets_org_employee_week'")" = 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 5
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from information_schema.columns where table_name='project_allocations' and column_name='legal_entity_id'")" = 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from information_schema.columns where table_name='timesheets' and column_name='legal_entity_id'")" = 1
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-replay.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 4
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 5
 
-      - name: Exact WOS-01A upgrade backfill reconciliation and replay through 025
+      - name: Exact WOS-01A upgrade backfill reconciliation and replay through 026
         shell: bash
         env:
           UPGRADE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_upgrade
@@ -238,14 +241,13 @@ jobs:
           test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from employees where id='e-final-up'")" = 'org-default|legal-default'
           test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from clients where id='client-final-up'")" = 'org-default|legal-default'
           test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from projects where id='p-final-up'")" = 'org-default|legal-default'
-          test "$(psql "$UPGRADE_URL" -Atc "select organization_id from project_allocations where id='a-final-up'")" = 'org-default'
-          test "$(psql "$UPGRADE_URL" -Atc "select organization_id from timesheets where id='00000000-0000-0000-0000-000000000802'")" = 'org-default'
+          test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from project_allocations where id='a-final-up'")" = 'org-default|legal-default'
+          test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from timesheets where id='00000000-0000-0000-0000-000000000802'")" = 'org-default|legal-default'
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from worker_history where employee_id='e-final-up' and legal_entity_id='legal-default'")" = 1
-          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from pg_indexes where tablename='timesheets' and indexname='uq_timesheets_org_employee_week'")" = 1
           (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
-          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='025_wos02_timesheet_scope_integrity'")" = 1
+          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='026_wos02_canonical_legal_scope_integrity'")" = 1
 
-      - name: Execute corrected 17-check live API and DB closure matrix
+      - name: Execute retained corrected 17-check live API and DB closure matrix
         shell: bash
         working-directory: controller
         env:
@@ -256,15 +258,26 @@ jobs:
           (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
           node .github/scripts/wos02-final-review-live-acceptance.mjs
 
-      - name: Verify organization-scoped timesheet upsert isolation directly
+      - name: Execute 15-check canonical organization and legal scope write matrix
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_scope_write
+        run: |
+          set -euo pipefail
+          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+          node .github/scripts/wos02-scope-write-acceptance.mjs
+
+      - name: Verify database ownership constraints and organization-scoped timesheet uniqueness directly
         shell: bash
         working-directory: target
         env:
-          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_live
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_scope_write
         run: |
           set -euo pipefail
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where tablename='timesheets' and indexname='uq_timesheets_org_employee_week'")" = 1
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where tablename='timesheets' and indexdef ilike '%unique%' and indexdef ilike '%organization_id%employee_id%week_ending%'")" -ge 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname in ('project_allocations_employee_legal_scope_fk','project_allocations_project_legal_scope_fk','timesheets_employee_legal_scope_fk')")" = 3
 
       - name: Retained production identity
         shell: bash
