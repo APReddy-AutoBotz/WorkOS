@@ -1,0 +1,5 @@
+WOS-02 controller rebind payload
+source controller: 62adfe868ba64399cce51b2b78feea57b59884a5
+product: 031be9e18b6871594f0cfef25f8b098741dde74c
+product tree: 6f8813a9bb0a4821734ae8cd0a60f935fe1e16e1
+workflow blob: 38a0de6fece3009c74c4c5886089aec08b970c28
