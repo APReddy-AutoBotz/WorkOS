@@ -141,7 +141,7 @@ try {
     assert.equal(state.profile.organization_id, 'org-worker');
     assert.equal(state.profile.legal_entity_id, 'legal-worker');
     assert.equal(state.profile.lifecycle_status, 'Active');
-    assert.equal(String(state.profile.effective_from).slice(0, 10), '2026-01-01');
+    assert.equal(new Date(state.profile.effective_from).toISOString().slice(0, 10), '2026-01-01');
     assert.equal(state.history.length, 1);
     assert.equal(state.history[0].organization_id, 'org-worker');
     assert.equal(state.history[0].legal_entity_id, 'legal-worker');
