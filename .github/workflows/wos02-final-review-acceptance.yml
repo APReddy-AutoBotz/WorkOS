@@ -12,6 +12,7 @@ on:
       - '.github/scripts/wos02-readiness-acceptance.mjs'
       - '.github/scripts/wos02-org-profile-acceptance.mjs'
       - '.github/scripts/wos02-calendar-acceptance.mjs'
+      - '.github/scripts/wos02-demo-seed-acceptance.mjs'
 
 permissions:
   contents: read
@@ -20,8 +21,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: abc8f9bb026dbed30abf084498625672b8875a86
-  TARGET_TREE: 483e6fbab2a204c7356dcd61677bae3538c51624
+  TARGET_HEAD: c2d067cd63b7c84b5ec51dafe5f500730f6d3276
+  TARGET_TREE: 56d09de608606596397129ffa628fe6e6d4838ce
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -53,7 +54,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 28-file authority
+      - name: Verify exact product controller main and 29-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -101,6 +102,7 @@ jobs:
               'src/services/api.ts',
               'src/services/apiClient.ts',
               'src/types.ts',
+              'tests/backend-contract-smoke.mjs',
               'tests/organization-setup-smoke.mjs',
             ].sort();
             if (JSON.stringify(actual) !== JSON.stringify(required)) failures.push(`target files=${JSON.stringify(actual)}`);
@@ -185,6 +187,7 @@ jobs:
           npm run test:wos00-baseline
           npm audit --omit=dev --audit-level=high
           git diff --check "$EXPECTED_MAIN_HEAD..$TARGET_HEAD"
+          node -e "const p=require('./package.json');if(p.scripts['api:seed:demo']!=='node --import tsx server/seed-demo.mjs')throw new Error('unexpected api:seed:demo command')"
           node --check server/index.mjs
           node --check server/organization-setup.mjs
           node --check server/worker-lifecycle.mjs
@@ -194,6 +197,7 @@ jobs:
           node --check server/seed-demo.mjs
           node --check ../controller/.github/scripts/wos02-org-profile-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-calendar-acceptance.mjs
+          node --check ../controller/.github/scripts/wos02-demo-seed-acceptance.mjs
 
       - name: Production startup fails closed without required config
         shell: bash
@@ -213,7 +217,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 40); do pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres && break; sleep 1; done
-          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_reporting_period wos02_readiness wos02_org_profile wos02_calendar wos02_final_prod; do
+          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_reporting_period wos02_readiness wos02_org_profile wos02_calendar wos02_demo_seed wos02_final_prod; do
             dropdb --if-exists -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
             createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
           done
@@ -375,6 +379,17 @@ jobs:
           set -euo pipefail
           (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
           node .github/scripts/wos02-calendar-acceptance.mjs
+
+      - name: Execute demo-seed ownership identity lifecycle replay and reset matrix
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_demo_seed
+        run: |
+          set -euo pipefail
+          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+          node .github/scripts/wos02-demo-seed-acceptance.mjs
 
       - name: Verify database ownership constraints and organization-scoped timesheet uniqueness directly
         shell: bash
