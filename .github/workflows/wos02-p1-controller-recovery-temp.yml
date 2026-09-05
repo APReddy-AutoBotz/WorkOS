@@ -1,4 +1,4 @@
-name: WOS-02 P1 Controller Recovery Materializer TEMP
+name: WOS-02 P1 Controller Recovery Artifact TEMP
 
 on:
   push:
@@ -6,12 +6,12 @@ on:
       - controller/wos02-p1-ctrl-publisher-temp
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
   issues: read
 
 jobs:
-  materialize:
+  recover:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -77,9 +77,8 @@ jobs:
             if m.group(2)!=want or hashlib.sha256(chunk.encode()).hexdigest()!=want: raise SystemExit(f'hash {label}')
             chunks.append(chunk)
           b64=''.join(chunks)
-          if len(b64)!=7568: raise SystemExit('total base64')
           gz=base64.b64decode(b64,validate=True)
-          if len(gz)!=5676 or hashlib.sha256(gz).hexdigest()!='2498e3d6117e7df53e2729eb321c473fc3f15ad7744781507bcfdfd0d289872d': raise SystemExit('gzip')
+          if len(b64)!=7568 or len(gz)!=5676 or hashlib.sha256(gz).hexdigest()!='2498e3d6117e7df53e2729eb321c473fc3f15ad7744781507bcfdfd0d289872d': raise SystemExit('gzip')
           raw=gzip.decompress(gz)
           if len(raw)!=21027 or hashlib.sha256(raw).hexdigest()!='91b0d883bf8a0df3e9fa4df6e446d64beb24fed1b5e0696a26fed08215ea8d5b': raise SystemExit('raw')
           Path('/tmp/controller.diff').write_bytes(raw)
@@ -91,33 +90,16 @@ jobs:
           node --check .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
           ruby -e "require 'yaml'; YAML.load_file('.github/workflows/wos02-final-review-acceptance.yml'); puts 'YAML OK'"
           git diff --cached --check
+          mkdir -p /tmp/exact-controller/.github/scripts /tmp/exact-controller/.github/workflows
+          cp .github/scripts/wos02-mutation-lifecycle-acceptance.mjs /tmp/exact-controller/.github/scripts/
+          cp .github/workflows/wos02-final-review-acceptance.yml /tmp/exact-controller/.github/workflows/
+          sha256sum /tmp/exact-controller/.github/scripts/wos02-mutation-lifecycle-acceptance.mjs /tmp/exact-controller/.github/workflows/wos02-final-review-acceptance.yml | tee /tmp/exact-controller/SHA256SUMS
+          printf '%s\n' "$BASE_CONTROLLER" > /tmp/exact-controller/BASE_CONTROLLER
+          printf '%s\n' "$EXPECTED_TREE" > /tmp/exact-controller/EXPECTED_TREE
 
-      - name: Materialize exact blobs tree and commit object
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          api="https://api.github.com/repos/${{ github.repository }}"
-          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json")
-          upload_blob() {
-            local path="$1"
-            local payload
-            payload="$(base64 -w0 "$path")"
-            jq -n --arg content "$payload" '{content:$content,encoding:"base64"}' \
-              | curl -fsSL "${auth[@]}" -X POST "$api/git/blobs" --data-binary @- | jq -r .sha
-          }
-          script_blob="$(upload_blob .github/scripts/wos02-mutation-lifecycle-acceptance.mjs)"
-          workflow_blob="$(upload_blob .github/workflows/wos02-final-review-acceptance.yml)"
-          tree_json="$(jq -n --arg base "$BASE_TREE" --arg sb "$script_blob" --arg wb "$workflow_blob" '{base_tree:$base,tree:[{path:".github/scripts/wos02-mutation-lifecycle-acceptance.mjs",mode:"100644",type:"blob",sha:$sb},{path:".github/workflows/wos02-final-review-acceptance.yml",mode:"100644",type:"blob",sha:$wb}]}')"
-          tree_sha="$(curl -fsSL "${auth[@]}" -X POST "$api/git/trees" --data-binary "$tree_json" | jq -r .sha)"
-          test "$tree_sha" = "$EXPECTED_TREE"
-          commit_json="$(jq -n --arg msg 'CTRL: accept P1 mutation lifecycle at exact head' --arg tree "$tree_sha" --arg parent "$BASE_CONTROLLER" '{message:$msg,tree:$tree,parents:[$parent]}')"
-          commit_sha="$(curl -fsSL "${auth[@]}" -X POST "$api/git/commits" --data-binary "$commit_json" | jq -r .sha)"
-          check="$(curl -fsSL "${auth[@]}" "$api/git/commits/$commit_sha")"
-          test "$(jq -r .tree.sha <<<"$check")" = "$EXPECTED_TREE"
-          test "$(jq -r '.parents[0].sha' <<<"$check")" = "$BASE_CONTROLLER"
-          echo "MATERIALIZED_SCRIPT_BLOB=$script_blob"
-          echo "MATERIALIZED_WORKFLOW_BLOB=$workflow_blob"
-          echo "MATERIALIZED_TREE=$tree_sha"
-          echo "MATERIALIZED_COMMIT=$commit_sha"
+      - name: Upload exact recovered controller files
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos02-p1-controller-recovery-exact
+          path: /tmp/exact-controller
+          if-no-files-found: error
