@@ -1,3 +1,4 @@
+// Controller retrigger after retained readiness fixture correction.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
