@@ -195,7 +195,7 @@ try {
     assert.ok(list.body.some(row => row.holiday_id === publicHoliday)); assert.ok(list.body.some(row => row.holiday_id === companyHoliday));
     response = await request('PUT', `/api/organization-setup/calendars/${currentLegalCalendar}/holidays/${companyHoliday}`, { holidayType: 'Company', label: 'Synthetic Company Holiday Updated', holidayDate: '2026-12-02', effectiveFrom: '2026-08-01' }); expect(response, 200);
     list = await request('GET', `/api/organization-setup/calendars/${currentLegalCalendar}/holidays?asOf=2026-08-15`); expect(list, 200);
-    assert.equal(list.body.find(row => row.holiday_id === companyHoliday)?.holiday_date, '2026-12-02');
+    assert.equal(String(list.body.find(row => row.holiday_id === companyHoliday)?.holiday_date).slice(0, 10), '2026-12-02');
     response = await request('POST', `/api/organization-setup/calendars/${currentLegalCalendar}/holidays/${companyHoliday}/retire`, { reason: 'Synthetic retirement' }); expect(response, 200);
     const audits = await pool.query(`select action,old_value,new_value,user_id,active_role,source from audit_logs where entity_id in ($1,$2) order by created_at`, [publicHoliday, companyHoliday]);
     assert.ok(audits.rowCount >= 4, JSON.stringify(audits.rows)); assert.ok(audits.rows.every(row => String(row.user_id) === USER && row.active_role && row.source)); assert.ok(audits.rows.some(row => row.old_value && row.new_value));
