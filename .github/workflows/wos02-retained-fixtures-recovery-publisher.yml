@@ -1,0 +1,111 @@
+name: WOS-02 Retained Fixtures Recovery Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-retained-fixtures-recovery-publisher.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 6ec5debaf3c8827bc948d1101c12ca0e21e39653
+  EXPECTED_PRODUCT_TREE: 22b027d0bc4cd5124cab7f2ca56e61b03f23af87
+  EXPECTED_CONTROLLER: c1a6a52f231b27c81a9e2d7728b3fc9475060e49
+  RESULT_TREE: 22dd2f3ad8ea5f711ceadead1b58f08a97cd82dd
+  RAW_BYTES: '5733'
+  RAW_SHA: 69eec138061eda28b00030db3a2704227cfc9b683144bbcbd97d2c7b73fc4bdf
+  GZIP_BYTES: '1460'
+  GZIP_SHA: 75d4d87adc64cf936707968cf68005c1155fc230429e6c27d9532ec118c63c92
+  SOURCE_COMMENT: '5549410747'
+  CONTROLLER_BRANCH: controller/wos02-exact-acceptance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.state!=='open'||!product.draft||product.head.sha!==process.env.EXPECTED_PRODUCT||product.base.sha!==process.env.EXPECTED_MAIN) failures.push(`product=${product.head.sha}/${product.state}/draft:${product.draft}/base:${product.base.sha}`);
+            const {data:pc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:product.head.sha});
+            if(pc.commit.tree.sha!==process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${pc.commit.tree.sha}`);
+            if(controller.state!=='open'||!controller.draft||controller.head.ref!==process.env.CONTROLLER_BRANCH||controller.head.sha!==process.env.EXPECTED_CONTROLLER||controller.base.sha!==process.env.EXPECTED_MAIN) failures.push(`controller=${controller.head.sha}/${controller.state}/draft:${controller.draft}/base:${controller.base.sha}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch verify and apply complete recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CONTROLLER"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${SOURCE_COMMENT}" --jq .body > "$RUNNER_TEMP/comment.txt"
+          python - <<'PY'
+          import os,re,base64,hashlib,gzip,pathlib
+          body=pathlib.Path(os.environ['RUNNER_TEMP']+'/comment.txt').read_text()
+          blocks=re.findall(r'```text\s*\n(H4sI[A-Za-z0-9+/=\r\n]+?)\n```',body,re.S)
+          valid=[]
+          for block in blocks:
+              b64=''.join(block.split())
+              try:
+                  gz=base64.b64decode(b64,validate=True)
+              except Exception:
+                  continue
+              if len(gz)==int(os.environ['GZIP_BYTES']) and hashlib.sha256(gz).hexdigest()==os.environ['GZIP_SHA']:
+                  valid.append(gz)
+          assert len(valid)==1, f'expected one valid payload, blocks={len(blocks)} valid={len(valid)}'
+          raw=gzip.decompress(valid[0])
+          assert len(raw)==int(os.environ['RAW_BYTES'])
+          assert hashlib.sha256(raw).hexdigest()==os.environ['RAW_SHA']
+          pathlib.Path(os.environ['RUNNER_TEMP']+'/fixtures.diff').write_bytes(raw)
+          PY
+          git apply --check --binary "$RUNNER_TEMP/fixtures.diff"
+          git apply --binary "$RUNNER_TEMP/fixtures.diff"
+          git diff --check
+          test "$(git diff --name-only)" = ".github/scripts/wos02-final-review-live-acceptance.mjs"
+          node --check .github/scripts/wos02-final-review-live-acceptance.mjs
+          git add .github/scripts/wos02-final-review-live-acceptance.mjs
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'CTRL: correct retained live acceptance fixtures'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_CONTROLLER"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$RESULT_TREE"
+
+      - name: Revalidate live leases before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.head.sha!==process.env.EXPECTED_PRODUCT||!product.draft) failures.push(`product=${product.head.sha}/draft:${product.draft}`);
+            if(controller.head.sha!==process.env.EXPECTED_CONTROLLER||!controller.draft) failures.push(`controller=${controller.head.sha}/draft:${controller.draft}`);
+            if(failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing controller branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"$CONTROLLER_BRANCH"
