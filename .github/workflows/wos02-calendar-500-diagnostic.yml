@@ -45,36 +45,43 @@ jobs:
       - run: npm ci
       - name: Migrate exact product
         run: node server/migrate.mjs
-      - name: Reproduce calendar insert and audit independently
+      - name: Reproduce exact calendar route transaction
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           import pg from 'pg';
           const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
+          const client=await pool.connect();
+          const report=(label,e)=>console.error(label,JSON.stringify({code:e?.code,constraint:e?.constraint,detail:e?.detail,message:e?.message,table:e?.table,column:e?.column}));
           try {
-            await pool.query(`insert into organizations(id,code,name,effective_from) values('org-final','ORG-FINAL','Final Org','2026-01-01') on conflict(id) do nothing`);
-            await pool.query(`insert into legal_entities(id,organization_id,code,name,effective_from,effective_to) values('legal-a','org-final','LEGAL-A','Legal A','2026-01-01',null) on conflict(id) do nothing`);
-            const q=`insert into working_calendars(organization_id,applicability_type,legal_entity_id,country_code,country_authority_legal_entity_id,worker_group_id,code,name,timezone,working_days,hours_per_day,effective_from)
-              values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`;
+            await client.query(`insert into organizations(id,code,name,effective_from) values('org-final','ORG-FINAL','Final Org','2026-01-01') on conflict(id) do nothing`);
+            await client.query(`insert into legal_entities(id,organization_id,code,name,effective_from,effective_to) values('legal-a','org-final','LEGAL-A','Legal A','2026-01-01',null) on conflict(id) do nothing`);
+            await client.query('begin');
             try {
-              const r=await pool.query(q,['org-final','legal_entity','legal-a',null,null,null,'CAL-FUTURE','Future Calendar','UTC',[1,2,3,4,5],8,'2099-01-01']);
-              console.log('DIRECT_CALENDAR_INSERT_OK',JSON.stringify(r.rows[0]));
-            } catch(e) {
-              console.error('DIRECT_CALENDAR_INSERT_FAIL',JSON.stringify({code:e.code,constraint:e.constraint,detail:e.detail,message:e.message,table:e.table,column:e.column}));
-              throw e;
-            }
-            const auditCols=await pool.query(`select column_name,data_type,is_nullable from information_schema.columns where table_name='audit_logs' order by ordinal_position`);
-            console.log('AUDIT_COLUMNS',JSON.stringify(auditCols.rows));
-            try {
-              await pool.query(`insert into audit_logs(user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,old_value,new_value,details,reason,ip_address,session_id)
+              await client.query('select pg_advisory_xact_lock(hashtext($1))',['calendar:org-final:legal_entity:legal-a:CAL-FUTURE']);
+              console.log('ROUTE_LOCK_OK');
+              const values=['org-final','legal_entity','legal-a',null,null,null,'CAL-FUTURE'];
+              const latest=(await client.query(`select * from working_calendars where organization_id=$1 and applicability_type=$2
+                and legal_entity_id is not distinct from $3 and country_code is not distinct from $4
+                and country_authority_legal_entity_id is not distinct from $5 and worker_group_id is not distinct from $6
+                and code=$7 order by effective_from desc limit 1 for update`,values)).rows[0];
+              console.log('ROUTE_LATEST_OK',JSON.stringify(latest||null));
+              const result=await client.query(`insert into working_calendars(organization_id,applicability_type,legal_entity_id,country_code,
+                country_authority_legal_entity_id,worker_group_id,code,name,timezone,working_days,hours_per_day,effective_from)
+                values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,[...values,'Future Calendar','UTC',[1,2,3,4,5],8,'2099-01-01']);
+              console.log('ROUTE_INSERT_OK',JSON.stringify(result.rows[0]));
+              await client.query(`insert into audit_logs(user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,old_value,new_value,details,reason,ip_address,session_id)
                 values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,[
-                '00000000-0000-0000-0000-000000000701','final-admin','Admin','Admin','Web','Organization Setup','Version Calendar','Working Calendar','diag-calendar',null,JSON.stringify({id:'diag-calendar'}),'Created an effective-dated working calendar version',null,null,'00000000-0000-0000-0000-000000000701'
+                '00000000-0000-0000-0000-000000000701','final-admin','Admin','Admin','Web','Organization Setup','Version Calendar','Working Calendar',result.rows[0].id,null,JSON.stringify(result.rows[0]),'Created an effective-dated working calendar version',null,null,'00000000-0000-0000-0000-000000000701'
               ]);
-              console.log('AUDIT_INSERT_OK');
+              console.log('ROUTE_AUDIT_OK');
+              await client.query('commit');
+              console.log('ROUTE_COMMIT_OK');
             } catch(e) {
-              console.error('AUDIT_INSERT_FAIL',JSON.stringify({code:e.code,constraint:e.constraint,detail:e.detail,message:e.message,table:e.table,column:e.column}));
+              report('ROUTE_TX_FAIL',e);
+              try { await client.query('rollback'); } catch {}
               throw e;
             }
-          } finally { await pool.end(); }
+          } finally { client.release(); await pool.end(); }
           NODE
