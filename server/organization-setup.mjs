@@ -315,7 +315,7 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
         and country_authority_legal_entity_id is not distinct from $5 and worker_group_id is not distinct from $6
         and code=$7 order by effective_from desc limit 1 for update`,values)).rows[0];
       if(latest&&parsed.data.effectiveFrom<=dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});}
-      if(latest?.effective_to==null)await client.query('update working_calendars set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
+      if(latest&&latest.effective_to==null)await client.query('update working_calendars set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
       const result=await client.query(`insert into working_calendars(organization_id,applicability_type,legal_entity_id,country_code,
         country_authority_legal_entity_id,worker_group_id,code,name,timezone,working_days,hours_per_day,effective_from)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,[...values,parsed.data.name,parsed.data.timezone,parsed.data.workingDays,parsed.data.hoursPerDay,parsed.data.effectiveFrom]);
