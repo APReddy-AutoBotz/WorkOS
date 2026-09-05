@@ -1,0 +1,24 @@
+name: TEMP WOS-02 Base Workflow Artifact
+
+on:
+  push:
+    branches: [controller/wos02-terminology-controller-publisher-temp]
+    paths: ['.github/workflows/wos02-base-workflow-artifact-temp.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  export-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4b7e1748e455727dd51ffd3a662bcbd46d8898ad
+          fetch-depth: 1
+      - run: cp .github/workflows/wos02-final-review-acceptance.yml /tmp/base-workflow.yml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wos02-base-workflow
+          path: /tmp/base-workflow.yml
+          retention-days: 1
