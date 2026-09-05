@@ -1,0 +1,67 @@
+name: WOS-02 Readiness Controller Publisher Temp
+on:
+  push:
+    branches: [controller/wos02-exact-acceptance]
+    paths: ['.github/workflows/wos02-readiness-controller-publisher-temp.yml']
+permissions:
+  contents: write
+  pull-requests: read
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 3b44e9ee454496461d9711a0bac1f458c3c33fff
+  EXPECTED_TREE: 593708d35ce92b4a02b85c4e0f2742eaff0ffd6a
+  EXPECTED_CONTROLLER_PARENT: 6ac5eb1eacb70bd3e68036f89be651605217ed63
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const bad=[];
+            const {data:m}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:p}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:c}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(m.commit.sha!==process.env.EXPECTED_MAIN) bad.push(`main=${m.commit.sha}`);
+            if(p.head.sha!==process.env.EXPECTED_PRODUCT||p.state!=='open'||!p.draft) bad.push(`product=${p.head.sha}/${p.state}/${p.draft}`);
+            const {data:pc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:p.head.sha});
+            if(pc.commit.tree.sha!==process.env.EXPECTED_TREE) bad.push(`tree=${pc.commit.tree.sha}`);
+            if(c.head.sha!==context.sha||c.state!=='open'||!c.draft) bad.push(`controller=${c.head.sha}/${c.state}/${c.draft}`);
+            const {data:cc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:context.sha});
+            if(cc.parents?.[0]?.sha!==process.env.EXPECTED_CONTROLLER_PARENT) bad.push(`parent=${cc.parents?.[0]?.sha}`);
+            if(bad.length) core.setFailed(bad.join('; '));
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Rebind workflow and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/wos02-final-review-acceptance.yml'); s=p.read_text()
+          def r(a,b):
+            global s
+            assert s.count(a)==1,(a,s.count(a)); s=s.replace(a,b,1)
+          r("      - '.github/scripts/wos02-reporting-period-acceptance.mjs'\n","      - '.github/scripts/wos02-reporting-period-acceptance.mjs'\n      - '.github/scripts/wos02-readiness-acceptance.mjs'\n")
+          r('  TARGET_HEAD: 253b0320ac3426b0df600a8823c9f98d4485d8a4\n','  TARGET_HEAD: 3b44e9ee454496461d9711a0bac1f458c3c33fff\n')
+          r('  TARGET_TREE: 9afbfa7eb02067a312cb14b5e17f71424ce807c7\n','  TARGET_TREE: 593708d35ce92b4a02b85c4e0f2742eaff0ffd6a\n')
+          r('24-file authority','25-file authority')
+          r("              'server/reporting-periods.mjs',\n","              'server/reporting-periods.mjs',\n              'server/setup-readiness.mjs',\n")
+          r('          node --check server/reporting-periods.mjs\n','          node --check server/reporting-periods.mjs\n          node --check server/setup-readiness.mjs\n')
+          r('wos02_worker_lifecycle wos02_reporting_period wos02_final_prod','wos02_worker_lifecycle wos02_reporting_period wos02_readiness wos02_final_prod')
+          marker='      - name: Verify database ownership constraints and organization-scoped timesheet uniqueness directly\n'
+          step='''      - name: Execute guided setup readiness completeness matrix\n        shell: bash\n        working-directory: controller\n        env:\n          TARGET_ROOT: ${{ github.workspace }}/target\n          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_readiness\n        run: |\n          set -euo pipefail\n          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)\n          node .github/scripts/wos02-readiness-acceptance.mjs\n\n'''
+          assert s.count(marker)==1; s=s.replace(marker,step+marker,1); p.write_text(s)
+          PY
+          node --check .github/scripts/wos02-readiness-acceptance.mjs
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/wos02-final-review-acceptance.yml')"
+          git rm .github/workflows/wos02-readiness-controller-publisher-temp.yml
+          git add .github/workflows/wos02-final-review-acceptance.yml
+          git diff --cached --check
+          git config user.name 'WorkOS Controller'; git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'CTRL: bind readiness acceptance to exact head'
+          git push origin HEAD:controller/wos02-exact-acceptance
