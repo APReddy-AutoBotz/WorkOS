@@ -1,0 +1,77 @@
+name: WOS-02 Demo Seed Guarded Publisher Temp
+
+on:
+  push:
+    branches:
+      - controller/wos02-exact-acceptance
+    paths:
+      - .github/workflows/wos02-demo-seed-publisher-temp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout product branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/wos-02-organization-setup-foundation
+          fetch-depth: 0
+
+      - name: Guarded exact-payload publication
+        shell: bash
+        env:
+          EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+          EXPECTED_BASE: abc8f9bb026dbed30abf084498625672b8875a86
+          EXPECTED_BASE_TREE: 483e6fbab2a204c7356dcd61677bae3538c51624
+          EXPECTED_RESULT_TREE: 56d09de608606596397129ffa628fe6e6d4838ce
+          EXPECTED_RAW_BYTES: "21706"
+          EXPECTED_RAW_SHA256: 47a91254831ebc8e06caac2ede6feda5fbbeb9be934a9686575904e53b47e850
+          EXPECTED_GZIP_BYTES: "5311"
+          EXPECTED_GZIP_SHA256: 07407128f4e5626cfc3b27e4a35a4a8617081c08b11ff0e56be776bd6ca1c433
+          PAYLOAD_B64: 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
+        run: |
+          set -euo pipefail
+          git fetch origin main codex/wos-02-organization-setup-foundation
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse origin/codex/wos-02-organization-setup-foundation)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_BASE_TREE"
+
+          printf '%s' "$PAYLOAD_B64" | base64 -d > /tmp/demo.diff.gz
+          test "$(wc -c < /tmp/demo.diff.gz | tr -d ' ')" = "$EXPECTED_GZIP_BYTES"
+          test "$(sha256sum /tmp/demo.diff.gz | awk '{print $1}')" = "$EXPECTED_GZIP_SHA256"
+          gzip -dc /tmp/demo.diff.gz > /tmp/demo.diff
+          test "$(wc -c < /tmp/demo.diff | tr -d ' ')" = "$EXPECTED_RAW_BYTES"
+          test "$(sha256sum /tmp/demo.diff | awk '{print $1}')" = "$EXPECTED_RAW_SHA256"
+
+          git apply --check /tmp/demo.diff
+          git apply /tmp/demo.diff
+
+          expected_files=$(cat <<'FILES'
+          docs/00-control/REQUIREMENTS_TRACEABILITY.md
+          package.json
+          server/seed-demo.mjs
+          tests/backend-contract-smoke.mjs
+          FILES
+          )
+          actual_files="$(git diff --name-only | sort)"
+          test "$actual_files" = "$(printf '%s\n' "$expected_files" | sed 's/^          //' | sort)"
+          test "$(git diff --numstat | awk '{a+=$1; d+=$2} END {print a "/" d}')" = "102/33"
+
+          git add docs/00-control/REQUIREMENTS_TRACEABILITY.md package.json server/seed-demo.mjs tests/backend-contract-smoke.mjs
+          test "$(git write-tree)" = "$EXPECTED_RESULT_TREE"
+
+          git config user.name "WorkOS Controller"
+          git config user.email "controller@users.noreply.github.com"
+          git commit -m "fix: align demo seed with WOS-02 ownership"
+
+          git fetch origin main codex/wos-02-organization-setup-foundation
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse origin/codex/wos-02-organization-setup-foundation)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_RESULT_TREE"
+
+          git push origin HEAD:codex/wos-02-organization-setup-foundation
