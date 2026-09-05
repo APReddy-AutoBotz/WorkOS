@@ -1,0 +1,100 @@
+name: WOS-02 P1 Controller Exact Export TEMP
+
+on:
+  push:
+    branches:
+      - controller/wos02-p1-ctrl-publisher-temp
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_CONTROLLER: c64a1dc055ea36215cd169a30ab025b79bb6b8cf
+      BASE_TREE: 5654dfb61b091901d739d76517fa4b7585cfeff0
+      EXPECTED_PRODUCT: 436ac4ad7f984cd402495d25a8d2799a9947f217
+      EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+      EXPECTED_TREE: 72e64ee298cff47e4a0f6509fd0ac552af6170f7
+      RECOVERY_COMMENT: '5554921100'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact leases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${{ github.repository }}"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+          test "$(curl -fsSL "${auth[@]}" "$api/branches/main" | jq -r .commit.sha)" = "$EXPECTED_MAIN"
+          test "$(curl -fsSL "${auth[@]}" "$api/pulls/37" | jq -r .head.sha)" = "$EXPECTED_PRODUCT"
+          pr38="$(curl -fsSL "${auth[@]}" "$api/pulls/38")"
+          test "$(jq -r .head.sha <<<"$pr38")" = "$BASE_CONTROLLER"
+          test "$(jq -r .draft <<<"$pr38")" = true
+          test "$(git rev-parse HEAD)" = "$BASE_CONTROLLER"
+          test "$(git rev-parse HEAD^{tree})" = "$BASE_TREE"
+
+      - name: Reconstruct exact accepted controller tree
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/comments/$RECOVERY_COMMENT" | jq -r .body > /tmp/recovery.md
+          python3 - <<'PY'
+          import base64,gzip,hashlib,re
+          from pathlib import Path
+          s=Path('/tmp/recovery.md').read_text()
+          ex=[
+          ('00',1200,'26c62e47165857f23dbb5b861103627d22bedb879a6fcc2730e3d8c13f514b9d'),
+          ('01',1200,'ef4ddefbb0558c913e9b8727934d37076b68f16010a8d944aae0154fb3b5273a'),
+          ('02',1200,'67150e7c38febb730f420ea6e1d914009ef153cbfec47de2a512ea61f8f4e62c'),
+          ('03',1200,'2fba524e01372b78964404d7393fed1c7fa142f9ccbfa00c7c3191009df05b95'),
+          ('04',1200,'8b52968b4231469a06b4743b9b1fda2b5db73cd755624f85ccf649419554d004'),
+          ('05',1200,'fc90708a8d9469d926133fc6dc3ce96fb84a2f86b406bd7cff517be6c5f192b2'),
+          ('06',368,'4c3d30727b6a5a29f22fd775383c117912407392bd86e0cd1a99c92eaba7c1ad')]
+          chunks=[]
+          for n,count,want in ex:
+            label='P1-CTRL-PAYLOAD-'+n
+            m=re.search(rf"### {label}\s+Character count: `([0-9]+)`\s+SHA-256: `([0-9a-f]{{64}})`\s+```text\s*\n([A-Za-z0-9+/=]+)\n```",s,re.S)
+            if not m: raise SystemExit(label)
+            c=m.group(3)
+            if int(m.group(1))!=count or len(c)!=count or m.group(2)!=want or hashlib.sha256(c.encode()).hexdigest()!=want: raise SystemExit('bad '+label)
+            chunks.append(c)
+          b=''.join(chunks); g=base64.b64decode(b,validate=True); r=gzip.decompress(g)
+          if len(b)!=7568 or len(g)!=5676 or hashlib.sha256(g).hexdigest()!='2498e3d6117e7df53e2729eb321c473fc3f15ad7744781507bcfdfd0d289872d': raise SystemExit('gzip mismatch')
+          if len(r)!=21027 or hashlib.sha256(r).hexdigest()!='91b0d883bf8a0df3e9fa4df6e446d64beb24fed1b5e0696a26fed08215ea8d5b': raise SystemExit('raw mismatch')
+          Path('/tmp/controller.diff').write_bytes(r)
+          PY
+          git apply --index /tmp/controller.diff
+          test "$(git diff --cached --name-only | sort | tr '\n' '|')" = ".github/scripts/wos02-mutation-lifecycle-acceptance.mjs|.github/workflows/wos02-final-review-acceptance.yml|"
+          test "$(git diff --cached --numstat | awk '{a+=$1;d+=$2} END{print a " " d}')" = "91 3"
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          node --check .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/wos02-final-review-acceptance.yml')"
+          git diff --cached --check
+          mkdir -p /tmp/exact-controller/.github/scripts /tmp/exact-controller/.github/workflows
+          cp .github/scripts/wos02-mutation-lifecycle-acceptance.mjs /tmp/exact-controller/.github/scripts/
+          cp .github/workflows/wos02-final-review-acceptance.yml /tmp/exact-controller/.github/workflows/
+          sha256sum /tmp/exact-controller/.github/scripts/wos02-mutation-lifecycle-acceptance.mjs /tmp/exact-controller/.github/workflows/wos02-final-review-acceptance.yml > /tmp/exact-controller/SHA256SUMS
+          echo "$BASE_CONTROLLER" > /tmp/exact-controller/BASE_CONTROLLER
+          echo "$EXPECTED_TREE" > /tmp/exact-controller/EXPECTED_TREE
+
+      - name: Upload exact controller files
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos02-p1-controller-exact-files
+          path: /tmp/exact-controller
+          include-hidden-files: true
+          if-no-files-found: error
