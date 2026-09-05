@@ -1,0 +1,113 @@
+name: WOS-02 Org Profile Recovery Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-org-profile-recovery-publisher.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 3b44e9ee454496461d9711a0bac1f458c3c33fff
+  EXPECTED_PRODUCT_TREE: 593708d35ce92b4a02b85c4e0f2742eaff0ffd6a
+  RESULT_TREE: abb20695820d376bb5f33718305b5a63aedf5ef8
+  RAW_BYTES: '38436'
+  RAW_SHA: 0594ddb15c79932cd3a17c052c714568bbe287de1166fc3a5b0647b117a92e79
+  GZIP_BYTES: '9202'
+  GZIP_SHA: 3edab35160218e454997cfcee701b22ce0f024e98bf02f4bc86eed35d07093ca
+  B64_BYTES: '12272'
+  SOURCE_COMMENT: '5548377086'
+  TARGET_BRANCH: codex/wos-02-organization-setup-foundation
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:pr}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(pr.state!=='open'||!pr.draft) failures.push(`PR37=${pr.state}/draft:${pr.draft}`);
+            if(pr.head.ref!==process.env.TARGET_BRANCH) failures.push(`branch=${pr.head.ref}`);
+            if(pr.head.sha!==process.env.EXPECTED_PRODUCT) failures.push(`head=${pr.head.sha}`);
+            if(pr.base.sha!==process.env.EXPECTED_MAIN) failures.push(`base=${pr.base.sha}`);
+            const {data:c}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:process.env.EXPECTED_PRODUCT});
+            if(c.commit.tree.sha!==process.env.EXPECTED_PRODUCT_TREE) failures.push(`tree=${c.commit.tree.sha}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact product head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch verify and apply complete recovery payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_PRODUCT_TREE"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${SOURCE_COMMENT}" --jq .body > "$RUNNER_TEMP/comment.txt"
+          python - <<'PY'
+          import os,re,base64,hashlib,gzip,pathlib
+          body=pathlib.Path(os.environ['RUNNER_TEMP']+'/comment.txt').read_text()
+          chunks=[]
+          for idx in (1,2):
+              m=re.search(rf'#### Chunk {idx}/2[^\n]*\n\n```text\n([A-Za-z0-9+/=\r\n]+?)\n```', body, re.S)
+              assert m, f'missing chunk {idx}'
+              chunks.append(''.join(m.group(1).split()))
+          assert len(chunks[0])==6200, len(chunks[0])
+          assert len(chunks[1])==6072, len(chunks[1])
+          b64=''.join(chunks)
+          assert len(b64)==int(os.environ['B64_BYTES']), (len(b64),os.environ['B64_BYTES'])
+          gz=base64.b64decode(b64,validate=True)
+          assert len(gz)==int(os.environ['GZIP_BYTES']), (len(gz),os.environ['GZIP_BYTES'])
+          assert hashlib.sha256(gz).hexdigest()==os.environ['GZIP_SHA']
+          raw=gzip.decompress(gz)
+          assert len(raw)==int(os.environ['RAW_BYTES']), (len(raw),os.environ['RAW_BYTES'])
+          assert hashlib.sha256(raw).hexdigest()==os.environ['RAW_SHA']
+          pathlib.Path(os.environ['RUNNER_TEMP']+'/org-profile.diff').write_bytes(raw)
+          PY
+          git apply --binary "$RUNNER_TEMP/org-profile.diff"
+          git diff --check
+          git add -A
+          expected='docs/00-control/REQUIREMENTS_TRACEABILITY.md server/migrations/028_wos02_organization_legal_entity_profiles.sql server/organization-setup.mjs src/services/api.ts src/services/apiClient.ts src/types.ts tests/organization-setup-smoke.mjs '
+          actual="$(git diff --cached --name-only | sort | tr '\n' ' ')"
+          test "$actual" = "$expected"
+          test "$(git diff --cached --numstat | awk '{a+=$1; d+=$2} END {print a"|"d}')" = '306|5'
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'feat: add organization profile administration'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$RESULT_TREE"
+
+      - name: Revalidate live lease immediately before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:pr}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(pr.state!=='open'||!pr.draft||pr.head.ref!==process.env.TARGET_BRANCH||pr.head.sha!==process.env.EXPECTED_PRODUCT||pr.base.sha!==process.env.EXPECTED_MAIN) failures.push(`PR37=${pr.head.sha}/${pr.state}/draft:${pr.draft}/base:${pr.base.sha}`);
+            if(failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"$TARGET_BRANCH"
