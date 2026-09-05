@@ -8,6 +8,7 @@ on:
       - '.github/scripts/wos02-final-review-live-acceptance.mjs'
       - '.github/scripts/wos02-scope-write-acceptance.mjs'
       - '.github/scripts/wos02-worker-lifecycle-acceptance.mjs'
+      - '.github/scripts/wos02-mutation-lifecycle-acceptance.mjs'
       - '.github/scripts/wos02-reporting-period-acceptance.mjs'
       - '.github/scripts/wos02-readiness-acceptance.mjs'
       - '.github/scripts/wos02-org-profile-acceptance.mjs'
@@ -22,8 +23,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: 86c4cc1bef7a96adad3fc31b9ff3b717ba63444f
-  TARGET_TREE: c5387984997e765690f0ebd2a89437701a9279e0
+  TARGET_HEAD: 436ac4ad7f984cd402495d25a8d2799a9947f217
+  TARGET_TREE: d7ceedbd604fc0cc35febc28600ef006990b0484
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -214,6 +215,7 @@ jobs:
           node --check ../controller/.github/scripts/wos02-calendar-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-demo-seed-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-terminology-acceptance.mjs
+          node --check ../controller/.github/scripts/wos02-mutation-lifecycle-acceptance.mjs
 
       - name: Execute FINAL TERMINOLOGY runtime and stability acceptance
         shell: bash
@@ -242,7 +244,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 40); do pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres && break; sleep 1; done
-          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_reporting_period wos02_readiness wos02_org_profile wos02_calendar wos02_demo_seed wos02_final_prod; do
+          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_mutation_lifecycle wos02_reporting_period wos02_readiness wos02_org_profile wos02_calendar wos02_demo_seed wos02_final_prod; do
             dropdb --if-exists -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
             createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
           done
@@ -360,6 +362,17 @@ jobs:
           set -euo pipefail
           (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
           node .github/scripts/wos02-worker-lifecycle-acceptance.mjs
+
+      - name: Execute P1 mutation and lifecycle acceptance matrix
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_mutation_lifecycle
+        run: |
+          set -euo pipefail
+          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+          node .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
 
       - name: Execute reporting-period authority and audit acceptance matrix
         shell: bash
