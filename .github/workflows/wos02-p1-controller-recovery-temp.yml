@@ -1,4 +1,4 @@
-name: WOS-02 P1 Controller Recovery Publisher TEMP
+name: WOS-02 P1 Controller Recovery Materializer TEMP
 
 on:
   push:
@@ -11,16 +11,15 @@ permissions:
   issues: read
 
 jobs:
-  publish:
+  materialize:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       BASE_CONTROLLER: c64a1dc055ea36215cd169a30ab025b79bb6b8cf
+      BASE_TREE: 5654dfb61b091901d739d76517fa4b7585cfeff0
       EXPECTED_PRODUCT: 436ac4ad7f984cd402495d25a8d2799a9947f217
       EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
       EXPECTED_TREE: 72e64ee298cff47e4a0f6509fd0ac552af6170f7
-      RAW_SHA: 91b0d883bf8a0df3e9fa4df6e446d64beb24fed1b5e0696a26fed08215ea8d5b
-      GZIP_SHA: 2498e3d6117e7df53e2729eb321c473fc3f15ad7744781507bcfdfd0d289872d
       RECOVERY_COMMENT: '5554921100'
     steps:
       - name: Checkout exact controller base
@@ -28,7 +27,7 @@ jobs:
         with:
           ref: ${{ env.BASE_CONTROLLER }}
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Verify live leases
         shell: bash
@@ -41,13 +40,13 @@ jobs:
           main="$(curl -fsSL "${auth[@]}" "$api/branches/main" | jq -r .commit.sha)"
           product="$(curl -fsSL "${auth[@]}" "$api/pulls/37" | jq -r .head.sha)"
           controller_json="$(curl -fsSL "${auth[@]}" "$api/pulls/38")"
-          controller="$(jq -r .head.sha <<<"$controller_json")"
           test "$main" = "$EXPECTED_MAIN"
           test "$product" = "$EXPECTED_PRODUCT"
-          test "$controller" = "$BASE_CONTROLLER"
+          test "$(jq -r .head.sha <<<"$controller_json")" = "$BASE_CONTROLLER"
           test "$(jq -r .state <<<"$controller_json")" = "open"
           test "$(jq -r .draft <<<"$controller_json")" = "true"
           test "$(git rev-parse HEAD)" = "$BASE_CONTROLLER"
+          test "$(git rev-parse HEAD^{tree})" = "$BASE_TREE"
 
       - name: Recover verify and apply exact controller patch
         shell: bash
@@ -55,40 +54,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -fsSL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/comments/$RECOVERY_COMMENT" \
-            | jq -r .body > /tmp/recovery.md
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/comments/$RECOVERY_COMMENT" | jq -r .body > /tmp/recovery.md
           python3 - <<'PY'
           import base64, gzip, hashlib, re
           from pathlib import Path
-          text = Path('/tmp/recovery.md').read_text()
-          expected = [
-              ('P1-CTRL-PAYLOAD-00',1200,'26c62e47165857f23dbb5b861103627d22bedb879a6fcc2730e3d8c13f514b9d'),
-              ('P1-CTRL-PAYLOAD-01',1200,'ef4ddefbb0558c913e9b8727934d37076b68f16010a8d944aae0154fb3b5273a'),
-              ('P1-CTRL-PAYLOAD-02',1200,'67150e7c38febb730f420ea6e1d914009ef153cbfec47de2a512ea61f8f4e62c'),
-              ('P1-CTRL-PAYLOAD-03',1200,'2fba524e01372b78964404d7393fed1c7fa142f9ccbfa00c7c3191009df05b95'),
-              ('P1-CTRL-PAYLOAD-04',1200,'8b52968b4231469a06b4743b9b1fda2b5db73cd755624f85ccf649419554d004'),
-              ('P1-CTRL-PAYLOAD-05',1200,'fc90708a8d9469d926133fc6dc3ce96fb84a2f86b406bd7cff517be6c5f192b2'),
-              ('P1-CTRL-PAYLOAD-06',368,'4c3d30727b6a5a29f22fd775383c117912407392bd86e0cd1a99c92eaba7c1ad'),
-          ]
+          text=Path('/tmp/recovery.md').read_text()
+          expected=[
+            ('P1-CTRL-PAYLOAD-00',1200,'26c62e47165857f23dbb5b861103627d22bedb879a6fcc2730e3d8c13f514b9d'),
+            ('P1-CTRL-PAYLOAD-01',1200,'ef4ddefbb0558c913e9b8727934d37076b68f16010a8d944aae0154fb3b5273a'),
+            ('P1-CTRL-PAYLOAD-02',1200,'67150e7c38febb730f420ea6e1d914009ef153cbfec47de2a512ea61f8f4e62c'),
+            ('P1-CTRL-PAYLOAD-03',1200,'2fba524e01372b78964404d7393fed1c7fa142f9ccbfa00c7c3191009df05b95'),
+            ('P1-CTRL-PAYLOAD-04',1200,'8b52968b4231469a06b4743b9b1fda2b5db73cd755624f85ccf649419554d004'),
+            ('P1-CTRL-PAYLOAD-05',1200,'fc90708a8d9469d926133fc6dc3ce96fb84a2f86b406bd7cff517be6c5f192b2'),
+            ('P1-CTRL-PAYLOAD-06',368,'4c3d30727b6a5a29f22fd775383c117912407392bd86e0cd1a99c92eaba7c1ad')]
           chunks=[]
           for label,count,want in expected:
-              pat = rf"### {re.escape(label)}\s+Character count: `([0-9]+)`\s+SHA-256: `([0-9a-f]{{64}})`\s+```text\s*\n([A-Za-z0-9+/=]+)\n```"
-              m=re.search(pat,text,re.S)
-              if not m: raise SystemExit(f'missing payload section {label}')
-              declared=int(m.group(1)); declared_hash=m.group(2); chunk=m.group(3)
-              got=hashlib.sha256(chunk.encode()).hexdigest()
-              if declared != count or len(chunk) != count: raise SystemExit(f'{label} count mismatch')
-              if declared_hash != want or got != want: raise SystemExit(f'{label} hash mismatch')
-              chunks.append(chunk)
+            m=re.search(rf"### {re.escape(label)}\s+Character count: `([0-9]+)`\s+SHA-256: `([0-9a-f]{{64}})`\s+```text\s*\n([A-Za-z0-9+/=]+)\n```",text,re.S)
+            if not m: raise SystemExit(f'missing {label}')
+            chunk=m.group(3)
+            if int(m.group(1))!=count or len(chunk)!=count: raise SystemExit(f'count {label}')
+            if m.group(2)!=want or hashlib.sha256(chunk.encode()).hexdigest()!=want: raise SystemExit(f'hash {label}')
+            chunks.append(chunk)
           b64=''.join(chunks)
-          if len(b64) != 7568: raise SystemExit('total base64 length mismatch')
-          gz=base64.b64decode(b64, validate=True)
-          if len(gz) != 5676 or hashlib.sha256(gz).hexdigest() != '2498e3d6117e7df53e2729eb321c473fc3f15ad7744781507bcfdfd0d289872d': raise SystemExit('gzip mismatch')
+          if len(b64)!=7568: raise SystemExit('total base64')
+          gz=base64.b64decode(b64,validate=True)
+          if len(gz)!=5676 or hashlib.sha256(gz).hexdigest()!='2498e3d6117e7df53e2729eb321c473fc3f15ad7744781507bcfdfd0d289872d': raise SystemExit('gzip')
           raw=gzip.decompress(gz)
-          if len(raw) != 21027 or hashlib.sha256(raw).hexdigest() != '91b0d883bf8a0df3e9fa4df6e446d64beb24fed1b5e0696a26fed08215ea8d5b': raise SystemExit('raw diff mismatch')
+          if len(raw)!=21027 or hashlib.sha256(raw).hexdigest()!='91b0d883bf8a0df3e9fa4df6e446d64beb24fed1b5e0696a26fed08215ea8d5b': raise SystemExit('raw')
           Path('/tmp/controller.diff').write_bytes(raw)
           PY
           git apply --index /tmp/controller.diff
@@ -99,30 +92,32 @@ jobs:
           ruby -e "require 'yaml'; YAML.load_file('.github/workflows/wos02-final-review-acceptance.yml'); puts 'YAML OK'"
           git diff --cached --check
 
-      - name: Commit exact controller tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "APReddy-AutoBotz"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "CTRL: accept P1 mutation lifecycle at exact head"
-          test "$(git rev-parse HEAD^)" = "$BASE_CONTROLLER"
-          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
-
-      - name: Second lease and non-force publish existing controller branch
+      - name: Materialize exact blobs tree and commit object
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           api="https://api.github.com/repos/${{ github.repository }}"
-          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
-          main="$(curl -fsSL "${auth[@]}" "$api/branches/main" | jq -r .commit.sha)"
-          product="$(curl -fsSL "${auth[@]}" "$api/pulls/37" | jq -r .head.sha)"
-          controller_json="$(curl -fsSL "${auth[@]}" "$api/pulls/38")"
-          controller="$(jq -r .head.sha <<<"$controller_json")"
-          test "$main" = "$EXPECTED_MAIN"
-          test "$product" = "$EXPECTED_PRODUCT"
-          test "$controller" = "$BASE_CONTROLLER"
-          test "$(jq -r .draft <<<"$controller_json")" = "true"
-          git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/json")
+          upload_blob() {
+            local path="$1"
+            local payload
+            payload="$(base64 -w0 "$path")"
+            jq -n --arg content "$payload" '{content:$content,encoding:"base64"}' \
+              | curl -fsSL "${auth[@]}" -X POST "$api/git/blobs" --data-binary @- | jq -r .sha
+          }
+          script_blob="$(upload_blob .github/scripts/wos02-mutation-lifecycle-acceptance.mjs)"
+          workflow_blob="$(upload_blob .github/workflows/wos02-final-review-acceptance.yml)"
+          tree_json="$(jq -n --arg base "$BASE_TREE" --arg sb "$script_blob" --arg wb "$workflow_blob" '{base_tree:$base,tree:[{path:".github/scripts/wos02-mutation-lifecycle-acceptance.mjs",mode:"100644",type:"blob",sha:$sb},{path:".github/workflows/wos02-final-review-acceptance.yml",mode:"100644",type:"blob",sha:$wb}]}')"
+          tree_sha="$(curl -fsSL "${auth[@]}" -X POST "$api/git/trees" --data-binary "$tree_json" | jq -r .sha)"
+          test "$tree_sha" = "$EXPECTED_TREE"
+          commit_json="$(jq -n --arg msg 'CTRL: accept P1 mutation lifecycle at exact head' --arg tree "$tree_sha" --arg parent "$BASE_CONTROLLER" '{message:$msg,tree:$tree,parents:[$parent]}')"
+          commit_sha="$(curl -fsSL "${auth[@]}" -X POST "$api/git/commits" --data-binary "$commit_json" | jq -r .sha)"
+          check="$(curl -fsSL "${auth[@]}" "$api/git/commits/$commit_sha")"
+          test "$(jq -r .tree.sha <<<"$check")" = "$EXPECTED_TREE"
+          test "$(jq -r '.parents[0].sha' <<<"$check")" = "$BASE_CONTROLLER"
+          echo "MATERIALIZED_SCRIPT_BLOB=$script_blob"
+          echo "MATERIALIZED_WORKFLOW_BLOB=$workflow_blob"
+          echo "MATERIALIZED_TREE=$tree_sha"
+          echo "MATERIALIZED_COMMIT=$commit_sha"
