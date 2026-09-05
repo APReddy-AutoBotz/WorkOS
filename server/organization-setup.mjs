@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { disableLinkedWorkerIdentity } from './worker-lifecycle.mjs';
 import { canTransitionReportingPeriod, REPORTING_PERIOD_STATES } from './reporting-periods.mjs';
 import { buildSetupReadiness } from './setup-readiness.mjs';
+import { calendarScopeValues, validateWorkingCalendar, validateWorkingCalendarHoliday } from './working-calendars.mjs';
 
 export const MAX_SETUP_ROWS = 200;
 export const MAX_DEPENDENCIES = 100;
@@ -284,21 +285,107 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
 
   router.get('/calendars', async (req,res) => {
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
-    const result=await pool.query(`select * from working_calendars c where c.organization_id=$1
-      and (c.legal_entity_id is null or c.legal_entity_id=$2) and ${asOfPredicate('c','$3')} order by code limit $4`,
+    const result=await pool.query(`select c.* from working_calendars c
+      left join organization_catalog_items wg on wg.id=c.worker_group_id and wg.organization_id=c.organization_id
+      join legal_entities scope_le on scope_le.id=$2 and scope_le.organization_id=c.organization_id
+      where c.organization_id=$1 and (
+        (c.applicability_type='legal_entity' and c.legal_entity_id=$2)
+        or (c.applicability_type='country' and c.country_code=scope_le.country_code)
+        or (c.applicability_type='worker_group' and (wg.legal_entity_id is null or wg.legal_entity_id=$2))
+      ) and ${asOfPredicate('c','$3')} order by c.code,c.effective_from desc limit $4`,
     [req.organizationScope.organizationId,req.organizationScope.legalEntityId,asOf,MAX_SETUP_ROWS]);
     res.json(result.rows);
   });
   router.post('/calendars', requirePermission('settings.manage'), async (req,res) => {
-    const parsed=z.object({code:z.string().trim().min(1).max(50),name:z.string().trim().min(1).max(150),timezone:z.string().trim().min(1).max(80).default('UTC'),workingDays:z.array(z.number().int().min(0).max(6)).min(1),hoursPerDay:z.number().positive().max(24),effectiveFrom:z.string().date()}).safeParse(req.body);
-    if(!parsed.success)return res.status(400).json({error:parsed.error.flatten()});
-    const client=await pool.connect(); try { await client.query('begin'); await client.query('select pg_advisory_xact_lock(hashtext($1))',[`calendar:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${parsed.data.code}`]);
-      const latest=(await client.query('select * from working_calendars where organization_id=$1 and legal_entity_id=$2 and code=$3 order by effective_from desc limit 1 for update',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code])).rows[0];
+    const parsed=validateWorkingCalendar(req.body);
+    if(!parsed.success)return res.status(400).json({error:'Invalid working calendar',code:'CALENDAR_VALIDATION_FAILED',issues:parsed.error.flatten()});
+    const scope=calendarScopeValues(parsed.data.applicability,req.organizationScope.legalEntityId);
+    const client=await pool.connect(); try { await client.query('begin');
+      await client.query('select pg_advisory_xact_lock(hashtext($1))',[`calendar:${req.organizationScope.organizationId}:${scope.applicabilityType}:${scope.legalEntityId||scope.countryCode||scope.workerGroupId}:${parsed.data.code}`]);
+      if(scope.countryCode){const authority=await client.query(`select 1 from legal_entities where organization_id=$1 and id=$2 and country_code=$3
+          and status='Active' and current_date between effective_from and coalesce(effective_to,'infinity'::date)`,[req.organizationScope.organizationId,req.organizationScope.legalEntityId,scope.countryCode]);
+        if(!authority.rowCount){await client.query('rollback');return res.status(404).json({error:'Country authority not found',code:'CALENDAR_COUNTRY_NOT_FOUND'});}}
+      if(scope.workerGroupId){const group=await client.query(`select 1 from organization_catalog_items where id=$1 and organization_id=$2
+          and catalog_type='business_unit' and active=true and (legal_entity_id is null or legal_entity_id=$3)
+          and $4::date between effective_from and coalesce(effective_to,'infinity'::date)`,[scope.workerGroupId,req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.effectiveFrom]);
+        if(!group.rowCount){await client.query('rollback');return res.status(404).json({error:'Worker group not found',code:'CALENDAR_WORKER_GROUP_NOT_FOUND'});}}
+      const values=[req.organizationScope.organizationId,scope.applicabilityType,scope.legalEntityId,scope.countryCode,scope.countryAuthorityLegalEntityId,scope.workerGroupId,parsed.data.code];
+      const latest=(await client.query(`select * from working_calendars where organization_id=$1 and applicability_type=$2
+        and legal_entity_id is not distinct from $3 and country_code is not distinct from $4
+        and country_authority_legal_entity_id is not distinct from $5 and worker_group_id is not distinct from $6
+        and code=$7 order by effective_from desc limit 1 for update`,values)).rows[0];
       if(latest&&parsed.data.effectiveFrom<=dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});}
-      if(latest?.effective_to==null)await client.query('update working_calendars set effective_to=$4::date-1 where organization_id=$1 and legal_entity_id=$2 and code=$3 and effective_to is null',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.effectiveFrom]);
-      const result=await client.query('insert into working_calendars(organization_id,legal_entity_id,code,name,timezone,working_days,hours_per_day,effective_from) values($1,$2,$3,$4,$5,$6,$7,$8) returning *',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.name,parsed.data.timezone,parsed.data.workingDays,parsed.data.hoursPerDay,parsed.data.effectiveFrom]);
+      if(latest?.effective_to==null)await client.query('update working_calendars set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
+      const result=await client.query(`insert into working_calendars(organization_id,applicability_type,legal_entity_id,country_code,
+        country_authority_legal_entity_id,worker_group_id,code,name,timezone,working_days,hours_per_day,effective_from)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,[...values,parsed.data.name,parsed.data.timezone,parsed.data.workingDays,parsed.data.hoursPerDay,parsed.data.effectiveFrom]);
       await audit(client,req,{module:'Organization Setup',action:'Version Calendar',entityType:'Working Calendar',entityId:result.rows[0].id,newValue:result.rows[0],details:'Created an effective-dated working calendar version'}); await client.query('commit');res.status(201).json(result.rows[0]);
     }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});res.status(500).json({error:'Calendar creation failed'});}finally{client.release();}
+  });
+  router.post('/calendars/:id/retire',requirePermission('settings.manage'),async(req,res)=>{
+    const client=await pool.connect();try{await client.query('begin');
+      const calendar=(await client.query(`select * from working_calendars where id=$1 and organization_id=$2 and (
+        (applicability_type='legal_entity' and legal_entity_id=$3) or
+        (applicability_type='country' and country_authority_legal_entity_id=$3) or
+        (applicability_type='worker_group' and exists(select 1 from organization_catalog_items where id=worker_group_id and organization_id=$2 and (legal_entity_id is null or legal_entity_id=$3)))) for update`,[req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
+      if(!calendar){await client.query('rollback');return res.status(404).json({error:'Working calendar not found'});}
+      const dependencies=await client.query(`select employee_id id,'worker' dependency from worker_profiles where working_calendar_id=$1
+        and organization_id=$2 and lifecycle_status in ('Active','On Leave')
+        union all select holiday_id,'holiday' from working_calendar_holidays where calendar_id=$1 and organization_id=$2 and active=true
+        and current_date between effective_from and coalesce(effective_to,'infinity'::date) limit $3`,[calendar.id,req.organizationScope.organizationId,MAX_DEPENDENCIES+1]);
+      if(dependencies.rowCount){await client.query('rollback');return res.status(409).json({error:'Active dependencies prevent calendar retirement',code:'CALENDAR_IN_USE',dependencies:dependencies.rows.slice(0,MAX_DEPENDENCIES)});}
+      const result=await client.query(`update working_calendars set active=false,effective_to=least(coalesce(effective_to,current_date),current_date) where id=$1 returning *`,[calendar.id]);
+      await audit(client,req,{module:'Organization Setup',action:'Retire Calendar',entityType:'Working Calendar',entityId:calendar.id,oldValue:calendar,newValue:result.rows[0],details:'Retired working calendar after dependency analysis'});
+      await client.query('commit');res.json(result.rows[0]);
+    }catch(error){await client.query('rollback');res.status(500).json({error:'Calendar retirement failed'});}finally{client.release();}
+  });
+  router.get('/calendars/:id/holidays',async(req,res)=>{
+    const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
+    const authorized=await pool.query(`select 1 from working_calendars c left join organization_catalog_items wg
+      on wg.id=c.worker_group_id and wg.organization_id=c.organization_id
+      join legal_entities scope_le on scope_le.id=$3 and scope_le.organization_id=c.organization_id where c.id=$1 and c.organization_id=$2 and (
+        (c.applicability_type='legal_entity' and c.legal_entity_id=$3) or (c.applicability_type='country' and c.country_code=scope_le.country_code)
+        or (c.applicability_type='worker_group' and (wg.legal_entity_id is null or wg.legal_entity_id=$3)))`,
+    [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId]);
+    if(!authorized.rowCount)return res.status(404).json({error:'Working calendar not found'});
+    const result=await pool.query(`select h.* from working_calendar_holidays h
+      where h.organization_id=$1 and h.calendar_id=$2 and (h.active=true or h.effective_to is not null)
+      and $3::date between h.effective_from and coalesce(h.effective_to,'infinity'::date)
+      order by h.holiday_date,h.label limit $4`,[req.organizationScope.organizationId,req.params.id,asOf,MAX_SETUP_ROWS]);
+    res.json(result.rows);
+  });
+  const mutateHoliday=async(req,res)=>{
+    const parsed=validateWorkingCalendarHoliday(req.body);if(!parsed.success)return res.status(400).json({error:'Invalid calendar holiday',code:'CALENDAR_HOLIDAY_VALIDATION_FAILED',issues:parsed.error.flatten()});
+    const client=await pool.connect();try{await client.query('begin');
+      const calendar=(await client.query(`select * from working_calendars where id=$1 and organization_id=$2 and active=true and (
+        (applicability_type='legal_entity' and legal_entity_id=$3) or (applicability_type='country' and country_authority_legal_entity_id=$3)
+        or (applicability_type='worker_group' and exists(select 1 from organization_catalog_items where id=worker_group_id and organization_id=$2 and (legal_entity_id is null or legal_entity_id=$3)))) for update`,[req.params.calendarId,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
+      if(!calendar){await client.query('rollback');return res.status(404).json({error:'Working calendar not found'});}
+      const holidayId=req.params.holidayId||null;await client.query('select pg_advisory_xact_lock(hashtext($1))',[`calendar-holiday:${calendar.id}:${holidayId||parsed.data.holidayDate}`]);
+      const previous=holidayId?(await client.query(`select * from working_calendar_holidays where holiday_id=$1 and calendar_id=$2 and organization_id=$3 and active=true order by effective_from desc limit 1 for update`,[holidayId,calendar.id,req.organizationScope.organizationId])).rows[0]:null;
+      if(holidayId&&!previous){await client.query('rollback');return res.status(404).json({error:'Calendar holiday not found'});}
+      if(previous&&parsed.data.effectiveFrom<=dateOnly(previous.effective_from)){await client.query('rollback');return res.status(409).json({error:'Holiday version conflict',code:'CALENDAR_HOLIDAY_VERSION_CONFLICT'});}
+      if(previous)await client.query('update working_calendar_holidays set effective_to=$2::date-1 where id=$1',[previous.id,parsed.data.effectiveFrom]);
+      const result=await client.query(`insert into working_calendar_holidays(holiday_id,organization_id,calendar_id,holiday_date,label,holiday_type,effective_from,created_by)
+        values(coalesce($1,'calendar-holiday-'||gen_random_uuid()::text),$2,$3,$4,$5,$6,$7,$8) returning *`,[holidayId,req.organizationScope.organizationId,calendar.id,parsed.data.holidayDate,parsed.data.label,parsed.data.holidayType,parsed.data.effectiveFrom,req.user.sub]);
+      await audit(client,req,{module:'Organization Setup',action:previous?'Update Calendar Holiday':'Create Calendar Holiday',entityType:'Calendar Holiday',entityId:result.rows[0].holiday_id,oldValue:previous,newValue:result.rows[0],details:`${parsed.data.holidayType} holiday authority for ${parsed.data.holidayDate}`});
+      await client.query('commit');res.status(previous?200:201).json(result.rows[0]);
+    }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Holiday date conflicts with existing authority',code:'CALENDAR_HOLIDAY_CONFLICT'});res.status(500).json({error:'Calendar holiday mutation failed'});}finally{client.release();}
+  };
+  router.post('/calendars/:calendarId/holidays',requirePermission('settings.manage'),mutateHoliday);
+  router.put('/calendars/:calendarId/holidays/:holidayId',requirePermission('settings.manage'),mutateHoliday);
+  router.post('/calendars/:calendarId/holidays/:holidayId/retire',requirePermission('settings.manage'),async(req,res)=>{
+    const client=await pool.connect();try{await client.query('begin');
+      const previous=(await client.query(`select h.* from working_calendar_holidays h join working_calendars c on c.id=h.calendar_id and c.organization_id=h.organization_id
+        left join organization_catalog_items wg on wg.id=c.worker_group_id and wg.organization_id=c.organization_id
+        where h.holiday_id=$1 and h.calendar_id=$2 and h.organization_id=$3 and h.active=true
+        and ((c.applicability_type='legal_entity' and c.legal_entity_id=$4) or (c.applicability_type='country' and c.country_authority_legal_entity_id=$4)
+          or (c.applicability_type='worker_group' and (wg.legal_entity_id is null or wg.legal_entity_id=$4))) order by h.effective_from desc limit 1 for update of h`,[req.params.holidayId,req.params.calendarId,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
+      if(!previous){await client.query('rollback');return res.status(404).json({error:'Calendar holiday not found'});}
+      const result=await client.query(`update working_calendar_holidays set active=false,effective_to=case when effective_from<current_date then least(coalesce(effective_to,current_date-1),current_date-1) else effective_to end where id=$1 returning *`,[previous.id]);
+      await audit(client,req,{module:'Organization Setup',action:'Retire Calendar Holiday',entityType:'Calendar Holiday',entityId:previous.holiday_id,oldValue:previous,newValue:result.rows[0],details:'Retired calendar holiday authority'});
+      await client.query('commit');res.json(result.rows[0]);
+    }catch(error){await client.query('rollback');res.status(500).json({error:'Calendar holiday retirement failed'});}finally{client.release();}
   });
   router.get('/reporting-periods', async (req,res) => {
     const result=await pool.query(`select * from reporting_periods where organization_id=$1
@@ -359,8 +446,12 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
         and current_date between effective_from and coalesce(effective_to,'infinity'::date)) legal_entity,
       exists(select 1 from organization_catalog_items where organization_id=$1 and catalog_type='worker_type' and active
         and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) worker_type,
-      exists(select 1 from working_calendars where organization_id=$1 and active
-        and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) calendars,
+      exists(select 1 from working_calendars c left join organization_catalog_items wg on wg.id=c.worker_group_id and wg.organization_id=c.organization_id
+        join legal_entities scope_le on scope_le.id=$2 and scope_le.organization_id=c.organization_id
+        where c.organization_id=$1 and c.active and current_date between c.effective_from and coalesce(c.effective_to,'infinity'::date)
+        and ((c.applicability_type='legal_entity' and c.legal_entity_id=$2)
+          or (c.applicability_type='country' and c.country_code=scope_le.country_code)
+          or (c.applicability_type='worker_group' and (wg.legal_entity_id is null or wg.legal_entity_id=$2)))) calendars,
       exists(select 1 from reporting_periods where organization_id=$1 and status='Open'
         and current_date between starts_on and ends_on and legal_entity_id=$2) reporting_period,
       exists(select 1 from user_organization_scopes s join users u on u.id=s.user_id and u.status='Active'

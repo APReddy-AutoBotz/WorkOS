@@ -4,6 +4,7 @@ import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from '../se
 import { assertReportingPeriodAllows, canTransitionReportingPeriod, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
 import { buildSetupReadiness, identityReadinessFromEnvironment, productionReadinessFromEnvironment, REQUIRED_SETUP_CHECKS } from '../server/setup-readiness.mjs';
 import { validateLegalEntity, validateOrganizationProfile } from '../server/organization-setup.mjs';
+import { calendarScopeValues, validateWorkingCalendar, validateWorkingCalendarHoliday } from '../server/working-calendars.mjs';
 
 const migration = readFileSync('server/migrations/022_organization_setup_foundation.sql', 'utf8');
 const integrityMigration = readFileSync('server/migrations/023_wos02_scope_lifecycle_integrity.sql', 'utf8');
@@ -13,6 +14,7 @@ const projectLegalScopePrerequisite = readFileSync('server/migrations/025a_wos02
 const canonicalScopeMigration = readFileSync('server/migrations/026_wos02_canonical_legal_scope_integrity.sql', 'utf8');
 const reportingPeriodMigration = readFileSync('server/migrations/027_wos02_reporting_period_authority.sql', 'utf8');
 const organizationProfileMigration = readFileSync('server/migrations/028_wos02_organization_legal_entity_profiles.sql', 'utf8');
+const calendarAuthorityMigration = readFileSync('server/migrations/029_wos02_working_calendar_authority.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
 const server = readFileSync('server/index.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
@@ -20,6 +22,29 @@ const api = readFileSync('src/services/api.ts', 'utf8');
 const runtimeTerminology = readFileSync('src/config/RuntimeTerminology.tsx', 'utf8');
 const apiClient = readFileSync('src/services/apiClient.ts', 'utf8');
 const productConfig = readFileSync('src/config/productConfig.ts', 'utf8');
+
+const validCalendar = { code:'US-WORK',name:'US Standard',timezone:'America/New_York',workingDays:[1,2,3,4,5],
+  hoursPerDay:8,effectiveFrom:'2026-01-01',applicability:{type:'legal_entity'} };
+assert.equal(validateWorkingCalendar(validCalendar).success,true,'legal-entity calendar compatibility must remain valid');
+assert.equal(validateWorkingCalendar({...validCalendar,applicability:{type:'country',countryCode:'US'}}).success,true,'country applicability must validate');
+assert.equal(validateWorkingCalendar({...validCalendar,applicability:{type:'worker_group',workerGroupId:'business-unit-a'}}).success,true,'canonical worker-group applicability must validate');
+for (const invalid of [
+  {workingDays:[1,1,2]}, {workingDays:[1,7]}, {hoursPerDay:0}, {hoursPerDay:24.01},
+  {applicability:{type:'country',countryCode:'USA'}}, {applicability:{type:'worker_group',workerGroupId:''}},
+]) assert.equal(validateWorkingCalendar({...validCalendar,...invalid}).success,false,`${Object.keys(invalid)[0]} must fail calendar validation without a write`);
+assert.deepEqual(calendarScopeValues({type:'legal_entity'},'legal-a'),{applicabilityType:'legal_entity',legalEntityId:'legal-a',countryCode:null,countryAuthorityLegalEntityId:null,workerGroupId:null});
+assert.equal(validateWorkingCalendarHoliday({holidayDate:'2026-07-04',label:'Public Holiday',holidayType:'Public',effectiveFrom:'2026-01-01'}).success,true);
+assert.equal(validateWorkingCalendarHoliday({holidayDate:'2026-12-24',label:'Company Holiday',holidayType:'Company',effectiveFrom:'2026-01-01'}).success,true);
+assert.equal(validateWorkingCalendarHoliday({holidayDate:'2026-12-24',label:'Invalid',holidayType:'Optional',effectiveFrom:'2026-01-01'}).success,false);
+assert.match(calendarAuthorityMigration,/update working_calendars set applicability_type='legal_entity'[\s\S]*working_calendars_applicability_check/,'migration 029 must deterministically retain existing legal-entity calendars');
+assert.match(calendarAuthorityMigration,/country_authority_legal_entity_id[\s\S]*working_calendars_country_authority_fk[\s\S]*working_calendars_worker_group_fk/,'country and canonical worker-group references must be database-owned');
+assert.match(calendarAuthorityMigration,/enforce_working_calendar_worker_group[\s\S]*catalog_type='business_unit'[\s\S]*working_calendars_worker_group_authority/,'alternate database writes must not attach a noncanonical worker-group reference');
+assert.match(calendarAuthorityMigration,/working_calendar_versions_no_overlap[\s\S]*applicability_type with =[\s\S]*daterange/,'calendar versions must remain non-overlapping per applicability scope');
+assert.match(calendarAuthorityMigration,/working_calendar_holidays[\s\S]*holiday_type in \('Public','Company'\)[\s\S]*working_calendar_holiday_date_authority_no_overlap/,'public/company holiday authority must prevent ambiguous same-date versions');
+assert.match(service,/CALENDAR_COUNTRY_NOT_FOUND[\s\S]*catalog_type='business_unit'[\s\S]*CALENDAR_WORKER_GROUP_NOT_FOUND/,'calendar applicability must fail closed against persisted country and worker-group authority');
+assert.match(service,/router\.post\('\/calendars\/:calendarId\/holidays'[\s\S]*router\.put\('\/calendars\/:calendarId\/holidays\/:holidayId'[\s\S]*Retire Calendar Holiday/,'holidays must support governed create, update, and retirement');
+assert.match(service,/CALENDAR_HOLIDAY_CONFLICT[\s\S]*Retire Calendar Holiday[\s\S]*oldValue:previous,newValue:/,'holiday conflicts and changes must be stable and audited with before/after values');
+assert.match(service,/Active dependencies prevent calendar retirement[\s\S]*CALENDAR_IN_USE/,'active worker or holiday dependencies must block calendar retirement');
 
 const validProfile = { name:'Synthetic Organization',legalName:'Synthetic Organization LLC',productDisplayName:'Synthetic Work',
   supportContact:'support@example.test',defaultLocale:'en-US',defaultTimeZone:'America/New_York',baseCurrency:'USD',
@@ -96,6 +121,10 @@ assert.match(integrityMigration, /worker_history_versions_no_overlap[\s\S]*exclu
 assert.match(timesheetScopeMigration, /drop constraint if exists timesheets_employee_id_week_ending_key/, 'unsafe global timesheet uniqueness must be removed');
 assert.match(timesheetScopeMigration, /uq_timesheets_org_employee_week[\s\S]*organization_id, employee_id, week_ending/, 'timesheet uniqueness must be organization scoped');
 const migrationOrder = readdirSync('server/migrations').filter(file => file.endsWith('.sql')).sort();
+assert.ok(
+  migrationOrder.indexOf('028_wos02_organization_legal_entity_profiles.sql') < migrationOrder.indexOf('029_wos02_working_calendar_authority.sql'),
+  'calendar authority migration must append after the accepted WOS-02 profile migration',
+);
 assert.ok(
   migrationOrder.indexOf('025_wos02_timesheet_scope_integrity.sql') < migrationOrder.indexOf('025a_wos02_project_legal_scope_unique_prerequisite.sql')
     && migrationOrder.indexOf('025a_wos02_project_legal_scope_unique_prerequisite.sql') < migrationOrder.indexOf('026_wos02_canonical_legal_scope_integrity.sql'),
