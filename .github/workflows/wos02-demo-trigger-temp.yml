@@ -1,0 +1,67 @@
+name: WOS-02 Demo Seed Guarded Publisher Trigger Temp
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/wos02-demo-trigger-temp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout product branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/wos-02-organization-setup-foundation
+          fetch-depth: 0
+
+      - name: Guarded exact-payload publication
+        shell: bash
+        env:
+          EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+          EXPECTED_BASE: abc8f9bb026dbed30abf084498625672b8875a86
+          EXPECTED_BASE_TREE: 483e6fbab2a204c7356dcd61677bae3538c51624
+          EXPECTED_RESULT_TREE: 56d09de608606596397129ffa628fe6e6d4838ce
+          EXPECTED_RAW_BYTES: "21706"
+          EXPECTED_RAW_SHA256: 47a91254831ebc8e06caac2ede6feda5fbbeb9be934a9686575904e53b47e850
+          EXPECTED_GZIP_BYTES: "5311"
+          EXPECTED_GZIP_SHA256: 07407128f4e5626cfc3b27e4a35a4a8617081c08b11ff0e56be776bd6ca1c433
+        run: |
+          set -euo pipefail
+          git fetch origin main codex/wos-02-organization-setup-foundation controller/wos02-exact-acceptance
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse origin/codex/wos-02-organization-setup-foundation)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_BASE_TREE"
+
+          PAYLOAD_B64="$(git show origin/controller/wos02-exact-acceptance:.github/workflows/wos02-demo-seed-publisher-temp.yml | sed -n 's/^          PAYLOAD_B64: //p')"
+          test "${#PAYLOAD_B64}" = "7084"
+          printf '%s' "$PAYLOAD_B64" | base64 -d > /tmp/demo.diff.gz
+          test "$(wc -c < /tmp/demo.diff.gz | tr -d ' ')" = "$EXPECTED_GZIP_BYTES"
+          test "$(sha256sum /tmp/demo.diff.gz | awk '{print $1}')" = "$EXPECTED_GZIP_SHA256"
+          gzip -dc /tmp/demo.diff.gz > /tmp/demo.diff
+          test "$(wc -c < /tmp/demo.diff | tr -d ' ')" = "$EXPECTED_RAW_BYTES"
+          test "$(sha256sum /tmp/demo.diff | awk '{print $1}')" = "$EXPECTED_RAW_SHA256"
+
+          git apply --check /tmp/demo.diff
+          git apply /tmp/demo.diff
+          test "$(git diff --name-only | sort | tr '\n' '|')" = "docs/00-control/REQUIREMENTS_TRACEABILITY.md|package.json|server/seed-demo.mjs|tests/backend-contract-smoke.mjs|"
+          test "$(git diff --numstat | awk '{a+=$1; d+=$2} END {print a "/" d}')" = "102/33"
+          git add docs/00-control/REQUIREMENTS_TRACEABILITY.md package.json server/seed-demo.mjs tests/backend-contract-smoke.mjs
+          test "$(git write-tree)" = "$EXPECTED_RESULT_TREE"
+
+          git config user.name "WorkOS Controller"
+          git config user.email "controller@users.noreply.github.com"
+          git commit -m "fix: align demo seed with WOS-02 ownership"
+
+          git fetch origin main codex/wos-02-organization-setup-foundation
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse origin/codex/wos-02-organization-setup-foundation)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_RESULT_TREE"
+          git push origin HEAD:codex/wos-02-organization-setup-foundation
