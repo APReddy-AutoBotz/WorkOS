@@ -1,0 +1,116 @@
+name: WOS-02 P1 Recovery Publisher TEMP
+
+on:
+  push:
+    branches:
+      - controller/wos02-p1-publisher-temp
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-exact-p1-recovery:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout temporary publisher authority
+        uses: actions/checkout@v4
+        with:
+          ref: controller/wos02-p1-publisher-temp
+          path: publisher
+          fetch-depth: 0
+
+      - name: Checkout exact product base
+        uses: actions/checkout@v4
+        with:
+          ref: 86c4cc1bef7a96adad3fc31b9ff3b717ba63444f
+          path: product
+          fetch-depth: 0
+
+      - name: Verify exact live leases before reconstruction
+        shell: bash
+        run: |
+          set -euo pipefail
+          main_remote="$(git -C product ls-remote origin refs/heads/main | awk '{print $1}')"
+          product_remote="$(git -C product ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')"
+          test "$main_remote" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
+          test "$product_remote" = "86c4cc1bef7a96adad3fc31b9ff3b717ba63444f"
+          test "$(git -C product rev-parse HEAD)" = "86c4cc1bef7a96adad3fc31b9ff3b717ba63444f"
+          test "$(git -C product rev-parse HEAD^{tree})" = "c5387984997e765690f0ebd2a89437701a9279e0"
+
+      - name: Verify and reconstruct complete recovery payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd publisher/.github/recovery
+          echo "c81526cdf01bfe4d845a43b12cb74dc7b0b13d669d2ea8f6a4b45058bf145351  wos02-p1-payload-00.b64" | sha256sum -c -
+          echo "422ff228c60579f0635210738b86eb9fade600d53b22efe7dae37292dc949ec0  wos02-p1-payload-01.b64" | sha256sum -c -
+          echo "b516147fbd98189d6bd307db43e1b0c0d4bd5a15142d1bf7deb521841258536e  wos02-p1-payload-02.b64" | sha256sum -c -
+          echo "c1a533aece71c8818b500381590b9f5c4f8dee75b5b9ca1d8bc2ad99d0a3a2e1  wos02-p1-payload-03.b64" | sha256sum -c -
+          echo "2d86ba715d9807874a81e8963c730adbfd1c9d0c9a55c06c60550cf354dbdf43  wos02-p1-payload-04.b64" | sha256sum -c -
+          echo "a81c1fbc6aefe7985ecd4e14dfe83a9ff65d2c35e89adb941e2ab991beb4601e  wos02-p1-payload-05.b64" | sha256sum -c -
+          echo "45a4327ddbdbad0f81b36105ec12e9163ca33dc21bec0846150e563fb718138c  wos02-p1-payload-06.b64" | sha256sum -c -
+          cat wos02-p1-payload-{00..06}.b64 > "$GITHUB_WORKSPACE/payload.b64"
+          test "$(wc -c < "$GITHUB_WORKSPACE/payload.b64")" = "7296"
+          base64 -d "$GITHUB_WORKSPACE/payload.b64" > "$GITHUB_WORKSPACE/p1-mutation.diff.gz"
+          test "$(wc -c < "$GITHUB_WORKSPACE/p1-mutation.diff.gz")" = "5472"
+          echo "e8fb136248207c8d76ff0a25e2d6e5e2ca7e3c1f9d11598065e76199af87ae03  $GITHUB_WORKSPACE/p1-mutation.diff.gz" | sha256sum -c -
+          gzip -dc "$GITHUB_WORKSPACE/p1-mutation.diff.gz" > "$GITHUB_WORKSPACE/p1-mutation.diff"
+          test "$(wc -c < "$GITHUB_WORKSPACE/p1-mutation.diff")" = "25183"
+          echo "99c45bcb3444f7d63eb208a25583a183746aac82167c23d15473f626cab1a3d2  $GITHUB_WORKSPACE/p1-mutation.diff" | sha256sum -c -
+
+      - name: Apply exact bounded product correction and verify tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product
+          git apply --binary "$GITHUB_WORKSPACE/p1-mutation.diff"
+          git diff --check
+          mapfile -t files < <(git diff --name-only | sort)
+          test "${#files[@]}" = "2"
+          test "${files[0]}" = "server/index.mjs"
+          test "${files[1]}" = "tests/organization-setup-smoke.mjs"
+          read -r adds dels < <(git diff --numstat | awk '{a+=$1; d+=$2} END {print a,d}')
+          test "$adds" = "137"
+          test "$dels" = "30"
+          git add server/index.mjs tests/organization-setup-smoke.mjs
+          test "$(git write-tree)" = "d7ceedbd604fc0cc35febc28600ef006990b0484"
+
+      - name: Focused retained verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product
+          npm ci
+          npm run test:organization-setup
+          npm run test:backend
+          npm run test:authorization-convergence
+          npm run typecheck
+          npm run lint
+          npm run build
+          npm run test:bootstrap-scan
+          npm run test:wos00-baseline
+          APP_MODE=test ALLOW_TEST_FALLBACK=true npm test
+          NODE_ENV=production node server/index.mjs >/tmp/wos02-prod-start.log 2>&1 && exit 1 || true
+          grep -q "Production startup blocked" /tmp/wos02-prod-start.log
+
+      - name: Commit exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "noreply@github.com"
+          git commit -m "fix: enforce scoped mutation lifecycle integrity"
+          test "$(git rev-parse HEAD^)" = "86c4cc1bef7a96adad3fc31b9ff3b717ba63444f"
+          test "$(git rev-parse HEAD^{tree})" = "d7ceedbd604fc0cc35febc28600ef006990b0484"
+
+      - name: Verify second live lease and non-force publish existing PR37 branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          main_remote="$(git -C product ls-remote origin refs/heads/main | awk '{print $1}')"
+          product_remote="$(git -C product ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')"
+          test "$main_remote" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
+          test "$product_remote" = "86c4cc1bef7a96adad3fc31b9ff3b717ba63444f"
+          git -C product push origin HEAD:refs/heads/codex/wos-02-organization-setup-foundation
