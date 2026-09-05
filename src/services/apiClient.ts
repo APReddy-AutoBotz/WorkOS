@@ -134,6 +134,7 @@ async function apiFetch<T>(
 export const api = {
   get:    <T>(path: string) => apiFetch<T>('GET', path),
   post:   <T>(path: string, body: unknown) => apiFetch<T>('POST', path, body),
+  put:    <T>(path: string, body: unknown) => apiFetch<T>('PUT', path, body),
   patch:  <T>(path: string, body: unknown) => apiFetch<T>('PATCH', path, body),
   delete: <T>(path: string, body?: unknown) => apiFetch<T>('DELETE', path, body),
 };

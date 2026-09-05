@@ -41,6 +41,45 @@ const asOfPredicate = (alias, parameter) =>
   `${alias}.effective_from <= ${parameter} and (${alias}.effective_to is null or ${alias}.effective_to >= ${parameter})`;
 const dateOnly = value => value instanceof Date ? value.toISOString().slice(0, 10) : String(value);
 
+const isLocale = value => { try { return Intl.getCanonicalLocales(value).length === 1; } catch { return false; } };
+const isTimeZone = value => { try { new Intl.DateTimeFormat('en', { timeZone:value }).format(); return true; } catch { return false; } };
+const isFiscalStart = value => {
+  if (!/^\d{2}-\d{2}$/.test(value)) return false;
+  const [month, day] = value.split('-').map(Number);
+  const candidate = new Date(Date.UTC(2000, month - 1, day));
+  return candidate.getUTCMonth() === month - 1 && candidate.getUTCDate() === day;
+};
+const isSupportContact = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || (() => {
+  try { return new URL(value).protocol === 'https:'; } catch { return false; }
+})();
+const currency = z.string().trim().regex(/^[A-Z]{3}$/);
+const organizationProfileSchema = z.object({
+  name:z.string().trim().min(1).max(150), legalName:z.string().trim().min(1).max(200),
+  productDisplayName:z.string().trim().min(1).max(150), supportContact:z.string().trim().min(3).max(254).refine(isSupportContact),
+  defaultLocale:z.string().trim().min(2).max(35).refine(isLocale), defaultTimeZone:z.string().trim().min(1).max(80).refine(isTimeZone),
+  baseCurrency:currency, fiscalYearStart:z.string().refine(isFiscalStart), defaultWeekStart:z.number().int().min(0).max(6),
+  effectiveFrom:z.string().date(), organizationId:z.string().optional(),
+});
+const addressSchema = z.object({ line1:z.string().trim().min(1).max(200), line2:z.string().trim().max(200).optional(),
+  city:z.string().trim().min(1).max(100), region:z.string().trim().max(100).optional(), postalCode:z.string().trim().max(30).optional(),
+  countryCode:z.string().trim().regex(/^[A-Z]{2}$/) }).strict();
+const legalEntitySchema = z.object({
+  code:z.string().trim().regex(/^[A-Z0-9][A-Z0-9_-]{0,49}$/), legalName:z.string().trim().min(1).max(200),
+  registrationIdentifier:z.string().trim().min(1).max(100).nullable().optional(), taxIdentifier:z.string().trim().min(1).max(100).nullable().optional(),
+  reportingCurrency:currency, address:addressSchema, status:z.enum(['Active','Inactive']),
+  effectiveFrom:z.string().date(), effectiveTo:z.string().date().nullable().optional(), organizationId:z.string().optional(),
+});
+export const validateOrganizationProfile = input => organizationProfileSchema.safeParse(input);
+export const validateLegalEntity = input => legalEntitySchema.safeParse(input);
+const profileSelect = `select o.id organization_id,o.code organization_code,p.name organization_name,
+  p.legal_name,p.product_display_name,p.support_contact,p.default_locale,p.default_time_zone,p.base_currency,
+  p.fiscal_year_start,p.default_week_start,p.effective_from profile_effective_from,p.effective_to profile_effective_to
+  from organizations o join organization_profile_versions p on p.organization_id=o.id`;
+const legalSelect = `select le.id,le.organization_id,le.code,le.name,le.country_code,le.status,le.effective_from,le.effective_to,
+  p.legal_name,p.registration_identifier,p.tax_identifier,p.reporting_currency,p.address,
+  p.effective_from profile_effective_from,p.effective_to profile_effective_to
+  from legal_entities le join legal_entity_profile_versions p on p.legal_entity_id=le.id and p.organization_id=le.organization_id`;
+
 export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, requireAuth, requirePermission, audit }) => {
   const router = Router();
   router.use(requireDatabase, requireAuth, async (req, res, next) => {
@@ -54,12 +93,114 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
 
   router.get('/context', async (req, res) => {
     const { organizationId, legalEntityId } = req.organizationScope;
-    const result = await pool.query(`select o.id organization_id,o.code organization_code,o.name organization_name,
-      le.id legal_entity_id,le.code legal_entity_code,le.name legal_entity_name
+    const result = await pool.query(`select o.id organization_id,o.code organization_code,op.name organization_name,
+      op.legal_name organization_legal_name,op.product_display_name,op.support_contact,op.default_locale,
+      op.default_time_zone,op.base_currency,op.fiscal_year_start,op.default_week_start,
+      le.id legal_entity_id,le.code legal_entity_code,le.name legal_entity_name,le.status legal_entity_status,
+      le.effective_from legal_entity_effective_from,le.effective_to legal_entity_effective_to,
+      lp.legal_name legal_entity_legal_name,lp.registration_identifier,lp.tax_identifier,lp.reporting_currency,lp.address
       from organizations o join legal_entities le on le.organization_id=o.id
-      where o.id=$1 and le.id=$2`, [organizationId, legalEntityId]);
+      join lateral (select * from organization_profile_versions where organization_id=o.id and $3::date between effective_from and coalesce(effective_to,'infinity'::date) order by effective_from desc limit 1) op on true
+      join lateral (select * from legal_entity_profile_versions where organization_id=o.id and legal_entity_id=le.id and $3::date between effective_from and coalesce(effective_to,'infinity'::date) order by effective_from desc limit 1) lp on true
+      where o.id=$1 and le.id=$2`, [organizationId, legalEntityId, String(req.query.asOf||new Date().toISOString().slice(0,10))]);
     res.json(result.rows[0]);
   });
+
+  router.get('/profile', async(req,res)=>{
+    const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
+    const result=await pool.query(`${profileSelect} where o.id=$1 and ${asOfPredicate('p','$2')}
+      order by p.effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
+    if(!result.rowCount)return res.status(404).json({error:'Organization profile not found',code:'ORGANIZATION_PROFILE_NOT_FOUND'});
+    res.json(result.rows[0]);
+  });
+
+  router.put('/profile',requirePermission('settings.manage'),async(req,res)=>{
+    const parsed=validateOrganizationProfile(req.body);
+    if(!parsed.success)return res.status(400).json({error:'Invalid organization profile',code:'ORGANIZATION_PROFILE_VALIDATION_FAILED',issues:parsed.error.flatten()});
+    if(parsed.data.organizationId&&parsed.data.organizationId!==req.organizationScope.organizationId)
+      return res.status(403).json({error:'Organization scope is not authorized',code:'ORG_SCOPE_DENIED'});
+    const client=await pool.connect();try{
+      await client.query('begin');await client.query('select pg_advisory_xact_lock(hashtext($1))',[`organization-profile:${req.organizationScope.organizationId}`]);
+      const organization=(await client.query('select * from organizations where id=$1 for update',[req.organizationScope.organizationId])).rows[0];
+      const latest=(await client.query('select * from organization_profile_versions where organization_id=$1 order by effective_from desc limit 1 for update',[req.organizationScope.organizationId])).rows[0];
+      if(latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Organization profile version is stale',code:'ORGANIZATION_PROFILE_VERSION_CONFLICT'});}
+      if(latest&&parsed.data.effectiveFrom>dateOnly(latest.effective_from)&&latest.effective_to==null)
+        await client.query('update organization_profile_versions set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
+      const values=[req.organizationScope.organizationId,parsed.data.name,parsed.data.legalName,parsed.data.productDisplayName,parsed.data.supportContact,
+        parsed.data.defaultLocale,parsed.data.defaultTimeZone,parsed.data.baseCurrency,parsed.data.fiscalYearStart,parsed.data.defaultWeekStart,parsed.data.effectiveFrom,req.user.sub];
+      const result=await client.query(`insert into organization_profile_versions(organization_id,name,legal_name,product_display_name,support_contact,
+        default_locale,default_time_zone,base_currency,fiscal_year_start,default_week_start,effective_from,created_by)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) on conflict(organization_id,effective_from) do update set
+        name=excluded.name,legal_name=excluded.legal_name,product_display_name=excluded.product_display_name,support_contact=excluded.support_contact,
+        default_locale=excluded.default_locale,default_time_zone=excluded.default_time_zone,base_currency=excluded.base_currency,
+        fiscal_year_start=excluded.fiscal_year_start,default_week_start=excluded.default_week_start returning *`,values);
+      await client.query('update organizations set name=$2,updated_at=now() where id=$1',[req.organizationScope.organizationId,parsed.data.name]);
+      await audit(client,req,{module:'Organization Setup',action:'Update Organization Profile',entityType:'Organization',entityId:req.organizationScope.organizationId,
+        oldValue:{...latest,name:organization.name},newValue:{...result.rows[0],name:parsed.data.name},details:'Versioned organization profile using authoritative request scope'});
+      const response=await client.query(`${profileSelect} where o.id=$1 and p.id=$2`,[req.organizationScope.organizationId,result.rows[0].id]);
+      await client.query('commit');res.json(response.rows[0]);
+    }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Organization profile version conflicts with existing history',code:'ORGANIZATION_PROFILE_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Organization profile mutation failed',code:'ORGANIZATION_PROFILE_MUTATION_FAILED'});}finally{client.release();}
+  });
+
+  router.get('/legal-entities',async(req,res)=>{
+    const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
+    const result=await pool.query(`${legalSelect} join user_organization_scopes s on s.legal_entity_id=le.id and s.organization_id=le.organization_id
+      where le.organization_id=$1 and s.user_id=$2 and s.active=true and ${asOfPredicate('p','$3')}
+      order by le.code,p.effective_from desc limit $4`,[req.organizationScope.organizationId,req.user.sub,asOf,MAX_SETUP_ROWS]);res.json(result.rows);
+  });
+  router.get('/legal-entities/:id',async(req,res)=>{
+    if(req.params.id!==req.organizationScope.legalEntityId)return res.status(404).json({error:'Legal entity not found'});
+    const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
+    const result=await pool.query(`${legalSelect} where le.organization_id=$1 and le.id=$2 and ${asOfPredicate('p','$3')}
+      order by p.effective_from desc limit 1`,[req.organizationScope.organizationId,req.params.id,asOf]);
+    if(!result.rowCount)return res.status(404).json({error:'Legal entity not found'});res.json(result.rows[0]);
+  });
+
+  const mutateLegalEntity=async(req,res)=>{
+    const parsed=validateLegalEntity(req.body);
+    if(!parsed.success||parsed.success&&parsed.data.effectiveTo&&parsed.data.effectiveTo<parsed.data.effectiveFrom)
+      return res.status(400).json({error:'Invalid legal entity',code:'LEGAL_ENTITY_VALIDATION_FAILED',issues:parsed.success?undefined:parsed.error.flatten()});
+    if(parsed.data.organizationId&&parsed.data.organizationId!==req.organizationScope.organizationId)
+      return res.status(403).json({error:'Organization scope is not authorized',code:'ORG_SCOPE_DENIED'});
+    const targetId=req.params.id||null;
+    if(targetId&&targetId!==req.organizationScope.legalEntityId)return res.status(404).json({error:'Legal entity not found'});
+    const client=await pool.connect();try{
+      await client.query('begin');await client.query('select pg_advisory_xact_lock(hashtext($1))',[`legal-entity:${req.organizationScope.organizationId}:${targetId||parsed.data.code}`]);
+      const previous=targetId?(await client.query('select * from legal_entities where id=$1 and organization_id=$2 for update',[targetId,req.organizationScope.organizationId])).rows[0]:null;
+      if(targetId&&!previous){await client.query('rollback');return res.status(404).json({error:'Legal entity not found'});}
+      if(previous&&parsed.data.code!==previous.code){await client.query('rollback');return res.status(409).json({error:'Legal entity code is immutable',code:'LEGAL_ENTITY_CODE_IMMUTABLE'});}
+      if(previous&&(parsed.data.status==='Inactive'||parsed.data.effectiveTo)){
+        const deps=await client.query(`select id from employees where organization_id=$1 and legal_entity_id=$2 and status<>'Exited'
+          union all select id from projects where organization_id=$1 and legal_entity_id=$2 and status in ('Proposed','Active','On Hold')
+          union all select id from clients where organization_id=$1 and legal_entity_id=$2 and status='Active' limit $3`,[req.organizationScope.organizationId,targetId,MAX_DEPENDENCIES+1]);
+        const alternative=await client.query(`select 1 from user_organization_scopes s join legal_entities le on le.id=s.legal_entity_id and le.organization_id=s.organization_id
+          where s.user_id=$1 and s.organization_id=$2 and s.legal_entity_id<>$3 and s.active=true and le.status='Active'
+          and current_date between le.effective_from and coalesce(le.effective_to,'infinity'::date) limit 1`,[req.user.sub,req.organizationScope.organizationId,targetId]);
+        if(deps.rowCount||!alternative.rowCount){await client.query('rollback');return res.status(409).json({error:'Legal entity has active authority or dependencies',code:'LEGAL_ENTITY_IN_USE'});}
+      }
+      const id=previous?.id||`legal-${crypto.randomUUID()}`;
+      const entity=previous?await client.query(`update legal_entities set name=$2,country_code=$3,status=$4,effective_to=$5,updated_at=now() where id=$1 returning *`,
+        [id,parsed.data.legalName,parsed.data.address.countryCode,parsed.data.status,parsed.data.effectiveTo||null]):
+        await client.query(`insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from,effective_to) values($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+          [id,req.organizationScope.organizationId,parsed.data.code,parsed.data.legalName,parsed.data.address.countryCode,parsed.data.status,parsed.data.effectiveFrom,parsed.data.effectiveTo||null]);
+      const latest=(await client.query('select * from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from desc limit 1 for update',[id])).rows[0];
+      if(latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Legal entity profile version is stale',code:'LEGAL_ENTITY_VERSION_CONFLICT'});}
+      if(latest&&parsed.data.effectiveFrom>dateOnly(latest.effective_from)&&latest.effective_to==null)
+        await client.query('update legal_entity_profile_versions set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
+      const profile=await client.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,registration_identifier,tax_identifier,reporting_currency,address,effective_from,created_by)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict(legal_entity_id,effective_from) do update set legal_name=excluded.legal_name,
+        registration_identifier=excluded.registration_identifier,tax_identifier=excluded.tax_identifier,reporting_currency=excluded.reporting_currency,address=excluded.address returning *`,
+      [id,req.organizationScope.organizationId,parsed.data.legalName,parsed.data.registrationIdentifier||null,parsed.data.taxIdentifier||null,parsed.data.reportingCurrency,JSON.stringify(parsed.data.address),parsed.data.effectiveFrom,req.user.sub]);
+      if(!previous)await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true)
+        on conflict(user_id,organization_id,legal_entity_id) do update set active=true`,[req.user.sub,req.organizationScope.organizationId,id]);
+      await audit(client,req,{module:'Organization Setup',action:previous?'Update Legal Entity':'Create Legal Entity',entityType:'Legal Entity',entityId:id,
+        oldValue:previous?{entity:previous,profile:latest}:null,newValue:{entity:entity.rows[0],profile:profile.rows[0]},details:`${previous?'Updated':'Created'} legal entity in authoritative organization scope`});
+      const response=await client.query(`${legalSelect} where le.id=$1 and p.id=$2`,[id,profile.rows[0].id]);
+      await client.query('commit');res.status(previous?200:201).json(response.rows[0]);
+    }catch(error){await client.query('rollback');if(error.code==='23505')return res.status(409).json({error:'Legal entity code or identity already exists',code:'LEGAL_ENTITY_UNIQUENESS_CONFLICT'});if(error.code==='23P01')return res.status(409).json({error:'Legal entity profile version conflicts with existing history',code:'LEGAL_ENTITY_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Legal entity mutation failed',code:'LEGAL_ENTITY_MUTATION_FAILED'});}finally{client.release();}
+  };
+  router.post('/legal-entities',requirePermission('settings.manage'),mutateLegalEntity);
+  router.put('/legal-entities/:id',requirePermission('settings.manage'),mutateLegalEntity);
 
   router.get('/catalogs/:type', async (req, res) => {
     if (!catalogTypes.includes(req.params.type)) return res.status(404).json({ error: 'Unknown organization catalog' });

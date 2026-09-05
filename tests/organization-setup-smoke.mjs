@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from '../server/worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, canTransitionReportingPeriod, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
 import { buildSetupReadiness, identityReadinessFromEnvironment, productionReadinessFromEnvironment, REQUIRED_SETUP_CHECKS } from '../server/setup-readiness.mjs';
+import { validateLegalEntity, validateOrganizationProfile } from '../server/organization-setup.mjs';
 
 const migration = readFileSync('server/migrations/022_organization_setup_foundation.sql', 'utf8');
 const integrityMigration = readFileSync('server/migrations/023_wos02_scope_lifecycle_integrity.sql', 'utf8');
@@ -11,6 +12,7 @@ const timesheetScopeMigration = readFileSync('server/migrations/025_wos02_timesh
 const projectLegalScopePrerequisite = readFileSync('server/migrations/025a_wos02_project_legal_scope_unique_prerequisite.sql', 'utf8');
 const canonicalScopeMigration = readFileSync('server/migrations/026_wos02_canonical_legal_scope_integrity.sql', 'utf8');
 const reportingPeriodMigration = readFileSync('server/migrations/027_wos02_reporting_period_authority.sql', 'utf8');
+const organizationProfileMigration = readFileSync('server/migrations/028_wos02_organization_legal_entity_profiles.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
 const server = readFileSync('server/index.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
@@ -18,6 +20,30 @@ const api = readFileSync('src/services/api.ts', 'utf8');
 const runtimeTerminology = readFileSync('src/config/RuntimeTerminology.tsx', 'utf8');
 const apiClient = readFileSync('src/services/apiClient.ts', 'utf8');
 const productConfig = readFileSync('src/config/productConfig.ts', 'utf8');
+
+const validProfile = { name:'Synthetic Organization',legalName:'Synthetic Organization LLC',productDisplayName:'Synthetic Work',
+  supportContact:'support@example.test',defaultLocale:'en-US',defaultTimeZone:'America/New_York',baseCurrency:'USD',
+  fiscalYearStart:'04-01',defaultWeekStart:1,effectiveFrom:'2026-01-01' };
+assert.equal(validateOrganizationProfile(validProfile).success,true,'the complete bounded organization profile must validate');
+for (const invalid of [
+  {defaultLocale:'not_a_locale'}, {defaultTimeZone:'Mars/Olympus'}, {baseCurrency:'usd'}, {fiscalYearStart:'02-31'},
+  {defaultWeekStart:7}, {supportContact:'not a contact'},
+]) assert.equal(validateOrganizationProfile({...validProfile,...invalid}).success,false,`${Object.keys(invalid)[0]} must fail stable validation`);
+const validLegalEntity={code:'LEGAL-A',legalName:'Synthetic Legal Entity',reportingCurrency:'EUR',status:'Active',effectiveFrom:'2026-01-01',
+  address:{line1:'1 Test Street',city:'Test City',countryCode:'US'}};
+assert.equal(validateLegalEntity(validLegalEntity).success,true,'required legal-entity administration values must validate');
+assert.equal(validateLegalEntity({...validLegalEntity,reportingCurrency:'EU'}).success,false,'reporting currency must use an ISO-style code');
+assert.match(organizationProfileMigration,/organization_profile_versions[\s\S]*legal_name[\s\S]*product_display_name[\s\S]*support_contact[\s\S]*default_locale[\s\S]*default_time_zone[\s\S]*base_currency[\s\S]*fiscal_year_start[\s\S]*default_week_start/,'migration must persist every WOS-ORG-001 field');
+assert.match(organizationProfileMigration,/legal_entity_profile_versions[\s\S]*registration_identifier[\s\S]*tax_identifier[\s\S]*reporting_currency[\s\S]*address/,'migration must persist every WOS-ORG-002 profile field');
+assert.match(organizationProfileMigration,/organization_profile_versions_no_overlap[\s\S]*legal_entity_profile_versions_no_overlap/,'profile histories must be database non-overlapping');
+assert.match(organizationProfileMigration,/uq_legal_entity_registration_identity[\s\S]*uq_legal_entity_tax_identity/,'current legal registration and tax identities must be scoped uniquely');
+assert.match(service,/router\.put\('\/profile'[\s\S]*ORGANIZATION_PROFILE_VALIDATION_FAILED[\s\S]*Update Organization Profile/,'organization profile updates must validate, scope, and audit');
+assert.match(service,/organizationId&&parsed\.data\.organizationId!==req\.organizationScope\.organizationId[\s\S]*ORG_SCOPE_DENIED/,'caller-supplied organization spoofing must fail closed');
+assert.match(service,/router\.post\('\/legal-entities'[\s\S]*router\.put\('\/legal-entities\/:id'/,'legal entities must have governed create and update surfaces');
+assert.match(service,/targetId&&targetId!==req\.organizationScope\.legalEntityId[\s\S]*Legal entity not found/,'same-organization cross-legal mutation must fail closed');
+assert.match(service,/LEGAL_ENTITY_IN_USE[\s\S]*Update Legal Entity':'Create Legal Entity'[\s\S]*oldValue:/,'unsafe legal-entity deactivation must fail before audited mutation');
+assert.match(service,/insert into user_organization_scopes\(user_id,organization_id,legal_entity_id,active\)/,'a creator must receive explicit persisted scope for a newly created legal entity');
+assert.match(service,/join lateral \(select \* from organization_profile_versions[\s\S]*join lateral \(select \* from legal_entity_profile_versions/,'context must expose deterministic profile values without breaking existing identity fields');
 
 const sessionSecretKey = ['API', 'SESSION', 'SECRET'].join('_');
 const identitySecretKey = ['ENTRA', 'CLIENT', 'SECRET'].join('_');

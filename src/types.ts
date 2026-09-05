@@ -135,6 +135,36 @@ export interface OrganizationSetupReadiness {
   authority: 'persisted-server-state';
 }
 
+export interface OrganizationProfile {
+  organizationId: string;
+  code: string;
+  name: string;
+  legalName: string;
+  productDisplayName: string;
+  supportContact: string;
+  defaultLocale: string;
+  defaultTimeZone: string;
+  baseCurrency: string;
+  fiscalYearStart: string;
+  defaultWeekStart: number;
+  effectiveFrom: string;
+}
+
+export interface LegalEntityProfile {
+  id: string;
+  organizationId: string;
+  code: string;
+  legalName: string;
+  registrationIdentifier?: string | null;
+  taxIdentifier?: string | null;
+  reportingCurrency: string;
+  address: { line1: string; line2?: string; city: string; region?: string; postalCode?: string; countryCode: string };
+  status: 'Active' | 'Inactive';
+  effectiveFrom: string;
+  entityEffectiveFrom: string;
+  effectiveTo?: string | null;
+}
+
 export interface DataQualityIssue {
   entityType: string;
   entityId: string;
