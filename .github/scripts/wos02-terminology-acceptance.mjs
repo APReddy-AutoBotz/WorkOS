@@ -82,7 +82,7 @@ for (const [file, source] of sources) {
 
 // Guard the product terminology commit from renaming durable contracts. These
 // tokens are canonical implementation vocabulary, not user-facing copy.
-const contractFiles = ['src/App.tsx', 'src/services/api.ts', 'src/services/apiClient.ts', 'src/types.ts'];
+const contractFiles = ['server/index.mjs', 'src/App.tsx', 'src/services/api.ts', 'src/services/apiClient.ts', 'src/types.ts'];
 const contractSource = contractFiles.map(read).join('\n');
 for (const token of ['/employees', '/projects', 'employee_id', 'project_id', 'organization_id', 'legal_entity_id']) {
   assert(contractSource.includes(token), `stable canonical contract token missing: ${token}`);
