@@ -1,0 +1,87 @@
+name: WOS-02 Calendar Route Context Diagnostic
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-calendar-route-context-diagnostic.yml'
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_HEAD: 6ec5debaf3c8827bc948d1101c12ca0e21e39653
+  CONTROLLER_HEAD: db62bed170e0016af713f4d77a3d340c5932b49b
+  DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_calendar_context
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: wos02_calendar_context
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d wos02_calendar_context"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout exact product
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_HEAD }}
+          path: target
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout exact controller fixture
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROLLER_HEAD }}
+          path: controller
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+      - run: npm ci --prefix target
+      - name: Migrate exact product
+        working-directory: target
+        run: node server/migrate.mjs
+      - name: Inject diagnostic-only calendar error logging in ephemeral checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('target/server/organization-setup.mjs')
+          s=p.read_text()
+          old="res.status(500).json({error:'Calendar creation failed'});"
+          new="console.error('CALENDAR_ROUTE_DIAGNOSTIC', { code:error?.code, constraint:error?.constraint, detail:error?.detail, message:error?.message, table:error?.table, column:error?.column });res.status(500).json({error:'Calendar creation failed'});"
+          assert s.count(old)==1,s.count(old)
+          p.write_text(s.replace(old,new))
+          PY
+          node --check target/server/organization-setup.mjs
+      - name: Run actual retained 17-check matrix with diagnostic logging
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+        shell: bash
+        working-directory: controller
+        run: |
+          set -uo pipefail
+          node .github/scripts/wos02-final-review-live-acceptance.mjs 2>&1 | tee "$RUNNER_TEMP/context.log"
+          rc=${PIPESTATUS[0]}
+          echo "MATRIX_RC=$rc"
+          echo '--- DIAGNOSTIC LINES ---'
+          grep -n -E 'CALENDAR_ROUTE_DIAGNOSTIC|FAIL governed setup authoring|PASS governed setup authoring' "$RUNNER_TEMP/context.log" || true
+          test "$rc" -ne 0
+          grep -q 'CALENDAR_ROUTE_DIAGNOSTIC' "$RUNNER_TEMP/context.log"
