@@ -106,7 +106,7 @@ try {
   await q(`insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from) values('legal-demo-sentinel','org-demo-sentinel','LEGAL-DEMO-SENTINEL','Demo Sentinel Legal','ZZ','Active','2026-01-01') on conflict(id) do nothing`);
   await q(`insert into country_directors(id,name,region) values('cd-demo-sentinel','Demo Sentinel Director','Synthetic') on conflict(id) do nothing`);
   await q(`insert into roles(name) values('DemoSentinelRole') on conflict(name) do nothing`);
-  await q(`insert into catalog_items(id,catalog_type,name,active,created_at,updated_at) values('demo-sentinel-catalog','sentinel','Demo Sentinel Catalog',true,now(),now()) on conflict(id) do nothing`);
+  await q(`insert into catalog_items(id,catalog_type,name,active,created_at,updated_at) values('demo-sentinel-catalog','departments','Demo Sentinel Catalog',true,now(),now()) on conflict(id) do nothing`);
 
   expectSuccess(runSeed({ reset: true }));
   await assertOwnedReferences();
