@@ -32,21 +32,26 @@ jobs:
           test "$MAIN" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
           test "$PROD" = "c2d067cd63b7c84b5ec51dafe5f500730f6d3276"
 
-      - name: Fetch and verify complete terminology recovery payload
+      - name: Fetch exact recovery result comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const response = await github.rest.issues.getComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: 5552885251,
+            });
+            fs.writeFileSync('/tmp/comment-body.txt', response.data.body, 'utf8');
+
+      - name: Reconstruct and verify complete terminology recovery payload
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -fsSL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/APReddy-AutoBotz/WorkOS/issues/comments/5552885251" \
-            > /tmp/comment.json
           python - <<'PY'
-          import base64, gzip, hashlib, json, re
-          with open('/tmp/comment.json', encoding='utf-8') as handle:
-              body = json.load(handle)['body']
+          import base64, gzip, hashlib, re
+          body = open('/tmp/comment-body.txt', encoding='utf-8').read()
           pattern = re.compile(
               r"### TERM-FINAL-PAYLOAD-(\d+).*?"
               r"Character count: `(\d+)`.*?"
@@ -60,8 +65,7 @@ jobs:
           chunks = []
           for index, count, expected_sha, payload in rows:
               assert len(payload) == int(count), (index, len(payload), count)
-              actual_sha = hashlib.sha256(payload.encode()).hexdigest()
-              assert actual_sha == expected_sha, (index, actual_sha, expected_sha)
+              assert hashlib.sha256(payload.encode()).hexdigest() == expected_sha
               chunks.append(payload)
           encoded = ''.join(chunks)
           assert len(encoded) == 16940
@@ -71,8 +75,7 @@ jobs:
           raw = gzip.decompress(compressed)
           assert len(raw) == 54482
           assert hashlib.sha256(raw).hexdigest() == '50c95d61a8db626858ca1b04247ea875fb63467f25e3a79e1f1bd04bb614aee8'
-          with open('/tmp/terminology.diff', 'wb') as handle:
-              handle.write(raw)
+          open('/tmp/terminology.diff', 'wb').write(raw)
           PY
           git apply --check --binary /tmp/terminology.diff
           git apply --binary /tmp/terminology.diff
