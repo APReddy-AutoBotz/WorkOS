@@ -1,0 +1,81 @@
+name: WOS-02 Calendar 500 Diagnostic
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-calendar-500-diagnostic.yml'
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_HEAD: 6ec5debaf3c8827bc948d1101c12ca0e21e39653
+  DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_calendar_diag
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: wos02_calendar_diag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workos -d wos02_calendar_diag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Migrate exact product
+        run: node server/migrate.mjs
+      - name: Reproduce calendar insert and audit independently
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
+          try {
+            await pool.query(`insert into organizations(id,code,name,effective_from) values('org-final','ORG-FINAL','Final Org','2026-01-01') on conflict(id) do nothing`);
+            await pool.query(`insert into legal_entities(id,organization_id,code,name,effective_from,effective_to) values('legal-a','org-final','LEGAL-A','Legal A','2026-01-01',null) on conflict(id) do nothing`);
+            const q=`insert into working_calendars(organization_id,applicability_type,legal_entity_id,country_code,country_authority_legal_entity_id,worker_group_id,code,name,timezone,working_days,hours_per_day,effective_from)
+              values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`;
+            try {
+              const r=await pool.query(q,['org-final','legal_entity','legal-a',null,null,null,'CAL-FUTURE','Future Calendar','UTC',[1,2,3,4,5],8,'2099-01-01']);
+              console.log('DIRECT_CALENDAR_INSERT_OK',JSON.stringify(r.rows[0]));
+            } catch(e) {
+              console.error('DIRECT_CALENDAR_INSERT_FAIL',JSON.stringify({code:e.code,constraint:e.constraint,detail:e.detail,message:e.message,table:e.table,column:e.column}));
+              process.exitCode=21;
+              return;
+            }
+            const auditCols=await pool.query(`select column_name,data_type,is_nullable from information_schema.columns where table_name='audit_logs' order by ordinal_position`);
+            console.log('AUDIT_COLUMNS',JSON.stringify(auditCols.rows));
+            try {
+              await pool.query(`insert into audit_logs(user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,old_value,new_value,details,reason,ip_address,session_id)
+                values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,[
+                '00000000-0000-0000-0000-000000000701','final-admin','Admin','Admin','Web','Organization Setup','Version Calendar','Working Calendar','diag-calendar',null,JSON.stringify({id:'diag-calendar'}),'Created an effective-dated working calendar version',null,null,'00000000-0000-0000-0000-000000000701'
+              ]);
+              console.log('AUDIT_INSERT_OK');
+            } catch(e) {
+              console.error('AUDIT_INSERT_FAIL',JSON.stringify({code:e.code,constraint:e.constraint,detail:e.detail,message:e.message,table:e.table,column:e.column}));
+              process.exitCode=22;
+            }
+          } finally { await pool.end(); }
+          NODE
