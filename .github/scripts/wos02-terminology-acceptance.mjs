@@ -33,12 +33,15 @@ execFileSync('npm', ['run', 'test:terminology-runtime'], {
 });
 
 const keys = ['employee', 'manager', 'teamLead', 'businessUnit', 'region', 'regionalOwner', 'engagement', 'project', 'worklog'];
-const registry = read('src/config/terminology.ts');
+const registry = read('src/config/productConfig.ts');
 for (const key of keys) {
-  assert.match(registry, new RegExp(`\\b${key}\\b`), `persisted terminology key missing: ${key}`);
+  assert.match(registry, new RegExp(`\\b${key}\\b`), `persisted terminology key missing from authoritative product config: ${key}`);
   assert.match(combined, new RegExp(`(?:terminology|terms|term|\\bt\\b)[^\\n]{0,80}\\b${key}\\b`, 'i'),
     `terminology key is not materially consumed by a covered runtime surface: ${key}`);
 }
+assert.match(registry, /key in defaultTerminology/, 'persisted terminology does not reject unknown canonical keys');
+assert.match(registry, /typeof value === ['"]string['"][^\n]*value\.trim\(\)/,
+  'persisted terminology does not reject invalid or blank values');
 
 const surfaceGroups = {
   'navigation/search': ['src/components/Layout/Header.tsx', 'src/components/Layout/Sidebar.tsx'],
@@ -53,12 +56,15 @@ for (const [name, files] of Object.entries(surfaceGroups)) {
 }
 
 const provider = read('src/config/RuntimeTerminology.tsx');
-assert.match(provider, /organization|organizationId|activeOrganization/i, 'provider is not organization scoped');
-assert.match(provider, /useEffect[\s\S]*\[[^\]]*(?:organization|organizationId|activeOrganization)/i,
-  'provider does not reload when organization scope changes');
-assert.match(provider, /defaultTerminology|DEFAULT_TERMINOLOGY|fallback/i, 'provider has no deterministic fallback');
-assert.match(provider, /catch|\.catch\s*\(/, 'fetch failure is not handled');
-assert.match(provider, /valid|sanitize|parse|normalize/i, 'invalid terminology is not validated/normalized');
+assert.match(provider, /workos:organization-scope-changed/, 'provider does not observe organization scope changes');
+assert.match(provider, /addEventListener\(['"]workos:organization-scope-changed['"]\s*,\s*load\)/,
+  'provider does not reload terminology on organization scope changes');
+assert.match(provider, /removeEventListener\(['"]workos:organization-scope-changed['"]\s*,\s*load\)/,
+  'provider does not clean up organization scope listener');
+assert.match(provider, /if \(!authenticated\)[\s\S]{0,160}applyPersistedTerminology\(\{\}\)/,
+  'unauthenticated terminology loading does not reset to safe defaults');
+assert.match(provider, /catch[\s\S]{0,120}applyPersistedTerminology\(\{\}\)/,
+  'fetch failure does not reset to safe defaults');
 
 // This is intentionally finite: only JSX display text/label attributes in the
 // explicit covered list are scanned. Canonical identifiers are not rewritten.
