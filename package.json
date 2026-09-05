@@ -7,7 +7,7 @@
     "dev": "vite --port=3000 --host=0.0.0.0",
     "api:dev": "node server/index.mjs",
     "api:migrate": "node server/migrate.mjs",
-    "api:seed:demo": "node server/seed-demo.mjs",
+    "api:seed:demo": "node --import tsx server/seed-demo.mjs",
     "build": "vite build",
     "start": "node server/start-production.mjs",
     "preview": "vite preview",
