@@ -80,8 +80,10 @@ for (const [file, source] of sources) {
   }
 }
 
-// Guard the product terminology commit from renaming durable contracts. These
-// tokens are canonical implementation vocabulary, not user-facing copy.
+// Guard durable canonical contracts without assuming that unrelated later
+// product fixes preserve the exact number/order of canonical token usages.
+// Existing canonical values may not disappear or be renamed; additive exact-scope
+// predicates/usages are allowed and are covered by their own acceptance matrices.
 const contractFiles = ['server/index.mjs', 'src/App.tsx', 'src/services/api.ts', 'src/services/apiClient.ts', 'src/types.ts'];
 const contractSource = contractFiles.map(read).join('\n');
 for (const token of ['/employees', '/projects', 'employee_id', 'project_id', 'organization_id', 'legal_entity_id']) {
@@ -89,14 +91,34 @@ for (const token of ['/employees', '/projects', 'employee_id', 'project_id', 'or
 }
 const previousContractSource = contractFiles.map((file) =>
   execFileSync('git', ['show', `HEAD^:${file}`], { cwd: root, encoding: 'utf8' })).join('\n');
-for (const pattern of [
-  /['"`]\/(?:employees|projects)(?:\/|['"`])/g,
-  /\b(?:employee_id|project_id|organization_id|legal_entity_id)\b/g,
-  /\b(?:permission|role|event_type|audit_action|audit_entity)\b\s*[:=]/gi,
-  /["'`][^"'`\n]+\.csv["'`]/gi,
-]) {
-  assert.deepEqual(contractSource.match(pattern) || [], previousContractSource.match(pattern) || [],
-    `terminology delta changed stable contract sequence: ${pattern}`);
+const stableContractExtractors = [
+  {
+    name: 'employee/project route literals',
+    pattern: /['"`]\/(?:employees|projects)(?:\/|['"`])/g,
+    normalize: (value) => value.replace(/^[`'"]/, '').replace(/[`'"]$/, ''),
+  },
+  {
+    name: 'canonical ownership identifiers',
+    pattern: /\b(?:employee_id|project_id|organization_id|legal_entity_id)\b/g,
+    normalize: (value) => value,
+  },
+  {
+    name: 'permission/role/event/audit property keys',
+    pattern: /\b(?:permission|role|event_type|audit_action|audit_entity)\b\s*[:=]/gi,
+    normalize: (value) => value.toLowerCase().replace(/\s*[:=]\s*$/, ''),
+  },
+  {
+    name: 'CSV filenames',
+    pattern: /["'`][^"'`\n]+\.csv["'`]/gi,
+    normalize: (value) => value.slice(1, -1),
+  },
+];
+for (const { name, pattern, normalize } of stableContractExtractors) {
+  const previousValues = new Set((previousContractSource.match(pattern) || []).map(normalize));
+  const currentValues = new Set((contractSource.match(pattern) || []).map(normalize));
+  for (const value of previousValues) {
+    assert(currentValues.has(value), `stable canonical contract removed or renamed (${name}): ${value}`);
+  }
 }
 
 console.log(JSON.stringify({ status: 'passed', keys: keys.length, files: covered.length, bounded: true }));
