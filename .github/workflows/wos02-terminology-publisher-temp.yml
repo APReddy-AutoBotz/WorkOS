@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  issues: read
 
 jobs:
   publish:
@@ -32,51 +31,16 @@ jobs:
           test "$MAIN" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
           test "$PROD" = "c2d067cd63b7c84b5ec51dafe5f500730f6d3276"
 
-      - name: Fetch exact recovery result comment
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const fs = require('fs');
-            const response = await github.rest.issues.getComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: 5552885251,
-            });
-            fs.writeFileSync('/tmp/comment-body.txt', response.data.body, 'utf8');
-
-      - name: Reconstruct and verify complete terminology recovery payload
+      - name: Reconstruct and verify exact terminology payload
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import base64, gzip, hashlib, re
-          body = open('/tmp/comment-body.txt', encoding='utf-8').read()
-          pattern = re.compile(
-              r"### TERM-FINAL-PAYLOAD-(\d+).*?"
-              r"Character count: `(\d+)`.*?"
-              r"SHA-256: `([0-9a-f]{64})`.*?"
-              r"```text\n([A-Za-z0-9+/=]+)\n```",
-              re.S,
-          )
-          rows = sorted(pattern.findall(body), key=lambda row: int(row[0]))
-          assert len(rows) == 15, f"expected 15 chunks, got {len(rows)}"
-          assert [int(row[0]) for row in rows] == list(range(15))
-          chunks = []
-          for index, count, expected_sha, payload in rows:
-              assert len(payload) == int(count), (index, len(payload), count)
-              assert hashlib.sha256(payload.encode()).hexdigest() == expected_sha
-              chunks.append(payload)
-          encoded = ''.join(chunks)
-          assert len(encoded) == 16940
-          compressed = base64.b64decode(encoded, validate=True)
-          assert len(compressed) == 12703
-          assert hashlib.sha256(compressed).hexdigest() == '7f8f278c9d321245dfbfd7a2e5cf71c1e3478cbe1d8f0b3e96cbd5e71614c701'
-          raw = gzip.decompress(compressed)
-          assert len(raw) == 54482
-          assert hashlib.sha256(raw).hexdigest() == '50c95d61a8db626858ca1b04247ea875fb63467f25e3a79e1f1bd04bb614aee8'
-          open('/tmp/terminology.diff', 'wb').write(raw)
-          PY
+          git show origin/controller/wos02-terminology-publisher-temp:.github/terminology-recovery.diff.gz > /tmp/terminology.diff.gz
+          test "$(wc -c < /tmp/terminology.diff.gz)" = "12703"
+          echo "7f8f278c9d321245dfbfd7a2e5cf71c1e3478cbe1d8f0b3e96cbd5e71614c701  /tmp/terminology.diff.gz" | sha256sum -c -
+          gzip -dc /tmp/terminology.diff.gz > /tmp/terminology.diff
+          test "$(wc -c < /tmp/terminology.diff)" = "54482"
+          echo "50c95d61a8db626858ca1b04247ea875fb63467f25e3a79e1f1bd04bb614aee8  /tmp/terminology.diff" | sha256sum -c -
           git apply --check --binary /tmp/terminology.diff
           git apply --binary /tmp/terminology.diff
           git diff --check
