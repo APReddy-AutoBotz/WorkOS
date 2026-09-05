@@ -214,7 +214,15 @@ try {
     assert.equal(period.status, 201, JSON.stringify(period.body));
     const after = await call('GET', '/api/organization-setup/readiness', { token: adminToken, scope: scopeA });
     assert.equal(after.status, 200);
-    assert.equal(after.body.ready, true, JSON.stringify(after.body));
+    assert.equal(after.body.checks.organization, true, JSON.stringify(after.body));
+    assert.equal(after.body.checks.legal_entity, true, JSON.stringify(after.body));
+    assert.equal(after.body.checks.worker_type, true, JSON.stringify(after.body));
+    assert.equal(after.body.checks.calendars, true, JSON.stringify(after.body));
+    assert.equal(after.body.checks.reporting_period, true, JSON.stringify(after.body));
+    assert.equal(after.body.identity, undefined);
+    assert.equal(after.body.ready, false, JSON.stringify(after.body));
+    assert.equal(after.body.authority, 'persisted-server-state');
+    assert.equal(after.body.checks.production_readiness, false, JSON.stringify(after.body));
   });
 
   await check('terminology is effective-dated at API and consumed by runtime frontend', async () => {
