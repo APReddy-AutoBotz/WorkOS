@@ -1,0 +1,63 @@
+name: TEMP WOS-02 Controller Git Object Builder
+
+on:
+  push:
+    branches: [controller/wos02-terminology-controller-publisher-temp]
+    paths: ['.github/workflows/wos02-controller-gitobject-temp.yml']
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+jobs:
+  build-object:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build exact controller commit object without moving authority ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          main='3070c80a71640fa4275477d0d2f1538cc8d2a819'
+          product='86c4cc1bef7a96adad3fc31b9ff3b717ba63444f'
+          product_tree='c5387984997e765690f0ebd2a89437701a9279e0'
+          base='4b7e1748e455727dd51ffd3a662bcbd46d8898ad'
+          base_tree='6af2b0352c48911feb1324dffcc571a66f572d55'
+          result_tree='c1e162c5378270750c596780eacae7167fa8813b'
+          payload='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'
+
+          test "$(gh api repos/$repo/branches/main --jq .commit.sha)" = "$main"
+          test "$(gh api repos/$repo/pulls/37 --jq '.state+"|"+(.draft|tostring)+"|"+.head.sha')" = "open|true|$product"
+          test "$(gh api repos/$repo/git/commits/$product --jq .tree.sha)" = "$product_tree"
+          test "$(gh api repos/$repo/pulls/38 --jq '.state+"|"+(.draft|tostring)+"|"+.head.sha')" = "open|true|$base"
+
+          git fetch origin controller/wos02-exact-acceptance
+          git checkout -B controller/wos02-exact-acceptance origin/controller/wos02-exact-acceptance
+          test "$(git rev-parse HEAD)" = "$base"
+          printf '%s' "$payload" | base64 -d | gzip -dc > /tmp/controller.diff
+          test "$(wc -c < /tmp/controller.diff)" = 9840
+          echo 'e2c9d1d26e15f00aafd634dd9306d4260c1ffbf993c90c05511c70c8ecb61826  /tmp/controller.diff' | sha256sum -c -
+          git apply --index --binary /tmp/controller.diff
+          test "$(git write-tree)" = "$result_tree"
+          node --check .github/scripts/wos02-terminology-acceptance.mjs
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/wos02-final-review-acceptance.yml')"
+          git diff --cached --check
+
+          script_json=$(jq -n --rawfile content .github/scripts/wos02-terminology-acceptance.mjs '{content:$content,encoding:"utf-8"}')
+          workflow_json=$(jq -n --rawfile content .github/workflows/wos02-final-review-acceptance.yml '{content:$content,encoding:"utf-8"}')
+          script_blob=$(gh api --method POST "repos/$repo/git/blobs" --input - --jq .sha <<<"$script_json")
+          workflow_blob=$(gh api --method POST "repos/$repo/git/blobs" --input - --jq .sha <<<"$workflow_json")
+          tree_json=$(jq -n --arg base "$base_tree" --arg sb "$script_blob" --arg wb "$workflow_blob" '{base_tree:$base,tree:[{path:".github/scripts/wos02-terminology-acceptance.mjs",mode:"100644",type:"blob",sha:$sb},{path:".github/workflows/wos02-final-review-acceptance.yml",mode:"100644",type:"blob",sha:$wb}]}')
+          created_tree=$(gh api --method POST "repos/$repo/git/trees" --input - --jq .sha <<<"$tree_json")
+          test "$created_tree" = "$result_tree"
+          commit_json=$(jq -n --arg msg 'CTRL: accept final terminology at exact head' --arg tree "$created_tree" --arg parent "$base" '{message:$msg,tree:$tree,parents:[$parent]}')
+          created_commit=$(gh api --method POST "repos/$repo/git/commits" --input - --jq .sha <<<"$commit_json")
+          echo "CREATED_COMMIT=$created_commit"
+          gh api --method POST "repos/$repo/issues/38/comments" -f body="[TEMP-CONTROLLER-GIT-OBJECT] Exact verified controller commit object created: \`$created_commit\`; parent \`$base\`; tree \`$created_tree\`. Temporary builder only; no authority ref moved."
