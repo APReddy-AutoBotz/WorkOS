@@ -27,6 +27,7 @@ import { validateDeactivateManager, validateEmployeeHierarchy } from './orgChart
 import { DEFAULT_ROLE_PERMISSIONS, PERMISSION_DEFINITIONS, SYSTEM_ROLES, hasPermission } from './permissions';
 
 import { productConfig } from '../config/productConfig';
+import { displayEntityType } from '../config/terminology';
 const todayIso = () => new Date().toISOString().split('T')[0];
 const sha256 = async (value: string) => {
   const data = new TextEncoder().encode(value);
@@ -140,12 +141,13 @@ const ensureLocalApprovalRecord = (record: Omit<ApprovalRecord, 'id' | 'createdA
   };
   saveLocalApprovalRecord(next);
   if (next.status === 'Pending') {
+    const displayType = displayEntityType(next.entityType);
     createLocalNotification({
       recipientEmployeeId: next.subjectEmployeeId,
       recipientName: next.subjectEmployeeName,
       eventType: 'ApprovalRequested',
-      title: `${next.entityType} approval requested`,
-      body: `${next.requesterName || next.subjectEmployeeName || 'A user'} submitted ${next.entityType} for approval.`,
+      title: `${displayType} approval requested`,
+      body: `${next.requesterName || next.subjectEmployeeName || 'A user'} submitted ${displayType.toLowerCase()} for approval.`,
       entityType: next.entityType,
       entityId: next.entityId,
       severity: 'Info',
@@ -170,12 +172,13 @@ const decideLocalApprovalRecord = (entityType: string, entityId: string, status:
     updatedAt: new Date().toISOString(),
   };
   saveLocalApprovalRecord(next);
+  const displayType = displayEntityType(next.entityType);
   createLocalNotification({
     recipientEmployeeId: next.subjectEmployeeId,
     recipientName: next.subjectEmployeeName,
     eventType: 'ApprovalDecided',
-    title: `${next.entityType} approval ${status.toLowerCase()}`,
-    body: `${next.entityType} ${next.entityId} was ${status.toLowerCase()}.`,
+    title: `${displayType} approval ${status.toLowerCase()}`,
+    body: `${displayType} ${next.entityId} was ${status.toLowerCase()}.`,
     entityType: next.entityType,
     entityId: next.entityId,
     severity: status === 'Rejected' ? 'Warning' : 'Info',

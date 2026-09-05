@@ -7,6 +7,7 @@ import { EMPLOYEE_STATUSES } from '../../constants/statuses';
 import { validateEmployeeHierarchy } from '../../services/orgChart';
 
 import { productConfig } from '../../config/productConfig';
+import { term, termPluralTitle, termTitle } from '../../config/terminology';
 const BUSINESS_UNITS = ['DACH', 'South Europe', `${productConfig.organizationName} AI`, 'NEXUS', 'Other'];
 const REGION_OPTIONS = ['India', 'Sri Lanka', 'USA', 'United Kingdom', 'Turkey', 'Switzerland', 'Spain', 'Germany', 'France', 'Italy', 'Egypt', 'DACH', 'South Europe', `${productConfig.organizationName} AI`, 'NEXUS', 'Other'];
 
@@ -79,7 +80,7 @@ export const EmployeeForm = ({ employee, onClose, onSave }: { employee?: Employe
   const validate = () => {
     const newErrors: Record<string, string> = {};
     if (!formData.name) newErrors.name = 'Name is required';
-    if (!formData.employeeId) newErrors.employeeId = 'Employee ID is required';
+    if (!formData.employeeId) newErrors.employeeId = `${termTitle('employee')} ID is required`;
     if (!formData.email) newErrors.email = 'Email is required';
     if (!formData.primaryCountryDirectorId) newErrors.cd = 'Primary Director is required';
     if (!formData.standardWeeklyHours || formData.standardWeeklyHours < 1) newErrors.standardWeeklyHours = 'Standard weekly hours are required';
@@ -110,7 +111,7 @@ export const EmployeeForm = ({ employee, onClose, onSave }: { employee?: Employe
       onClose();
     } catch (error) {
       console.error(error);
-      setFormError(error instanceof Error ? error.message : 'Employee could not be saved.');
+      setFormError(error instanceof Error ? error.message : `${termTitle('employee')} could not be saved.`);
     } finally {
       setLoading(false);
     }
@@ -134,7 +135,7 @@ export const EmployeeForm = ({ employee, onClose, onSave }: { employee?: Employe
     <div className="bg-white rounded-2xl shadow-2xl border border-border-light overflow-hidden max-w-2xl w-full mx-auto">
       <div className="px-8 py-6 border-b border-border-light flex items-center justify-between bg-gray-50/50">
         <div>
-          <h3 className="text-xl font-bold text-heading tracking-tight">{employee ? 'Edit Employee' : 'Onboard Consultant'}</h3>
+          <h3 className="text-xl font-bold text-heading tracking-tight">{employee ? `Edit ${termTitle('employee')}` : `Onboard ${termTitle('employee')}`}</h3>
           <p className="text-xs text-body opacity-60 font-medium">Register or update a resource in the global directory.</p>
         </div>
         <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
@@ -161,7 +162,7 @@ export const EmployeeForm = ({ employee, onClose, onSave }: { employee?: Employe
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-heading uppercase tracking-wider">Employee ID</label>
+              <label className="text-xs font-bold text-heading uppercase tracking-wider">{termTitle('employee')} ID</label>
               <input
                 type="text"
                 value={formData.employeeId}
@@ -227,7 +228,7 @@ export const EmployeeForm = ({ employee, onClose, onSave }: { employee?: Employe
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-heading uppercase tracking-wider">Region</label>
+              <label className="text-xs font-bold text-heading uppercase tracking-wider">{termTitle('region')}</label>
               <select
                 value={formData.region || formData.country || ''}
                 onChange={(e) => setFormData({ ...formData, region: e.target.value })}
@@ -237,7 +238,7 @@ export const EmployeeForm = ({ employee, onClose, onSave }: { employee?: Employe
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-heading uppercase tracking-wider">Business Unit</label>
+              <label className="text-xs font-bold text-heading uppercase tracking-wider">{termTitle('businessUnit')}</label>
               <select
                 value={formData.businessUnit || 'Other'}
                 onChange={(e) => setFormData({ ...formData, businessUnit: e.target.value })}
@@ -286,7 +287,7 @@ export const EmployeeForm = ({ employee, onClose, onSave }: { employee?: Employe
                 </select>
              </div>
              <div className="space-y-1">
-                <label className="text-xs font-bold text-heading uppercase tracking-wider">Reporting Manager</label>
+                <label className="text-xs font-bold text-heading uppercase tracking-wider">Reporting {termTitle('manager')}</label>
                 <select
                   value={formData.reportingManagerId || ''}
                   onChange={(e) => setFormData({ ...formData, reportingManagerId: e.target.value || undefined })}
@@ -300,7 +301,7 @@ export const EmployeeForm = ({ employee, onClose, onSave }: { employee?: Employe
              <div className="flex items-start gap-2 p-3 bg-bg-secondary rounded-xl border border-border-light mt-4">
                 <Info size={14} className="text-primary mt-0.5 shrink-0" />
                 <p className="text-[10px] text-body/70 leading-relaxed font-medium">
-                  Mapping an employee to multiple directors allows them to appear in all relevant organizational filtered views and utilization reports.
+                  Mapping a {term('employee')} to multiple {termPluralTitle('regionalOwner').toLowerCase()} allows them to appear in all relevant organizational filtered views and utilization reports.
                 </p>
              </div>
           </div>

@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils';
 import { Project, Employee, Client } from '../../types';
 import { projectService, employeeService, clientService } from '../../services/api';
 import { PROJECT_STATUSES } from '../../constants/statuses';
+import { termTitle } from '../../config/terminology';
 
 interface ProjectFormProps {
   onClose: () => void;
@@ -57,10 +58,10 @@ export const ProjectForm = ({ onClose, onSave, project }: ProjectFormProps) => {
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    if (!formData.name) newErrors.name = 'Project Name is required';
-    if (!formData.projectCode) newErrors.projectCode = 'Project Code is required';
+    if (!formData.name) newErrors.name = `${termTitle('project')} Name is required`;
+    if (!formData.projectCode) newErrors.projectCode = `${termTitle('project')} Code is required`;
     if (!formData.clientId && !formData.client) newErrors.client = 'Client is required';
-    if (!formData.managerId) newErrors.managerId = 'Project Manager is required';
+    if (!formData.managerId) newErrors.managerId = `${termTitle('project')} ${termTitle('manager')} is required`;
     if (!formData.startDate) newErrors.startDate = 'Start Date is required';
     if (!formData.endDate) newErrors.endDate = 'End Date is required';
     setErrors(newErrors);
@@ -102,8 +103,8 @@ export const ProjectForm = ({ onClose, onSave, project }: ProjectFormProps) => {
             <Briefcase size={20} className="text-orange-400" />
           </div>
           <div>
-            <h2 className="text-lg font-bold">{project ? 'Edit Project' : 'Register Project'}</h2>
-            <p className="text-[10px] text-white/50 uppercase tracking-widest font-bold">Project Master Governance</p>
+            <h2 className="text-lg font-bold">{project ? `Edit ${termTitle('project')}` : `Register ${termTitle('project')}`}</h2>
+            <p className="text-[10px] text-white/50 uppercase tracking-widest font-bold">{termTitle('project')} Master Governance</p>
           </div>
         </div>
         <button
@@ -123,7 +124,7 @@ export const ProjectForm = ({ onClose, onSave, project }: ProjectFormProps) => {
             </h3>
             <div className="space-y-4 pt-1">
               <div className="space-y-1.5 font-bold">
-                <label className="text-[10px] font-bold text-heading uppercase tracking-wider">Project Name</label>
+                <label className="text-[10px] font-bold text-heading uppercase tracking-wider">{termTitle('project')} Name</label>
                 <input
                   type="text"
                   value={formData.name}
@@ -133,7 +134,7 @@ export const ProjectForm = ({ onClose, onSave, project }: ProjectFormProps) => {
                 />
               </div>
               <div className="space-y-1.5 font-bold">
-                <label className="text-[10px] font-bold text-heading uppercase tracking-wider">Project Code</label>
+                <label className="text-[10px] font-bold text-heading uppercase tracking-wider">{termTitle('project')} Code</label>
                 <input
                   type="text"
                   value={formData.projectCode}
@@ -167,13 +168,13 @@ export const ProjectForm = ({ onClose, onSave, project }: ProjectFormProps) => {
                 <p className="text-[10px] text-slate-400 font-medium">New clients are managed in Client Portfolio to keep project reporting consistent.</p>
               </div>
               <div className="space-y-1.5 font-bold">
-                <label className="text-[10px] font-bold text-heading uppercase tracking-wider">Project Manager</label>
+                <label className="text-[10px] font-bold text-heading uppercase tracking-wider">{termTitle('project')} {termTitle('manager')}</label>
                 <select
                   value={formData.managerId}
                   onChange={(e) => setFormData({ ...formData, managerId: e.target.value })}
                   className={cn("w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all appearance-none cursor-pointer", errors.managerId ? "border-danger" : "border-slate-200")}
                 >
-                  <option value="">Select Project Lead</option>
+                  <option value="">Select {termTitle('teamLead')}</option>
                   {managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select>
               </div>

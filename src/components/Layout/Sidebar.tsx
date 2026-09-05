@@ -24,6 +24,7 @@ import { authService } from '../../services/authService';
 import { hasRouteRole, ROUTE_ROLES } from '../../services/accessControl';
 import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from '../../config/featureFlags';
 import { productConfig } from '../../config/productConfig';
+import { termPluralTitle, termTitle } from '../../config/terminology';
 import { UserRole } from '../../types';
 
 interface SidebarItem {
@@ -57,7 +58,7 @@ export const Sidebar = () => {
     {
       group: 'Workforce',
       items: [
-        { name: 'Employee Directory', path: '/employees', icon: Users, roles: ROUTE_ROLES.employees, navRoles: ['Admin', 'HR', 'CountryDirector', 'TeamLead'] },
+        { name: `${termTitle('employee')} Directory`, path: '/employees', icon: Users, roles: ROUTE_ROLES.employees, navRoles: ['Admin', 'HR', 'CountryDirector', 'TeamLead'] },
         { name: 'My Leave', path: '/leave/my', icon: CalendarDays, roles: ROUTE_ROLES.leaveSelfService, navRoles: ['Employee'], feature: 'leave' },
         { name: 'Team Leave Calendar', path: '/leave/team-calendar', icon: CalendarDays, roles: ROUTE_ROLES.leaveTeam, navRoles: ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead'], feature: 'leave' },
         { name: 'Leave Administration', path: '/leave/admin', icon: Settings, roles: ROUTE_ROLES.leaveAdmin, feature: 'leave' },
@@ -66,7 +67,7 @@ export const Sidebar = () => {
     {
       group: 'Delivery',
       items: [
-        { name: 'Project Master', path: '/projects', icon: Briefcase, roles: ROUTE_ROLES.projects },
+        { name: `${termTitle('project')} Master`, path: '/projects', icon: Briefcase, roles: ROUTE_ROLES.projects },
         { name: 'Client Portfolio', path: '/clients', icon: Building2, roles: ROUTE_ROLES.clients },
       ]
     },
@@ -106,7 +107,7 @@ export const Sidebar = () => {
         { name: 'Governance Settings', path: '/admin', icon: Settings, roles: ROUTE_ROLES.adminSettings },
       ]
     },
-  ], [user?.role]);
+  ], [user?.role, productConfig.terminology.employee, productConfig.terminology.project]);
 
   const filteredGroups = useMemo(() => {
     if (!user) return [];

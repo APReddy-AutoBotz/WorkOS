@@ -2,6 +2,7 @@ import { adminService, allocationService, clientService, employeeService, projec
 import { downloadCsv } from './csv';
 
 import { productConfig } from '../config/productConfig';
+import { term, termPlural, termPluralTitle, termTitle } from '../config/terminology';
 export interface ReportExportOption {
   id: string;
   title: string;
@@ -10,15 +11,16 @@ export interface ReportExportOption {
   category: 'Workforce' | 'Delivery' | 'Planning' | 'Time' | 'Governance';
 }
 
-export const reportExportOptions: ReportExportOption[] = [
-  { id: 'master_emp', title: 'Employee Master Export', description: 'Employees, reporting lines, CD mappings, capacity, and identity placeholders.', fileName: 'employees.csv', category: 'Workforce' },
+export const getReportExportOptions = (): ReportExportOption[] => [
+  { id: 'master_emp', title: `${termTitle('employee')} Master Export`, description: `${termPluralTitle('employee')}, reporting ${termPlural('manager')}, ${termPlural('regionalOwner')}, capacity, and identity placeholders.`, fileName: 'employees.csv', category: 'Workforce' },
   { id: 'master_client', title: 'Client Master Export', description: `Client ownership, industry, status, and ${productConfig.terminology.regionalOwner} scope.`, fileName: 'clients.csv', category: 'Delivery' },
-  { id: 'master_prj', title: 'Project Master Export', description: 'Projects, clients, managers, dates, status, and delivery attributes.', fileName: 'projects.csv', category: 'Delivery' },
-  { id: 'util_report', title: 'Utilization Analysis', description: 'Planned and actual utilization summary by employee.', fileName: 'utilization-report.csv', category: 'Planning' },
-  { id: 'timesheet_logs', title: 'Timesheet Audit Export', description: 'Timesheet status, entries, work type, and approval evidence.', fileName: 'timesheets.csv', category: 'Time' },
-  { id: 'alloc_matrix', title: 'Allocation Matrix', description: 'Employee-project assignments, allocation percentages, and effective dates.', fileName: 'allocations.csv', category: 'Planning' },
+  { id: 'master_prj', title: `${termTitle('project')} Master Export`, description: `${termPluralTitle('project')}, clients, ${termPlural('manager')}, dates, status, and ${term('engagement')} attributes.`, fileName: 'projects.csv', category: 'Delivery' },
+  { id: 'util_report', title: 'Utilization Analysis', description: `Planned and actual utilization summary by ${term('employee')}.`, fileName: 'utilization-report.csv', category: 'Planning' },
+  { id: 'timesheet_logs', title: `${termTitle('worklog')} Audit Export`, description: `${termTitle('worklog')} status, entries, work type, and approval evidence.`, fileName: 'timesheets.csv', category: 'Time' },
+  { id: 'alloc_matrix', title: 'Allocation Matrix', description: `${termTitle('employee')}-${term('project')} assignments, allocation percentages, and effective dates.`, fileName: 'allocations.csv', category: 'Planning' },
   { id: 'system_audit', title: 'Full Traceability Audit', description: 'Audit events across master data, reports, imports, exports, and governance.', fileName: 'audit-logs.csv', category: 'Governance' },
 ];
+export const reportExportOptions = getReportExportOptions();
 
 export const downloadAuditedCsv = async (
   fileName: string,
@@ -40,7 +42,7 @@ export const downloadAuditedCsv = async (
 };
 
 export const downloadReportExport = async (id: string) => {
-  const option = reportExportOptions.find(item => item.id === id);
+  const option = getReportExportOptions().find(item => item.id === id);
   if (!option) throw new Error(`Unknown report export: ${id}`);
 
   let rows: object[];

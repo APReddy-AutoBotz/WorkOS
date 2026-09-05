@@ -3,6 +3,7 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
 import { projectService, adminService, employeeService, allocationService, clientService } from '../services/api';
 import { authService } from '../services/authService';
+import { termTitle } from '../config/terminology';
 import { Allocation, Client, CountryDirector, Employee, Project } from '../types';
 import {
   Briefcase,
@@ -285,7 +286,7 @@ export const ProjectMaster = () => {
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       <PageHeader
-        title="Project Master"
+        title={`${termTitle('project')} Master`}
         subtitle="Full lifecycle oversight of client engagements, delivery milestones, and resource density."
         breadcrumb={['Delivery', 'Master Data']}
         actions={

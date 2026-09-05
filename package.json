@@ -36,6 +36,7 @@
     "test:identity-discovery": "node tests/identity-discovery-smoke.mjs",
     "test:authorization-convergence": "node tests/authorization-convergence-smoke.mjs",
     "test:organization-setup": "node tests/organization-setup-smoke.mjs",
+    "test:terminology-runtime": "node --import tsx tests/terminology-runtime-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",

@@ -33,6 +33,7 @@ import { motion } from 'motion/react';
 import { nextSortConfig, SortConfig, sortByConfig } from '../lib/sorting';
 import { EMPLOYEE_STATUSES } from '../constants/statuses';
 import { authService } from '../services/authService';
+import { termTitle } from '../config/terminology';
 import { CapacityCard } from '../components/employee/CapacityCard';
 import { AllocationTimeline } from '../components/employee/AllocationTimeline';
 import { UtilizationHeatmap } from '../components/employee/UtilizationHeatmap';
@@ -259,7 +260,7 @@ export const EmployeeMaster = () => {
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       <PageHeader
-        title="Employee Master"
+        title={`${termTitle('employee')} Master`}
         subtitle="Manage global consultant directory, multi-director mappings, and utilization benchmarks."
         breadcrumb={['Operations', 'Master Data']}
         actions={

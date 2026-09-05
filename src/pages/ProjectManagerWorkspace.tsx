@@ -10,6 +10,7 @@ import { Allocation, Employee, Project, SystemSettings, TimesheetSummary } from 
 import { cn } from '../lib/utils';
 import { isProjectAvailableForPlanning, overlapsDateRange } from '../services/calculations';
 import { formatFte, formatHours, formatMetric, formatPercent } from '../lib/format';
+import { term, termPlural, termPluralTitle, termTitle } from '../config/terminology';
 
 const todayIso = () => new Date().toISOString().split('T')[0];
 
@@ -106,12 +107,12 @@ export const ProjectManagerWorkspace = () => {
     <div className="animate-in fade-in duration-500 pb-12">
       <PageHeader
         title="PM Workspace"
-        subtitle="Managed projects, team allocation, pending approvals, and staffing risks."
+        subtitle={`Managed ${termPlural('project')}, ${term('teamLead')} allocation, pending approvals, and staffing risks.`}
         breadcrumb={['Operations', user.name]}
         actions={(
           <div className="flex items-center gap-2">
             <Link to="/projects" className="btn-secondary py-2.5 px-5 flex items-center gap-2">
-              <Briefcase size={14} /> Project Master
+              <Briefcase size={14} /> {termTitle('project')} Master
             </Link>
             <Link to="/timesheets/approval" className="btn-primary py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-primary/20">
               <CheckCircle2 size={14} /> Approvals
@@ -122,10 +123,10 @@ export const ProjectManagerWorkspace = () => {
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         {[
-          { label: 'Managed Projects', value: projects.length, sub: `${activeProjects.length} active today`, icon: Briefcase },
-          { label: 'Current Team', value: team.length, sub: 'Visible resources', icon: Users },
+          { label: `Managed ${termPluralTitle('project')}`, value: projects.length, sub: `${activeProjects.length} active today`, icon: Briefcase },
+          { label: 'Current Team', value: team.length, sub: `Visible ${termPlural('employee')}`, icon: Users },
           { label: 'Allocated FTE', value: formatMetric(allocatedFte), sub: 'Across active projects', icon: Users },
-          { label: 'Pending Approvals', value: pendingTimesheets.length, sub: 'Submitted timesheets', icon: Clock },
+          { label: 'Pending Approvals', value: pendingTimesheets.length, sub: `Submitted ${termPlural('worklog')}`, icon: Clock },
           { label: 'Staffing Risks', value: staffingGaps.length + overloadedTeam.length, sub: `${staffingGaps.length} gaps, ${overloadedTeam.length} overloads`, icon: AlertCircle },
         ].map(item => (
           <div key={item.label} className="bg-white border border-border-light rounded-2xl p-4 shadow-sm">

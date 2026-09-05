@@ -4,9 +4,10 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { cn } from '../lib/utils';
-import { downloadReportExport, reportExportOptions } from '../lib/reportExport';
+import { downloadReportExport, getReportExportOptions } from '../lib/reportExport';
 
 export const ReportsCenter = () => {
+  const reportExportOptions = getReportExportOptions();
   const [downloading, setDownloading] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
 

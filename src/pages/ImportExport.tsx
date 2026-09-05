@@ -16,7 +16,8 @@ import {
 import { cn } from '../lib/utils';
 import { allocationService, clientService, employeeService, projectService, timesheetService, adminService } from '../services/api';
 import { Employee, Project, Allocation, ImportExportLog, Client, TimesheetSummary, WorkType } from '../types';
-import { downloadAuditedCsv, downloadReportExport, reportExportOptions } from '../lib/reportExport';
+import { downloadAuditedCsv, downloadReportExport, getReportExportOptions } from '../lib/reportExport';
+import { termPluralTitle, termTitle } from '../config/terminology';
 
 type ImportChannel = 'employees' | 'clients' | 'projects' | 'allocations' | 'timesheets';
 type CsvRow = Record<string, string>;
@@ -34,15 +35,13 @@ type PendingImport = {
   errors: ImportErrorRow[];
 };
 
-const importOptions: Array<{ id: ImportChannel; title: string; description: string; icon: typeof FileText }> = [
-  { id: 'employees', title: 'Employee Master', description: 'Bulk onboard or update resources, skills, and mapping.', icon: FileText },
+const getImportOptions = (): Array<{ id: ImportChannel; title: string; description: string; icon: typeof FileText }> => [
+  { id: 'employees', title: `${termTitle('employee')} Master`, description: `Bulk onboard or update ${termPluralTitle('employee').toLowerCase()}, skills, and mapping.`, icon: FileText },
   { id: 'clients', title: 'Client Master', description: 'Bulk create or update clients, industries, and director scope.', icon: FileText },
-  { id: 'projects', title: 'Project Master', description: 'Batch create projects, managers, clients, and timelines.', icon: FileText },
+  { id: 'projects', title: `${termTitle('project')} Master`, description: `Batch create ${termPluralTitle('project').toLowerCase()}, ${termPluralTitle('manager').toLowerCase()}, clients, and timelines.`, icon: FileText },
   { id: 'allocations', title: 'Allocation Control', description: 'Validate assignment matrix and percentage loads.', icon: FileText },
-  { id: 'timesheets', title: 'Timesheet Import', description: 'Bulk load weekly time entries with employee, project, and date validation.', icon: FileText },
+  { id: 'timesheets', title: `${termTitle('worklog')} Import`, description: `Bulk load weekly time entries with ${termTitle('employee').toLowerCase()}, ${termTitle('project').toLowerCase()}, and date validation.`, icon: FileText },
 ];
-
-const exportOptions = reportExportOptions.map(option => ({ ...option, filters: [option.category, 'Scope'], formats: ['CSV'] }));
 
 const employeeStatuses: Employee['status'][] = ['Active', 'On Leave', 'Exited'];
 const projectStatuses: Project['status'][] = ['Proposed', 'Active', 'On Hold', 'Completed'];
@@ -82,6 +81,8 @@ const isDateOrderValid = (startDate: string, endDate: string) => {
 };
 
 export const ImportExport = () => {
+  const importOptions = getImportOptions();
+  const exportOptions = getReportExportOptions().map(option => ({ ...option, filters: [option.category, 'Scope'], formats: ['CSV'] }));
   const [activeTab, setActiveTab] = useState<'import' | 'export'>('import');
   const [lastResult, setLastResult] = useState<string>('');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
