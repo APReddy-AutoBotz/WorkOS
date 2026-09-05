@@ -1,0 +1,70 @@
+name: WOS-02 Calendar Guard Recovery Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - .github/workflows/wos02-calendar-guard-recovery-publisher.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact product lease
+        uses: actions/checkout@v4
+        with:
+          ref: codex/wos-02-organization-setup-foundation
+          fetch-depth: 0
+
+      - name: Verify and publish exact recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_BASE='6ec5debaf3c8827bc948d1101c12ca0e21e39653'
+          EXPECTED_MAIN='3070c80a71640fa4275477d0d2f1538cc8d2a819'
+          EXPECTED_TREE='483e6fbab2a204c7356dcd61677bae3538c51624'
+          EXPECTED_RAW_BYTES='3741'
+          EXPECTED_RAW_SHA='b257821eda60d5000b19705a25d08ace135438cc506cbb3ade39a92d472e33d8'
+          EXPECTED_GZ_BYTES='1412'
+          EXPECTED_GZ_SHA='78bc7a94291ea06e9e03613462e113088dcbf8fbd14406fc14b72be2ed881bb3'
+          BRANCH='codex/wos-02-organization-setup-foundation'
+
+          test "$(git rev-parse HEAD)" = "$EXPECTED_BASE"
+          git fetch origin main "$BRANCH"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse origin/$BRANCH)" = "$EXPECTED_BASE"
+
+          cat > payload.b64 <<'PAYLOAD'
+H4sIAAAAAAACA81X227bOBB991fwwajsmpJj59I6WaMNctkG29qF03ZRRIVKS5TNRiZVkkrqFv33HVIXX+Nk92kDOLYkcnhm5pyZUcTiGLnuhGlE2orKOyrbQk4IZz+JZoK7iuos9WbfFBrvfl5jPKI/0GFnTA+7Pc/r0pe9cdxBnb29o4ODmuu6j51Qa7Vaj57y+jVy9zuH+AVq5V9wg/5IhdQoFFxpJOmEKU3lcGn/tdk+EpmmCvVR4xciaYpRKkSCYf33jEl6TjQZE0XNjRoq/wiPwGzGtZwHJNNTIZmeBwmdkCSgXJsLFiGmEBcaRXAu46FGsRQzVD+0u++FvKUymEiRpQ+vPVo/MqL9+gskZEQlGs8RjWMaanZHA7s+oipECZtB1jooFhJlaUQ0/YrvSJJR1Wx6Utyrm70vJ6VdFjcSWKH0s2cpkYpGHmwgXmX3Esz+0TdGhjyZF2u91WObzV/knsCZYcLAee97RuW84UiRJGMS3jrNEwlxlhwiqDylic5U42Cv1/S+KcEbv6iUQh47ZyShPCISQZIV5MakLU5YqB1s3IYFp28vBueno+DTxej6ajgIzoaDy7dXZx+c382T3zV3zaFXSyi16Pd5liTNbTjzGNmEMD4JwgKHQkAutGKj3j0+NmvdDrqfUkkRi/r1joNvirCwCD8YxC/Nk1prI+Yb8fyfIC3YUSpHZYnub0H0lXFQpUaMa7EJq7EsVeA4BnVBQsmYJUYgep5SvCYZXIrKpBwvyP+o1vCanixnMCczijWb0Z+CU1wCjMhc4anIpApS2AKXeI3Qi4Nz4TTqHVzv4vo+rh/g+iGuH+H6C1x/ies9XO/swQeed7pNlBMdDkHPv+Ibz/Py/SvBtqCWb1QAl28WYM8N1uX7Fvd7KuHB7hRGyxXcJF1tKZ2umolbWpTxxxcVtfyoF/X2e/ueRzr7+y+73dVa/gQzeUF/wkJT1Q+6+Ai14H/P1HSiDOO8GdHhtFFS7bSkxTs2kdYSblMOBTCkwTotg2Wm3Pi1p1vcsFRUKhVwEQi4SAgYVP71l+ebTEf3TE9Rv3hutCkJn9A2dsK1wqfQLLOqmxHGoSlwt7CdGl4BY9GKdaRCkVLHiPa/ezIVCTOyKOAVlzlwAOE3nPfZGM50sHMmZinhc8dvFosfMhYYJ5cUuwgSOJ1ac+0wN4aKLahanccglfQOJI7IbMwmmcig0oF4XFsFy2htem4GBRZS3K46xtnw4+DD6HMwGH4ILuH3eQE9BOUkYmL97DvjTDFOlQoyzrRTLKls/D0c/XUxCv4cDT++Xxhazt9qWqwDMWEJlEwBMkVkAvk0ThngMIlUE8TSPOBaVi7CYJxrbXeOxf5a6/ZtJfAfat7lcn+tffvNKpUPtlhwExp3Qi3URQ52U9c47+bOP9GPTYBlP/RXGqKf9x//37REf1tP9G1TzJ3f2ctKXVsQJIuY9hs5FgyDIob4EI5Ahxw4y2DwqiJjA2KDgMYUKpLRkz3HRDJm0jytCJSnHVRudykS02QO0SThdHmXPd7WE5hcESlOhMluOcqRoGog9LuHgu2/2h7mFUKv4rHzKQQuhg8PDRcQGSujzxxBQYIdgpRm1Ja+lwoA0HD8dhVfv31c/r6K/HZZj0oVVhuzp+2D28XPq6i0MaIa5nlUzZlv8gXgcLmrCHuW2teGialW3MgUMqDhBSDnGrY5kNbYDJx/Sv15M3x7dX76uZLTbkTFU5FEn8z0cGyqIIPihzm9z+8sMFdTsspfEKamqRSOjCkC0Y4L1VrWgDe2D+VUbJMYolrMODv8OLUkgdwDvyNIPYMTytJckWURkfVicjUIPl5fGInkdvJSBy8xVdlfsZxjT0R4u824gfkPaCFdK50OAAA=
+PAYLOAD
+
+          base64 -d payload.b64 > recovery.diff.gz
+          test "$(wc -c < recovery.diff.gz)" = "$EXPECTED_GZ_BYTES"
+          echo "$EXPECTED_GZ_SHA  recovery.diff.gz" | sha256sum -c -
+          gzip -dc recovery.diff.gz > recovery.diff
+          test "$(wc -c < recovery.diff)" = "$EXPECTED_RAW_BYTES"
+          echo "$EXPECTED_RAW_SHA  recovery.diff" | sha256sum -c -
+
+          git apply --check --binary recovery.diff
+          git apply --binary recovery.diff
+          mapfile -t files < <(git diff --name-only | sort)
+          test "${#files[@]}" = '2'
+          test "${files[0]}" = 'server/organization-setup.mjs'
+          test "${files[1]}" = 'tests/organization-setup-smoke.mjs'
+          test "$(git diff --numstat | awk '{a+=$1; d+=$2} END {print a ":" d}')" = '4:1'
+
+          git add server/organization-setup.mjs tests/organization-setup-smoke.mjs
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          git config user.name 'WorkOS Controller'
+          git config user.email 'workos-controller@users.noreply.github.com'
+          git commit -m 'fix: guard first calendar version'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+
+          git fetch origin "$BRANCH"
+          test "$(git rev-parse origin/$BRANCH)" = "$EXPECTED_BASE"
+          git push origin HEAD:"$BRANCH"
