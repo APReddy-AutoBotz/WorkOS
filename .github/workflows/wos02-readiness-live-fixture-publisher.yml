@@ -1,0 +1,101 @@
+name: WOS-02 Readiness Live Fixture Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-readiness-live-fixture-publisher.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 3b44e9ee454496461d9711a0bac1f458c3c33fff
+  EXPECTED_TREE: 593708d35ce92b4a02b85c4e0f2742eaff0ffd6a
+  EXPECTED_CONTROLLER: 309668a16c43f42b7fe45dad80db6a876e321f92
+  CONTROLLER_BRANCH: controller/wos02-exact-acceptance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.head.sha!==process.env.EXPECTED_PRODUCT||product.state!=='open'||!product.draft) failures.push(`product=${product.head.sha}/${product.state}/draft:${product.draft}`);
+            const {data:pc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:product.head.sha});
+            if(pc.commit.tree.sha!==process.env.EXPECTED_TREE) failures.push(`tree=${pc.commit.tree.sha}`);
+            if(controller.head.sha!==process.env.EXPECTED_CONTROLLER||controller.state!=='open'||!controller.draft||controller.head.ref!==process.env.CONTROLLER_BRANCH) failures.push(`controller=${controller.head.sha}/${controller.state}/draft:${controller.draft}/${controller.head.ref}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Correct retained readiness fixture contract only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CONTROLLER"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/wos02-final-review-live-acceptance.mjs')
+          s=p.read_text()
+          old="""    const after = await call('GET', '/api/organization-setup/readiness', { token: adminToken, scope: scopeA });
+              assert.equal(after.status, 200);
+              assert.equal(after.body.ready, true, JSON.stringify(after.body));
+          """
+          new="""    const after = await call('GET', '/api/organization-setup/readiness', { token: adminToken, scope: scopeA });
+              assert.equal(after.status, 200);
+              assert.equal(after.body.checks.organization, true, JSON.stringify(after.body));
+              assert.equal(after.body.checks.legal_entity, true, JSON.stringify(after.body));
+              assert.equal(after.body.checks.worker_type, true, JSON.stringify(after.body));
+              assert.equal(after.body.checks.calendars, true, JSON.stringify(after.body));
+              assert.equal(after.body.checks.reporting_period, true, JSON.stringify(after.body));
+              assert.equal(after.body.identity, undefined);
+              assert.equal(after.body.ready, false, JSON.stringify(after.body));
+              assert.equal(after.body.authority, 'persisted-server-state');
+              assert.equal(after.body.checks.production_readiness, false, JSON.stringify(after.body));
+          """
+          if s.count(old)!=1:
+              raise SystemExit(f'expected old readiness assertion exactly once, found {s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+          PY
+          node --check .github/scripts/wos02-final-review-live-acceptance.mjs
+          git diff --check
+          test "$(git diff --name-only | tr '\n' ' ')" = ".github/scripts/wos02-final-review-live-acceptance.mjs "
+          git add .github/scripts/wos02-final-review-live-acceptance.mjs
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'CTRL: align retained readiness fixture with complete readiness'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_CONTROLLER"
+
+      - name: Revalidate exact live leases before push
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(product.head.sha!==process.env.EXPECTED_PRODUCT||product.state!=='open'||!product.draft) failures.push(`product=${product.head.sha}/${product.state}/draft:${product.draft}`);
+            if(controller.head.sha!==process.env.EXPECTED_CONTROLLER||controller.state!=='open'||!controller.draft) failures.push(`controller=${controller.head.sha}/${controller.state}/draft:${controller.draft}`);
+            if(failures.length) core.setFailed(`pre-push lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward controller branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"$CONTROLLER_BRANCH"
