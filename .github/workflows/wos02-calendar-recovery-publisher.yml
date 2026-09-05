@@ -95,7 +95,7 @@ jobs:
           server/working-calendars.mjs
           tests/organization-setup-smoke.mjs
           EOF
-          git diff --name-only | sort > "$RUNNER_TEMP/actual-files"
+          { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u > "$RUNNER_TEMP/actual-files"
           diff -u "$RUNNER_TEMP/expected-files" "$RUNNER_TEMP/actual-files"
           git diff --check
           git add -A
