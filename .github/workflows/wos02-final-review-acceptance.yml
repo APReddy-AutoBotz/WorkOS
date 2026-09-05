@@ -9,6 +9,7 @@ on:
       - '.github/scripts/wos02-scope-write-acceptance.mjs'
       - '.github/scripts/wos02-worker-lifecycle-acceptance.mjs'
       - '.github/scripts/wos02-reporting-period-acceptance.mjs'
+      - '.github/scripts/wos02-readiness-acceptance.mjs'
 
 permissions:
   contents: read
@@ -17,8 +18,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: 253b0320ac3426b0df600a8823c9f98d4485d8a4
-  TARGET_TREE: 9afbfa7eb02067a312cb14b5e17f71424ce807c7
+  TARGET_HEAD: 3b44e9ee454496461d9711a0bac1f458c3c33fff
+  TARGET_TREE: 593708d35ce92b4a02b85c4e0f2742eaff0ffd6a
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -50,7 +51,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 24-file authority
+      - name: Verify exact product controller main and 25-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -85,6 +86,7 @@ jobs:
               'server/organization-setup.mjs',
               'server/reporting-periods.mjs',
               'server/seed-demo.mjs',
+              'server/setup-readiness.mjs',
               'server/worker-lifecycle.mjs',
               'src/App.tsx',
               'src/components/Layout/Header.tsx',
@@ -182,6 +184,7 @@ jobs:
           node --check server/organization-setup.mjs
           node --check server/worker-lifecycle.mjs
           node --check server/reporting-periods.mjs
+          node --check server/setup-readiness.mjs
           node --check server/seed-demo.mjs
 
       - name: Production startup fails closed without required config
@@ -202,7 +205,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 40); do pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres && break; sleep 1; done
-          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_reporting_period wos02_final_prod; do
+          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_reporting_period wos02_readiness wos02_final_prod; do
             dropdb --if-exists -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
             createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
           done
@@ -315,6 +318,17 @@ jobs:
           set -euo pipefail
           (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
           node .github/scripts/wos02-reporting-period-acceptance.mjs
+
+      - name: Execute guided setup readiness completeness matrix
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_readiness
+        run: |
+          set -euo pipefail
+          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+          node .github/scripts/wos02-readiness-acceptance.mjs
 
       - name: Verify database ownership constraints and organization-scoped timesheet uniqueness directly
         shell: bash
