@@ -62,8 +62,7 @@ jobs:
               console.log('DIRECT_CALENDAR_INSERT_OK',JSON.stringify(r.rows[0]));
             } catch(e) {
               console.error('DIRECT_CALENDAR_INSERT_FAIL',JSON.stringify({code:e.code,constraint:e.constraint,detail:e.detail,message:e.message,table:e.table,column:e.column}));
-              process.exitCode=21;
-              return;
+              throw e;
             }
             const auditCols=await pool.query(`select column_name,data_type,is_nullable from information_schema.columns where table_name='audit_logs' order by ordinal_position`);
             console.log('AUDIT_COLUMNS',JSON.stringify(auditCols.rows));
@@ -75,7 +74,7 @@ jobs:
               console.log('AUDIT_INSERT_OK');
             } catch(e) {
               console.error('AUDIT_INSERT_FAIL',JSON.stringify({code:e.code,constraint:e.constraint,detail:e.detail,message:e.message,table:e.table,column:e.column}));
-              process.exitCode=22;
+              throw e;
             }
           } finally { await pool.end(); }
           NODE
