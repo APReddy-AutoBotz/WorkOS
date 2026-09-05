@@ -1,0 +1,124 @@
+name: WOS-02 Retained Live Fixture Refresh Publisher
+
+on:
+  push:
+    branches:
+      - controller/wos02-migration-publisher-temp2
+    paths:
+      - '.github/workflows/wos02-live-fixture-refresh-publisher.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 6ec5debaf3c8827bc948d1101c12ca0e21e39653
+  EXPECTED_PRODUCT_TREE: 22b027d0bc4cd5124cab7f2ca56e61b03f23af87
+  EXPECTED_CONTROLLER: c1a6a52f231b27c81a9e2d7728b3fc9475060e49
+  CONTROLLER_BRANCH: controller/wos02-exact-acceptance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.state!=='open'||!product.draft||product.head.sha!==process.env.EXPECTED_PRODUCT||product.base.sha!==process.env.EXPECTED_MAIN) failures.push(`product=${product.head.sha}/${product.state}/draft:${product.draft}/base:${product.base.sha}`);
+            const {data:pc}=await github.rest.repos.getCommit({owner:context.repo.owner,repo:context.repo.repo,ref:product.head.sha});
+            if(pc.commit.tree.sha!==process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${pc.commit.tree.sha}`);
+            if(controller.state!=='open'||!controller.draft||controller.head.ref!==process.env.CONTROLLER_BRANCH||controller.head.sha!==process.env.EXPECTED_CONTROLLER||controller.base.sha!==process.env.EXPECTED_MAIN) failures.push(`controller=${controller.head.sha}/${controller.state}/draft:${controller.draft}/base:${controller.base.sha}`);
+            if(failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Correct only stale retained live fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CONTROLLER"
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/wos02-final-review-live-acceptance.mjs')
+          s=p.read_text()
+
+          old="const futureCalendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-FUTURE', name: 'Future Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, effectiveFrom: '2099-01-01' } });"
+          new="const futureCalendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-FUTURE', name: 'Future Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, effectiveFrom: '2099-01-01', applicability: { type: 'legal_entity' } } });"
+          assert s.count(old)==1, s.count(old)
+          s=s.replace(old,new)
+
+          old="const calendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-CURRENT', name: 'Current Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, effectiveFrom: '2026-01-01' } });"
+          new="const calendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-CURRENT', name: 'Current Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, effectiveFrom: '2026-01-01', applicability: { type: 'legal_entity' } } });"
+          assert s.count(old)==1, s.count(old)
+          s=s.replace(old,new)
+
+          old="""await pool.query(`insert into working_calendars(organization_id,legal_entity_id,code,name,timezone,working_days,hours_per_day,effective_from,effective_to)
+      values('org-final','legal-a','CAL-OVERLAP','Overlap Baseline','UTC',array[1,2,3,4,5],8,'2026-01-01','2026-12-31')`);"""
+          new="""await pool.query(`insert into working_calendars(organization_id,legal_entity_id,applicability_type,code,name,timezone,working_days,hours_per_day,effective_from,effective_to)
+      values('org-final','legal-a','legal_entity','CAL-OVERLAP','Overlap Baseline','UTC',array[1,2,3,4,5],8,'2026-01-01','2026-12-31')`);"""
+          assert s.count(old)==1, s.count(old)
+          s=s.replace(old,new)
+
+          old="""() => pool.query(`insert into working_calendars(organization_id,legal_entity_id,code,name,timezone,working_days,hours_per_day,effective_from,effective_to)
+        values('org-final','legal-a','CAL-OVERLAP','Overlap Conflict','UTC',array[1,2,3,4,5],8,'2026-06-01','2026-09-30')`),"""
+          new="""() => pool.query(`insert into working_calendars(organization_id,legal_entity_id,applicability_type,code,name,timezone,working_days,hours_per_day,effective_from,effective_to)
+        values('org-final','legal-a','legal_entity','CAL-OVERLAP','Overlap Conflict','UTC',array[1,2,3,4,5],8,'2026-06-01','2026-09-30')`),"""
+          assert s.count(old)==1, s.count(old)
+          s=s.replace(old,new)
+
+          needle="""  await check('canonical timesheet import uses a valid past week and creates scoped timesheet state', async () => {
+    const response = await call('POST', '/api/imports/timesheets/apply',"""
+          replacement="""  await check('canonical timesheet import uses a valid past week and creates scoped timesheet state', async () => {
+    const coveringPeriod = await pool.query(`select 1 from reporting_periods
+      where organization_id='org-final' and legal_entity_id='legal-a' and status='Open'
+        and '2026-08-24'::date between starts_on and ends_on limit 1`);
+    if (!coveringPeriod.rowCount) {
+      await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)
+        values('org-final','legal-a','PERIOD-IMPORT','Import Acceptance Period','2026-08-24','2026-08-30','Open')`);
+    }
+    const response = await call('POST', '/api/imports/timesheets/apply',"""
+          assert s.count(needle)==1, s.count(needle)
+          s=s.replace(needle,replacement)
+
+          p.write_text(s)
+          PY
+          git diff --check
+          test "$(git diff --name-only | tr '\n' ' ')" = ".github/scripts/wos02-final-review-live-acceptance.mjs "
+          node --check .github/scripts/wos02-final-review-live-acceptance.mjs
+          git add .github/scripts/wos02-final-review-live-acceptance.mjs
+          git config user.name 'WorkOS Controller'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'CTRL: refresh retained live fixtures for calendar authority'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_CONTROLLER"
+
+      - name: Revalidate live leases before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures=[];
+            const {data:main}=await github.rest.repos.getBranch({owner:context.repo.owner,repo:context.repo.repo,branch:'main'});
+            const {data:product}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:37});
+            const {data:controller}=await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:38});
+            if(main.commit.sha!==process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if(product.head.sha!==process.env.EXPECTED_PRODUCT||!product.draft) failures.push(`product=${product.head.sha}/draft:${product.draft}`);
+            if(controller.head.sha!==process.env.EXPECTED_CONTROLLER||!controller.draft) failures.push(`controller=${controller.head.sha}/draft:${controller.draft}`);
+            if(failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing controller branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"$CONTROLLER_BRANCH"
