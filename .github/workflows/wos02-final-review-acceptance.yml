@@ -13,6 +13,7 @@ on:
       - '.github/scripts/wos02-org-profile-acceptance.mjs'
       - '.github/scripts/wos02-calendar-acceptance.mjs'
       - '.github/scripts/wos02-demo-seed-acceptance.mjs'
+      - '.github/scripts/wos02-terminology-acceptance.mjs'
 
 permissions:
   contents: read
@@ -21,8 +22,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: c2d067cd63b7c84b5ec51dafe5f500730f6d3276
-  TARGET_TREE: 56d09de608606596397129ffa628fe6e6d4838ce
+  TARGET_HEAD: 86c4cc1bef7a96adad3fc31b9ff3b717ba63444f
+  TARGET_TREE: c5387984997e765690f0ebd2a89437701a9279e0
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -54,7 +55,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 29-file authority
+      - name: Verify exact product controller main and 43-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -96,14 +97,28 @@ jobs:
               'server/working-calendars.mjs',
               'src/App.tsx',
               'src/components/Layout/Header.tsx',
+              'src/components/Layout/Sidebar.tsx',
+              'src/components/employee/OrgChartView.tsx',
+              'src/components/forms/EmployeeForm.tsx',
+              'src/components/forms/ProjectForm.tsx',
               'src/config/RuntimeTerminology.tsx',
               'src/config/productConfig.ts',
+              'src/config/terminology.ts',
+              'src/lib/reportExport.ts',
               'src/pages/AdminSettings.tsx',
+              'src/pages/EmployeeDetail.tsx',
+              'src/pages/EmployeeMaster.tsx',
+              'src/pages/ImportExport.tsx',
+              'src/pages/ProjectDetail.tsx',
+              'src/pages/ProjectManagerWorkspace.tsx',
+              'src/pages/ProjectMaster.tsx',
+              'src/pages/ReportsCenter.tsx',
               'src/services/api.ts',
               'src/services/apiClient.ts',
               'src/types.ts',
               'tests/backend-contract-smoke.mjs',
               'tests/organization-setup-smoke.mjs',
+              'tests/terminology-runtime-smoke.mjs',
             ].sort();
             if (JSON.stringify(actual) !== JSON.stringify(required)) failures.push(`target files=${JSON.stringify(actual)}`);
             if (failures.length) core.setFailed(`authority failed: ${failures.join('; ')}`);
@@ -198,6 +213,16 @@ jobs:
           node --check ../controller/.github/scripts/wos02-org-profile-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-calendar-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-demo-seed-acceptance.mjs
+          node --check ../controller/.github/scripts/wos02-terminology-acceptance.mjs
+
+      - name: Execute FINAL TERMINOLOGY runtime and stability acceptance
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+        run: |
+          set -euo pipefail
+          node .github/scripts/wos02-terminology-acceptance.mjs
 
       - name: Production startup fails closed without required config
         shell: bash
@@ -432,6 +457,9 @@ jobs:
           WOS_CHROME_HANDSHAKE_EVIDENCE: ${{ runner.temp }}/wos02-final-browser-evidence.json
         run: |
           set -euo pipefail
+          # Keep the proven production-auth role/denial journey unchanged. Injecting
+          # terminology here would require product/auth mutation; the dedicated
+          # FINAL TERMINOLOGY step is therefore the exact terminology authority.
           (cd target && npm run preview -- --host 127.0.0.1 --port 4174 > "$RUNNER_TEMP/wos02-final-preview.log" 2>&1) &
           preview_pid=$!
           cleanup() { kill "$preview_pid" >/dev/null 2>&1 || true; }
