@@ -65,12 +65,23 @@ jobs:
           import os,re,base64,hashlib,gzip,pathlib
           body=pathlib.Path(os.environ['RUNNER_TEMP']+'/comment.txt').read_text()
           blocks=re.findall(r'```text\s*\n(H4sI[A-Za-z0-9+/=\r\n]+?)\n```',body,re.S)
-          assert len(blocks)==1, f'expected one recovery payload, found {len(blocks)}'
-          b64=''.join(blocks[0].split())
-          assert len(b64)==int(os.environ['B64_BYTES']), (len(b64),os.environ['B64_BYTES'])
-          gz=base64.b64decode(b64,validate=True)
-          assert len(gz)==int(os.environ['GZIP_BYTES']), (len(gz),os.environ['GZIP_BYTES'])
-          assert hashlib.sha256(gz).hexdigest()==os.environ['GZIP_SHA']
+          assert len(blocks)==1, f'expected one recovery payload block, found {len(blocks)}'
+          compact=''.join(blocks[0].split())
+          want_len=int(os.environ['B64_BYTES'])
+          want_gzip_bytes=int(os.environ['GZIP_BYTES'])
+          want_gzip_sha=os.environ['GZIP_SHA']
+          matches=[]
+          for start in range(0,max(0,len(compact)-want_len)+1):
+              candidate=compact[start:start+want_len]
+              try:
+                  gz=base64.b64decode(candidate,validate=True)
+              except Exception:
+                  continue
+              if len(gz)==want_gzip_bytes and hashlib.sha256(gz).hexdigest()==want_gzip_sha:
+                  matches.append((start,candidate,gz))
+          assert len(matches)==1, f'expected one cryptographic payload window; captured={len(compact)} target={want_len} matches={[(m[0],len(m[1])) for m in matches]}'
+          start,b64,gz=matches[0]
+          print(f'validated payload window start={start} chars={len(b64)} captured={len(compact)}')
           raw=gzip.decompress(gz)
           assert len(raw)==int(os.environ['RAW_BYTES']), (len(raw),os.environ['RAW_BYTES'])
           assert hashlib.sha256(raw).hexdigest()==os.environ['RAW_SHA']
