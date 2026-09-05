@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: read
+  issues: read
 
 jobs:
   publish:
@@ -20,6 +21,7 @@ jobs:
       EXPECTED_TREE: 72e64ee298cff47e4a0f6509fd0ac552af6170f7
       RAW_SHA: 91b0d883bf8a0df3e9fa4df6e446d64beb24fed1b5e0696a26fed08215ea8d5b
       GZIP_SHA: 2498e3d6117e7df53e2729eb321c473fc3f15ad7744781507bcfdfd0d289872d
+      RECOVERY_COMMENT: '5554921100'
     steps:
       - name: Checkout exact controller base
         uses: actions/checkout@v4
@@ -38,31 +40,60 @@ jobs:
           auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
           main="$(curl -fsSL "${auth[@]}" "$api/branches/main" | jq -r .commit.sha)"
           product="$(curl -fsSL "${auth[@]}" "$api/pulls/37" | jq -r .head.sha)"
-          controller="$(curl -fsSL "${auth[@]}" "$api/pulls/38" | jq -r .head.sha)"
+          controller_json="$(curl -fsSL "${auth[@]}" "$api/pulls/38")"
+          controller="$(jq -r .head.sha <<<"$controller_json")"
           test "$main" = "$EXPECTED_MAIN"
           test "$product" = "$EXPECTED_PRODUCT"
           test "$controller" = "$BASE_CONTROLLER"
+          test "$(jq -r .state <<<"$controller_json")" = "open"
+          test "$(jq -r .draft <<<"$controller_json")" = "true"
           test "$(git rev-parse HEAD)" = "$BASE_CONTROLLER"
 
-      - name: Reconstruct and verify exact controller patch
+      - name: Recover verify and apply exact controller patch
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cat > /tmp/controller.diff.gz.b64 <<'PAYLOAD'
-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
-PAYLOAD
-          test "$(wc -c < /tmp/controller.diff.gz.b64)" = "7569"
-          truncate -s -1 /tmp/controller.diff.gz.b64
-          test "$(wc -c < /tmp/controller.diff.gz.b64)" = "7568"
-          base64 -d /tmp/controller.diff.gz.b64 > /tmp/controller.diff.gz
-          echo "$GZIP_SHA  /tmp/controller.diff.gz" | sha256sum --check
-          gzip -dc /tmp/controller.diff.gz > /tmp/controller.diff
-          echo "$RAW_SHA  /tmp/controller.diff" | sha256sum --check
-          test "$(wc -c < /tmp/controller.diff.gz)" = "5676"
-          test "$(wc -c < /tmp/controller.diff)" = "21027"
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/comments/$RECOVERY_COMMENT" \
+            | jq -r .body > /tmp/recovery.md
+          python3 - <<'PY'
+          import base64, gzip, hashlib, re
+          from pathlib import Path
+          text = Path('/tmp/recovery.md').read_text()
+          expected = [
+              ('P1-CTRL-PAYLOAD-00',1200,'26c62e47165857f23dbb5b861103627d22bedb879a6fcc2730e3d8c13f514b9d'),
+              ('P1-CTRL-PAYLOAD-01',1200,'ef4ddefbb0558c913e9b8727934d37076b68f16010a8d944aae0154fb3b5273a'),
+              ('P1-CTRL-PAYLOAD-02',1200,'67150e7c38febb730f420ea6e1d914009ef153cbfec47de2a512ea61f8f4e62c'),
+              ('P1-CTRL-PAYLOAD-03',1200,'2fba524e01372b78964404d7393fed1c7fa142f9ccbfa00c7c3191009df05b95'),
+              ('P1-CTRL-PAYLOAD-04',1200,'8b52968b4231469a06b4743b9b1fda2b5db73cd755624f85ccf649419554d004'),
+              ('P1-CTRL-PAYLOAD-05',1200,'fc90708a8d9469d926133fc6dc3ce96fb84a2f86b406bd7cff517be6c5f192b2'),
+              ('P1-CTRL-PAYLOAD-06',368,'4c3d30727b6a5a29f22fd775383c117912407392bd86e0cd1a99c92eaba7c1ad'),
+          ]
+          chunks=[]
+          for label,count,want in expected:
+              pat = rf"### {re.escape(label)}\s+Character count: `([0-9]+)`\s+SHA-256: `([0-9a-f]{{64}})`\s+```text\s*\n([A-Za-z0-9+/=]+)\n```"
+              m=re.search(pat,text,re.S)
+              if not m: raise SystemExit(f'missing payload section {label}')
+              declared=int(m.group(1)); declared_hash=m.group(2); chunk=m.group(3)
+              got=hashlib.sha256(chunk.encode()).hexdigest()
+              if declared != count or len(chunk) != count: raise SystemExit(f'{label} count mismatch')
+              if declared_hash != want or got != want: raise SystemExit(f'{label} hash mismatch')
+              chunks.append(chunk)
+          b64=''.join(chunks)
+          if len(b64) != 7568: raise SystemExit('total base64 length mismatch')
+          gz=base64.b64decode(b64, validate=True)
+          if len(gz) != 5676 or hashlib.sha256(gz).hexdigest() != '2498e3d6117e7df53e2729eb321c473fc3f15ad7744781507bcfdfd0d289872d': raise SystemExit('gzip mismatch')
+          raw=gzip.decompress(gz)
+          if len(raw) != 21027 or hashlib.sha256(raw).hexdigest() != '91b0d883bf8a0df3e9fa4df6e446d64beb24fed1b5e0696a26fed08215ea8d5b': raise SystemExit('raw diff mismatch')
+          Path('/tmp/controller.diff').write_bytes(raw)
+          PY
           git apply --index /tmp/controller.diff
           test "$(git diff --cached --name-only | sort | tr '\n' '|')" = ".github/scripts/wos02-mutation-lifecycle-acceptance.mjs|.github/workflows/wos02-final-review-acceptance.yml|"
-          test "$(git diff --cached --numstat | awk '{a+=$1;d+=$2} END{print a \" \" d}')" = "91 3"
+          test "$(git diff --cached --numstat | awk '{a+=$1;d+=$2} END{print a " " d}')" = "91 3"
           test "$(git write-tree)" = "$EXPECTED_TREE"
           node --check .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
           ruby -e "require 'yaml'; YAML.load_file('.github/workflows/wos02-final-review-acceptance.yml'); puts 'YAML OK'"
@@ -88,8 +119,10 @@ PAYLOAD
           auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
           main="$(curl -fsSL "${auth[@]}" "$api/branches/main" | jq -r .commit.sha)"
           product="$(curl -fsSL "${auth[@]}" "$api/pulls/37" | jq -r .head.sha)"
-          controller="$(curl -fsSL "${auth[@]}" "$api/pulls/38" | jq -r .head.sha)"
+          controller_json="$(curl -fsSL "${auth[@]}" "$api/pulls/38")"
+          controller="$(jq -r .head.sha <<<"$controller_json")"
           test "$main" = "$EXPECTED_MAIN"
           test "$product" = "$EXPECTED_PRODUCT"
           test "$controller" = "$BASE_CONTROLLER"
+          test "$(jq -r .draft <<<"$controller_json")" = "true"
           git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
