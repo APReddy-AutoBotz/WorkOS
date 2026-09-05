@@ -200,7 +200,7 @@ try {
     const workerType = await call('POST', '/api/organization-setup/catalogs/worker_type', { token: adminToken, scope: scopeA, body: { code: 'WT-FINAL', name: 'Final Worker', effectiveFrom: '2026-01-01' } });
     assert.equal(workerType.status, 201, JSON.stringify(workerType.body));
     workerTypeId = workerType.body.id;
-    const futureCalendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-FUTURE', name: 'Future Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, effectiveFrom: '2099-01-01' } });
+    const futureCalendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-FUTURE', name: 'Future Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, applicability: { type: 'legal_entity' }, effectiveFrom: '2099-01-01' } });
     assert.equal(futureCalendar.status, 201, JSON.stringify(futureCalendar.body));
     const oldPeriod = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-OLD', name: 'Old Period', startsOn: '2025-01-01', endsOn: '2025-12-31', status: 'Closed' } });
     assert.equal(oldPeriod.status, 201, JSON.stringify(oldPeriod.body));
@@ -208,7 +208,7 @@ try {
     assert.equal(before.status, 200);
     assert.equal(before.body.ready, false);
     assert.equal(before.body.authority, 'persisted-server-state');
-    const calendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-CURRENT', name: 'Current Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, effectiveFrom: '2026-01-01' } });
+    const calendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-CURRENT', name: 'Current Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, applicability: { type: 'legal_entity' }, effectiveFrom: '2026-01-01' } });
     assert.equal(calendar.status, 201, JSON.stringify(calendar.body));
     const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-CURRENT', name: 'Current Period', startsOn: '2026-01-01', endsOn: '2026-12-31', status: 'Open' } });
     assert.equal(period.status, 201, JSON.stringify(period.body));
@@ -241,11 +241,11 @@ try {
   });
 
   await check('working-calendar non-overlap is independently enforced by database', async () => {
-    await pool.query(`insert into working_calendars(organization_id,legal_entity_id,code,name,timezone,working_days,hours_per_day,effective_from,effective_to)
-      values('org-final','legal-a','CAL-OVERLAP','Overlap Baseline','UTC',array[1,2,3,4,5],8,'2026-01-01','2026-12-31')`);
+    await pool.query(`insert into working_calendars(organization_id,legal_entity_id,applicability_type,code,name,timezone,working_days,hours_per_day,effective_from,effective_to)
+      values('org-final','legal-a','legal_entity','CAL-OVERLAP','Overlap Baseline','UTC',array[1,2,3,4,5],8,'2026-01-01','2026-12-31')`);
     await assert.rejects(
-      () => pool.query(`insert into working_calendars(organization_id,legal_entity_id,code,name,timezone,working_days,hours_per_day,effective_from,effective_to)
-        values('org-final','legal-a','CAL-OVERLAP','Overlap Conflict','UTC',array[1,2,3,4,5],8,'2026-06-01','2026-09-30')`),
+      () => pool.query(`insert into working_calendars(organization_id,legal_entity_id,applicability_type,code,name,timezone,working_days,hours_per_day,effective_from,effective_to)
+        values('org-final','legal-a','legal_entity','CAL-OVERLAP','Overlap Conflict','UTC',array[1,2,3,4,5],8,'2026-06-01','2026-09-30')`),
       error => error?.code === '23P01',
     );
   });
@@ -286,6 +286,17 @@ try {
   });
 
   await check('canonical timesheet import uses a valid past week and creates scoped timesheet state', async () => {
+    const coveringPeriods = await pool.query(`select id from reporting_periods
+      where organization_id='org-final' and legal_entity_id='legal-a' and status='Open'
+        and starts_on <= '2026-08-24' and ends_on >= '2026-08-24'`);
+    if (coveringPeriods.rowCount === 0) {
+      await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)
+        values('org-final','legal-a','PERIOD-IMPORT-WEEK','Timesheet Import Week','2026-08-24','2026-08-30','Open')`);
+    }
+    const authoritativePeriods = await pool.query(`select count(*)::int count from reporting_periods
+      where organization_id='org-final' and legal_entity_id='legal-a' and status='Open'
+        and starts_on <= '2026-08-24' and ends_on >= '2026-08-24'`);
+    assert.equal(authoritativePeriods.rows[0].count, 1, 'timesheet import fixture requires exactly one authoritative Open period');
     const response = await call('POST', '/api/imports/timesheets/apply', { token: adminToken, scope: scopeA, body: { fileName: 'synthetic-timesheet.csv', rows: [{ employeeId: scopedEmployee, weekEnding: '2026-08-30', workType: 'Project Work', projectId: 'project-final', date: '2026-08-24', hours: 8, billable: true, status: 'Draft' }] } });
     assert.equal(response.status, 200, JSON.stringify(response.body));
     assert.equal(response.body.status, 'Success', JSON.stringify(response.body));
