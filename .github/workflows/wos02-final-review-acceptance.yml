@@ -10,6 +10,7 @@ on:
       - '.github/scripts/wos02-worker-lifecycle-acceptance.mjs'
       - '.github/scripts/wos02-mutation-lifecycle-acceptance.mjs'
       - '.github/scripts/wos02-reporting-period-acceptance.mjs'
+      - '.github/scripts/wos02-reporting-period-u8u9-acceptance.mjs'
       - '.github/scripts/wos02-readiness-acceptance.mjs'
       - '.github/scripts/wos02-org-profile-acceptance.mjs'
       - '.github/scripts/wos02-calendar-acceptance.mjs'
@@ -23,8 +24,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: ff278306c5394d3c43d0c860a736d783ad59d19c
-  TARGET_TREE: d81d00223cc64d1db25695395bc0b696f82e34cd
+  TARGET_HEAD: 28edf2f1966e293c44ca4d173a2ad0a2857e6b2b
+  TARGET_TREE: 23c9d49046e0af9a1540f71690825ef2845e5c07
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -56,7 +57,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 43-file authority
+      - name: Verify exact product controller main and 44-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -90,6 +91,7 @@ jobs:
               'server/migrations/027_wos02_reporting_period_authority.sql',
               'server/migrations/028_wos02_organization_legal_entity_profiles.sql',
               'server/migrations/029_wos02_working_calendar_authority.sql',
+              'server/migrations/030_wos02_reporting_period_frequency.sql',
               'server/organization-setup.mjs',
               'server/reporting-periods.mjs',
               'server/seed-demo.mjs',
@@ -216,6 +218,8 @@ jobs:
           node --check ../controller/.github/scripts/wos02-demo-seed-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-terminology-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-mutation-lifecycle-acceptance.mjs
+          node --check ../controller/.github/scripts/wos02-reporting-period-acceptance.mjs
+          node --check ../controller/.github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
 
       - name: Execute FINAL TERMINOLOGY runtime and stability acceptance
         shell: bash
@@ -244,36 +248,39 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 40); do pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres && break; sleep 1; done
-          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_mutation_lifecycle wos02_reporting_period wos02_readiness wos02_org_profile wos02_calendar wos02_demo_seed wos02_final_prod; do
+          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_worker_lifecycle wos02_mutation_lifecycle wos02_reporting_period wos02_reporting_u8u9 wos02_readiness wos02_org_profile wos02_calendar wos02_demo_seed wos02_final_prod; do
             dropdb --if-exists -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
             createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
           done
 
-      - name: Fresh install and replay migrations 022 through 029
+      - name: Fresh install and replay migrations 022 through 030
         shell: bash
         working-directory: target
         env:
           DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_fresh
         run: |
           set -euo pipefail
-          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','025a_wos02_project_legal_scope_unique_prerequisite','026_wos02_canonical_legal_scope_integrity','027_wos02_reporting_period_authority','028_wos02_organization_legal_entity_profiles','029_wos02_working_calendar_authority'"
+          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','025a_wos02_project_legal_scope_unique_prerequisite','026_wos02_canonical_legal_scope_integrity','027_wos02_reporting_period_authority','028_wos02_organization_legal_entity_profiles','029_wos02_working_calendar_authority','030_wos02_reporting_period_frequency'"
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-first.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 9
-          node -e "const fs=require('fs');const f=fs.readdirSync('server/migrations').filter(x=>x.endsWith('.sql')).sort();const names=['025_wos02_timesheet_scope_integrity.sql','025a_wos02_project_legal_scope_unique_prerequisite.sql','026_wos02_canonical_legal_scope_integrity.sql','027_wos02_reporting_period_authority.sql','028_wos02_organization_legal_entity_profiles.sql','029_wos02_working_calendar_authority.sql'];const p=names.map(x=>f.indexOf(x));if(p.some(x=>x<0)||p.some((x,i)=>i&&p[i-1]>=x))throw new Error('invalid migration order '+f.join(','));"
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 10
+          node -e "const fs=require('fs');const f=fs.readdirSync('server/migrations').filter(x=>x.endsWith('.sql')).sort();const names=['025_wos02_timesheet_scope_integrity.sql','025a_wos02_project_legal_scope_unique_prerequisite.sql','026_wos02_canonical_legal_scope_integrity.sql','027_wos02_reporting_period_authority.sql','028_wos02_organization_legal_entity_profiles.sql','029_wos02_working_calendar_authority.sql','030_wos02_reporting_period_frequency.sql'];const p=names.map(x=>f.indexOf(x));if(p.some(x=>x<0)||p.some((x,i)=>i&&p[i-1]>=x))throw new Error('invalid migration order '+f.join(','));"
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where indexname='uq_projects_org_legal_id'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname='project_allocations_project_legal_scope_fk'")" = 1
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname='reporting_period_ranges_no_overlap'")" = 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname='reporting_period_ranges_no_overlap'")" = 0
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname='reporting_period_frequency_ranges_no_overlap'")" = 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from reporting_periods where frequency is null or frequency not in ('Weekly','Monthly','Fiscal')")" = 0
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from information_schema.tables where table_name in ('organization_profile_versions','legal_entity_profile_versions')")" = 2
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname in ('organization_profile_versions_no_overlap','legal_entity_profile_versions_no_overlap')")" = 2
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where indexname in ('uq_legal_entity_registration_identity','uq_legal_entity_tax_identity')")" = 2
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from organization_profile_versions where organization_id='org-default'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from legal_entity_profile_versions where legal_entity_id='legal-default'")" = 1
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-replay.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 9
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 10
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id='028_wos02_organization_legal_entity_profiles'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id='029_wos02_working_calendar_authority'")" = 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id='030_wos02_reporting_period_frequency'")" = 1
 
-      - name: Exact WOS-01A upgrade backfill reconciliation and replay through 029
+      - name: Exact WOS-01A upgrade backfill reconciliation and replay through 030
         shell: bash
         env:
           UPGRADE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_upgrade
@@ -297,6 +304,7 @@ jobs:
           mv target/server/migrations/027_wos02_reporting_period_authority.sql "$RUNNER_TEMP/027_wos02_reporting_period_authority.sql"
           mv target/server/migrations/028_wos02_organization_legal_entity_profiles.sql "$RUNNER_TEMP/028_wos02_organization_legal_entity_profiles.sql"
           mv target/server/migrations/029_wos02_working_calendar_authority.sql "$RUNNER_TEMP/029_wos02_working_calendar_authority.sql"
+          mv target/server/migrations/030_wos02_reporting_period_frequency.sql "$RUNNER_TEMP/030_wos02_reporting_period_frequency.sql"
           (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
           psql "$UPGRADE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)
@@ -308,6 +316,7 @@ jobs:
           mv "$RUNNER_TEMP/027_wos02_reporting_period_authority.sql" target/server/migrations/027_wos02_reporting_period_authority.sql
           mv "$RUNNER_TEMP/028_wos02_organization_legal_entity_profiles.sql" target/server/migrations/028_wos02_organization_legal_entity_profiles.sql
           mv "$RUNNER_TEMP/029_wos02_working_calendar_authority.sql" target/server/migrations/029_wos02_working_calendar_authority.sql
+          mv "$RUNNER_TEMP/030_wos02_reporting_period_frequency.sql" target/server/migrations/030_wos02_reporting_period_frequency.sql
           (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
           after="$(psql "$UPGRADE_URL" -Atc "select (select count(*) from employees)||'|'||(select count(*) from clients)||'|'||(select count(*) from projects)||'|'||(select count(*) from project_allocations)||'|'||(select count(*) from timesheets)")"
           test "$before" = "$after"
@@ -318,6 +327,7 @@ jobs:
           test "$(psql "$UPGRADE_URL" -Atc "select organization_id||'|'||legal_entity_id from timesheets where id='00000000-0000-0000-0000-000000000802'")" = 'org-default|legal-default'
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from worker_history where employee_id='e-final-up' and legal_entity_id='legal-default'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select status from reporting_periods where code='RP-LEGACY-LOCKED' and organization_id='org-default' and legal_entity_id='legal-default'")" = 'Financially Locked'
+          test "$(psql "$UPGRADE_URL" -Atc "select frequency from reporting_periods where code='RP-LEGACY-LOCKED' and organization_id='org-default' and legal_entity_id='legal-default'")" = 'Weekly'
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='027_wos02_reporting_period_authority'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='028_wos02_organization_legal_entity_profiles'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='029_wos02_working_calendar_authority'")" = 1
@@ -384,6 +394,17 @@ jobs:
           set -euo pipefail
           (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
           node .github/scripts/wos02-reporting-period-acceptance.mjs
+
+      - name: Execute U8-U9 multi-frequency per-entry reporting acceptance matrix
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_reporting_u8u9
+        run: |
+          set -euo pipefail
+          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+          node .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
 
       - name: Execute guided setup readiness completeness matrix
         shell: bash

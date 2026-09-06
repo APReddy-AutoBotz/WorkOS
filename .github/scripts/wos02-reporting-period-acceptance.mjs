@@ -101,7 +101,7 @@ const call = async (method, route, { token, body, scope = primaryScope } = {}) =
   return { status: response.status, body: payload };
 };
 
-const periodBody = (code, startsOn, endsOn, status, name = code) => ({ code, name, startsOn, endsOn, status });
+const periodBody = (code, startsOn, endsOn, status, name = code, frequency = 'Weekly') => ({ code, name, frequency, startsOn, endsOn, status });
 const employeeBody = (code, name = code) => ({
   employee_id: code,
   name,
@@ -285,14 +285,14 @@ try {
   });
 
   await check('ambiguous persisted authority fails closed and database overlap protection can be restored', async () => {
-    await pool.query(`alter table reporting_periods drop constraint reporting_period_ranges_no_overlap`);
-    await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status) values
-      ('org-rp','legal-rp','RP-AMB-A','Ambiguous A','2026-08-03','2026-08-09','Open'),
-      ('org-rp','legal-rp','RP-AMB-B','Ambiguous B','2026-08-03','2026-08-09','Open')`);
+    await pool.query(`alter table reporting_periods drop constraint reporting_period_frequency_ranges_no_overlap`);
+    await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,frequency,starts_on,ends_on,status) values
+      ('org-rp','legal-rp','RP-AMB-A','Ambiguous A','Weekly','2026-08-03','2026-08-09','Open'),
+      ('org-rp','legal-rp','RP-AMB-B','Ambiguous B','Weekly','2026-08-03','2026-08-09','Open')`);
     await expectPeriodBlock(() => call('POST', '/api/timesheets', { token: adminToken, body: timesheetBody(workers['E-RP-D'], '2026-08-09', 'Draft') }), workers['E-RP-D'], '2026-08-09', 'REPORTING_PERIOD_AMBIGUOUS');
     await pool.query(`delete from reporting_periods where code='RP-AMB-B' and organization_id='org-rp' and legal_entity_id='legal-rp'`);
-    await pool.query(`alter table reporting_periods add constraint reporting_period_ranges_no_overlap exclude using gist
-      (organization_id with =, legal_entity_id with =, daterange(starts_on,ends_on + 1,'[)') with &&)`);
+    await pool.query(`alter table reporting_periods add constraint reporting_period_frequency_ranges_no_overlap exclude using gist
+      (organization_id with =, legal_entity_id with =, frequency with =, daterange(starts_on,ends_on + 1,'[)') with &&)`);
   });
 
   await check('invalid/overlapping authoring rolls back period and audit state atomically', async () => {
