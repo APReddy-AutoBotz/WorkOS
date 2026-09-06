@@ -1,4 +1,4 @@
-name: WOS-02 Retained Readiness Fixture Publisher
+name: WOS-02 Retained Live Diagnostic
 
 on:
   push:
@@ -8,84 +8,99 @@ on:
       - .github/workflows/wos02-one-shot-migration-publisher.yml
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
 
 concurrency:
-  group: wos02-retained-readiness-fixture-publisher
+  group: wos02-retained-live-diagnostic
   cancel-in-progress: false
 
 jobs:
-  publish:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: wos02_diag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U workos -d wos02_diag"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     env:
-      GH_TOKEN: ${{ github.token }}
+      DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_diag
       MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
       PRODUCT_HEAD: 28edf2f1966e293c44ca4d173a2ad0a2857e6b2b
-      PRODUCT_TREE: 23c9d49046e0af9a1540f71690825ef2845e5c07
-      CONTROLLER_HEAD: 5d79d44d730d3bfbc3101cfd246db813a8ba37ea
+      CONTROLLER_HEAD: e121f3c763aee2ef4a64174262b8403a2cb53809
     steps:
       - name: Checkout exact controller
         uses: actions/checkout@v4
         with:
           ref: ${{ env.CONTROLLER_HEAD }}
-          fetch-depth: 0
-          persist-credentials: true
+          path: controller
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Verify exact live leases
+      - name: Checkout exact product
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_HEAD }}
+          path: target
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact diagnostic authority
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$CONTROLLER_HEAD"
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MAIN_HEAD"
-          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
-          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/git/commits/$PRODUCT_HEAD --jq '.tree.sha')" = "$PRODUCT_TREE"
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_HEAD"
+          test "$(git -C target rev-parse HEAD)" = "$PRODUCT_HEAD"
+          test "$(git ls-remote https://github.com/$GITHUB_REPOSITORY.git refs/heads/main | cut -f1)" = "$MAIN_HEAD"
+          test "$(git ls-remote https://github.com/$GITHUB_REPOSITORY.git refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
+          test "$(git ls-remote https://github.com/$GITHUB_REPOSITORY.git refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
 
-      - name: Correct retained readiness fixture only
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+
+      - name: Locked install and migrate exact product
+        shell: bash
+        working-directory: target
+        run: |
+          set -euo pipefail
+          npm ci
+          node server/migrate.mjs
+
+      - name: Execute retained 17-check matrix and capture exact failure
+        id: live
+        shell: bash
+        run: |
+          set +e
+          TARGET_ROOT="$GITHUB_WORKSPACE/target" DATABASE_URL="$DATABASE_URL" node controller/.github/scripts/wos02-final-review-live-acceptance.mjs > retained-live.log 2>&1
+          status=$?
+          cat retained-live.log
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload exact diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos02-retained-live-diagnostic
+          path: retained-live.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail if retained matrix failed
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('.github/scripts/wos02-final-review-live-acceptance.mjs')
-          s = p.read_text()
-          old_old = "const oldPeriod = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-OLD', name: 'Old Period', startsOn: '2025-01-01', endsOn: '2025-12-31', status: 'Closed' } });"
-          new_old = "const oldPeriod = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-OLD', name: 'Old Period', frequency: 'Weekly', startsOn: '2025-01-01', endsOn: '2025-12-31', status: 'Closed' } });"
-          assert s.count(old_old) == 1, s.count(old_old)
-          s = s.replace(old_old, new_old, 1)
-          nl = chr(10)
-          old_current = nl.join(["    const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-CURRENT', name: 'Current Period', startsOn: '2026-01-01', endsOn: '2026-12-31', status: 'Open' } });", "    assert.equal(period.status, 201, JSON.stringify(period.body));", ""])
-          new_current = nl.join(["    for (const frequency of ['Weekly', 'Monthly', 'Fiscal']) {", "      const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: `PERIOD-CURRENT-${frequency.toUpperCase()}`, name: `Current ${frequency} Period`, frequency, startsOn: today, endsOn: today, status: 'Open' } });", "      assert.equal(period.status, 201, `${frequency} ${JSON.stringify(period.body)}`);", "    }", ""])
-          assert s.count(old_current) == 1, s.count(old_current)
-          s = s.replace(old_current, new_current, 1)
-          assert "frequency: 'Weekly', startsOn: '2025-01-01'" in s
-          assert "for (const frequency of ['Weekly', 'Monthly', 'Fiscal'])" in s
-          p.write_text(s)
-          PY
-          git add .github/scripts/wos02-final-review-live-acceptance.mjs
-          git diff --cached --check
-          test "$(git diff --cached --name-only)" = ".github/scripts/wos02-final-review-live-acceptance.mjs"
-          node --check .github/scripts/wos02-final-review-live-acceptance.mjs
-          git config user.name "WorkOS Implementation Controller"
-          git config user.email "noreply@github.com"
-          git commit -m "test: align retained readiness fixture with reporting frequencies"
-          test "$(git rev-parse HEAD^)" = "$CONTROLLER_HEAD"
-
-      - name: Revalidate and non-force publish controller correction
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MAIN_HEAD"
-          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
-          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
-          git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
+          test "${{ steps.live.outputs.exit_code }}" = "0"
