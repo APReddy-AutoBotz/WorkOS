@@ -236,8 +236,10 @@ try {
     await expectPeriodBlock(() => call('POST', '/api/timesheets', { token: adminToken, body: timesheetBody(workers['E-RP-D'], '2026-08-30', 'Draft') }), workers['E-RP-D'], '2026-08-30');
     const beforeImport = await snapshot(workers['E-RP-D'], '2026-08-30');
     const imported = await call('POST', '/api/imports/timesheets/apply', { token: adminToken, body: { fileName: 'rp-submission-closed.csv', rows: [{ employeeId: 'E-RP-D', weekEnding: '2026-08-30', workType: 'Client Misc Task', clientName: 'Synthetic Client', date: '2026-08-30', hours: 8, billable: false, status: 'Draft' }] } });
-    assert.equal(imported.status, 409, JSON.stringify(imported.body));
-    assert.equal(imported.body.code, 'REPORTING_PERIOD_CLOSED');
+    assert.equal(imported.status, 200, JSON.stringify(imported.body));
+    assert.equal(imported.body.status, 'Failed', JSON.stringify(imported.body));
+    assert.equal(imported.body.validRows, 0, JSON.stringify(imported.body));
+    assert.ok(imported.body.errors.some(error => error.code === 'REPORTING_PERIOD_CLOSED'), JSON.stringify(imported.body));
     assert.deepEqual(await snapshot(workers['E-RP-D'], '2026-08-30'), beforeImport);
     const decision = await call('PATCH', `/api/timesheets/${submissionTimesheetId}/status`, { token: adminToken, body: { status: 'Approved' } });
     assert.equal(decision.status, 200, JSON.stringify(decision.body));
