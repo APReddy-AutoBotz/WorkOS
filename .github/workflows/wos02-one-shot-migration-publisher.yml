@@ -1,4 +1,4 @@
-name: WOS-02 Retained Frequency Fixture Publisher
+name: WOS-02 Scope-Write Diagnostic
 
 on:
   push:
@@ -8,83 +8,105 @@ on:
       - .github/workflows/wos02-one-shot-migration-publisher.yml
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
 
 concurrency:
-  group: wos02-retained-frequency-fixture-publisher
+  group: wos02-scope-write-diagnostic
   cancel-in-progress: false
 
 jobs:
-  publish:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: workos
+          POSTGRES_DB: wos02_scope_diag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U workos -d wos02_scope_diag"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     env:
       GH_TOKEN: ${{ github.token }}
+      DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_scope_diag
       MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
       PRODUCT_HEAD: 28edf2f1966e293c44ca4d173a2ad0a2857e6b2b
-      PRODUCT_TREE: 23c9d49046e0af9a1540f71690825ef2845e5c07
-      CONTROLLER_HEAD: e121f3c763aee2ef4a64174262b8403a2cb53809
+      CONTROLLER_HEAD: f50a101b8d0c7477c73a1e9c6a0b1f1fc19e048a
     steps:
       - name: Checkout exact controller
         uses: actions/checkout@v4
         with:
           ref: ${{ env.CONTROLLER_HEAD }}
-          fetch-depth: 0
-          persist-credentials: true
+          path: controller
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Verify exact live leases
+      - name: Checkout exact product
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_HEAD }}
+          path: target
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact diagnostic authority
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$CONTROLLER_HEAD"
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MAIN_HEAD"
-          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
-          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_HEAD"
+          test "$(git -C target rev-parse HEAD)" = "$PRODUCT_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq '.commit.sha')" = "$MAIN_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/git/commits/$PRODUCT_HEAD --jq '.tree.sha')" = "$PRODUCT_TREE"
 
-      - name: Correct retained reporting frequency fixture only
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+
+      - name: Locked install and migrate exact product
+        shell: bash
+        working-directory: target
+        run: |
+          set -euo pipefail
+          npm ci
+          node server/migrate.mjs
+
+      - name: Execute retained 15-check scope-write matrix and capture exact failure
+        id: scope
+        shell: bash
+        run: |
+          set +e
+          TARGET_ROOT="$GITHUB_WORKSPACE/target" DATABASE_URL="$DATABASE_URL" node controller/.github/scripts/wos02-scope-write-acceptance.mjs > scope-write.log 2>&1
+          status=$?
+          cat scope-write.log
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload exact scope-write diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wos02-scope-write-diagnostic
+          path: scope-write.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail if scope-write matrix failed
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('.github/scripts/wos02-final-review-live-acceptance.mjs')
-          s = p.read_text()
-          nl = chr(10)
-          old_insert = nl.join(["      await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)", "        values('org-final','legal-a','PERIOD-IMPORT-WEEK','Timesheet Import Week','2026-08-24','2026-08-30','Open')`);"])
-          new_insert = nl.join(["      await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,frequency,starts_on,ends_on,status)", "        values('org-final','legal-a','PERIOD-IMPORT-WEEK','Timesheet Import Week','Weekly','2026-08-24','2026-08-30','Open')`);"])
-          assert s.count(old_insert) == 1, s.count(old_insert)
-          s = s.replace(old_insert, new_insert, 1)
-          assert "code,name,frequency,starts_on,ends_on,status" in s
-          assert "'PERIOD-IMPORT-WEEK','Timesheet Import Week','Weekly'" in s
-          p.write_text(s)
-          PY
-          git add .github/scripts/wos02-final-review-live-acceptance.mjs
-          git diff --cached --check
-          test "$(git diff --cached --name-only)" = ".github/scripts/wos02-final-review-live-acceptance.mjs"
-          node --check .github/scripts/wos02-final-review-live-acceptance.mjs
-          git config user.name "WorkOS Implementation Controller"
-          git config user.email "noreply@github.com"
-          git commit -m "test: set retained reporting fixture frequency"
-          test "$(git rev-parse HEAD^)" = "$CONTROLLER_HEAD"
-          echo "CONTROLLER_COMMIT=$(git rev-parse HEAD)"
-          echo "CONTROLLER_TREE=$(git rev-parse HEAD^{tree})"
-
-      - name: Revalidate and non-force publish controller correction
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MAIN_HEAD"
-          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
-          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
-          git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$(git rev-parse HEAD)"
+          test "${{ steps.scope.outputs.exit_code }}" = "0"
