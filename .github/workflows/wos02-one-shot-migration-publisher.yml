@@ -61,14 +61,9 @@ jobs:
           new_old = "const oldPeriod = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-OLD', name: 'Old Period', frequency: 'Weekly', startsOn: '2025-01-01', endsOn: '2025-12-31', status: 'Closed' } });"
           assert s.count(old_old) == 1, s.count(old_old)
           s = s.replace(old_old, new_old, 1)
-          old_current = """    const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-CURRENT', name: 'Current Period', startsOn: '2026-01-01', endsOn: '2026-12-31', status: 'Open' } });
-    assert.equal(period.status, 201, JSON.stringify(period.body));
-"""
-          new_current = """    for (const frequency of ['Weekly', 'Monthly', 'Fiscal']) {
-      const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: `PERIOD-CURRENT-${frequency.toUpperCase()}`, name: `Current ${frequency} Period`, frequency, startsOn: today, endsOn: today, status: 'Open' } });
-      assert.equal(period.status, 201, `${frequency} ${JSON.stringify(period.body)}`);
-    }
-"""
+          nl = chr(10)
+          old_current = nl.join(["    const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-CURRENT', name: 'Current Period', startsOn: '2026-01-01', endsOn: '2026-12-31', status: 'Open' } });", "    assert.equal(period.status, 201, JSON.stringify(period.body));", ""])
+          new_current = nl.join(["    for (const frequency of ['Weekly', 'Monthly', 'Fiscal']) {", "      const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: `PERIOD-CURRENT-${frequency.toUpperCase()}`, name: `Current ${frequency} Period`, frequency, startsOn: today, endsOn: today, status: 'Open' } });", "      assert.equal(period.status, 201, `${frequency} ${JSON.stringify(period.body)}`);", "    }", ""])
           assert s.count(old_current) == 1, s.count(old_current)
           s = s.replace(old_current, new_current, 1)
           assert "frequency: 'Weekly', startsOn: '2025-01-01'" in s
