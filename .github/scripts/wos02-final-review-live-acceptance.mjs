@@ -292,8 +292,8 @@ try {
       where organization_id='org-final' and legal_entity_id='legal-a' and status='Open'
         and starts_on <= '2026-08-24' and ends_on >= '2026-08-24'`);
     if (coveringPeriods.rowCount === 0) {
-      await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)
-        values('org-final','legal-a','PERIOD-IMPORT-WEEK','Timesheet Import Week','2026-08-24','2026-08-30','Open')`);
+      await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,frequency,starts_on,ends_on,status)
+        values('org-final','legal-a','PERIOD-IMPORT-WEEK','Timesheet Import Week','Weekly','2026-08-24','2026-08-30','Open')`);
     }
     const authoritativePeriods = await pool.query(`select count(*)::int count from reporting_periods
       where organization_id='org-final' and legal_entity_id='legal-a' and status='Open'
