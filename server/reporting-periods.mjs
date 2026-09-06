@@ -29,6 +29,23 @@ export class ReportingPeriodError extends Error {
   }
 }
 
+export const normalizeReportingDate = value => {
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) {
+      throw new ReportingPeriodError('Reporting date is invalid', 'REPORTING_PERIOD_INVALID_DATE');
+    }
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new ReportingPeriodError('Reporting date is invalid', 'REPORTING_PERIOD_INVALID_DATE');
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new ReportingPeriodError('Reporting date is invalid', 'REPORTING_PERIOD_INVALID_DATE');
+  }
+  return value;
+};
+
 export const assertReportingPeriodAllows = async (database, {
   organizationId,
   legalEntityId,
@@ -37,7 +54,8 @@ export const assertReportingPeriodAllows = async (database, {
   operation,
 }) => {
   if (!allowedStates[operation]) throw new Error(`Unknown reporting-period operation: ${operation}`);
-  const dates = [...new Set((relevantDates || [relevantDate]).filter(Boolean).map(String))].sort();
+  const requestedDates = (relevantDates || [relevantDate]).filter(value => value !== undefined && value !== null);
+  const dates = [...new Set(requestedDates.map(normalizeReportingDate))].sort();
   if (dates.length === 0) throw new ReportingPeriodError('At least one reporting date is required', 'REPORTING_PERIOD_MISSING');
   if (dates.length > MAX_REPORTING_PERIOD_DATES) {
     throw new ReportingPeriodError(`Reporting-period checks are limited to ${MAX_REPORTING_PERIOD_DATES} unique dates`, 'REPORTING_PERIOD_DATE_LIMIT');

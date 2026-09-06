@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from '../server/worker-lifecycle.mjs';
-import { assertReportingPeriodAllows, canTransitionReportingPeriod, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
+import { assertReportingPeriodAllows, canTransitionReportingPeriod, normalizeReportingDate, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
 import { buildSetupReadiness, identityReadinessFromEnvironment, productionReadinessFromEnvironment, REQUIRED_SETUP_CHECKS } from '../server/setup-readiness.mjs';
 import { validateLegalEntity, validateOrganizationProfile } from '../server/organization-setup.mjs';
 import { calendarScopeValues, validateWorkingCalendar, validateWorkingCalendarHoliday } from '../server/working-calendars.mjs';
@@ -244,7 +244,23 @@ await assert.doesNotReject(assertReportingPeriodAllows({ query: async (sql, para
   return { rows: params[2].map(date => ({ id:`weekly-${date}`,code:'W',frequency:'Weekly',status:'Open',relevant_date:date })) };
 } }, { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:['2026-01-01','2026-01-07'],operation:REPORTING_PERIOD_OPERATIONS.CONTENT }));
 assert.match(lockedQuery, /join reporting_periods p[\s\S]*for share of p/, 'every matched reporting authority row must be locked in the caller transaction');
-await assert.rejects(assertReportingPeriodAllows(periodQuery('Open'), { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:Array.from({length:101},(_,i)=>`2026-01-${String(i+1).padStart(2,'0')}`),operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_DATE_LIMIT');
+assert.equal(normalizeReportingDate(new Date('2026-08-30T23:59:59.999Z')), '2026-08-30', 'database Date values must normalize to their UTC date');
+assert.equal(normalizeReportingDate('2026-08-30'), '2026-08-30', 'canonical date strings must retain exact semantics');
+for (const invalidDate of [new Date(Number.NaN), '2026-02-29', '2026-8-30', 'not-a-date']) {
+  assert.throws(() => normalizeReportingDate(invalidDate), error => error.code === 'REPORTING_PERIOD_INVALID_DATE');
+}
+let normalizedDates;
+await assert.doesNotReject(assertReportingPeriodAllows({ query: async (_sql, params) => {
+  normalizedDates = params[2];
+  return { rows: [{ id:'weekly-1',code:'W',frequency:'Weekly',status:'Open',relevant_date:'2026-08-30' }] };
+} }, { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:[new Date('2026-08-30T00:00:00Z'),'2026-08-30'],operation:REPORTING_PERIOD_OPERATIONS.CONTENT }));
+assert.deepEqual(normalizedDates, ['2026-08-30'], 'equivalent Date and string values must deduplicate before query binding');
+let invalidQueryReached = false;
+await assert.rejects(assertReportingPeriodAllows({ query: async () => { invalidQueryReached = true; return { rows: [] }; } }, { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-02-30',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_INVALID_DATE');
+assert.equal(invalidQueryReached, false, 'invalid reporting dates must fail before database access');
+const boundedDates = Array.from({length:101}, (_, index) => new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
+await assert.doesNotReject(assertReportingPeriodAllows({ query: async (_sql, params) => ({ rows: params[2].map(date => ({ id:`weekly-${date}`,code:'W',frequency:'Weekly',status:'Open',relevant_date:date })) }) }, { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:boundedDates.slice(0,100),operation:REPORTING_PERIOD_OPERATIONS.CONTENT }));
+await assert.rejects(assertReportingPeriodAllows(periodQuery('Open'), { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:boundedDates,operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_DATE_LIMIT');
 assert.match(server, /relevantDates: \[parsed\.data\.week_ending, \.\.\.parsed\.data\.entries\.map\(entry => entry\.work_date\)\]/, 'direct timesheets must validate every unique entry date with the week ending');
 assert.match(server, /relevantDates: \[group\.weekEnding, \.\.\.group\.entries\.map\(entry => entry\.workDate\)\][\s\S]*error instanceof ReportingPeriodError[\s\S]*continue/, 'imports must skip blocked groups while preserving partial processing');
 assert.equal(canTransitionReportingPeriod('Open','Submission Closed'),true);
