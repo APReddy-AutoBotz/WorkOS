@@ -1,4 +1,4 @@
-name: WOS-02 Retained Live Diagnostic
+name: WOS-02 Retained Frequency Fixture Publisher
 
 on:
   push:
@@ -8,34 +8,19 @@ on:
       - .github/workflows/wos02-one-shot-migration-publisher.yml
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: read
 
 concurrency:
-  group: wos02-retained-live-diagnostic
+  group: wos02-retained-frequency-fixture-publisher
   cancel-in-progress: false
 
 jobs:
-  diagnose:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: workos
-          POSTGRES_PASSWORD: workos
-          POSTGRES_DB: wos02_diag
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U workos -d wos02_diag"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_diag
       MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
       PRODUCT_HEAD: 28edf2f1966e293c44ca4d173a2ad0a2857e6b2b
       CONTROLLER_HEAD: e121f3c763aee2ef4a64174262b8403a2cb53809
@@ -44,24 +29,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ env.CONTROLLER_HEAD }}
-          path: controller
-          fetch-depth: 1
-          persist-credentials: false
+          fetch-depth: 0
+          persist-credentials: true
 
-      - name: Checkout exact product
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.PRODUCT_HEAD }}
-          path: target
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Verify exact diagnostic authority
+      - name: Verify exact live leases
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_HEAD"
-          test "$(git -C target rev-parse HEAD)" = "$PRODUCT_HEAD"
+          test "$(git rev-parse HEAD)" = "$CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq '.commit.sha')" = "$MAIN_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
@@ -70,43 +45,40 @@ jobs:
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: target/package-lock.json
-
-      - name: Locked install and migrate exact product
-        shell: bash
-        working-directory: target
-        run: |
-          set -euo pipefail
-          npm ci
-          node server/migrate.mjs
-
-      - name: Execute retained 17-check matrix and capture exact failure
-        id: live
-        shell: bash
-        run: |
-          set +e
-          TARGET_ROOT="$GITHUB_WORKSPACE/target" DATABASE_URL="$DATABASE_URL" node controller/.github/scripts/wos02-final-review-live-acceptance.mjs > retained-live.log 2>&1
-          status=$?
-          cat retained-live.log
-          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload exact diagnostic log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wos02-retained-live-diagnostic
-          path: retained-live.log
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Fail if retained matrix failed
+      - name: Correct only stale retained reporting fixture
         shell: bash
         run: |
           set -euo pipefail
-          test "${{ steps.live.outputs.exit_code }}" = "0"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/wos02-final-review-live-acceptance.mjs')
+          s = p.read_text()
+          old = """      await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)
+        values('org-final','legal-a','PERIOD-IMPORT-WEEK','Timesheet Import Week','2026-08-24','2026-08-30','Open')`);"""
+          new = """      await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,frequency,starts_on,ends_on,status)
+        values('org-final','legal-a','PERIOD-IMPORT-WEEK','Timesheet Import Week','Weekly','2026-08-24','2026-08-30','Open')`);"""
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          git add .github/scripts/wos02-final-review-live-acceptance.mjs
+          git diff --cached --check
+          test "$(git diff --cached --name-only)" = ".github/scripts/wos02-final-review-live-acceptance.mjs"
+          git diff --cached -- .github/scripts/wos02-final-review-live-acceptance.mjs
+          node --check .github/scripts/wos02-final-review-live-acceptance.mjs
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "noreply@github.com"
+          git commit -m "test: set retained reporting fixture frequency"
+          test "$(git rev-parse HEAD^)" = "$CONTROLLER_HEAD"
+          echo "CONTROLLER_COMMIT=$(git rev-parse HEAD)"
+          echo "CONTROLLER_TREE=$(git rev-parse HEAD^{tree})"
+
+      - name: Revalidate and non-force publish controller-only correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq '.commit.sha')" = "$MAIN_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
+          git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$(git rev-parse HEAD)"
