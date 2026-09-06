@@ -1,149 +1,156 @@
-name: WOS-02 Exit Replay Recovery Publisher TEMP
+name: WOS-02 Controller Rebind TEMP
 
 on:
   push:
     branches:
       - controller/wos02-p1-publisher-temp
     paths:
-      - .github/recovery/exit-replay-v2-trigger.txt
+      - .github/recovery/wos02-controller-rebind-trigger.txt
 
 permissions:
   contents: write
   pull-requests: read
 
 jobs:
-  publish-exact-exit-replay-recovery:
+  rebind-controller-to-exit-replay-product:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout temporary publisher authority
+      - name: Checkout temporary controller authority
         uses: actions/checkout@v4
         with:
           ref: controller/wos02-p1-publisher-temp
           path: publisher
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Checkout exact product parent
+      - name: Checkout exact controller parent
         uses: actions/checkout@v4
         with:
-          ref: 436ac4ad7f984cd402495d25a8d2799a9947f217
-          path: product
+          ref: 544d08699294b36bf4f2ad4af033b6430e60776d
+          path: controller
           fetch-depth: 0
 
-      - name: Verify exact live authority before reconstruction
+      - name: Verify exact live leases before edit
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          main_remote="$(git -C product ls-remote origin refs/heads/main | awk '{print $1}')"
-          product_remote="$(git -C product ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')"
+          main_remote="$(git -C controller ls-remote origin refs/heads/main | awk '{print $1}')"
+          controller_remote="$(git -C controller ls-remote origin refs/heads/controller/wos02-exact-acceptance | awk '{print $1}')"
+          product_remote="$(git -C controller ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')"
           test "$main_remote" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
-          test "$product_remote" = "436ac4ad7f984cd402495d25a8d2799a9947f217"
-          test "$(git -C product rev-parse HEAD)" = "436ac4ad7f984cd402495d25a8d2799a9947f217"
-          test "$(git -C product rev-parse HEAD^{tree})" = "d7ceedbd604fc0cc35febc28600ef006990b0484"
+          test "$controller_remote" = "544d08699294b36bf4f2ad4af033b6430e60776d"
+          test "$product_remote" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
+          test "$(git -C controller rev-parse HEAD)" = "544d08699294b36bf4f2ad4af033b6430e60776d"
 
           gh api "repos/$GITHUB_REPOSITORY/pulls/37" > /tmp/pr37.json
-          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.ref == "codex/wos-02-organization-setup-foundation" and .head.sha == "436ac4ad7f984cd402495d25a8d2799a9947f217" and .base.ref == "main" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819"' /tmp/pr37.json >/dev/null
-          test "$(jq -r '.changed_files' /tmp/pr37.json)" = "43"
+          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.ref == "codex/wos-02-organization-setup-foundation" and .head.sha == "ff278306c5394d3c43d0c860a736d783ad59d19c" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819" and .changed_files == 43' /tmp/pr37.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/commits/ff278306c5394d3c43d0c860a736d783ad59d19c" > /tmp/product.json
+          jq -e '.parents|length == 1 and .[0].sha == "436ac4ad7f984cd402495d25a8d2799a9947f217"' /tmp/product.json >/dev/null
+          test "$(jq -r '.commit.tree.sha' /tmp/product.json)" = "d81d00223cc64d1db25695395bc0b696f82e34cd"
+          test "$(jq -r '.stats.additions' /tmp/product.json)" = "39"
+          test "$(jq -r '.stats.deletions' /tmp/product.json)" = "7"
+          test "$(jq -r '[.files[].filename]|sort|join("|")' /tmp/product.json)" = "server/index.mjs|tests/organization-setup-smoke.mjs"
 
           gh api "repos/$GITHUB_REPOSITORY/pulls/38" > /tmp/pr38.json
-          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.ref == "controller/wos02-exact-acceptance" and .head.sha == "544d08699294b36bf4f2ad4af033b6430e60776d"' /tmp/pr38.json >/dev/null
+          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.ref == "controller/wos02-exact-acceptance" and .head.sha == "544d08699294b36bf4f2ad4af033b6430e60776d" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819"' /tmp/pr38.json >/dev/null
 
-          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/37/files?per_page=100" --jq '.[].filename' | sort -u > /tmp/pr37-files.txt
-          test "$(wc -l < /tmp/pr37-files.txt)" = "43"
-          grep '^server/migrations/' /tmp/pr37-files.txt | sort > /tmp/migrations.txt
-          cat > /tmp/expected-migrations.txt <<'EOF'
-          server/migrations/022_organization_setup_foundation.sql
-          server/migrations/023_wos02_scope_lifecycle_integrity.sql
-          server/migrations/024_wos02_final_review_closure.sql
-          server/migrations/025_wos02_timesheet_scope_integrity.sql
-          server/migrations/025a_wos02_project_legal_scope_unique_prerequisite.sql
-          server/migrations/026_wos02_canonical_legal_scope_integrity.sql
-          server/migrations/027_wos02_reporting_period_authority.sql
-          server/migrations/028_wos02_organization_legal_entity_profiles.sql
-          server/migrations/029_wos02_working_calendar_authority.sql
-          EOF
-          diff -u /tmp/expected-migrations.txt /tmp/migrations.txt
-
-      - name: Verify and reconstruct exact recovery payload
+      - name: Rebind exact authority and correct exit-replay controller contract
         shell: bash
         run: |
           set -euo pipefail
-          cd publisher/.github/recovery
-          test "$(wc -c < exit-replay-v2-payload-00.b64)" = "1200"
-          test "$(wc -c < exit-replay-v2-payload-01.b64)" = "1200"
-          test "$(wc -c < exit-replay-v2-payload-02.b64)" = "760"
-          echo "8b930d0dd4b8f72f26217c3722c096e904284d598c252d0fccdb15ba8a9cc78e  exit-replay-v2-payload-00.b64" | sha256sum -c -
-          echo "119dc2ff78859f27ee23fc64ee3a34ddd5b68e374d28bfe8e172d9f0bd1ccf49  exit-replay-v2-payload-01.b64" | sha256sum -c -
-          echo "5fdabce9ed90fe45d2e02f1dafc301ea91d210c02de4541c601faa983b2461c8  exit-replay-v2-payload-02.b64" | sha256sum -c -
-          cat exit-replay-v2-payload-{00..02}.b64 > "$GITHUB_WORKSPACE/payload.b64"
-          test "$(wc -c < "$GITHUB_WORKSPACE/payload.b64")" = "3160"
-          base64 -d "$GITHUB_WORKSPACE/payload.b64" > "$GITHUB_WORKSPACE/exit-replay-v2.diff.gz"
-          test "$(wc -c < "$GITHUB_WORKSPACE/exit-replay-v2.diff.gz")" = "2370"
-          echo "bae50154044191e8eda9371de381a2fb49a912591145e888e0ba2029019bb277  $GITHUB_WORKSPACE/exit-replay-v2.diff.gz" | sha256sum -c -
-          gzip -dc "$GITHUB_WORKSPACE/exit-replay-v2.diff.gz" > "$GITHUB_WORKSPACE/exit-replay-v2.diff"
-          test "$(wc -c < "$GITHUB_WORKSPACE/exit-replay-v2.diff")" = "8427"
-          echo "c7951477e93cb120db83ccced9de8a9a20f60132599761fffb92e47a3a55bd95  $GITHUB_WORKSPACE/exit-replay-v2.diff" | sha256sum -c -
+          cd controller
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
 
-      - name: Apply exact bounded recovery and verify target tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd product
-          git apply --check --binary "$GITHUB_WORKSPACE/exit-replay-v2.diff"
-          git apply --binary "$GITHUB_WORKSPACE/exit-replay-v2.diff"
+          workflow = Path('.github/workflows/wos02-final-review-acceptance.yml')
+          text = workflow.read_text()
+          old_head = 'TARGET_HEAD: 436ac4ad7f984cd402495d25a8d2799a9947f217'
+          new_head = 'TARGET_HEAD: ff278306c5394d3c43d0c860a736d783ad59d19c'
+          old_tree = 'TARGET_TREE: d7ceedbd604fc0cc35febc28600ef006990b0484'
+          new_tree = 'TARGET_TREE: d81d00223cc64d1db25695395bc0b696f82e34cd'
+          if text.count(old_head) != 1 or text.count(old_tree) != 1:
+              raise SystemExit('controller workflow authority anchors are not exact')
+          text = text.replace(old_head, new_head).replace(old_tree, new_tree)
+          workflow.write_text(text)
+
+          script = Path('.github/scripts/wos02-mutation-lifecycle-acceptance.mjs')
+          source = script.read_text()
+
+          source, count = re.subn(
+              r"^ await check\('stale or equal exit history is stable no-write conflict'.*$",
+              """ await check('already-exited same-date direct replay preserves authoritative lifecycle state',async()=>{ const before=await workerState(directId); const r=await call('POST','/api/employees',{token,body:{...employeeBody('E-P1-DIRECT',{status:'Exited',exit_date:'2026-08-01'}),initial_password:undefined}}); assert.equal(r.status,200,JSON.stringify(r.body)); const after=await workerState(directId); assert.equal(String(after.employee.exit_date).slice(0,10),'2026-08-01'); assert.equal(after.employee.status,'Exited'); assert.equal(after.profile.lifecycle_status,'Exited'); assert.equal(after.user.status,'Disabled'); assert.equal(after.scopes.find(s=>s.organization_id==='org-p1'&&s.legal_entity_id==='legal-p1-a')?.active,false); assert.equal(after.history.length,before.history.length); });
+ await check('already-exited omitted-date direct replay preserves authoritative lifecycle state',async()=>{ const before=await workerState(directId); const r=await call('POST','/api/employees',{token,body:{...employeeBody('E-P1-DIRECT',{status:'Exited'}),initial_password:undefined}}); assert.equal(r.status,200,JSON.stringify(r.body)); const after=await workerState(directId); assert.equal(String(after.employee.exit_date).slice(0,10),'2026-08-01'); assert.equal(after.history.length,before.history.length); assert.equal(after.user.status,'Disabled'); assert.equal(after.scopes.find(s=>s.organization_id==='org-p1'&&s.legal_entity_id==='legal-p1-a')?.active,false); });
+ await check('already-exited different-date direct replay is stable no-write conflict',async()=>{ const before=await workerState(directId); const r=await call('POST','/api/employees',{token,body:{...employeeBody('E-P1-DIRECT',{status:'Exited',exit_date:'2026-01-01'}),initial_password:undefined}}); assert.equal(r.status,409,JSON.stringify(r.body)); assert.ok(hasCode(r.body,'WORKER_VERSION_CONFLICT')); assertUnchanged(before,await workerState(directId)); });""",
+              source,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit('direct exit replay controller anchor not exact')
+
+          source, count = re.subn(
+              r"^ await check\('employee import partial processing blocks unsafe exit and converges allowed exit'.*$",
+              """ let importAllowedId;
+ await check('employee import partial processing blocks unsafe exit and converges allowed exit',async()=>{ const a=await call('POST','/api/employees',{token,body:employeeBody('E-P1-IMPORT-OK')}); importAllowedId=a.body.id; const beforeBlocked=await workerState(blockedId); const payload={fileName:'p1-exits.csv',rows:[{...importRow('E-P1-BLOCK',{status:'Exited',exitDate:'2026-09-01'}),initialPassword:undefined},{...importRow('E-P1-IMPORT-OK',{status:'Exited',exitDate:'2026-09-01'}),initialPassword:undefined}]}; const r=await call('POST','/api/imports/employees/apply',{token,body:payload}); assert.equal(r.status,200,JSON.stringify(r.body)); assert.equal(r.body.status,'Partial'); assert.ok(hasCode(r.body,'WORKER_DEPENDENCY_CONFLICT')); assertUnchanged(beforeBlocked,await workerState(blockedId)); assertExited(await workerState(importAllowedId)); });
+ await check('already-exited same-date employee import replay preserves authoritative lifecycle state',async()=>{ const before=await workerState(importAllowedId); const r=await call('POST','/api/imports/employees/apply',{token,body:{fileName:'p1-exit-same-date.csv',rows:[{...importRow('E-P1-IMPORT-OK',{status:'Exited',exitDate:'2026-09-01'}),initialPassword:undefined}]}}); assert.equal(r.status,200,JSON.stringify(r.body)); assert.equal(r.body.status,'Success',JSON.stringify(r.body)); const after=await workerState(importAllowedId); assert.equal(String(after.employee.exit_date).slice(0,10),'2026-09-01'); assert.equal(after.employee.status,'Exited'); assert.equal(after.profile.lifecycle_status,'Exited'); assert.equal(after.user.status,'Disabled'); assert.equal(after.scopes.find(s=>s.organization_id==='org-p1'&&s.legal_entity_id==='legal-p1-a')?.active,false); assert.equal(after.history.length,before.history.length); });
+ await check('already-exited different-date employee import conflict is row-local and partial',async()=>{ const valid=await call('POST','/api/employees',{token,body:employeeBody('E-P1-IMPORT-PARTIAL')}); assert.equal(valid.status,200,JSON.stringify(valid.body)); const before=await workerState(importAllowedId); const r=await call('POST','/api/imports/employees/apply',{token,body:{fileName:'p1-exit-replay-partial.csv',rows:[{...importRow('E-P1-IMPORT-OK',{status:'Exited',exitDate:'2026-10-01'}),initialPassword:undefined},{...importRow('E-P1-IMPORT-PARTIAL',{name:'E-P1-IMPORT-PARTIAL-UPDATED',status:'Active'}),initialPassword:undefined}]}}); assert.equal(r.status,200,JSON.stringify(r.body)); assert.equal(r.body.status,'Partial',JSON.stringify(r.body)); assert.ok(hasCode(r.body,'WORKER_VERSION_CONFLICT'),JSON.stringify(r.body)); assertUnchanged(before,await workerState(importAllowedId)); const validAfter=await workerState(valid.body.id); assert.equal(validAfter.employee.name,'E-P1-IMPORT-PARTIAL-UPDATED'); });""",
+              source,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit('employee import controller anchor not exact')
+
+          source, count = re.subn(
+              r"(\n scopes:.*\n)( audit:Number)",
+              r"\1 mappings:(await pool.query(`select country_director_id from employee_country_director_map where employee_id=$1 order by 1`,[id])).rows,\n roles:(await pool.query(`select r.name from user_roles ur join roles r on r.id=ur.role_id where ur.user_id=(select id from users where employee_record_id=$1) order by r.name`,[id])).rows,\n\2",
+              source,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit('worker state controller anchor not exact')
+
+          script.write_text(source)
+          PY
+
+          node --check .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
+          grep -q 'TARGET_HEAD: ff278306c5394d3c43d0c860a736d783ad59d19c' .github/workflows/wos02-final-review-acceptance.yml
+          grep -q 'TARGET_TREE: d81d00223cc64d1db25695395bc0b696f82e34cd' .github/workflows/wos02-final-review-acceptance.yml
+          grep -q 'already-exited same-date direct replay preserves authoritative lifecycle state' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
+          grep -q 'already-exited different-date employee import conflict is row-local and partial' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
           git diff --check
           mapfile -t files < <(git diff --name-only | sort)
           test "${#files[@]}" = "2"
-          test "${files[0]}" = "server/index.mjs"
-          test "${files[1]}" = "tests/organization-setup-smoke.mjs"
-          read -r adds dels < <(git diff --numstat | awk '{a+=$1; d+=$2} END {print a,d}')
-          test "$adds" = "39"
-          test "$dels" = "7"
-          git add server/index.mjs tests/organization-setup-smoke.mjs
-          test "$(git write-tree)" = "d81d00223cc64d1db25695395bc0b696f82e34cd"
+          test "${files[0]}" = ".github/scripts/wos02-mutation-lifecycle-acceptance.mjs"
+          test "${files[1]}" = ".github/workflows/wos02-final-review-acceptance.yml"
 
-      - name: Focused retained verification
+      - name: Commit exact controller-only rebind
         shell: bash
         run: |
           set -euo pipefail
-          cd product
-          npm ci
-          npm run test:organization-setup
-          npm run test:backend
-          npm run test:authorization-convergence
-          APP_MODE=test ALLOW_TEST_FALLBACK=true npm test
-          npm run typecheck
-          npm run lint
-          npm run build
-          npm run test:bootstrap-scan
-          npm run test:wos00-baseline
-          NODE_ENV=production node server/index.mjs >/tmp/wos02-prod-start.log 2>&1 && exit 1 || true
-          grep -q "Production startup blocked" /tmp/wos02-prod-start.log
-
-      - name: Commit exact verified product tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd product
+          cd controller
           git config user.name "WorkOS Implementation Controller"
           git config user.email "noreply@github.com"
-          git commit -m "fix: preserve idempotent exited worker replays"
-          test "$(git rev-parse HEAD^)" = "436ac4ad7f984cd402495d25a8d2799a9947f217"
-          test "$(git rev-parse HEAD^{tree})" = "d81d00223cc64d1db25695395bc0b696f82e34cd"
+          git add .github/scripts/wos02-mutation-lifecycle-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml
+          git commit -m "test: rebind WOS-02 acceptance to exit-replay fix"
+          test "$(git rev-parse HEAD^)" = "544d08699294b36bf4f2ad4af033b6430e60776d"
 
-      - name: Verify second exact live lease and non-force publish PR37 branch
+      - name: Verify second live lease and non-force publish existing PR38 branch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          main_remote="$(git -C product ls-remote origin refs/heads/main | awk '{print $1}')"
-          product_remote="$(git -C product ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')"
+          main_remote="$(git -C controller ls-remote origin refs/heads/main | awk '{print $1}')"
+          controller_remote="$(git -C controller ls-remote origin refs/heads/controller/wos02-exact-acceptance | awk '{print $1}')"
+          product_remote="$(git -C controller ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')"
           test "$main_remote" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
-          test "$product_remote" = "436ac4ad7f984cd402495d25a8d2799a9947f217"
+          test "$controller_remote" = "544d08699294b36bf4f2ad4af033b6430e60776d"
+          test "$product_remote" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
           gh api "repos/$GITHUB_REPOSITORY/pulls/37" > /tmp/pr37-second.json
-          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "436ac4ad7f984cd402495d25a8d2799a9947f217" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819" and .changed_files == 43' /tmp/pr37-second.json >/dev/null
+          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "ff278306c5394d3c43d0c860a736d783ad59d19c" and .changed_files == 43' /tmp/pr37-second.json >/dev/null
           gh api "repos/$GITHUB_REPOSITORY/pulls/38" > /tmp/pr38-second.json
           jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "544d08699294b36bf4f2ad4af033b6430e60776d"' /tmp/pr38-second.json >/dev/null
-          git -C product push origin HEAD:refs/heads/codex/wos-02-organization-setup-foundation
+          git -C controller push origin HEAD:refs/heads/controller/wos02-exact-acceptance
