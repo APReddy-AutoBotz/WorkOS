@@ -78,27 +78,46 @@ jobs:
           grep -F "TARGET_TREE: $PRODUCT_TREE" .github/workflows/wos02-final-review-acceptance.yml
           grep -F "030_wos02_reporting_period_frequency.sql" .github/workflows/wos02-final-review-acceptance.yml
           grep -F "wos02-reporting-period-u8u9-acceptance.mjs" .github/workflows/wos02-final-review-acceptance.yml
-          git config user.name "WorkOS Implementation Controller"
-          git config user.email "noreply@github.com"
-          git commit -m "test: rebind U8-U9 reporting acceptance"
-          test "$(git rev-parse HEAD^)" = "$CONTROLLER_HEAD"
-          echo "CONTROLLER_COMMIT=$(git rev-parse HEAD)"
-          echo "CONTROLLER_TREE=$(git rev-parse HEAD^{tree})"
 
-      - name: Revalidate and attempt controller publication
+      - name: Checkout publisher branch for generated blob staging
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: staging
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Stage exact generated controller blobs on publisher branch
         shell: bash
         run: |
           set -euo pipefail
           test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MAIN_HEAD"
           test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
           test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
-          echo "PUBLISHING_CONTROLLER_COMMIT=$(git rev-parse HEAD)"
-          echo "PUBLISHING_CONTROLLER_TREE=$(git rev-parse HEAD^{tree})"
-          git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
-          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$(git rev-parse HEAD)"
+          mkdir -p staging/.github/publisher/generated
+          cp .github/workflows/wos02-final-review-acceptance.yml staging/.github/publisher/generated/wos02-final-review-acceptance.yml
+          cp .github/scripts/wos02-reporting-period-acceptance.mjs staging/.github/publisher/generated/wos02-reporting-period-acceptance.mjs
+          cp .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs staging/.github/publisher/generated/wos02-reporting-period-u8u9-acceptance.mjs
+          {
+            echo "MAIN_HEAD=$MAIN_HEAD"
+            echo "PRODUCT_HEAD=$PRODUCT_HEAD"
+            echo "PRODUCT_TREE=$PRODUCT_TREE"
+            echo "CONTROLLER_HEAD=$CONTROLLER_HEAD"
+            for file in wos02-final-review-acceptance.yml wos02-reporting-period-acceptance.mjs wos02-reporting-period-u8u9-acceptance.mjs; do
+              bytes=$(wc -c < "staging/.github/publisher/generated/$file" | tr -d ' ')
+              hash=$(sha256sum "staging/.github/publisher/generated/$file" | cut -d' ' -f1)
+              echo "$file bytes=$bytes sha256=$hash"
+            done
+          } > staging/.github/publisher/generated/MANIFEST.txt
+          cd staging
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git ls-remote origin refs/heads/controller/wos02-migration-publisher | cut -f1)" = "$GITHUB_SHA"
+          git add .github/publisher/generated/MANIFEST.txt .github/publisher/generated/wos02-final-review-acceptance.yml .github/publisher/generated/wos02-reporting-period-acceptance.mjs .github/publisher/generated/wos02-reporting-period-u8u9-acceptance.mjs
+          git diff --cached --check
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/publisher/generated/MANIFEST.txt .github/publisher/generated/wos02-final-review-acceptance.yml .github/publisher/generated/wos02-reporting-period-acceptance.mjs .github/publisher/generated/wos02-reporting-period-u8u9-acceptance.mjs "
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "noreply@github.com"
+          git commit -m "chore: stage exact generated WOS-02 controller blobs"
+          git push origin HEAD:refs/heads/controller/wos02-migration-publisher
