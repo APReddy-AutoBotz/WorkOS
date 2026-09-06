@@ -82,8 +82,10 @@ jobs:
           git config user.email "noreply@github.com"
           git commit -m "test: rebind U8-U9 reporting acceptance"
           test "$(git rev-parse HEAD^)" = "$CONTROLLER_HEAD"
+          echo "CONTROLLER_COMMIT=$(git rev-parse HEAD)"
+          echo "CONTROLLER_TREE=$(git rev-parse HEAD^{tree})"
 
-      - name: Revalidate and non-force publish existing controller branch
+      - name: Revalidate and attempt controller publication
         shell: bash
         run: |
           set -euo pipefail
@@ -96,5 +98,7 @@ jobs:
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
+          echo "PUBLISHING_CONTROLLER_COMMIT=$(git rev-parse HEAD)"
+          echo "PUBLISHING_CONTROLLER_TREE=$(git rev-parse HEAD^{tree})"
           git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
           test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$(git rev-parse HEAD)"
