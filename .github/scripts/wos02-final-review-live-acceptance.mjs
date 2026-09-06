@@ -202,7 +202,7 @@ try {
     workerTypeId = workerType.body.id;
     const futureCalendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-FUTURE', name: 'Future Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, applicability: { type: 'legal_entity' }, effectiveFrom: '2099-01-01' } });
     assert.equal(futureCalendar.status, 201, JSON.stringify(futureCalendar.body));
-    const oldPeriod = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-OLD', name: 'Old Period', startsOn: '2025-01-01', endsOn: '2025-12-31', status: 'Closed' } });
+    const oldPeriod = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-OLD', name: 'Old Period', frequency: 'Weekly', startsOn: '2025-01-01', endsOn: '2025-12-31', status: 'Closed' } });
     assert.equal(oldPeriod.status, 201, JSON.stringify(oldPeriod.body));
     const before = await call('GET', '/api/organization-setup/readiness?ready=true', { token: adminToken, scope: scopeA });
     assert.equal(before.status, 200);
@@ -210,8 +210,10 @@ try {
     assert.equal(before.body.authority, 'persisted-server-state');
     const calendar = await call('POST', '/api/organization-setup/calendars', { token: adminToken, scope: scopeA, body: { code: 'CAL-CURRENT', name: 'Current Calendar', timezone: 'UTC', workingDays: [1,2,3,4,5], hoursPerDay: 8, applicability: { type: 'legal_entity' }, effectiveFrom: '2026-01-01' } });
     assert.equal(calendar.status, 201, JSON.stringify(calendar.body));
-    const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-CURRENT', name: 'Current Period', startsOn: '2026-01-01', endsOn: '2026-12-31', status: 'Open' } });
-    assert.equal(period.status, 201, JSON.stringify(period.body));
+    for (const frequency of ['Weekly', 'Monthly', 'Fiscal']) {
+      const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: `PERIOD-CURRENT-${frequency.toUpperCase()}`, name: `Current ${frequency} Period`, frequency, startsOn: today, endsOn: today, status: 'Open' } });
+      assert.equal(period.status, 201, `${frequency} ${JSON.stringify(period.body)}`);
+    }
     const after = await call('GET', '/api/organization-setup/readiness', { token: adminToken, scope: scopeA });
     assert.equal(after.status, 200);
     assert.equal(after.body.checks.organization, true, JSON.stringify(after.body));
