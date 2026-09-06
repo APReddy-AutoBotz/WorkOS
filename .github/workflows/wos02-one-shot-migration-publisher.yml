@@ -69,15 +69,15 @@ jobs:
           set -euo pipefail
           python publisher/.github/publisher/wos02-u8u9-controller-rebind.py
           cp publisher/.github/publisher/wos02-reporting-period-u8u9-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
-          git diff --check
-          test "$(git diff --name-only | sort | tr '\n' ' ')" = ".github/scripts/wos02-reporting-period-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml "
+          git add .github/scripts/wos02-reporting-period-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml
+          git diff --cached --check
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/scripts/wos02-reporting-period-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml "
           node --check .github/scripts/wos02-reporting-period-acceptance.mjs
           node --check .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
           grep -F "TARGET_HEAD: $PRODUCT_HEAD" .github/workflows/wos02-final-review-acceptance.yml
           grep -F "TARGET_TREE: $PRODUCT_TREE" .github/workflows/wos02-final-review-acceptance.yml
           grep -F "030_wos02_reporting_period_frequency.sql" .github/workflows/wos02-final-review-acceptance.yml
           grep -F "wos02-reporting-period-u8u9-acceptance.mjs" .github/workflows/wos02-final-review-acceptance.yml
-          git add .github/scripts/wos02-reporting-period-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml
           git config user.name "WorkOS Implementation Controller"
           git config user.email "noreply@github.com"
           git commit -m "test: rebind U8-U9 reporting acceptance"
