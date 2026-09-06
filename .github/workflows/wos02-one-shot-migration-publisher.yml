@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: wos02-retained-live-diagnostic
@@ -33,6 +34,7 @@ jobs:
           --health-timeout=5s
           --health-retries=20
     env:
+      GH_TOKEN: ${{ github.token }}
       DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_diag
       MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
       PRODUCT_HEAD: 28edf2f1966e293c44ca4d173a2ad0a2857e6b2b
@@ -60,9 +62,13 @@ jobs:
           set -euo pipefail
           test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_HEAD"
           test "$(git -C target rev-parse HEAD)" = "$PRODUCT_HEAD"
-          test "$(git ls-remote https://github.com/$GITHUB_REPOSITORY.git refs/heads/main | cut -f1)" = "$MAIN_HEAD"
-          test "$(git ls-remote https://github.com/$GITHUB_REPOSITORY.git refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
-          test "$(git ls-remote https://github.com/$GITHUB_REPOSITORY.git refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq '.commit.sha')" = "$MAIN_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
 
       - name: Setup Node
         uses: actions/setup-node@v4
