@@ -1,26 +1,26 @@
-name: WOS-02 Controller Rebind TEMP
+name: WOS-02 Controller Carrier TEMP
 
 on:
   push:
     branches:
       - controller/wos02-p1-publisher-temp
     paths:
-      - '.github/recovery/wos02-controller-rebind-trigger.txt'
+      - '.github/recovery/wos02-controller-carrier-trigger.txt'
 
 permissions:
   contents: write
   pull-requests: read
 
 jobs:
-  rebind-controller-to-exit-replay-product:
+  materialize-controller-carrier:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout temporary controller authority
+      - name: Checkout temporary carrier branch
         uses: actions/checkout@v4
         with:
           ref: controller/wos02-p1-publisher-temp
           path: publisher
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Checkout exact controller parent
         uses: actions/checkout@v4
@@ -29,20 +29,17 @@ jobs:
           path: controller
           fetch-depth: 0
 
-      - name: Verify exact live leases before edit
+      - name: Verify exact live authority
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          main_remote="$(git -C controller ls-remote origin refs/heads/main | awk '{print $1}')"
-          controller_remote="$(git -C controller ls-remote origin refs/heads/controller/wos02-exact-acceptance | awk '{print $1}')"
-          product_remote="$(git -C controller ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')"
-          test "$main_remote" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
-          test "$controller_remote" = "544d08699294b36bf4f2ad4af033b6430e60776d"
-          test "$product_remote" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
+          test "$(git -C controller ls-remote origin refs/heads/main | awk '{print $1}')" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
+          test "$(git -C controller ls-remote origin refs/heads/controller/wos02-exact-acceptance | awk '{print $1}')" = "544d08699294b36bf4f2ad4af033b6430e60776d"
+          test "$(git -C controller ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
           gh api "repos/$GITHUB_REPOSITORY/pulls/37" > /tmp/pr37.json
-          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.ref == "codex/wos-02-organization-setup-foundation" and .head.sha == "ff278306c5394d3c43d0c860a736d783ad59d19c" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819" and .changed_files == 43' /tmp/pr37.json >/dev/null
+          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "ff278306c5394d3c43d0c860a736d783ad59d19c" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819" and .changed_files == 43' /tmp/pr37.json >/dev/null
           gh api "repos/$GITHUB_REPOSITORY/commits/ff278306c5394d3c43d0c860a736d783ad59d19c" > /tmp/product.json
           test "$(jq -r '.commit.tree.sha' /tmp/product.json)" = "d81d00223cc64d1db25695395bc0b696f82e34cd"
           test "$(jq -r '.parents[0].sha' /tmp/product.json)" = "436ac4ad7f984cd402495d25a8d2799a9947f217"
@@ -50,9 +47,9 @@ jobs:
           test "$(jq -r '.stats.deletions' /tmp/product.json)" = "7"
           test "$(jq -r '[.files[].filename] | sort | join("|")' /tmp/product.json)" = "server/index.mjs|tests/organization-setup-smoke.mjs"
           gh api "repos/$GITHUB_REPOSITORY/pulls/38" > /tmp/pr38.json
-          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.ref == "controller/wos02-exact-acceptance" and .head.sha == "544d08699294b36bf4f2ad4af033b6430e60776d" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819"' /tmp/pr38.json >/dev/null
+          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "544d08699294b36bf4f2ad4af033b6430e60776d" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819"' /tmp/pr38.json >/dev/null
 
-      - name: Rebind exact authority and correct exit-replay controller contract
+      - name: Generate exact two-file controller rebind
         shell: bash
         run: |
           set -euo pipefail
@@ -62,6 +59,9 @@ jobs:
           grep -q 'TARGET_HEAD: ff278306c5394d3c43d0c860a736d783ad59d19c' .github/workflows/wos02-final-review-acceptance.yml
           grep -q 'TARGET_TREE: d81d00223cc64d1db25695395bc0b696f82e34cd' .github/workflows/wos02-final-review-acceptance.yml
           grep -q 'already-exited same-date direct replay preserves authoritative lifecycle state' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
+          grep -q 'already-exited omitted-date direct replay preserves authoritative lifecycle state' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
+          grep -q 'already-exited different-date direct replay is stable no-write conflict' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
+          grep -q 'already-exited same-date employee import replay preserves authoritative lifecycle state' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
           grep -q 'already-exited different-date employee import conflict is row-local and partial' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
           git diff --check
           mapfile -t files < <(git diff --name-only | sort)
@@ -69,31 +69,25 @@ jobs:
           test "${files[0]}" = ".github/scripts/wos02-mutation-lifecycle-acceptance.mjs"
           test "${files[1]}" = ".github/workflows/wos02-final-review-acceptance.yml"
 
-      - name: Commit exact controller-only rebind
+      - name: Publish inert verified carrier blobs to temporary branch
         shell: bash
         run: |
           set -euo pipefail
-          cd controller
+          mkdir -p publisher/.github/recovery/wos02-controller-rebind
+          cp controller/.github/scripts/wos02-mutation-lifecycle-acceptance.mjs publisher/.github/recovery/wos02-controller-rebind/mutation-lifecycle.mjs
+          cp controller/.github/workflows/wos02-final-review-acceptance.yml publisher/.github/recovery/wos02-controller-rebind/final-review-acceptance.yml.txt
+          {
+            echo "controller_parent=544d08699294b36bf4f2ad4af033b6430e60776d"
+            echo "product_head=ff278306c5394d3c43d0c860a736d783ad59d19c"
+            echo "product_tree=d81d00223cc64d1db25695395bc0b696f82e34cd"
+            sha256sum publisher/.github/recovery/wos02-controller-rebind/mutation-lifecycle.mjs
+            sha256sum publisher/.github/recovery/wos02-controller-rebind/final-review-acceptance.yml.txt
+            wc -c publisher/.github/recovery/wos02-controller-rebind/mutation-lifecycle.mjs publisher/.github/recovery/wos02-controller-rebind/final-review-acceptance.yml.txt
+          } > publisher/.github/recovery/wos02-controller-rebind/manifest.txt
+          cd publisher
           git config user.name "WorkOS Implementation Controller"
           git config user.email "noreply@github.com"
-          git add .github/scripts/wos02-mutation-lifecycle-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml
-          git commit -m "test: rebind WOS-02 acceptance to exit-replay fix"
-          test "$(git rev-parse HEAD^)" = "544d08699294b36bf4f2ad4af033b6430e60776d"
-
-      - name: Verify second live lease and non-force publish existing PR38 branch
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          main_remote="$(git -C controller ls-remote origin refs/heads/main | awk '{print $1}')"
-          controller_remote="$(git -C controller ls-remote origin refs/heads/controller/wos02-exact-acceptance | awk '{print $1}')"
-          product_remote="$(git -C controller ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')"
-          test "$main_remote" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
-          test "$controller_remote" = "544d08699294b36bf4f2ad4af033b6430e60776d"
-          test "$product_remote" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
-          gh api "repos/$GITHUB_REPOSITORY/pulls/37" > /tmp/pr37-second.json
-          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "ff278306c5394d3c43d0c860a736d783ad59d19c" and .changed_files == 43' /tmp/pr37-second.json >/dev/null
-          gh api "repos/$GITHUB_REPOSITORY/pulls/38" > /tmp/pr38-second.json
-          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "544d08699294b36bf4f2ad4af033b6430e60776d"' /tmp/pr38-second.json >/dev/null
-          git -C controller push origin HEAD:refs/heads/controller/wos02-exact-acceptance
+          git add .github/recovery/wos02-controller-rebind/
+          git diff --cached --check
+          git commit -m "chore: materialize WOS-02 controller rebind carrier"
+          git push origin HEAD:refs/heads/controller/wos02-p1-publisher-temp
