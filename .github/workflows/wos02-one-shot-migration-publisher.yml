@@ -1,4 +1,4 @@
-name: WOS-02 Scope-Write Frequency Fixture Publisher
+name: WOS-02 Scope-Write Fixture Publisher
 
 on:
   push:
@@ -10,10 +10,6 @@ on:
 permissions:
   contents: write
   pull-requests: read
-
-concurrency:
-  group: wos02-scope-write-frequency-fixture-publisher
-  cancel-in-progress: false
 
 jobs:
   publish:
@@ -32,54 +28,39 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Verify exact live leases
+      - name: Verify lease
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq '.commit.sha')" = "$MAIN_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
 
-      - name: Correct only stale scope-write reporting fixtures
+      - name: Correct stale frequency fixture only
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('.github/scripts/wos02-scope-write-acceptance.mjs')
-          s = p.read_text()
-          old = """await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status) values
- ('org-scope','legal-scope-a','RP-SCOPE-0816','Scope Week 0816','2026-08-10','2026-08-16','Open'),
- ('org-scope','legal-scope-a','RP-SCOPE-0823','Scope Week 0823','2026-08-17','2026-08-23','Open'),
- ('org-scope','legal-scope-a','RP-SCOPE-0830','Scope Week 0830','2026-08-24','2026-08-30','Open')
- on conflict(organization_id,legal_entity_id,code) do nothing`);"""
-          new = """await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,frequency,starts_on,ends_on,status) values
- ('org-scope','legal-scope-a','RP-SCOPE-0816','Scope Week 0816','Weekly','2026-08-10','2026-08-16','Open'),
- ('org-scope','legal-scope-a','RP-SCOPE-0823','Scope Week 0823','Weekly','2026-08-17','2026-08-23','Open'),
- ('org-scope','legal-scope-a','RP-SCOPE-0830','Scope Week 0830','Weekly','2026-08-24','2026-08-30','Open')
- on conflict(organization_id,legal_entity_id,frequency,code) do nothing`);"""
-          assert s.count(old) == 1, s.count(old)
-          s = s.replace(old, new, 1)
-          p.write_text(s)
-          PY
-          git add .github/scripts/wos02-scope-write-acceptance.mjs
+          file=.github/scripts/wos02-scope-write-acceptance.mjs
+          python -c "from pathlib import Path; p=Path('$file'); s=p.read_text(); old='insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status) values'; new='insert into reporting_periods(organization_id,legal_entity_id,code,name,frequency,starts_on,ends_on,status) values'; assert s.count(old)==1; p.write_text(s.replace(old,new,1))"
+          python -c "from pathlib import Path; p=Path('$file'); s=p.read_text(); pairs=[(\"'Scope Week 0816','2026-08-10'\",\"'Scope Week 0816','Weekly','2026-08-10'\"),(\"'Scope Week 0823','2026-08-17'\",\"'Scope Week 0823','Weekly','2026-08-17'\"),(\"'Scope Week 0830','2026-08-24'\",\"'Scope Week 0830','Weekly','2026-08-24'\")]; [(_ for _ in ()).throw(AssertionError((a,s.count(a)))) if s.count(a)!=1 else None for a,b in pairs]; [None for a,b in pairs if not (s:=s.replace(a,b,1))]; p.write_text(s)"
+          python -c "from pathlib import Path; p=Path('$file'); s=p.read_text(); old='on conflict(organization_id,legal_entity_id,code) do nothing'; new='on conflict(organization_id,legal_entity_id,frequency,code) do nothing'; assert s.count(old)==1; p.write_text(s.replace(old,new,1))"
+          git add "$file"
           git diff --cached --check
-          test "$(git diff --cached --name-only)" = ".github/scripts/wos02-scope-write-acceptance.mjs"
-          node --check .github/scripts/wos02-scope-write-acceptance.mjs
-          git diff --cached -- .github/scripts/wos02-scope-write-acceptance.mjs
+          test "$(git diff --cached --name-only)" = "$file"
+          node --check "$file"
+          grep -F "code,name,frequency,starts_on,ends_on,status" "$file"
+          grep -F "'Scope Week 0816','Weekly','2026-08-10'" "$file"
+          grep -F "on conflict(organization_id,legal_entity_id,frequency,code) do nothing" "$file"
           git config user.name "WorkOS Implementation Controller"
           git config user.email "noreply@github.com"
           git commit -m "test: align scope-write reporting fixtures with frequency authority"
           test "$(git rev-parse HEAD^)" = "$CONTROLLER_HEAD"
-          echo "CONTROLLER_COMMIT=$(git rev-parse HEAD)"
-          echo "CONTROLLER_TREE=$(git rev-parse HEAD^{tree})"
+          echo "NEW_CONTROLLER=$(git rev-parse HEAD)"
 
-      - name: Revalidate and non-force publish controller correction
+      - name: Revalidate and publish
         shell: bash
         run: |
           set -euo pipefail
