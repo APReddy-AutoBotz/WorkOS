@@ -1,4 +1,4 @@
-name: WOS-02 U8-U9 Verified Recovery Publisher
+name: WOS-02 U8-U9 Controller Rebind Publisher
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
   issues: read
 
 concurrency:
-  group: wos02-u8-u9-verified-recovery-publisher
+  group: wos02-u8-u9-controller-rebind-publisher
   cancel-in-progress: false
 
 jobs:
@@ -22,11 +22,15 @@ jobs:
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
+      MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+      PRODUCT_HEAD: 28edf2f1966e293c44ca4d173a2ad0a2857e6b2b
+      PRODUCT_TREE: 23c9d49046e0af9a1540f71690825ef2845e5c07
+      CONTROLLER_HEAD: 10ea59ed7d244c6fa457d0530fa13888065ace51
     steps:
-      - name: Checkout exact product base
+      - name: Checkout exact controller base
         uses: actions/checkout@v4
         with:
-          ref: ff278306c5394d3c43d0c860a736d783ad59d19c
+          ref: ${{ env.CONTROLLER_HEAD }}
           fetch-depth: 0
           persist-credentials: true
 
@@ -34,77 +38,64 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
-          test "$(git rev-parse HEAD^{tree})" = "d81d00223cc64d1db25695395bc0b696f82e34cd"
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
-          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
-          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "10ea59ed7d244c6fa457d0530fa13888065ace51"
+          test "$(git rev-parse HEAD)" = "$CONTROLLER_HEAD"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MAIN_HEAD"
+          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
+          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.merged')" = "false"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.merged')" = "false"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "10ea59ed7d244c6fa457d0530fa13888065ace51"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/git/commits/$PRODUCT_HEAD --jq '.tree.sha')" = "$PRODUCT_TREE"
 
-      - name: Retrieve and verify exact recovery payload
+      - name: Retrieve and verify controller rebind payload
         shell: bash
         run: |
           set -euo pipefail
-          gh api repos/$GITHUB_REPOSITORY/issues/comments/5557573519 --jq '.body' > /tmp/recovery.md
+          gh api repos/$GITHUB_REPOSITORY/issues/comments/5558390189 --jq '.body' > /tmp/rebind.md
           python - <<'PY'
-          import hashlib, re
+          import base64, hashlib, re
           from pathlib import Path
-          body = Path('/tmp/recovery.md').read_text()
-          pattern = re.compile(
-              r"### U8U9-RETRY-(\d{3})\s+"
-              r"Character count:\s*`(\d+)`\s+"
-              r"SHA-256:\s*`([0-9a-f]{64})`\s+"
-              r"```text\s*([A-Za-z0-9+/=]+)\s*```",
-              re.S,
-          )
-          matches = pattern.findall(body)
-          assert len(matches) == 40, f"expected 40 segments, got {len(matches)}"
-          payload = []
-          for i, (label, count, sha, data) in enumerate(matches):
-              assert label == f"{i:03d}", (i, label)
-              assert len(data) == int(count), (label, len(data), count)
-              assert hashlib.sha256(data.encode()).hexdigest() == sha, label
-              payload.append(data)
-          combined = ''.join(payload)
-          assert len(combined) == 9412
-          assert hashlib.sha256(combined.encode()).hexdigest() == "bfe3ac868751bbf9d9bfdc272cb9f7cd8f4fdff616771aece450127762642082"
-          Path('/tmp/payload.b64').write_text(combined)
+          body = Path('/tmp/rebind.md').read_text()
+          match = re.search(r"```base64\s*\n([A-Za-z0-9+/=\r\n]+)\n```", body)
+          assert match, 'base64 payload block missing'
+          payload = ''.join(match.group(1).split())
+          assert len(payload) == 21856, len(payload)
+          assert hashlib.sha256(payload.encode()).hexdigest() == '4b02322def958df67ac8a4b69a9131a419b5fb365c9bec3fdf516e87a9b6885f'
+          decoded = base64.b64decode(payload, validate=True)
+          assert len(decoded) == 16391, len(decoded)
+          assert hashlib.sha256(decoded).hexdigest() == '897175d3513c4ad6b8bb1b8ecc91150ec5c92a254a7dd4dbe932f06ed46e37b0'
+          Path('/tmp/rebind.py').write_bytes(decoded)
           PY
-          base64 -d /tmp/payload.b64 > /tmp/u8u9.diff.gz
-          test "$(wc -c < /tmp/u8u9.diff.gz | tr -d ' ')" = "7057"
-          echo "2150c2bd8abb79375252cfd1be3a184260ef5cb5fa2335a9d5ca050ee662cb2c  /tmp/u8u9.diff.gz" | sha256sum -c -
-          gzip -dc /tmp/u8u9.diff.gz > /tmp/u8u9.diff
-          test "$(wc -c < /tmp/u8u9.diff | tr -d ' ')" = "27914"
-          echo "c48f054cd1c2b4feff7e29cacb83f2e131dac7771df6083111b5d14586a7d20f  /tmp/u8u9.diff" | sha256sum -c -
-          git apply --check --binary /tmp/u8u9.diff
-          git apply --binary /tmp/u8u9.diff
-          git add -A
-          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = "docs/00-control/REQUIREMENTS_TRACEABILITY.md server/index.mjs server/migrations/030_wos02_reporting_period_frequency.sql server/organization-setup.mjs server/reporting-periods.mjs tests/organization-setup-smoke.mjs "
-          test "$(git diff --cached --numstat | awk '{a+=$1; d+=$2} END {print a "/" d}')" = "101/36"
-          git diff --cached --check
+          python /tmp/rebind.py
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = ".github/scripts/wos02-reporting-period-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml "
+          node --check .github/scripts/wos02-reporting-period-acceptance.mjs
+          grep -F "TARGET_HEAD: $PRODUCT_HEAD" .github/workflows/wos02-final-review-acceptance.yml
+          grep -F "TARGET_TREE: $PRODUCT_TREE" .github/workflows/wos02-final-review-acceptance.yml
+          grep -F "030_wos02_reporting_period_frequency.sql" .github/workflows/wos02-final-review-acceptance.yml
+          git add .github/scripts/wos02-reporting-period-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml
           git config user.name "WorkOS Implementation Controller"
           git config user.email "noreply@github.com"
-          git commit -m "fix: preserve reporting period row lock authority"
-          test "$(git rev-parse HEAD^)" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
-          test "$(git rev-parse HEAD^{tree})" = "23c9d49046e0af9a1540f71690825ef2845e5c07"
+          git commit -m "test: rebind U8-U9 reporting acceptance"
+          test "$(git rev-parse HEAD^)" = "$CONTROLLER_HEAD"
 
-      - name: Revalidate and non-force publish existing PR branch
+      - name: Revalidate and non-force publish existing controller branch
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
-          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
-          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "10ea59ed7d244c6fa457d0530fa13888065ace51"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MAIN_HEAD"
+          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$PRODUCT_HEAD"
+          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.merged')" = "false"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
-          git push origin HEAD:refs/heads/codex/wos-02-organization-setup-foundation
-          test "$(git ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | cut -f1)" = "$(git rev-parse HEAD)"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
+          git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
+          test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$(git rev-parse HEAD)"
