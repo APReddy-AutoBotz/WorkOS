@@ -10,7 +10,6 @@ on:
 permissions:
   contents: write
   pull-requests: read
-  issues: read
 
 concurrency:
   group: wos02-u8-u9-controller-rebind-publisher
@@ -26,6 +25,7 @@ jobs:
       PRODUCT_HEAD: 28edf2f1966e293c44ca4d173a2ad0a2857e6b2b
       PRODUCT_TREE: 23c9d49046e0af9a1540f71690825ef2845e5c07
       CONTROLLER_HEAD: 10ea59ed7d244c6fa457d0530fa13888065ace51
+      PUBLISHER_HEAD: 496ddebebcd118fda35ba4bfa195d43f755cb656
     steps:
       - name: Checkout exact controller base
         uses: actions/checkout@v4
@@ -34,7 +34,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Verify exact live leases
+      - name: Checkout exact staged publisher payloads
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISHER_HEAD }}
+          path: publisher
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact live leases and staged payloads
         shell: bash
         run: |
           set -euo pipefail
@@ -44,41 +52,31 @@ jobs:
           test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.draft')" = "true"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.merged')" = "false"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.state')" = "open"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
-          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.merged')" = "false"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/git/commits/$PRODUCT_HEAD --jq '.tree.sha')" = "$PRODUCT_TREE"
+          test "$(wc -c < publisher/.github/publisher/wos02-u8u9-controller-rebind.py | tr -d ' ')" = "9372"
+          echo "cfefe3ec2e1b16b63b09cec01c7a8c4466ac92f5d745e4c7c3d5cc5d3be3bf68  publisher/.github/publisher/wos02-u8u9-controller-rebind.py" | sha256sum -c -
+          test "$(wc -c < publisher/.github/publisher/wos02-reporting-period-u8u9-acceptance.mjs | tr -d ' ')" = "15332"
+          echo "aea79f5dfc29edcedbb1693caba16a75f9b1fc6f8058205b0233a4c3c2ff83a5  publisher/.github/publisher/wos02-reporting-period-u8u9-acceptance.mjs" | sha256sum -c -
 
-      - name: Retrieve and verify controller rebind payload
+      - name: Apply and verify controller-only rebind
         shell: bash
         run: |
           set -euo pipefail
-          gh api repos/$GITHUB_REPOSITORY/issues/comments/5558390189 --jq '.body' > /tmp/rebind.md
-          python - <<'PY'
-          import base64, hashlib, re
-          from pathlib import Path
-          body = Path('/tmp/rebind.md').read_text()
-          match = re.search(r"```base64\s*\n([A-Za-z0-9+/=\r\n]+)\n```", body)
-          assert match, 'base64 payload block missing'
-          payload = ''.join(match.group(1).split())
-          assert len(payload) == 21856, len(payload)
-          assert hashlib.sha256(payload.encode()).hexdigest() == '4b02322def958df67ac8a4b69a9131a419b5fb365c9bec3fdf516e87a9b6885f'
-          decoded = base64.b64decode(payload, validate=True)
-          assert len(decoded) == 16391, len(decoded)
-          assert hashlib.sha256(decoded).hexdigest() == '897175d3513c4ad6b8bb1b8ecc91150ec5c92a254a7dd4dbe932f06ed46e37b0'
-          Path('/tmp/rebind.py').write_bytes(decoded)
-          PY
-          python /tmp/rebind.py
+          python publisher/.github/publisher/wos02-u8u9-controller-rebind.py
+          cp publisher/.github/publisher/wos02-reporting-period-u8u9-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
           git diff --check
-          test "$(git diff --name-only | sort | tr '\n' ' ')" = ".github/scripts/wos02-reporting-period-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml "
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = ".github/scripts/wos02-reporting-period-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml "
           node --check .github/scripts/wos02-reporting-period-acceptance.mjs
+          node --check .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
           grep -F "TARGET_HEAD: $PRODUCT_HEAD" .github/workflows/wos02-final-review-acceptance.yml
           grep -F "TARGET_TREE: $PRODUCT_TREE" .github/workflows/wos02-final-review-acceptance.yml
           grep -F "030_wos02_reporting_period_frequency.sql" .github/workflows/wos02-final-review-acceptance.yml
-          git add .github/scripts/wos02-reporting-period-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml
+          grep -F "wos02-reporting-period-u8u9-acceptance.mjs" .github/workflows/wos02-final-review-acceptance.yml
+          git add .github/scripts/wos02-reporting-period-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml
           git config user.name "WorkOS Implementation Controller"
           git config user.email "noreply@github.com"
           git commit -m "test: rebind U8-U9 reporting acceptance"
