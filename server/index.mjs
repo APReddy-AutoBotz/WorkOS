@@ -10,7 +10,7 @@ import { z } from 'zod';
 import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
 import { registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from './worker-lifecycle.mjs';
-import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, sendReportingPeriodError } from './reporting-periods.mjs';
+import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
 const { Pool } = pg;
 
@@ -2762,7 +2762,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     await assertReportingPeriodAllows(client, {
       organizationId: req.organizationScope.organizationId,
       legalEntityId: req.organizationScope.legalEntityId,
-      relevantDate: parsed.data.week_ending,
+      relevantDates: [parsed.data.week_ending, ...parsed.data.entries.map(entry => entry.work_date)],
       operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
     });
     const employee = (await client.query('select * from employees where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
@@ -7076,6 +7076,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
         continue;
       }
       group.entries.push({
+        rowNumber,
         projectId: project?.id || null,
         workType: row.workType,
         clientName: row.clientName || null,
@@ -7090,12 +7091,19 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     }
 
     for (const group of groups.values()) {
-      await assertReportingPeriodAllows(client, {
-        organizationId: req.organizationScope.organizationId,
-        legalEntityId: req.organizationScope.legalEntityId,
-        relevantDate: group.weekEnding,
-        operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
-      });
+      try {
+        await assertReportingPeriodAllows(client, {
+          organizationId: req.organizationScope.organizationId,
+          legalEntityId: req.organizationScope.legalEntityId,
+          relevantDates: [group.weekEnding, ...group.entries.map(entry => entry.workDate)],
+          operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
+        });
+      } catch (error) {
+        if (!(error instanceof ReportingPeriodError)) throw error;
+        errors.push(...group.entries.map(entry => ({ rowNumber: entry.rowNumber, field: 'date', message: error.message, code: error.code })));
+        validEntryRows -= group.entries.length;
+        continue;
+      }
       const totalHours = round1(group.entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
       const billableHours = round1(group.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
       const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, group.employee.id, group.weekEnding])).rows[0];

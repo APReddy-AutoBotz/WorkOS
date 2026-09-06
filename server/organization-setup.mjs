@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { disableLinkedWorkerIdentity } from './worker-lifecycle.mjs';
-import { canTransitionReportingPeriod, REPORTING_PERIOD_STATES } from './reporting-periods.mjs';
+import { canTransitionReportingPeriod, REPORTING_PERIOD_FREQUENCIES, REPORTING_PERIOD_STATES } from './reporting-periods.mjs';
 import { buildSetupReadiness } from './setup-readiness.mjs';
 import { calendarScopeValues, validateWorkingCalendar, validateWorkingCalendarHoliday } from './working-calendars.mjs';
 
@@ -393,14 +393,14 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     [req.organizationScope.organizationId,req.organizationScope.legalEntityId,MAX_SETUP_ROWS]); res.json(result.rows);
   });
   router.post('/reporting-periods', requirePermission('settings.manage'), async(req,res)=>{
-    const parsed=z.object({code:z.string().trim().min(1).max(50),name:z.string().trim().min(1).max(150),startsOn:z.string().date(),endsOn:z.string().date(),status:z.enum(REPORTING_PERIOD_STATES).default('Open')}).safeParse(req.body);
+    const parsed=z.object({code:z.string().trim().min(1).max(50),name:z.string().trim().min(1).max(150),frequency:z.enum(REPORTING_PERIOD_FREQUENCIES),startsOn:z.string().date(),endsOn:z.string().date(),status:z.enum(REPORTING_PERIOD_STATES).default('Open')}).safeParse(req.body);
     if(!parsed.success||parsed.success&&parsed.data.endsOn<parsed.data.startsOn)return res.status(400).json({error:'Invalid reporting period'});
     const client=await pool.connect();
     try {
       await client.query('begin');
-      await client.query('select pg_advisory_xact_lock(hashtext($1))',[`reporting-period:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}`]);
-      const previous=(await client.query(`select * from reporting_periods where organization_id=$1 and legal_entity_id=$2 and code=$3 for update`,
-        [req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code])).rows[0];
+      await client.query('select pg_advisory_xact_lock(hashtext($1))',[`reporting-period:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${parsed.data.frequency}`]);
+      const previous=(await client.query(`select * from reporting_periods where organization_id=$1 and legal_entity_id=$2 and frequency=$3 and code=$4 for update`,
+        [req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.frequency,parsed.data.code])).rows[0];
       if(previous&&!canTransitionReportingPeriod(previous.status,parsed.data.status)){
         await client.query('rollback');return res.status(409).json({error:'Reporting period state transition is not allowed',code:'REPORTING_PERIOD_TRANSITION_CONFLICT'});
       }
@@ -408,17 +408,17 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
         && (parsed.data.name!==previous.name||parsed.data.startsOn!==dateOnly(previous.starts_on)||parsed.data.endsOn!==dateOnly(previous.ends_on))){
         await client.query('rollback');return res.status(409).json({error:'Closed reporting-period boundaries and identity are immutable',code:'REPORTING_PERIOD_IMMUTABLE'});
       }
-      const overlap=(await client.query(`select id from reporting_periods where organization_id=$1 and legal_entity_id=$2
-        and id<>coalesce($3,'') and daterange(starts_on,ends_on+1,'[)') && daterange($4::date,$5::date+1,'[)') limit 1`,
-      [req.organizationScope.organizationId,req.organizationScope.legalEntityId,previous?.id||null,parsed.data.startsOn,parsed.data.endsOn])).rows[0];
+      const overlap=(await client.query(`select id from reporting_periods where organization_id=$1 and legal_entity_id=$2 and frequency=$3
+        and id<>coalesce($4,'') and daterange(starts_on,ends_on+1,'[)') && daterange($5::date,$6::date+1,'[)') limit 1`,
+      [req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.frequency,previous?.id||null,parsed.data.startsOn,parsed.data.endsOn])).rows[0];
       if(overlap){await client.query('rollback');return res.status(409).json({error:'Reporting period overlaps existing authority',code:'REPORTING_PERIOD_OVERLAP'});}
       let result;
       if(previous) result=await client.query(`update reporting_periods set name=$2,starts_on=$3,ends_on=$4,status=$5 where id=$1 returning *`,
         [previous.id,parsed.data.name,parsed.data.startsOn,parsed.data.endsOn,parsed.data.status]);
-      else result=await client.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)
-        values($1,$2,$3,$4,$5,$6,$7) returning *`,[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.name,parsed.data.startsOn,parsed.data.endsOn,parsed.data.status]);
+      else result=await client.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,frequency,starts_on,ends_on,status)
+        values($1,$2,$3,$4,$5,$6,$7,$8) returning *`,[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.code,parsed.data.name,parsed.data.frequency,parsed.data.startsOn,parsed.data.endsOn,parsed.data.status]);
       await audit(client,req,{module:'Organization Setup',action:previous?'Update Reporting Period':'Create Reporting Period',entityType:'Reporting Period',entityId:result.rows[0].id,
-        oldValue:previous,newValue:result.rows[0],details:`${previous?'Updated':'Created'} reporting period ${parsed.data.code} in state ${parsed.data.status}`});
+        oldValue:previous,newValue:result.rows[0],details:`${previous?'Updated':'Created'} ${parsed.data.frequency} reporting period ${parsed.data.code} in state ${parsed.data.status}`});
       await client.query('commit');res.status(previous?200:201).json(result.rows[0]);
     } catch(error) {
       await client.query('rollback');
@@ -452,8 +452,8 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
         and ((c.applicability_type='legal_entity' and c.legal_entity_id=$2)
           or (c.applicability_type='country' and c.country_code=scope_le.country_code)
           or (c.applicability_type='worker_group' and (wg.legal_entity_id is null or wg.legal_entity_id=$2)))) calendars,
-      exists(select 1 from reporting_periods where organization_id=$1 and status='Open'
-        and current_date between starts_on and ends_on and legal_entity_id=$2) reporting_period,
+      (select count(distinct frequency)=3 from reporting_periods where organization_id=$1 and status='Open'
+        and frequency in ('Weekly','Monthly','Fiscal') and current_date between starts_on and ends_on and legal_entity_id=$2) reporting_period,
       exists(select 1 from user_organization_scopes s join users u on u.id=s.user_id and u.status='Active'
         join user_roles ur on ur.user_id=u.id join roles r on r.id=ur.role_id
         join role_permissions rp on rp.role_name=r.name and rp.enabled=true

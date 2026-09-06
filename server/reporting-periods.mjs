@@ -12,6 +12,9 @@ export const REPORTING_PERIOD_OPERATIONS = Object.freeze({
   DECISION: 'timesheet-decision',
 });
 
+export const REPORTING_PERIOD_FREQUENCIES = Object.freeze(['Weekly', 'Monthly', 'Fiscal']);
+export const MAX_REPORTING_PERIOD_DATES = 100;
+
 const allowedStates = {
   [REPORTING_PERIOD_OPERATIONS.CONTENT]: new Set(['Open']),
   [REPORTING_PERIOD_OPERATIONS.DECISION]: new Set(['Open', 'Submission Closed']),
@@ -30,24 +33,38 @@ export const assertReportingPeriodAllows = async (database, {
   organizationId,
   legalEntityId,
   relevantDate,
+  relevantDates,
   operation,
 }) => {
   if (!allowedStates[operation]) throw new Error(`Unknown reporting-period operation: ${operation}`);
-  const result = await database.query(`select id,code,name,starts_on,ends_on,status
-    from reporting_periods
-    where organization_id=$1 and legal_entity_id=$2 and $3::date between starts_on and ends_on
-    order by starts_on,id limit 2 for share`, [organizationId, legalEntityId, relevantDate]);
-  if (result.rows.length === 0) {
-    throw new ReportingPeriodError('No authoritative reporting period covers this timesheet date', 'REPORTING_PERIOD_MISSING');
+  const dates = [...new Set((relevantDates || [relevantDate]).filter(Boolean).map(String))].sort();
+  if (dates.length === 0) throw new ReportingPeriodError('At least one reporting date is required', 'REPORTING_PERIOD_MISSING');
+  if (dates.length > MAX_REPORTING_PERIOD_DATES) {
+    throw new ReportingPeriodError(`Reporting-period checks are limited to ${MAX_REPORTING_PERIOD_DATES} unique dates`, 'REPORTING_PERIOD_DATE_LIMIT');
   }
-  if (result.rows.length !== 1) {
-    throw new ReportingPeriodError('Reporting period authority is ambiguous', 'REPORTING_PERIOD_AMBIGUOUS');
+  const result = await database.query(`select requested.relevant_date,id,code,name,starts_on,ends_on,status,frequency
+    from unnest($3::date[]) requested(relevant_date)
+    join reporting_periods p on p.organization_id=$1 and p.legal_entity_id=$2
+      and requested.relevant_date between p.starts_on and p.ends_on
+    order by requested.relevant_date,p.frequency,p.starts_on,p.id
+    for share of p`, [organizationId, legalEntityId, dates]);
+  const byDate = new Map(dates.map(date => [date, []]));
+  for (const period of result.rows) {
+    const key = String(period.relevant_date instanceof Date ? period.relevant_date.toISOString().slice(0, 10) : period.relevant_date);
+    if (byDate.has(key)) byDate.get(key).push(period);
   }
-  const period = result.rows[0];
-  if (!allowedStates[operation].has(period.status)) {
-    throw new ReportingPeriodError(`Reporting period ${period.code} does not permit this timesheet operation`, 'REPORTING_PERIOD_CLOSED');
+  for (const [date, periods] of byDate) {
+    const byFrequency = new Map();
+    for (const period of periods) {
+      if (byFrequency.has(period.frequency)) throw new ReportingPeriodError(`Reporting period authority is ambiguous for ${date}`, 'REPORTING_PERIOD_AMBIGUOUS');
+      byFrequency.set(period.frequency, period);
+    }
+    if (!byFrequency.has('Weekly')) throw new ReportingPeriodError(`No authoritative Weekly reporting period covers ${date}`, 'REPORTING_PERIOD_MISSING');
+    for (const period of periods) {
+      if (!allowedStates[operation].has(period.status)) throw new ReportingPeriodError(`Reporting period ${period.code} does not permit this timesheet operation`, 'REPORTING_PERIOD_CLOSED');
+    }
   }
-  return period;
+  return result.rows;
 };
 
 export const sendReportingPeriodError = (res, error) => {

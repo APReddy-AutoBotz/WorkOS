@@ -13,6 +13,7 @@ const timesheetScopeMigration = readFileSync('server/migrations/025_wos02_timesh
 const projectLegalScopePrerequisite = readFileSync('server/migrations/025a_wos02_project_legal_scope_unique_prerequisite.sql', 'utf8');
 const canonicalScopeMigration = readFileSync('server/migrations/026_wos02_canonical_legal_scope_integrity.sql', 'utf8');
 const reportingPeriodMigration = readFileSync('server/migrations/027_wos02_reporting_period_authority.sql', 'utf8');
+const reportingPeriodFrequencyMigration = readFileSync('server/migrations/030_wos02_reporting_period_frequency.sql', 'utf8');
 const organizationProfileMigration = readFileSync('server/migrations/028_wos02_organization_legal_entity_profiles.sql', 'utf8');
 const calendarAuthorityMigration = readFileSync('server/migrations/029_wos02_working_calendar_authority.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
@@ -143,7 +144,8 @@ assert.match(canonicalScopeMigration, /project_allocations add column if not exi
 assert.match(canonicalScopeMigration, /timesheets add column if not exists legal_entity_id[\s\S]*timesheets_employee_legal_scope_fk/, 'timesheet persistence must enforce employee legal ownership');
 assert.match(reportingPeriodMigration, /drop constraint if exists reporting_periods_status_check[\s\S]*status='Financially Locked' where status='Locked'/, 'legacy Locked periods must be deterministically reconciled before the new state constraint');
 assert.match(reportingPeriodMigration, /Submission Closed[\s\S]*Approval Closed[\s\S]*Financially Locked/, 'reporting periods must persist distinct closure stages');
-assert.match(reportingPeriodMigration, /reporting_period_ranges_no_overlap[\s\S]*exclude using gist[\s\S]*organization_id with =, legal_entity_id with =/, 'same-scope reporting-period ranges must be database non-overlapping while legal entities remain isolated');
+assert.match(reportingPeriodFrequencyMigration, /frequency text[\s\S]*set frequency='Weekly'[\s\S]*Weekly','Monthly','Fiscal/, 'existing periods must receive deterministic validated Weekly frequency authority');
+assert.match(reportingPeriodFrequencyMigration, /drop constraint if exists reporting_period_ranges_no_overlap[\s\S]*frequency with =[\s\S]*daterange/, 'period overlap authority must be isolated by frequency');
 assert.match(server, /api\/imports\/clients\/apply[\s\S]*from clients[\s\S]*organization_id = \$3 and legal_entity_id = \$4[\s\S]*insert into clients \(id, name, industry, account_owner_id, status, organization_id, legal_entity_id\)/, 'client import must resolve and persist authoritative ownership');
 assert.match(server, /api\/clients[\s\S]*select \* from clients where id = \$1 and organization_id=\$2 and legal_entity_id=\$3 for update[\s\S]*select 1 from clients where id=\$1[\s\S]*Client not found in the authorized organization and legal entity/, 'direct client IDs must be authorized before any mutation');
 assert.match(server, /api\/clients[\s\S]*select id from employees where id=\$1 and organization_id=\$2 and legal_entity_id=\$3 and status='Active'[\s\S]*Account owner must reference an active employee/, 'direct clients must validate an active same-scope account owner');
@@ -215,7 +217,9 @@ assert.match(server, /approval\.entity_type === 'Timesheet'[\s\S]*timesheets whe
 assert.match(server, /approval\.entity_type === 'LeaveRequest'[\s\S]*leave_requests where id = \$1 for update[\s\S]*decideApprovalRecord/, 'non-timesheet generic approval behavior must remain retained');
 assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT/, 'all timesheet import statuses must use the shared content-mutation guard');
 
-const periodQuery = status => ({ query: async () => ({ rows: status === null ? [] : Array.isArray(status) ? status : [{ id:'period-1', code:'P1', status }] }) });
+const periodQuery = status => ({ query: async (_sql, params) => ({ rows: status === null ? [] : (Array.isArray(status) ? status : [{ id:'period-1', code:'P1', status }]).map((period, index) => ({
+  id:`period-${index}`,code:'P1',frequency:'Weekly',relevant_date:params[2][0],...period,
+})) }) });
 for (const state of ['Planned','Submission Closed','Approval Closed','Financially Locked','Closed']) {
   await assert.rejects(assertReportingPeriodAllows(periodQuery(state), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }),
     error => error instanceof ReportingPeriodError && error.code === 'REPORTING_PERIOD_CLOSED', `${state} must block timesheet content mutation`);
@@ -228,6 +232,21 @@ for (const state of ['Planned','Approval Closed','Financially Locked','Closed'])
 }
 await assert.rejects(assertReportingPeriodAllows(periodQuery(null), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_MISSING');
 await assert.rejects(assertReportingPeriodAllows(periodQuery([{status:'Open'},{status:'Open'}]), { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_AMBIGUOUS');
+const multiFrequency = periodQuery([
+  { status:'Open', frequency:'Weekly' },
+  { status:'Financially Locked', frequency:'Monthly' },
+  { status:'Open', frequency:'Fiscal' },
+]);
+await assert.rejects(assertReportingPeriodAllows(multiFrequency, { organizationId:'org-a',legalEntityId:'legal-a',relevantDate:'2026-01-07',operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_CLOSED', 'an Open Weekly period must not bypass an applicable Monthly lock');
+let lockedQuery = '';
+await assert.doesNotReject(assertReportingPeriodAllows({ query: async (sql, params) => {
+  lockedQuery = sql;
+  return { rows: params[2].map(date => ({ id:`weekly-${date}`,code:'W',frequency:'Weekly',status:'Open',relevant_date:date })) };
+} }, { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:['2026-01-01','2026-01-07'],operation:REPORTING_PERIOD_OPERATIONS.CONTENT }));
+assert.match(lockedQuery, /join reporting_periods p[\s\S]*for share of p/, 'every matched reporting authority row must be locked in the caller transaction');
+await assert.rejects(assertReportingPeriodAllows(periodQuery('Open'), { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:Array.from({length:101},(_,i)=>`2026-01-${String(i+1).padStart(2,'0')}`),operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_DATE_LIMIT');
+assert.match(server, /relevantDates: \[parsed\.data\.week_ending, \.\.\.parsed\.data\.entries\.map\(entry => entry\.work_date\)\]/, 'direct timesheets must validate every unique entry date with the week ending');
+assert.match(server, /relevantDates: \[group\.weekEnding, \.\.\.group\.entries\.map\(entry => entry\.workDate\)\][\s\S]*error instanceof ReportingPeriodError[\s\S]*continue/, 'imports must skip blocked groups while preserving partial processing');
 assert.equal(canTransitionReportingPeriod('Open','Submission Closed'),true);
 assert.equal(canTransitionReportingPeriod('Approval Closed','Open'),false, 'closed approval authority must not silently reopen');
 
