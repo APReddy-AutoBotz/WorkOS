@@ -1,4 +1,4 @@
-name: WOS-02 U8-U9 Controller Rebind Publisher
+name: WOS-02 Retained Readiness Fixture Publisher
 
 on:
   push:
@@ -12,37 +12,28 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: wos02-u8-u9-controller-rebind-publisher
+  group: wos02-retained-readiness-fixture-publisher
   cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
       MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
       PRODUCT_HEAD: 28edf2f1966e293c44ca4d173a2ad0a2857e6b2b
       PRODUCT_TREE: 23c9d49046e0af9a1540f71690825ef2845e5c07
-      CONTROLLER_HEAD: 10ea59ed7d244c6fa457d0530fa13888065ace51
-      PUBLISHER_HEAD: 496ddebebcd118fda35ba4bfa195d43f755cb656
+      CONTROLLER_HEAD: 5d79d44d730d3bfbc3101cfd246db813a8ba37ea
     steps:
-      - name: Checkout exact controller base
+      - name: Checkout exact controller
         uses: actions/checkout@v4
         with:
           ref: ${{ env.CONTROLLER_HEAD }}
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Checkout exact staged publisher payloads
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.PUBLISHER_HEAD }}
-          path: publisher
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Verify exact live leases and staged payloads
+      - name: Verify exact live leases
         shell: bash
         run: |
           set -euo pipefail
@@ -57,37 +48,43 @@ jobs:
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.draft')" = "true"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/git/commits/$PRODUCT_HEAD --jq '.tree.sha')" = "$PRODUCT_TREE"
-          sed -i 's/assert occurrences >= 3/assert occurrences == 1/' publisher/.github/publisher/wos02-u8u9-controller-rebind.py
-          test "$(wc -c < publisher/.github/publisher/wos02-u8u9-controller-rebind.py | tr -d ' ')" = "9372"
-          echo "462ff988cf76cb55d4b3be0e468d2283ad895562fd173d85fd804142b06bda9d  publisher/.github/publisher/wos02-u8u9-controller-rebind.py" | sha256sum -c -
-          test "$(wc -c < publisher/.github/publisher/wos02-reporting-period-u8u9-acceptance.mjs | tr -d ' ')" = "15332"
-          echo "aea79f5dfc29edcedbb1693caba16a75f9b1fc6f8058205b0233a4c3c2ff83a5  publisher/.github/publisher/wos02-reporting-period-u8u9-acceptance.mjs" | sha256sum -c -
 
-      - name: Apply and verify controller-only rebind
+      - name: Correct retained readiness fixture only
         shell: bash
         run: |
           set -euo pipefail
-          python publisher/.github/publisher/wos02-u8u9-controller-rebind.py
-          cp publisher/.github/publisher/wos02-reporting-period-u8u9-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
-          git add .github/scripts/wos02-reporting-period-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/wos02-final-review-live-acceptance.mjs')
+          s = p.read_text()
+          old_old = "const oldPeriod = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-OLD', name: 'Old Period', startsOn: '2025-01-01', endsOn: '2025-12-31', status: 'Closed' } });"
+          new_old = "const oldPeriod = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-OLD', name: 'Old Period', frequency: 'Weekly', startsOn: '2025-01-01', endsOn: '2025-12-31', status: 'Closed' } });"
+          assert s.count(old_old) == 1, s.count(old_old)
+          s = s.replace(old_old, new_old, 1)
+          old_current = """    const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: 'PERIOD-CURRENT', name: 'Current Period', startsOn: '2026-01-01', endsOn: '2026-12-31', status: 'Open' } });
+    assert.equal(period.status, 201, JSON.stringify(period.body));
+"""
+          new_current = """    for (const frequency of ['Weekly', 'Monthly', 'Fiscal']) {
+      const period = await call('POST', '/api/organization-setup/reporting-periods', { token: adminToken, scope: scopeA, body: { code: `PERIOD-CURRENT-${frequency.toUpperCase()}`, name: `Current ${frequency} Period`, frequency, startsOn: today, endsOn: today, status: 'Open' } });
+      assert.equal(period.status, 201, `${frequency} ${JSON.stringify(period.body)}`);
+    }
+"""
+          assert s.count(old_current) == 1, s.count(old_current)
+          s = s.replace(old_current, new_current, 1)
+          assert "frequency: 'Weekly', startsOn: '2025-01-01'" in s
+          assert "for (const frequency of ['Weekly', 'Monthly', 'Fiscal'])" in s
+          p.write_text(s)
+          PY
+          git add .github/scripts/wos02-final-review-live-acceptance.mjs
           git diff --cached --check
-          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/scripts/wos02-reporting-period-acceptance.mjs .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs .github/workflows/wos02-final-review-acceptance.yml "
-          node --check .github/scripts/wos02-reporting-period-acceptance.mjs
-          node --check .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
-          grep -F "TARGET_HEAD: $PRODUCT_HEAD" .github/workflows/wos02-final-review-acceptance.yml
-          grep -F "TARGET_TREE: $PRODUCT_TREE" .github/workflows/wos02-final-review-acceptance.yml
-          grep -F "030_wos02_reporting_period_frequency.sql" .github/workflows/wos02-final-review-acceptance.yml
-          grep -F "wos02-reporting-period-u8u9-acceptance.mjs" .github/workflows/wos02-final-review-acceptance.yml
+          test "$(git diff --cached --name-only)" = ".github/scripts/wos02-final-review-live-acceptance.mjs"
+          node --check .github/scripts/wos02-final-review-live-acceptance.mjs
+          git config user.name "WorkOS Implementation Controller"
+          git config user.email "noreply@github.com"
+          git commit -m "test: align retained readiness fixture with reporting frequencies"
+          test "$(git rev-parse HEAD^)" = "$CONTROLLER_HEAD"
 
-      - name: Checkout publisher branch for generated blob staging
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: staging
-          fetch-depth: 1
-          persist-credentials: true
-
-      - name: Stage exact generated controller blobs on publisher branch
+      - name: Revalidate and non-force publish controller correction
         shell: bash
         run: |
           set -euo pipefail
@@ -96,28 +93,4 @@ jobs:
           test "$(git ls-remote origin refs/heads/controller/wos02-exact-acceptance | cut -f1)" = "$CONTROLLER_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/37 --jq '.head.sha')" = "$PRODUCT_HEAD"
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/38 --jq '.head.sha')" = "$CONTROLLER_HEAD"
-          mkdir -p staging/.github/publisher/generated
-          cp .github/workflows/wos02-final-review-acceptance.yml staging/.github/publisher/generated/wos02-final-review-acceptance.yml
-          cp .github/scripts/wos02-reporting-period-acceptance.mjs staging/.github/publisher/generated/wos02-reporting-period-acceptance.mjs
-          cp .github/scripts/wos02-reporting-period-u8u9-acceptance.mjs staging/.github/publisher/generated/wos02-reporting-period-u8u9-acceptance.mjs
-          {
-            echo "MAIN_HEAD=$MAIN_HEAD"
-            echo "PRODUCT_HEAD=$PRODUCT_HEAD"
-            echo "PRODUCT_TREE=$PRODUCT_TREE"
-            echo "CONTROLLER_HEAD=$CONTROLLER_HEAD"
-            for file in wos02-final-review-acceptance.yml wos02-reporting-period-acceptance.mjs wos02-reporting-period-u8u9-acceptance.mjs; do
-              bytes=$(wc -c < "staging/.github/publisher/generated/$file" | tr -d ' ')
-              hash=$(sha256sum "staging/.github/publisher/generated/$file" | cut -d' ' -f1)
-              echo "$file bytes=$bytes sha256=$hash"
-            done
-          } > staging/.github/publisher/generated/MANIFEST.txt
-          cd staging
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git ls-remote origin refs/heads/controller/wos02-migration-publisher | cut -f1)" = "$GITHUB_SHA"
-          git add .github/publisher/generated/MANIFEST.txt .github/publisher/generated/wos02-final-review-acceptance.yml .github/publisher/generated/wos02-reporting-period-acceptance.mjs .github/publisher/generated/wos02-reporting-period-u8u9-acceptance.mjs
-          git diff --cached --check
-          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = ".github/publisher/generated/MANIFEST.txt .github/publisher/generated/wos02-final-review-acceptance.yml .github/publisher/generated/wos02-reporting-period-acceptance.mjs .github/publisher/generated/wos02-reporting-period-u8u9-acceptance.mjs "
-          git config user.name "WorkOS Implementation Controller"
-          git config user.email "noreply@github.com"
-          git commit -m "chore: stage exact generated WOS-02 controller blobs"
-          git push origin HEAD:refs/heads/controller/wos02-migration-publisher
+          git push origin HEAD:refs/heads/controller/wos02-exact-acceptance
