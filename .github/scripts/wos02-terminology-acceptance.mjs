@@ -121,5 +121,5 @@ for (const { name, pattern, normalize } of stableContractExtractors) {
   }
 }
 
-// Controller-only retrigger after aligning the retained reporting-frequency readiness fixture.
+// Controller-only retrigger after aligning the retained raw reporting frequency fixture.
 console.log(JSON.stringify({ status: 'passed', keys: keys.length, files: covered.length, bounded: true }));
