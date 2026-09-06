@@ -16,6 +16,7 @@ const reportingPeriodMigration = readFileSync('server/migrations/027_wos02_repor
 const reportingPeriodFrequencyMigration = readFileSync('server/migrations/030_wos02_reporting_period_frequency.sql', 'utf8');
 const organizationProfileMigration = readFileSync('server/migrations/028_wos02_organization_legal_entity_profiles.sql', 'utf8');
 const calendarAuthorityMigration = readFileSync('server/migrations/029_wos02_working_calendar_authority.sql', 'utf8');
+const legalEntityAuthorityMigration = readFileSync('server/migrations/031_wos02_legal_entity_effective_authority.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
 const server = readFileSync('server/index.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
@@ -73,6 +74,14 @@ assert.match(service,/targetId&&targetId!==req\.organizationScope\.legalEntityId
 assert.match(service,/LEGAL_ENTITY_IN_USE[\s\S]*Update Legal Entity':'Create Legal Entity'[\s\S]*oldValue:/,'unsafe legal-entity deactivation must fail before audited mutation');
 assert.match(service,/insert into user_organization_scopes\(user_id,organization_id,legal_entity_id,active\)/,'a creator must receive explicit persisted scope for a newly created legal entity');
 assert.match(service,/join lateral \(select \* from organization_profile_versions[\s\S]*join lateral \(select \* from legal_entity_profile_versions/,'context must expose deterministic profile values without breaking existing identity fields');
+assert.match(legalEntityAuthorityMigration,/add column if not exists country_code[\s\S]*add column if not exists status[\s\S]*add column if not exists authority_effective_to/,'migration 031 must persist effective-dated legal-entity display and lifecycle authority');
+assert.match(legalEntityAuthorityMigration,/update legal_entity_profile_versions p[\s\S]*from legal_entities le[\s\S]*alter column country_code set not null[\s\S]*alter column status set not null/,'existing legal-entity profiles must upgrade deterministically without losing base authority');
+assert.match(service,/join legal_entity_profile_versions lp[\s\S]*lp\.status='Active'[\s\S]*coalesce\(lp\.authority_effective_to,'infinity'::date\)/,'scope authorization must resolve current effective profile authority rather than future base-table facts');
+assert.match(service,/lp\.legal_name legal_entity_name,lp\.status legal_entity_status[\s\S]*lp\.authority_effective_to legal_entity_effective_to/,'context must expose only the selected as-of legal-entity version');
+assert.match(service,/select le\.id,le\.organization_id,le\.code,p\.legal_name name,p\.country_code,p\.status[\s\S]*p\.authority_effective_to effective_to/,'legal-entity reads must resolve profile, country, status, and lifecycle end as of the requested date');
+assert.match(service,/LEGAL_ENTITY_CODE_IMMUTABLE[\s\S]*select \* from legal_entity_profile_versions[\s\S]*LEGAL_ENTITY_VERSION_CONFLICT[\s\S]*with changed as \(update legal_entities set[\s\S]*where id=\$1 and \$6::date<=current_date/,'stale legal-entity versions must fail before mutation and future versions must not rewrite the base projection');
+assert.match(service,/insert into legal_entity_profile_versions\(legal_entity_id,organization_id,legal_name,country_code,status,authority_effective_to[\s\S]*on conflict\(legal_entity_id,effective_from\) do update/,'same-date legal-entity replay must update one effective-dated authority version deterministically');
+assert.match(service,/exists\(select 1 from legal_entities le join legal_entity_profile_versions lp[\s\S]*lp\.status='Active'[\s\S]*lp\.authority_effective_to/,'setup readiness must use current-effective legal-entity lifecycle authority');
 
 const sessionSecretKey = ['API', 'SESSION', 'SECRET'].join('_');
 const identitySecretKey = ['ENTRA', 'CLIENT', 'SECRET'].join('_');

@@ -21,10 +21,12 @@ export const resolveOrganizationScope = async (database, request) => {
     select s.organization_id, s.legal_entity_id
     from user_organization_scopes s
     join legal_entities le on le.id=s.legal_entity_id and le.organization_id=s.organization_id
+    join legal_entity_profile_versions lp on lp.legal_entity_id=le.id and lp.organization_id=le.organization_id
+      and current_date between lp.effective_from and coalesce(lp.effective_to,'infinity'::date)
     join organizations o on o.id=s.organization_id
-    where s.user_id=$1 and s.active=true and o.status='Active' and le.status='Active'
+    where s.user_id=$1 and s.active=true and o.status='Active' and lp.status='Active'
       and current_date between o.effective_from and coalesce(o.effective_to,'infinity'::date)
-      and current_date between le.effective_from and coalesce(le.effective_to,'infinity'::date)
+      and current_date between le.effective_from and coalesce(lp.authority_effective_to,'infinity'::date)
       and ($2::text='' or s.organization_id=$2)
       and ($3::text='' or s.legal_entity_id=$3)
     order by s.organization_id, s.legal_entity_id limit 2`,
@@ -76,7 +78,7 @@ const profileSelect = `select o.id organization_id,o.code organization_code,p.na
   p.legal_name,p.product_display_name,p.support_contact,p.default_locale,p.default_time_zone,p.base_currency,
   p.fiscal_year_start,p.default_week_start,p.effective_from profile_effective_from,p.effective_to profile_effective_to
   from organizations o join organization_profile_versions p on p.organization_id=o.id`;
-const legalSelect = `select le.id,le.organization_id,le.code,le.name,le.country_code,le.status,le.effective_from,le.effective_to,
+const legalSelect = `select le.id,le.organization_id,le.code,p.legal_name name,p.country_code,p.status,le.effective_from,p.authority_effective_to effective_to,
   p.legal_name,p.registration_identifier,p.tax_identifier,p.reporting_currency,p.address,
   p.effective_from profile_effective_from,p.effective_to profile_effective_to
   from legal_entities le join legal_entity_profile_versions p on p.legal_entity_id=le.id and p.organization_id=le.organization_id`;
@@ -97,9 +99,10 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     const result = await pool.query(`select o.id organization_id,o.code organization_code,op.name organization_name,
       op.legal_name organization_legal_name,op.product_display_name,op.support_contact,op.default_locale,
       op.default_time_zone,op.base_currency,op.fiscal_year_start,op.default_week_start,
-      le.id legal_entity_id,le.code legal_entity_code,le.name legal_entity_name,le.status legal_entity_status,
-      le.effective_from legal_entity_effective_from,le.effective_to legal_entity_effective_to,
-      lp.legal_name legal_entity_legal_name,lp.registration_identifier,lp.tax_identifier,lp.reporting_currency,lp.address
+      le.id legal_entity_id,le.code legal_entity_code,lp.legal_name legal_entity_name,lp.status legal_entity_status,
+      le.effective_from legal_entity_effective_from,lp.authority_effective_to legal_entity_effective_to,
+      lp.legal_name legal_entity_legal_name,lp.country_code legal_entity_country_code,
+      lp.registration_identifier,lp.tax_identifier,lp.reporting_currency,lp.address
       from organizations o join legal_entities le on le.organization_id=o.id
       join lateral (select * from organization_profile_versions where organization_id=o.id and $3::date between effective_from and coalesce(effective_to,'infinity'::date) order by effective_from desc limit 1) op on true
       join lateral (select * from legal_entity_profile_versions where organization_id=o.id and legal_entity_id=le.id and $3::date between effective_from and coalesce(effective_to,'infinity'::date) order by effective_from desc limit 1) lp on true
@@ -170,28 +173,36 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       const previous=targetId?(await client.query('select * from legal_entities where id=$1 and organization_id=$2 for update',[targetId,req.organizationScope.organizationId])).rows[0]:null;
       if(targetId&&!previous){await client.query('rollback');return res.status(404).json({error:'Legal entity not found'});}
       if(previous&&parsed.data.code!==previous.code){await client.query('rollback');return res.status(409).json({error:'Legal entity code is immutable',code:'LEGAL_ENTITY_CODE_IMMUTABLE'});}
+      const latest=(await client.query('select * from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from desc limit 1 for update',[previous?.id||''])).rows[0];
+      if(latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Legal entity profile version is stale',code:'LEGAL_ENTITY_VERSION_CONFLICT'});}
       if(previous&&(parsed.data.status==='Inactive'||parsed.data.effectiveTo)){
         const deps=await client.query(`select id from employees where organization_id=$1 and legal_entity_id=$2 and status<>'Exited'
           union all select id from projects where organization_id=$1 and legal_entity_id=$2 and status in ('Proposed','Active','On Hold')
           union all select id from clients where organization_id=$1 and legal_entity_id=$2 and status='Active' limit $3`,[req.organizationScope.organizationId,targetId,MAX_DEPENDENCIES+1]);
         const alternative=await client.query(`select 1 from user_organization_scopes s join legal_entities le on le.id=s.legal_entity_id and le.organization_id=s.organization_id
-          where s.user_id=$1 and s.organization_id=$2 and s.legal_entity_id<>$3 and s.active=true and le.status='Active'
-          and current_date between le.effective_from and coalesce(le.effective_to,'infinity'::date) limit 1`,[req.user.sub,req.organizationScope.organizationId,targetId]);
+          join legal_entity_profile_versions lp on lp.legal_entity_id=le.id and lp.organization_id=le.organization_id
+            and current_date between lp.effective_from and coalesce(lp.effective_to,'infinity'::date)
+          where s.user_id=$1 and s.organization_id=$2 and s.legal_entity_id<>$3 and s.active=true and lp.status='Active'
+          and current_date between le.effective_from and coalesce(lp.authority_effective_to,'infinity'::date) limit 1`,[req.user.sub,req.organizationScope.organizationId,targetId]);
         if(deps.rowCount||!alternative.rowCount){await client.query('rollback');return res.status(409).json({error:'Legal entity has active authority or dependencies',code:'LEGAL_ENTITY_IN_USE'});}
       }
       const id=previous?.id||`legal-${crypto.randomUUID()}`;
-      const entity=previous?await client.query(`update legal_entities set name=$2,country_code=$3,status=$4,effective_to=$5,updated_at=now() where id=$1 returning *`,
-        [id,parsed.data.legalName,parsed.data.address.countryCode,parsed.data.status,parsed.data.effectiveTo||null]):
+      const entity=previous?await client.query(`with changed as (update legal_entities set
+          name=$2,country_code=$3,status=$4,effective_to=$5,updated_at=now()
+          where id=$1 and $6::date<=current_date returning *)
+          select * from changed union all select * from legal_entities where id=$1 and not exists(select 1 from changed)`,
+        [id,parsed.data.legalName,parsed.data.address.countryCode,parsed.data.status,parsed.data.effectiveTo||null,parsed.data.effectiveFrom]):
         await client.query(`insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from,effective_to) values($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
           [id,req.organizationScope.organizationId,parsed.data.code,parsed.data.legalName,parsed.data.address.countryCode,parsed.data.status,parsed.data.effectiveFrom,parsed.data.effectiveTo||null]);
-      const latest=(await client.query('select * from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from desc limit 1 for update',[id])).rows[0];
-      if(latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Legal entity profile version is stale',code:'LEGAL_ENTITY_VERSION_CONFLICT'});}
       if(latest&&parsed.data.effectiveFrom>dateOnly(latest.effective_from)&&latest.effective_to==null)
         await client.query('update legal_entity_profile_versions set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
-      const profile=await client.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,registration_identifier,tax_identifier,reporting_currency,address,effective_from,created_by)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict(legal_entity_id,effective_from) do update set legal_name=excluded.legal_name,
+      const profile=await client.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,country_code,status,authority_effective_to,
+        registration_identifier,tax_identifier,reporting_currency,address,effective_from,created_by)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) on conflict(legal_entity_id,effective_from) do update set legal_name=excluded.legal_name,
+        country_code=excluded.country_code,status=excluded.status,authority_effective_to=excluded.authority_effective_to,
         registration_identifier=excluded.registration_identifier,tax_identifier=excluded.tax_identifier,reporting_currency=excluded.reporting_currency,address=excluded.address returning *`,
-      [id,req.organizationScope.organizationId,parsed.data.legalName,parsed.data.registrationIdentifier||null,parsed.data.taxIdentifier||null,parsed.data.reportingCurrency,JSON.stringify(parsed.data.address),parsed.data.effectiveFrom,req.user.sub]);
+      [id,req.organizationScope.organizationId,parsed.data.legalName,parsed.data.address.countryCode,parsed.data.status,parsed.data.effectiveTo||null,
+        parsed.data.registrationIdentifier||null,parsed.data.taxIdentifier||null,parsed.data.reportingCurrency,JSON.stringify(parsed.data.address),parsed.data.effectiveFrom,req.user.sub]);
       if(!previous)await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true)
         on conflict(user_id,organization_id,legal_entity_id) do update set active=true`,[req.user.sub,req.organizationScope.organizationId,id]);
       await audit(client,req,{module:'Organization Setup',action:previous?'Update Legal Entity':'Create Legal Entity',entityType:'Legal Entity',entityId:id,
@@ -442,8 +453,11 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     const facts=await pool.query(`select
       exists(select 1 from organizations where id=$1 and status='Active'
         and current_date between effective_from and coalesce(effective_to,'infinity'::date)) organization,
-      exists(select 1 from legal_entities where id=$2 and organization_id=$1 and status='Active'
-        and current_date between effective_from and coalesce(effective_to,'infinity'::date)) legal_entity,
+      exists(select 1 from legal_entities le join legal_entity_profile_versions lp
+        on lp.legal_entity_id=le.id and lp.organization_id=le.organization_id
+        and current_date between lp.effective_from and coalesce(lp.effective_to,'infinity'::date)
+        where le.id=$2 and le.organization_id=$1 and lp.status='Active'
+        and current_date between le.effective_from and coalesce(lp.authority_effective_to,'infinity'::date)) legal_entity,
       exists(select 1 from organization_catalog_items where organization_id=$1 and catalog_type='worker_type' and active
         and current_date between effective_from and coalesce(effective_to,'infinity'::date) and (legal_entity_id is null or legal_entity_id=$2)) worker_type,
       exists(select 1 from working_calendars c left join organization_catalog_items wg on wg.id=c.worker_group_id and wg.organization_id=c.organization_id
