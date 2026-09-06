@@ -1,18 +1,18 @@
-name: WOS-02 Controller Carrier TEMP
+name: WOS-02 Controller Date Carrier TEMP
 
 on:
   push:
     branches:
       - controller/wos02-p1-publisher-temp
     paths:
-      - '.github/recovery/wos02-controller-carrier-trigger.txt'
+      - '.github/recovery/wos02-controller-date-trigger.txt'
 
 permissions:
   contents: write
   pull-requests: read
 
 jobs:
-  materialize-controller-carrier:
+  materialize-controller-date-carrier:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout temporary carrier branch
@@ -25,7 +25,7 @@ jobs:
       - name: Checkout exact controller parent
         uses: actions/checkout@v4
         with:
-          ref: 544d08699294b36bf4f2ad4af033b6430e60776d
+          ref: cfafb3bccff3e897cea9f88e111c581ce5012385
           path: controller
           fetch-depth: 0
 
@@ -36,58 +36,48 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C controller ls-remote origin refs/heads/main | awk '{print $1}')" = "3070c80a71640fa4275477d0d2f1538cc8d2a819"
-          test "$(git -C controller ls-remote origin refs/heads/controller/wos02-exact-acceptance | awk '{print $1}')" = "544d08699294b36bf4f2ad4af033b6430e60776d"
+          test "$(git -C controller ls-remote origin refs/heads/controller/wos02-exact-acceptance | awk '{print $1}')" = "cfafb3bccff3e897cea9f88e111c581ce5012385"
           test "$(git -C controller ls-remote origin refs/heads/codex/wos-02-organization-setup-foundation | awk '{print $1}')" = "ff278306c5394d3c43d0c860a736d783ad59d19c"
           gh api "repos/$GITHUB_REPOSITORY/pulls/37" > /tmp/pr37.json
           jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "ff278306c5394d3c43d0c860a736d783ad59d19c" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819" and .changed_files == 43' /tmp/pr37.json >/dev/null
-          gh api "repos/$GITHUB_REPOSITORY/commits/ff278306c5394d3c43d0c860a736d783ad59d19c" > /tmp/product.json
-          test "$(jq -r '.commit.tree.sha' /tmp/product.json)" = "d81d00223cc64d1db25695395bc0b696f82e34cd"
-          test "$(jq -r '.parents[0].sha' /tmp/product.json)" = "436ac4ad7f984cd402495d25a8d2799a9947f217"
-          test "$(jq -r '.stats.additions' /tmp/product.json)" = "39"
-          test "$(jq -r '.stats.deletions' /tmp/product.json)" = "7"
-          test "$(jq -r '[.files[].filename] | sort | join("|")' /tmp/product.json)" = "server/index.mjs|tests/organization-setup-smoke.mjs"
           gh api "repos/$GITHUB_REPOSITORY/pulls/38" > /tmp/pr38.json
-          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "544d08699294b36bf4f2ad4af033b6430e60776d" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819"' /tmp/pr38.json >/dev/null
+          jq -e '.state == "open" and .draft == true and .merged_at == null and .head.sha == "cfafb3bccff3e897cea9f88e111c581ce5012385" and .base.sha == "3070c80a71640fa4275477d0d2f1538cc8d2a819"' /tmp/pr38.json >/dev/null
+          grep -q 'TARGET_HEAD: ff278306c5394d3c43d0c860a736d783ad59d19c' controller/.github/workflows/wos02-final-review-acceptance.yml
+          grep -q 'TARGET_TREE: d81d00223cc64d1db25695395bc0b696f82e34cd' controller/.github/workflows/wos02-final-review-acceptance.yml
 
-      - name: Generate exact two-file controller rebind
+      - name: Apply only date-normalization controller correction
         shell: bash
         run: |
           set -euo pipefail
           cd controller
           python3 ../publisher/.github/scripts/wos02-controller-rebind-temp.py
           node --check .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
-          grep -q 'TARGET_HEAD: ff278306c5394d3c43d0c860a736d783ad59d19c' .github/workflows/wos02-final-review-acceptance.yml
-          grep -q 'TARGET_TREE: d81d00223cc64d1db25695395bc0b696f82e34cd' .github/workflows/wos02-final-review-acceptance.yml
-          grep -q 'already-exited same-date direct replay preserves authoritative lifecycle state' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
-          grep -q 'already-exited omitted-date direct replay preserves authoritative lifecycle state' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
-          grep -q 'already-exited different-date direct replay is stable no-write conflict' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
-          grep -q 'already-exited same-date employee import replay preserves authoritative lifecycle state' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
-          grep -q 'already-exited different-date employee import conflict is row-local and partial' .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
+          test "$(grep -o "toIsoDate(after.employee.exit_date)" .github/scripts/wos02-mutation-lifecycle-acceptance.mjs | wc -l)" = "3"
+          test "$(grep -o "String(after.employee.exit_date).slice(0,10)" .github/scripts/wos02-mutation-lifecycle-acceptance.mjs | wc -l)" = "0"
+          grep -q "const toIsoDate = value => value instanceof Date ? value.toISOString().slice(0,10) : String(value ?? '').slice(0,10);" .github/scripts/wos02-mutation-lifecycle-acceptance.mjs
           git diff --check
-          mapfile -t files < <(git diff --name-only | sort)
-          test "${#files[@]}" = "2"
+          mapfile -t files < <(git diff --name-only)
+          test "${#files[@]}" = "1"
           test "${files[0]}" = ".github/scripts/wos02-mutation-lifecycle-acceptance.mjs"
-          test "${files[1]}" = ".github/workflows/wos02-final-review-acceptance.yml"
+          test -z "$(git diff -- .github/workflows/wos02-final-review-acceptance.yml)"
 
-      - name: Publish inert verified carrier blobs to temporary branch
+      - name: Publish inert verified script carrier to temporary branch
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p publisher/.github/recovery/wos02-controller-rebind
-          cp controller/.github/scripts/wos02-mutation-lifecycle-acceptance.mjs publisher/.github/recovery/wos02-controller-rebind/mutation-lifecycle.mjs
-          cp controller/.github/workflows/wos02-final-review-acceptance.yml publisher/.github/recovery/wos02-controller-rebind/final-review-acceptance.yml.txt
+          mkdir -p publisher/.github/recovery/wos02-controller-date-fix
+          cp controller/.github/scripts/wos02-mutation-lifecycle-acceptance.mjs publisher/.github/recovery/wos02-controller-date-fix/mutation-lifecycle.mjs
           {
-            echo "controller_parent=544d08699294b36bf4f2ad4af033b6430e60776d"
+            echo "controller_parent=cfafb3bccff3e897cea9f88e111c581ce5012385"
             echo "product_head=ff278306c5394d3c43d0c860a736d783ad59d19c"
             echo "product_tree=d81d00223cc64d1db25695395bc0b696f82e34cd"
-            sha256sum publisher/.github/recovery/wos02-controller-rebind/mutation-lifecycle.mjs
-            sha256sum publisher/.github/recovery/wos02-controller-rebind/final-review-acceptance.yml.txt
-            wc -c publisher/.github/recovery/wos02-controller-rebind/mutation-lifecycle.mjs publisher/.github/recovery/wos02-controller-rebind/final-review-acceptance.yml.txt
-          } > publisher/.github/recovery/wos02-controller-rebind/manifest.txt
+            sha256sum publisher/.github/recovery/wos02-controller-date-fix/mutation-lifecycle.mjs
+            wc -c publisher/.github/recovery/wos02-controller-date-fix/mutation-lifecycle.mjs
+          } > publisher/.github/recovery/wos02-controller-date-fix/manifest.txt
           cd publisher
           git config user.name "WorkOS Implementation Controller"
           git config user.email "noreply@github.com"
-          git add .github/recovery/wos02-controller-rebind/
+          git add .github/recovery/wos02-controller-date-fix/
           git diff --cached --check
-          git commit -m "chore: materialize WOS-02 controller rebind carrier"
+          git commit -m "chore: materialize WOS-02 controller date-fix carrier"
           git push origin HEAD:refs/heads/controller/wos02-p1-publisher-temp
