@@ -485,7 +485,23 @@ const workerExitDependencies = async (client, employeeId, { organizationId, lega
 const isoDateOnly = value => typeof value === 'string' ? value.slice(0, 10) : value.toISOString().slice(0, 10);
 
 const assertWorkerMayExit = async (client, employee, scope, effectiveFrom) => {
-  if (!employee || employee.status === 'Exited') return;
+  if (!employee) return effectiveFrom;
+  if (employee.status === 'Exited') {
+    const terminal = (await client.query(`select effective_from from worker_history where employee_id=$1 and organization_id=$2 and legal_entity_id=$3 and status='Exited' order by effective_from desc limit 1 for update`,
+      [employee.id, scope.organizationId, scope.legalEntityId])).rows[0];
+    if (!terminal) {
+      const error = new Error('Worker exit conflicts with existing history');
+      error.code = 'WORKER_VERSION_CONFLICT';
+      throw error;
+    }
+    const authoritativeExitDate = isoDateOnly(terminal.effective_from);
+    if (effectiveFrom != null && isoDateOnly(effectiveFrom) !== authoritativeExitDate) {
+      const error = new Error('Worker exit conflicts with existing history');
+      error.code = 'WORKER_VERSION_CONFLICT';
+      throw error;
+    }
+    return authoritativeExitDate;
+  }
   const dependencies = await workerExitDependencies(client, employee.id, scope);
   if (dependencies.rowCount) {
     const error = new Error('Worker has active dependencies');
@@ -501,6 +517,7 @@ const assertWorkerMayExit = async (client, employee, scope, effectiveFrom) => {
     error.code = 'WORKER_VERSION_CONFLICT';
     throw error;
   }
+  return effectiveFrom;
 };
 
 const synchronizeWorkerExit = async (client, req, employee, effectiveFrom, reason) => {
@@ -1738,8 +1755,14 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       'select * from employees where employee_id = $1 and organization_id = $2 and legal_entity_id = $3',
       [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
     )).rows[0];
-    if (previous && previous.status !== 'Exited' && parsed.data.status === 'Exited') {
-      await assertWorkerMayExit(client, previous, req.organizationScope, parsed.data.exit_date || new Date().toISOString().slice(0, 10));
+    let effectiveExitDate = parsed.data.exit_date;
+    if (previous && parsed.data.status === 'Exited') {
+      effectiveExitDate = await assertWorkerMayExit(
+        client,
+        previous,
+        req.organizationScope,
+        previous.status === 'Exited' ? parsed.data.exit_date : (parsed.data.exit_date || new Date().toISOString().slice(0, 10)),
+      );
     }
     if (parsed.data.id && (!previous || previous.id !== parsed.data.id)) {
       const unavailableId = (await client.query('select 1 from employees where id = $1', [parsed.data.id])).rows[0];
@@ -1841,7 +1864,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       parsed.data.status,
       utilizationEligible,
       parsed.data.joining_date || null,
-      parsed.data.exit_date || null,
+      effectiveExitDate || null,
       parsed.data.standard_weekly_hours || 40,
       parsed.data.capacity_type || (utilizationEligible ? 'Delivery' : 'Governance'),
       parsed.data.contract_type || 'Permanent',
@@ -6256,9 +6279,15 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         continue;
       }
       const targetStatus = row.status || previous?.status || 'Active';
-      if (previous && previous.status !== 'Exited' && targetStatus === 'Exited') {
+      let effectiveExitDate = row.exitDate;
+      if (previous && targetStatus === 'Exited') {
         try {
-          await assertWorkerMayExit(client, previous, req.organizationScope, row.exitDate || new Date().toISOString().slice(0, 10));
+          effectiveExitDate = await assertWorkerMayExit(
+            client,
+            previous,
+            req.organizationScope,
+            previous.status === 'Exited' ? row.exitDate : (row.exitDate || new Date().toISOString().slice(0, 10)),
+          );
         } catch (error) {
           if (!['WORKER_DEPENDENCY_CONFLICT', 'WORKER_VERSION_CONFLICT'].includes(error.code)) throw error;
           errors.push({ rowNumber, field: 'status', message: `${error.message}.`, code: error.code });
@@ -6326,7 +6355,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         row.status || previous?.status || 'Active',
         utilizationEligible,
         row.joiningDate || previous?.joining_date || null,
-        row.exitDate || previous?.exit_date || null,
+        effectiveExitDate || previous?.exit_date || null,
         Number.isFinite(standardWeeklyHours) ? standardWeeklyHours : 40,
         row.capacityType || previous?.capacity_type || (utilizationEligible ? 'Delivery' : 'Governance'),
         row.contractType || previous?.contract_type || 'Permanent',
