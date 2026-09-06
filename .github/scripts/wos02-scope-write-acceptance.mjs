@@ -62,11 +62,11 @@ await pool.query(`insert into user_organization_scopes(user_id,organization_id,l
 // Provision explicit Open authority for the exact weeks exercised below so these
 // checks continue to test legal-entity ownership rather than fail earlier on
 // the now-correct REPORTING_PERIOD_MISSING guard.
-await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status) values
- ('org-scope','legal-scope-a','RP-SCOPE-0816','Scope Week 0816','2026-08-10','2026-08-16','Open'),
- ('org-scope','legal-scope-a','RP-SCOPE-0823','Scope Week 0823','2026-08-17','2026-08-23','Open'),
- ('org-scope','legal-scope-a','RP-SCOPE-0830','Scope Week 0830','2026-08-24','2026-08-30','Open')
- on conflict(organization_id,legal_entity_id,code) do nothing`);
+await pool.query(`insert into reporting_periods(organization_id,legal_entity_id,code,name,frequency,starts_on,ends_on,status) values
+ ('org-scope','legal-scope-a','RP-SCOPE-0816','Scope Week 0816','Weekly','2026-08-10','2026-08-16','Open'),
+ ('org-scope','legal-scope-a','RP-SCOPE-0823','Scope Week 0823','Weekly','2026-08-17','2026-08-23','Open'),
+ ('org-scope','legal-scope-a','RP-SCOPE-0830','Scope Week 0830','Weekly','2026-08-24','2026-08-30','Open')
+ on conflict(organization_id,legal_entity_id,frequency,code) do nothing`);
 
 const child = spawn(process.execPath, ['server/index.mjs'], {
   cwd: targetRoot,
