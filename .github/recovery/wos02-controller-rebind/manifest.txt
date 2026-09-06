@@ -1,0 +1,8 @@
+controller_parent=544d08699294b36bf4f2ad4af033b6430e60776d
+product_head=ff278306c5394d3c43d0c860a736d783ad59d19c
+product_tree=d81d00223cc64d1db25695395bc0b696f82e34cd
+870c62f25437c7dab16154553c168501deb79e27448d65be519fbeb67678323b  publisher/.github/recovery/wos02-controller-rebind/mutation-lifecycle.mjs
+d62ad6bcf630d213fc84c857f5f8ac9d1cc7c2d666b5eb3afb78e6d16b0c7485  publisher/.github/recovery/wos02-controller-rebind/final-review-acceptance.yml.txt
+21216 publisher/.github/recovery/wos02-controller-rebind/mutation-lifecycle.mjs
+29648 publisher/.github/recovery/wos02-controller-rebind/final-review-acceptance.yml.txt
+50864 total
