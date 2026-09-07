@@ -36,6 +36,16 @@ const scope = { 'x-organization-id': 'org-worker', 'x-legal-entity-id': 'legal-w
 await pool.query(`insert into country_directors(id,name,region) values('cd-worker','Worker Director','Synthetic') on conflict(id) do nothing`);
 await pool.query(`insert into organizations(id,code,name,effective_from) values('org-worker','ORG-WORKER','Worker Acceptance Org','2026-01-01') on conflict(id) do nothing`);
 await pool.query(`insert into legal_entities(id,organization_id,code,name,effective_from) values('legal-worker','org-worker','LEGAL-WORKER','Worker Acceptance Legal','2026-01-01') on conflict(id) do nothing`);
+await pool.query(`insert into legal_entity_profile_versions(
+  legal_entity_id,organization_id,legal_name,country_code,status,reporting_currency,address,effective_from,effective_to,authority_effective_to
+) values(
+  'legal-worker','org-worker','Worker Acceptance Legal','US','Active','USD',
+  '{\"line1\":\"Synthetic acceptance\",\"city\":\"Synthetic\",\"countryCode\":\"US\"}'::jsonb,
+  '2026-01-01',null,null
+) on conflict(legal_entity_id,effective_from) do update set
+  organization_id=excluded.organization_id,legal_name=excluded.legal_name,country_code=excluded.country_code,
+  status=excluded.status,reporting_currency=excluded.reporting_currency,address=excluded.address,
+  effective_to=excluded.effective_to,authority_effective_to=excluded.authority_effective_to`);
 const adminHash = await hashPassword(loginSecret);
 await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
  values('admin-worker','ADMIN-WORKER','Worker Admin','worker-admin@example.test','System Administrator','Administration','Synthetic','cd-worker','Active','org-worker','legal-worker')
