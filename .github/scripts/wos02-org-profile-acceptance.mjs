@@ -13,25 +13,27 @@ const failures=[];
 const check=async(name,fn)=>{try{await fn();console.log(`PASS ${name}`)}catch(error){failures.push({name,error:error?.stack||String(error)});console.error(`FAIL ${name}: ${error?.stack||error}`)}};
 const iso=value=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
 
-const ORG='org-profile', LEGAL='legal-profile', OTHER_ORG='org-profile-other', OTHER_LEGAL='legal-profile-other';
+const ORG='org-profile', LEGAL='legal-profile', FUTURE_LEGAL='legal-profile-future', OTHER_ORG='org-profile-other', OTHER_LEGAL='legal-profile-other';
 const USER='00000000-0000-0000-0000-000000001081', EMP='admin-profile', SECRET='org-profile-acceptance-session-secret';
 const sign=payload=>{const body=Buffer.from(JSON.stringify(payload)).toString('base64url');return `${body}.${crypto.createHmac('sha256',SECRET).update(body).digest('base64url')}`};
 const token=sign({sub:USER,username:'profile-admin',activeRole:'Admin',employeeRecordId:EMP,employeeId:'ADMIN-PROFILE',exp:Date.now()+3600000});
 const headers={authorization:`Bearer ${token}`,'content-type':'application/json','x-organization-id':ORG,'x-legal-entity-id':LEGAL};
+const futureHeaders={...headers,'x-legal-entity-id':FUTURE_LEGAL};
 
 await pool.query(`insert into country_directors(id,name,region) values('cd-profile','Profile Director','Synthetic') on conflict(id) do nothing`);
 await pool.query(`insert into organizations(id,code,name,status,effective_from) values($1,'ORG-PROFILE','Profile Org','Active','2026-01-01'),($2,'ORG-OTHER','Other Org','Active','2026-01-01') on conflict(id) do update set status='Active'`,[ORG,OTHER_ORG]);
-await pool.query(`insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from) values($1,$2,'LEGAL-PROFILE','Profile Legal','US','Active','2026-01-01'),($3,$4,'LEGAL-OTHER','Other Legal','US','Active','2026-01-01') on conflict(id) do update set status='Active'`,[LEGAL,ORG,OTHER_LEGAL,OTHER_ORG]);
+await pool.query(`insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from) values($1,$2,'LEGAL-PROFILE','Profile Legal','US','Active','2026-01-01'),($3,$2,'LEGAL-FUTURE','Future Authority Legal','US','Active','2026-01-01'),($4,$5,'LEGAL-OTHER','Other Legal','US','Active','2026-01-01') on conflict(id) do update set status='Active'`,[LEGAL,ORG,FUTURE_LEGAL,OTHER_LEGAL,OTHER_ORG]);
 await pool.query(`insert into organization_profile_versions(organization_id,name,legal_name,product_display_name,support_contact,default_locale,default_time_zone,base_currency,fiscal_year_start,default_week_start,effective_from) values($1,'Profile Org','Profile Org LLC','ProfileOS','support@profile.example.test','en-US','UTC','USD','01-01',1,'2026-01-01') on conflict(organization_id,effective_from) do nothing`,[ORG]);
 await pool.query(`insert into organization_profile_versions(organization_id,name,legal_name,product_display_name,support_contact,default_locale,default_time_zone,base_currency,fiscal_year_start,default_week_start,effective_from) values($1,'Other Org','Other Org LLC','OtherOS','support@other.example.test','en-US','UTC','USD','01-01',1,'2026-01-01') on conflict(organization_id,effective_from) do nothing`,[OTHER_ORG]);
 const address=JSON.stringify({line1:'1 Profile Street',city:'Profile City',countryCode:'US'});
 await pool.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,country_code,status,registration_identifier,tax_identifier,reporting_currency,address,effective_from) values($1,$2,'Profile Legal','US','Active','REG-PROFILE','TAX-PROFILE','USD',$3::jsonb,'2026-01-01') on conflict(legal_entity_id,effective_from) do nothing`,[LEGAL,ORG,address]);
+await pool.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,country_code,status,registration_identifier,tax_identifier,reporting_currency,address,effective_from) values($1,$2,'Future Authority Legal','US','Active','REG-FUTURE','TAX-FUTURE','USD',$3::jsonb,'2026-01-01') on conflict(legal_entity_id,effective_from) do nothing`,[FUTURE_LEGAL,ORG,address]);
 await pool.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,country_code,status,registration_identifier,tax_identifier,reporting_currency,address,effective_from) values($1,$2,'Other Legal','US','Active','REG-OTHER','TAX-OTHER','USD',$3::jsonb,'2026-01-01') on conflict(legal_entity_id,effective_from) do nothing`,[OTHER_LEGAL,OTHER_ORG,address]);
 await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values($1,'ADMIN-PROFILE','Profile Admin','profile-admin@example.test','Administrator','Administration','Synthetic','cd-profile','Active',$2,$3) on conflict(id) do update set status='Active',organization_id=excluded.organization_id,legal_entity_id=excluded.legal_entity_id`,[EMP,ORG,LEGAL]);
 await pool.query(`insert into users(id,username,employee_id,employee_record_id,email,status) values($1,'profile-admin','ADMIN-PROFILE',$2,'profile-admin@example.test','Active') on conflict(id) do update set employee_record_id=excluded.employee_record_id,status='Active'`,[USER,EMP]);
 const admin=(await pool.query(`select id from roles where name='Admin' limit 1`)).rows[0]; assert.ok(admin);
 await pool.query(`insert into user_roles(user_id,role_id) values($1,$2) on conflict do nothing`,[USER,admin.id]);
-await pool.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true) on conflict(user_id,organization_id,legal_entity_id) do update set active=true`,[USER,ORG,LEGAL]);
+for(const legalEntityId of [LEGAL,FUTURE_LEGAL]) await pool.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true) on conflict(user_id,organization_id,legal_entity_id) do update set active=true`,[USER,ORG,legalEntityId]);
 
 const port=4332, origin=`http://127.0.0.1:${port}`;
 const request=async(method,url,body,h=headers)=>{const response=await fetch(origin+url,{method,headers:h,body:body===undefined?undefined:JSON.stringify(body)});let payload;try{payload=await response.json()}catch{payload=await response.text()}return{status:response.status,body:payload}};
@@ -77,32 +79,32 @@ try{
   const list=await request('GET','/api/organization-setup/legal-entities');expect(list,200);assert.ok(list.body.some(x=>x.id===LEGAL));assert.ok(!list.body.some(x=>x.id===OTHER_LEGAL));
   expect(await request('GET',`/api/organization-setup/legal-entities/${LEGAL}`),200);expect(await request('GET',`/api/organization-setup/legal-entities/${OTHER_LEGAL}`),404);
  });
- await check('future-effective legal profile preserves current scope and resolves deterministic as-of history',async()=>{
-  const future={code:'LEGAL-PROFILE',legalName:'Future Profile Legal',registrationIdentifier:'REG-PROFILE',taxIdentifier:'TAX-PROFILE',reportingCurrency:'CAD',address:{line1:'99 Future Street',city:'Future City',countryCode:'CA'},status:'Inactive',effectiveFrom:'2099-01-01',effectiveTo:'2099-12-31'};
-  const beforeBase=(await pool.query(`select name,country_code,status,effective_from,effective_to from legal_entities where id=$1 and organization_id=$2`,[LEGAL,ORG])).rows[0];
-  const beforeScope=(await pool.query(`select active from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3`,[USER,ORG,LEGAL])).rows[0];
-  const scheduled=await request('PUT',`/api/organization-setup/legal-entities/${LEGAL}`,future);expect(scheduled,200);
-  assert.deepEqual((await pool.query(`select name,country_code,status,effective_from,effective_to from legal_entities where id=$1 and organization_id=$2`,[LEGAL,ORG])).rows[0],beforeBase);
-  assert.deepEqual((await pool.query(`select active from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3`,[USER,ORG,LEGAL])).rows[0],beforeScope);
-  const current=await request('GET',`/api/organization-setup/legal-entities/${LEGAL}?asOf=2026-09-06`);expect(current,200);assert.equal(current.body.name,'Profile Legal');assert.equal(current.body.country_code,'US');assert.equal(current.body.status,'Active');
-  const futureRead=await request('GET',`/api/organization-setup/legal-entities/${LEGAL}?asOf=2099-06-01`);expect(futureRead,200);assert.equal(futureRead.body.name,future.legalName);assert.equal(futureRead.body.country_code,'CA');assert.equal(futureRead.body.status,'Inactive');
-  const history=await pool.query(`select legal_name,status,effective_from,effective_to from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from`,[LEGAL]);assert.equal(history.rowCount,2);assert.equal(iso(history.rows[0].effective_to),'2098-12-31');assert.equal(iso(history.rows[1].effective_from),'2099-01-01');
-  const context=await request('GET','/api/organization-setup/context?asOf=2026-09-06');expect(context,200);assert.equal(context.body.legal_entity_name,'Profile Legal');
+ await check('future-effective inactive legal profile preserves current authority and resolves deterministic as-of history',async()=>{
+  const future={code:'LEGAL-FUTURE',legalName:'Future Authority Legal CA',registrationIdentifier:'REG-FUTURE',taxIdentifier:'TAX-FUTURE',reportingCurrency:'CAD',address:{line1:'99 Future Street',city:'Future City',countryCode:'CA'},status:'Inactive',effectiveFrom:'2099-01-01',effectiveTo:'2099-12-31'};
+  const beforeBase=(await pool.query(`select name,country_code,status,effective_from,effective_to from legal_entities where id=$1 and organization_id=$2`,[FUTURE_LEGAL,ORG])).rows[0];
+  const beforeScope=(await pool.query(`select active from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3`,[USER,ORG,FUTURE_LEGAL])).rows[0];
+  const scheduled=await request('PUT',`/api/organization-setup/legal-entities/${FUTURE_LEGAL}`,future,futureHeaders);expect(scheduled,200);
+  assert.deepEqual((await pool.query(`select name,country_code,status,effective_from,effective_to from legal_entities where id=$1 and organization_id=$2`,[FUTURE_LEGAL,ORG])).rows[0],beforeBase);
+  assert.deepEqual((await pool.query(`select active from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3`,[USER,ORG,FUTURE_LEGAL])).rows[0],beforeScope);
+  const current=await request('GET',`/api/organization-setup/legal-entities/${FUTURE_LEGAL}?asOf=2026-09-06`,undefined,futureHeaders);expect(current,200);assert.equal(current.body.name,'Future Authority Legal');assert.equal(current.body.country_code,'US');assert.equal(current.body.status,'Active');
+  const futureRead=await request('GET',`/api/organization-setup/legal-entities/${FUTURE_LEGAL}?asOf=2099-06-01`,undefined,futureHeaders);expect(futureRead,200);assert.equal(futureRead.body.name,future.legalName);assert.equal(futureRead.body.country_code,'CA');assert.equal(futureRead.body.status,'Inactive');
+  const history=await pool.query(`select legal_name,status,effective_from,effective_to from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from`,[FUTURE_LEGAL]);assert.equal(history.rowCount,2);assert.equal(iso(history.rows[0].effective_to),'2098-12-31');assert.equal(iso(history.rows[1].effective_from),'2099-01-01');
+  const context=await request('GET','/api/organization-setup/context?asOf=2026-09-06',undefined,futureHeaders);expect(context,200);assert.equal(context.body.legal_entity_name,'Future Authority Legal');
  });
- await check('legal profile stale writes conflict and same-effective replay is deterministic',async()=>{
-  const snapshot=async()=>JSON.stringify((await pool.query(`select legal_name,country_code,status,effective_from,effective_to from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from`,[LEGAL])).rows);
+ await check('future legal profile stale writes conflict and same-effective replay is deterministic',async()=>{
+  const snapshot=async()=>JSON.stringify((await pool.query(`select legal_name,country_code,status,effective_from,effective_to from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from`,[FUTURE_LEGAL])).rows);
   const before=await snapshot();
-  const stale={code:'LEGAL-PROFILE',legalName:'Stale',registrationIdentifier:'REG-PROFILE',taxIdentifier:'TAX-PROFILE',reportingCurrency:'USD',address:{line1:'Stale',city:'Stale',countryCode:'US'},status:'Active',effectiveFrom:'2025-01-01'};
-  const conflict=await request('PUT',`/api/organization-setup/legal-entities/${LEGAL}`,stale);expect(conflict,409);assert.equal(await snapshot(),before);
-  const replay={code:'LEGAL-PROFILE',legalName:'Future Profile Legal Revised',registrationIdentifier:'REG-PROFILE',taxIdentifier:'TAX-PROFILE',reportingCurrency:'CAD',address:{line1:'99 Future Street',city:'Future City',countryCode:'CA'},status:'Inactive',effectiveFrom:'2099-01-01',effectiveTo:'2099-12-31'};
-  expect(await request('PUT',`/api/organization-setup/legal-entities/${LEGAL}`,replay),200);
-  assert.equal(Number((await pool.query(`select count(*) n from legal_entity_profile_versions where legal_entity_id=$1 and effective_from='2099-01-01'`,[LEGAL])).rows[0].n),1);
-  assert.equal((await pool.query(`select legal_name from legal_entity_profile_versions where legal_entity_id=$1 and effective_from='2099-01-01'`,[LEGAL])).rows[0].legal_name,replay.legalName);
-  const audit=(await pool.query(`select old_value,new_value,user_id from audit_logs where action='Update Legal Entity' and entity_id=$1 order by created_at desc limit 1`,[LEGAL])).rows[0];assert.equal(String(audit.user_id),USER);assert.ok(audit.old_value);assert.equal(audit.new_value.profile.legal_name,replay.legalName);
-  const current={code:'LEGAL-PROFILE',legalName:'Profile Legal Current',countryCode:'US',registrationIdentifier:'REG-PROFILE',taxIdentifier:'TAX-PROFILE',reportingCurrency:'USD',address:{line1:'1 Profile Street',city:'Profile City',countryCode:'US'},status:'Active',effectiveFrom:'2026-01-01'};
-  expect(await request('PUT',`/api/organization-setup/legal-entities/${LEGAL}`,current),200);
-  const base=(await pool.query(`select name,country_code,status from legal_entities where id=$1`,[LEGAL])).rows[0];assert.deepEqual(base,{name:current.legalName,country_code:'US',status:'Active'});
-  assert.equal(Number((await pool.query(`select count(*) n from legal_entity_profile_versions where legal_entity_id=$1`,[LEGAL])).rows[0].n),2);
+  const stale={code:'LEGAL-FUTURE',legalName:'Stale',registrationIdentifier:'REG-FUTURE',taxIdentifier:'TAX-FUTURE',reportingCurrency:'USD',address:{line1:'Stale',city:'Stale',countryCode:'US'},status:'Active',effectiveFrom:'2025-01-01'};
+  const conflict=await request('PUT',`/api/organization-setup/legal-entities/${FUTURE_LEGAL}`,stale,futureHeaders);expect(conflict,409);assert.equal(await snapshot(),before);
+  const replay={code:'LEGAL-FUTURE',legalName:'Future Authority Legal Revised',registrationIdentifier:'REG-FUTURE',taxIdentifier:'TAX-FUTURE',reportingCurrency:'CAD',address:{line1:'99 Future Street',city:'Future City',countryCode:'CA'},status:'Inactive',effectiveFrom:'2099-01-01',effectiveTo:'2099-12-31'};
+  expect(await request('PUT',`/api/organization-setup/legal-entities/${FUTURE_LEGAL}`,replay,futureHeaders),200);
+  assert.equal(Number((await pool.query(`select count(*) n from legal_entity_profile_versions where legal_entity_id=$1 and effective_from='2099-01-01'`,[FUTURE_LEGAL])).rows[0].n),1);
+  assert.equal((await pool.query(`select legal_name from legal_entity_profile_versions where legal_entity_id=$1 and effective_from='2099-01-01'`,[FUTURE_LEGAL])).rows[0].legal_name,replay.legalName);
+  const audit=(await pool.query(`select old_value,new_value,user_id from audit_logs where action='Update Legal Entity' and entity_id=$1 order by created_at desc limit 1`,[FUTURE_LEGAL])).rows[0];assert.equal(String(audit.user_id),USER);assert.ok(audit.old_value);assert.equal(audit.new_value.profile.legal_name,replay.legalName);
+  const current={code:'LEGAL-FUTURE',legalName:'Future Authority Legal Current',registrationIdentifier:'REG-FUTURE',taxIdentifier:'TAX-FUTURE',reportingCurrency:'USD',address:{line1:'1 Profile Street',city:'Profile City',countryCode:'US'},status:'Active',effectiveFrom:'2026-01-01'};
+  expect(await request('PUT',`/api/organization-setup/legal-entities/${FUTURE_LEGAL}`,current,futureHeaders),200);
+  const base=(await pool.query(`select name,country_code,status from legal_entities where id=$1`,[FUTURE_LEGAL])).rows[0];assert.deepEqual(base,{name:current.legalName,country_code:'US',status:'Active'});
+  assert.equal(Number((await pool.query(`select count(*) n from legal_entity_profile_versions where legal_entity_id=$1`,[FUTURE_LEGAL])).rows[0].n),2);
  });
  await check('legal-entity create is atomic with creator scope and audit',async()=>{
   const p={code:'LEGAL-NEW',legalName:'New Legal Entity LLC',registrationIdentifier:'REG-NEW',taxIdentifier:'TAX-NEW',reportingCurrency:'EUR',address:{line1:'10 New Street',city:'New City',countryCode:'DE'},status:'Active',effectiveFrom:'2026-09-01'};
