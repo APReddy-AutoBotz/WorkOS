@@ -41,6 +41,13 @@ await pool.query(`insert into legal_entities(id,organization_id,code,name,countr
   ($3,$2,'LEGAL-CALENDAR-GB','Calendar Legal GB','GB','Active','2026-01-01'),
   ($4,$5,'LEGAL-CALENDAR-OTHER','Other Calendar Legal','US','Active','2026-01-01')
   on conflict(id) do update set status='Active',country_code=excluded.country_code`, [LEGAL, ORG, LEGAL_GB, OTHER_LEGAL, OTHER_ORG]);
+await pool.query(`insert into legal_entity_profile_versions(
+  legal_entity_id,organization_id,legal_name,country_code,status,reporting_currency,address,effective_from,effective_to,authority_effective_to
+) values
+  ($1,$2,'Calendar Legal','US','Active','USD','{"countryCode":"US"}'::jsonb,'2026-01-01',null,null),
+  ($3,$2,'Calendar Legal GB','GB','Active','GBP','{"countryCode":"GB"}'::jsonb,'2026-01-01',null,null),
+  ($4,$5,'Other Calendar Legal','US','Active','USD','{"countryCode":"US"}'::jsonb,'2026-01-01',null,null)
+on conflict(legal_entity_id,effective_from) do update set organization_id=excluded.organization_id,legal_name=excluded.legal_name,country_code=excluded.country_code,status=excluded.status,reporting_currency=excluded.reporting_currency,address=excluded.address,effective_to=excluded.effective_to,authority_effective_to=excluded.authority_effective_to`, [LEGAL, ORG, LEGAL_GB, OTHER_LEGAL, OTHER_ORG]);
 await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
   values($1,'ADMIN-CALENDAR','Calendar Admin','calendar-admin@example.test','Administrator','Administration','Synthetic','cd-calendar','Active',$2,$3)
   on conflict(id) do update set status='Active',organization_id=excluded.organization_id,legal_entity_id=excluded.legal_entity_id`, [EMPLOYEE, ORG, LEGAL]);
