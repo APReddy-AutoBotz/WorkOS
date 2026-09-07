@@ -173,8 +173,11 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       const previous=targetId?(await client.query('select * from legal_entities where id=$1 and organization_id=$2 for update',[targetId,req.organizationScope.organizationId])).rows[0]:null;
       if(targetId&&!previous){await client.query('rollback');return res.status(404).json({error:'Legal entity not found'});}
       if(previous&&parsed.data.code!==previous.code){await client.query('rollback');return res.status(409).json({error:'Legal entity code is immutable',code:'LEGAL_ENTITY_CODE_IMMUTABLE'});}
+      const exactVersion=(await client.query('select * from legal_entity_profile_versions where legal_entity_id=$1 and effective_from=$2 for update',[previous?.id||'',parsed.data.effectiveFrom])).rows[0];
       const latest=(await client.query('select * from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from desc limit 1 for update',[previous?.id||''])).rows[0];
-      if(latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Legal entity profile version is stale',code:'LEGAL_ENTITY_VERSION_CONFLICT'});}
+      const currentDate=new Date().toISOString().slice(0,10);
+      const exactVersionIsHistorical=exactVersion&&exactVersion.effective_to&&dateOnly(exactVersion.effective_to)<currentDate;
+      if(exactVersionIsHistorical||!exactVersion&&latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Legal entity profile version is stale',code:'LEGAL_ENTITY_VERSION_CONFLICT'});}
       if(previous&&(parsed.data.status==='Inactive'||parsed.data.effectiveTo)){
         const deps=await client.query(`select id from employees where organization_id=$1 and legal_entity_id=$2 and status<>'Exited'
           union all select id from projects where organization_id=$1 and legal_entity_id=$2 and status in ('Proposed','Active','On Hold')
@@ -194,7 +197,7 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
         [id,parsed.data.legalName,parsed.data.address.countryCode,parsed.data.status,parsed.data.effectiveTo||null,parsed.data.effectiveFrom]):
         await client.query(`insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from,effective_to) values($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
           [id,req.organizationScope.organizationId,parsed.data.code,parsed.data.legalName,parsed.data.address.countryCode,parsed.data.status,parsed.data.effectiveFrom,parsed.data.effectiveTo||null]);
-      if(latest&&parsed.data.effectiveFrom>dateOnly(latest.effective_from)&&latest.effective_to==null)
+      if(!exactVersion&&latest&&parsed.data.effectiveFrom>dateOnly(latest.effective_from)&&latest.effective_to==null)
         await client.query('update legal_entity_profile_versions set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
       const profile=await client.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,country_code,status,authority_effective_to,
         registration_identifier,tax_identifier,reporting_currency,address,effective_from,created_by)
@@ -206,7 +209,7 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       if(!previous)await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true)
         on conflict(user_id,organization_id,legal_entity_id) do update set active=true`,[req.user.sub,req.organizationScope.organizationId,id]);
       await audit(client,req,{module:'Organization Setup',action:previous?'Update Legal Entity':'Create Legal Entity',entityType:'Legal Entity',entityId:id,
-        oldValue:previous?{entity:previous,profile:latest}:null,newValue:{entity:entity.rows[0],profile:profile.rows[0]},details:`${previous?'Updated':'Created'} legal entity in authoritative organization scope`});
+        oldValue:previous?{entity:previous,profile:exactVersion||latest}:null,newValue:{entity:entity.rows[0],profile:profile.rows[0]},details:`${previous?'Updated':'Created'} legal entity in authoritative organization scope`});
       const response=await client.query(`${legalSelect} where le.id=$1 and p.id=$2`,[id,profile.rows[0].id]);
       await client.query('commit');res.status(previous?200:201).json(response.rows[0]);
     }catch(error){await client.query('rollback');if(error.code==='23505')return res.status(409).json({error:'Legal entity code or identity already exists',code:'LEGAL_ENTITY_UNIQUENESS_CONFLICT'});if(error.code==='23P01')return res.status(409).json({error:'Legal entity profile version conflicts with existing history',code:'LEGAL_ENTITY_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Legal entity mutation failed',code:'LEGAL_ENTITY_MUTATION_FAILED'});}finally{client.release();}
