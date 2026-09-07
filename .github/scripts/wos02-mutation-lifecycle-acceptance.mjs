@@ -20,6 +20,16 @@ const password = 'P1-Mutation-Life-42!';
 await pool.query(`insert into country_directors(id,name,region) values('cd-p1','P1 Director','Synthetic') on conflict(id) do nothing`);
 await pool.query(`insert into organizations(id,code,name,effective_from) values ('org-p1','ORG-P1','P1 Org','2026-01-01'),('org-p1-x','ORG-P1-X','P1 Foreign Org','2026-01-01') on conflict(id) do nothing`);
 await pool.query(`insert into legal_entities(id,organization_id,code,name,effective_from) values ('legal-p1-a','org-p1','LEGAL-P1-A','P1 Legal A','2026-01-01'),('legal-p1-b','org-p1','LEGAL-P1-B','P1 Legal B','2026-01-01'),('legal-p1-x','org-p1-x','LEGAL-P1-X','P1 Foreign Legal','2026-01-01') on conflict(id) do nothing`);
+await pool.query(`insert into legal_entity_profile_versions(
+  legal_entity_id,organization_id,legal_name,country_code,status,reporting_currency,address,effective_from,effective_to,authority_effective_to
+) values
+  ('legal-p1-a','org-p1','P1 Legal A','US','Active','USD','{"line1":"Synthetic acceptance","city":"Synthetic","countryCode":"US"}'::jsonb,'2026-01-01',null,null),
+  ('legal-p1-b','org-p1','P1 Legal B','US','Active','USD','{"line1":"Synthetic acceptance","city":"Synthetic","countryCode":"US"}'::jsonb,'2026-01-01',null,null),
+  ('legal-p1-x','org-p1-x','P1 Foreign Legal','US','Active','USD','{"line1":"Synthetic acceptance","city":"Synthetic","countryCode":"US"}'::jsonb,'2026-01-01',null,null)
+on conflict(legal_entity_id,effective_from) do update set
+  organization_id=excluded.organization_id,legal_name=excluded.legal_name,country_code=excluded.country_code,
+  status=excluded.status,reporting_currency=excluded.reporting_currency,address=excluded.address,
+  effective_to=excluded.effective_to,authority_effective_to=excluded.authority_effective_to`);
 await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values
  ('admin-p1','ADMIN-P1','P1 Admin','admin-p1@example.test','System Administrator','Administration','Synthetic','cd-p1','Active','org-p1','legal-p1-a'),
  ('owner-p1-b','OWNER-P1-B','Foreign Legal Owner','owner-p1-b@example.test','Manager','Delivery','Synthetic','cd-p1','Active','org-p1','legal-p1-b'),
