@@ -8,6 +8,7 @@ on:
       - '.github/scripts/wos02-final-review-live-acceptance.mjs'
       - '.github/scripts/wos02-scope-write-acceptance.mjs'
       - '.github/scripts/wos02-worker-lifecycle-acceptance.mjs'
+      - '.github/scripts/wos02-worker-reactivation-acceptance.mjs'
       - '.github/scripts/wos02-mutation-lifecycle-acceptance.mjs'
       - '.github/scripts/wos02-reporting-period-acceptance.mjs'
       - '.github/scripts/wos02-reporting-period-u8u9-acceptance.mjs'
@@ -24,8 +25,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: 3896836b31883b668d04c77fcab28d5180535d44
-  TARGET_TREE: cd1c97fe8771c4a6038f74d2ff0b1e041ca30d80
+  TARGET_HEAD: 8029edb0014e805810ff0b9b990bd0c93ebdb9ba
+  TARGET_TREE: 1551069514c85598b85982e19a4919445f206c92
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -223,6 +224,7 @@ jobs:
           node --check ../controller/.github/scripts/wos02-mutation-lifecycle-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-reporting-period-acceptance.mjs
           node --check ../controller/.github/scripts/wos02-reporting-period-u8u9-acceptance.mjs
+          node --check ../controller/.github/scripts/wos02-worker-reactivation-acceptance.mjs
 
       - name: Execute FINAL TERMINOLOGY runtime and stability acceptance
         shell: bash
@@ -390,6 +392,16 @@ jobs:
           set -euo pipefail
           (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
           node .github/scripts/wos02-worker-lifecycle-acceptance.mjs
+
+      - name: Execute worker reactivation linked-identity acceptance matrix
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_worker_lifecycle
+        run: |
+          set -euo pipefail
+          node .github/scripts/wos02-worker-reactivation-acceptance.mjs
 
       - name: Execute P1 mutation and lifecycle acceptance matrix
         shell: bash
