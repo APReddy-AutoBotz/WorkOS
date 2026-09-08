@@ -228,13 +228,32 @@ try {
   });
 
   await check('terminology is effective-dated at API and consumed by runtime frontend', async () => {
-    const current = await call('POST', '/api/organization-setup/terminology', { token: adminToken, scope: scopeA, body: { terms: { employee: 'Colleague', project: 'Engagement' }, effectiveFrom: '2026-01-01' } });
+    const currentTerms = {
+      employee: { singular: 'Colleague', plural: 'Colleagues', helpText: 'A current colleague in the organization.' },
+      manager: { singular: 'People Manager', plural: 'People Managers', helpText: 'A colleague responsible for people management.' },
+      teamLead: { singular: 'Team Lead', plural: 'Team Leads', helpText: 'A colleague responsible for leading a team.' },
+      businessUnit: { singular: 'Business Unit', plural: 'Business Units', helpText: 'An organizational business unit.' },
+      region: { singular: 'Region', plural: 'Regions', helpText: 'A geographic operating region.' },
+      regionalOwner: { singular: 'Regional Owner', plural: 'Regional Owners', helpText: 'A colleague responsible for a region.' },
+      engagement: { singular: 'Assignment', plural: 'Assignments', helpText: 'A commercial assignment for a client.' },
+      project: { singular: 'Engagement', plural: 'Engagements', helpText: 'A current delivery engagement.' },
+      worklog: { singular: 'Work Log', plural: 'Work Logs', helpText: 'A record of completed work.' },
+    };
+    const current = await call('POST', '/api/organization-setup/terminology', { token: adminToken, scope: scopeA, body: { terms: currentTerms, effectiveFrom: '2026-01-01' } });
     assert.equal(current.status, 201, JSON.stringify(current.body));
-    const future = await call('POST', '/api/organization-setup/terminology', { token: adminToken, scope: scopeA, body: { terms: { employee: 'Future Colleague' }, effectiveFrom: '2099-01-01' } });
+    const futureTerms = {
+      ...currentTerms,
+      employee: { singular: 'Future Colleague', plural: 'Future Colleagues', helpText: 'A colleague term scheduled for the future.' },
+    };
+    const future = await call('POST', '/api/organization-setup/terminology', { token: adminToken, scope: scopeA, body: { terms: futureTerms, effectiveFrom: '2099-01-01' } });
     assert.equal(future.status, 201, JSON.stringify(future.body));
     const resolved = await call('GET', '/api/organization-setup/terminology', { token: adminToken, scope: scopeA });
     assert.equal(resolved.status, 200);
-    assert.equal(resolved.body.terms.employee, 'Colleague');
+    assert.deepEqual(resolved.body.terms.employee, currentTerms.employee);
+    assert.deepEqual(resolved.body.terms.project, currentTerms.project);
+    assert.notEqual(resolved.body.terms.employee.singular, futureTerms.employee.singular);
+    assert.notEqual(resolved.body.terms.employee.plural, futureTerms.employee.plural);
+    assert.notEqual(resolved.body.terms.employee.helpText, futureTerms.employee.helpText);
     const frontendFiles = ['src/App.tsx','src/config/RuntimeTerminology.tsx','src/config/productConfig.ts','src/services/apiClient.ts'];
     const runtimeText = frontendFiles.map(file => readFileSync(path.join(targetRoot, file), 'utf8')).join('\n');
     assert.match(runtimeText, /organization-setup\/terminology/);
