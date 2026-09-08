@@ -9,6 +9,19 @@ export const MAX_SETUP_ROWS = 200;
 export const MAX_DEPENDENCIES = 100;
 export const MAX_HISTORY_ROWS = 100;
 
+const terminologyKeys = ['employee','manager','teamLead','businessUnit','region','regionalOwner','engagement','project','worklog'];
+const terminologyValueSchema = z.object({
+  singular:z.string().trim().min(1).max(100), plural:z.string().trim().min(1).max(100), helpText:z.string().trim().max(500),
+}).strict();
+const terminologyTermsSchema = z.object(Object.fromEntries(terminologyKeys.map(key => [key, terminologyValueSchema]))).strict();
+const legacyPluralize = value => /[^aeiou]y$/i.test(value) ? `${value.slice(0,-1)}ies` : /(s|x|z|ch|sh)$/i.test(value) ? `${value}es` : `${value}s`;
+const normalizeTerminologyTerms = terms => Object.fromEntries(Object.entries(terms || {}).map(([key,value]) => {
+  if (typeof value !== 'string') return [key,value];
+  const singular=value.trim(); return [key,{singular,plural:legacyPluralize(singular),helpText:''}];
+}));
+export const validateTerminology = input => z.object({terms:terminologyTermsSchema,effectiveFrom:z.string().date()}).strict().safeParse(input);
+export const normalizePersistedTerminology = normalizeTerminologyTerms;
+
 const catalogTypes = ['business_unit', 'department', 'cost_centre', 'practice', 'location', 'region', 'worker_type'];
 const scopeHeaders = request => ({
   organizationId: String(request.headers['x-organization-id'] || '').trim(),
@@ -443,12 +456,20 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
   router.get('/terminology', async (req,res) => {
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
     const result=await pool.query(`select terms,effective_from,effective_to from terminology_versions t where t.organization_id=$1 and ${asOfPredicate('t','$2')} order by effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
-    res.json(result.rows[0]||{terms:{}});
+    const row=result.rows[0];res.json(row?{...row,terms:normalizeTerminologyTerms(row.terms)}:{terms:{}});
   });
   router.post('/terminology',requirePermission('settings.manage'),async(req,res)=>{
-    const parsed=z.object({terms:z.record(z.string(),z.string().trim().min(1).max(100)),effectiveFrom:z.string().date()}).safeParse(req.body);if(!parsed.success)return res.status(400).json({error:parsed.error.flatten()});
-    const result=await pool.query(`insert into terminology_versions(organization_id,terms,effective_from,created_by) values($1,$2,$3,$4)
-      on conflict(organization_id,effective_from) do update set terms=excluded.terms where terminology_versions.organization_id=$1 returning *`,[req.organizationScope.organizationId,JSON.stringify(parsed.data.terms),parsed.data.effectiveFrom,req.user.sub]);res.status(201).json(result.rows[0]);
+    const parsed=validateTerminology(req.body);if(!parsed.success)return res.status(400).json({error:parsed.error.flatten(),code:'TERMINOLOGY_INVALID'});
+    const client=await pool.connect();try{
+      await client.query('begin');await client.query('select pg_advisory_xact_lock(hashtext($1))',[`terminology:${req.organizationScope.organizationId}`]);
+      const versions=(await client.query('select * from terminology_versions where organization_id=$1 order by effective_from desc for update',[req.organizationScope.organizationId])).rows;
+      const exact=versions.find(row=>dateOnly(row.effective_from)===parsed.data.effectiveFrom);const latest=versions[0];
+      if(!exact&&latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Terminology version is stale',code:'TERMINOLOGY_VERSION_CONFLICT'});}
+      let result;if(exact) result=await client.query('update terminology_versions set terms=$3,created_by=$4 where organization_id=$1 and effective_from=$2 returning *',[req.organizationScope.organizationId,parsed.data.effectiveFrom,JSON.stringify(parsed.data.terms),req.user.sub]);
+      else {if(latest)await client.query("update terminology_versions set effective_to=($2::date-interval '1 day')::date where organization_id=$1 and effective_to is null",[req.organizationScope.organizationId,parsed.data.effectiveFrom]);result=await client.query('insert into terminology_versions(organization_id,terms,effective_from,created_by) values($1,$2,$3,$4) returning *',[req.organizationScope.organizationId,JSON.stringify(parsed.data.terms),parsed.data.effectiveFrom,req.user.sub]);}
+      await audit(client,req,{module:'Organization Setup',action:exact?'Update Terminology':'Version Terminology',entityType:'Terminology',entityId:`${req.organizationScope.organizationId}:${parsed.data.effectiveFrom}`,oldValue:exact||null,newValue:result.rows[0],details:'Updated effective-dated terminology labels and help text'});
+      await client.query('commit');res.status(exact?200:201).json(result.rows[0]);
+    }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Terminology version conflicts with existing history',code:'TERMINOLOGY_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Terminology mutation failed'});}finally{client.release();}
   });
 
   router.get('/readiness', async (req,res) => {

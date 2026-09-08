@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from '../server/worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, canTransitionReportingPeriod, normalizeReportingDate, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
 import { buildSetupReadiness, identityReadinessFromEnvironment, productionReadinessFromEnvironment, REQUIRED_SETUP_CHECKS } from '../server/setup-readiness.mjs';
-import { validateLegalEntity, validateOrganizationProfile } from '../server/organization-setup.mjs';
+import { normalizePersistedTerminology, validateLegalEntity, validateOrganizationProfile, validateTerminology } from '../server/organization-setup.mjs';
 import { calendarScopeValues, validateWorkingCalendar, validateWorkingCalendarHoliday } from '../server/working-calendars.mjs';
 
 const migration = readFileSync('server/migrations/022_organization_setup_foundation.sql', 'utf8');
@@ -18,6 +18,19 @@ const organizationProfileMigration = readFileSync('server/migrations/028_wos02_o
 const calendarAuthorityMigration = readFileSync('server/migrations/029_wos02_working_calendar_authority.sql', 'utf8');
 const legalEntityAuthorityMigration = readFileSync('server/migrations/031_wos02_legal_entity_effective_authority.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
+const terminologyKeys = ['employee','manager','teamLead','businessUnit','region','regionalOwner','engagement','project','worklog'];
+const terminologyTerms = Object.fromEntries(terminologyKeys.map(key => [key,{singular:key,plural:`${key}s`,helpText:''}]));
+assert(validateTerminology({terms:terminologyTerms,effectiveFrom:'2026-01-01'}).success);
+for (const invalidTerms of [
+  {...terminologyTerms,employee:'person'},
+  Object.fromEntries(Object.entries(terminologyTerms).slice(1)),
+  {...terminologyTerms,unknown:{singular:'x',plural:'xs',helpText:''}},
+  {...terminologyTerms,employee:{singular:'',plural:'people',helpText:''}},
+  {...terminologyTerms,employee:{singular:'x'.repeat(101),plural:'people',helpText:''}},
+  {...terminologyTerms,employee:{singular:'person',plural:'x'.repeat(101),helpText:''}},
+  {...terminologyTerms,employee:{singular:'person',plural:'people',helpText:'x'.repeat(501)}},
+]) assert(!validateTerminology({terms:invalidTerms,effectiveFrom:'2026-01-01'}).success, 'invalid terminology must fail closed');
+assert.deepEqual(normalizePersistedTerminology({employee:'person'}).employee,{singular:'person',plural:'persons',helpText:''});
 const server = readFileSync('server/index.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
 const api = readFileSync('src/services/api.ts', 'utf8');
@@ -206,6 +219,12 @@ assert.match(service, /reporting-period:\$\{req\.organizationScope\.organization
 assert.match(service, /Submission Closed','Approval Closed','Financially Locked','Closed'[\s\S]*REPORTING_PERIOD_IMMUTABLE/, 'closed reporting-period identity and boundaries must not be rewritten');
 assert.match(service, /Update Reporting Period':'Create Reporting Period'[\s\S]*oldValue:previous,newValue:result\.rows\[0\]/, 'reporting-period mutations must audit material before and after values in their transaction');
 assert.match(service, /router\.post\('\/terminology'/, 'terminology must have governed authoring');
+assert.match(service, /terminologyTermsSchema[\s\S]*\.strict\(\)/, 'terminology writes must require the complete structured key contract');
+assert.match(service, /singular:z\.string\(\)\.trim\(\)\.min\(1\)\.max\(100\)[\s\S]*plural:z\.string\(\)\.trim\(\)\.min\(1\)\.max\(100\)[\s\S]*helpText:z\.string\(\)\.trim\(\)\.max\(500\)/, 'terminology labels and help text must be bounded');
+assert.match(service, /normalizeTerminologyTerms[\s\S]*legacyPluralize\(singular\)[\s\S]*helpText:''/, 'legacy persisted scalar rows must preserve scalar-derived plural behavior');
+assert.match(service, /terminology:\$\{req\.organizationScope\.organizationId\}[\s\S]*for update[\s\S]*TERMINOLOGY_VERSION_CONFLICT/, 'terminology mutation must serialize and reject stale versions');
+assert.match(service, /Update Terminology':'Version Terminology'[\s\S]*oldValue:exact\|\|null,newValue:result\.rows\[0\]/, 'terminology audit must contain material before and after values');
+assert.match(service, /created_by=\$4[\s\S]*req\.user\.sub/, 'same-effective terminology updates must record the current actor');
 assert.match(server, /registerOrganizationSetupRoutes/, 'canonical API must register the setup module');
 assert.match(ui, /Organization setup readiness/, 'governance UI must expose setup readiness');
 assert.match(ui, /setupReadiness\.checks/, 'UI must render server-derived checks');

@@ -1,22 +1,40 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { applyPersistedTerminology, productConfig } from '../src/config/productConfig.ts';
-import { displayEntityType, termPluralTitle, termTitle } from '../src/config/terminology.ts';
+import { applyPersistedTerminology, productConfig, resolveTerminologyValue } from '../src/config/productConfig.ts';
+import { displayEntityType, termHelpText, termPlural, termPluralTitle, termTitle } from '../src/config/terminology.ts';
 import { getReportExportOptions } from '../src/lib/reportExport.ts';
 import { loadRuntimeTerminology } from '../src/config/RuntimeTerminology.tsx';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const keys = ['employee', 'manager', 'teamLead', 'businessUnit', 'region', 'regionalOwner', 'engagement', 'project', 'worklog'];
-const synthetic = Object.fromEntries(keys.map((key, index) => [key, `scope alpha ${key} ${index}`]));
+const synthetic = Object.fromEntries(keys.map((key, index) => [key, {
+  singular: `scope alpha ${key} ${index}`, plural: `scope alpha ${key} ${index} plural`, helpText: `Help for ${key}`,
+}]));
 
 applyPersistedTerminology(synthetic);
-for (const key of keys) assert.equal(productConfig.terminology[key], synthetic[key], `${key} must accept persisted runtime terminology`);
+for (const key of keys) assert.equal(productConfig.terminology[key], synthetic[key].singular, `${key} must accept persisted runtime terminology`);
 assert.equal(termTitle('project'), 'Scope Alpha Project 7');
-assert.equal(termPluralTitle('employee'), 'Scope Alpha Employee 0s');
+assert.equal(termPluralTitle('employee'), 'Scope Alpha Employee 0 Plural');
+assert.equal(termHelpText('employee'), 'Help for employee');
 assert.equal(displayEntityType('Timesheet'), 'Scope Alpha Worklog 8');
 
+applyPersistedTerminology({ ...synthetic, employee:{ singular:'person', plural:'people', helpText:'People who perform work.' }, manager:{ singular:'staff', plural:'staff', helpText:'' } });
+assert.equal(termPlural('employee'), 'people', 'structured irregular plural must be authoritative');
+assert.equal(termPlural('manager'), 'staff', 'structured uncountable plural must be authoritative');
+assert.equal(termHelpText('employee'), 'People who perform work.', 'structured help text must reach runtime helpers');
+
+applyPersistedTerminology({ employee:'person' });
+assert.equal(termTitle('employee'), 'Person');
+assert.equal(termPlural('employee'), 'persons', 'legacy persisted scalar uses the exact pre-change plural rule');
+assert.equal(termHelpText('employee'), '');
+assert.deepEqual(resolveTerminologyValue({ VITE_TERM_EMPLOYEE:'person' }, 'VITE_TERM_EMPLOYEE', 'resource'),
+  { singular:'person', plural:'persons', helpText:'' }, 'legacy scalar environment override derives its plural');
+assert.deepEqual(resolveTerminologyValue({ VITE_TERM_EMPLOYEE:'person', VITE_TERM_EMPLOYEE_PLURAL:'people', VITE_TERM_EMPLOYEE_HELP_TEXT:'Approved label.' }, 'VITE_TERM_EMPLOYEE', 'resource'),
+  { singular:'person', plural:'people', helpText:'Approved label.' }, 'explicit plural and help environment overrides are authoritative');
+
+applyPersistedTerminology(synthetic);
 const reports = getReportExportOptions();
 assert.match(reports.find(option => option.id === 'master_emp').title, /Scope Alpha Employee 0/);
 assert.match(reports.find(option => option.id === 'master_prj').description, /scope alpha engagement 6/);
@@ -51,6 +69,9 @@ for (const [key, files] of Object.entries(surfaces)) {
 const runtime = read('src/config/RuntimeTerminology.tsx');
 assert.match(runtime, /workos:organization-scope-changed/);
 assert.match(runtime, /applyPersistedTerminology\(\{\}\)/, 'unauthenticated/fetch failure fallback remains deterministic');
+const configSource = read('src/config/productConfig.ts');
+assert.match(configSource, /envValue \? legacyPluralize\(singular\) : fallbackPlural/, 'legacy scalar environment overrides derive the pre-change plural');
+assert.match(configSource, /explicitPlural \|\|/, 'an explicit structured plural environment value takes precedence');
 
 const canonical = [
   ['src/components/Layout/Sidebar.tsx', "path: '/employees'"],

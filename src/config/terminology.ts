@@ -1,18 +1,14 @@
-import { productConfig, type Terminology } from './productConfig';
+import { getTerminologyValue, productConfig, type TerminologyKey } from './productConfig';
 
-export type TerminologyKey = keyof Terminology;
+export type { TerminologyKey } from './productConfig';
 
 export const term = (key: TerminologyKey) => productConfig.terminology[key];
+export const termHelpText = (key: TerminologyKey) => getTerminologyValue(key).helpText;
 
 export const termTitle = (key: TerminologyKey) =>
   term(key).replace(/\b\w/g, character => character.toUpperCase());
 
-export const termPlural = (key: TerminologyKey) => {
-  const value = term(key);
-  if (/[^aeiou]y$/i.test(value)) return `${value.slice(0, -1)}ies`;
-  if (/(s|x|z|ch|sh)$/i.test(value)) return `${value}es`;
-  return `${value}s`;
-};
+export const termPlural = (key: TerminologyKey) => getTerminologyValue(key).plural;
 
 export const termPluralTitle = (key: TerminologyKey) =>
   termPlural(key).replace(/\b\w/g, character => character.toUpperCase());
