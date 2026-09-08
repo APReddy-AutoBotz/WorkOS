@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { disableLinkedWorkerIdentity } from './worker-lifecycle.mjs';
+import { disableLinkedWorkerIdentity, restoreLinkedWorkerIdentity } from './worker-lifecycle.mjs';
 import { canTransitionReportingPeriod, REPORTING_PERIOD_FREQUENCIES, REPORTING_PERIOD_STATES } from './reporting-periods.mjs';
 import { buildSetupReadiness } from './setup-readiness.mjs';
 import { calendarScopeValues, validateWorkingCalendar, validateWorkingCalendarHoliday } from './working-calendars.mjs';
@@ -572,10 +572,16 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
           organizationId: req.organizationScope.organizationId,
           legalEntityId: req.organizationScope.legalEntityId,
         });
+      } else if (['Disabled','Exited'].includes(worker.lifecycle_status) && ['Active','On Leave'].includes(parsed.data.status)) {
+        await restoreLinkedWorkerIdentity(client, {
+          employeeId: worker.id,
+          organizationId: req.organizationScope.organizationId,
+          legalEntityId: req.organizationScope.legalEntityId,
+        });
       }
       await audit(client,req,{module:'Workforce',action:'Worker Lifecycle Transition',entityType:'Employee',entityId:worker.id,oldValue:{status:worker.lifecycle_status},newValue:snapshot,reason:parsed.data.reason,details:'Applied dependency-safe worker transition'});
       await client.query('commit');res.json({worker:snapshot,replayed:false});
-    } catch(error){await client.query('rollback');if(['23P01','23505','23514'].includes(error.code))return res.status(409).json({error:'Worker transition conflicts with existing history',code:'WORKER_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Worker transition failed'});}finally{client.release();}
+    } catch(error){await client.query('rollback');if(error.code==='WORKER_IDENTITY_SYNC_CONFLICT')return res.status(409).json({error:'Linked worker identity scope synchronization failed',code:'WORKER_IDENTITY_SYNC_CONFLICT'});if(['23P01','23505','23514'].includes(error.code))return res.status(409).json({error:'Worker transition conflicts with existing history',code:'WORKER_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Worker transition failed'});}finally{client.release();}
   });
 
   router.get('/workers/:id/history', async(req,res)=>{

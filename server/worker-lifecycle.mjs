@@ -49,3 +49,28 @@ export const disableLinkedWorkerIdentity = async (client, {
   }
   return users.rowCount;
 };
+
+export const restoreLinkedWorkerIdentity = async (client, {
+  employeeId,
+  organizationId,
+  legalEntityId,
+}) => {
+  const users = await client.query(`
+    update users set status='Active', updated_at=now()
+    where employee_record_id=$1
+    returning id
+  `, [employeeId]);
+  if (users.rowCount) {
+    const scopes = await client.query(`
+      update user_organization_scopes set active=true
+      where user_id=any($1::uuid[]) and organization_id=$2 and legal_entity_id=$3
+      returning user_id
+    `, [users.rows.map(user => user.id), organizationId, legalEntityId]);
+    if (scopes.rowCount !== users.rowCount) {
+      const error = new Error('Linked worker identity scope synchronization failed');
+      error.code = 'WORKER_IDENTITY_SYNC_CONFLICT';
+      throw error;
+    }
+  }
+  return users.rowCount;
+};
