@@ -43,6 +43,15 @@ await pool.query(`insert into legal_entities(id,organization_id,code,name,effect
  ('legal-admin-a','org-admin-scope','LEGAL-ADMIN-A','Admin Legal A','2026-01-01'),
  ('legal-admin-b','org-admin-scope','LEGAL-ADMIN-B','Admin Legal B','2026-01-01')
  on conflict(id) do nothing`);
+await pool.query(`insert into legal_entity_profile_versions(
+  legal_entity_id,organization_id,legal_name,country_code,status,reporting_currency,address,effective_from,effective_to,authority_effective_to
+) values
+ ('legal-admin-a','org-admin-scope','Admin Legal A','US','Active','USD','{"line1":"Synthetic acceptance","city":"Synthetic","countryCode":"US"}'::jsonb,'2026-01-01',null,null),
+ ('legal-admin-b','org-admin-scope','Admin Legal B','US','Active','USD','{"line1":"Synthetic acceptance","city":"Synthetic","countryCode":"US"}'::jsonb,'2026-01-01',null,null)
+ on conflict(legal_entity_id,effective_from) do update set
+  organization_id=excluded.organization_id,legal_name=excluded.legal_name,country_code=excluded.country_code,
+  status=excluded.status,reporting_currency=excluded.reporting_currency,address=excluded.address,
+  effective_to=excluded.effective_to,authority_effective_to=excluded.authority_effective_to`);
 await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values
  ('admin-scope-actor','ADMIN-SCOPE-ACTOR','Admin Scope Actor','admin-scope-actor@example.test','System Administrator','Administration','Synthetic','cd-admin-scope','Active','org-admin-scope','legal-admin-a'),
  ('admin-scope-employee-a','ADMIN-EMP-A','Admin Employee A','admin-employee-a@example.test','Engineer','Delivery','Synthetic','cd-admin-scope','Active','org-admin-scope','legal-admin-a'),
