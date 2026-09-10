@@ -1,0 +1,188 @@
+name: WOS-02 Scope P1 Recovery Publisher 2026-09-10
+
+on:
+  push:
+    branches:
+      - controller/wos02-scope-p1-recovery-publisher-20260910
+    paths:
+      - .github/workflows/wos02-scope-p1-recovery-publisher-20260910.yml
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: wos02-scope-p1-recovery-publisher-20260910
+  cancel-in-progress: false
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 8029edb0014e805810ff0b9b990bd0c93ebdb9ba
+  EXPECTED_PRODUCT_TREE: 1551069514c85598b85982e19a4919445f206c92
+  EXPECTED_CONTROLLER: 44da6aad737e04eb145ed97393b840a974e50617
+  EXPECTED_RESULT_TREE: 35a403a48188ba8431b838c6ba6710cee57c66e5
+  EXPECTED_SERVER_BLOB: 80e3818d797caaf48505d5b93c9e9cb7f2b08151
+  EXPECTED_TEST_BLOB: 4e804dfd65aa39212515ec200b0344db0c07fa69
+  RECOVERY_COMMENT: '3974950999'
+  TARGET_BRANCH: codex/wos-02-organization-setup-foundation
+  RAW_BYTES: '13492'
+  RAW_SHA: b013239ac956e92926517c007e46b94cfe356c7f536761a5d47e4314d93d88d6
+  GZIP_BYTES: '3042'
+  GZIP_SHA: 76b5bafcaf1d829912ca92110536a32322556a3024f7adf3f1531ca3603a30aa
+  BASE64_CHARS: '4056'
+  BASE64_SHA: 3f3a0018804bd1386f6d53122cdd94e60f3550998b2870a0df743668203fbb65
+  SEGMENT_COUNT: '17'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner, repo:context.repo.repo, branch:'main'});
+            const {data: issue} = await github.rest.issues.get({owner:context.repo.owner, repo:context.repo.repo, issue_number:4});
+            const {data: product} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:37});
+            const {data: controller} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:38});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (issue.state !== 'open') failures.push(`issue4=${issue.state}`);
+            if (product.state !== 'open' || !product.draft || product.merged_at) failures.push(`PR37 lifecycle=${product.state}/draft:${product.draft}/merged:${product.merged_at}`);
+            if (product.head.ref !== process.env.TARGET_BRANCH) failures.push(`PR37 branch=${product.head.ref}`);
+            if (product.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${product.head.sha}`);
+            if (product.base.sha !== process.env.EXPECTED_MAIN) failures.push(`PR37 base=${product.base.sha}`);
+            if (controller.state !== 'open' || !controller.draft || controller.merged_at) failures.push(`PR38 lifecycle=${controller.state}/draft:${controller.draft}/merged:${controller.merged_at}`);
+            if (controller.head.sha !== process.env.EXPECTED_CONTROLLER) failures.push(`PR38 head=${controller.head.sha}`);
+            const {data: productCommit} = await github.rest.repos.getCommit({owner:context.repo.owner, repo:context.repo.repo, ref:process.env.EXPECTED_PRODUCT});
+            if (productCommit.commit.tree.sha !== process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${productCommit.commit.tree.sha}`);
+            if (failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact product head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch and validate complete recovery handoff
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const path = require('path');
+            const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
+            const {data: comment} = await github.rest.pulls.getReviewComment({owner:context.repo.owner, repo:context.repo.repo, comment_id:Number(process.env.RECOVERY_COMMENT)});
+            const body = comment.body || '';
+            const required = [
+              `Exact parent:       ${process.env.EXPECTED_PRODUCT}`,
+              `Expected tree:      ${process.env.EXPECTED_RESULT_TREE}`,
+              `Raw diff bytes:     ${process.env.RAW_BYTES}`,
+              `Raw diff SHA-256:   ${process.env.RAW_SHA}`,
+              `Gzip bytes:         ${process.env.GZIP_BYTES}`,
+              `Gzip SHA-256:       ${process.env.GZIP_SHA}`,
+              `Base64 characters: ${process.env.BASE64_CHARS}`,
+              `Base64 SHA-256:     ${process.env.BASE64_SHA}`,
+              `Segment count:      ${process.env.SEGMENT_COUNT}`,
+              process.env.EXPECTED_SERVER_BLOB,
+              process.env.EXPECTED_TEST_BLOB,
+              'Diff stat:          2 files changed, 90 insertions, 21 deletions',
+            ];
+            const missing = required.filter(x => !body.includes(x));
+            if (missing.length) return core.setFailed(`handoff metadata missing: ${missing.join(' | ')}`);
+
+            const segmentRe = /#### SCOPE-(\d{3})[\s\S]*?Length `([0-9]+)`; SHA-256 `([0-9a-f]{64})`[\s\S]*?```text\s*([A-Za-z0-9+/=\r\n]+?)\s*```/g;
+            const segments = [];
+            let match;
+            while ((match = segmentRe.exec(body)) !== null) {
+              segments.push({id:match[1], length:Number(match[2]), sha:match[3], payload:match[4].replace(/\s+/g,'')});
+            }
+            if (segments.length !== Number(process.env.SEGMENT_COUNT)) return core.setFailed(`segment count=${segments.length}`);
+            segments.sort((a,b) => a.id.localeCompare(b.id));
+            for (let i=0; i<segments.length; i++) {
+              const expectedId = String(i).padStart(3,'0');
+              const s = segments[i];
+              if (s.id !== expectedId) return core.setFailed(`segment order expected=${expectedId} got=${s.id}`);
+              if (s.payload.length !== s.length) return core.setFailed(`segment ${s.id} length=${s.payload.length}`);
+              if (sha256(s.payload) !== s.sha) return core.setFailed(`segment ${s.id} sha mismatch`);
+            }
+            const payload = segments.map(s => s.payload).join('');
+            if (payload.length !== Number(process.env.BASE64_CHARS)) return core.setFailed(`base64 chars=${payload.length}`);
+            if (sha256(payload) !== process.env.BASE64_SHA) return core.setFailed(`base64 sha=${sha256(payload)}`);
+            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'payload.b64'), payload, 'utf8');
+
+      - name: Verify payload hashes files and exact result tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_PRODUCT_TREE"
+
+          base64 -d "$RUNNER_TEMP/payload.b64" > "$RUNNER_TEMP/scope-integrity.diff.gz"
+          test "$(wc -c < "$RUNNER_TEMP/scope-integrity.diff.gz")" = "$GZIP_BYTES"
+          echo "$GZIP_SHA  $RUNNER_TEMP/scope-integrity.diff.gz" | sha256sum -c -
+          gzip -dc "$RUNNER_TEMP/scope-integrity.diff.gz" > "$RUNNER_TEMP/scope-integrity.diff"
+          test "$(wc -c < "$RUNNER_TEMP/scope-integrity.diff")" = "$RAW_BYTES"
+          echo "$RAW_SHA  $RUNNER_TEMP/scope-integrity.diff" | sha256sum -c -
+
+          git apply --check --binary "$RUNNER_TEMP/scope-integrity.diff"
+          git apply --binary "$RUNNER_TEMP/scope-integrity.diff"
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "server/index.mjs tests/organization-setup-smoke.mjs "
+          read adds dels < <(git diff --numstat | awk '{a+=$1; d+=$2} END {print a,d}')
+          test "$adds" = 90
+          test "$dels" = 21
+          test "$(git diff --numstat -- server/index.mjs | awk '{print $1"/"$2}')" = "66/21"
+          test "$(git diff --numstat -- tests/organization-setup-smoke.mjs | awk '{print $1"/"$2}')" = "24/0"
+          git diff --check
+          test "$(git hash-object server/index.mjs)" = "$EXPECTED_SERVER_BLOB"
+          test "$(git hash-object tests/organization-setup-smoke.mjs)" = "$EXPECTED_TEST_BLOB"
+
+          git add server/index.mjs tests/organization-setup-smoke.mjs
+          test "$(git write-tree)" = "$EXPECTED_RESULT_TREE"
+          git config user.name 'WorkOS Implementation Controller'
+          git config user.email 'noreply@github.com'
+          git commit -m 'fix: enforce scope on retained admin mutations'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_RESULT_TREE"
+
+      - name: Revalidate exact live lease immediately before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner, repo:context.repo.repo, branch:'main'});
+            const {data: issue} = await github.rest.issues.get({owner:context.repo.owner, repo:context.repo.repo, issue_number:4});
+            const {data: product} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:37});
+            const {data: controller} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:38});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (issue.state !== 'open') failures.push(`issue4=${issue.state}`);
+            if (product.state !== 'open' || !product.draft || product.merged_at) failures.push(`PR37 lifecycle=${product.state}/draft:${product.draft}/merged:${product.merged_at}`);
+            if (product.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${product.head.sha}`);
+            if (product.head.ref !== process.env.TARGET_BRANCH) failures.push(`PR37 branch=${product.head.ref}`);
+            if (product.base.sha !== process.env.EXPECTED_MAIN) failures.push(`PR37 base=${product.base.sha}`);
+            if (controller.state !== 'open' || !controller.draft || controller.merged_at || controller.head.sha !== process.env.EXPECTED_CONTROLLER) failures.push(`PR38=${controller.state}/draft:${controller.draft}/head:${controller.head.sha}`);
+            if (failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing product branch
+        id: push
+        shell: bash
+        run: |
+          set -euo pipefail
+          new_head="$(git rev-parse HEAD)"
+          git push origin HEAD:"refs/heads/$TARGET_BRANCH"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published remote exact lineage and tree
+        shell: bash
+        env:
+          NEW_HEAD: ${{ steps.push.outputs.new_head }}
+        run: |
+          set -euo pipefail
+          remote="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | awk '{print $1}')"
+          test "$remote" = "$NEW_HEAD"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PRODUCT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_RESULT_TREE"
+          test "$(git show --format= --name-only HEAD | sort | tr '\n' ' ')" = "server/index.mjs tests/organization-setup-smoke.mjs "
