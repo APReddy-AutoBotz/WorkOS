@@ -1608,12 +1608,14 @@ app.post('/api/users/:id/password-reset', requireDatabase, requireAuth, requireP
   try {
     await client.query('begin');
     const user = (await client.query(`
-      select id, username, employee_id, email, status, must_change_password
-      from users
-      where id::text = $1 or lower(username) = lower($1) or lower(employee_id) = lower($1) or lower(email) = lower($1)
+      select u.id, u.username, u.employee_id, u.email, u.status, u.must_change_password
+      from users u
+      join employees e on e.id = u.employee_record_id
+      where (u.id::text = $1 or lower(u.username) = lower($1) or lower(u.employee_id) = lower($1) or lower(u.email) = lower($1))
+        and e.organization_id = $2 and e.legal_entity_id = $3
       for update
       limit 1
-    `, [req.params.id])).rows[0];
+    `, [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     if (!user) {
       await client.query('rollback');
       res.status(404).json({ error: 'User was not found' });
@@ -1629,8 +1631,11 @@ app.post('/api/users/:id/password-reset', requireDatabase, requireAuth, requireP
     const passwordHash = await scryptHash(temporaryPassword);
     const mustChangePassword = parsed.data.mustChangePassword ?? true;
     await client.query(
-      'update users set password_hash = $1, must_change_password = $2, updated_at = now() where id = $3',
-      [passwordHash, mustChangePassword, user.id]
+      `update users u set password_hash = $1, must_change_password = $2, updated_at = now()
+       from employees e
+       where u.id = $3 and e.id = u.employee_record_id
+         and e.organization_id = $4 and e.legal_entity_id = $5`,
+      [passwordHash, mustChangePassword, user.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
     );
     await audit(client, req, {
       module: 'Admin',
@@ -2166,7 +2171,10 @@ app.patch('/api/projects/:id/status', requireDatabase, requireAuth, requirePermi
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from projects where id = $1 for update', [req.params.id])).rows[0];
+    const previous = (await client.query(
+      'select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3 for update',
+      [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
+    )).rows[0];
     if (!previous) {
       await client.query('rollback');
       res.status(404).json({ error: 'Project not found' });
@@ -2186,17 +2194,17 @@ app.patch('/api/projects/:id/status', requireDatabase, requireAuth, requirePermi
       set status = $2,
         end_date = case when $2 = 'Completed' and end_date > current_date then current_date else end_date end,
         updated_at = now()
-      where id = $1
+      where id = $1 and organization_id = $3 and legal_entity_id = $4
       returning *
-    `, [req.params.id, parsed.data.status]);
+    `, [req.params.id, parsed.data.status, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     if (parsed.data.status === 'Completed') {
       await client.query(`
         update project_allocations
         set status = 'Completed',
           end_date = case when end_date > current_date then current_date else end_date end,
           updated_at = now()
-        where project_id = $1 and status = 'Active'
-      `, [req.params.id]);
+        where project_id = $1 and organization_id = $2 and legal_entity_id = $3 and status = 'Active'
+      `, [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     }
     await audit(client, req, {
       module: 'Projects',
@@ -2346,15 +2354,19 @@ app.delete('/api/clients/:id', requireDatabase, requireAuth, requirePermission('
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from clients where id = $1 for update', [req.params.id])).rows[0];
+    const previous = (await client.query(
+      'select * from clients where id = $1 and organization_id = $2 and legal_entity_id = $3 for update',
+      [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
+    )).rows[0];
     if (!previous) {
       await client.query('rollback');
       res.status(404).json({ error: 'Client not found' });
       return;
     }
     const activeProjects = Number((await client.query(
-      `select count(*)::int as count from projects where client_id = $1 and status <> 'Completed'`,
-      [req.params.id]
+      `select count(*)::int as count from projects
+       where client_id = $1 and organization_id = $2 and legal_entity_id = $3 and status <> 'Completed'`,
+      [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
     )).rows[0]?.count || 0);
     if (activeProjects > 0) {
       await audit(client, req, {
@@ -2373,9 +2385,9 @@ app.delete('/api/clients/:id', requireDatabase, requireAuth, requirePermission('
     const result = await client.query(`
       update clients
       set status = 'Inactive', updated_at = now()
-      where id = $1
+      where id = $1 and organization_id = $2 and legal_entity_id = $3
       returning *
-    `, [req.params.id]);
+    `, [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     await audit(client, req, {
       module: 'Clients',
       action: 'Deactivate Client',
@@ -4447,13 +4459,14 @@ const isTeamsActionEntityInScope = async (client, req, entityType, entityId) => 
   return false;
 };
 
-app.get('/api/integrations/identity-links', requireDatabase, requireAuth, requirePermission('integrations.identity'), (_req, res) => {
+app.get('/api/integrations/identity-links', requireDatabase, requireAuth, requirePermission('integrations.identity'), (req, res) => {
   run(res, `
     select ipl.*, e.name as employee_name
     from identity_provider_links ipl
     join employees e on e.id = ipl.employee_id
+    where e.organization_id = $1 and e.legal_entity_id = $2
     order by e.name, ipl.provider
-  `);
+  `, [req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
 });
 
 app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requirePermission('integrations.identity'), async (req, res) => {
@@ -4473,7 +4486,36 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from identity_provider_links where employee_id = $1 and provider = $2', [parsed.data.employee_id, parsed.data.provider])).rows[0];
+    const employee = (await client.query(
+      'select id from employees where id = $1 and organization_id = $2 and legal_entity_id = $3 for update',
+      [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
+    )).rows[0];
+    if (!employee) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Employee not found' });
+      return;
+    }
+    const previous = (await client.query(
+      `select ipl.* from identity_provider_links ipl
+       join employees e on e.id = ipl.employee_id
+       where ipl.employee_id = $1 and ipl.provider = $2
+         and e.organization_id = $3 and e.legal_entity_id = $4
+       for update`,
+      [employee.id, parsed.data.provider, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
+    )).rows[0];
+    if (parsed.data.id && previous && parsed.data.id !== previous.id) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Identity link not found' });
+      return;
+    }
+    if (parsed.data.id && !previous) {
+      const conflictingLink = (await client.query('select 1 from identity_provider_links where id = $1', [parsed.data.id])).rows[0];
+      if (conflictingLink) {
+        await client.query('rollback');
+        res.status(404).json({ error: 'Identity link not found' });
+        return;
+      }
+    }
     const result = await client.query(`
       insert into identity_provider_links (id, employee_id, provider, provider_subject, provider_upn, status)
       values (coalesce($1, 'identity-link-' || gen_random_uuid()::text), $2, $3, $4, $5, $6)
@@ -4483,8 +4525,11 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
         status = excluded.status,
         updated_at = now()
       returning *
-    `, [parsed.data.id || null, parsed.data.employee_id, parsed.data.provider, parsed.data.provider_subject, parsed.data.provider_upn || null, parsed.data.status]);
-    await client.query('update employees set entra_object_id = $2, updated_at = now() where id = $1', [parsed.data.employee_id, parsed.data.provider_subject]);
+    `, [parsed.data.id || null, employee.id, parsed.data.provider, parsed.data.provider_subject, parsed.data.provider_upn || null, parsed.data.status]);
+    await client.query(
+      'update employees set entra_object_id = $2, updated_at = now() where id = $1 and organization_id = $3 and legal_entity_id = $4',
+      [employee.id, parsed.data.provider_subject, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
+    );
     await logIntegrationEvent(client, {
       provider: parsed.data.provider,
       eventType: 'IdentityLinkUpserted',

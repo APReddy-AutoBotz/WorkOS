@@ -38,6 +38,30 @@ const runtimeTerminology = readFileSync('src/config/RuntimeTerminology.tsx', 'ut
 const apiClient = readFileSync('src/services/apiClient.ts', 'utf8');
 const productConfig = readFileSync('src/config/productConfig.ts', 'utf8');
 
+const routeSource = (start, end) => {
+  const startIndex = server.indexOf(start);
+  assert.notEqual(startIndex, -1, `${start} route must exist`);
+  const endIndex = server.indexOf(end, startIndex + start.length);
+  assert.notEqual(endIndex, -1, `${start} route must have a stable boundary`);
+  return server.slice(startIndex, endIndex);
+};
+const passwordResetRoute = routeSource("app.post('/api/users/:id/password-reset'", "app.get('/api/employees'");
+assert.match(passwordResetRoute, /join employees e on e\.id = u\.employee_record_id[\s\S]*e\.organization_id = \$2 and e\.legal_entity_id = \$3[\s\S]*for update/, 'password reset must lock only an identity in the exact selected scope');
+assert.match(passwordResetRoute, /update users u[\s\S]*from employees e[\s\S]*e\.organization_id = \$4 and e\.legal_entity_id = \$5[\s\S]*await audit/, 'password reset write and audit must remain behind the exact scope predicate');
+
+const projectStatusRoute = routeSource("app.patch('/api/projects/:id/status'", "app.get('/api/clients'");
+assert.match(projectStatusRoute, /select \* from projects where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update/, 'project status target lookup must fail closed across organization or legal entity');
+assert.match(projectStatusRoute, /where id = \$1 and organization_id = \$3 and legal_entity_id = \$4[\s\S]*where project_id = \$1 and organization_id = \$2 and legal_entity_id = \$3/, 'project and allocation status writes must remain in the exact selected scope');
+
+const clientDeactivateRoute = routeSource("app.delete('/api/clients/:id'", "app.get('/api/allocations'");
+assert.match(clientDeactivateRoute, /select \* from clients where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update/, 'client deactivation target lookup must fail closed across organization or legal entity');
+assert.match(clientDeactivateRoute, /projects[\s\S]*client_id = \$1 and organization_id = \$2 and legal_entity_id = \$3[\s\S]*update clients[\s\S]*where id = \$1 and organization_id = \$2 and legal_entity_id = \$3/, 'client dependency checks and deactivation must share the exact selected scope');
+
+const identityLinkRoutes = routeSource("app.get('/api/integrations/identity-links'", "app.get('/api/integrations/entra-role-mappings'");
+assert.match(identityLinkRoutes, /where e\.organization_id = \$1 and e\.legal_entity_id = \$2/, 'identity-link reads must disclose only the selected scope');
+assert.match(identityLinkRoutes, /select id from employees where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*select ipl\.\*[\s\S]*e\.organization_id = \$3 and e\.legal_entity_id = \$4/, 'identity-link targets and existing links must be authorized through exact employee ownership');
+assert.match(identityLinkRoutes, /update employees set entra_object_id[\s\S]*organization_id = \$3 and legal_entity_id = \$4[\s\S]*await logIntegrationEvent[\s\S]*await audit/, 'identity metadata, integration evidence, and audit must follow the exact scoped mutation');
+
 const validCalendar = { code:'US-WORK',name:'US Standard',timezone:'America/New_York',workingDays:[1,2,3,4,5],
   hoursPerDay:8,effectiveFrom:'2026-01-01',applicability:{type:'legal_entity'} };
 assert.equal(validateWorkingCalendar(validCalendar).success,true,'legal-entity calendar compatibility must remain valid');
