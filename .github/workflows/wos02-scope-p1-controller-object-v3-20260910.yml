@@ -1,0 +1,135 @@
+name: WOS-02 Scope P1 Controller Object V3 2026-09-10
+
+on:
+  push:
+    branches:
+      - controller/wos02-scope-p1-recovery-publisher-20260910
+    paths:
+      - .github/workflows/wos02-scope-p1-controller-object-v3-20260910.yml
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: wos02-scope-p1-controller-object-v3-20260910
+  cancel-in-progress: false
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 4c0ef1a69dfa2dff62437b2c23c34d3e35ecec04
+  EXPECTED_PRODUCT_TREE: 35a403a48188ba8431b838c6ba6710cee57c66e5
+  EXPECTED_CONTROLLER: c5b40b792ca711e4cb35ca534880e28e42de073a
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner, repo:context.repo.repo, branch:'main'});
+            const {data: issue} = await github.rest.issues.get({owner:context.repo.owner, repo:context.repo.repo, issue_number:4});
+            const {data: product} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:37});
+            const {data: controller} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:38});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (issue.state !== 'open') failures.push(`issue4=${issue.state}`);
+            if (product.state !== 'open' || !product.draft || product.merged_at) failures.push(`PR37 lifecycle=${product.state}/draft:${product.draft}/merged:${product.merged_at}`);
+            if (product.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${product.head.sha}`);
+            if (product.base.sha !== process.env.EXPECTED_MAIN) failures.push(`PR37 base=${product.base.sha}`);
+            const {data: pc} = await github.rest.repos.getCommit({owner:context.repo.owner, repo:context.repo.repo, ref:process.env.EXPECTED_PRODUCT});
+            if (pc.commit.tree.sha !== process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${pc.commit.tree.sha}`);
+            if (controller.state !== 'open' || !controller.draft || controller.merged_at) failures.push(`PR38 lifecycle=${controller.state}/draft:${controller.draft}/merged:${controller.merged_at}`);
+            if (controller.head.ref !== 'controller/wos02-exact-acceptance') failures.push(`PR38 branch=${controller.head.ref}`);
+            if (controller.head.sha !== process.env.EXPECTED_CONTROLLER) failures.push(`PR38 head=${controller.head.sha}`);
+            if (controller.base.sha !== process.env.EXPECTED_MAIN) failures.push(`PR38 base=${controller.base.sha}`);
+            if (failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Produce exact modified acceptance workflow locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/wos02-final-review-acceptance.yml')
+          s = p.read_text()
+          def once(old, new, label):
+              global s
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected one match, got {n}')
+              s = s.replace(old, new, 1)
+          once('  TARGET_HEAD: 8029edb0014e805810ff0b9b990bd0c93ebdb9ba\n', '  TARGET_HEAD: 4c0ef1a69dfa2dff62437b2c23c34d3e35ecec04\n', 'head')
+          once('  TARGET_TREE: 1551069514c85598b85982e19a4919445f206c92\n', '  TARGET_TREE: 35a403a48188ba8431b838c6ba6710cee57c66e5\n', 'tree')
+          once("      - '.github/scripts/wos02-scope-write-acceptance.mjs'\n", "      - '.github/scripts/wos02-scope-write-acceptance.mjs'\n      - '.github/scripts/wos02-retained-admin-scope-acceptance.mjs'\n", 'trigger')
+          once("          node --check ../controller/.github/scripts/wos02-worker-reactivation-acceptance.mjs\n", "          node --check ../controller/.github/scripts/wos02-worker-reactivation-acceptance.mjs\n          node --check ../controller/.github/scripts/wos02-retained-admin-scope-acceptance.mjs\n", 'node check')
+          once('wos02_scope_write wos02_worker_lifecycle', 'wos02_scope_write wos02_admin_scope wos02_worker_lifecycle', 'db')
+          anchor = '          node .github/scripts/wos02-scope-write-acceptance.mjs\n\n'
+          if s.count(anchor) != 1:
+              raise SystemExit(f'anchor count={s.count(anchor)}')
+          step = (
+              '      - name: Execute retained Admin HR scope-integrity P1 acceptance\n'
+              '        shell: bash\n'
+              '        working-directory: controller\n'
+              '        env:\n'
+              '          TARGET_ROOT: ${{ github.workspace }}/target\n'
+              '          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_admin_scope\n'
+              '        run: |\n'
+              '          set -euo pipefail\n'
+              '          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)\n'
+              '          node .github/scripts/wos02-retained-admin-scope-acceptance.mjs\n\n'
+          )
+          s = s.replace(anchor, anchor + step, 1)
+          p.write_text(s)
+          PY
+          node --check .github/scripts/wos02-retained-admin-scope-acceptance.mjs
+          grep -F 'TARGET_HEAD: 4c0ef1a69dfa2dff62437b2c23c34d3e35ecec04' .github/workflows/wos02-final-review-acceptance.yml
+          grep -F 'TARGET_TREE: 35a403a48188ba8431b838c6ba6710cee57c66e5' .github/workflows/wos02-final-review-acceptance.yml
+          grep -F 'wos02_admin_scope' .github/workflows/wos02-final-review-acceptance.yml
+          git diff --check
+          test "$(git diff --name-only | tr '\n' ' ')" = ".github/workflows/wos02-final-review-acceptance.yml "
+
+      - name: Materialize remote Git commit object without updating any ref
+        id: object
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const workflowPath = '.github/workflows/wos02-final-review-acceptance.yml';
+            const content = fs.readFileSync(workflowPath, 'utf8');
+            const {data: parent} = await github.rest.repos.getCommit({owner:context.repo.owner, repo:context.repo.repo, ref:process.env.EXPECTED_CONTROLLER});
+            const {data: blob} = await github.rest.git.createBlob({owner:context.repo.owner, repo:context.repo.repo, content, encoding:'utf-8'});
+            const {data: tree} = await github.rest.git.createTree({owner:context.repo.owner, repo:context.repo.repo, base_tree:parent.commit.tree.sha, tree:[{path:workflowPath, mode:'100644', type:'blob', sha:blob.sha}]});
+            const {data: commit} = await github.rest.git.createCommit({owner:context.repo.owner, repo:context.repo.repo, message:'test: rebind WOS-02 scope-integrity acceptance', tree:tree.sha, parents:[process.env.EXPECTED_CONTROLLER]});
+            core.info(`REMOTE_CONTROLLER_BLOB=${blob.sha}`);
+            core.info(`REMOTE_CONTROLLER_TREE=${tree.sha}`);
+            core.info(`REMOTE_CONTROLLER_COMMIT=${commit.sha}`);
+            core.setOutput('commit', commit.sha);
+            core.setOutput('tree', tree.sha);
+
+      - name: Verify remote commit object exact lineage and bounded files
+        uses: actions/github-script@v7
+        env:
+          NEW_COMMIT: ${{ steps.object.outputs.commit }}
+          NEW_TREE: ${{ steps.object.outputs.tree }}
+        with:
+          script: |
+            const {data: c} = await github.rest.repos.getCommit({owner:context.repo.owner, repo:context.repo.repo, ref:process.env.NEW_COMMIT});
+            if (c.parents.length !== 1 || c.parents[0].sha !== process.env.EXPECTED_CONTROLLER) core.setFailed(`parent mismatch ${c.parents.map(p=>p.sha)}`);
+            if (c.commit.tree.sha !== process.env.NEW_TREE) core.setFailed(`tree mismatch ${c.commit.tree.sha}`);
+            const names = (c.files || []).map(f=>f.filename).sort();
+            if (JSON.stringify(names) !== JSON.stringify(['.github/workflows/wos02-final-review-acceptance.yml'])) core.setFailed(`files=${JSON.stringify(names)}`);
+            if ((c.stats?.additions || 0) !== 16 || (c.stats?.deletions || 0) !== 3) core.setFailed(`stats=${JSON.stringify(c.stats)}`);
+            core.info(`VERIFIED_REMOTE_CONTROLLER_COMMIT=${process.env.NEW_COMMIT}`);
+            core.info(`VERIFIED_REMOTE_CONTROLLER_TREE=${process.env.NEW_TREE}`);
