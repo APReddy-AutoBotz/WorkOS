@@ -1,0 +1,156 @@
+name: WOS-02 Scope P1 Controller Rebind 2026-09-10
+
+on:
+  push:
+    branches:
+      - controller/wos02-scope-p1-recovery-publisher-20260910
+    paths:
+      - .github/workflows/wos02-scope-p1-controller-rebind-20260910.yml
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: wos02-scope-p1-controller-rebind-20260910
+  cancel-in-progress: false
+
+env:
+  EXPECTED_MAIN: 3070c80a71640fa4275477d0d2f1538cc8d2a819
+  EXPECTED_PRODUCT: 4c0ef1a69dfa2dff62437b2c23c34d3e35ecec04
+  EXPECTED_PRODUCT_TREE: 35a403a48188ba8431b838c6ba6710cee57c66e5
+  EXPECTED_CONTROLLER: c5b40b792ca711e4cb35ca534880e28e42de073a
+  TARGET_CONTROLLER_BRANCH: controller/wos02-exact-acceptance
+
+jobs:
+  rebind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live leases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner, repo:context.repo.repo, branch:'main'});
+            const {data: issue} = await github.rest.issues.get({owner:context.repo.owner, repo:context.repo.repo, issue_number:4});
+            const {data: product} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:37});
+            const {data: controller} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:38});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (issue.state !== 'open') failures.push(`issue4=${issue.state}`);
+            if (product.state !== 'open' || !product.draft || product.merged_at) failures.push(`PR37 lifecycle=${product.state}/draft:${product.draft}/merged:${product.merged_at}`);
+            if (product.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37 head=${product.head.sha}`);
+            if (product.base.sha !== process.env.EXPECTED_MAIN) failures.push(`PR37 base=${product.base.sha}`);
+            const {data: productCommit} = await github.rest.repos.getCommit({owner:context.repo.owner, repo:context.repo.repo, ref:process.env.EXPECTED_PRODUCT});
+            if (productCommit.commit.tree.sha !== process.env.EXPECTED_PRODUCT_TREE) failures.push(`product tree=${productCommit.commit.tree.sha}`);
+            if (controller.state !== 'open' || !controller.draft || controller.merged_at) failures.push(`PR38 lifecycle=${controller.state}/draft:${controller.draft}/merged:${controller.merged_at}`);
+            if (controller.head.ref !== process.env.TARGET_CONTROLLER_BRANCH) failures.push(`PR38 branch=${controller.head.ref}`);
+            if (controller.head.sha !== process.env.EXPECTED_CONTROLLER) failures.push(`PR38 head=${controller.head.sha}`);
+            if (controller.base.sha !== process.env.EXPECTED_MAIN) failures.push(`PR38 base=${controller.base.sha}`);
+            if (failures.length) core.setFailed(`lease failed: ${failures.join('; ')}`);
+
+      - name: Checkout exact controller head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CONTROLLER }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Rebind exact product and wire retained Admin scope acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/wos02-final-review-acceptance.yml')
+          s = p.read_text()
+          def once(old, new, label):
+              global s
+              if s.count(old) != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, got {s.count(old)}')
+              s = s.replace(old, new, 1)
+
+          once('  TARGET_HEAD: 8029edb0014e805810ff0b9b990bd0c93ebdb9ba\n', '  TARGET_HEAD: 4c0ef1a69dfa2dff62437b2c23c34d3e35ecec04\n', 'product head')
+          once('  TARGET_TREE: 1551069514c85598b85982e19a4919445f206c92\n', '  TARGET_TREE: 35a403a48188ba8431b838c6ba6710cee57c66e5\n', 'product tree')
+          once("      - '.github/scripts/wos02-scope-write-acceptance.mjs'\n", "      - '.github/scripts/wos02-scope-write-acceptance.mjs'\n      - '.github/scripts/wos02-retained-admin-scope-acceptance.mjs'\n", 'trigger path')
+          once("          node --check ../controller/.github/scripts/wos02-worker-reactivation-acceptance.mjs\n", "          node --check ../controller/.github/scripts/wos02-worker-reactivation-acceptance.mjs\n          node --check ../controller/.github/scripts/wos02-retained-admin-scope-acceptance.mjs\n", 'node check')
+          once('wos02_scope_write wos02_worker_lifecycle', 'wos02_scope_write wos02_admin_scope wos02_worker_lifecycle', 'database inventory')
+          scope_step = '''      - name: Execute 15-check canonical organization and legal scope write matrix
+                shell: bash
+                working-directory: controller
+                env:
+                  TARGET_ROOT: ${{ github.workspace }}/target
+                  DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_scope_write
+                run: |
+                  set -euo pipefail
+                  (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+                  node .github/scripts/wos02-scope-write-acceptance.mjs
+          '''
+          # Normalize indentation produced by this Python literal to the workflow's exact 6-space step indentation.
+          scope_step = '\n'.join(line[6:] if line.startswith('      ') else line for line in scope_step.splitlines()) + '\n'
+          if scope_step not in s:
+              # Use the stable command tail as an insertion anchor if presentation whitespace differs.
+              anchor = '          node .github/scripts/wos02-scope-write-acceptance.mjs\n\n'
+              if s.count(anchor) != 1:
+                  raise SystemExit(f'scope insertion anchor count={s.count(anchor)}')
+              new_step = '''      - name: Execute retained Admin HR scope-integrity P1 acceptance
+        shell: bash
+        working-directory: controller
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_admin_scope
+        run: |
+          set -euo pipefail
+          (cd "$TARGET_ROOT" && DATABASE_URL="$DATABASE_URL" node server/migrate.mjs)
+          node .github/scripts/wos02-retained-admin-scope-acceptance.mjs
+
+'''
+              s = s.replace(anchor, anchor + new_step, 1)
+          else:
+              raise SystemExit('unexpected exact block path; use stable insertion anchor only')
+          p.write_text(s)
+          PY
+          node --check .github/scripts/wos02-retained-admin-scope-acceptance.mjs
+          grep -F 'TARGET_HEAD: 4c0ef1a69dfa2dff62437b2c23c34d3e35ecec04' .github/workflows/wos02-final-review-acceptance.yml
+          grep -F 'TARGET_TREE: 35a403a48188ba8431b838c6ba6710cee57c66e5' .github/workflows/wos02-final-review-acceptance.yml
+          grep -F 'wos02-retained-admin-scope-acceptance.mjs' .github/workflows/wos02-final-review-acceptance.yml
+          grep -F 'wos02_admin_scope' .github/workflows/wos02-final-review-acceptance.yml
+          git diff --check
+          test "$(git diff --name-only | tr '\n' ' ')" = ".github/workflows/wos02-final-review-acceptance.yml "
+
+      - name: Commit bounded controller rebind
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add .github/workflows/wos02-final-review-acceptance.yml
+          git config user.name 'WorkOS Implementation Controller'
+          git config user.email 'noreply@github.com'
+          git commit -m 'test: rebind WOS-02 scope-integrity acceptance'
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_CONTROLLER"
+          new_head="$(git rev-parse HEAD)"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate live product and controller lease immediately before publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failures = [];
+            const {data: main} = await github.rest.repos.getBranch({owner:context.repo.owner, repo:context.repo.repo, branch:'main'});
+            const {data: product} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:37});
+            const {data: controller} = await github.rest.pulls.get({owner:context.repo.owner, repo:context.repo.repo, pull_number:38});
+            if (main.commit.sha !== process.env.EXPECTED_MAIN) failures.push(`main=${main.commit.sha}`);
+            if (product.state !== 'open' || !product.draft || product.head.sha !== process.env.EXPECTED_PRODUCT) failures.push(`PR37=${product.state}/draft:${product.draft}/head:${product.head.sha}`);
+            if (controller.state !== 'open' || !controller.draft || controller.head.sha !== process.env.EXPECTED_CONTROLLER) failures.push(`PR38=${controller.state}/draft:${controller.draft}/head:${controller.head.sha}`);
+            if (failures.length) core.setFailed(`pre-publish lease failed: ${failures.join('; ')}`);
+
+      - name: Non-force fast-forward existing controller branch
+        shell: bash
+        env:
+          NEW_HEAD: ${{ steps.commit.outputs.new_head }}
+        run: |
+          set -euo pipefail
+          git push origin HEAD:"refs/heads/$TARGET_CONTROLLER_BRANCH"
+          remote="$(git ls-remote origin "refs/heads/$TARGET_CONTROLLER_BRANCH" | awk '{print $1}')"
+          test "$remote" = "$NEW_HEAD"
