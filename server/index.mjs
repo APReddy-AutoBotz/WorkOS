@@ -2160,6 +2160,8 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
         country = excluded.country,
         notes = excluded.notes,
         updated_at = now()
+      where projects.organization_id = excluded.organization_id
+        and projects.legal_entity_id = excluded.legal_entity_id
       returning *
     `, [
       parsed.data.id || null,
@@ -2178,6 +2180,11 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
       parsed.data.notes || null,
       req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
+    if (result.rowCount === 0) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Project not found in the authorized organization and legal entity' });
+      return;
+    }
     await audit(client, req, {
       module: 'Projects',
       action: previous ? 'Update Project' : 'Create Project',
