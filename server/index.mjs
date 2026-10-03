@@ -9,7 +9,7 @@ import pg from 'pg';
 import { z } from 'zod';
 import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
 import { registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
-import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from './worker-lifecycle.mjs';
+import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
 const { Pool } = pg;
@@ -1754,13 +1754,25 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
   try {
     await client.query('begin');
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [
-      `employee:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${parsed.data.employee_id}`,
+      `employee:${req.organizationScope.organizationId}:${parsed.data.employee_id}`,
     ]);
     const previous = (await client.query(
-      'select * from employees where employee_id = $1 and organization_id = $2 and legal_entity_id = $3',
+      'select * from employees where employee_id = $1 and organization_id = $2 and legal_entity_id = $3 for update',
       [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
     )).rows[0];
+    if (!previous) {
+      const otherLegalEntityEmployee = (await client.query(
+        'select id from employees where employee_id = $1 and organization_id = $2 and legal_entity_id is distinct from $3 for update',
+        [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
+      )).rows[0];
+      if (otherLegalEntityEmployee) {
+        await client.query('rollback');
+        res.status(409).json({ error: 'Employee ID is already assigned to another legal entity', code: 'EMPLOYEE_SCOPE_CONFLICT' });
+        return;
+      }
+    }
     let effectiveExitDate = parsed.data.exit_date;
+    if (previous?.status === 'Exited' && parsed.data.status !== 'Exited') effectiveExitDate = null;
     if (previous && parsed.data.status === 'Exited') {
       effectiveExitDate = await assertWorkerMayExit(
         client,
@@ -1927,6 +1939,18 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       parsed.data.status === 'Exited' ? 'Disabled' : 'Active',
     ]);
     await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,$4) on conflict(user_id,organization_id,legal_entity_id) do update set active=excluded.active`,[userResult.rows[0].id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,employee.status !== 'Exited']);
+    if (previous?.status === 'Exited' && employee.status !== 'Exited') {
+      await synchronizeWorkerReactivation(client, {
+        employeeId: employee.id,
+        organizationId: req.organizationScope.organizationId,
+        legalEntityId: req.organizationScope.legalEntityId,
+        actorId: req.user.sub,
+        effectiveFrom: new Date().toISOString().slice(0, 10),
+        status: employee.status,
+        reason: 'Reactivated through employee save',
+        source: 'Employee save',
+      });
+    }
     const defaultRoleNames = employeeCode.startsWith('ADMIN-')
       ? ['Admin']
       : employeeCode.startsWith('HR-')
@@ -1958,7 +1982,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
     res.json({ ...employee, mapped_country_director_ids: mappedIds });
   } catch (error) {
     await client.query('rollback');
-    if (error.code === 'WORKER_DEPENDENCY_CONFLICT' || error.code === 'WORKER_VERSION_CONFLICT') {
+    if (['WORKER_DEPENDENCY_CONFLICT', 'WORKER_VERSION_CONFLICT', 'WORKER_IDENTITY_SYNC_CONFLICT'].includes(error.code)) {
       res.status(409).json({ error: error.message, code: error.code, dependencies: error.dependencies, truncated: error.truncated });
       return;
     }
@@ -1983,6 +2007,15 @@ app.delete('/api/employees/:id', requireDatabase, requireAuth, requirePermission
   const client = await pool.connect();
   try {
     await client.query('begin');
+    const employeeKey = (await client.query('select employee_id from employees where id=$1 and organization_id=$2 and legal_entity_id=$3', [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
+    if (!employeeKey) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Employee not found' });
+      return;
+    }
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [
+      `employee:${req.organizationScope.organizationId}:${employeeKey.employee_id}`,
+    ]);
     const previous = (await client.query('select * from employees where id=$1 and organization_id=$2 and legal_entity_id=$3 for update', [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
     if (!previous) {
       await client.query('rollback');
@@ -6277,7 +6310,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
       const rowNumber = index + 2;
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
       await client.query('select pg_advisory_xact_lock(hashtext($1))', [
-        `employee:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${row.employeeId}`,
+        `employee:${req.organizationScope.organizationId}:${row.employeeId}`,
       ]);
       const mappedIds = splitPipeList(row.mappedCountryDirectorIds);
       const primaryDirectorId = row.primaryCountryDirectorId || mappedIds[0] || null;
@@ -6299,9 +6332,19 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         reportingManagerId = manager?.id || null;
       }
       const previous = (await client.query(
-        'select * from employees where employee_id = $1 and organization_id = $2 and legal_entity_id = $3 limit 1',
+        'select * from employees where employee_id = $1 and organization_id = $2 and legal_entity_id = $3 limit 1 for update',
         [row.employeeId, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
       )).rows[0];
+      if (!previous) {
+        const otherLegalEntityEmployee = (await client.query(
+          'select id from employees where employee_id = $1 and organization_id = $2 and legal_entity_id is distinct from $3 limit 1 for update',
+          [row.employeeId, req.organizationScope.organizationId, req.organizationScope.legalEntityId],
+        )).rows[0];
+        if (otherLegalEntityEmployee) {
+          errors.push({ rowNumber, field: 'employeeId', message: 'Employee ID is already assigned to another legal entity.', code: 'EMPLOYEE_SCOPE_CONFLICT' });
+          continue;
+        }
+      }
       if (reportingManagerId && (reportingManagerId === previous?.id || row.reportingManagerId === row.employeeId)) {
         rowErrors.push({ rowNumber, field: 'reportingManagerId', message: 'Employee cannot report to themselves.' });
       }
@@ -6339,6 +6382,9 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
           continue;
         }
       }
+      const employeeExitDate = previous?.status === 'Exited' && targetStatus !== 'Exited'
+        ? null
+        : effectiveExitDate || previous?.exit_date || null;
       const employeeCode = row.employeeId.toUpperCase();
       const designation = row.designation || previous?.designation || 'Consultant';
       const department = row.department || previous?.department || 'Digital Transformation';
@@ -6357,6 +6403,10 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
       const standardWeeklyHours = row.standardWeeklyHours === undefined || row.standardWeeklyHours === ''
         ? Number(previous?.standard_weekly_hours || 40)
         : Number(row.standardWeeklyHours);
+      const reactivationSavepoint = previous?.status === 'Exited' && targetStatus !== 'Exited'
+        ? `employee_reactivation_${index}`
+        : null;
+      if (reactivationSavepoint) await client.query(`savepoint ${reactivationSavepoint}`);
       const employeeResult = await client.query(`
         insert into employees (
           id, employee_id, name, email, designation, department, country, region, business_unit, reporting_manager_id,
@@ -6400,7 +6450,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         row.status || previous?.status || 'Active',
         utilizationEligible,
         row.joiningDate || previous?.joining_date || null,
-        effectiveExitDate || previous?.exit_date || null,
+        employeeExitDate,
         Number.isFinite(standardWeeklyHours) ? standardWeeklyHours : 40,
         row.capacityType || previous?.capacity_type || (utilizationEligible ? 'Delivery' : 'Governance'),
         row.contractType || previous?.contract_type || 'Permanent',
@@ -6455,6 +6505,27 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         employee.status === 'Exited' ? 'Disabled' : 'Active',
       ]);
       await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,$4) on conflict(user_id,organization_id,legal_entity_id) do update set active=excluded.active`,[userResult.rows[0].id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,employee.status !== 'Exited']);
+      if (previous?.status === 'Exited' && employee.status !== 'Exited') {
+        try {
+          await synchronizeWorkerReactivation(client, {
+            employeeId: employee.id,
+            organizationId: req.organizationScope.organizationId,
+            legalEntityId: req.organizationScope.legalEntityId,
+            actorId: req.user.sub,
+            effectiveFrom: new Date().toISOString().slice(0, 10),
+            status: employee.status,
+            reason: `Reactivated through employee import ${parsed.data.fileName}`,
+            source: 'Employee import',
+          });
+          await client.query(`release savepoint ${reactivationSavepoint}`);
+        } catch (error) {
+          await client.query(`rollback to savepoint ${reactivationSavepoint}`);
+          await client.query(`release savepoint ${reactivationSavepoint}`);
+          if (!['WORKER_VERSION_CONFLICT', 'WORKER_IDENTITY_SYNC_CONFLICT'].includes(error.code)) throw error;
+          errors.push({ rowNumber, field: 'status', message: `${error.message}.`, code: error.code });
+          continue;
+        }
+      }
       const roleNames = splitPipeList(row.roles);
       const requestedRoles = roleNames.length > 0 ? roleNames : ['Employee'];
       const rolesResult = await client.query('select id, name from roles where name = any($1::text[])', [requestedRoles]);
@@ -6506,6 +6577,10 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
     });
   } catch (error) {
     await client.query('rollback');
+    if (['WORKER_VERSION_CONFLICT', 'WORKER_IDENTITY_SYNC_CONFLICT'].includes(error.code)) {
+      res.status(409).json({ error: error.message, code: error.code });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'Employee import apply failed' });
   } finally {

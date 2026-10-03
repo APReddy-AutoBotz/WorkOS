@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle } from '../server/worker-lifecycle.mjs';
+import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from '../server/worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, canTransitionReportingPeriod, normalizeReportingDate, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError } from '../server/reporting-periods.mjs';
 import { buildSetupReadiness, identityReadinessFromEnvironment, productionReadinessFromEnvironment, REQUIRED_SETUP_CHECKS } from '../server/setup-readiness.mjs';
 import { normalizePersistedTerminology, validateLegalEntity, validateOrganizationProfile, validateTerminology } from '../server/organization-setup.mjs';
@@ -203,6 +203,31 @@ assert.match(server, /api\/employees[\s\S]*assertWorkerMayExit[\s\S]*initializeN
 assert.match(server, /let effectiveExitDate = parsed\.data\.exit_date[\s\S]*previous\.status === 'Exited' \? parsed\.data\.exit_date[\s\S]*effectiveExitDate \|\| null/, 'direct already-exited replay must compare explicit dates and preserve authoritative dates when omitted');
 assert.match(server, /api\/imports\/employees\/apply[\s\S]*assertWorkerMayExit[\s\S]*errors\.push\(\{ rowNumber, field: 'status'[\s\S]*active=excluded\.active[\s\S]*synchronizeWorkerExit/, 'employee import exits must retain row-level errors and use the canonical lifecycle synchronization');
 assert.match(server, /let effectiveExitDate = row\.exitDate[\s\S]*previous\.status === 'Exited' \? row\.exitDate[\s\S]*code: error\.code[\s\S]*continue;[\s\S]*effectiveExitDate \|\| previous\?\.exit_date/, 'employee import must preserve same-date or omitted terminal authority and keep different-date conflicts row-local');
+const employeeSaveRoute = routeSource("app.post('/api/employees'", "app.delete('/api/employees/:id'");
+const employeeImportRoute = routeSource("app.post('/api/imports/employees/apply'", "app.post('/api/imports/clients/apply'");
+const employeeDeleteRoute = routeSource("app.delete('/api/employees/:id'", "app.get('/api/projects'");
+assert.match(employeeSaveRoute, /previous\?\.status === 'Exited' && employee\.status !== 'Exited'[\s\S]*await synchronizeWorkerReactivation/, 'direct employee reactivation must synchronize canonical history, profile, and login');
+assert.match(employeeImportRoute, /previous\?\.status === 'Exited' && employee\.status !== 'Exited'[\s\S]*await synchronizeWorkerReactivation/, 'employee-import reactivation must synchronize canonical history, profile, and login');
+assert.match(employeeSaveRoute, /previous\?\.status === 'Exited' && parsed\.data\.status !== 'Exited'\) effectiveExitDate = null/, 'direct reactivation must not retain an exited-only current exit date');
+assert.match(employeeImportRoute, /previous\?\.status === 'Exited' && targetStatus !== 'Exited'[\s\S]*\? null[\s\S]*effectiveExitDate \|\| previous\?\.exit_date/, 'employee-import reactivation must not retain an exited-only current exit date');
+assert.match(employeeSaveRoute, /pg_advisory_xact_lock\(hashtext\(\$1\)\)[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{parsed\.data\.employee_id\}[\s\S]*select \* from employees where employee_id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update/, 'employee save must serialize the organization-scoped unique key and re-read locked employee state');
+assert.match(employeeImportRoute, /pg_advisory_xact_lock\(hashtext\(\$1\)\)[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{row\.employeeId\}[\s\S]*select \* from employees where employee_id = \$1 and organization_id = \$2 and legal_entity_id = \$3 limit 1 for update/, 'employee import must serialize the organization-scoped unique key and re-read locked employee state');
+assert.match(employeeDeleteRoute, /select employee_id from employees[\s\S]*pg_advisory_xact_lock[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{employeeKey\.employee_id\}[\s\S]*select \* from employees where id=\$1 and organization_id=\$2 and legal_entity_id=\$3 for update/, 'employee deactivation must share the lifecycle lock before its locked status read');
+assert.match(service, /const employeeKey=\(await client\.query[\s\S]*select employee_id from employees[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{employeeKey\.employee_id\}[\s\S]*select e\.\*,wp\.lifecycle_status[\s\S]*for update/, 'canonical worker transitions must share the organization-scoped employee-code lock before their locked status read');
+assert.match(employeeSaveRoute, /legal_entity_id is distinct from \$3[\s\S]*EMPLOYEE_SCOPE_CONFLICT/, 'employee save must fail with a stable conflict when its organization-scoped code belongs to another legal entity');
+assert.match(employeeImportRoute, /legal_entity_id is distinct from \$3[\s\S]*EMPLOYEE_SCOPE_CONFLICT[\s\S]*continue/, 'employee import must report a cross-legal code collision as a row error');
+assert.match(employeeImportRoute, /const reactivationSavepoint = previous\?\.status === 'Exited' && targetStatus !== 'Exited'[\s\S]*savepoint \$\{reactivationSavepoint\}[\s\S]*const employeeResult/, 'employee import must savepoint a reactivation row before its first write');
+assert.match(employeeImportRoute, /rollback to savepoint \$\{reactivationSavepoint\}[\s\S]*release savepoint \$\{reactivationSavepoint\}[\s\S]*errors\.push\(\{ rowNumber, field: 'status'[\s\S]*continue;/, 'a rejected reactivation must roll back only its import row and continue with valid rows');
+for (const [name, route] of [['direct employee save', employeeSaveRoute], ['employee import', employeeImportRoute]]) {
+  const begin = route.indexOf("await client.query('begin')");
+  const scopeWrite = route.indexOf('insert into user_organization_scopes');
+  const lifecycleWrite = route.indexOf('await synchronizeWorkerReactivation');
+  const auditWrite = route.indexOf('await audit');
+  const commit = route.indexOf("await client.query('commit')");
+  assert.ok(begin >= 0 && scopeWrite > begin && lifecycleWrite > scopeWrite && auditWrite > lifecycleWrite && commit > auditWrite,
+    `${name} must keep employee, identity scope, lifecycle history/profile, and audit in one transaction`);
+  assert.match(route, /catch \(error\)[\s\S]*await client\.query\('rollback'\)/, `${name} must roll back the whole operation if reactivation synchronization fails`);
+}
 assert.match(server, /app\.delete\('\/api\/employees\/:id'[\s\S]*assertWorkerMayExit[\s\S]*synchronizeWorkerExit[\s\S]*Deactivate Employee/, 'DELETE employee must preserve dependency denial and synchronize terminal lifecycle atomically');
 assert.match(server, /api\/projects[\s\S]*select \* from projects where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*Project not found in the authorized organization and legal entity/, 'project ID updates must deny cross-scope rows before upsert');
 assert.match(server, /api\/imports\/projects\/apply[\s\S]*from clients[\s\S]*organization_id=\$3 and legal_entity_id=\$4[\s\S]*from employees[\s\S]*organization_id=\$2 and legal_entity_id=\$3/, 'project imports must resolve clients and managers in the exact request scope');
@@ -332,8 +357,94 @@ assert.deepEqual(lifecycleQueries[1].params, ['employee-record', 'org-a', 'legal
 assert.equal(await initializeNewWorkerLifecycle(lifecycleClient, { ...workerInput, isNew: false }), false);
 assert.equal(lifecycleQueries.length, 2, 'employee updates and import replays must not reset or duplicate worker history');
 assert.equal((server.match(/initializeNewWorkerLifecycle\(client,/g) || []).length, 2, 'canonical employee save and import must both initialize new worker state');
-assert.match(server, /employee:\$\{req\.organizationScope\.organizationId\}:\$\{req\.organizationScope\.legalEntityId\}:\$\{parsed\.data\.employee_id\}[\s\S]*isNew: !previous/, 'canonical employee save must serialize new-record detection before worker initialization');
-assert.match(server, /api\/imports\/employees\/apply[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{req\.organizationScope\.legalEntityId\}:\$\{row\.employeeId\}[\s\S]*isNew: !previous/, 'employee import must serialize new-record detection before worker initialization');
+assert.match(server, /employee:\$\{req\.organizationScope\.organizationId\}:\$\{parsed\.data\.employee_id\}[\s\S]*isNew: !previous/, 'canonical employee save must serialize organization-scoped new-record detection before worker initialization');
+assert.match(server, /api\/imports\/employees\/apply[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{row\.employeeId\}[\s\S]*isNew: !previous/, 'employee import must serialize organization-scoped new-record detection before worker initialization');
+
+const makeReactivationClient = ({
+  lifecycleStatus = 'Exited',
+  effectiveFrom = '2026-09-01',
+  profileEffectiveFrom = effectiveFrom,
+  historyStatus = lifecycleStatus,
+  historyEffectiveFrom = effectiveFrom,
+  historyEffectiveTo = null,
+  profileMissing = false,
+  historyMissing = false,
+  scopeRowCount = 1,
+} = {}) => {
+  const queries = [];
+  return {
+    queries,
+    client: { query: async (sql, params) => {
+      queries.push({ sql, params });
+      if (sql.includes('select lifecycle_status, effective_from')) {
+        return profileMissing ? { rowCount: 0, rows: [] } : { rowCount: 1, rows: [{ lifecycle_status: lifecycleStatus, effective_from: profileEffectiveFrom }] };
+      }
+      if (sql.includes('select status, effective_from, effective_to')) {
+        return historyMissing ? { rowCount: 0, rows: [] } : { rowCount: 1, rows: [{ status: historyStatus, effective_from: historyEffectiveFrom, effective_to: historyEffectiveTo }] };
+      }
+      if (sql.includes('update user_organization_scopes')) return { rowCount: scopeRowCount, rows: [] };
+      if (sql.includes('update users')) return { rowCount: 1, rows: [{ id: 'user-a' }] };
+      return { rowCount: 1, rows: [{ employee_id: workerInput.employeeId }] };
+    } },
+  };
+};
+for (const [previousStatus, nextStatus] of [['Exited', 'Active'], ['Disabled', 'On Leave']]) {
+  const { client: reactivationClient, queries: reactivationQueries } = makeReactivationClient({ lifecycleStatus: previousStatus });
+  assert.equal(await synchronizeWorkerReactivation(reactivationClient, {
+    ...workerInput,
+    effectiveFrom: '2026-10-03',
+    status: nextStatus,
+    reason: 'Reactivation regression test',
+    source: 'Employee save',
+  }), true);
+  assert.equal(reactivationQueries.length, 7, 'reactivation must close history, append a version, update profile, and restore identity/scope');
+  assert.match(reactivationQueries[0].sql, /worker_profiles[\s\S]*for update/);
+  assert.match(reactivationQueries[1].sql, /worker_history[\s\S]*for update/);
+  assert.deepEqual(reactivationQueries[2].params, [workerInput.employeeId, workerInput.organizationId, workerInput.legalEntityId, '2026-10-03', '2026-09-01', previousStatus]);
+  assert.match(reactivationQueries[2].sql, /set effective_to=\$4::date - 1[\s\S]*effective_to is null/);
+  assert.deepEqual(reactivationQueries[3].params, [workerInput.employeeId, workerInput.organizationId, workerInput.legalEntityId, '2026-10-03', nextStatus, 'Reactivation regression test', 'Employee save', previousStatus, workerInput.actorId]);
+  assert.match(reactivationQueries[3].sql, /jsonb_build_object[\s\S]*to_jsonb\(e\)/);
+  assert.equal(reactivationQueries[4].params[3], nextStatus, 'the profile must converge to the reactivated status');
+  assert.match(reactivationQueries[5].sql, /update users set status='Active'[\s\S]*employee_record_id=\$1/);
+  assert.match(reactivationQueries[6].sql, /update user_organization_scopes set active=true[\s\S]*organization_id=\$2 and legal_entity_id=\$3/);
+}
+
+const sameDayReactivation = makeReactivationClient({ effectiveFrom: '2026-10-03' });
+await assert.rejects(synchronizeWorkerReactivation(sameDayReactivation.client, {
+  ...workerInput,
+  effectiveFrom: '2026-10-03',
+  status: 'Active',
+  reason: 'Same-day reactivation',
+  source: 'Employee save',
+}), error => error.code === 'WORKER_VERSION_CONFLICT', 'same-day reactivation must fail closed instead of overlapping lifecycle history');
+assert.equal(sameDayReactivation.queries.length, 2, 'a lifecycle conflict must be detected before any history/profile/identity write');
+
+for (const [label, options] of [
+  ['missing profile', { profileMissing: true }],
+  ['missing history', { historyMissing: true }],
+  ['mismatched profile/history status', { historyStatus: 'Active' }],
+  ['mismatched profile/history date', { profileEffectiveFrom: '2026-08-31' }],
+  ['closed terminal history', { historyEffectiveTo: '2026-09-02' }],
+]) {
+  const invalidReactivation = makeReactivationClient(options);
+  await assert.rejects(synchronizeWorkerReactivation(invalidReactivation.client, {
+    ...workerInput,
+    effectiveFrom: '2026-10-03',
+    status: 'Active',
+    reason: `Reject ${label}`,
+    source: 'Employee save',
+  }), error => error.code === 'WORKER_VERSION_CONFLICT', `${label} must fail closed`);
+  assert.equal(invalidReactivation.queries.length, 2, `${label} must be rejected before writes`);
+}
+
+const scopeMismatchReactivation = makeReactivationClient({ scopeRowCount: 0 });
+await assert.rejects(synchronizeWorkerReactivation(scopeMismatchReactivation.client, {
+  ...workerInput,
+  effectiveFrom: '2026-10-03',
+  status: 'Active',
+  reason: 'Identity mismatch reactivation',
+  source: 'Employee import',
+}), error => error.code === 'WORKER_IDENTITY_SYNC_CONFLICT', 'identity scope mismatch must abort the enclosing reactivation transaction');
 
 const identityQueries = [];
 const identityClient = { query: async (sql, params) => {

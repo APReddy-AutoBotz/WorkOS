@@ -537,7 +537,14 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     if(parsed.data.effectiveFrom>new Date().toISOString().slice(0,10)) return res.status(409).json({error:'Future worker transitions are not supported',code:'FUTURE_TRANSITION_UNSUPPORTED'});
     const client=await pool.connect();
     try {
-      await client.query('begin'); await client.query('select pg_advisory_xact_lock(hashtext($1))',[`worker:${req.params.id}`]);
+      await client.query('begin');
+      const employeeKey=(await client.query(`select employee_id from employees
+        where id=$1 and organization_id=$2 and legal_entity_id=$3`,
+      [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
+      if(!employeeKey){await client.query('rollback');return res.status(404).json({error:'Worker not found'});}
+      await client.query('select pg_advisory_xact_lock(hashtext($1))',[
+        `employee:${req.organizationScope.organizationId}:${employeeKey.employee_id}`,
+      ]);
       const worker=(await client.query(`select e.*,wp.lifecycle_status from employees e join worker_profiles wp on wp.employee_id=e.id
         where e.id=$1 and e.organization_id=$2 and e.legal_entity_id=$3 and wp.organization_id=$2 and wp.legal_entity_id=$3 for update`,
       [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
