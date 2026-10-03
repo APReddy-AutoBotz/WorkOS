@@ -81,10 +81,10 @@ export const synchronizeWorkerReactivation = async (client, {
 
     const history = await client.query(`
       insert into worker_history (employee_id, organization_id, legal_entity_id, effective_from, status, snapshot, actor_id)
-      select e.id, $2, $3, $4, $5,
-        jsonb_build_object('status', $5, 'reason', $6, 'source', $7, 'previousStatus', $8, 'employee', to_jsonb(e)), $9
+      select e.id, $2, $3, $4::date, $5::text,
+        jsonb_build_object('status', $5::text, 'reason', $6::text, 'source', $7::text, 'previousStatus', $8::text, 'employee', to_jsonb(e)), $9
       from employees e
-      where e.id=$1 and e.organization_id=$2 and e.legal_entity_id=$3 and e.status=$5
+      where e.id=$1 and e.organization_id=$2 and e.legal_entity_id=$3 and e.status=$5::text
       returning employee_id
     `, [employeeId, organizationId, legalEntityId, effectiveDate, status, reason, source, profile.lifecycle_status, actorId]);
     if (history.rowCount !== 1) throw reactivationConflict();

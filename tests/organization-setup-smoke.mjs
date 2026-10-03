@@ -18,6 +18,7 @@ const organizationProfileMigration = readFileSync('server/migrations/028_wos02_o
 const calendarAuthorityMigration = readFileSync('server/migrations/029_wos02_working_calendar_authority.sql', 'utf8');
 const legalEntityAuthorityMigration = readFileSync('server/migrations/031_wos02_legal_entity_effective_authority.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
+const workerLifecycle = readFileSync('server/worker-lifecycle.mjs', 'utf8');
 const terminologyKeys = ['employee','manager','teamLead','businessUnit','region','regionalOwner','engagement','project','worklog'];
 const terminologyTerms = Object.fromEntries(terminologyKeys.map(key => [key,{singular:key,plural:`${key}s`,helpText:''}]));
 assert(validateTerminology({terms:terminologyTerms,effectiveFrom:'2026-01-01'}).success);
@@ -359,6 +360,7 @@ assert.equal(lifecycleQueries.length, 2, 'employee updates and import replays mu
 assert.equal((server.match(/initializeNewWorkerLifecycle\(client,/g) || []).length, 2, 'canonical employee save and import must both initialize new worker state');
 assert.match(server, /employee:\$\{req\.organizationScope\.organizationId\}:\$\{parsed\.data\.employee_id\}[\s\S]*isNew: !previous/, 'canonical employee save must serialize organization-scoped new-record detection before worker initialization');
 assert.match(server, /api\/imports\/employees\/apply[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{row\.employeeId\}[\s\S]*isNew: !previous/, 'employee import must serialize organization-scoped new-record detection before worker initialization');
+assert.match(workerLifecycle, /select e\.id, \$2, \$3, \$4::date, \$5::text,[\s\S]*jsonb_build_object\('status', \$5::text, 'reason', \$6::text, 'source', \$7::text, 'previousStatus', \$8::text[\s\S]*e\.status=\$5::text/, 'reactivation insert parameters used by polymorphic JSON and INSERT SELECT must have explicit PostgreSQL types');
 
 const makeReactivationClient = ({
   lifecycleStatus = 'Exited',
