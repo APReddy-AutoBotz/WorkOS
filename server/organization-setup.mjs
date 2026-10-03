@@ -172,7 +172,8 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
         name=excluded.name,legal_name=excluded.legal_name,product_display_name=excluded.product_display_name,support_contact=excluded.support_contact,
         default_locale=excluded.default_locale,default_time_zone=excluded.default_time_zone,base_currency=excluded.base_currency,
         fiscal_year_start=excluded.fiscal_year_start,default_week_start=excluded.default_week_start returning *`,values);
-      await client.query('update organizations set name=$2,updated_at=now() where id=$1',[req.organizationScope.organizationId,parsed.data.name]);
+      await client.query(`update organizations set name=$2,updated_at=now()
+        where id=$1 and $3::date <= current_date`,[req.organizationScope.organizationId,parsed.data.name,parsed.data.effectiveFrom]);
       await audit(client,req,{module:'Organization Setup',action:'Update Organization Profile',entityType:'Organization',entityId:req.organizationScope.organizationId,
         oldValue:{...latest,name:organization.name},newValue:{...result.rows[0],name:parsed.data.name},details:'Versioned organization profile using authoritative request scope'});
       const response=await client.query(`${profileSelect} where o.id=$1 and p.id=$2`,[req.organizationScope.organizationId,result.rows[0].id]);

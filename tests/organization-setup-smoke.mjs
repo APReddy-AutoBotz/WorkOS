@@ -50,6 +50,8 @@ const routeSource = (start, end) => {
   assert.notEqual(endIndex, -1, `${start} route must have a stable boundary`);
   return server.slice(startIndex, endIndex);
 };
+const organizationProfileRoute = service.slice(service.indexOf("router.put('/profile'"), service.indexOf("router.get('/legal-entities'"));
+assert.match(organizationProfileRoute, /update organizations set name=\$2,updated_at=now\(\)[\s\S]*where id=\$1 and \$3::date <= current_date/, 'future organization profile versions must not replace the current organizations.name compatibility projection early');
 const passwordResetRoute = routeSource("app.post('/api/users/:id/password-reset'", "app.get('/api/employees'");
 assert.match(passwordResetRoute, /join employees e on e\.id = u\.employee_record_id[\s\S]*e\.organization_id = \$2 and e\.legal_entity_id = \$3[\s\S]*for update/, 'password reset must lock only an identity in the exact selected scope');
 assert.match(passwordResetRoute, /update users u[\s\S]*from employees e[\s\S]*e\.organization_id = \$4 and e\.legal_entity_id = \$5[\s\S]*await audit/, 'password reset write and audit must remain behind the exact scope predicate');
