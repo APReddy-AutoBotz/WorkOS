@@ -10,6 +10,7 @@ on:
       - '.github/scripts/wos02-retained-admin-scope-acceptance.mjs'
       - '.github/scripts/wos02-worker-lifecycle-acceptance.mjs'
       - '.github/scripts/wos02-worker-reactivation-acceptance.mjs'
+      - '.github/scripts/wos02-multiscope-scope-selection-browser-acceptance.mjs'
       - '.github/scripts/wos02-mutation-lifecycle-acceptance.mjs'
       - '.github/scripts/wos02-reporting-period-acceptance.mjs'
       - '.github/scripts/wos02-reporting-period-u8u9-acceptance.mjs'
@@ -26,8 +27,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: e57b0337662decab09fe4d5e87cd95d385c81eff
-  TARGET_TREE: c6332650ada000fe7fb4f60f62b67016791bccac
+  TARGET_HEAD: bb1e1062dca0e41083c63be7836474d91e05b9ed
+  TARGET_TREE: 41dfbc7ca69901d193d08aa4b99143578415ce05
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -59,7 +60,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 45-file authority
+      - name: Verify exact product controller main and 46-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -101,6 +102,7 @@ jobs:
               'server/worker-lifecycle.mjs',
               'server/working-calendars.mjs',
               'src/App.tsx',
+              'src/components/auth/OrganizationScopeGate.tsx',
               'src/components/Layout/Header.tsx',
               'src/components/Layout/Sidebar.tsx',
               'src/components/employee/OrgChartView.tsx',
@@ -128,7 +130,7 @@ jobs:
             const migration031 = actual.filter(path => /^server\/migrations\/031_[a-z0-9_]+\.sql$/.test(path));
             if (migration031.length !== 1) failures.push(`migration 031 authority=${JSON.stringify(migration031)}`);
             const expected = [...required, ...migration031].sort();
-            if (actual.length !== 45 || JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`target files=${JSON.stringify(actual)}`);
+            if (actual.length !== 46 || JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`target files=${JSON.stringify(actual)}`);
             if (failures.length) core.setFailed(`authority failed: ${failures.join('; ')}`);
 
       - name: Checkout exact controller
@@ -544,6 +546,18 @@ jobs:
           timeout 8m node retained-wos01-controller/.github/scripts/wos01a-browser-acceptance-v2.mjs
           test -s "$WOS_CHROME_HANDSHAKE_EVIDENCE"
 
+      - name: Execute exact multi-scope browser selection and Entra session bootstrap
+        shell: bash
+        env:
+          TARGET_ROOT: ${{ github.workspace }}/target
+          DATABASE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_live
+          WOS_BROWSER_ORIGIN: http://127.0.0.1:4339
+          WOS_CHROME_HANDSHAKE_EVIDENCE: ${{ runner.temp }}/wos02-multiscope-browser-evidence.json
+        run: |
+          set -euo pipefail
+          timeout 8m node controller/.github/scripts/wos02-multiscope-scope-selection-browser-acceptance.mjs
+          test -s "$WOS_CHROME_HANDSHAKE_EVIDENCE"
+
       - name: Final exact live authority
         if: always()
         uses: actions/github-script@v7
@@ -569,5 +583,6 @@ jobs:
             ${{ runner.temp }}/wos02-final-fresh-first.log
             ${{ runner.temp }}/wos02-final-fresh-replay.log
             ${{ runner.temp }}/wos02-final-browser-evidence.json
+            ${{ runner.temp }}/wos02-multiscope-browser-evidence.json
             ${{ runner.temp }}/wos02-final-preview.log
           if-no-files-found: warn

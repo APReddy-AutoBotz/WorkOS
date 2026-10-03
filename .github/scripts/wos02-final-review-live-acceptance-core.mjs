@@ -131,11 +131,25 @@ try {
     assert.equal(scopes.status, 200, JSON.stringify(scopes.body));
     const keys = scopes.body.map(row => `${row.organizationId}:${row.legalEntityId}`).sort();
     assert.deepEqual(keys, ['org-final:legal-a', 'org-final:legal-b']);
-    const ambiguous = await call('GET', '/api/auth/me', { token: adminToken });
-    assert.equal(ambiguous.status, 403);
-    assert.equal((await call('GET', '/api/auth/me', { token: adminToken, scope: scopeA })).status, 200);
-    assert.equal((await call('GET', '/api/auth/me', { token: adminToken, scope: scopeFuture })).status, 403);
-    assert.equal((await call('GET', '/api/auth/me', { token: adminToken, scope: scopeExpired })).status, 403);
+    const identity = await call('GET', '/api/auth/me', { token: adminToken });
+    assert.equal(identity.status, 200, JSON.stringify(identity.body));
+    assert.equal(identity.body.id, adminId);
+    assert.equal(identity.body.token?.length > 0, true, 'identity-only session refresh must return a renewable token');
+    assert.equal('organizationId' in identity.body, false, 'identity refresh must not select a data scope implicitly');
+    assert.equal('legalEntityId' in identity.body, false, 'identity refresh must not select a data scope implicitly');
+
+    const unscopedData = await call('GET', '/api/employees', { token: identity.body.token });
+    assert.equal(unscopedData.status, 403, 'protected data must remain fail-closed without a selected scope');
+    assert.equal(unscopedData.body.code, 'ORG_SCOPE_DENIED');
+    const unscopedRoleSwitch = await call('POST', '/api/auth/switch-role', { token: identity.body.token, body: { role: 'Admin' } });
+    assert.equal(unscopedRoleSwitch.status, 403, 'scope-bound audit mutations must require the selected scope');
+    assert.equal(unscopedRoleSwitch.body.code, 'ORG_SCOPE_DENIED');
+
+    assert.equal((await call('GET', '/api/employees', { token: identity.body.token, scope: scopeA })).status, 200);
+    assert.equal((await call('POST', '/api/auth/switch-role', { token: identity.body.token, scope: scopeA, body: { role: 'Admin' } })).status, 200,
+      'role switching must work after explicit scope selection');
+    assert.equal((await call('GET', '/api/employees', { token: identity.body.token, scope: scopeFuture })).status, 403);
+    assert.equal((await call('GET', '/api/employees', { token: identity.body.token, scope: scopeExpired })).status, 403);
   });
 
   await check('canonical employee create/upsert propagates ownership and provisions user scope atomically', async () => {
