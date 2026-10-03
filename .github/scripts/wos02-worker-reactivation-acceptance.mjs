@@ -93,10 +93,32 @@ const loadWorker = async employeeId => {
   const user = (await pool.query('select * from users where employee_record_id=$1', [employeeId])).rows[0];
   const scopes = user ? (await pool.query('select * from user_organization_scopes where user_id=$1 order by organization_id,legal_entity_id', [user.id])).rows : [];
   const auditCount = Number((await pool.query("select count(*) from audit_logs where module='Workforce' and entity_id=$1", [employeeId])).rows[0].count);
-  return { profile, history, employee, user, scopes, auditCount };
+  const mutationAuditCount = Number((await pool.query("select count(*) from audit_logs where module in ('Employee','Import') and entity_id=$1", [employeeId])).rows[0].count);
+  return { profile, history, employee, user, scopes, auditCount, mutationAuditCount };
 };
 const exactScope = state => state.scopes.find(row => row.organization_id === 'org-worker' && row.legal_entity_id === 'legal-worker');
 const altScope = state => state.scopes.find(row => row.organization_id === 'org-worker' && row.legal_entity_id === 'legal-worker-alt');
+const dateOnly = value => value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+const previousDay = value => {
+  const date = new Date(`${dateOnly(value)}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+};
+const exitWorker = async (employeeId, key) => call('POST', `/api/organization-setup/workers/${employeeId}/transition`, {
+  token: adminToken,
+  body: { status: 'Exited', effectiveFrom: previousDay(new Date().toISOString().slice(0, 10)), reason: 'synthetic exit before reactivation acceptance', idempotencyKey: key },
+});
+const assertLifecycleState = (state, status) => {
+  const terminal = ['Disabled', 'Exited'].includes(status);
+  const latest = state.history.at(-1);
+  assert.equal(state.profile.lifecycle_status, status);
+  assert.equal(state.employee.status, terminal ? 'Exited' : status);
+  assert.equal(latest?.status, status);
+  assert.equal(dateOnly(state.profile.effective_from), dateOnly(latest?.effective_from));
+  assert.equal(latest?.effective_to, null);
+  assert.equal(state.user.status, terminal ? 'Disabled' : 'Active');
+  assert.equal(exactScope(state)?.active, !terminal);
+};
 
 let adminToken = '';
 try {
@@ -172,6 +194,199 @@ try {
     assert.equal(after.user.status, 'Active');
     assert.equal(exactScope(after)?.active, true);
     assert.equal(altScope(after)?.active, true);
+  });
+
+  await check('employee save reactivation atomically converges employee, profile, history, and linked scope', async () => {
+    const created = await call('POST', '/api/employees', { token: adminToken, body: employeeBody('E-REACT-SAVE', 'Employee Save Reactivation') });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    let state = await loadWorker(created.body.id);
+    await pool.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active)
+      values($1,'org-worker','legal-worker-alt',true)
+      on conflict(user_id,organization_id,legal_entity_id) do update set active=true`, [state.user.id]);
+
+    const exited = await exitWorker(created.body.id, 'worker-react-save-exit-001');
+    assert.equal(exited.status, 200, JSON.stringify(exited.body));
+    state = await loadWorker(created.body.id);
+    assertLifecycleState(state, 'Exited');
+    const before = state;
+
+    const reactivation = employeeBody('E-REACT-SAVE', 'Employee Save Reactivation');
+    reactivation.status = 'On Leave';
+    reactivation.exit_date = dateOnly(before.history.at(-1).effective_from);
+    const response = await call('POST', '/api/employees', { token: adminToken, body: reactivation });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+
+    state = await loadWorker(created.body.id);
+    assertLifecycleState(state, 'On Leave');
+    assert.equal(state.employee.exit_date, null, 'reactivation must clear the current terminal exit date');
+    assert.equal(state.history.length, before.history.length + 1);
+    assert.equal(dateOnly(state.history.at(-2).effective_to), previousDay(dateOnly(state.history.at(-1).effective_from)));
+    assert.equal(state.mutationAuditCount, before.mutationAuditCount + 1);
+    assert.equal(altScope(state)?.active, true, 'reactivation must preserve unrelated legal-entity scope');
+  });
+
+  await check('employee import reactivation atomically converges employee, profile, history, and linked scope', async () => {
+    const created = await call('POST', '/api/employees', { token: adminToken, body: employeeBody('E-REACT-IMPORT', 'Employee Import Reactivation') });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    let state = await loadWorker(created.body.id);
+    await pool.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active)
+      values($1,'org-worker','legal-worker-alt',true)
+      on conflict(user_id,organization_id,legal_entity_id) do update set active=true`, [state.user.id]);
+
+    const exited = await exitWorker(created.body.id, 'worker-react-import-exit-001');
+    assert.equal(exited.status, 200, JSON.stringify(exited.body));
+    state = await loadWorker(created.body.id);
+    assertLifecycleState(state, 'Exited');
+    const before = state;
+    const importResult = await call('POST', '/api/imports/employees/apply', {
+      token: adminToken,
+      body: {
+        fileName: 'synthetic-worker-reactivation.csv',
+        rows: [{
+          employeeId: 'E-REACT-IMPORT',
+          name: 'Employee Import Reactivation',
+          email: 'e-react-import@example.test',
+          designation: 'Engineer',
+          department: 'Delivery',
+          country: 'Synthetic',
+          primaryCountryDirectorId: 'cd-worker',
+          mappedCountryDirectorIds: [],
+          status: 'Active',
+          exitDate: dateOnly(before.history.at(-1).effective_from),
+          roles: ['Employee'],
+        }],
+      },
+    });
+    assert.equal(importResult.status, 200, JSON.stringify(importResult.body));
+    assert.equal(importResult.body.status, 'Success');
+    assert.equal(importResult.body.validRows, 1);
+    assert.equal(importResult.body.errorRows, 0);
+
+    state = await loadWorker(created.body.id);
+    assertLifecycleState(state, 'Active');
+    assert.equal(state.employee.exit_date, null, 'employee import reactivation must clear the current terminal exit date');
+    assert.equal(state.history.length, before.history.length + 1);
+    assert.equal(dateOnly(state.history.at(-2).effective_to), previousDay(dateOnly(state.history.at(-1).effective_from)));
+    assert.equal(state.mutationAuditCount, before.mutationAuditCount + 1);
+    assert.equal(altScope(state)?.active, true, 'import reactivation must preserve unrelated legal-entity scope');
+  });
+
+  await check('a rejected import reactivation rolls back only its row and continues valid rows', async () => {
+    const created = await call('POST', '/api/employees', { token: adminToken, body: employeeBody('E-REACT-ROW-CONFLICT', 'Import Reactivation Conflict') });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    const exited = await exitWorker(created.body.id, 'worker-react-row-conflict-exit-001');
+    assert.equal(exited.status, 200, JSON.stringify(exited.body));
+    const terminal = await loadWorker(created.body.id);
+    const terminalHistory = terminal.history.at(-1);
+    await pool.query(`update worker_history set status='Active'
+      where employee_id=$1 and organization_id='org-worker' and legal_entity_id='legal-worker' and effective_from=$2::date`,
+    [created.body.id, dateOnly(terminalHistory.effective_from)]);
+    const mismatchedBefore = await loadWorker(created.body.id);
+
+    try {
+      const importResult = await call('POST', '/api/imports/employees/apply', {
+        token: adminToken,
+        body: {
+          fileName: 'synthetic-worker-reactivation-partial.csv',
+          rows: [
+            {
+              employeeId: 'E-REACT-ROW-CONFLICT',
+              name: 'Must Roll Back Import Reactivation',
+              email: 'must-roll-back-reactivation@example.test',
+              designation: 'Engineer',
+              department: 'Delivery',
+              country: 'Synthetic',
+              primaryCountryDirectorId: 'cd-worker',
+              mappedCountryDirectorIds: [],
+              status: 'Active',
+              exitDate: dateOnly(terminalHistory.effective_from),
+              roles: ['Employee'],
+            },
+            {
+              employeeId: 'E-REACT-IMPORT-PARTIAL',
+              name: 'Valid Partial Import Worker',
+              email: 'e-react-import-partial@example.test',
+              designation: 'Engineer',
+              department: 'Delivery',
+              country: 'Synthetic',
+              primaryCountryDirectorId: 'cd-worker',
+              mappedCountryDirectorIds: [],
+              status: 'Active',
+              roles: ['Employee'],
+              initialPassword: 'E-REACT-IMPORT-PARTIAL-Credential-42!d',
+            },
+          ],
+        },
+      });
+      assert.equal(importResult.status, 200, JSON.stringify(importResult.body));
+      assert.equal(importResult.body.status, 'Partial');
+      assert.equal(importResult.body.validRows, 1);
+      assert.equal(importResult.body.errorRows, 1);
+      assert.equal(importResult.body.errors[0].rowNumber, 2);
+      assert.equal(importResult.body.errors[0].field, 'status');
+      assert.equal(importResult.body.errors[0].code, 'WORKER_VERSION_CONFLICT');
+
+      const afterRejectedRow = await loadWorker(created.body.id);
+      assert.equal(afterRejectedRow.profile.lifecycle_status, mismatchedBefore.profile.lifecycle_status);
+      assert.equal(afterRejectedRow.employee.name, mismatchedBefore.employee.name);
+      assert.equal(afterRejectedRow.employee.email, mismatchedBefore.employee.email);
+      assert.equal(afterRejectedRow.employee.status, mismatchedBefore.employee.status);
+      assert.equal(dateOnly(afterRejectedRow.employee.exit_date), dateOnly(mismatchedBefore.employee.exit_date));
+      assert.equal(afterRejectedRow.user.status, mismatchedBefore.user.status);
+      assert.equal(afterRejectedRow.history.length, mismatchedBefore.history.length);
+      assert.equal(afterRejectedRow.history.at(-1).status, mismatchedBefore.history.at(-1).status);
+      assert.equal(afterRejectedRow.mutationAuditCount, mismatchedBefore.mutationAuditCount);
+      assert.equal(exactScope(afterRejectedRow)?.active, false);
+
+      const validRow = (await pool.query("select id from employees where employee_id='E-REACT-IMPORT-PARTIAL' and organization_id='org-worker' and legal_entity_id='legal-worker'" )).rows[0];
+      assert.ok(validRow, 'the valid row must commit after a rejected reactivation row');
+      assertLifecycleState(await loadWorker(validRow.id), 'Active');
+    } finally {
+      await pool.query(`update worker_history set status='Exited'
+        where employee_id=$1 and organization_id='org-worker' and legal_entity_id='legal-worker' and effective_from=$2::date`,
+      [created.body.id, dateOnly(terminalHistory.effective_from)]);
+    }
+  });
+
+  await check('a rejected direct-save reactivation rolls back employee and identity mutations', async () => {
+    const created = await call('POST', '/api/employees', { token: adminToken, body: employeeBody('E-REACT-SAVE-ROW-CONFLICT', 'Direct Save Reactivation Conflict') });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    const exited = await exitWorker(created.body.id, 'worker-react-save-row-conflict-exit-001');
+    assert.equal(exited.status, 200, JSON.stringify(exited.body));
+    const terminal = await loadWorker(created.body.id);
+    const terminalHistory = terminal.history.at(-1);
+    await pool.query(`update worker_history set status='Active'
+      where employee_id=$1 and organization_id='org-worker' and legal_entity_id='legal-worker' and effective_from=$2::date`,
+    [created.body.id, dateOnly(terminalHistory.effective_from)]);
+    const mismatchedBefore = await loadWorker(created.body.id);
+
+    try {
+      const attempted = employeeBody('E-REACT-SAVE-ROW-CONFLICT', 'Must Roll Back Direct Save');
+      attempted.email = 'must-roll-back-direct-save@example.test';
+      attempted.status = 'On Leave';
+      attempted.exit_date = dateOnly(terminalHistory.effective_from);
+      const response = await call('POST', '/api/employees', { token: adminToken, body: attempted });
+      assert.equal(response.status, 409, JSON.stringify(response.body));
+      assert.equal(response.body.code, 'WORKER_VERSION_CONFLICT');
+
+      const afterRejectedSave = await loadWorker(created.body.id);
+      assert.equal(afterRejectedSave.profile.lifecycle_status, mismatchedBefore.profile.lifecycle_status);
+      assert.equal(afterRejectedSave.employee.name, mismatchedBefore.employee.name);
+      assert.equal(afterRejectedSave.employee.email, mismatchedBefore.employee.email);
+      assert.equal(afterRejectedSave.employee.status, mismatchedBefore.employee.status);
+      assert.equal(dateOnly(afterRejectedSave.employee.exit_date), dateOnly(mismatchedBefore.employee.exit_date));
+      assert.equal(afterRejectedSave.user.status, mismatchedBefore.user.status);
+      assert.deepEqual(afterRejectedSave.scopes.map(row => [row.organization_id, row.legal_entity_id, row.active]),
+        mismatchedBefore.scopes.map(row => [row.organization_id, row.legal_entity_id, row.active]));
+      assert.deepEqual(afterRejectedSave.history.map(row => [row.status, dateOnly(row.effective_from), row.effective_to && dateOnly(row.effective_to)]),
+        mismatchedBefore.history.map(row => [row.status, dateOnly(row.effective_from), row.effective_to && dateOnly(row.effective_to)]));
+      assert.equal(afterRejectedSave.mutationAuditCount, mismatchedBefore.mutationAuditCount);
+      assert.equal(exactScope(afterRejectedSave)?.active, false);
+    } finally {
+      await pool.query(`update worker_history set status='Exited'
+        where employee_id=$1 and organization_id='org-worker' and legal_entity_id='legal-worker' and effective_from=$2::date`,
+      [created.body.id, dateOnly(terminalHistory.effective_from)]);
+    }
   });
 
   await check('Disabled to On Leave restores linked user and exact scope', async () => {
