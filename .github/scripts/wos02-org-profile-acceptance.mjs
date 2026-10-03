@@ -62,6 +62,7 @@ try{
  await check('exact-scope organization profile read/update/history/audit',async()=>{
   let r=await request('GET','/api/organization-setup/profile');expect(r,200);for(const k of ['organization_name','legal_name','product_display_name','support_contact','default_locale','default_time_zone','base_currency','fiscal_year_start','default_week_start'])assert.ok(Object.hasOwn(r.body,k),k);
   r=await request('PUT','/api/organization-setup/profile',profile);expect(r,200);assert.equal(r.body.organization_name,profile.name);assert.equal(r.body.base_currency,'INR');
+  assert.equal((await pool.query(`select name from organizations where id=$1`,[ORG])).rows[0].name,profile.name,'a currently effective profile must refresh the compatibility projection');
   const old=await request('GET','/api/organization-setup/profile?asOf=2026-08-31');expect(old,200);assert.equal(old.body.organization_name,'Profile Org');
   const current=await request('GET','/api/organization-setup/profile?asOf=2026-09-02');expect(current,200);assert.equal(current.body.organization_name,profile.name);
   const versions=await pool.query(`select effective_to from organization_profile_versions where organization_id=$1 order by effective_from`,[ORG]);assert.equal(versions.rowCount,2);assert.equal(iso(versions.rows[0].effective_to),'2026-08-31');
@@ -76,6 +77,18 @@ try{
   const beforeName=(await pool.query(`select name from organizations where id=$1`,[ORG])).rows[0].name;
   await pool.query(`create function reject_profile_audit() returns trigger language plpgsql as $$begin if NEW.action='Update Organization Profile' then raise exception 'reject'; end if; return NEW; end$$;create trigger reject_profile_audit before insert on audit_logs for each row execute function reject_profile_audit()`);
   try{expect(await request('PUT','/api/organization-setup/profile',{...profile,name:'Rollback',effectiveFrom:'2026-10-01'}),500);assert.equal((await pool.query(`select name from organizations where id=$1`,[ORG])).rows[0].name,beforeName)}finally{await pool.query(`drop trigger reject_profile_audit on audit_logs;drop function reject_profile_audit()`)}
+ });
+ await check('future-effective organization profile preserves current name projection until its start date',async()=>{
+  const futureDate=identifierDates.change_date;
+  const futureName='Profile Org Scheduled';
+  const scheduled=await request('PUT','/api/organization-setup/profile',{...profile,name:futureName,legalName:'Profile Org Scheduled LLC',effectiveFrom:futureDate});expect(scheduled,200);assert.equal(scheduled.body.organization_name,futureName);
+  assert.equal((await pool.query(`select name from organizations where id=$1`,[ORG])).rows[0].name,profile.name,'a future profile must not replace the currently effective compatibility projection');
+  const current=await request('GET','/api/organization-setup/profile');expect(current,200);assert.equal(current.body.organization_name,profile.name);
+  const scopes=await request('GET','/api/auth/organization-scopes');expect(scopes,200);
+  const currentScope=scopes.body.find(row=>row.organizationId===ORG&&row.legalEntityId===LEGAL);assert.ok(currentScope);assert.equal(currentScope.organizationName,profile.name);
+  const future=await request('GET',`/api/organization-setup/profile?asOf=${futureDate}`);expect(future,200);assert.equal(future.body.organization_name,futureName);
+  const versions=await pool.query(`select effective_from,effective_to from organization_profile_versions where organization_id=$1 order by effective_from`,[ORG]);
+  assert.equal(versions.rowCount,3);assert.equal(iso(versions.rows[1].effective_to),identifierDates.prior_end);assert.equal(iso(versions.rows[2].effective_from),futureDate);
  });
  await check('legal-entity list/read is scope bounded',async()=>{
   const list=await request('GET','/api/organization-setup/legal-entities');expect(list,200);assert.ok(list.body.some(x=>x.id===LEGAL));assert.ok(!list.body.some(x=>x.id===OTHER_LEGAL));
