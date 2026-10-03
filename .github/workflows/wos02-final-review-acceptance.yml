@@ -27,8 +27,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: 1b3d2dd7dbf753defde75978ee90dfc050b9b30e
-  TARGET_TREE: 2b8306e059539b077886247d74abd32010e1ea79
+  TARGET_HEAD: 62c46cfee1d393df68514ef762a61be664262ebb
+  TARGET_TREE: 2efbda78ac169ecd3f523930081321a2af650646
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -413,7 +413,7 @@ jobs:
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='$id032'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select status from reporting_periods where code='RP-LEGACY-LOCKED'")" = 'Financially Locked'
 
-      - name: Execute retained corrected 17-check live API and DB closure matrix
+      - name: Execute retained corrected 18-check live API and DB closure matrix
         shell: bash
         working-directory: controller
         env:

@@ -301,9 +301,75 @@ try {
     assert.equal(state.lifecycle_status, 'Active');
   });
 
-  await pool.query(`insert into clients(id,name,status,organization_id,legal_entity_id) values('client-final','Final Client','Active','org-final','legal-a') on conflict(id) do nothing`);
-  await pool.query(`insert into projects(id,project_code,name,client_id,client,manager_id,manager_name,billable,start_date,end_date,status,organization_id,legal_entity_id)
-    values('project-final','P-FINAL','Final Project','client-final','Final Client','admin-final','Final Admin',true,'2026-01-01','2026-12-31','Active','org-final','legal-a') on conflict(id) do nothing`);
+await pool.query(`insert into clients(id,name,status,organization_id,legal_entity_id) values('client-final','Final Client','Active','org-final','legal-a') on conflict(id) do nothing`);
+await pool.query(`insert into clients(id,name,status,organization_id,legal_entity_id) values('client-final-b','Final Client B','Active','org-final','legal-b') on conflict(id) do nothing`);
+await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+  values('manager-final-b','MANAGER-FINAL-B','Final Manager B','manager-final-b@example.test','Manager','Delivery','Synthetic','cd-final','Active','org-final','legal-b') on conflict(id) do nothing`);
+await pool.query(`insert into projects(id,project_code,name,client_id,client,manager_id,manager_name,billable,start_date,end_date,status,organization_id,legal_entity_id)
+  values('project-final','P-FINAL','Final Project','client-final','Final Client','admin-final','Final Admin',true,'2026-01-01','2026-12-31','Active','org-final','legal-a') on conflict(id) do nothing`);
+
+await check('concurrent project ID collision cannot update a different legal entity', async () => {
+  const trigger = 'wos02_project_id_conflict_gate';
+  const sequence = 'wos02_project_id_conflict_gate_seq';
+  try {
+    await pool.query(`drop trigger if exists ${trigger} on projects`);
+    await pool.query(`drop function if exists ${trigger}()`);
+    await pool.query(`drop sequence if exists ${sequence}`);
+    await pool.query(`create sequence ${sequence} start with 1`);
+    await pool.query(`create function ${trigger}() returns trigger language plpgsql as $$
+      declare arrivals bigint;
+      begin
+        if new.id = 'project-scope-conflict-race' then
+          perform nextval('${sequence}');
+          for attempt in 1..1000 loop
+            select last_value into arrivals from ${sequence};
+            if arrivals >= 2 then return new; end if;
+            perform pg_sleep(0.01);
+          end loop;
+          raise exception 'Timed out waiting for concurrent project ID conflict requests';
+        end if;
+        return new;
+      end;
+      $$`);
+    await pool.query(`create trigger ${trigger} before insert on projects for each row execute function ${trigger}()`);
+
+    const request = (legalEntityId, projectCode, clientId, managerId) => call('POST', '/api/projects', {
+      token: adminToken,
+      scope: { 'x-organization-id': 'org-final', 'x-legal-entity-id': legalEntityId },
+      body: {
+        id: 'project-scope-conflict-race', project_code: projectCode,
+        name: `Race ${legalEntityId}`, client_id: clientId, manager_id: managerId,
+        start_date: '2026-01-01', end_date: '2026-12-31', status: 'Proposed', billable: true,
+      },
+    });
+    const responses = await Promise.all([
+      request('legal-a', 'P-RACE-A', 'client-final', 'admin-final'),
+      request('legal-b', 'P-RACE-B', 'client-final-b', 'manager-final-b'),
+    ]);
+    const saved = responses.filter(response => response.status === 200);
+    const denied = responses.filter(response => response.status === 404);
+    assert.equal(saved.length, 1, JSON.stringify(responses));
+    assert.equal(denied.length, 1, JSON.stringify(responses));
+    assert.equal(denied[0].body.error, 'Project not found in the authorized organization and legal entity');
+    const winner = saved[0].body;
+    const row = (await pool.query(`select id,project_code,name,client_id,manager_id,organization_id,legal_entity_id
+      from projects where id='project-scope-conflict-race'`)).rows[0];
+    assert.ok(row, 'the winning request must persist exactly one project');
+    assert.equal(row.organization_id, 'org-final');
+    assert.equal(row.legal_entity_id, winner.legal_entity_id);
+    assert.equal(row.project_code, winner.project_code);
+    assert.equal(row.name, winner.name);
+    assert.equal(row.client_id, winner.client_id);
+    assert.equal(row.manager_id, winner.manager_id);
+    assert.equal((await pool.query(`select count(*)::int count from projects where id='project-scope-conflict-race'`)).rows[0].count, 1);
+    assert.equal((await pool.query(`select count(*)::int count from audit_logs where entity_type='Project' and entity_id='project-scope-conflict-race'`)).rows[0].count, 1,
+      'the rejected racing update must not append an audit record');
+  } finally {
+    await pool.query(`drop trigger if exists ${trigger} on projects`);
+    await pool.query(`drop function if exists ${trigger}()`);
+    await pool.query(`drop sequence if exists ${sequence}`);
+  }
+});
 
   await check('canonical allocation import creates a scoped allocation', async () => {
     const response = await call('POST', '/api/imports/allocations/apply', { token: adminToken, scope: scopeA, body: { fileName: 'synthetic-allocation.csv', rows: [{ id: 'alloc-import-final', employeeId: scopedEmployee, projectId: 'project-final', percentage: 50, startDate: '2026-01-01', endDate: '2026-12-31', status: 'Active', billable: true }] } });
@@ -394,4 +460,4 @@ if (failures.length) {
   console.error(JSON.stringify({ status: 'failed', failures }, null, 2));
   process.exit(1);
 }
-console.log(JSON.stringify({ status: 'passed', checks: 17, today }, null, 2));
+console.log(JSON.stringify({ status: 'passed', checks: 18, today }, null, 2));
