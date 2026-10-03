@@ -17,6 +17,7 @@ const reportingPeriodFrequencyMigration = readFileSync('server/migrations/030_wo
 const organizationProfileMigration = readFileSync('server/migrations/028_wos02_organization_legal_entity_profiles.sql', 'utf8');
 const calendarAuthorityMigration = readFileSync('server/migrations/029_wos02_working_calendar_authority.sql', 'utf8');
 const legalEntityAuthorityMigration = readFileSync('server/migrations/031_wos02_legal_entity_effective_authority.sql', 'utf8');
+const legalIdentifierMigration = readFileSync('server/migrations/032_wos02_legal_identifier_effective_ranges.sql', 'utf8');
 const service = readFileSync('server/organization-setup.mjs', 'utf8');
 const workerLifecycle = readFileSync('server/worker-lifecycle.mjs', 'utf8');
 const terminologyKeys = ['employee','manager','teamLead','businessUnit','region','regionalOwner','engagement','project','worklog'];
@@ -107,10 +108,14 @@ assert.equal(validateLegalEntity({...validLegalEntity,reportingCurrency:'EU'}).s
 assert.match(organizationProfileMigration,/organization_profile_versions[\s\S]*legal_name[\s\S]*product_display_name[\s\S]*support_contact[\s\S]*default_locale[\s\S]*default_time_zone[\s\S]*base_currency[\s\S]*fiscal_year_start[\s\S]*default_week_start/,'migration must persist every WOS-ORG-001 field');
 assert.match(organizationProfileMigration,/legal_entity_profile_versions[\s\S]*registration_identifier[\s\S]*tax_identifier[\s\S]*reporting_currency[\s\S]*address/,'migration must persist every WOS-ORG-002 profile field');
 assert.match(organizationProfileMigration,/organization_profile_versions_no_overlap[\s\S]*legal_entity_profile_versions_no_overlap/,'profile histories must be database non-overlapping');
-assert.match(organizationProfileMigration,/uq_legal_entity_registration_identity[\s\S]*uq_legal_entity_tax_identity/,'current legal registration and tax identities must be scoped uniquely');
+assert.match(legalIdentifierMigration,/drop index if exists uq_legal_entity_registration_identity[\s\S]*drop index if exists uq_legal_entity_tax_identity/,'legacy open-row-only legal identifier indexes must be replaced');
+assert.match(legalIdentifierMigration,/legal_entity_registration_identifier_no_overlap[\s\S]*daterange\(effective_from, coalesce\(effective_to \+ 1, 'infinity'::date\)/,'registration identifiers must be unique across overlapping effective ranges');
+assert.match(legalIdentifierMigration,/legal_entity_tax_identifier_no_overlap[\s\S]*daterange\(effective_from, coalesce\(effective_to \+ 1, 'infinity'::date\)/,'tax identifiers must be unique across overlapping effective ranges');
+assert.match(legalIdentifierMigration,/Overlapping registration-identifier effective ranges must be corrected before migration 032[\s\S]*Overlapping tax-identifier effective ranges must be corrected before migration 032/,'upgrade migration must fail closed without rewriting conflicting identifier history');
 assert.match(service,/router\.put\('\/profile'[\s\S]*ORGANIZATION_PROFILE_VALIDATION_FAILED[\s\S]*Update Organization Profile/,'organization profile updates must validate, scope, and audit');
 assert.match(service,/organizationId&&parsed\.data\.organizationId!==req\.organizationScope\.organizationId[\s\S]*ORG_SCOPE_DENIED/,'caller-supplied organization spoofing must fail closed');
 assert.match(service,/router\.post\('\/legal-entities'[\s\S]*router\.put\('\/legal-entities\/:id'/,'legal entities must have governed create and update surfaces');
+assert.match(service,/legal_entity_registration_identifier_no_overlap[\s\S]*LEGAL_ENTITY_IDENTIFIER_CONFLICT[\s\S]*legal_entity_tax_identifier_no_overlap[\s\S]*LEGAL_ENTITY_IDENTIFIER_CONFLICT/,'overlapping registration and tax identifiers must return stable conflict responses');
 assert.match(service,/targetId&&targetId!==req\.organizationScope\.legalEntityId[\s\S]*Legal entity not found/,'same-organization cross-legal mutation must fail closed');
 assert.match(service,/LEGAL_ENTITY_IN_USE[\s\S]*Update Legal Entity':'Create Legal Entity'[\s\S]*oldValue:/,'unsafe legal-entity deactivation must fail before audited mutation');
 assert.match(service,/insert into user_organization_scopes\(user_id,organization_id,legal_entity_id,active\)/,'a creator must receive explicit persisted scope for a newly created legal entity');

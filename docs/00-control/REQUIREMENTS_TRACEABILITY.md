@@ -26,7 +26,7 @@ A requirement cannot be marked accepted from a PR description or implementation-
 | WOS-CORE-004 | PR-004, 007–012 | Effective dates, historical versions, immutable history and controlled corrections | Blueprint |
 | WOS-CORE-005 | PR-006 through PR-014 | Common and module-specific production-mutation/audit evidence | Blueprint |
 | WOS-CORE-008 | PR-010 through PR-013 | Decimal-safe deterministic calculations, immutable evidence and reconciliation | Blueprint |
-| WOS-ORG-001–010 | PR-004 | Fresh/upgrade migrations, organization-scope negatives and guided-setup journeys | Not started |
+| WOS-ORG-001–010 | PR-004 | Fresh/upgrade migrations, organization-scoped uniqueness across effective identifier ranges (including concurrency), scope negatives and guided-setup journeys | Not started |
 | WOS-IAM-001–010 | PR-003, 004, 006, 014 | Mandatory configured production OIDC/named accounts, fail-closed startup/authentication for missing/invalid/unavailable identity configuration, non-production/demo-only local/shared identities, session and authorization evidence | Not started |
 | WOS-WKF-001–002, 006 | PR-004 | Worker migration, relationship/lifecycle dependencies and scoped administration | Not started |
 | WOS-WKF-003–005, 007–008 | PR-008 | Capacity, skills, single-count leave, self-service and scoped workforce views | Not started |
