@@ -79,6 +79,10 @@ export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
 export const getOrganizationScope = (): OrganizationScope | null => {
   try { return JSON.parse(sessionStorage.getItem(SCOPE_KEY) || 'null'); } catch { return null; }
 };
+export const clearOrganizationScope = () => {
+  try { sessionStorage.removeItem(SCOPE_KEY); } catch { /* server-side rendering has no session storage */ }
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('workos:organization-scope-changed'));
+};
 export const selectOrganizationScope = async (scope: OrganizationScope) => {
   const scopes = await apiFetch<OrganizationScope[]>('GET', '/api/auth/organization-scopes');
   if (!scopes.some(item => item.organizationId === scope.organizationId && item.legalEntityId === scope.legalEntityId)) throw new Error('Organization scope is not authorized');
@@ -90,7 +94,7 @@ export const selectOrganizationScope = async (scope: OrganizationScope) => {
 
 type ApiError = { error: string; reason?: string };
 
-const buildHeaders = (): HeadersInit => {
+export const getApiHeaders = (): HeadersInit => {
   const token = getToken();
   const scope = getOrganizationScope();
   return {
@@ -107,7 +111,7 @@ async function apiFetch<T>(
 ): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: buildHeaders(),
+    headers: getApiHeaders(),
     credentials: 'include',
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });

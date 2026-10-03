@@ -8,7 +8,7 @@ import express from 'express';
 import pg from 'pg';
 import { z } from 'zod';
 import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
-import { registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
+import { listAuthorizedOrganizationScopes, registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
@@ -96,16 +96,28 @@ const readCookie = (req, name) => {
     ?.slice(name.length + 1);
 };
 
-const requireAuth = async (req, res, next) => {
+const attachVerifiedIdentity = (req, res) => {
   const authHeader = req.headers.authorization || '';
   const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
   const cookieToken = readCookie(req, 'workos_session');
   const payload = verifyToken(bearerToken || cookieToken);
   if (!payload) {
     res.status(401).json({ error: 'Authentication required' });
-    return;
+    return false;
   }
   req.user = payload;
+  return true;
+};
+
+// Identity-only routes may establish or refresh a session before the user has
+// chosen one of several authorized data scopes. They must not read or mutate
+// organization data without the separate requireAuth scope check below.
+const requireIdentity = (req, res, next) => {
+  if (attachVerifiedIdentity(req, res)) next();
+};
+
+const requireAuth = async (req, res, next) => {
+  if (!attachVerifiedIdentity(req, res)) return;
   try {
     const scope = await resolveOrganizationScope(pool, req);
     req.organizationScope = scope;
@@ -1396,18 +1408,13 @@ app.post('/api/auth/logout', (_req, res) => {
 
 // Scope discovery deliberately authenticates identity without resolving a
 // context first; it is the only endpoint used to choose among multiple scopes.
-app.get('/api/auth/organization-scopes', requireDatabase, async (req, res) => {
-  const authHeader = req.headers.authorization || '';
-  const payload = verifyToken(authHeader.startsWith('Bearer ') ? authHeader.slice(7) : readCookie(req, 'workos_session'));
-  if (!payload) return res.status(401).json({ error: 'Authentication required' });
-  const result = await pool.query(`select s.organization_id "organizationId",s.legal_entity_id "legalEntityId",
-    o.name "organizationName",le.name "legalEntityName" from user_organization_scopes s
-    join organizations o on o.id=s.organization_id join legal_entities le on le.id=s.legal_entity_id and le.organization_id=s.organization_id
-    where s.user_id=$1 and s.active and o.status='Active' and le.status='Active'
-      and current_date between o.effective_from and coalesce(o.effective_to,'infinity'::date)
-      and current_date between le.effective_from and coalesce(le.effective_to,'infinity'::date)
-    order by o.name,le.name limit 100`,[payload.sub]);
-  res.json(result.rows);
+app.get('/api/auth/organization-scopes', requireDatabase, requireIdentity, async (req, res) => {
+  try {
+    res.json(await listAuthorizedOrganizationScopes(pool, req.user.sub));
+  } catch (error) {
+    console.error(error);
+    res.status(503).json({ error: 'Authoritative organization scopes are unavailable', code: 'ORG_SCOPE_UNAVAILABLE' });
+  }
 });
 
 app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res) => {
@@ -1474,7 +1481,7 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
   }
 });
 
-app.get('/api/auth/me', requireDatabase, requireAuth, async (req, res) => {
+app.get('/api/auth/me', requireDatabase, requireIdentity, async (req, res) => {
   try {
     const result = await pool.query(`
       select u.id, u.username, u.employee_id, u.email, u.must_change_password, u.status,

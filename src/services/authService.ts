@@ -5,7 +5,7 @@
  */
 import { UserAccount, UserRole, UserSession, CountryDirector, UserPermissionGrant, RolePermissionSetting } from '../types';
 import { DataStorage, STORAGE_KEYS } from './storage';
-import { checkBackend, storeToken, clearToken, getToken, resetBackendCheck, isDemoFallbackAllowed } from './apiClient';
+import { checkBackend, storeToken, clearToken, getApiHeaders, resetBackendCheck, isDemoFallbackAllowed } from './apiClient';
 import { getDefaultPermissionsForRole, getEffectivePermissions } from './permissions';
 
 const SESSION_KEY = 'workos_session';
@@ -136,6 +136,7 @@ export const authService = {
         if (!res.ok) return null;
         const data = await res.json() as ApiLoginResponse;
         const session = buildApiSession(data);
+        clearToken();
         storeToken(data.token);
         saveSession(session);
         return session;
@@ -173,6 +174,11 @@ export const authService = {
   completeEntraLogin: async (): Promise<UserSession | null> => {
     try {
       resetBackendCheck();
+      // A callback may follow an earlier session in the same browser tab. Do
+      // not let that stale bearer token override the new Entra session cookie.
+      clearToken();
+      sessionStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(STORAGE_KEYS.AUTH);
       if (!(await checkBackend())) return null;
       const res = await fetch('/api/auth/me', {
         method: 'GET',
@@ -203,10 +209,7 @@ export const authService = {
       try {
         const res = await fetch('/api/auth/switch-role', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
-          },
+          headers: getApiHeaders(),
           credentials: 'include',
           body: JSON.stringify({ role }),
         });
@@ -271,10 +274,7 @@ export const authService = {
       try {
         const res = await fetch('/api/auth/me', {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
-          },
+          headers: getApiHeaders(),
           credentials: 'include',
         });
         if (!res.ok) return null;
@@ -322,10 +322,7 @@ export const authService = {
       try {
         const res = await fetch('/api/auth/change-password', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
-          },
+          headers: getApiHeaders(),
           credentials: 'include',
           body: JSON.stringify({ currentPassword, newPassword }),
         });

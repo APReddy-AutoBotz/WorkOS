@@ -28,18 +28,39 @@ const scopeHeaders = request => ({
   legalEntityId: String(request.headers['x-legal-entity-id'] || '').trim(),
 });
 
+const currentOrganizationScopeSource = `
+  from user_organization_scopes s
+  join users u on u.id=s.user_id and u.status='Active'
+  join organizations o on o.id=s.organization_id
+  left join organization_profile_versions op on op.organization_id=o.id
+    and current_date between op.effective_from and coalesce(op.effective_to,'infinity'::date)
+  join legal_entities le on le.id=s.legal_entity_id and le.organization_id=s.organization_id
+  join legal_entity_profile_versions lp on lp.legal_entity_id=le.id and lp.organization_id=le.organization_id
+    and current_date between lp.effective_from and coalesce(lp.effective_to,'infinity'::date)
+`;
+const currentOrganizationScopePredicate = `
+  s.user_id=$1 and s.active=true and o.status='Active' and lp.status='Active'
+  and current_date between o.effective_from and coalesce(o.effective_to,'infinity'::date)
+  and current_date between le.effective_from and coalesce(lp.authority_effective_to,'infinity'::date)
+`;
+
+export const listAuthorizedOrganizationScopes = async (database, userId) => {
+  const result = await database.query(`
+    select s.organization_id "organizationId",s.legal_entity_id "legalEntityId",
+      coalesce(op.name,o.name) "organizationName",coalesce(lp.legal_name,le.name) "legalEntityName"
+    ${currentOrganizationScopeSource}
+    where ${currentOrganizationScopePredicate}
+    order by coalesce(op.name,o.name),coalesce(lp.legal_name,le.name) limit 100
+  `, [userId]);
+  return result.rows;
+};
+
 export const resolveOrganizationScope = async (database, request) => {
   const requested = scopeHeaders(request);
   const result = await database.query(`
     select s.organization_id, s.legal_entity_id
-    from user_organization_scopes s
-    join legal_entities le on le.id=s.legal_entity_id and le.organization_id=s.organization_id
-    join legal_entity_profile_versions lp on lp.legal_entity_id=le.id and lp.organization_id=le.organization_id
-      and current_date between lp.effective_from and coalesce(lp.effective_to,'infinity'::date)
-    join organizations o on o.id=s.organization_id
-    where s.user_id=$1 and s.active=true and o.status='Active' and lp.status='Active'
-      and current_date between o.effective_from and coalesce(o.effective_to,'infinity'::date)
-      and current_date between le.effective_from and coalesce(lp.authority_effective_to,'infinity'::date)
+    ${currentOrganizationScopeSource}
+    where ${currentOrganizationScopePredicate}
       and ($2::text='' or s.organization_id=$2)
       and ($3::text='' or s.legal_entity_id=$3)
     order by s.organization_id, s.legal_entity_id limit 2`,

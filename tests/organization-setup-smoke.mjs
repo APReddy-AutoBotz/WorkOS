@@ -37,6 +37,9 @@ const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
 const api = readFileSync('src/services/api.ts', 'utf8');
 const runtimeTerminology = readFileSync('src/config/RuntimeTerminology.tsx', 'utf8');
 const apiClient = readFileSync('src/services/apiClient.ts', 'utf8');
+const authService = readFileSync('src/services/authService.ts', 'utf8');
+const appSource = readFileSync('src/App.tsx', 'utf8');
+const scopeGate = readFileSync('src/components/auth/OrganizationScopeGate.tsx', 'utf8');
 const productConfig = readFileSync('src/config/productConfig.ts', 'utf8');
 
 const routeSource = (start, end) => {
@@ -360,6 +363,19 @@ assert.equal(lifecycleQueries.length, 2, 'employee updates and import replays mu
 assert.equal((server.match(/initializeNewWorkerLifecycle\(client,/g) || []).length, 2, 'canonical employee save and import must both initialize new worker state');
 assert.match(server, /employee:\$\{req\.organizationScope\.organizationId\}:\$\{parsed\.data\.employee_id\}[\s\S]*isNew: !previous/, 'canonical employee save must serialize organization-scoped new-record detection before worker initialization');
 assert.match(server, /api\/imports\/employees\/apply[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{row\.employeeId\}[\s\S]*isNew: !previous/, 'employee import must serialize organization-scoped new-record detection before worker initialization');
+assert.match(server, /const requireIdentity = \(req, res, next\)[\s\S]*const requireAuth = async[\s\S]*resolveOrganizationScope\(pool, req\)/, 'identity-only session bootstrap must stay separate from protected data scope enforcement');
+assert.match(server, /app\.get\('\/api\/auth\/me', requireDatabase, requireIdentity/, 'session bootstrap may refresh identity before an organization scope is selected');
+assert.match(server, /app\.get\('\/api\/auth\/organization-scopes', requireDatabase, requireIdentity[\s\S]*listAuthorizedOrganizationScopes/, 'scope discovery must authenticate identity without requiring an already-selected scope');
+assert.match(service, /const currentOrganizationScopeSource[\s\S]*legal_entity_profile_versions lp[\s\S]*current_date between lp\.effective_from[\s\S]*listAuthorizedOrganizationScopes[\s\S]*where \$\{currentOrganizationScopePredicate\}/, 'scope discovery and protected scope resolution must share current effective-profile authority');
+assert.match(service, /join users u on u\.id=s\.user_id and u\.status='Active'[\s\S]*coalesce\(op\.name,o\.name\)[\s\S]*coalesce\(lp\.legal_name,le\.name\)/, 'scope discovery must hide disabled accounts and use current effective profile labels');
+assert.match(authService, /fetch\('\/api\/auth\/switch-role'[\s\S]*headers: getApiHeaders\(\)/, 'role switching must propagate the explicitly selected organization scope');
+assert.match(authService, /completeEntraLogin:[\s\S]*clearToken\(\)[\s\S]*fetch\('\/api\/auth\/me'/, 'Entra completion must discard stale tab identity and bootstrap from the session cookie');
+assert.match(apiClient, /export const getApiHeaders[\s\S]*X-Organization-Id[\s\S]*X-Legal-Entity-Id/, 'scope-bound raw auth actions must share the selected-scope headers');
+assert.match(apiClient, /export const clearOrganizationScope/, 'the scope gate must be able to clear an expired or unauthorized selection');
+assert.match(appSource, /<OrganizationScopeGate><RuntimeTerminology>\{children\}<\/RuntimeTerminology><\/OrganizationScopeGate>/, 'authenticated application routes and scoped terminology must not mount until a valid scope is selected');
+assert.match(scopeGate, /\/api\/auth\/organization-scopes[\s\S]*status === 'choosing'[\s\S]*data-testid=\{`organization-scope-option-/, 'the scope gate must render authorized choices before mounting protected application content');
+assert.match(scopeGate, /No active organization access/, 'users with no currently authorized scope must fail closed');
+assert.match(runtimeTerminology, /if \(!getOrganizationScope\(\)\)[\s\S]*applyPersistedTerminology\(\{\}\)/, 'runtime profile data must not be requested before a scope is chosen');
 assert.match(workerLifecycle, /select e\.id, \$2, \$3, \$4::date, \$5::text,[\s\S]*jsonb_build_object\('status', \$5::text, 'reason', \$6::text, 'source', \$7::text, 'previousStatus', \$8::text[\s\S]*e\.status=\$5::text/, 'reactivation insert parameters used by polymorphic JSON and INSERT SELECT must have explicit PostgreSQL types');
 
 const makeReactivationClient = ({

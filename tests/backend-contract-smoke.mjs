@@ -26,7 +26,8 @@ assert.match(server, /API_SESSION_TTL_HOURS/, 'session TTL must be configurable 
 assert.match(server, /maxAge: getSessionTtlMs\(\)/, 'session cookie must use configured maxAge');
 assert.doesNotMatch(server, /Date\.now\(\) \+ 8 \* 60 \* 60 \* 1000/, 'session expiry must not be hardcoded at token issuance');
 assert.match(server, /sessionExpiresAt/, 'login and role switching must expose session expiry metadata');
-assert.match(server, /app\.get\('\/api\/auth\/me', requireDatabase, requireAuth, async/, 'auth/me must refresh the session from the database');
+assert.match(server, /app\.get\('\/api\/auth\/me', requireDatabase, requireIdentity, async/, 'auth/me must refresh identity before an organization scope is selected');
+assert.match(server, /app\.get\('\/api\/employees', requireDatabase, requireAuth, requirePermission/, 'protected employee data must still require an explicit resolved scope');
 assert.match(server, /app\.get\('\/api\/auth\/me'[\s\S]*getEffectivePermissionsForUser[\s\S]*res\.cookie\?\.\('workos_session'/, 'auth/me must recompute permissions and issue a refreshed token');
 assert.match(server, /app\.post\('\/api\/auth\/change-password'/, 'self-service password change route must exist');
 assert.match(server, /app\.get\('\/api\/auth\/entra\/config'/, 'Entra login config route must exist');

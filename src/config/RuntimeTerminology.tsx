@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { applyPersistedTerminology } from './productConfig';
-import { api } from '../services/apiClient';
+import { api, getOrganizationScope } from '../services/apiClient';
 import { authService } from '../services/authService';
 
 type TerminologyResponse = { terms?: Record<string, unknown> };
@@ -11,6 +11,10 @@ export const loadRuntimeTerminology = async (
   fetchTerms: () => Promise<TerminologyResponse> = () => api.get<TerminologyResponse>('/api/organization-setup/terminology'),
 ) => {
   if (!authenticated) {
+    applyPersistedTerminology({});
+    return;
+  }
+  if (!getOrganizationScope()) {
     applyPersistedTerminology({});
     return;
   }
