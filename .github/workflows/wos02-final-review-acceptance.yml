@@ -27,8 +27,8 @@ permissions:
 env:
   TARGET_PR: '37'
   TARGET_BRANCH: codex/wos-02-organization-setup-foundation
-  TARGET_HEAD: bb1e1062dca0e41083c63be7836474d91e05b9ed
-  TARGET_TREE: 41dfbc7ca69901d193d08aa4b99143578415ce05
+  TARGET_HEAD: 1b3d2dd7dbf753defde75978ee90dfc050b9b30e
+  TARGET_TREE: 2b8306e059539b077886247d74abd32010e1ea79
   EXPECTED_MAIN_HEAD: 3070c80a71640fa4275477d0d2f1538cc8d2a819
   RETAINED_WOS01_CONTROLLER: b48f40b61d26c21920b00f658a720c02b1f01c08
   PGHOST: 127.0.0.1
@@ -60,7 +60,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Verify exact product controller main and 47-file authority
+      - name: Verify exact product controller main and 48-file authority
         uses: actions/github-script@v7
         with:
           script: |
@@ -130,8 +130,10 @@ jobs:
             ];
             const migration031 = actual.filter(path => /^server\/migrations\/031_[a-z0-9_]+\.sql$/.test(path));
             if (migration031.length !== 1) failures.push(`migration 031 authority=${JSON.stringify(migration031)}`);
-            const expected = [...required, ...migration031].sort();
-            if (actual.length !== 47 || JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`target files=${JSON.stringify(actual)}`);
+            const migration032 = actual.filter(path => /^server\/migrations\/032_[a-z0-9_]+\.sql$/.test(path));
+            if (migration032.length !== 1) failures.push(`migration 032 authority=${JSON.stringify(migration032)}`);
+            const expected = [...required, ...migration031, ...migration032].sort();
+            if (actual.length !== 48 || JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`target files=${JSON.stringify(actual)}`);
             if (failures.length) core.setFailed(`authority failed: ${failures.join('; ')}`);
 
       - name: Checkout exact controller
@@ -258,12 +260,12 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 40); do pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres && break; sleep 1; done
-          for db in wos02_final_fresh wos02_final_upgrade wos02_final_live wos02_scope_write wos02_admin_scope wos02_worker_lifecycle wos02_mutation_lifecycle wos02_reporting_period wos02_reporting_u8u9 wos02_readiness wos02_org_profile wos02_calendar wos02_demo_seed wos02_final_prod; do
+          for db in wos02_final_fresh wos02_final_upgrade wos02_legal_identifier_conflict wos02_final_live wos02_scope_write wos02_admin_scope wos02_worker_lifecycle wos02_mutation_lifecycle wos02_reporting_period wos02_reporting_u8u9 wos02_readiness wos02_org_profile wos02_calendar wos02_demo_seed wos02_final_prod; do
             dropdb --if-exists -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
             createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$db"
           done
 
-      - name: Fresh install and replay migrations 022 through 031
+      - name: Fresh install and replay migrations 022 through 032
         shell: bash
         working-directory: target
         env:
@@ -272,11 +274,14 @@ jobs:
           set -euo pipefail
           migration031="$(find server/migrations -maxdepth 1 -type f -name '031_*.sql' -printf '%f\n')"
           test "$(printf '%s\n' "$migration031" | sed '/^$/d' | wc -l)" = 1
+          migration032="$(find server/migrations -maxdepth 1 -type f -name '032_*.sql' -printf '%f\n')"
+          test "$(printf '%s\n' "$migration032" | sed '/^$/d' | wc -l)" = 1
           id031="${migration031%.sql}"
-          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','025a_wos02_project_legal_scope_unique_prerequisite','026_wos02_canonical_legal_scope_integrity','027_wos02_reporting_period_authority','028_wos02_organization_legal_entity_profiles','029_wos02_working_calendar_authority','030_wos02_reporting_period_frequency','$id031'"
+          id032="${migration032%.sql}"
+          ids="'022_organization_setup_foundation','023_wos02_scope_lifecycle_integrity','024_wos02_final_review_closure','025_wos02_timesheet_scope_integrity','025a_wos02_project_legal_scope_unique_prerequisite','026_wos02_canonical_legal_scope_integrity','027_wos02_reporting_period_authority','028_wos02_organization_legal_entity_profiles','029_wos02_working_calendar_authority','030_wos02_reporting_period_frequency','$id031','$id032'"
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-first.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 11
-          node -e "const fs=require('fs');const f=fs.readdirSync('server/migrations').filter(x=>x.endsWith('.sql')).sort();const m31=f.filter(x=>/^031_[a-z0-9_]+\.sql$/.test(x));if(m31.length!==1)throw new Error('invalid migration 031 inventory '+f.join(','));const names=['025_wos02_timesheet_scope_integrity.sql','025a_wos02_project_legal_scope_unique_prerequisite.sql','026_wos02_canonical_legal_scope_integrity.sql','027_wos02_reporting_period_authority.sql','028_wos02_organization_legal_entity_profiles.sql','029_wos02_working_calendar_authority.sql','030_wos02_reporting_period_frequency.sql',m31[0]];const p=names.map(x=>f.indexOf(x));if(p.some(x=>x<0)||p.some((x,i)=>i&&p[i-1]>=x))throw new Error('invalid migration order '+f.join(','));"
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 12
+          node -e "const fs=require('fs');const f=fs.readdirSync('server/migrations').filter(x=>x.endsWith('.sql')).sort();const m31=f.filter(x=>/^031_[a-z0-9_]+\.sql$/.test(x)),m32=f.filter(x=>/^032_[a-z0-9_]+\.sql$/.test(x));if(m31.length!==1||m32.length!==1)throw new Error('invalid migration 031/032 inventory '+f.join(','));const names=['025_wos02_timesheet_scope_integrity.sql','025a_wos02_project_legal_scope_unique_prerequisite.sql','026_wos02_canonical_legal_scope_integrity.sql','027_wos02_reporting_period_authority.sql','028_wos02_organization_legal_entity_profiles.sql','029_wos02_working_calendar_authority.sql','030_wos02_reporting_period_frequency.sql',m31[0],m32[0]];const p=names.map(x=>f.indexOf(x));if(p.some(x=>x<0)||p.some((x,i)=>i&&p[i-1]>=x))throw new Error('invalid migration order '+f.join(','));"
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where indexname='uq_projects_org_legal_id'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname='project_allocations_project_legal_scope_fk'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname='reporting_period_ranges_no_overlap'")" = 0
@@ -284,19 +289,55 @@ jobs:
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from reporting_periods where frequency is null or frequency not in ('Weekly','Monthly','Fiscal')")" = 0
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from information_schema.tables where table_name in ('organization_profile_versions','legal_entity_profile_versions')")" = 2
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname in ('organization_profile_versions_no_overlap','legal_entity_profile_versions_no_overlap')")" = 2
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where indexname in ('uq_legal_entity_registration_identity','uq_legal_entity_tax_identity')")" = 2
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_constraint where conname in ('legal_entity_registration_identifier_no_overlap','legal_entity_tax_identifier_no_overlap')")" = 2
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from pg_indexes where indexname in ('uq_legal_entity_registration_identity','uq_legal_entity_tax_identity')")" = 0
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from organization_profile_versions where organization_id='org-default'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from legal_entity_profile_versions where legal_entity_id='legal-default'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from information_schema.columns where table_name='legal_entity_profile_versions' and column_name in ('legal_name','country_code','status')")" = 3
           test "$(psql "$DATABASE_URL" -Atc "select legal_name||'|'||country_code||'|'||status from legal_entity_profile_versions where legal_entity_id='legal-default'")" = "$(psql "$DATABASE_URL" -Atc "select name||'|'||country_code||'|'||status from legal_entities where id='legal-default'")"
           node server/migrate.mjs | tee "$RUNNER_TEMP/wos02-final-fresh-replay.log"
-          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 11
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id in ($ids)")" = 12
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id='028_wos02_organization_legal_entity_profiles'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id='029_wos02_working_calendar_authority'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id='030_wos02_reporting_period_frequency'")" = 1
           test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id='$id031'")" = 1
+          test "$(psql "$DATABASE_URL" -Atc "select count(*) from schema_migrations where id='$id032'")" = 1
 
-      - name: Exact WOS-01A upgrade backfill reconciliation and replay through 031
+      - name: Refuse upgrade with overlapping legacy legal identifiers
+        shell: bash
+        env:
+          IDENTIFIER_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_legal_identifier_conflict
+        run: |
+          set -euo pipefail
+          (cd accepted-main && DATABASE_URL="$IDENTIFIER_URL" node server/migrate.mjs)
+          migration032="$(find target/server/migrations -maxdepth 1 -type f -name '032_*.sql' -printf '%f\n')"
+          test "$(printf '%s\n' "$migration032" | sed '/^$/d' | wc -l)" = 1
+          mv "target/server/migrations/$migration032" "$RUNNER_TEMP/$migration032"
+          restore_migration032() { mv "$RUNNER_TEMP/$migration032" "target/server/migrations/$migration032"; }
+          trap restore_migration032 EXIT
+          (cd target && DATABASE_URL="$IDENTIFIER_URL" node server/migrate.mjs)
+          restore_migration032
+          trap - EXIT
+          psql "$IDENTIFIER_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from) values
+            ('legal-id-conflict-a','org-default','LEGAL-ID-CONFLICT-A','Identifier Conflict A','US','Active',current_date-30),
+            ('legal-id-conflict-b','org-default','LEGAL-ID-CONFLICT-B','Identifier Conflict B','US','Active',current_date-30);
+          insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,country_code,status,registration_identifier,tax_identifier,reporting_currency,address,effective_from,effective_to) values
+            ('legal-id-conflict-a','org-default','Identifier Conflict A','US','Active','REG-LEGACY-OVERLAP','TAX-LEGACY-A','USD',jsonb_build_object('line1','Synthetic','city','Synthetic','countryCode','US'),current_date-30,current_date+30),
+            ('legal-id-conflict-b','org-default','Identifier Conflict B','US','Active','REG-LEGACY-OVERLAP','TAX-LEGACY-B','USD',jsonb_build_object('line1','Synthetic','city','Synthetic','countryCode','US'),current_date-10,null);
+          SQL
+          if (cd target && DATABASE_URL="$IDENTIFIER_URL" node server/migrate.mjs > "$RUNNER_TEMP/wos02-identifier-conflict-migration.log" 2>&1); then
+            cat "$RUNNER_TEMP/wos02-identifier-conflict-migration.log"
+            echo 'Migration 032 unexpectedly accepted overlapping legacy registration identifiers' >&2
+            exit 1
+          fi
+          grep -F 'Overlapping registration-identifier effective ranges must be corrected before migration 032' "$RUNNER_TEMP/wos02-identifier-conflict-migration.log"
+          test "$(psql "$IDENTIFIER_URL" -Atc "select count(*) from schema_migrations where id='032_wos02_legal_identifier_effective_ranges'")" = 0
+          test "$(psql "$IDENTIFIER_URL" -Atc "select count(*) from pg_indexes where indexname in ('uq_legal_entity_registration_identity','uq_legal_entity_tax_identity')")" = 2
+          test "$(psql "$IDENTIFIER_URL" -Atc "select count(*) from pg_constraint where conname in ('legal_entity_registration_identifier_no_overlap','legal_entity_tax_identifier_no_overlap')")" = 0
+          test "$(psql "$IDENTIFIER_URL" -Atc "select count(*) from legal_entity_profile_versions where registration_identifier='REG-LEGACY-OVERLAP'")" = 2
+
+      - name: Exact WOS-01A upgrade backfill reconciliation and replay through 032
         shell: bash
         env:
           UPGRADE_URL: postgresql://workos:workos@127.0.0.1:5432/wos02_final_upgrade
@@ -323,8 +364,12 @@ jobs:
           mv target/server/migrations/030_wos02_reporting_period_frequency.sql "$RUNNER_TEMP/030_wos02_reporting_period_frequency.sql"
           migration031="$(find target/server/migrations -maxdepth 1 -type f -name '031_*.sql' -printf '%f\n')"
           test "$(printf '%s\n' "$migration031" | sed '/^$/d' | wc -l)" = 1
+          migration032="$(find target/server/migrations -maxdepth 1 -type f -name '032_*.sql' -printf '%f\n')"
+          test "$(printf '%s\n' "$migration032" | sed '/^$/d' | wc -l)" = 1
           id031="${migration031%.sql}"
+          id032="${migration032%.sql}"
           mv "target/server/migrations/$migration031" "$RUNNER_TEMP/$migration031"
+          mv "target/server/migrations/$migration032" "$RUNNER_TEMP/$migration032"
           (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
           psql "$UPGRADE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           insert into reporting_periods(organization_id,legal_entity_id,code,name,starts_on,ends_on,status)
@@ -338,6 +383,7 @@ jobs:
           mv "$RUNNER_TEMP/029_wos02_working_calendar_authority.sql" target/server/migrations/029_wos02_working_calendar_authority.sql
           mv "$RUNNER_TEMP/030_wos02_reporting_period_frequency.sql" target/server/migrations/030_wos02_reporting_period_frequency.sql
           mv "$RUNNER_TEMP/$migration031" "target/server/migrations/$migration031"
+          mv "$RUNNER_TEMP/$migration032" "target/server/migrations/$migration032"
           (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
           after="$(psql "$UPGRADE_URL" -Atc "select (select count(*) from employees)||'|'||(select count(*) from clients)||'|'||(select count(*) from projects)||'|'||(select count(*) from project_allocations)||'|'||(select count(*) from timesheets)")"
           test "$before" = "$after"
@@ -356,6 +402,7 @@ jobs:
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from legal_entity_profile_versions where organization_id='org-default' and legal_entity_id='legal-default'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select legal_name||'|'||country_code||'|'||status from legal_entity_profile_versions where organization_id='org-default' and legal_entity_id='legal-default'")" = "$(psql "$UPGRADE_URL" -Atc "select name||'|'||country_code||'|'||status from legal_entities where organization_id='org-default' and id='legal-default'")"
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='$id031'")" = 1
+          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='$id032'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select id||'|'||organization_id||'|'||legal_entity_id from working_calendars where id='calendar-upgrade-retained'")" = 'calendar-upgrade-retained|org-default|legal-default'
           test "$(psql "$UPGRADE_URL" -Atc "select working_calendar_id from worker_profiles where employee_id='e-final-up'")" = 'calendar-upgrade-retained'
           (cd target && DATABASE_URL="$UPGRADE_URL" node server/migrate.mjs)
@@ -363,6 +410,7 @@ jobs:
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='029_wos02_working_calendar_authority'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='030_wos02_reporting_period_frequency'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='$id031'")" = 1
+          test "$(psql "$UPGRADE_URL" -Atc "select count(*) from schema_migrations where id='$id032'")" = 1
           test "$(psql "$UPGRADE_URL" -Atc "select status from reporting_periods where code='RP-LEGACY-LOCKED'")" = 'Financially Locked'
 
       - name: Execute retained corrected 17-check live API and DB closure matrix

@@ -9,6 +9,7 @@ const root=process.env.TARGET_ROOT, db=process.env.DATABASE_URL;
 if(!root||!db) throw new Error('TARGET_ROOT and DATABASE_URL are required');
 const {Pool}=createRequire(path.join(root,'package.json'))('pg');
 const pool=new Pool({connectionString:db});
+const identifierDates=(await pool.query(`select current_date::text today,(current_date+30)::text change_date,(current_date+29)::text prior_end`)).rows[0];
 const failures=[];
 const check=async(name,fn)=>{try{await fn();console.log(`PASS ${name}`)}catch(error){failures.push({name,error:error?.stack||String(error)});console.error(`FAIL ${name}: ${error?.stack||error}`)}};
 const iso=value=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
@@ -45,10 +46,11 @@ for(let i=0;i<120;i++){try{const r=await fetch(origin+'/api/health');if(r.status
 const profile={name:'Profile Org Updated',legalName:'Profile Org Incorporated',productDisplayName:'Profile WorkOS',supportContact:'https://support.profile.example.test',defaultLocale:'en-IN',defaultTimeZone:'Asia/Kolkata',baseCurrency:'INR',fiscalYearStart:'04-01',defaultWeekStart:1,effectiveFrom:'2026-09-01'};
 let created;
 try{
- await check('migration 028 authority/backfill/non-overlap/scoped identities',async()=>{
+ await check('migration 028/032 authority/backfill/effective identifier exclusion constraints',async()=>{
   assert.equal(Number((await pool.query(`select count(*) n from schema_migrations where id='028_wos02_organization_legal_entity_profiles'`)).rows[0].n),1);
-  assert.equal(Number((await pool.query(`select count(*) n from pg_constraint where conname in ('organization_profile_versions_no_overlap','legal_entity_profile_versions_no_overlap')`)).rows[0].n),2);
-  assert.equal(Number((await pool.query(`select count(*) n from pg_indexes where indexname in ('uq_legal_entity_registration_identity','uq_legal_entity_tax_identity')`)).rows[0].n),2);
+  assert.equal(Number((await pool.query(`select count(*) n from schema_migrations where id='032_wos02_legal_identifier_effective_ranges'`)).rows[0].n),1);
+  assert.equal(Number((await pool.query(`select count(*) n from pg_constraint where conname in ('organization_profile_versions_no_overlap','legal_entity_profile_versions_no_overlap','legal_entity_registration_identifier_no_overlap','legal_entity_tax_identifier_no_overlap')`)).rows[0].n),4);
+  assert.equal(Number((await pool.query(`select count(*) n from pg_indexes where indexname in ('uq_legal_entity_registration_identity','uq_legal_entity_tax_identity')`)).rows[0].n),0);
   assert.equal(Number((await pool.query(`select count(*) n from organization_profile_versions where organization_id='org-default'`)).rows[0].n),1);
   assert.equal(Number((await pool.query(`select count(*) n from legal_entity_profile_versions where legal_entity_id='legal-default'`)).rows[0].n),1);
  });
@@ -105,6 +107,72 @@ try{
   expect(await request('PUT',`/api/organization-setup/legal-entities/${FUTURE_LEGAL}`,current,futureHeaders),200);
   const base=(await pool.query(`select name,country_code,status from legal_entities where id=$1`,[FUTURE_LEGAL])).rows[0];assert.deepEqual(base,{name:current.legalName,country_code:'US',status:'Active'});
   assert.equal(Number((await pool.query(`select count(*) n from legal_entity_profile_versions where legal_entity_id=$1`,[FUTURE_LEGAL])).rows[0].n),2);
+ });
+ await check('scheduled registration and tax identifiers remain reserved through their effective end',async()=>{
+  const scheduled={code:'LEGAL-PROFILE',legalName:'Profile Legal Future',registrationIdentifier:'REG-PROFILE-FUTURE',taxIdentifier:'TAX-PROFILE-FUTURE',reportingCurrency:'USD',address:{line1:'1 Future Profile Street',city:'Profile City',countryCode:'US'},status:'Active',effectiveFrom:identifierDates.change_date};
+  expect(await request('PUT',`/api/organization-setup/legal-entities/${LEGAL}`,scheduled),200);
+  const versions=(await pool.query(`select registration_identifier,tax_identifier,effective_from,effective_to from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from`,[LEGAL])).rows;
+  assert.equal(versions.length,2);assert.equal(versions[0].registration_identifier,'REG-PROFILE');assert.equal(versions[0].tax_identifier,'TAX-PROFILE');
+  assert.equal(iso(versions[0].effective_to),identifierDates.prior_end);assert.equal(iso(versions[1].effective_from),identifierDates.change_date);
+
+  const rollbackA=await request('POST','/api/organization-setup/legal-entities',{code:'LEGAL-ROLLBACK-A',legalName:'Rollback A',registrationIdentifier:'REG-ROLLBACK-X',taxIdentifier:'TAX-ROLLBACK-A',reportingCurrency:'USD',address:{line1:'Rollback',city:'Rollback',countryCode:'US'},status:'Active',effectiveFrom:identifierDates.today});expect(rollbackA,201);
+  const rollbackB=await request('POST','/api/organization-setup/legal-entities',{code:'LEGAL-ROLLBACK-B',legalName:'Rollback B',registrationIdentifier:'REG-ROLLBACK-B',taxIdentifier:'TAX-ROLLBACK-B',reportingCurrency:'USD',address:{line1:'Rollback',city:'Rollback',countryCode:'US'},status:'Active',effectiveFrom:identifierDates.today});expect(rollbackB,201);
+  const rollbackBHeaders={...headers,'x-legal-entity-id':rollbackB.body.id};
+  const profileSnapshot=async()=>JSON.stringify((await pool.query(`select legal_name,registration_identifier,tax_identifier,effective_from::text,effective_to::text from legal_entity_profile_versions where legal_entity_id=$1 order by effective_from`,[rollbackB.body.id])).rows);
+  const baseSnapshot=async()=>JSON.stringify((await pool.query(`select name,country_code,status,effective_from::text,effective_to::text from legal_entities where id=$1`,[rollbackB.body.id])).rows);
+  const beforeProfiles=await profileSnapshot(),beforeBase=await baseSnapshot();
+  const beforeAudit=Number((await pool.query(`select count(*) n from audit_logs where action='Update Legal Entity' and entity_id=$1`,[rollbackB.body.id])).rows[0].n);
+  const rollbackConflict=await request('PUT',`/api/organization-setup/legal-entities/${rollbackB.body.id}`,{code:'LEGAL-ROLLBACK-B',legalName:'Rollback B Scheduled',registrationIdentifier:'REG-ROLLBACK-X',taxIdentifier:'TAX-ROLLBACK-B-FUTURE',reportingCurrency:'USD',address:{line1:'Rollback',city:'Rollback',countryCode:'US'},status:'Active',effectiveFrom:identifierDates.change_date},rollbackBHeaders);
+  expect(rollbackConflict,409);assert.equal(rollbackConflict.body.code,'LEGAL_ENTITY_IDENTIFIER_CONFLICT');assert.equal(rollbackConflict.body.field,'registrationIdentifier');
+  assert.equal(await profileSnapshot(),beforeProfiles,'failed identifier update must roll back the prior profile closure and inserted version');
+  assert.equal(await baseSnapshot(),beforeBase,'failed future update must leave the compatibility projection unchanged');
+  assert.equal(Number((await pool.query(`select count(*) n from audit_logs where action='Update Legal Entity' and entity_id=$1`,[rollbackB.body.id])).rows[0].n),beforeAudit,'failed identifier update must not emit audit');
+
+  const nullIdentifierClaims=await Promise.all(['A','B'].map(s=>request('POST','/api/organization-setup/legal-entities',{code:`LEGAL-NULL-${s}`,legalName:`Null ${s}`,registrationIdentifier:null,taxIdentifier:null,reportingCurrency:'USD',address:{line1:'Null',city:'Null',countryCode:'US'},status:'Active',effectiveFrom:identifierDates.today})));
+  assert.deepEqual(nullIdentifierClaims.map(r=>r.status),[201,201],'null optional identifiers remain exempt from the exclusion constraints');
+
+  const registrationClaim={code:'LEGAL-OVERLAP-REG',legalName:'Overlap Registration Claim',registrationIdentifier:'REG-PROFILE',taxIdentifier:'TAX-OVERLAP-REG',reportingCurrency:'USD',address:{line1:'Overlap',city:'Overlap',countryCode:'US'},status:'Active',effectiveFrom:identifierDates.today};
+  const registrationConflict=await request('POST','/api/organization-setup/legal-entities',registrationClaim);expect(registrationConflict,409);
+  assert.equal(registrationConflict.body.code,'LEGAL_ENTITY_IDENTIFIER_CONFLICT');assert.equal(registrationConflict.body.field,'registrationIdentifier');
+  const taxClaim={code:'LEGAL-OVERLAP-TAX',legalName:'Overlap Tax Claim',registrationIdentifier:'REG-OVERLAP-TAX',taxIdentifier:'TAX-PROFILE',reportingCurrency:'USD',address:{line1:'Overlap',city:'Overlap',countryCode:'US'},status:'Active',effectiveFrom:identifierDates.today};
+  const taxConflict=await request('POST','/api/organization-setup/legal-entities',taxClaim);expect(taxConflict,409);
+  assert.equal(taxConflict.body.code,'LEGAL_ENTITY_IDENTIFIER_CONFLICT');assert.equal(taxConflict.body.field,'taxIdentifier');
+  assert.equal(Number((await pool.query(`select count(*) n from legal_entities where organization_id=$1 and code in ('LEGAL-OVERLAP-REG','LEGAL-OVERLAP-TAX')`,[ORG])).rows[0].n),0,'failed identifier claims must roll back entity rows');
+
+  const client=await pool.connect();
+  try {
+    await client.query('begin');
+    await client.query(`update legal_entity_profile_versions set registration_identifier='REG-PROFILE',tax_identifier='TAX-PROFILE' where legal_entity_id=$1 and organization_id=$2 and effective_from='2026-01-01'`,[OTHER_LEGAL,OTHER_ORG]);
+    await client.query('rollback');
+  } catch(error) { await client.query('rollback'); throw error; } finally { client.release(); }
+
+  const sameOrgClient=await pool.connect();
+  try {
+    await sameOrgClient.query('begin');
+    await sameOrgClient.query(`insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from) values('legal-identifier-direct-conflict',$1,'LEGAL-ID-DIRECT','Direct Claim','US','Active',$2::date)`,[ORG,identifierDates.today]);
+    await assert.rejects(()=>sameOrgClient.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,country_code,status,registration_identifier,tax_identifier,reporting_currency,address,effective_from) values('legal-identifier-direct-conflict',$1,'Direct Claim','US','Active','REG-PROFILE','TAX-DIRECT','USD',$2::jsonb,$3::date)`,[ORG,address,identifierDates.today]),error=>error.code==='23P01'&&error.constraint==='legal_entity_registration_identifier_no_overlap');
+  } finally { await sameOrgClient.query('rollback');sameOrgClient.release(); }
+
+  const claimConcurrently=async(suffix)=>{
+    const connection=await pool.connect();
+    try {
+      await connection.query('begin');
+      const legalId=`legal-identifier-race-${suffix}-${crypto.randomUUID()}`;
+      await connection.query(`insert into legal_entities(id,organization_id,code,name,country_code,status,effective_from) values($1,$2,$3,$4,'US','Active',$5::date)`,[legalId,ORG,`LEGAL-RACE-${suffix}-${crypto.randomUUID().slice(0,8)}`,`Concurrent ${suffix}`,identifierDates.today]);
+      await connection.query(`insert into legal_entity_profile_versions(legal_entity_id,organization_id,legal_name,country_code,status,registration_identifier,tax_identifier,reporting_currency,address,effective_from) values($1,$2,$3,'US','Active','REG-IDENTIFIER-RACE',$4,'USD',$5::jsonb,$6::date)`,[legalId,ORG,`Concurrent ${suffix}`,`TAX-RACE-${suffix}`,address,identifierDates.today]);
+      await connection.query('commit');return {outcome:'created'};
+    } catch(error) {
+      await connection.query('rollback');
+      if(error.code==='23P01')return {outcome:'conflict',constraint:error.constraint};
+      throw error;
+    } finally {connection.release();}
+  };
+  const concurrent=await Promise.all([claimConcurrently('A'),claimConcurrently('B')]);
+  assert.deepEqual(concurrent.map(x=>x.outcome).sort(),['conflict','created']);
+  assert.equal(concurrent.find(x=>x.outcome==='conflict').constraint,'legal_entity_registration_identifier_no_overlap');
+
+  const reused={code:'LEGAL-REUSE-OLD-IDENTIFIERS',legalName:'Reused Prior Identifiers',registrationIdentifier:'REG-PROFILE',taxIdentifier:'TAX-PROFILE',reportingCurrency:'USD',address:{line1:'Reuse',city:'Reuse',countryCode:'US'},status:'Active',effectiveFrom:identifierDates.change_date};
+  expect(await request('POST','/api/organization-setup/legal-entities',reused),201,'adjacent, non-overlapping identifier ranges may reuse prior values');
  });
  await check('legal-entity create is atomic with creator scope and audit',async()=>{
   const p={code:'LEGAL-NEW',legalName:'New Legal Entity LLC',registrationIdentifier:'REG-NEW',taxIdentifier:'TAX-NEW',reportingCurrency:'EUR',address:{line1:'10 New Street',city:'New City',countryCode:'DE'},status:'Active',effectiveFrom:'2026-09-01'};
