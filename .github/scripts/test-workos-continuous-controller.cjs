@@ -24,6 +24,68 @@ const {
 const HEAD = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
 const OTHER_HEAD = 'c'.repeat(40);
+const MAIN_SHA = BASE;
+const REPOSITORY = 'APReddy-AutoBotz/WorkOS';
+const WOS02_TASK_PATH = 'docs/tasks/WOS-02-ORGANIZATION-SETUP-FOUNDATION.md';
+const WOS02_BRANCH = 'codex/wos-02-organization-setup-foundation';
+const WOS02_TASK_DOC = readFileSync(
+  `${__dirname}/../../docs/tasks/WOS-02-ORGANIZATION-SETUP-FOUNDATION.md`,
+  'utf8',
+);
+
+function continuationBody({taskPath = WOS02_TASK_PATH, issue = 4} = {}) {
+  return [
+    'WORKOS-CONTINUATION-LANE: product-implementation',
+    `WORKOS-GOVERNING-TASK: ${taskPath}`,
+    `WORKOS-GOVERNING-ISSUE: ${issue}`,
+    '',
+    'Continue only this governing product task.',
+  ].join('\n');
+}
+
+function productDraft({
+  number = 27,
+  title = 'WOS-02: Organization foundation',
+  branch = WOS02_BRANCH,
+  body = continuationBody(),
+  headSha = HEAD,
+  baseSha = MAIN_SHA,
+  baseRef = 'main',
+  headRepo = REPOSITORY,
+  baseRepo = REPOSITORY,
+} = {}) {
+  return {
+    number,
+    title,
+    state: 'open',
+    draft: true,
+    body,
+    updated_at: '2026-08-28T01:00:00Z',
+    head: {sha: headSha, ref: branch, repo: {full_name: headRepo}},
+    base: {sha: baseSha, ref: baseRef, repo: {full_name: baseRepo}},
+  };
+}
+
+function encodedTaskFile(markdown = WOS02_TASK_DOC) {
+  const bytes = Buffer.from(markdown, 'utf8');
+  return {data: {type: 'file', encoding: 'base64', size: bytes.length, content: bytes.toString('base64')}};
+}
+
+function taskLookup({markdown = WOS02_TASK_DOC, error = null} = {}) {
+  const calls = [];
+  const github = {
+    rest: {
+      repos: {
+        getContent: async (args) => {
+          calls.push(args);
+          if (error) throw error;
+          return encodedTaskFile(markdown);
+        },
+      },
+    },
+  };
+  return {github, calls};
+}
 
 assert.deepEqual(
   parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD} base=${BASE}]`),
@@ -262,7 +324,6 @@ const pulls = [
     base: {sha: BASE},
   },
 ];
-assert.equal(selectActiveDraft(pulls).number, 26);
 assert.equal(selectMergeCandidate(pulls), null);
 
 const ready = {
@@ -463,6 +524,279 @@ function buildMergeHarness({
     get counts() { return {pullReads, checkReads, reviewReads}; },
     get mergeArgs() { return mergeArgs; },
   };
+}
+
+async function verifyProductLaneSelector() {
+  const valid = productDraft({title: 'Alternative title; task authority is controlling'});
+  const controller = {
+    ...productDraft({number: 28, title: 'CTRL: Add guarded monitoring', branch: 'controller/workos-continuous-controller-v2'}),
+    body: '## Outcome\nController-only work. No product continuation authority is declared.',
+  };
+  const acceptance = {
+    ...productDraft({number: 38, title: 'WOS-02 CTRL: Exact-head acceptance', branch: 'controller/wos02-exact-acceptance'}),
+    body: '## Purpose\nRead-only exact-head acceptance controller for product PR #37.\n\nGoverning issue/task: #4 / `docs/tasks/WOS-02-ORGANIZATION-SETUP-FOUNDATION.md`.',
+  };
+
+  const lookup = taskLookup();
+  const selected = await selectActiveDraft({
+    github: lookup.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [controller, acceptance, valid],
+    mainSha: MAIN_SHA,
+  });
+  assert.equal(selected.number, valid.number, 'only a Draft with explicit product task authority is selected');
+  assert.deepEqual(lookup.calls, [{
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    path: WOS02_TASK_PATH,
+    ref: MAIN_SHA,
+  }], 'the governing task is read from current main, not the candidate head');
+
+  const currentPullsOnly = taskLookup();
+  const currentSelection = await selectActiveDraft({
+    github: currentPullsOnly.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [controller, acceptance],
+    mainSha: MAIN_SHA,
+  });
+  assert.equal(currentSelection, null, 'the actual #28 and #38 controller/evidence lanes are not product candidates');
+  assert.equal(currentPullsOnly.calls.length, 0, 'undeclared lanes are excluded before task lookup');
+
+  const wrongBranch = productDraft({
+    number: 38,
+    title: 'WOS-02: acceptance evidence',
+    branch: 'controller/wos02-exact-acceptance',
+  });
+  const wrongBranchLookup = taskLookup();
+  assert.equal(await selectActiveDraft({
+    github: wrongBranchLookup.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [wrongBranch],
+    mainSha: MAIN_SHA,
+  }), null, 'a product task path cannot authorize the acceptance controller branch');
+
+  const duplicateMetadata = productDraft({body: continuationBody() + '\nWORKOS-CONTINUATION-LANE: product-implementation'});
+  assert.equal(await selectActiveDraft({
+    github: taskLookup().github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [duplicateMetadata],
+    mainSha: MAIN_SHA,
+  }), null, 'duplicate lane declarations fail closed');
+
+  const wrongIssue = productDraft({body: continuationBody({issue: 5})});
+  assert.equal(await selectActiveDraft({
+    github: taskLookup().github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [wrongIssue],
+    mainSha: MAIN_SHA,
+  }), null, 'the issue identifier must match the authoritative task document');
+
+  const missingSeparator = productDraft({body: continuationBody().replace('\n\nContinue', '\nContinue')});
+  assert.equal(await selectActiveDraft({
+    github: taskLookup().github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [missingSeparator],
+    mainSha: MAIN_SHA,
+  }), null, 'the canonical authority block must be followed by a blank line');
+
+  const wrongBase = productDraft({baseRef: 'release'});
+  assert.equal(await selectActiveDraft({
+    github: taskLookup().github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [wrongBase],
+    mainSha: MAIN_SHA,
+  }), null, 'a non-main base is ineligible');
+
+  const crossRepositoryHead = productDraft({headRepo: 'APReddy-AutoBotz/WorkOS-fork'});
+  assert.equal(await selectActiveDraft({
+    github: taskLookup().github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [crossRepositoryHead],
+    mainSha: MAIN_SHA,
+  }), null, 'cross-repository heads are ineligible');
+
+  const controllerLaneDoc = WOS02_TASK_DOC.replace(
+    '- **Controller continuation lane:** `product-implementation`',
+    '- **Controller continuation lane:** `controller-only`',
+  );
+  assert.equal(await selectActiveDraft({
+    github: taskLookup({markdown: controllerLaneDoc}).github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [valid],
+    mainSha: MAIN_SHA,
+  }), null, 'non-product task lanes are ineligible');
+
+  const twoProductsLookup = taskLookup();
+  assert.equal(await selectActiveDraft({
+    github: twoProductsLookup.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [valid, productDraft({number: 29, branch: WOS02_BRANCH})],
+    mainSha: MAIN_SHA,
+  }), null, 'multiple eligible Drafts are ambiguous and do not produce an autopick');
+
+  const unreadableTask = taskLookup({error: new Error('task not found on main')});
+  assert.equal(await selectActiveDraft({
+    github: unreadableTask.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'WorkOS',
+    pulls: [valid],
+    mainSha: MAIN_SHA,
+  }), null, 'missing authoritative task data fails closed');
+}
+
+async function verifyControllerLanesDoNotStartContinuation() {
+  const listPulls = () => {};
+  const listComments = () => {};
+  const posted = [];
+  let taskLookups = 0;
+  const controller = {
+    number: 28,
+    title: 'CTRL: Add guarded continuous WorkOS monitoring',
+    state: 'open',
+    draft: true,
+    updated_at: new Date().toISOString(),
+    body: 'Controller-only work; no product lane declaration.',
+    head: {sha: HEAD, ref: 'controller/workos-continuous-controller-v2', repo: {full_name: REPOSITORY}},
+    base: {sha: MAIN_SHA, ref: 'main', repo: {full_name: REPOSITORY}},
+  };
+  const acceptance = {
+    number: 38,
+    title: 'WOS-02 CTRL: Exact-head organization/setup acceptance',
+    state: 'open',
+    draft: true,
+    updated_at: new Date(Date.now() + 1000).toISOString(),
+    body: 'Read-only exact-head acceptance controller; Governing task: `docs/tasks/WOS-02-ORGANIZATION-SETUP-FOUNDATION.md`.',
+    head: {sha: OTHER_HEAD, ref: 'controller/wos02-exact-acceptance', repo: {full_name: REPOSITORY}},
+    base: {sha: MAIN_SHA, ref: 'main', repo: {full_name: REPOSITORY}},
+  };
+  const github = {
+    rest: {
+      pulls: {list: listPulls},
+      repos: {
+        getBranch: async () => ({data: {commit: {sha: MAIN_SHA}}}),
+        getContent: async () => { taskLookups += 1; return encodedTaskFile(); },
+      },
+      issues: {
+        listComments,
+        createComment: async (args) => { posted.push(args); },
+        updateComment: async (args) => { posted.push(args); },
+      },
+    },
+    paginate: async (endpoint, params) => {
+      if (endpoint === listPulls) return [acceptance, controller];
+      if (endpoint === listComments && params.issue_number === 3) return [];
+      throw new Error('unexpected controller-lane endpoint');
+    },
+  };
+  const summary = {
+    addHeading() { return this; },
+    addRaw() { return this; },
+    addEOL() { return this; },
+    write() { return this; },
+  };
+  const action = await runController({
+    github,
+    context: {repo: {owner: 'APReddy-AutoBotz', repo: 'WorkOS'}},
+    core: {summary},
+  });
+  assert.equal(action.classification, 'waiting');
+  assert.equal(taskLookups, 0);
+  assert.equal(posted.length, 1, 'the only post is the controller heartbeat on issue #3');
+  assert.equal(posted[0].issue_number, 3);
+  assert.equal(posted.some((comment) => comment.issue_number === 28 || comment.issue_number === 38), false);
+  assert.equal(posted.some((comment) => /@codex/i.test(comment.body || '')), false);
+}
+
+async function verifyLiveLaneRevalidationBeforeContinuation() {
+  const listPulls = () => {};
+  const listComments = () => {};
+  const listReviews = () => {};
+  const posts = [];
+  const events = [];
+  let pullListCalls = 0;
+  let mainReads = 0;
+  let taskLookups = 0;
+  const eligibleAtStart = productDraft({number: 27});
+  const revokedDuringFreshnessReads = {
+    ...eligibleAtStart,
+    body: 'Lane authority was removed while the controller was checking workflow freshness.',
+  };
+  const controllerPr = {
+    number: 28,
+    title: 'CTRL: Add guarded continuous WorkOS monitoring',
+    state: 'open',
+    draft: true,
+    body: 'Controller-only scope.',
+    head: {sha: OTHER_HEAD, ref: 'controller/workos-continuous-controller-v2', repo: {full_name: REPOSITORY}},
+    base: {sha: MAIN_SHA, ref: 'main', repo: {full_name: REPOSITORY}},
+  };
+  const github = {
+    rest: {
+      pulls: {list: listPulls, listReviews},
+      actions: {listWorkflowRunsForRepo: async () => ({data: {workflow_runs: []}})},
+      repos: {
+        getBranch: async () => {
+          mainReads += 1;
+          events.push(`main-read-${mainReads}`);
+          return {data: {commit: {sha: MAIN_SHA}}};
+        },
+        getContent: async () => { taskLookups += 1; return encodedTaskFile(); },
+      },
+      issues: {
+        listComments,
+        createComment: async (args) => { posts.push(args); },
+        updateComment: async (args) => { posts.push(args); },
+      },
+    },
+    paginate: async (endpoint, params) => {
+      if (endpoint === listPulls) {
+        pullListCalls += 1;
+        events.push(`pull-list-${pullListCalls}`);
+        return pullListCalls === 1 ? [eligibleAtStart] : [revokedDuringFreshnessReads, controllerPr];
+      }
+      if (endpoint === listComments && params.issue_number === 3) return [];
+      if (endpoint === listComments && params.issue_number === 27) {
+        events.push('freshness-comments');
+        return [];
+      }
+      if (endpoint === listReviews && params.pull_number === 27) {
+        events.push('freshness-reviews');
+        return [];
+      }
+      throw new Error('unexpected lane-revalidation endpoint');
+    },
+  };
+  const summary = {
+    addHeading() { return this; },
+    addRaw() { return this; },
+    addEOL() { return this; },
+    write() { return this; },
+  };
+  const action = await runController({
+    github,
+    context: {repo: {owner: 'APReddy-AutoBotz', repo: 'WorkOS'}},
+    core: {summary},
+  });
+  assert.equal(action.classification, 'waiting');
+  assert.equal(pullListCalls, 3, 'the candidate set is re-read before any continuation and for final reporting');
+  assert.equal(taskLookups, 1, 'the now-ineligible task is not re-read from a stale selector result');
+  assert.equal(posts.length, 1, 'only the issue #3 state heartbeat is posted');
+  assert.equal(posts[0].issue_number, 3);
+  assert.equal(posts.some((comment) => comment.issue_number === 27), false);
+  assert.equal(posts.some((comment) => /@codex/i.test(comment.body || '')), false);
+  const revalidationIndex = events.indexOf('main-read-2');
+  assert.ok(events.indexOf('freshness-comments') < revalidationIndex);
+  assert.ok(events.indexOf('freshness-reviews') < revalidationIndex);
 }
 
 async function verifyReviewGateContext() {
@@ -757,13 +1091,13 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
     let rerunCalls = 0;
     const activePr = {
       number: 28,
-      title: 'WOS-02: active test',
+      title: 'WOS-02: active product lane',
       state: 'open',
       draft: true,
       updated_at: new Date().toISOString(),
-      body: '',
-      head: {sha: HEAD},
-      base: {sha: BASE},
+      body: continuationBody(),
+      head: {sha: HEAD, ref: WOS02_BRANCH, repo: {full_name: REPOSITORY}},
+      base: {sha: MAIN_SHA, ref: 'main', repo: {full_name: REPOSITORY}},
     };
     const github = {
       rest: {
@@ -784,6 +1118,7 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
         },
         repos: {
           getBranch: async () => ({data: {commit: {sha: BASE}}}),
+          getContent: async () => encodedTaskFile(),
         },
         issues: {
           listComments,
@@ -819,6 +1154,9 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
 }
 
 async function runAsyncTests() {
+  await verifyProductLaneSelector();
+  await verifyControllerLanesDoNotStartContinuation();
+  await verifyLiveLaneRevalidationBeforeContinuation();
   await verifyReviewGateContext();
   await verifyGeneratedContinuationPrompt();
   await verifyFinalMergeRevalidation();
@@ -849,4 +1187,7 @@ runAsyncTests().then(() => console.log(JSON.stringify({
   postActionRefetch: true,
   legacyHeartbeatMigration: true,
   neverAutoReady: true,
+  productLaneSelectionFailClosed: true,
+  controllerAndAcceptanceLanesCannotAutopick: true,
+  liveLaneRevalidationBeforeAutopick: true,
 }, null, 2))).catch((error) => { console.error(error); process.exitCode = 1; });

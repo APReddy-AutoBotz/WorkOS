@@ -8,6 +8,8 @@ const TRANSIENT_CONCLUSIONS = new Set(['cancelled', 'timed_out', 'startup_failur
 const ACTIVE_WORKFLOW_STATUSES = new Set(['queued', 'in_progress', 'waiting', 'requested', 'pending']);
 const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 const BOT_LOGINS = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
+const PRODUCT_CONTINUATION_LANE = 'product-implementation';
+const PRODUCT_CONTINUATION_LANE_LINE = 'WORKOS-CONTINUATION-LANE: product-implementation';
 const MINUTE = 60 * 1000;
 const WORKFLOW_ACTIVITY_FRESHNESS_MS = 20 * MINUTE;
 const MAX_AUTHORITY_BODY_LENGTH = 256;
@@ -207,10 +209,127 @@ function assessContinuationFreshness({comments = [], reviews = [], body = '', no
   };
 }
 
-function selectActiveDraft(pulls = []) {
-  return pulls
-    .filter((pr) => pr.draft && /^(?:WOS-|CTRL:)/i.test(pr.title || '') && !/transport/i.test(pr.title || ''))
-    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))[0] || null;
+function hasContinuationAuthorityDeclaration(body = '') {
+  return /^WORKOS-(?:CONTINUATION-LANE|GOVERNING-TASK|GOVERNING-ISSUE)(?::|\b)/im.test(String(body));
+}
+
+function parseContinuationAuthority(pr = {}) {
+  const body = typeof pr.body === 'string' ? pr.body.replace(/\r\n/g, '\n') : '';
+  const lines = body.split('\n');
+  if (lines[0] !== PRODUCT_CONTINUATION_LANE_LINE) return null;
+
+  const laneLines = lines.filter((line) => /^WORKOS-CONTINUATION-LANE:/i.test(line));
+  const taskLines = lines.filter((line) => /^WORKOS-GOVERNING-TASK:/i.test(line));
+  const issueLines = lines.filter((line) => /^WORKOS-GOVERNING-ISSUE:/i.test(line));
+  if (laneLines.length !== 1 || taskLines.length !== 1 || issueLines.length !== 1) return null;
+  if (lines[3] !== '') return null;
+
+  const taskMatch = lines[1]?.match(
+    /^WORKOS-GOVERNING-TASK: (docs\/tasks\/(WOS-[0-9]{2}[A-Z]?)-[A-Z0-9]+(?:-[A-Z0-9]+)*\.md)$/,
+  );
+  const issueMatch = lines[2]?.match(/^WORKOS-GOVERNING-ISSUE: ([1-9][0-9]*)$/);
+  if (!taskMatch || !issueMatch) return null;
+
+  const issueNumber = Number(issueMatch[1]);
+  if (!Number.isSafeInteger(issueNumber)) return null;
+  return {
+    lane: PRODUCT_CONTINUATION_LANE,
+    taskPath: taskMatch[1],
+    workstream: taskMatch[2],
+    issueNumber,
+  };
+}
+
+function taskAuthoritySection(markdown = '') {
+  const lines = String(markdown).replace(/\r\n/g, '\n').split('\n');
+  const authorityIndexes = lines
+    .map((line, index) => line === '## Authority' ? index : -1)
+    .filter((index) => index >= 0);
+  if (authorityIndexes.length !== 1) return null;
+  const start = authorityIndexes[0] + 1;
+  let end = lines.length;
+  for (let index = start; index < lines.length; index += 1) {
+    if (/^##\s/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end);
+}
+
+function taskField(section, field) {
+  const prefix = `- **${field}:** `;
+  const matches = section.filter((line) => line.startsWith(prefix));
+  return matches.length === 1 ? matches[0].slice(prefix.length) : null;
+}
+
+function taskDocumentConfirmsProductLane(markdown, authority, targetBranch) {
+  const section = taskAuthoritySection(markdown);
+  if (!section) return false;
+  const lines = String(markdown).replace(/\r\n/g, '\n').split('\n');
+  const headingCount = lines.filter((line) => line.startsWith(`# ${authority.workstream} `)).length;
+  if (headingCount !== 1) return false;
+
+  const workstream = taskField(section, 'Workstream');
+  const issue = taskField(section, 'Issue');
+  const branch = taskField(section, 'Target branch');
+  const lane = taskField(section, 'Controller continuation lane');
+  return workstream === authority.workstream
+    && issue === `#${authority.issueNumber}`
+    && branch === `\`${targetBranch}\``
+    && lane === `\`${PRODUCT_CONTINUATION_LANE}\``;
+}
+
+function decodeTaskFile(response) {
+  const file = response?.data;
+  if (
+    !file || Array.isArray(file) || file.type !== 'file' || file.encoding !== 'base64'
+    || typeof file.content !== 'string' || !Number.isSafeInteger(file.size) || file.size < 1
+  ) return null;
+  const bytes = Buffer.from(file.content, 'base64');
+  if (bytes.length !== file.size) return null;
+  return bytes.toString('utf8');
+}
+
+async function selectActiveDraft({github, owner, repo, pulls = [], mainSha}) {
+  const explicitDrafts = pulls.filter((pr) =>
+    pr.state === 'open' && pr.draft === true && hasContinuationAuthorityDeclaration(pr.body || '')
+  );
+  if (explicitDrafts.length === 0) return null;
+  if (!/^[0-9a-f]{40}$/.test(mainSha || '')) return null;
+
+  const repositoryName = `${owner}/${repo}`;
+  const eligible = [];
+  for (const pr of explicitDrafts) {
+    const authority = parseContinuationAuthority(pr);
+    if (!authority) return null;
+    if (
+      pr.base?.ref !== 'main'
+      || pr.base.repo?.full_name !== repositoryName
+      || pr.head?.repo?.full_name !== repositoryName
+      || typeof pr.head.ref !== 'string'
+      || pr.head.ref.length === 0
+    ) return null;
+
+    let taskDocument;
+    try {
+      const response = await github.rest.repos.getContent({
+        owner,
+        repo,
+        path: authority.taskPath,
+        ref: mainSha,
+      });
+      taskDocument = decodeTaskFile(response);
+    } catch {
+      return null;
+    }
+    if (!taskDocument || !taskDocumentConfirmsProductLane(taskDocument, authority, pr.head.ref)) {
+      return null;
+    }
+    eligible.push(pr);
+  }
+
+  return eligible.length === 1 ? eligible[0] : null;
 }
 
 function selectMergeCandidate(pulls = []) {
@@ -421,7 +540,7 @@ async function maybeRerunTransient({github, owner, repo, active}) {
   return {...classification, rerun: true};
 }
 
-async function maybeAutopick({github, owner, repo, active}) {
+async function maybeAutopick({github, owner, repo, active, validateBeforePost = null}) {
   if (!active) return null;
   const [comments, reviews] = await Promise.all([
     github.paginate(github.rest.issues.listComments, {
@@ -445,6 +564,14 @@ async function maybeAutopick({github, owner, repo, active}) {
   });
   if (!freshness.shouldPost) return {posted: false, detail: freshness.detail};
 
+  if (validateBeforePost) {
+    const current = await validateBeforePost(active);
+    if (!current) {
+      return {posted: false, detail: 'live product-task lane or exact head/base changed; no continuation posted'};
+    }
+    active = current;
+  }
+
   const taskMatch = (active.body || '').match(/`(docs\/tasks\/[^`]+\.md)`/i);
   const taskReference = taskMatch
     ? `Read and execute \`${taskMatch[1]}\` and the current PR body as the governing contract.`
@@ -463,6 +590,38 @@ async function maybeAutopick({github, owner, repo, active}) {
     + 'create a duplicate active PR, or start a dependency-blocked later workstream.';
   await github.rest.issues.createComment({owner, repo, issue_number: active.number, body});
   return {posted: true, detail: `posted bounded Codex continuation on PR #${active.number}`};
+}
+
+async function revalidateCurrentProductLane({github, owner, repo, active}) {
+  if (!active) return null;
+  try {
+    const [mainResponse, pulls] = await Promise.all([
+      github.rest.repos.getBranch({owner, repo, branch: 'main'}),
+      listOpenPulls(github, owner, repo),
+    ]);
+    const mainSha = mainResponse.data.commit?.sha || '';
+    const current = await selectActiveDraft({github, owner, repo, pulls, mainSha});
+    if (
+      !current
+      || current.number !== active.number
+      || current.head.sha !== active.head.sha
+      || current.base.sha !== active.base.sha
+    ) return null;
+    return current;
+  } catch {
+    return null;
+  }
+}
+
+async function maybeAutopickForCurrentLane({github, owner, repo, active}) {
+  if (!active) return {posted: false, detail: 'no eligible product-implementation Draft'};
+  return maybeAutopick({
+    github,
+    owner,
+    repo,
+    active,
+    validateBeforePost: (candidate) => revalidateCurrentProductLane({github, owner, repo, active: candidate}),
+  });
 }
 
 async function publishHeartbeat({github, owner, repo, mainSha, pulls, active, mergeCandidate, action}) {
@@ -506,8 +665,16 @@ async function listOpenPulls(github, owner, repo) {
 async function run({github, context, core}) {
   const owner = context.repo.owner;
   const repo = context.repo.repo;
+  const initialMain = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
+  const initialMainSha = initialMain.commit?.sha || '';
   const initialPulls = await listOpenPulls(github, owner, repo);
-  const active = selectActiveDraft(initialPulls);
+  const active = await selectActiveDraft({
+    github,
+    owner,
+    repo,
+    pulls: initialPulls,
+    mainSha: initialMainSha,
+  });
   const mergeCandidate = selectMergeCandidate(initialPulls);
   let action = {classification: 'observed', detail: 'no state-changing action was eligible'};
 
@@ -537,7 +704,7 @@ async function run({github, context, core}) {
         detail: workflow.reason || 'latest workflow attempt could not be determined; no continuation or retry was started',
       };
     } else if (workflow?.classification === 'failure') {
-      const autopick = await maybeAutopick({github, owner, repo, active});
+      const autopick = await maybeAutopickForCurrentLane({github, owner, repo, active});
       action = autopick?.posted
         ? {
             classification: 'gate-failure-codex-continuation',
@@ -548,7 +715,7 @@ async function run({github, context, core}) {
             detail: `workflow ${workflow.run.id} failed and is not proven transient; ${autopick?.detail || 'no continuation eligible'}`,
           };
     } else {
-      const autopick = await maybeAutopick({github, owner, repo, active});
+      const autopick = await maybeAutopickForCurrentLane({github, owner, repo, active});
       if (autopick?.posted) action = {classification: 'codex-continuation', detail: autopick.detail};
       else if (mergeCandidate && action.classification === 'merge-blocked') {
         // Preserve the exact merge blocker classification.
@@ -560,7 +727,13 @@ async function run({github, context, core}) {
 
   const finalMain = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
   const finalPulls = await listOpenPulls(github, owner, repo);
-  const finalActive = selectActiveDraft(finalPulls);
+  const finalActive = await selectActiveDraft({
+    github,
+    owner,
+    repo,
+    pulls: finalPulls,
+    mainSha: finalMain.commit?.sha || '',
+  });
   const finalMergeCandidate = selectMergeCandidate(finalPulls);
   const heartbeat = await publishHeartbeat({
     github,

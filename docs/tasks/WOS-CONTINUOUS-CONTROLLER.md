@@ -17,7 +17,9 @@ Replace the legacy hourly heartbeat with one guarded controller that checks Work
 ## Continuation policy
 
 - Re-fetch live main, open pull requests, exact heads/bases, workflow runs, issue comments and submitted pull-request reviews on every run.
-- Select one current Draft WorkOS/controller PR; never create duplicate implementation PRs.
+- Select only one unambiguous Draft product-implementation PR whose explicit PR authority metadata matches a product task document on the current main. Never continue controller, acceptance, evidence or other non-product lanes.
+- A candidate PR body must begin with exactly one each of `WORKOS-CONTINUATION-LANE: product-implementation`, `WORKOS-GOVERNING-TASK: docs/tasks/WOS-<workstream>-<task>.md` and `WORKOS-GOVERNING-ISSUE: <issue-number>`, followed by a blank line. The referenced task document is read from live `main`, never from the candidate head, and must have exactly one `Authority` section with matching Workstream and Issue, the same target branch as the PR head branch, and `Controller continuation lane: product-implementation`. Missing, malformed, duplicated or mismatched metadata, task-document lookup failure, cross-repository heads/bases, or a non-main base makes the candidate ineligible.
+- If more than one Draft passes the complete product-task authority check, select none and do not post a continuation. Missing or ambiguous authority fails closed instead of falling back to PR title, update time or free-form prose.
 - Order runs for each workflow by run_number, then run_attempt; use updated_at only to select the freshest representation of the same run attempt and to calculate activity freshness. If run identity is missing or invalid, fail closed without rerunning or posting a continuation.
 - Treat queued, in_progress, waiting, requested and pending workflow statuses as active leases. If the latest run has an unrecognized or missing status, fail closed without rerunning or posting a continuation.
 - Do not post a new Codex continuation while a task, review or workflow is fresh or likely running.
