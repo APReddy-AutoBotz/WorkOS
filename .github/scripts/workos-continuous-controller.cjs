@@ -52,6 +52,63 @@ function occursAfterReviewRequest(candidate, request) {
   return requestTime > 0 && candidateTime > requestTime;
 }
 
+function parseMergeAuthorization(body = '') {
+  const normalized = normalizeAuthorityBody(body);
+  if (normalized === null) return null;
+  const match = normalized.match(
+    /^@codex merge\n\[WORKOS-AUTO-MERGE head=([0-9a-f]{40}) base=([0-9a-f]{40})\]$/,
+  );
+  return match ? {head: match[1], base: match[2]} : null;
+}
+
+async function readOwnerMergeAuthorization({github, owner, repo, pr}) {
+  const lease = parseMergeLease(pr.body || '');
+  const head = pr.head?.sha?.toLowerCase();
+  const base = pr.base?.sha?.toLowerCase();
+  if (!lease || !head || !base || lease.head !== head || lease.base !== base) return null;
+
+  const commit = await github.rest.repos.getCommit({owner, repo, ref: head});
+  const headTime = new Date(commit.data.commit.committer?.date || commit.data.commit.author?.date || 0).getTime();
+  if (!Number.isFinite(headTime) || headTime <= 0) return null;
+
+  const comments = await github.paginate(github.rest.issues.listComments, {
+    owner,
+    repo,
+    issue_number: pr.number,
+    per_page: 100,
+  });
+  const authorization = comments
+    .filter((comment) => {
+      const login = comment.user?.login || '';
+      const command = parseMergeAuthorization(comment.body || '');
+      return login.toLowerCase() === owner.toLowerCase()
+        && command?.head === head
+        && command?.base === base
+        && authorityTimestamp(comment) > headTime;
+    })
+    .sort((a, b) => authorityTimestamp(b) - authorityTimestamp(a))[0];
+  return authorization ? {
+    head,
+    base,
+    commentId: authorization.id,
+    authorizedAt: authorityTimestamp(authorization),
+  } : null;
+}
+
+async function readOwnerMergeAuthorizations({github, owner, repo, pulls = []}) {
+  const authorizations = new Map();
+  for (const pr of pulls) {
+    if (pr.state !== 'open' || pr.draft || !parseMergeLease(pr.body || '')) continue;
+    try {
+      const authorization = await readOwnerMergeAuthorization({github, owner, repo, pr});
+      if (authorization) authorizations.set(pr.number, authorization);
+    } catch {
+      // Missing, inaccessible or malformed authorization fails closed.
+    }
+  }
+  return authorizations;
+}
+
 function isExactCleanReview(body = '', headSha = '') {
   if (typeof headSha !== 'string' || !/^[0-9a-f]{40}$/.test(headSha)) return false;
   return normalizeAuthorityBody(body)
@@ -332,12 +389,18 @@ async function selectActiveDraft({github, owner, repo, pulls = [], mainSha}) {
   return eligible.length === 1 ? eligible[0] : null;
 }
 
-function selectMergeCandidate(pulls = []) {
+function selectMergeCandidate(pulls = [], authorizations = new Map()) {
   return pulls
     .filter((pr) => {
       if (pr.draft || pr.state !== 'open') return false;
       const lease = parseMergeLease(pr.body || '');
-      return lease && lease.head === pr.head.sha.toLowerCase() && lease.base === pr.base.sha.toLowerCase();
+      const authorization = authorizations.get(pr.number);
+      return lease
+        && authorization
+        && lease.head === pr.head.sha.toLowerCase()
+        && lease.base === pr.base.sha.toLowerCase()
+        && authorization.head === lease.head
+        && authorization.base === lease.base;
     })
     .sort((a, b) => a.number - b.number)[0] || null;
 }
@@ -447,6 +510,22 @@ async function inspectChecks({github, owner, repo, sha}) {
   return checksAreGreen(checks, combined.data.statuses || [], combined.data.state);
 }
 
+async function classifyWorkflowRunsForHead({github, owner, repo, headSha}) {
+  const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+    owner,
+    repo,
+    head_sha: headSha,
+    per_page: 100,
+  }, (response) => {
+    const workflowRuns = response.data?.workflow_runs;
+    if (!Array.isArray(workflowRuns)) {
+      throw new Error('GitHub workflow-run response did not contain a workflow_runs array');
+    }
+    return workflowRuns;
+  });
+  return classifyLatestWorkflowRuns(runs || []);
+}
+
 async function attemptGuardedMerge({github, owner, repo, candidate}) {
   const fresh = (await github.rest.pulls.get({owner, repo, pull_number: candidate.number})).data;
   const lease = parseMergeLease(fresh.body || '');
@@ -458,6 +537,15 @@ async function attemptGuardedMerge({github, owner, repo, candidate}) {
   }
   if (fresh.mergeable !== true || fresh.mergeable_state !== 'clean') {
     return {performed: false, classification: 'merge-blocked', detail: `merge state is ${fresh.mergeable}/${fresh.mergeable_state}`};
+  }
+  let ownerAuthorization;
+  try {
+    ownerAuthorization = await readOwnerMergeAuthorization({github, owner, repo, pr: fresh});
+  } catch {
+    ownerAuthorization = null;
+  }
+  if (!ownerAuthorization) {
+    return {performed: false, classification: 'merge-blocked', detail: 'missing current owner-authored exact-head/base merge authorization'};
   }
 
   const checks = await inspectChecks({github, owner, repo, sha: fresh.head.sha});
@@ -472,6 +560,15 @@ async function attemptGuardedMerge({github, owner, repo, candidate}) {
   const finalLease = parseMergeLease(final.body || '');
   if (!finalLease || finalLease.head !== final.head.sha.toLowerCase() || finalLease.base !== final.base.sha.toLowerCase()) {
     return {performed: false, classification: 'merge-blocked', detail: 'final merge lease is not exact'};
+  }
+  let finalOwnerAuthorization;
+  try {
+    finalOwnerAuthorization = await readOwnerMergeAuthorization({github, owner, repo, pr: final});
+  } catch {
+    finalOwnerAuthorization = null;
+  }
+  if (!finalOwnerAuthorization) {
+    return {performed: false, classification: 'merge-blocked', detail: 'final owner-authored exact-head/base merge authorization is missing'};
   }
 
   const finalChecks = await inspectChecks({github, owner, repo, sha: final.head.sha});
@@ -507,6 +604,15 @@ async function attemptGuardedMerge({github, owner, repo, candidate}) {
   ) {
     return {performed: false, classification: 'merge-blocked', detail: 'final merge lease is not exact'};
   }
+  let afterGatesOwnerAuthorization;
+  try {
+    afterGatesOwnerAuthorization = await readOwnerMergeAuthorization({github, owner, repo, pr: afterGates});
+  } catch {
+    afterGatesOwnerAuthorization = null;
+  }
+  if (!afterGatesOwnerAuthorization) {
+    return {performed: false, classification: 'merge-blocked', detail: 'owner-authored exact-head/base merge authorization changed during final revalidation'};
+  }
 
   const result = await github.rest.pulls.merge({
     owner,
@@ -528,13 +634,7 @@ async function attemptGuardedMerge({github, owner, repo, candidate}) {
 
 async function maybeRerunTransient({github, owner, repo, active}) {
   if (!active) return null;
-  const response = await github.rest.actions.listWorkflowRunsForRepo({
-    owner,
-    repo,
-    head_sha: active.head.sha,
-    per_page: 50,
-  });
-  const classification = classifyLatestWorkflowRuns(response.data.workflow_runs || []);
+  const classification = await classifyWorkflowRunsForHead({github, owner, repo, headSha: active.head.sha});
   if (classification.classification !== 'transient') return classification;
   await github.rest.actions.reRunWorkflow({owner, repo, run_id: classification.run.id});
   return {...classification, rerun: true};
@@ -570,6 +670,59 @@ async function maybeAutopick({github, owner, repo, active, validateBeforePost = 
       return {posted: false, detail: 'live product-task lane or exact head/base changed; no continuation posted'};
     }
     active = current;
+
+    const [latestComments, latestReviews] = await Promise.all([
+      github.paginate(github.rest.issues.listComments, {
+        owner,
+        repo,
+        issue_number: active.number,
+        per_page: 100,
+      }),
+      github.paginate(github.rest.pulls.listReviews, {
+        owner,
+        repo,
+        pull_number: active.number,
+        per_page: 100,
+      }),
+    ]);
+    const finalFreshness = assessContinuationFreshness({
+      comments: latestComments,
+      reviews: latestReviews,
+      nowMs: Date.now(),
+      body: active.body || '',
+    });
+    if (!finalFreshness.shouldPost) {
+      return {posted: false, detail: 'activity changed during final lane/head revalidation; ' + finalFreshness.detail};
+    }
+
+    let finalWorkflow;
+    try {
+      finalWorkflow = await classifyWorkflowRunsForHead({
+        github,
+        owner,
+        repo,
+        headSha: active.head.sha,
+      });
+    } catch {
+      return {posted: false, detail: 'exact-head workflow freshness could not be revalidated; no continuation posted'};
+    }
+    if (['active', 'recent', 'transient', 'unknown'].includes(finalWorkflow.classification)) {
+      return {
+        posted: false,
+        detail: `exact-head workflow became ${finalWorkflow.classification} during final lane/head revalidation; no continuation posted`,
+      };
+    }
+
+    let finalCurrent;
+    try {
+      finalCurrent = await validateBeforePost(active);
+    } catch {
+      finalCurrent = null;
+    }
+    if (!finalCurrent) {
+      return {posted: false, detail: 'product-task lane or exact head/base changed at the final posting boundary'};
+    }
+    active = finalCurrent;
   }
 
   const taskMatch = (active.body || '').match(/`(docs\/tasks\/[^`]+\.md)`/i);
@@ -642,7 +795,7 @@ async function publishHeartbeat({github, owner, repo, mainSha, pulls, active, me
     .slice(0, 8)
     .map((pr) => `- #${pr.number} ${pr.draft ? 'Draft' : 'Ready'}: \`${pr.head.sha}\` → \`${pr.base.sha}\` — ${pr.title}`)
     .join('\n') || '- none';
-  const body = `${HEARTBEAT_MARKER}\n## WorkOS continuous implementation controller\n\n- Cadence: every 10 minutes plus manual dispatch\n- Current main: \`${mainSha}\`\n- Active Draft: ${active ? `#${active.number} at \`${active.head.sha}\`` : 'none'}\n- Exact auto-merge candidate: ${mergeCandidate ? `#${mergeCandidate.number} at \`${mergeCandidate.head.sha}\`` : 'none'}\n- Last state-changing/classified action: **${action.classification}** — ${action.detail}\n\n### Open WorkOS controller/implementation PRs\n${openSummary}\n\nThe controller never marks a Draft Ready, never treats stale/pending/skipped/cancelled/unexecuted checks as green, and merges only a non-Draft PR carrying an exact head/base lease after all exact-head checks succeed, an owner-authored exact-head independent-review request is followed by a structured independent clean result, no review thread or change request remains, and GitHub reports a clean merge state. It never deploys or uses real providers, secrets or customer data.`;
+  const body = `${HEARTBEAT_MARKER}\n## WorkOS continuous implementation controller\n\n- Cadence: every 10 minutes plus manual dispatch\n- Current main: \`${mainSha}\`\n- Active Draft: ${active ? `#${active.number} at \`${active.head.sha}\`` : 'none'}\n- Exact auto-merge candidate: ${mergeCandidate ? `#${mergeCandidate.number} at \`${mergeCandidate.head.sha}\`` : 'none'}\n- Last state-changing/classified action: **${action.classification}** — ${action.detail}\n\n### Open WorkOS controller/implementation PRs\n${openSummary}\n\nThe controller never marks a Draft Ready, never treats stale/pending/skipped/cancelled/unexecuted checks as green, and merges only a non-Draft PR with an exact head/base body marker plus a separate owner-authored exact-head/base merge command, after all exact-head checks succeed, an owner-authored exact-head independent-review request is followed by a structured independent clean result, no review thread or change request remains, and GitHub reports a clean merge state. It never deploys or uses real providers, secrets or customer data.`;
   if (!existing) {
     await github.rest.issues.createComment({owner, repo, issue_number: issueNumber, body});
   } else if ((existing.body || '').trim() !== body.trim()) {
@@ -675,7 +828,13 @@ async function run({github, context, core}) {
     pulls: initialPulls,
     mainSha: initialMainSha,
   });
-  const mergeCandidate = selectMergeCandidate(initialPulls);
+  const initialMergeAuthorizations = await readOwnerMergeAuthorizations({
+    github,
+    owner,
+    repo,
+    pulls: initialPulls,
+  });
+  const mergeCandidate = selectMergeCandidate(initialPulls, initialMergeAuthorizations);
   let action = {classification: 'observed', detail: 'no state-changing action was eligible'};
 
   if (mergeCandidate) {
@@ -734,7 +893,13 @@ async function run({github, context, core}) {
     pulls: finalPulls,
     mainSha: finalMain.commit?.sha || '',
   });
-  const finalMergeCandidate = selectMergeCandidate(finalPulls);
+  const finalMergeAuthorizations = await readOwnerMergeAuthorizations({
+    github,
+    owner,
+    repo,
+    pulls: finalPulls,
+  });
+  const finalMergeCandidate = selectMergeCandidate(finalPulls, finalMergeAuthorizations);
   const heartbeat = await publishHeartbeat({
     github,
     owner,
@@ -762,6 +927,7 @@ module.exports = {
   attemptGuardedMerge,
   authorityTimestamp,
   checksAreGreen,
+  classifyWorkflowRunsForHead,
   classifyLatestWorkflowRuns,
   inspectReviewGate,
   isExactCleanReview,
@@ -772,6 +938,9 @@ module.exports = {
   latestSubmittedReviewAt,
   occursAfterReviewRequest,
   parseMergeLease,
+  parseMergeAuthorization,
+  readOwnerMergeAuthorization,
+  readOwnerMergeAuthorizations,
   run,
   selectActiveDraft,
   selectMergeCandidate,

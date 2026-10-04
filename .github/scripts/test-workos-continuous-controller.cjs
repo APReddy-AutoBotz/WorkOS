@@ -17,6 +17,7 @@ const {
   run: runController,
   occursAfterReviewRequest,
   parseMergeLease,
+  parseMergeAuthorization,
   selectActiveDraft,
   selectMergeCandidate,
 } = require('./workos-continuous-controller.cjs');
@@ -93,6 +94,13 @@ assert.deepEqual(
 );
 assert.equal(parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD}]`), null);
 assert.equal(parseMergeLease(`[WORKOS-AUTO-MERGE head=${HEAD} base=${'c'.repeat(39)}]`), null);
+const mergeAuthorization = '@codex merge\n[WORKOS-AUTO-MERGE head=' + HEAD + ' base=' + BASE + ']';
+assert.deepEqual(parseMergeAuthorization(mergeAuthorization), {head: HEAD, base: BASE});
+assert.deepEqual(parseMergeAuthorization(mergeAuthorization + '\n'), {head: HEAD, base: BASE});
+assert.deepEqual(parseMergeAuthorization(mergeAuthorization.replace(/\n/g, '\r\n')), {head: HEAD, base: BASE});
+assert.equal(parseMergeAuthorization('I authorize merge:\n' + mergeAuthorization), null);
+assert.deepEqual(parseMergeAuthorization(mergeAuthorization.replace(HEAD, OTHER_HEAD)), {head: OTHER_HEAD, base: BASE});
+assert.equal(parseMergeAuthorization(mergeAuthorization.toUpperCase()), null);
 
 const reviewRequest = '@codex review\n[WORKOS-INDEPENDENT-REVIEW-REQUEST head=' + HEAD + ']';
 assert.equal(isExactReviewRequest(reviewRequest, HEAD), true);
@@ -331,8 +339,11 @@ const ready = {
   draft: false,
   body: `[WORKOS-AUTO-MERGE head=${HEAD} base=${BASE}]`,
 };
-assert.equal(selectMergeCandidate([ready]).number, 27);
-assert.equal(selectMergeCandidate([{...ready, body: `[WORKOS-AUTO-MERGE head=${OTHER_HEAD} base=${BASE}]`}]), null);
+assert.equal(selectMergeCandidate([ready]), null, 'a PR body marker alone cannot authorize an automatic merge');
+const authorizedReady = new Map([[27, {head: HEAD, base: BASE}]]);
+assert.equal(selectMergeCandidate([ready], authorizedReady).number, 27);
+assert.equal(selectMergeCandidate([{...ready, body: `[WORKOS-AUTO-MERGE head=${OTHER_HEAD} base=${BASE}]`}], authorizedReady), null);
+assert.equal(selectMergeCandidate([ready], new Map([[27, {head: OTHER_HEAD, base: BASE}]])), null);
 
 const nowForFreshness = new Date('2026-08-28T04:00:00Z').getTime();
 const freshness = (comments, body = '') => assessContinuationFreshness({
@@ -431,6 +442,11 @@ function buildMergeHarness({
   resultLogin = 'chatgpt-codex-connector[bot]',
   resultCreated = '2026-08-28T00:06:00Z',
   resultUpdated = '2026-08-28T00:06:00Z',
+  mergeIntentBody = mergeAuthorization,
+  mergeIntentLogin = 'APReddy-AutoBotz',
+  mergeIntentCreated = '2026-08-28T00:01:00Z',
+  mergeIntentUpdated = mergeIntentCreated,
+  hideMergeIntentAfterRead = Infinity,
   extraComments = [],
   extraReviews = [],
   commitDate = '2026-08-28T00:00:00Z',
@@ -438,6 +454,7 @@ function buildMergeHarness({
   let pullReads = 0;
   let checkReads = 0;
   let reviewReads = 0;
+  let commentReads = 0;
   let mergeArgs = null;
   const basePr = {
     number: 27,
@@ -465,6 +482,13 @@ function buildMergeHarness({
       body: resultBody,
       created_at: resultCreated,
       updated_at: resultUpdated,
+    },
+    {
+      id: 2001,
+      user: {login: mergeIntentLogin},
+      body: mergeIntentBody,
+      created_at: mergeIntentCreated,
+      updated_at: mergeIntentUpdated,
     },
     ...extraComments,
   ];
@@ -500,7 +524,12 @@ function buildMergeHarness({
         return [{name: 'all', status: 'completed', conclusion: 'success'}];
       }
       if (endpoint === listReviews) return extraReviews;
-      if (endpoint === listComments) return comments;
+      if (endpoint === listComments) {
+        commentReads += 1;
+        return commentReads > hideMergeIntentAfterRead
+          ? comments.filter((comment) => comment.id !== 2001)
+          : comments;
+      }
       throw new Error('unexpected paginated endpoint');
     },
     graphql: async () => {
@@ -521,7 +550,7 @@ function buildMergeHarness({
   };
   return {
     github,
-    get counts() { return {pullReads, checkReads, reviewReads}; },
+    get counts() { return {pullReads, checkReads, reviewReads, commentReads}; },
     get mergeArgs() { return mergeArgs; },
   };
 }
@@ -692,7 +721,7 @@ async function verifyControllerLanesDoNotStartContinuation() {
         updateComment: async (args) => { posted.push(args); },
       },
     },
-    paginate: async (endpoint, params) => {
+    paginate: async (endpoint, params, mapFunction) => {
       if (endpoint === listPulls) return [acceptance, controller];
       if (endpoint === listComments && params.issue_number === 3) return [];
       throw new Error('unexpected controller-lane endpoint');
@@ -721,6 +750,7 @@ async function verifyLiveLaneRevalidationBeforeContinuation() {
   const listPulls = () => {};
   const listComments = () => {};
   const listReviews = () => {};
+  const listWorkflowRuns = () => {};
   const posts = [];
   const events = [];
   let pullListCalls = 0;
@@ -743,7 +773,7 @@ async function verifyLiveLaneRevalidationBeforeContinuation() {
   const github = {
     rest: {
       pulls: {list: listPulls, listReviews},
-      actions: {listWorkflowRunsForRepo: async () => ({data: {workflow_runs: []}})},
+      actions: {listWorkflowRunsForRepo: listWorkflowRuns},
       repos: {
         getBranch: async () => {
           mainReads += 1;
@@ -758,12 +788,13 @@ async function verifyLiveLaneRevalidationBeforeContinuation() {
         updateComment: async (args) => { posts.push(args); },
       },
     },
-    paginate: async (endpoint, params) => {
+    paginate: async (endpoint, params, mapFunction) => {
       if (endpoint === listPulls) {
         pullListCalls += 1;
         events.push(`pull-list-${pullListCalls}`);
         return pullListCalls === 1 ? [eligibleAtStart] : [revokedDuringFreshnessReads, controllerPr];
       }
+      if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: []}});
       if (endpoint === listComments && params.issue_number === 3) return [];
       if (endpoint === listComments && params.issue_number === 27) {
         events.push('freshness-comments');
@@ -1027,6 +1058,181 @@ async function verifyGeneratedContinuationPrompt() {
   assert.equal(freshPostCount, 0);
 }
 
+async function verifyContinuationFreshnessFinalBoundary() {
+  for (const activityKind of ['task-comment', 'submitted-review']) {
+    const listComments = () => {};
+    const listReviews = () => {};
+    const events = [];
+    let commentReads = 0;
+    let reviewReads = 0;
+    let posted = 0;
+    const freshTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const taskComment = {
+      user: {login: 'APReddy-AutoBotz'},
+      body: '@codex continue the current task',
+      created_at: freshTime,
+      updated_at: freshTime,
+    };
+    const submittedReview = {
+      user: {login: 'reviewer'},
+      state: 'COMMENTED',
+      submitted_at: freshTime,
+    };
+    const github = {
+      rest: {
+        issues: {
+          listComments,
+          createComment: async () => { posted += 1; events.push('posted'); },
+        },
+        pulls: {listReviews},
+      },
+      paginate: async (endpoint) => {
+        if (endpoint === listComments) {
+          commentReads += 1;
+          events.push('comments-' + commentReads);
+          return activityKind === 'task-comment' && commentReads > 1 ? [taskComment] : [];
+        }
+        if (endpoint === listReviews) {
+          reviewReads += 1;
+          events.push('reviews-' + reviewReads);
+          return activityKind === 'submitted-review' && reviewReads > 1 ? [submittedReview] : [];
+        }
+        throw new Error('unexpected continuation freshness endpoint');
+      },
+    };
+    const outcome = await maybeAutopick({
+      github,
+      owner: 'APReddy-AutoBotz',
+      repo: 'WorkOS',
+      active: {number: 27, head: {sha: HEAD}, body: ''},
+      validateBeforePost: async (candidate) => {
+        events.push('lane-revalidated');
+        return candidate;
+      },
+    });
+    assert.equal(outcome.posted, false, `a new ${activityKind} during lane revalidation blocks the continuation`);
+    assert.equal(posted, 0);
+    assert.ok(events.indexOf('lane-revalidated') < events.indexOf('comments-2'));
+    assert.ok(events.indexOf('lane-revalidated') < events.indexOf('reviews-2'));
+  }
+}
+
+async function verifyWorkflowFreshnessFinalBoundary() {
+  const listPulls = () => {};
+  const listComments = () => {};
+  const listReviews = () => {};
+  const listWorkflowRuns = () => {};
+  const activePr = productDraft({number: 27, updated_at: new Date().toISOString()});
+  const activeWorkflow = {
+    workflow_id: 202,
+    run_number: 2,
+    run_attempt: 1,
+    status: 'in_progress',
+    conclusion: null,
+    updated_at: new Date().toISOString(),
+  };
+  const posts = [];
+  let workflowReads = 0;
+  const github = {
+    rest: {
+      pulls: {list: listPulls, listReviews},
+      actions: {listWorkflowRunsForRepo: listWorkflowRuns},
+      repos: {
+        getBranch: async () => ({data: {commit: {sha: MAIN_SHA}}}),
+        getContent: async () => encodedTaskFile(),
+      },
+      issues: {
+        listComments,
+        createComment: async (args) => { posts.push(args); },
+        updateComment: async (args) => { posts.push(args); },
+      },
+    },
+    paginate: async (endpoint, params, mapFunction) => {
+      if (endpoint === listPulls) return [activePr];
+      if (endpoint === listWorkflowRuns) {
+        workflowReads += 1;
+        return mapFunction({data: {workflow_runs: workflowReads === 1 ? [] : [activeWorkflow]}});
+      }
+      if (endpoint === listComments && params.issue_number === 3) return [];
+      if (endpoint === listComments && params.issue_number === 27) return [];
+      if (endpoint === listReviews && params.pull_number === 27) return [];
+      throw new Error('unexpected final-workflow-freshness endpoint');
+    },
+  };
+  const summary = {
+    addHeading() { return this; },
+    addRaw() { return this; },
+    addEOL() { return this; },
+    write() { return this; },
+  };
+  const action = await runController({
+    github,
+    context: {repo: {owner: 'APReddy-AutoBotz', repo: 'WorkOS'}},
+    core: {summary},
+  });
+  assert.equal(workflowReads, 2, 'the exact-head workflow set is reread after final lane/head validation');
+  assert.equal(action.classification, 'waiting', 'a newly active exact-head workflow suppresses autopick');
+  assert.equal(posts.some((comment) => /@codex/i.test(comment.body || '')), false);
+}
+
+async function verifyLaneAuthorityFinalBoundary() {
+  const listPulls = () => {};
+  const listComments = () => {};
+  const listReviews = () => {};
+  const listWorkflowRuns = () => {};
+  const eligiblePr = productDraft({number: 27, updated_at: new Date().toISOString()});
+  const revokedPr = {...eligiblePr, body: 'Controller-only work; product continuation authority was revoked.'};
+  const posts = [];
+  let pullListCalls = 0;
+  let commentReads = 0;
+  let activityBoundaryReached = false;
+  const github = {
+    rest: {
+      pulls: {list: listPulls, listReviews},
+      actions: {listWorkflowRunsForRepo: listWorkflowRuns},
+      repos: {
+        getBranch: async () => ({data: {commit: {sha: MAIN_SHA}}}),
+        getContent: async () => encodedTaskFile(),
+      },
+      issues: {
+        listComments,
+        createComment: async (args) => { posts.push(args); },
+        updateComment: async (args) => { posts.push(args); },
+      },
+    },
+    paginate: async (endpoint, params, mapFunction) => {
+      if (endpoint === listPulls) {
+        pullListCalls += 1;
+        return activityBoundaryReached && pullListCalls >= 3 ? [revokedPr] : [eligiblePr];
+      }
+      if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: []}});
+      if (endpoint === listComments && params.issue_number === 3) return [];
+      if (endpoint === listComments && params.issue_number === 27) {
+        commentReads += 1;
+        if (commentReads > 1) activityBoundaryReached = true;
+        return [];
+      }
+      if (endpoint === listReviews && params.pull_number === 27) return [];
+      throw new Error('unexpected final-lane-authority endpoint');
+    },
+  };
+  const summary = {
+    addHeading() { return this; },
+    addRaw() { return this; },
+    addEOL() { return this; },
+    write() { return this; },
+  };
+  const action = await runController({
+    github,
+    context: {repo: {owner: 'APReddy-AutoBotz', repo: 'WorkOS'}},
+    core: {summary},
+  });
+  assert.equal(commentReads, 2, 'final comment freshness is read after the first authority validation');
+  assert.ok(pullListCalls >= 4, 'lane/head authority is revalidated after final activity reads');
+  assert.equal(action.classification, 'waiting', 'revoked lane authority blocks the continuation');
+  assert.equal(posts.some((comment) => /@codex/i.test(comment.body || '')), false);
+}
+
 async function verifyFinalMergeRevalidation() {
   const passing = buildMergeHarness();
   const passed = await attemptGuardedMerge({
@@ -1040,6 +1246,46 @@ async function verifyFinalMergeRevalidation() {
   assert.equal(passing.counts.checkReads, 2);
   assert.equal(passing.counts.reviewReads, 2);
   assert.equal(passing.mergeArgs.sha, HEAD);
+
+  const collaboratorLease = buildMergeHarness({mergeIntentLogin: 'untrusted-contributor'});
+  const collaboratorLeaseResult = await attemptGuardedMerge({
+    github: collaboratorLease.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'repo',
+    candidate: {number: 27},
+  });
+  assert.equal(collaboratorLeaseResult.performed, false, 'a collaborator-authored exact token is not owner authorization');
+  assert.equal(collaboratorLease.mergeArgs, null);
+
+  const missingOwnerCommand = buildMergeHarness({mergeIntentBody: '[WORKOS-AUTO-MERGE head=' + HEAD + ' base=' + BASE + ']'});
+  const missingOwnerCommandResult = await attemptGuardedMerge({
+    github: missingOwnerCommand.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'repo',
+    candidate: {number: 27},
+  });
+  assert.equal(missingOwnerCommandResult.performed, false, 'a body-like marker in a comment is not a canonical owner command');
+  assert.equal(missingOwnerCommand.mergeArgs, null);
+
+  const staleOwnerCommand = buildMergeHarness({mergeIntentCreated: '2026-08-27T23:59:00Z'});
+  const staleOwnerCommandResult = await attemptGuardedMerge({
+    github: staleOwnerCommand.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'repo',
+    candidate: {number: 27},
+  });
+  assert.equal(staleOwnerCommandResult.performed, false, 'owner authorization must be posted after the exact head commit');
+  assert.equal(staleOwnerCommand.mergeArgs, null);
+
+  const revokedDuringFinalRevalidation = buildMergeHarness({hideMergeIntentAfterRead: 4});
+  const revokedResult = await attemptGuardedMerge({
+    github: revokedDuringFinalRevalidation.github,
+    owner: 'APReddy-AutoBotz',
+    repo: 'repo',
+    candidate: {number: 27},
+  });
+  assert.equal(revokedResult.performed, false, 'owner authorization is reread immediately before merge');
+  assert.equal(revokedDuringFinalRevalidation.mergeArgs, null);
 
   const mutations = [
     {draft: true},
@@ -1087,6 +1333,7 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
   for (const status of ['waiting', 'requested', 'pending', 'future-github-status']) {
     const listPulls = () => {};
     const listComments = () => {};
+    const listWorkflowRuns = () => {};
     const postedBodies = [];
     let rerunCalls = 0;
     const activePr = {
@@ -1103,17 +1350,7 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
       rest: {
         pulls: {list: listPulls},
         actions: {
-          listWorkflowRunsForRepo: async () => ({
-            data: {
-              workflow_runs: [run({
-                run_number: 99,
-                run_attempt: 1,
-                status,
-                conclusion: null,
-                updated_at: new Date().toISOString(),
-              })],
-            },
-          }),
+          listWorkflowRunsForRepo: listWorkflowRuns,
           reRunWorkflow: async () => { rerunCalls += 1; },
         },
         repos: {
@@ -1126,8 +1363,15 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
           updateComment: async (args) => { postedBodies.push(args.body); },
         },
       },
-      paginate: async (endpoint, params) => {
+      paginate: async (endpoint, params, mapFunction) => {
         if (endpoint === listPulls) return [activePr];
+        if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: [run({
+          run_number: 99,
+          run_attempt: 1,
+          status,
+          conclusion: null,
+          updated_at: new Date().toISOString(),
+        })]}});
         if (endpoint === listComments && params.issue_number === 3) return [];
         if (endpoint === listComments && params.issue_number === 28) return [];
         throw new Error('unexpected controller-run endpoint');
@@ -1153,14 +1397,89 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
   }
 }
 
+async function verifyWorkflowRunPagination() {
+  const listPulls = () => {};
+  const listComments = () => {};
+  const activePr = productDraft({number: 27});
+  const pageOne = Array.from({length: 50}, (_, index) => ({
+    workflow_id: 101,
+    run_number: 100 - index,
+    run_attempt: 1,
+    status: 'completed',
+    conclusion: 'success',
+    updated_at: '2026-08-28T00:00:00Z',
+  }));
+  const olderActiveWorkflow = {
+    workflow_id: 202,
+    run_number: 1,
+    run_attempt: 1,
+    status: 'in_progress',
+    conclusion: null,
+    updated_at: new Date().toISOString(),
+  };
+  const allRuns = [...pageOne, olderActiveWorkflow];
+  const posted = [];
+  let paginationCalls = 0;
+  let directCalls = 0;
+  const listWorkflowRuns = async () => {
+    directCalls += 1;
+    return {data: {workflow_runs: pageOne}};
+  };
+  const github = {
+    rest: {
+      pulls: {list: listPulls},
+      actions: {listWorkflowRunsForRepo: listWorkflowRuns},
+      repos: {
+        getBranch: async () => ({data: {commit: {sha: MAIN_SHA}}}),
+        getContent: async () => encodedTaskFile(),
+      },
+      issues: {
+        listComments,
+        createComment: async (args) => { posted.push(args); },
+        updateComment: async (args) => { posted.push(args); },
+      },
+    },
+    paginate: async (endpoint, params, mapFunction) => {
+      if (endpoint === listPulls) return [activePr];
+      if (endpoint === listWorkflowRuns) {
+        paginationCalls += 1;
+        assert.equal(params.per_page, 100);
+        assert.equal(typeof mapFunction, 'function');
+        return [allRuns.slice(0, 50), allRuns.slice(50)].flatMap((page) => mapFunction({data: {workflow_runs: page}}));
+      }
+      if (endpoint === listComments && params.issue_number === 3) return [];
+      throw new Error('unexpected paginated workflow-boundary endpoint');
+    },
+  };
+  const summary = {
+    addHeading() { return this; },
+    addRaw() { return this; },
+    addEOL() { return this; },
+    write() { return this; },
+  };
+  const action = await runController({
+    github,
+    context: {repo: {owner: 'APReddy-AutoBotz', repo: 'WorkOS'}},
+    core: {summary},
+  });
+  assert.equal(paginationCalls, 1, 'the controller reads all workflow pages for the exact head');
+  assert.equal(directCalls, 0, 'the first-page REST response is not used directly');
+  assert.equal(action.classification, 'workflow-active', 'an active workflow on a later page blocks continuation');
+  assert.equal(posted.some((comment) => /@codex/i.test(comment.body || '')), false);
+}
+
 async function runAsyncTests() {
   await verifyProductLaneSelector();
   await verifyControllerLanesDoNotStartContinuation();
   await verifyLiveLaneRevalidationBeforeContinuation();
   await verifyReviewGateContext();
   await verifyGeneratedContinuationPrompt();
+  await verifyContinuationFreshnessFinalBoundary();
+  await verifyWorkflowFreshnessFinalBoundary();
+  await verifyLaneAuthorityFinalBoundary();
   await verifyFinalMergeRevalidation();
   await verifyNonterminalWorkflowDoesNotAutopick();
+  await verifyWorkflowRunPagination();
 }
 
 runAsyncTests().then(() => console.log(JSON.stringify({
@@ -1180,6 +1499,11 @@ runAsyncTests().then(() => console.log(JSON.stringify({
   negativeReviewLanguageRejected: true,
   latestWorkflowAttemptSelection: true,
   nonterminalWorkflowNoAutopick: true,
+  exactHeadWorkflowRunsFullyPaginated: true,
+  ownerAuthoredMergeIntentRequired: true,
+  continuationFreshnessRecheckedAtPostBoundary: true,
+  workflowFreshnessRecheckedAtPostBoundary: true,
+  laneAuthorityRecheckedAfterFreshnessReads: true,
   editedCommentFreshness: true,
   recentWorkflowFreshness: true,
   submittedReviewFreshness: true,
