@@ -1,0 +1,374 @@
+create extension if not exists "pgcrypto";
+
+create table if not exists roles (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique
+);
+
+create table if not exists users (
+  id uuid primary key default gen_random_uuid(),
+  username text not null unique,
+  employee_id text unique,
+  email text not null unique,
+  password_hash text,
+  entra_object_id text unique,
+  must_change_password boolean not null default false,
+  status text not null default 'Active',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists user_roles (
+  user_id uuid not null references users(id) on delete cascade,
+  role_id uuid not null references roles(id) on delete restrict,
+  primary key (user_id, role_id)
+);
+
+create table if not exists country_directors (
+  id text primary key,
+  name text not null,
+  region text not null
+);
+
+create table if not exists role_definitions (
+  id text primary key,
+  name text not null unique,
+  department text not null,
+  description text,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists catalog_items (
+  id text primary key,
+  catalog_type text not null check (catalog_type in ('departments', 'countries', 'industries')),
+  name text not null,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (catalog_type, name)
+);
+
+create table if not exists clients (
+  id text primary key default ('client-' || gen_random_uuid()::text),
+  name text not null unique,
+  industry text not null default 'Unclassified',
+  account_owner_id text,
+  status text not null default 'Active' check (status in ('Active', 'Inactive')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists client_country_director_map (
+  client_id text not null references clients(id) on delete cascade,
+  country_director_id text not null references country_directors(id) on delete restrict,
+  primary key (client_id, country_director_id)
+);
+
+create table if not exists employees (
+  id text primary key default ('e-' || gen_random_uuid()::text),
+  employee_id text not null unique,
+  name text not null,
+  email text not null unique,
+  designation text not null,
+  department text not null,
+  country text not null,
+  region text,
+  business_unit text,
+  reporting_manager_id text references employees(id) on delete set null,
+  primary_country_director_id text not null references country_directors(id),
+  status text not null check (status in ('Active', 'On Leave', 'Exited')),
+  utilization_eligible boolean not null default true,
+  expected_weekly_hours numeric,
+  joining_date date,
+  exit_date date,
+  standard_weekly_hours numeric not null default 40,
+  capacity_type text not null default 'Delivery',
+  contract_type text not null default 'Permanent',
+  leave_policy_id text,
+  entra_object_id text,
+  teams_user_id text,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists employee_country_director_map (
+  employee_id text not null references employees(id) on delete cascade,
+  country_director_id text not null references country_directors(id) on delete restrict,
+  primary key (employee_id, country_director_id)
+);
+
+create table if not exists projects (
+  id text primary key default ('p-' || gen_random_uuid()::text),
+  project_code text not null unique,
+  name text not null,
+  client_id text references clients(id) on delete restrict,
+  client text not null,
+  manager_id text,
+  manager_name text not null,
+  project_type text,
+  billable boolean not null default true,
+  start_date date not null,
+  end_date date not null,
+  status text not null check (status in ('Proposed', 'Active', 'On Hold', 'Completed')),
+  country text,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (end_date >= start_date)
+);
+
+create table if not exists project_allocations (
+  id text primary key default ('a-' || gen_random_uuid()::text),
+  employee_id text not null references employees(id) on delete restrict,
+  project_id text not null references projects(id) on delete restrict,
+  role_on_project text,
+  percentage numeric not null check (percentage >= 0 and percentage <= 200),
+  start_date date not null,
+  end_date date not null,
+  billable boolean not null default true,
+  status text not null check (status in ('Active', 'Paused', 'Completed')),
+  comments text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (end_date >= start_date)
+);
+
+create table if not exists timesheets (
+  id uuid primary key default gen_random_uuid(),
+  employee_id text not null references employees(id) on delete restrict,
+  week_ending date not null,
+  status text not null check (status in ('Draft', 'Submitted', 'Approved', 'Rejected')),
+  total_hours numeric not null default 0,
+  billable_hours numeric not null default 0,
+  rejection_reason text,
+  submitted_at timestamptz,
+  approved_at timestamptz,
+  approved_by text,
+  rejected_at timestamptz,
+  rejected_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (employee_id, week_ending)
+);
+
+create table if not exists timesheet_entries (
+  id uuid primary key default gen_random_uuid(),
+  timesheet_id uuid not null references timesheets(id) on delete cascade,
+  project_id text references projects(id) on delete restrict,
+  work_type text not null check (work_type in ('Project Work', 'Client Misc Task')),
+  client_name text,
+  category text,
+  work_date date not null,
+  hours numeric not null check (hours >= 0 and hours <= 24),
+  remark text,
+  billable boolean not null default true
+);
+
+create table if not exists system_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  user_name text not null,
+  user_role text not null,
+  active_role text,
+  source text not null default 'Web',
+  module text not null,
+  action text not null,
+  entity_type text,
+  entity_id text,
+  old_value jsonb,
+  new_value jsonb,
+  reason text,
+  ip_address text,
+  session_id text,
+  details text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists import_export_logs (
+  id uuid primary key default gen_random_uuid(),
+  operation text not null check (operation in ('Import', 'Export')),
+  channel text not null,
+  file_name text not null,
+  status text not null check (status in ('Success', 'Partial', 'Failed', 'Dry Run')),
+  total_rows integer not null default 0,
+  valid_rows integer not null default 0,
+  error_rows integer not null default 0,
+  errors jsonb,
+  user_name text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists identity_provider_links (
+  id text primary key default ('identity-link-' || gen_random_uuid()::text),
+  employee_id text not null references employees(id) on delete cascade,
+  provider text not null default 'entra',
+  provider_subject text not null,
+  provider_upn text,
+  status text not null default 'Linked' check (status in ('Linked', 'Pending', 'Disabled')),
+  linked_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (provider, provider_subject),
+  unique (employee_id, provider)
+);
+
+create table if not exists entra_group_role_mappings (
+  id text primary key default ('entra-role-map-' || gen_random_uuid()::text),
+  group_id text not null unique,
+  group_name text not null,
+  role_name text not null check (role_name in ('Employee', 'TeamLead', 'ProjectManager', 'CountryDirector', 'HR', 'Admin')),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists teams_user_links (
+  id text primary key default ('teams-link-' || gen_random_uuid()::text),
+  employee_id text not null references employees(id) on delete cascade,
+  teams_user_id text not null unique,
+  teams_upn text,
+  teams_tenant_id text,
+  status text not null default 'Linked' check (status in ('Linked', 'Pending', 'Disabled')),
+  linked_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (employee_id)
+);
+
+create table if not exists teams_action_tokens (
+  id text primary key default ('teams-action-' || gen_random_uuid()::text),
+  token text not null unique,
+  entity_type text not null,
+  entity_id text not null,
+  action text not null check (action in ('approve', 'reject', 'open_portal')),
+  target_url text,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_by text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists integration_event_logs (
+  id text primary key default ('integration-event-' || gen_random_uuid()::text),
+  provider text not null,
+  event_type text not null,
+  entity_type text,
+  entity_id text,
+  status text not null default 'Success' check (status in ('Success', 'Failed', 'Pending')),
+  request_payload jsonb,
+  response_payload jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table employees add column if not exists utilization_eligible boolean not null default true;
+alter table employees add column if not exists reporting_manager_id text references employees(id) on delete set null;
+alter table employees add column if not exists region text;
+alter table employees add column if not exists business_unit text;
+alter table employees add column if not exists joining_date date;
+alter table employees add column if not exists exit_date date;
+alter table employees add column if not exists standard_weekly_hours numeric not null default 40;
+alter table employees add column if not exists capacity_type text not null default 'Delivery';
+alter table employees add column if not exists contract_type text not null default 'Permanent';
+alter table employees add column if not exists leave_policy_id text;
+alter table employees add column if not exists entra_object_id text;
+alter table employees add column if not exists teams_user_id text;
+
+create index if not exists idx_employee_cd_map_cd on employee_country_director_map(country_director_id);
+create index if not exists idx_employees_reporting_manager on employees(reporting_manager_id);
+create index if not exists idx_employees_teams_user_id on employees(teams_user_id);
+create unique index if not exists idx_employees_entra_object_id on employees(entra_object_id) where entra_object_id is not null;
+create index if not exists idx_client_cd_map_cd on client_country_director_map(country_director_id);
+create index if not exists idx_catalog_items_type_active on catalog_items(catalog_type, active, name);
+create index if not exists idx_projects_client_id on projects(client_id);
+create index if not exists idx_allocations_employee_dates on project_allocations(employee_id, start_date, end_date);
+create index if not exists idx_allocations_project_dates on project_allocations(project_id, start_date, end_date);
+create index if not exists idx_timesheets_employee_week on timesheets(employee_id, week_ending);
+create index if not exists idx_timesheets_status on timesheets(status);
+create index if not exists idx_audit_logs_created_at on audit_logs(created_at desc);
+create index if not exists idx_import_export_logs_created_at on import_export_logs(created_at desc);
+create index if not exists idx_identity_provider_links_employee on identity_provider_links(employee_id);
+create index if not exists idx_entra_group_role_mappings_role on entra_group_role_mappings(role_name, active);
+create index if not exists idx_teams_user_links_employee on teams_user_links(employee_id);
+create index if not exists idx_teams_action_tokens_token on teams_action_tokens(token);
+create index if not exists idx_integration_event_logs_created on integration_event_logs(created_at desc);
+
+alter table users add column if not exists must_change_password boolean not null default false;
+alter table users add column if not exists entra_object_id text;
+
+alter table audit_logs add column if not exists active_role text;
+alter table audit_logs add column if not exists source text not null default 'Web';
+alter table audit_logs add column if not exists ip_address text;
+alter table audit_logs add column if not exists session_id text;
+
+update employees
+set utilization_eligible = false
+where employee_id ilike 'ADMIN-%'
+   or employee_id ilike 'HR-%'
+   or employee_id ilike 'CD-%'
+   or lower(designation) in ('country director', 'system administrator', 'hr manager')
+   or lower(department) in ('regional leadership', 'administration', 'human resources');
+
+insert into roles(name)
+values ('Employee'), ('TeamLead'), ('ProjectManager'), ('CountryDirector'), ('HR'), ('Admin')
+on conflict (name) do nothing;
+
+insert into system_settings(key, value)
+values
+  ('expectedWeeklyHours', '40'),
+  ('utilizationThresholdHigh', '100'),
+  ('utilizationThresholdLow', '80'),
+  ('benchThreshold', '20'),
+  ('blockOverAllocation', 'false')
+on conflict (key) do nothing;
+
+with default_catalog_items(id, catalog_type, name) as (
+  values
+    ('department-1', 'departments', 'Automation CoE'),
+    ('department-2', 'departments', 'Business Transformation'),
+    ('department-3', 'departments', 'Client Operations'),
+    ('department-4', 'departments', 'Data & Analytics'),
+    ('department-5', 'departments', 'Delivery Management'),
+    ('department-6', 'departments', 'Engineering'),
+    ('department-7', 'departments', 'Managed Services'),
+    ('department-8', 'departments', 'Operations Excellence'),
+    ('department-9', 'departments', 'Quality Engineering'),
+    ('department-10', 'departments', 'Support Operations'),
+    ('country-1', 'countries', 'Australia'),
+    ('country-2', 'countries', 'Belgium'),
+    ('country-3', 'countries', 'Canada'),
+    ('country-4', 'countries', 'France'),
+    ('country-5', 'countries', 'Germany'),
+    ('country-6', 'countries', 'India'),
+    ('country-7', 'countries', 'Netherlands'),
+    ('country-8', 'countries', 'Singapore'),
+    ('country-9', 'countries', 'Switzerland'),
+    ('country-10', 'countries', 'United Kingdom'),
+    ('country-11', 'countries', 'United States'),
+    ('industry-1', 'industries', 'Banking'),
+    ('industry-2', 'industries', 'Insurance'),
+    ('industry-3', 'industries', 'Healthcare'),
+    ('industry-4', 'industries', 'Retail'),
+    ('industry-5', 'industries', 'Manufacturing'),
+    ('industry-6', 'industries', 'Logistics'),
+    ('industry-7', 'industries', 'Technology'),
+    ('industry-8', 'industries', 'Telecom'),
+    ('industry-9', 'industries', 'Energy'),
+    ('industry-10', 'industries', 'Public Sector'),
+    ('industry-11', 'industries', 'Professional Services')
+)
+insert into catalog_items(id, catalog_type, name)
+select defaults.id, defaults.catalog_type, defaults.name
+from default_catalog_items defaults
+where not exists (
+  select 1
+  from catalog_items existing
+  where existing.id = defaults.id
+     or (existing.catalog_type = defaults.catalog_type and existing.name = defaults.name)
+);

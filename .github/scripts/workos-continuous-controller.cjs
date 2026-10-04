@@ -4,30 +4,30 @@ const HEARTBEAT_MARKER = '<!-- workos-continuous-controller -->';
 const LEGACY_HEARTBEAT_MARKER = '<!-- workos-hourly-controller -->';
 const AUTOPICK_MARKER = '[WORKOS-CONTROLLER-AUTOPICK]';
 const MERGE_LEASE_PATTERN = /\[WORKOS-AUTO-MERGE\s+head=([0-9a-f]{40})\s+base=([0-9a-f]{40})\]/i;
-const REVIEW_REQUEST_PATTERN = /\[WORKOS-INDEPENDENT-REVIEW-REQUEST\s+head=([0-9a-f]{40})\]/i;
-const REVIEW_RESULT_PATTERN = /^\[WORKOS-INDEPENDENT-REVIEW-RESULT\s+head=([0-9a-f]{40})\s+result=clean\s+p0=0\s+p1=0\s+p2=0\]$/i;
-const NON_AUTHORITATIVE_REVIEW_PATTERN = /\b(?:do not accept|do not use|not authoritative|quoted example|example only|illustrative example|for example)\b/i;
-const CONTRADICTORY_REVIEW_PATTERN = /\b(?:not|isn't|isnt|is\s+not|never|cannot|can't)\s+(?:fully\s+)?clean\b|\b(?:p0|p1|p2)\b[^.\n]{0,80}\b(?:remain(?:s|ing)?|open|present|found|blocked|failing|fail(?:ed|ure)?)\b|\bresult\s*=\s*(?:blocked|fail(?:ed)?|unclean)\b/i;
 const TRANSIENT_CONCLUSIONS = new Set(['cancelled', 'timed_out', 'startup_failure']);
+const ACTIVE_WORKFLOW_STATUSES = new Set(['queued', 'in_progress', 'waiting', 'requested', 'pending']);
 const DECISIVE_REVIEW_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 const BOT_LOGINS = new Set(['chatgpt-codex-connector[bot]', 'chatgpt-codex-connector']);
 const MINUTE = 60 * 1000;
 const WORKFLOW_ACTIVITY_FRESHNESS_MS = 20 * MINUTE;
+const MAX_AUTHORITY_BODY_LENGTH = 256;
 
 function parseMergeLease(body = '') {
   const match = String(body).match(MERGE_LEASE_PATTERN);
   return match ? {head: match[1].toLowerCase(), base: match[2].toLowerCase()} : null;
 }
 
+function normalizeAuthorityBody(body = '') {
+  if (typeof body !== 'string' || body.length > MAX_AUTHORITY_BODY_LENGTH) return null;
+  let text = body.replace(/\r\n/g, '\n');
+  if (text.endsWith('\n')) text = text.slice(0, -1);
+  return text;
+}
+
 function isExactReviewRequest(body = '', headSha = '') {
-  const text = String(body).replace(/\s+/g, ' ').trim();
-  const match = text.match(REVIEW_REQUEST_PATTERN);
-  return Boolean(
-    headSha
-    && match
-    && match[1].toLowerCase() === headSha.toLowerCase()
-    && /@codex\s+review\b/i.test(text)
-  );
+  if (typeof headSha !== 'string' || !/^[0-9a-f]{40}$/.test(headSha)) return false;
+  return normalizeAuthorityBody(body)
+    === '@codex review\n[WORKOS-INDEPENDENT-REVIEW-REQUEST head=' + headSha + ']';
 }
 
 function authorityTimestamp(value = {}) {
@@ -50,34 +50,12 @@ function occursAfterReviewRequest(candidate, request) {
   return requestTime > 0 && candidateTime > requestTime;
 }
 
-function findStandaloneCleanResult(body = '', headSha = '') {
-  const lines = String(body).replace(/\r/g, '').split('\n');
-  let inFence = false;
-  let result = null;
-  for (let index = 0; index < lines.length; index += 1) {
-    const raw = lines[index];
-    const trimmed = raw.trim();
-    if (/^```/.test(trimmed)) {
-      inFence = !inFence;
-      continue;
-    }
-    const match = trimmed.match(REVIEW_RESULT_PATTERN);
-    if (!match) continue;
-    if (inFence || raw !== trimmed || result) return null;
-    if (!headSha || match[1].toLowerCase() !== headSha.toLowerCase()) return null;
-    result = {lines, index};
-  }
-  return result;
+function isExactCleanReview(body = '', headSha = '') {
+  if (typeof headSha !== 'string' || !/^[0-9a-f]{40}$/.test(headSha)) return false;
+  return normalizeAuthorityBody(body)
+    === '[WORKOS-INDEPENDENT-REVIEW-RESULT head=' + headSha + ' result=clean p0=0 p1=0 p2=0]';
 }
 
-function isExactCleanReview(body = '', headSha = '') {
-  const result = findStandaloneCleanResult(body, headSha);
-  if (!result) return false;
-  const outsideMarker = result.lines.filter((_line, index) => index !== result.index).join('\n').trim();
-  if (NON_AUTHORITATIVE_REVIEW_PATTERN.test(outsideMarker)) return false;
-  if (/\bp[0-2]\b/i.test(outsideMarker)) return false;
-  return !CONTRADICTORY_REVIEW_PATTERN.test(outsideMarker);
-}
 
 function checksAreGreen(checkRuns = [], statuses = [], aggregateState = '') {
   if (!Array.isArray(checkRuns) || checkRuns.length === 0) {
@@ -110,16 +88,52 @@ function workflowRunTimestamp(run) {
 
 function classifyLatestWorkflowRuns(runs = [], nowMs = Date.now()) {
   const latestByWorkflow = new Map();
-  for (const run of [...runs].sort((a, b) => workflowRunTimestamp(b) - workflowRunTimestamp(a))) {
-    if (!latestByWorkflow.has(run.workflow_id)) latestByWorkflow.set(run.workflow_id, run);
+  for (const run of runs) {
+    const workflowId = run.workflow_id;
+    const runNumber = Number(run.run_number);
+    const runAttempt = Number(run.run_attempt);
+    if (
+      workflowId === undefined || workflowId === null || workflowId === ''
+      || !Number.isSafeInteger(runNumber) || runNumber < 1
+      || !Number.isSafeInteger(runAttempt) || runAttempt < 1
+    ) {
+      return {
+        classification: 'unknown',
+        run,
+        reason: 'workflow run number/attempt is missing or invalid',
+      };
+    }
+    const key = String(workflowId);
+    const current = latestByWorkflow.get(key);
+    const isNewer = !current
+      || runNumber > Number(current.run_number)
+      || (
+        runNumber === Number(current.run_number)
+        && runAttempt > Number(current.run_attempt)
+      );
+    const sameAttemptIsMoreCurrent = current
+      && runNumber === Number(current.run_number)
+      && runAttempt === Number(current.run_attempt)
+      && workflowRunTimestamp(run) > workflowRunTimestamp(current);
+    if (isNewer || sameAttemptIsMoreCurrent) latestByWorkflow.set(key, run);
   }
   const latest = [...latestByWorkflow.values()];
-  const active = latest.find((run) => run.status === 'queued' || run.status === 'in_progress');
+  const unknownStatus = latest.find((run) =>
+    run.status !== 'completed' && !ACTIVE_WORKFLOW_STATUSES.has(run.status)
+  );
+  if (unknownStatus) {
+    return {
+      classification: 'unknown',
+      run: unknownStatus,
+      reason: 'workflow run has an unrecognized status: ' + (unknownStatus.status || 'missing'),
+    };
+  }
+  const active = latest.find((run) => ACTIVE_WORKFLOW_STATUSES.has(run.status));
   if (active) return {classification: 'active', run: active};
   const transient = latest.find((run) =>
     run.status === 'completed'
     && TRANSIENT_CONCLUSIONS.has(run.conclusion)
-    && Number(run.run_attempt || 1) < 2
+    && Number(run.run_attempt) < 2
   );
   if (transient) return {classification: 'transient', run: transient};
   const recent = latest.find((run) => {
@@ -152,6 +166,45 @@ function latestSubmittedReviewAt(reviews = []) {
     .map((review) => new Date(review.submitted_at || review.submittedAt || 0).getTime())
     .filter((time) => Number.isFinite(time) && time > 0);
   return times.length ? Math.max(...times) : 0;
+}
+
+
+function assessContinuationFreshness({comments = [], reviews = [], body = '', nowMs = Date.now()} = {}) {
+  const relevantComments = comments.filter((comment) =>
+    BOT_LOGINS.has(comment.user?.login)
+    || /@codex\b/i.test(comment.body || '')
+    || (comment.body || '').includes(AUTOPICK_MARKER)
+  );
+  if (relevantComments.some((comment) => authorityTimestamp(comment) <= 0)) {
+    return {shouldPost: false, detail: 'comment freshness could not be established'};
+  }
+
+  const latestByAuthority = (items) => [...items]
+    .sort((a, b) => authorityTimestamp(b) - authorityTimestamp(a));
+  const latestBot = latestByAuthority(comments.filter((comment) => BOT_LOGINS.has(comment.user?.login)))[0] || null;
+  const latestTask = latestByAuthority(comments.filter((comment) => /@codex\b/i.test(comment.body || '')))[0] || null;
+  const latestAuto = latestByAuthority(comments.filter((comment) => (comment.body || '').includes(AUTOPICK_MARKER)))[0] || null;
+  const latestReviewTime = latestSubmittedReviewAt(reviews);
+  const timestamp = (comment) => comment ? authorityTimestamp(comment) : 0;
+  const taskAge = latestTask ? nowMs - timestamp(latestTask) : Infinity;
+  const botAge = latestBot ? nowMs - timestamp(latestBot) : Infinity;
+  const autoAge = latestAuto ? nowMs - timestamp(latestAuto) : Infinity;
+  const reviewAge = latestReviewTime ? nowMs - latestReviewTime : Infinity;
+  const botRespondedAfterTask = Boolean(latestTask && latestBot && timestamp(latestBot) > timestamp(latestTask));
+  const bodyAllowsWork = !/(dependency[- ]blocked|not authorized to import|do not resume)/i.test(body || '');
+  const noLikelyRunningTask = !latestTask || botRespondedAfterTask || taskAge >= 75 * MINUTE;
+  const shouldPost = bodyAllowsWork
+    && noLikelyRunningTask
+    && botAge >= 45 * MINUTE
+    && autoAge >= 45 * MINUTE
+    && reviewAge >= 45 * MINUTE;
+  return {
+    shouldPost,
+    detail: shouldPost ? 'all workflow, task, response and review freshness leases expired' : 'current workflow/task/review activity is still fresh',
+    latestBotTime: timestamp(latestBot),
+    latestTaskTime: timestamp(latestTask),
+    latestAutoTime: timestamp(latestAuto),
+  };
 }
 
 function selectActiveDraft(pulls = []) {
@@ -222,6 +275,9 @@ async function inspectReviewGate({github, owner, repo, pr}) {
 
   const commit = await github.rest.repos.getCommit({owner, repo, ref: pr.head.sha});
   const headTime = new Date(commit.data.commit.committer?.date || commit.data.commit.author?.date || 0);
+  if (!Number.isFinite(headTime.getTime()) || headTime.getTime() <= 0) {
+    return {clean: false, reason: 'unable to establish exact head commit time'};
+  }
   const comments = await github.paginate(github.rest.issues.listComments, {
     owner,
     repo,
@@ -231,27 +287,32 @@ async function inspectReviewGate({github, owner, repo, pr}) {
   const reviewRequest = comments
   .filter((comment) =>
     comment.user?.login === owner
-    && authorityTimestamp(comment) >= headTime.getTime()
+    && authorityTimestamp(comment) > headTime.getTime()
     && isExactReviewRequest(comment.body || '', pr.head.sha)
   )
   .sort((a, b) => authorityTimestamp(b) - authorityTimestamp(a))[0] || null;
 if (!reviewRequest) {
   return {clean: false, reason: 'no owner-authored independent review request marker for the exact head'};
 }
-const exactCleanComment = comments.find((comment) =>
-  BOT_LOGINS.has(comment.user?.login)
-  && occursAfterReviewRequest(comment, reviewRequest)
-  && isExactCleanReview(comment.body || '', pr.head.sha)
-);
-const exactCleanReview = reviews.find((review) => {
-  const login = review.user?.login || review.author?.login;
-  return BOT_LOGINS.has(login)
-    && occursAfterReviewRequest(review, reviewRequest)
-    && isExactCleanReview(review.body || '', pr.head.sha);
-});
-  if (!exactCleanComment && !exactCleanReview) {
-    return {clean: false, reason: 'no independent structured clean result after the exact review request'};
-  }
+const postRequestBotResponses = [
+  ...comments.filter((comment) =>
+    BOT_LOGINS.has(comment.user?.login)
+    && occursAfterReviewRequest(comment, reviewRequest)
+  ),
+  ...reviews.filter((review) => {
+    const login = review.user?.login || review.author?.login;
+    return BOT_LOGINS.has(login) && occursAfterReviewRequest(review, reviewRequest);
+  }),
+];
+if (postRequestBotResponses.length === 0) {
+  return {clean: false, reason: 'no independent structured clean result after the exact review request'};
+}
+const latestResponseTime = Math.max(...postRequestBotResponses.map((response) => authorityTimestamp(response)));
+const latestResponses = postRequestBotResponses
+  .filter((response) => authorityTimestamp(response) === latestResponseTime);
+if (!latestResponses.every((response) => isExactCleanReview(response.body || '', pr.head.sha))) {
+  return {clean: false, reason: 'latest Codex response is not an exact clean review result'};
+}
   return {clean: true, reason: 'independent exact-head review request/result pair is clean'};
 }
 
@@ -303,11 +364,36 @@ async function attemptGuardedMerge({github, owner, repo, candidate}) {
     return {performed: false, classification: 'merge-blocked', detail: `final ${finalReview.reason}`};
   }
 
+  const afterGates = (await github.rest.pulls.get({owner, repo, pull_number: candidate.number})).data;
+  if (
+    afterGates.draft
+    || afterGates.state !== 'open'
+    || afterGates.head.sha !== final.head.sha
+    || afterGates.base.sha !== final.base.sha
+  ) {
+    return {performed: false, classification: 'merge-blocked', detail: 'PR changed during final check/review revalidation'};
+  }
+  if (afterGates.mergeable !== true || afterGates.mergeable_state !== 'clean') {
+    return {
+      performed: false,
+      classification: 'merge-blocked',
+      detail: 'final merge state is ' + afterGates.mergeable + '/' + afterGates.mergeable_state,
+    };
+  }
+  const afterGatesLease = parseMergeLease(afterGates.body || '');
+  if (
+    !afterGatesLease
+    || afterGatesLease.head !== afterGates.head.sha.toLowerCase()
+    || afterGatesLease.base !== afterGates.base.sha.toLowerCase()
+  ) {
+    return {performed: false, classification: 'merge-blocked', detail: 'final merge lease is not exact'};
+  }
+
   const result = await github.rest.pulls.merge({
     owner,
     repo,
-    pull_number: final.number,
-    sha: final.head.sha,
+    pull_number: afterGates.number,
+    sha: afterGates.head.sha,
     merge_method: 'squash',
     commit_title: `${final.title} (#${final.number})`,
   });
@@ -351,39 +437,30 @@ async function maybeAutopick({github, owner, repo, active}) {
       per_page: 100,
     }),
   ]);
-  const now = Date.now();
-  const botResponses = comments
-    .filter((comment) => BOT_LOGINS.has(comment.user?.login))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  const taskComments = comments
-    .filter((comment) => /@codex\b/i.test(comment.body || ''))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  const autoComments = comments
-    .filter((comment) => (comment.body || '').includes(AUTOPICK_MARKER))
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  const latestBot = botResponses[0] || null;
-  const latestTask = taskComments[0] || null;
-  const latestAuto = autoComments[0] || null;
-  const latestReviewTime = latestSubmittedReviewAt(reviews);
-  const taskAge = latestTask ? now - new Date(latestTask.created_at).getTime() : Infinity;
-  const botAge = latestBot ? now - new Date(latestBot.created_at).getTime() : Infinity;
-  const autoAge = latestAuto ? now - new Date(latestAuto.created_at).getTime() : Infinity;
-  const reviewAge = latestReviewTime ? now - latestReviewTime : Infinity;
-  const botRespondedAfterTask = Boolean(latestTask && latestBot && new Date(latestBot.created_at) > new Date(latestTask.created_at));
-  const bodyAllowsWork = !/(dependency[- ]blocked|not authorized to import|do not resume)/i.test(active.body || '');
-  const noLikelyRunningTask = !latestTask || botRespondedAfterTask || taskAge >= 75 * MINUTE;
-  const shouldPost = bodyAllowsWork
-    && noLikelyRunningTask
-    && botAge >= 45 * MINUTE
-    && autoAge >= 45 * MINUTE
-    && reviewAge >= 45 * MINUTE;
-  if (!shouldPost) return {posted: false, detail: 'current workflow/task/review activity is still fresh'};
+  const freshness = assessContinuationFreshness({
+    comments,
+    reviews,
+    nowMs: Date.now(),
+    body: active.body || '',
+  });
+  if (!freshness.shouldPost) return {posted: false, detail: freshness.detail};
 
   const taskMatch = (active.body || '').match(/`(docs\/tasks\/[^`]+\.md)`/i);
   const taskReference = taskMatch
     ? `Read and execute \`${taskMatch[1]}\` and the current PR body as the governing contract.`
     : 'Read the current PR body and governing WorkOS control documents before acting.';
-  const body = `@codex ${AUTOPICK_MARKER}\n\nContinue the active WorkOS implementation on PR #${active.number} from exact published head \`${active.head.sha}\`. ${taskReference}\n\nUse the **WorkOS Implementation** environment and the strongest appropriate **Sol** reasoning model. Re-fetch live PR/head/base/check/review state before any write. Use one root writer/coordinator. Resolve the next coherent blocker family, run every applicable exact-head gate, publish only to the existing branch under an exact-old-head lease, request a fresh independent exact-head review, and merge only when explicitly permitted by the governing task.\n\nKeep Draft unless all Ready gates are independently proven. Never deploy, use real secrets/providers/customer data, modify the authorized reference repository, weaken a gate, create a duplicate active PR, or start a dependency-blocked later workstream.`;
+  const body = '@codex ' + AUTOPICK_MARKER + '\n\n'
+    + 'Continue the active WorkOS implementation on PR #' + active.number
+    + ' from exact published head ' + active.head.sha + '. ' + taskReference + '\n\n'
+    + 'Use the WorkOS Implementation environment and the strongest appropriate Sol reasoning model. '
+    + 'Re-fetch live PR/head/base/check/review state before any write. Use one root writer/coordinator. '
+    + 'Resolve the next coherent blocker family, run every applicable exact-head gate, publish only to the existing branch under an exact-old-head lease, '
+    + 'and request a fresh independent exact-head review.\n\n'
+    + 'Keep the PR Draft unconditionally. Do not mark Ready. Do not merge. '
+    + 'A Ready transition requires a separate explicit owner action outside the autonomous controller; '
+    + 'merging is handled only by the controller exact-lease gates. '
+    + 'Never deploy, use real secrets/providers/customer data, modify the authorized reference repository, weaken a gate, '
+    + 'create a duplicate active PR, or start a dependency-blocked later workstream.';
   await github.rest.issues.createComment({owner, repo, issue_number: active.number, body});
   return {posted: true, detail: `posted bounded Codex continuation on PR #${active.number}`};
 }
@@ -454,6 +531,11 @@ async function run({github, context, core}) {
         classification: 'workflow-recent',
         detail: `workflow ${workflow.run.id} recently completed as ${workflow.run.conclusion}; the bounded freshness lease prevents a duplicate continuation`,
       };
+    } else if (workflow?.classification === 'unknown') {
+      action = {
+        classification: 'workflow-unknown',
+        detail: workflow.reason || 'latest workflow attempt could not be determined; no continuation or retry was started',
+      };
     } else if (workflow?.classification === 'failure') {
       const autopick = await maybeAutopick({github, owner, repo, active});
       action = autopick?.posted
@@ -499,15 +581,19 @@ async function run({github, context, core}) {
 }
 
 module.exports = {
+  ACTIVE_WORKFLOW_STATUSES,
   AUTOPICK_MARKER,
   HEARTBEAT_MARKER,
   LEGACY_HEARTBEAT_MARKER,
-  REVIEW_REQUEST_PATTERN,
-  REVIEW_RESULT_PATTERN,
+  assessContinuationFreshness,
+  attemptGuardedMerge,
   authorityTimestamp,
   checksAreGreen,
   classifyLatestWorkflowRuns,
+  inspectReviewGate,
   isExactCleanReview,
+  maybeAutopick,
+  normalizeAuthorityBody,
   isExactReviewRequest,
   latestDecisiveReviews,
   latestSubmittedReviewAt,
