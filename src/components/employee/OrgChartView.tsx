@@ -9,6 +9,7 @@ import { buildOrgTree } from '../../services/orgChart';
 import { isUtilizationEligibleEmployee } from '../../services/calculations';
 
 import { productConfig } from '../../config/productConfig';
+import { termPluralTitle, termTitle } from '../../config/terminology';
 interface OrgChartViewProps {
   employees: Employee[];
   allocations: Allocation[];
@@ -55,8 +56,8 @@ const compactTitle = (designation: string) => {
   if (/ceo/i.test(designation)) return 'CEO';
   if (/head of operations/i.test(designation)) return 'Head of Operations';
   if (/country director/i.test(designation)) return `${productConfig.terminology.regionalOwner}`;
-  if (/regional lead/i.test(designation)) return 'Regional Lead';
-  if (/business unit lead|company director/i.test(designation)) return 'Business Unit Lead';
+  if (/regional lead/i.test(designation)) return `${termTitle('region')} ${termTitle('teamLead')}`;
+  if (/business unit lead|company director/i.test(designation)) return `${termTitle('businessUnit')} ${termTitle('teamLead')}`;
   return designation;
 };
 
@@ -262,7 +263,7 @@ export const OrgChartView = ({ employees, allocations, allEmployees }: OrgChartV
             <div>
               <h3 className="text-base font-black text-heading">Organization Chart</h3>
               <p className="text-xs text-body/60 font-medium">
-                Tree generated from Employee Master reporting managers, countries, regions, business units, and utilization data.
+                Tree generated from {termTitle('employee')} Master reporting {termPluralTitle('manager').toLowerCase()}, countries, {termPluralTitle('region').toLowerCase()}, {termPluralTitle('businessUnit').toLowerCase()}, and utilization data.
               </p>
             </div>
           </div>
@@ -310,7 +311,7 @@ export const OrgChartView = ({ employees, allocations, allEmployees }: OrgChartV
               <div className="relative mx-auto pb-8">
                 <div className="flex items-start justify-between mb-5">
                   <div>
-                    <p className="text-[10px] font-bold text-slate-400">Generated from Employee Master</p>
+                    <p className="text-[10px] font-bold text-slate-400">Generated from {termTitle('employee')} Master</p>
                     <h2 className="text-xl font-black text-primary">{`Org Chart ${productConfig.organizationName} Group`}</h2>
                   </div>
                   <div className="text-right">
@@ -337,7 +338,7 @@ export const OrgChartView = ({ employees, allocations, allEmployees }: OrgChartV
                   <div className="relative flex justify-center gap-32">
                     {headOfOps && <PersonNode employee={headOfOps} />}
                     <div className="w-[180px] rounded-lg border border-slate-200 bg-[#ededee] px-3 py-2.5 text-center shadow-sm">
-                      <p className="text-xs font-black text-primary">Countries / Regions / BUs</p>
+                      <p className="text-xs font-black text-primary">Countries / {termPluralTitle('region')} / {termPluralTitle('businessUnit')}</p>
                       <p className="text-[10px] font-bold text-heading/70">{groupedUnits.length} operating groups</p>
                     </div>
                   </div>

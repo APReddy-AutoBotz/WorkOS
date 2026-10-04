@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ProjectForm } from '../components/forms/ProjectForm';
+import { termTitle } from '../config/terminology';
 import { overlapsDateRange } from '../services/calculations';
 import { authService } from '../services/authService';
 import {
@@ -87,7 +88,7 @@ export const ProjectDetail = () => {
         <div className="text-gray-400 mb-4">
           <Layers size={48} className="mx-auto opacity-20" />
         </div>
-        <h2 className="text-xl font-bold text-heading">Project Not Found</h2>
+        <h2 className="text-xl font-bold text-heading">{termTitle('project')} Not Found</h2>
         <p className="text-sm text-body/60 mt-2 mb-8">The project engagement you are looking for does not exist.</p>
         <Link to="/projects" className="btn-primary py-2 px-6">Back to Registry</Link>
       </div>
@@ -100,7 +101,7 @@ export const ProjectDetail = () => {
         <div className="text-gray-400 mb-4">
           <Layers size={48} className="mx-auto opacity-20" />
         </div>
-        <h2 className="text-xl font-bold text-heading">Project Not Found</h2>
+        <h2 className="text-xl font-bold text-heading">{termTitle('project')} Not Found</h2>
         <p className="text-sm text-body/60 mt-2 mb-8">The project engagement you are looking for is not available in your workspace scope.</p>
         <Link to="/" className="btn-primary py-2 px-6">Back to Dashboard</Link>
       </div>
@@ -243,7 +244,7 @@ export const ProjectDetail = () => {
       <PageHeader
         title={project.name}
         subtitle={`${project.projectCode} • ${project.client} • Lead: ${project.managerName}`}
-        breadcrumb={['Delivery', 'Project Master', project.name]}
+        breadcrumb={['Delivery', `${termTitle('project')} Master`, project.name]}
         actions={
           <div className="flex items-center gap-3">
              {canUseImportExport && (
@@ -263,7 +264,7 @@ export const ProjectDetail = () => {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 mt-8">
         {/* Left Column: Summary & KPIs */}
         <div className="xl:col-span-4 space-y-8">
-          <Card title="Engagement Blueprint" headerVariant="secondary">
+          <Card title={`${termTitle('engagement')} Blueprint`} headerVariant="secondary">
             <div className="space-y-6">
                <div className="flex justify-between items-start">
                   <div>
@@ -512,7 +513,7 @@ export const ProjectDetail = () => {
              </Card>
           </div>
 
-          <Card title="Approved Timesheet Evidence" headerVariant="secondary">
+          <Card title={`Approved ${termTitle('worklog')} Evidence`} headerVariant="secondary">
              <div className="space-y-4">
                 {recentTimesheetEvidence.map((timesheet) => {
                   const projectHours = timesheet.entries

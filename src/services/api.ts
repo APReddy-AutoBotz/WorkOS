@@ -3,7 +3,7 @@
  * AUTO-DETECTS backend: if /api/health returns database:connected → uses REST API.
  * Otherwise → falls back to localStorage (demo mode). Zero code change needed to switch.
  */
-import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportExportLog, SystemSettings, CountryDirector, RoleDefinition, Client, CatalogItem, UtilizationReport, UtilizationReportMode, UserAccount, DataQualityReport, DashboardReport, LeaveType, LeavePolicy, HolidayCalendar, LeaveBalance, LeaveRequest, LeaveAvailabilityEntry, ApprovalRecord, ApprovalDelegation, ApprovalSlaReport, NotificationEvent, NotificationTemplate, NotificationPreference, NotificationDeliveryAttempt, IdentityProviderLink, EntraRoleMapping, TeamsUserLink, TeamsActionToken, IntegrationEventLog, IntegrationHealthReport, ResourcePlanningReport, WorkforceCommandCenterReport, PermissionConfig, PermissionDefinition, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant } from '../types';
+import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportExportLog, SystemSettings, CountryDirector, RoleDefinition, Client, CatalogItem, UtilizationReport, UtilizationReportMode, UserAccount, DataQualityReport, DashboardReport, LeaveType, LeavePolicy, HolidayCalendar, LeaveBalance, LeaveRequest, LeaveAvailabilityEntry, ApprovalRecord, ApprovalDelegation, ApprovalSlaReport, NotificationEvent, NotificationTemplate, NotificationPreference, NotificationDeliveryAttempt, IdentityProviderLink, EntraRoleMapping, TeamsUserLink, TeamsActionToken, IntegrationEventLog, IntegrationHealthReport, ResourcePlanningReport, WorkforceCommandCenterReport, PermissionConfig, PermissionDefinition, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant, OrganizationSetupReadiness, OrganizationProfile, LegalEntityProfile } from '../types';
 import { DataStorage, STORAGE_KEYS } from './storage';
 import { authService } from './authService';
 import {
@@ -27,6 +27,7 @@ import { validateDeactivateManager, validateEmployeeHierarchy } from './orgChart
 import { DEFAULT_ROLE_PERMISSIONS, PERMISSION_DEFINITIONS, SYSTEM_ROLES, hasPermission } from './permissions';
 
 import { productConfig } from '../config/productConfig';
+import { displayEntityType } from '../config/terminology';
 const todayIso = () => new Date().toISOString().split('T')[0];
 const sha256 = async (value: string) => {
   const data = new TextEncoder().encode(value);
@@ -140,12 +141,13 @@ const ensureLocalApprovalRecord = (record: Omit<ApprovalRecord, 'id' | 'createdA
   };
   saveLocalApprovalRecord(next);
   if (next.status === 'Pending') {
+    const displayType = displayEntityType(next.entityType);
     createLocalNotification({
       recipientEmployeeId: next.subjectEmployeeId,
       recipientName: next.subjectEmployeeName,
       eventType: 'ApprovalRequested',
-      title: `${next.entityType} approval requested`,
-      body: `${next.requesterName || next.subjectEmployeeName || 'A user'} submitted ${next.entityType} for approval.`,
+      title: `${displayType} approval requested`,
+      body: `${next.requesterName || next.subjectEmployeeName || 'A user'} submitted ${displayType.toLowerCase()} for approval.`,
       entityType: next.entityType,
       entityId: next.entityId,
       severity: 'Info',
@@ -170,12 +172,13 @@ const decideLocalApprovalRecord = (entityType: string, entityId: string, status:
     updatedAt: new Date().toISOString(),
   };
   saveLocalApprovalRecord(next);
+  const displayType = displayEntityType(next.entityType);
   createLocalNotification({
     recipientEmployeeId: next.subjectEmployeeId,
     recipientName: next.subjectEmployeeName,
     eventType: 'ApprovalDecided',
-    title: `${next.entityType} approval ${status.toLowerCase()}`,
-    body: `${next.entityType} ${next.entityId} was ${status.toLowerCase()}.`,
+    title: `${displayType} approval ${status.toLowerCase()}`,
+    body: `${displayType} ${next.entityId} was ${status.toLowerCase()}.`,
     entityType: next.entityType,
     entityId: next.entityId,
     severity: status === 'Rejected' ? 'Warning' : 'Info',
@@ -1670,7 +1673,38 @@ export const integrationService = {
   },
 };
 
+const normalizeOrganizationProfile = (row: Record<string, unknown>): OrganizationProfile => ({
+  organizationId:String(row.organization_id), code:String(row.organization_code), name:String(row.organization_name),
+  legalName:String(row.legal_name), productDisplayName:String(row.product_display_name), supportContact:String(row.support_contact),
+  defaultLocale:String(row.default_locale), defaultTimeZone:String(row.default_time_zone), baseCurrency:String(row.base_currency),
+  fiscalYearStart:String(row.fiscal_year_start), defaultWeekStart:Number(row.default_week_start), effectiveFrom:String(row.profile_effective_from),
+});
+const normalizeLegalEntityProfile = (row: Record<string, unknown>): LegalEntityProfile => ({
+  id:String(row.id), organizationId:String(row.organization_id), code:String(row.code), legalName:String(row.legal_name),
+  registrationIdentifier:row.registration_identifier as string|null|undefined, taxIdentifier:row.tax_identifier as string|null|undefined,
+  reportingCurrency:String(row.reporting_currency), address:row.address as LegalEntityProfile['address'], status:row.status as LegalEntityProfile['status'],
+  effectiveFrom:String(row.profile_effective_from), entityEffectiveFrom:String(row.effective_from), effectiveTo:row.effective_to as string|null|undefined,
+});
+
 export const adminService = {
+  getOrganizationProfile: async (): Promise<OrganizationProfile | null> => {
+    if (!(await checkBackend())) return null;
+    return normalizeOrganizationProfile(await api.get<Record<string, unknown>>('/api/organization-setup/profile'));
+  },
+  updateOrganizationProfile: async (profile: OrganizationProfile): Promise<OrganizationProfile> =>
+    normalizeOrganizationProfile(await api.put<Record<string, unknown>>('/api/organization-setup/profile', profile)),
+  getLegalEntities: async (): Promise<LegalEntityProfile[]> => {
+    if (!(await checkBackend())) return [];
+    return (await api.get<Record<string, unknown>[]>('/api/organization-setup/legal-entities')).map(normalizeLegalEntityProfile);
+  },
+  createLegalEntity: async (profile: Omit<LegalEntityProfile, 'id'|'organizationId'|'entityEffectiveFrom'>): Promise<LegalEntityProfile> =>
+    normalizeLegalEntityProfile(await api.post<Record<string, unknown>>('/api/organization-setup/legal-entities', profile)),
+  updateLegalEntity: async (profile: LegalEntityProfile): Promise<LegalEntityProfile> =>
+    normalizeLegalEntityProfile(await api.put<Record<string, unknown>>(`/api/organization-setup/legal-entities/${profile.id}`, profile)),
+  getOrganizationSetupReadiness: async (): Promise<OrganizationSetupReadiness | null> => {
+    if (!(await checkBackend())) return null;
+    return api.get<OrganizationSetupReadiness>('/api/organization-setup/readiness');
+  },
   getAuditLogs: async (): Promise<AuditLog[]> => {
     if (!hasPermission(authService.getCurrentUser(), 'audit.view')) {
       return [];

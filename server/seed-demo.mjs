@@ -10,6 +10,8 @@ import {
 } from '../src/services/demoData.ts';
 
 const { Pool } = pg;
+const DEMO_ORGANIZATION_ID = 'org-default';
+const DEMO_LEGAL_ENTITY_ID = 'legal-default';
 
 const reset = process.argv.includes('--reset') || process.env.RESET_DEMO_DATA === 'true';
 if (process.env.NODE_ENV === 'production' || process.env.APP_MODE === 'production') {
@@ -47,6 +49,30 @@ const rolesForEmployee = (employee) => {
 
 const query = (client, text, params = []) => client.query(text, params);
 
+const assertDemoAuthority = async (client, dataset) => {
+  const authority = await query(client, `
+    select 1 from organizations o join legal_entities le on le.organization_id=o.id
+    where o.id=$1 and le.id=$2
+  `, [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID]);
+  if (authority.rowCount !== 1) throw new Error('Canonical demo organization/legal-entity authority is unavailable.');
+
+  const ids = dataset.employees.map(item => item.id);
+  const collisions = await query(client, `
+    select id from employees where id=any($1::text[]) and (organization_id<>$2 or legal_entity_id<>$3)
+    union all select id from clients where id=any($4::text[]) and (organization_id<>$2 or legal_entity_id<>$3)
+    union all select id from projects where id=any($5::text[]) and (organization_id<>$2 or legal_entity_id<>$3)
+    union all select id from project_allocations where id=any($6::text[]) and (organization_id<>$2 or legal_entity_id<>$3)
+  `, [ids, DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, dataset.clients.map(item => item.id), dataset.projects.map(item => item.id), dataset.allocations.map(item => item.id)]);
+  if (collisions.rowCount) throw new Error('Demo identifiers collide with records owned by another organization or legal entity.');
+
+  const identityCollisions = await query(client, `
+    select username from users
+    where username=any($1::text[])
+      and (employee_record_id is null or employee_record_id<>all($2::text[]))
+  `, [dataset.employees.map(item => item.employeeId.toLowerCase()), ids]);
+  if (identityCollisions.rowCount) throw new Error('Demo usernames collide with accounts outside the demo dataset.');
+};
+
 const seed = async () => {
   const dataset = generateDemoDataset();
   const catalogItems = [
@@ -59,26 +85,21 @@ const seed = async () => {
 
   try {
     await client.query('begin');
+    await assertDemoAuthority(client, dataset);
 
     if (reset) {
-      await client.query(`
-        truncate table
-          audit_logs,
-          timesheet_entries,
-          timesheets,
-          project_allocations,
-          projects,
-          employee_country_director_map,
-          employees,
-          client_country_director_map,
-          clients,
-          role_definitions,
-          catalog_items,
-          user_roles,
-          users,
-          country_directors
-        restart identity cascade
-      `);
+      const employeeIds = dataset.employees.map(item => item.id);
+      const userIds = (await query(client, 'select id from users where employee_record_id=any($1::text[])', [employeeIds])).rows.map(row => row.id);
+      await query(client, 'delete from timesheet_entries where timesheet_id in (select id from timesheets where organization_id=$1 and legal_entity_id=$2 and employee_id=any($3::text[]))', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, employeeIds]);
+      await query(client, 'delete from timesheets where organization_id=$1 and legal_entity_id=$2 and employee_id=any($3::text[])', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, employeeIds]);
+      await query(client, 'delete from project_allocations where organization_id=$1 and legal_entity_id=$2 and id=any($3::text[])', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, dataset.allocations.map(item => item.id)]);
+      await query(client, 'delete from worker_history where organization_id=$1 and legal_entity_id=$2 and employee_id=any($3::text[])', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, employeeIds]);
+      await query(client, 'delete from worker_profiles where organization_id=$1 and legal_entity_id=$2 and employee_id=any($3::text[])', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, employeeIds]);
+      if (userIds.length) await query(client, 'delete from user_organization_scopes where user_id=any($1::uuid[]) and organization_id=$2 and legal_entity_id=$3', [userIds, DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID]);
+      await query(client, 'delete from users where employee_record_id=any($1::text[])', [employeeIds]);
+      await query(client, 'delete from projects where organization_id=$1 and legal_entity_id=$2 and id=any($3::text[])', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, dataset.projects.map(item => item.id)]);
+      await query(client, 'delete from employees where organization_id=$1 and legal_entity_id=$2 and id=any($3::text[])', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, employeeIds]);
+      await query(client, 'delete from clients where organization_id=$1 and legal_entity_id=$2 and id=any($3::text[])', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, dataset.clients.map(item => item.id)]);
     }
 
     await query(client, `
@@ -137,15 +158,15 @@ const seed = async () => {
 
     for (const account of dataset.clients) {
       await query(client, `
-        insert into clients (id, name, industry, account_owner_id, status, created_at, updated_at)
-        values ($1,$2,$3,$4,$5,$6,$7)
+        insert into clients (id, name, industry, account_owner_id, status, created_at, updated_at, organization_id, legal_entity_id)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         on conflict (id) do update set
           name = excluded.name,
           industry = excluded.industry,
           account_owner_id = excluded.account_owner_id,
           status = excluded.status,
           updated_at = excluded.updated_at
-      `, [account.id, account.name, account.industry, account.accountOwnerId || null, account.status, account.createdAt, account.updatedAt]);
+      `, [account.id, account.name, account.industry, account.accountOwnerId || null, account.status, account.createdAt, account.updatedAt, DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID]);
 
       await query(client, 'delete from client_country_director_map where client_id = $1', [account.id]);
       for (const directorId of account.countryDirectorIds || []) {
@@ -164,9 +185,9 @@ const seed = async () => {
       await query(client, `
         insert into employees (
           id, employee_id, name, email, designation, department, country, region, business_unit, reporting_manager_id,
-          primary_country_director_id, status, utilization_eligible, expected_weekly_hours, updated_at
+          primary_country_director_id, status, utilization_eligible, expected_weekly_hours, updated_at, organization_id, legal_entity_id
         )
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),$15,$16)
         on conflict (id) do update set
           employee_id = excluded.employee_id,
           name = excluded.name,
@@ -197,7 +218,18 @@ const seed = async () => {
         employee.status,
         employee.utilizationEligible ?? true,
         40,
+        DEMO_ORGANIZATION_ID,
+        DEMO_LEGAL_ENTITY_ID,
       ]);
+
+      const lifecycleStatus = employee.status === 'Exited' ? 'Exited' : employee.status === 'On Leave' ? 'On Leave' : 'Active';
+      await query(client, `insert into worker_profiles (employee_id,organization_id,legal_entity_id,lifecycle_status,effective_from)
+        values ($1,$2,$3,$4,coalesce($5::date,current_date)) on conflict (employee_id) do nothing`,
+      [employee.id, DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, lifecycleStatus, employee.joiningDate || employee.createdAt || null]);
+      await query(client, `insert into worker_history (employee_id,organization_id,legal_entity_id,effective_from,status,snapshot)
+        select $1,$2,$3,wp.effective_from,$4,to_jsonb(e) from worker_profiles wp join employees e on e.id=wp.employee_id
+        where wp.employee_id=$1 and not exists (select 1 from worker_history where employee_id=$1)`,
+      [employee.id, DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, lifecycleStatus]);
 
       await query(client, 'delete from employee_country_director_map where employee_id = $1', [employee.id]);
       for (const directorId of employee.mappedCountryDirectorIds || []) {
@@ -213,9 +245,9 @@ const seed = async () => {
       await query(client, `
         insert into projects (
           id, project_code, name, client_id, client, manager_id, manager_name,
-          billable, start_date, end_date, status, updated_at
+          billable, start_date, end_date, status, updated_at, organization_id, legal_entity_id
         )
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),$12,$13)
         on conflict (id) do update set
           project_code = excluded.project_code,
           name = excluded.name,
@@ -240,6 +272,8 @@ const seed = async () => {
         project.startDate,
         project.endDate,
         project.status,
+        DEMO_ORGANIZATION_ID,
+        DEMO_LEGAL_ENTITY_ID,
       ]);
     }
 
@@ -247,9 +281,9 @@ const seed = async () => {
       await query(client, `
         insert into project_allocations (
           id, employee_id, project_id, role_on_project, percentage,
-          start_date, end_date, billable, status, updated_at
+          start_date, end_date, billable, status, organization_id, legal_entity_id, updated_at
         )
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
         on conflict (id) do update set
           employee_id = excluded.employee_id,
           project_id = excluded.project_id,
@@ -270,6 +304,8 @@ const seed = async () => {
         allocation.endDate,
         allocation.billable,
         allocation.status,
+        DEMO_ORGANIZATION_ID,
+        DEMO_LEGAL_ENTITY_ID,
       ]);
     }
 
@@ -277,10 +313,11 @@ const seed = async () => {
     for (const employee of dataset.employees) {
       const username = employee.employeeId.toLowerCase();
       const result = await query(client, `
-        insert into users (username, employee_id, email, password_hash, status, updated_at)
-        values ($1,$2,$3,$4,$5,now())
+        insert into users (username, employee_id, employee_record_id, email, password_hash, status, updated_at)
+        values ($1,$2,$3,$4,$5,$6,now())
         on conflict (username) do update set
           employee_id = excluded.employee_id,
+          employee_record_id = excluded.employee_record_id,
           email = excluded.email,
           password_hash = excluded.password_hash,
           status = excluded.status,
@@ -289,11 +326,16 @@ const seed = async () => {
       `, [
         username,
         employee.employeeId,
+        employee.id,
         employee.email,
         passwordHash,
         employee.status === 'Exited' ? 'Disabled' : 'Active',
       ]);
       const userId = result.rows[0].id;
+      await query(client, 'delete from user_organization_scopes where user_id=$1', [userId]);
+      await query(client, `insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active)
+        values($1,$2,$3,$4) on conflict(user_id,organization_id,legal_entity_id) do update set active=excluded.active`,
+      [userId, DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, employee.status !== 'Exited']);
       await query(client, 'delete from user_roles where user_id = $1', [userId]);
       for (const roleName of rolesForEmployee(employee)) {
         await query(client, `
@@ -308,10 +350,11 @@ const seed = async () => {
       const result = await query(client, `
         insert into timesheets (
           employee_id, week_ending, status, total_hours, billable_hours,
-          rejection_reason, submitted_at, approved_at, approved_by, rejected_at, rejected_by, updated_at
+          rejection_reason, submitted_at, approved_at, approved_by, rejected_at, rejected_by, updated_at,
+          organization_id, legal_entity_id
         )
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
-        on conflict (employee_id, week_ending) do update set
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),$12,$13)
+        on conflict (organization_id, employee_id, week_ending) do update set
           status = excluded.status,
           total_hours = excluded.total_hours,
           billable_hours = excluded.billable_hours,
@@ -335,6 +378,8 @@ const seed = async () => {
         timesheet.approvedBy || null,
         timesheet.rejectedAt || null,
         timesheet.rejectedBy || null,
+        DEMO_ORGANIZATION_ID,
+        DEMO_LEGAL_ENTITY_ID,
       ]);
       const timesheetId = result.rows[0].id;
       await query(client, 'delete from timesheet_entries where timesheet_id = $1', [timesheetId]);
@@ -358,6 +403,20 @@ const seed = async () => {
         ]);
       }
     }
+
+    const lifecycleInvariant = await query(client, `
+      select e.id from employees e
+      left join worker_profiles wp on wp.employee_id=e.id and wp.organization_id=e.organization_id and wp.legal_entity_id=e.legal_entity_id
+      left join worker_history wh on wh.employee_id=e.id and wh.organization_id=e.organization_id and wh.legal_entity_id=e.legal_entity_id
+      left join users u on u.employee_record_id=e.id
+      left join user_organization_scopes us on us.user_id=u.id and us.organization_id=e.organization_id and us.legal_entity_id=e.legal_entity_id
+      where e.id=any($1::text[]) and e.organization_id=$2 and e.legal_entity_id=$3
+      group by e.id,e.status,wp.employee_id,u.id,u.status,us.active
+      having wp.employee_id is null or count(wh.id)<>1 or u.id is null
+        or bool_or(us.active) is distinct from (e.status<>'Exited')
+        or (e.status='Exited' and u.status<>'Disabled')
+    `, [dataset.employees.map(item => item.id), DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID]);
+    if (lifecycleInvariant.rowCount) throw new Error('Demo worker identity, scope, or lifecycle invariant failed.');
 
     await query(client, `
       insert into audit_logs (user_id, user_name, user_role, module, action, entity_type, entity_id, details)

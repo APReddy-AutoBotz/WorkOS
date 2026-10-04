@@ -9,6 +9,8 @@ import { filterEmployeesByOrgVisibility, filterProjectsByOrgVisibility } from '.
 import type { UserRole } from '../../types';
 
 import { productConfig } from '../../config/productConfig';
+import { term, termPluralTitle, termTitle } from '../../config/terminology';
+import { api, getOrganizationScope, selectOrganizationScope, type OrganizationScope } from '../../services/apiClient';
 type SearchResult = {
   id: string;
   title: string;
@@ -32,9 +34,13 @@ export const Header = () => {
   const [passwordNotice, setPasswordNotice] = useState<{ type: 'success' | 'danger'; message: string } | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [switchingRole, setSwitchingRole] = useState<string | null>(null);
+  const [organizationScopes, setOrganizationScopes] = useState<OrganizationScope[]>([]);
+  const [organizationScope, setOrganizationScopeState] = useState(getOrganizationScope());
   const user = authService.getCurrentUser();
   const navigate = useNavigate();
   const isPasswordChangeRequired = Boolean(user?.mustChangePassword);
+
+  useEffect(() => { api.get<OrganizationScope[]>('/api/auth/organization-scopes').then(setOrganizationScopes).catch(() => setOrganizationScopes([])); }, []);
 
   // Async data for search
   const [allEmployees, setAllEmployees] = useState<any[]>([]);
@@ -93,8 +99,8 @@ export const Header = () => {
       { id: 'page-leave-admin', title: 'Leave Administration', subtitle: 'Leave policies, holiday calendars, and balances', path: '/leave/admin', icon: SettingsIcon, keywords: 'leave admin policies holidays balances', roles: ROUTE_ROLES.leaveAdmin, feature: 'leave' },
       { id: 'page-approvals', title: 'Approvals Inbox', subtitle: 'Shared approvals for timesheets, leave, allocations, and workflow items', path: '/approvals', icon: CheckCircle2, keywords: 'approvals inbox history delegation sla timesheet leave allocation action center', roles: ROUTE_ROLES.approvals, feature: 'notifications' },
       { id: 'page-notifications', title: 'Notifications', subtitle: 'In-app notifications, preferences, and delivery monitoring', path: '/notifications', icon: MailCheck, keywords: 'notifications inbox preferences templates email teams delivery', roles: ROUTE_ROLES.notifications, feature: 'notifications' },
-      { id: 'page-employees', title: 'Employee Directory', subtitle: 'Employee master, roles, CD mappings, utilization, and workforce profile data', path: '/employees', icon: Users, keywords: 'employees resources people consultants hr directory master', roles: ['Admin', 'HR', 'CountryDirector', 'TeamLead'] },
-      { id: 'page-projects', title: 'Project Master', subtitle: 'Processes, clients, project managers, resources', path: '/projects', icon: BriefcaseBusiness, keywords: 'projects processes clients pm delivery', roles: ROUTE_ROLES.projects },
+      { id: 'page-employees', title: `${termTitle('employee')} Directory`, subtitle: `${termTitle('employee')} master, roles, ${termPluralTitle('regionalOwner')}, utilization, and workforce profile data`, path: '/employees', icon: Users, keywords: 'employees resources people consultants hr directory master', roles: ['Admin', 'HR', 'CountryDirector', 'TeamLead'] },
+      { id: 'page-projects', title: `${termTitle('project')} Master`, subtitle: `Processes, clients, ${term('project')} ${termPluralTitle('manager').toLowerCase()}, resources`, path: '/projects', icon: BriefcaseBusiness, keywords: 'projects processes clients pm delivery', roles: ROUTE_ROLES.projects },
       { id: 'page-clients', title: 'Client Portfolio', subtitle: 'Client, project, and resource coverage', path: '/clients', icon: Building2, keywords: 'clients portfolio accounts customer distribution', roles: ['Admin', 'HR', 'CountryDirector'] },
       { id: 'page-allocations', title: 'Allocation Control', subtitle: 'Compatibility link into Planning Workspace allocation edits', path: '/allocations', icon: LinkIcon, keywords: 'allocation control assignments staffing percentage dates planning workspace', roles: ROUTE_ROLES.allocations },
       { id: 'page-utilization-reports', title: 'Utilization Reports', subtitle: 'Single entry point for planned, actual, and forecast utilization', path: '/reports/utilization', icon: BarChart3, keywords: 'utilization reports planned actual forecast capacity analytics', roles: ROUTE_ROLES.utilization },
@@ -315,6 +321,11 @@ export const Header = () => {
       </div>
 
       <div className="flex items-center gap-8">
+        {organizationScopes.length > 1 && <select aria-label="Organization context" value={organizationScope ? `${organizationScope.organizationId}:${organizationScope.legalEntityId}` : ''}
+          onChange={async event => { const next=organizationScopes.find(scope=>`${scope.organizationId}:${scope.legalEntityId}`===event.target.value); if(next){await selectOrganizationScope(next);setOrganizationScopeState(next);window.location.reload();}}}
+          className="rounded-lg border border-border-light bg-white px-3 py-2 text-xs font-semibold">
+          <option value="" disabled>Select organization</option>{organizationScopes.map(scope=><option key={`${scope.organizationId}:${scope.legalEntityId}`} value={`${scope.organizationId}:${scope.legalEntityId}`}>{scope.organizationName || scope.organizationId} / {scope.legalEntityName || scope.legalEntityId}</option>)}
+        </select>}
         <button className="relative text-heading hover:text-primary transition-colors p-2 rounded-full hover:bg-bg-secondary group">
           <Bell size={18} />
           <div className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full border-2 border-white group-hover:scale-110 transition-transform"></div>

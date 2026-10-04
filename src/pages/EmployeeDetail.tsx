@@ -29,6 +29,7 @@ import {
 import { cn } from '../lib/utils';
 import { EmployeeForm } from '../components/forms/EmployeeForm';
 import { isUtilizationEligibleEmployee } from '../services/calculations';
+import { termTitle } from '../config/terminology';
 import { authService } from '../services/authService';
 import {
   canAccessEmployeeDetail,
@@ -103,9 +104,9 @@ export const EmployeeDetail = () => {
         <div className="text-gray-400 mb-4">
           <User size={48} className="mx-auto opacity-20" />
         </div>
-        <h2 className="text-xl font-bold text-heading">Employee Not Found</h2>
+        <h2 className="text-xl font-bold text-heading">{termTitle('employee')} Not Found</h2>
         <p className="text-sm text-body/60 mt-2 mb-8">The consultant you are looking for does not exist in our database.</p>
-        <Link to="/employees" className="btn-primary py-2 px-6">Back to Employee Master</Link>
+        <Link to="/employees" className="btn-primary py-2 px-6">Back to {termTitle('employee')} Master</Link>
       </div>
     );
   }
@@ -116,7 +117,7 @@ export const EmployeeDetail = () => {
         <div className="text-gray-400 mb-4">
           <User size={48} className="mx-auto opacity-20" />
         </div>
-        <h2 className="text-xl font-bold text-heading">Employee Not Found</h2>
+        <h2 className="text-xl font-bold text-heading">{termTitle('employee')} Not Found</h2>
         <p className="text-sm text-body/60 mt-2 mb-8">The consultant you are looking for is not available in your workspace scope.</p>
         <Link to="/" className="btn-primary py-2 px-6">Back to Dashboard</Link>
       </div>
@@ -284,7 +285,7 @@ export const EmployeeDetail = () => {
       <PageHeader
         title={employee.name}
         subtitle={`${employee.designation} • ${employee.department} • ${employee.country}`}
-        breadcrumb={isSelfServiceView ? ['Self Service', 'Profile', employee.employeeId] : ['Operations', 'Employee Master', employee.name]}
+        breadcrumb={isSelfServiceView ? ['Self Service', 'Profile', employee.employeeId] : ['Operations', `${termTitle('employee')} Master`, employee.name]}
         actions={
           <div className="flex items-center gap-3">
              {canUseImportExport && (
@@ -571,7 +572,7 @@ export const EmployeeDetail = () => {
                       <div className="p-2 bg-bg-secondary group-hover:bg-white rounded-lg text-slate-dark group-hover:text-primary transition-colors">
                         <Clock size={16} />
                       </div>
-                      <span className="text-xs font-bold text-heading">Timesheet History</span>
+                      <span className="text-xs font-bold text-heading">{termTitle('worklog')} History</span>
                    </div>
                    <ChevronRight size={14} className="text-gray-300 group-hover:text-primary" />
                 </Link>

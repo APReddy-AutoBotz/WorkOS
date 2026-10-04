@@ -71,19 +71,36 @@ export const resetBackendCheck = () => {
 // ─── Token management ─────────────────────────────────────────────────────────
 
 const TOKEN_KEY = 'workos_api_token';
+const SCOPE_KEY = 'workos_organization_scope';
+export type OrganizationScope = { organizationId: string; legalEntityId: string; organizationName?: string; legalEntityName?: string };
 export const storeToken = (token: string) => sessionStorage.setItem(TOKEN_KEY, token);
-export const clearToken = () => sessionStorage.removeItem(TOKEN_KEY);
+export const clearToken = () => { sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(SCOPE_KEY); };
 export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
+export const getOrganizationScope = (): OrganizationScope | null => {
+  try { return JSON.parse(sessionStorage.getItem(SCOPE_KEY) || 'null'); } catch { return null; }
+};
+export const clearOrganizationScope = () => {
+  try { sessionStorage.removeItem(SCOPE_KEY); } catch { /* server-side rendering has no session storage */ }
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('workos:organization-scope-changed'));
+};
+export const selectOrganizationScope = async (scope: OrganizationScope) => {
+  const scopes = await apiFetch<OrganizationScope[]>('GET', '/api/auth/organization-scopes');
+  if (!scopes.some(item => item.organizationId === scope.organizationId && item.legalEntityId === scope.legalEntityId)) throw new Error('Organization scope is not authorized');
+  sessionStorage.setItem(SCOPE_KEY, JSON.stringify(scope));
+  window.dispatchEvent(new Event('workos:organization-scope-changed'));
+};
 
 // ─── Core fetch wrapper ───────────────────────────────────────────────────────
 
 type ApiError = { error: string; reason?: string };
 
-const buildHeaders = (): HeadersInit => {
+export const getApiHeaders = (): HeadersInit => {
   const token = getToken();
+  const scope = getOrganizationScope();
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(scope ? { 'X-Organization-Id': scope.organizationId, 'X-Legal-Entity-Id': scope.legalEntityId } : {}),
   };
 };
 
@@ -94,7 +111,7 @@ async function apiFetch<T>(
 ): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: buildHeaders(),
+    headers: getApiHeaders(),
     credentials: 'include',
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
@@ -112,12 +129,16 @@ async function apiFetch<T>(
     const err = json as ApiError;
     throw new Error(err.error || `API error ${res.status}`);
   }
+  if (method !== 'GET' && path === '/api/organization-setup/terminology') {
+    window.dispatchEvent(new Event('workos:organization-scope-changed'));
+  }
   return json as T;
 }
 
 export const api = {
   get:    <T>(path: string) => apiFetch<T>('GET', path),
   post:   <T>(path: string, body: unknown) => apiFetch<T>('POST', path, body),
+  put:    <T>(path: string, body: unknown) => apiFetch<T>('PUT', path, body),
   patch:  <T>(path: string, body: unknown) => apiFetch<T>('PATCH', path, body),
   delete: <T>(path: string, body?: unknown) => apiFetch<T>('DELETE', path, body),
 };

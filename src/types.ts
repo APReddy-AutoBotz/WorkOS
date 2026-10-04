@@ -126,6 +126,45 @@ export interface SystemSettings {
   currency: string;
 }
 
+export interface OrganizationSetupReadiness {
+  organizationId: string;
+  legalEntityId: string;
+  checks: Record<'organization' | 'legal_entity' | 'calendars' | 'roles' | 'identity' | 'initial_users' | 'imports' | 'commercial_defaults' | 'notifications' | 'production_readiness' | 'worker_type' | 'reporting_period', boolean>;
+  evidence?: Record<string, string>;
+  ready: boolean;
+  authority: 'persisted-server-state';
+}
+
+export interface OrganizationProfile {
+  organizationId: string;
+  code: string;
+  name: string;
+  legalName: string;
+  productDisplayName: string;
+  supportContact: string;
+  defaultLocale: string;
+  defaultTimeZone: string;
+  baseCurrency: string;
+  fiscalYearStart: string;
+  defaultWeekStart: number;
+  effectiveFrom: string;
+}
+
+export interface LegalEntityProfile {
+  id: string;
+  organizationId: string;
+  code: string;
+  legalName: string;
+  registrationIdentifier?: string | null;
+  taxIdentifier?: string | null;
+  reportingCurrency: string;
+  address: { line1: string; line2?: string; city: string; region?: string; postalCode?: string; countryCode: string };
+  status: 'Active' | 'Inactive';
+  effectiveFrom: string;
+  entityEffectiveFrom: string;
+  effectiveTo?: string | null;
+}
+
 export interface DataQualityIssue {
   entityType: string;
   entityId: string;
