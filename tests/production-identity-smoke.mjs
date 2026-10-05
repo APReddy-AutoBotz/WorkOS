@@ -304,25 +304,25 @@ try {
     name: 'missing-app-url',
     port: positivePort + 7,
     overrides: {APP_URL: undefined},
-    expected: /APP_URL is invalid/,
+    expected: /APP_URL is required in production/,
   }));
   results.push(await assertStartupFailure({
     name: 'http-app-url',
     port: positivePort + 8,
     overrides: {APP_URL: 'http://app.example.test'},
-    expected: /APP_URL must use HTTPS/,
+    expected: /APP_URL must be a public HTTPS origin/,
   }));
   results.push(await assertStartupFailure({
     name: 'loopback-callback',
     port: positivePort + 9,
     overrides: {ENTRA_REDIRECT_URI: 'https://localhost/api/auth/entra/callback'},
-    expected: /ENTRA_REDIRECT_URI must not use a loopback host/,
+    expected: /ENTRA_REDIRECT_URI must match the HTTPS APP_URL origin and callback path/,
   }));
   results.push(await assertStartupFailure({
     name: 'wrong-callback-route',
     port: positivePort + 10,
     overrides: {ENTRA_REDIRECT_URI: `${rootOrigin}/wrong`},
-    expected: /ENTRA_REDIRECT_URI must use the APP_URL origin and exact \/api\/auth\/entra\/callback route/,
+    expected: /ENTRA_REDIRECT_URI must match the HTTPS APP_URL origin and callback path/,
   }));
   results.push(await assertStartupFailure({
     name: 'missing-identity-setting',
@@ -334,7 +334,7 @@ try {
     name: 'local-provider-prohibited',
     port: positivePort + 12,
     overrides: {IDENTITY_PROVIDER: 'local'},
-    expected: /IDENTITY_PROVIDER must select the implemented governed Entra provider in production\./,
+    expected: /IDENTITY_PROVIDER must select the configured Entra provider/,
   }));
   results.push(await assertStartupFailure({
     name: 'unavailable-discovery',
