@@ -723,6 +723,36 @@ async function maybeAutopick({github, owner, repo, active, validateBeforePost = 
       return {posted: false, detail: 'product-task lane or exact head/base changed at the final posting boundary'};
     }
     active = finalCurrent;
+
+    let postingComments;
+    let postingReviews;
+    try {
+      [postingComments, postingReviews] = await Promise.all([
+        github.paginate(github.rest.issues.listComments, {
+          owner,
+          repo,
+          issue_number: active.number,
+          per_page: 100,
+        }),
+        github.paginate(github.rest.pulls.listReviews, {
+          owner,
+          repo,
+          pull_number: active.number,
+          per_page: 100,
+        }),
+      ]);
+    } catch {
+      return {posted: false, detail: 'comment/review freshness could not be revalidated at the final posting boundary; no continuation posted'};
+    }
+    const postingFreshness = assessContinuationFreshness({
+      comments: postingComments,
+      reviews: postingReviews,
+      nowMs: Date.now(),
+      body: active.body || '',
+    });
+    if (!postingFreshness.shouldPost) {
+      return {posted: false, detail: 'activity changed during final workflow/lane revalidation; ' + postingFreshness.detail};
+    }
   }
 
   const taskMatch = (active.body || '').match(/`(docs\/tasks\/[^`]+\.md)`/i);

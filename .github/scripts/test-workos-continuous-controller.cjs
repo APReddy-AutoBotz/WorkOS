@@ -1117,6 +1117,84 @@ async function verifyContinuationFreshnessFinalBoundary() {
   }
 }
 
+async function verifyContinuationFreshnessAfterFinalChecks() {
+  for (const arrivalPoint of ['workflow-recheck', 'final-lane-recheck']) {
+    for (const activityKind of ['task-comment', 'submitted-review']) {
+      const listComments = () => {};
+      const listReviews = () => {};
+      const listWorkflowRuns = () => {};
+      const events = [];
+      let commentReads = 0;
+      let reviewReads = 0;
+      let validationReads = 0;
+      let activityVisible = false;
+      let posted = 0;
+      const freshTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const taskComment = {
+        user: {login: 'APReddy-AutoBotz'},
+        body: '@codex continue the current task',
+        created_at: freshTime,
+        updated_at: freshTime,
+      };
+      const submittedReview = {
+        user: {login: 'reviewer'},
+        state: 'COMMENTED',
+        submitted_at: freshTime,
+      };
+      const github = {
+        rest: {
+          issues: {
+            listComments,
+            createComment: async () => { posted += 1; events.push('posted'); },
+          },
+          pulls: {listReviews},
+          actions: {listWorkflowRunsForRepo: listWorkflowRuns},
+        },
+        paginate: async (endpoint, _params, mapFunction) => {
+          if (endpoint === listComments) {
+            commentReads += 1;
+            events.push('comments-' + commentReads);
+            return activityKind === 'task-comment' && activityVisible && commentReads >= 3
+              ? [taskComment]
+              : [];
+          }
+          if (endpoint === listReviews) {
+            reviewReads += 1;
+            events.push('reviews-' + reviewReads);
+            return activityKind === 'submitted-review' && activityVisible && reviewReads >= 3
+              ? [submittedReview]
+              : [];
+          }
+          if (endpoint === listWorkflowRuns) {
+            events.push('workflow-recheck');
+            if (arrivalPoint === 'workflow-recheck') activityVisible = true;
+            return mapFunction({data: {workflow_runs: []}});
+          }
+          throw new Error('unexpected final-posting-freshness endpoint');
+        },
+      };
+      const outcome = await maybeAutopick({
+        github,
+        owner: 'APReddy-AutoBotz',
+        repo: 'WorkOS',
+        active: {number: 27, head: {sha: HEAD}, body: ''},
+        validateBeforePost: async (candidate) => {
+          validationReads += 1;
+          events.push('lane-' + validationReads);
+          if (arrivalPoint === 'final-lane-recheck' && validationReads === 2) activityVisible = true;
+          return candidate;
+        },
+      });
+      assert.equal(outcome.posted, false, `${activityKind} during ${arrivalPoint} blocks a duplicate continuation`);
+      assert.equal(posted, 0, 'fresh task/review activity suppresses the continuation');
+      assert.equal(commentReads, 3, 'comments are checked once more after the final lane/workflow reads');
+      assert.equal(reviewReads, 3, 'reviews are checked once more after the final lane/workflow reads');
+      assert.ok(events.indexOf('lane-2') < events.indexOf('comments-3'));
+      assert.ok(events.indexOf('workflow-recheck') < events.indexOf('comments-3'));
+    }
+  }
+}
+
 async function verifyWorkflowFreshnessFinalBoundary() {
   const listPulls = () => {};
   const listComments = () => {};
@@ -1475,6 +1553,7 @@ async function runAsyncTests() {
   await verifyReviewGateContext();
   await verifyGeneratedContinuationPrompt();
   await verifyContinuationFreshnessFinalBoundary();
+  await verifyContinuationFreshnessAfterFinalChecks();
   await verifyWorkflowFreshnessFinalBoundary();
   await verifyLaneAuthorityFinalBoundary();
   await verifyFinalMergeRevalidation();
@@ -1502,6 +1581,7 @@ runAsyncTests().then(() => console.log(JSON.stringify({
   exactHeadWorkflowRunsFullyPaginated: true,
   ownerAuthoredMergeIntentRequired: true,
   continuationFreshnessRecheckedAtPostBoundary: true,
+  continuationFreshnessRecheckedAfterFinalLaneAndWorkflow: true,
   workflowFreshnessRecheckedAtPostBoundary: true,
   laneAuthorityRecheckedAfterFreshnessReads: true,
   editedCommentFreshness: true,
