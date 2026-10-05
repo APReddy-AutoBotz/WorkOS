@@ -36,12 +36,17 @@
     "test:identity-discovery": "node tests/identity-discovery-smoke.mjs",
     "test:authorization-convergence": "node tests/authorization-convergence-smoke.mjs",
     "test:organization-setup": "node tests/organization-setup-smoke.mjs",
+    "test:environment": "node tests/runtime-environment-smoke.mjs",
+    "test:health": "node tests/health-endpoints-smoke.mjs",
+    "test:migration-manifest": "node tests/migration-manifest-smoke.mjs",
+    "test:migration-error-logging": "node tests/migration-error-logging-smoke.mjs",
+    "test:migrations": "node tests/migration-runner-smoke.mjs",
     "test:terminology-runtime": "node --import tsx tests/terminology-runtime-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",
     "test:document-metadata": "node tests/document-metadata-smoke.mjs",
-    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery"
+    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging"
   },
   "dependencies": {
     "clsx": "^2.1.1",

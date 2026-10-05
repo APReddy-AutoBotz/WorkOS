@@ -90,7 +90,7 @@ const cleanEnvironment = (overrides = {}) => {
     RESET_DEMO_DATA: 'false',
     DATABASE_URL: databaseUrl,
     PGSSLMODE: 'disable',
-    API_SESSION_SECRET: 'workos-test-only',
+    API_SESSION_SECRET: 'workos-test-only-session-secret-with-at-least-32-characters',
     IDENTITY_PROVIDER: 'entra',
     ENTRA_TENANT_ID: '00000000-0000-0000-0000-000000000001',
     ENTRA_CLIENT_ID: '00000000-0000-0000-0000-000000000002',
@@ -356,6 +356,13 @@ try {
     expected: /Identity provider discovery is missing authorization_endpoint/,
   }));
   invalidDiscovery = false;
+
+  results.push(await assertStartupFailure({
+    name: 'placeholder-client-secret',
+    port: positivePort + 15,
+    overrides: {ENTRA_CLIENT_SECRET: 'replace_me'},
+    expected: /ENTRA_CLIENT_SECRET must be a configured non-placeholder secret/,
+  }));
 
   const beforeUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);
   const beforeEmployees = Number((await pool.query('select count(*)::int as count from employees')).rows[0].count);

@@ -9,3 +9,4 @@ scratch_*.html
 test_logo.svg
 .env*
 !.env.example
+!.env.production.example
