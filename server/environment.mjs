@@ -142,15 +142,17 @@ export const validateRuntimeEnvironment = (source = process.env, {purpose = 'ser
   if (production && (environment.NODE_ENV !== 'production' || environment.APP_MODE !== 'production')) {
     errors.push('NODE_ENV and APP_MODE must both be production');
   }
+  if (!environment.DATABASE_URL && (production || purpose === 'migration')) {
+    errors.push(purpose === 'migration'
+      ? 'DATABASE_URL is required to run database migrations'
+      : 'DATABASE_URL is required in production');
+  }
   if (environment.DATABASE_URL && !isPostgresUrl(environment.DATABASE_URL)) {
     errors.push('DATABASE_URL must be a PostgreSQL connection URL');
   }
   if (production && environment.DATABASE_URL && isPostgresUrl(environment.DATABASE_URL)
       && !hasSafeProductionDatabaseCredentials(environment.DATABASE_URL)) {
     errors.push('DATABASE_URL must include non-placeholder database credentials');
-  }
-  if (purpose === 'migration' && !environment.DATABASE_URL) {
-    errors.push('DATABASE_URL is required to run database migrations');
   }
   if (production && purpose !== 'migration') errors.push(...collectProductionErrors(environment));
   if (environment.PORT && environment.API_PORT && environment.PORT !== environment.API_PORT) {

@@ -53,6 +53,10 @@ rejects({
   DATABASE_URL: 'postgresql://workos:replace_me@db:5432/workos',
 }, 'DATABASE_URL', {purpose: 'migration'});
 rejects({
+  NODE_ENV: 'development',
+  APP_MODE: 'development',
+}, 'DATABASE_URL', {purpose: 'migration'});
+rejects({
   NODE_ENV: 'production',
   APP_MODE: 'development',
   DATABASE_URL: productionEnvironment.DATABASE_URL,
@@ -60,6 +64,7 @@ rejects({
 
 rejects({...productionEnvironment, NODE_ENV: 'development'}, 'NODE_ENV');
 rejects({...productionEnvironment, DATABASE_URL: 'https://db.example.test/workos'}, 'DATABASE_URL');
+rejects({...productionEnvironment, DATABASE_URL: undefined}, 'DATABASE_URL is required in production');
 rejects({...productionEnvironment, API_SESSION_SECRET: 'short'}, 'API_SESSION_SECRET');
 rejects({...productionEnvironment, API_SESSION_SECRET: 'replace_with_a_unique_random_secret_at_least_32_characters'}, 'API_SESSION_SECRET');
 rejects({...productionEnvironment, IDENTITY_PROVIDER: 'local'}, 'IDENTITY_PROVIDER');
