@@ -86,7 +86,7 @@ export const runMigrations = async ({
   rootDir = serverDir,
   logger = console,
 } = {}) => {
-  if (!databaseUrl) throw new Error('DATABASE_URL is required to run database migrations.');
+  if (!suppliedPool && !databaseUrl) throw new Error('DATABASE_URL is required to run database migrations.');
 
   const pool = suppliedPool || new Pool({
     connectionString: databaseUrl,
