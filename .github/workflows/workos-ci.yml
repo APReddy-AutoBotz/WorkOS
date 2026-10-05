@@ -76,6 +76,9 @@ jobs:
           PGSSLMODE: disable
         run: npm run api:migrate
 
+      - name: Rebuild frontend after artifact hygiene tests
+        run: npm run build
+
       - name: Run production identity and fail-closed startup tests
         env:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
