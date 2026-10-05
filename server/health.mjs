@@ -1,5 +1,6 @@
 import {createRequire} from 'node:module';
 import {getMigrationStatus} from './migration-runner.mjs';
+import {isIdentityProviderAvailable} from './identity-readiness.mjs';
 
 const require = createRequire(import.meta.url);
 const packageVersion = require('../package.json').version;
@@ -15,8 +16,15 @@ const getBuildMetadata = (environment) => {
 
 const noStore = (response) => response.setHeader('Cache-Control', 'no-store');
 
-export const createHealthHandlers = ({pool, rootDir, environment = process.env, migrationStatus = getMigrationStatus}) => {
+export const createHealthHandlers = ({
+  pool,
+  rootDir,
+  environment = process.env,
+  migrationStatus = getMigrationStatus,
+  identityProviderReady = isIdentityProviderAvailable,
+}) => {
   const build = getBuildMetadata(environment);
+  const productionRuntime = environment.NODE_ENV === 'production' || environment.APP_MODE === 'production';
 
   const live = (_request, response) => {
     noStore(response);
@@ -45,10 +53,28 @@ export const createHealthHandlers = ({pool, rootDir, environment = process.env, 
         });
         return;
       }
+      let providerReady = false;
+      try {
+        providerReady = identityProviderReady() === true;
+      } catch {
+        providerReady = false;
+      }
+      if (productionRuntime && !providerReady) {
+        response.status(503).json({
+          status: 'unready',
+          database: 'connected',
+          migrations: 'current',
+          identityProvider: 'unavailable',
+          migrationLevel: status.currentVersion,
+        });
+        return;
+      }
+
       response.status(200).json({
         status: 'ready',
         database: 'connected',
         migrations: 'current',
+        ...(productionRuntime ? {identityProvider: 'available'} : {}),
         migrationLevel: status.currentVersion,
         ...build,
       });
@@ -86,8 +112,15 @@ export const createHealthHandlers = ({pool, rootDir, environment = process.env, 
   return {live, ready, buildInfo, legacy};
 };
 
-export const registerHealthRoutes = ({app, pool, rootDir, environment = process.env, migrationStatus = getMigrationStatus}) => {
-  const handlers = createHealthHandlers({pool, rootDir, environment, migrationStatus});
+export const registerHealthRoutes = ({
+  app,
+  pool,
+  rootDir,
+  environment = process.env,
+  migrationStatus = getMigrationStatus,
+  identityProviderReady = isIdentityProviderAvailable,
+}) => {
+  const handlers = createHealthHandlers({pool, rootDir, environment, migrationStatus, identityProviderReady});
   app.get('/api/health/live', handlers.live);
   app.get('/api/health/ready', handlers.ready);
   app.get('/api/health/build', handlers.buildInfo);

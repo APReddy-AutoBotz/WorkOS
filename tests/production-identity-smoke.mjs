@@ -230,6 +230,7 @@ const signIdToken = (nonce, overrides = {}) => {
 };
 
 let invalidDiscovery = false;
+let discoveryUnavailable = false;
 let discoveryRequests = 0;
 let callbackNonce = '';
 let nextTokenClaimOverrides = {};
@@ -237,7 +238,10 @@ const discoveryServer = createServer({key: readFileSync(privateKeyPath), cert: r
   discoveryRequests += 1;
   response.statusCode = 200;
   response.setHeader('content-type', 'application/json');
-  if (request.url?.endsWith('/oauth2/v2.0/token')) {
+  if (discoveryUnavailable) {
+    response.statusCode = 503;
+    response.end(JSON.stringify({error: 'synthetic provider outage'}));
+  } else if (request.url?.endsWith('/oauth2/v2.0/token')) {
     const claimOverrides = nextTokenClaimOverrides;
     nextTokenClaimOverrides = {};
     response.end(JSON.stringify({id_token: signIdToken(callbackNonce, claimOverrides)}));
@@ -397,6 +401,10 @@ try {
   assert.equal(health.status, 'ok');
   assert.equal(health.database, 'connected');
 
+  const initialReadiness = await fetchWithTimeout(`${serviceOrigin}/api/health/ready`, {}, 1000);
+  assert.equal(initialReadiness.status, 200);
+  assert.equal((await initialReadiness.json()).identityProvider, 'available');
+
   const identityConfig = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/config`, {}, 1000);
   assert.equal(identityConfig.status, 200);
   const identityConfigBody = await identityConfig.json();
@@ -505,12 +513,44 @@ try {
   assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');
   await pool.query("delete from users where username = 'synthetic-user'");
 
-  await closeDiscovery();
-  const outageExit = await waitForExit(productionChild, 15_000);
-  assert.notEqual(outageExit.code, 0, 'identity-provider outage must terminate production readiness');
-  assert.match(production.output(), /Identity provider discovery recheck failed: Identity provider discovery is unavailable/);
+  const discoveryRequestsBeforeOutage = discoveryRequests;
+  discoveryUnavailable = true;
+  let outageReadiness = null;
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    assert.equal(productionChild.exitCode, null, 'the process should remain available to serve an unready health response');
+    const response = await fetchWithTimeout(`${serviceOrigin}/api/health/ready`, {}, 1000);
+    const body = await response.json();
+    if (response.status === 503 && body.identityProvider === 'unavailable') {
+      outageReadiness = {status: response.status, body};
+      break;
+    }
+    await delay(100);
+  }
+  assert.ok(discoveryRequests > discoveryRequestsBeforeOutage,
+    'the periodic identity-provider probe must observe the outage before readiness changes');
+  assert.ok(outageReadiness, `readiness must return 503 after an identity-provider probe fails: ${production.output()}`);
+  const liveWhileProviderUnavailable = await fetchWithTimeout(`${serviceOrigin}/api/health/live`, {}, 1000);
+  assert.equal(liveWhileProviderUnavailable.status, 200, 'identity outage should not make liveness fail');
+  assert.match(production.output(), /Identity provider discovery recheck failed: Identity provider discovery returned HTTP 503/);
+
+  const discoveryRequestsBeforeRecovery = discoveryRequests;
+  discoveryUnavailable = false;
+  let recoveredReadiness = null;
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    assert.equal(productionChild.exitCode, null, 'the process should remain available for the next identity-provider probe');
+    const response = await fetchWithTimeout(`${serviceOrigin}/api/health/ready`, {}, 1000);
+    const body = await response.json();
+    if (response.status === 200 && body.identityProvider === 'available') {
+      recoveredReadiness = {status: response.status, body};
+      break;
+    }
+    await delay(100);
+  }
+  assert.ok(discoveryRequests > discoveryRequestsBeforeRecovery,
+    'a later successful identity-provider probe must run after the outage');
+  assert.ok(recoveredReadiness, `readiness should recover after the provider responds again: ${production.output()}`);
+  await terminate(productionChild);
   productionChild = null;
-  await assertNotServingReadiness(positivePort);
 
   results.push({
     name: 'configured-provider-ready-then-unavailable',
@@ -522,7 +562,8 @@ try {
     usersAfter: afterRejectedUsers,
     employeesBefore: beforeEmployees,
     employeesAfter: afterRejectedEmployees,
-    outageReadiness: 'closed',
+    outageReadiness: outageReadiness.status,
+    recoveryReadiness: recoveredReadiness.status,
   });
 } finally {
   await closeDiscovery();

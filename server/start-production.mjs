@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import {getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
+import {createIdentityProviderReadinessMonitor, setIdentityProviderAvailability} from './identity-readiness.mjs';
 import {validateRuntimeEnvironment} from './environment.mjs';
 import {formatSafeMigrationFailure, runMigrations} from './migration-runner.mjs';
 
@@ -32,8 +33,12 @@ for (const setting of requiredIdentitySettings) {
 getGovernedAppUrls();
 
 const probeIdentityProvider = loadEntraOpenIdConfiguration;
+const refreshIdentityProviderReadiness = createIdentityProviderReadinessMonitor({
+  probe: probeIdentityProvider,
+  onAvailabilityChange: setIdentityProviderAvailability,
+});
 
-await probeIdentityProvider();
+await refreshIdentityProviderReadiness();
 
 const discoveryRecheckMs = boundedNumber(
   process.env.IDENTITY_DISCOVERY_RECHECK_MS,
@@ -42,9 +47,8 @@ const discoveryRecheckMs = boundedNumber(
   300000,
 );
 const identityReadinessTimer = setInterval(() => {
-  void probeIdentityProvider().catch((error) => {
+  void refreshIdentityProviderReadiness().catch((error) => {
     console.error(`Identity provider discovery recheck failed: ${error.message}`);
-    process.exit(1);
   });
 }, discoveryRecheckMs);
 identityReadinessTimer.unref();

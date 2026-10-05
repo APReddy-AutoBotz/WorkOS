@@ -224,7 +224,7 @@ This is a local candidate based on current `main`; no accepted commit or remote 
 |---|---|---|
 | WOS-OPS-001–004, WOS-OPS-007, WOS-OPS-009; WOS-NFR-DPL-001–006 | `.github/workflows/workos-ci.yml`, `Dockerfile`, `compose.yaml`, `server/environment.mjs`, `server/health.mjs`, `server/migration-runner.mjs`, `server/migrate.mjs`, `tests/runtime-environment-smoke.mjs`, `tests/health-endpoints-smoke.mjs`, `tests/migration-manifest-smoke.mjs`, `tests/migration-runner-smoke.mjs` | Pending exact-head checks and review |
 | WOS-NFR-SEC-006, WOS-NFR-SEC-011 | Full-history Gitleaks step with comments/artifact upload disabled; `npm audit --audit-level=high`; production fallback/secret validation | Pending exact-head scans and finding disposition |
-| WOS-NFR-REL-002, WOS-NFR-MNT-004–007 | Separate liveness/readiness/build metadata, ordered migration ledger, transaction advisory lock, new-file checksums and migration operations documentation | Pending exact-head tests and review |
+| WOS-NFR-REL-002, WOS-NFR-MNT-004–007 | Separate liveness/readiness/build metadata (database, migration and production OIDC readiness), ordered migration ledger, transaction advisory lock, new-file checksums and migration operations documentation | Pending exact-head tests and review |
 | WOS-GOV-005 | PR-005 task authority and traceability documentation linked to Issue #5 | Pending publication and acceptance |
 
 Full backup/restore rehearsal, monitoring ownership, broader structured logging and v1 handover remain with the later operations/recovery packages. WOS-03B modular/API foundation remains PR-006 and is outside this package.

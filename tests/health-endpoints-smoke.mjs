@@ -2,9 +2,35 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import express from 'express';
 import {registerHealthRoutes} from '../server/health.mjs';
+import {createIdentityProviderReadinessMonitor} from '../server/identity-readiness.mjs';
+
+let providerAvailable = false;
+let releaseEarlierProbe;
+const earlierProbeResult = new Promise(resolve => { releaseEarlierProbe = resolve; });
+const orderedProbeResults = [
+  async () => {},
+  () => earlierProbeResult,
+  async () => { throw new Error('synthetic provider outage'); },
+  async () => {},
+];
+const refreshProviderReadiness = createIdentityProviderReadinessMonitor({
+  probe: () => orderedProbeResults.shift()(),
+  onAvailabilityChange: available => { providerAvailable = available; },
+});
+await refreshProviderReadiness();
+assert.equal(providerAvailable, true, 'a successful discovery probe marks production identity ready');
+const earlierSuccess = refreshProviderReadiness();
+await assert.rejects(refreshProviderReadiness(), /synthetic provider outage/);
+assert.equal(providerAvailable, false, 'the newest failed discovery probe marks identity unavailable');
+releaseEarlierProbe();
+await earlierSuccess;
+assert.equal(providerAvailable, false, 'an older successful probe cannot undo a newer outage');
+await refreshProviderReadiness();
+assert.equal(providerAvailable, true, 'a later successful discovery probe restores identity readiness');
 
 let databaseAvailable = true;
 let migrationState = 'current';
+let identityProviderAvailable = true;
 const privateDiagnostic = 'connection-string-must-not-be-returned';
 const pool = {
   query: async () => {
@@ -23,6 +49,8 @@ const migrationStatus = async () => {
 };
 const app = express();
 const healthEnvironment = {
+  APP_MODE: 'production',
+  NODE_ENV: 'production',
   APP_VERSION: '1.2.3',
   BUILD_SHA: 'abcdef0123456789',
   DATABASE_URL: 'postgresql://workos:synthetic-password@localhost/workos_test',
@@ -32,6 +60,7 @@ registerHealthRoutes({
   pool,
   migrationStatus,
   environment: healthEnvironment,
+  identityProviderReady: () => identityProviderAvailable,
 });
 
 const server = app.listen(0, '127.0.0.1');
@@ -54,6 +83,7 @@ try {
   assert.equal(ready.body.status, 'ready');
   assert.equal(ready.body.database, 'connected');
   assert.equal(ready.body.migrations, 'current');
+  assert.equal(ready.body.identityProvider, 'available');
   assert.equal(ready.body.migrationLevel, '032_wos02_legal_identifier_effective_ranges');
   assert.equal(ready.body.version, '1.2.3');
   assert.equal(ready.body.commit, 'abcdef0123456789');
@@ -76,6 +106,14 @@ try {
   assert.equal(unsupported.body.unsupportedMigrationCount, 1);
 
   migrationState = 'current';
+  identityProviderAvailable = false;
+  const identityUnavailable = await readJson('/api/health/ready');
+  assert.equal(identityUnavailable.response.status, 503);
+  assert.equal(identityUnavailable.body.database, 'connected');
+  assert.equal(identityUnavailable.body.migrations, 'current');
+  assert.equal(identityUnavailable.body.identityProvider, 'unavailable');
+  identityProviderAvailable = true;
+
   databaseAvailable = false;
   const liveWhileDatabaseDown = await readJson('/api/health/live');
   assert.equal(liveWhileDatabaseDown.response.status, 200);
