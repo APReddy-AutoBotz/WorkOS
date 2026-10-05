@@ -1,0 +1,145 @@
+name: WorkOS CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workos-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate application, migrations, and container
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: workos-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      WORKOS_TEST_DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint and syntax check
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run unit and contract tests
+        env:
+          NODE_ENV: test
+          APP_MODE: test
+          VITE_APP_MODE: test
+          ALLOW_TEST_FALLBACK: "true"
+          VITE_ALLOW_TEST_FALLBACK: "true"
+          DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
+        run: npm test
+
+      - name: Prepare disposable schema for production identity tests
+        env:
+          DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
+          PGSSLMODE: disable
+        run: npm run api:migrate
+
+      - name: Rebuild frontend after artifact hygiene tests
+        run: npm run build
+
+      - name: Run production identity and fail-closed startup tests
+        env:
+          DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
+          PGSSLMODE: disable
+        run: npm run test:production-identity
+
+      - name: Run fresh-install, upgrade, and concurrent migration tests
+        run: npm run test:migrations
+
+      - name: Audit locked dependencies
+        run: npm audit --audit-level=high
+
+      - name: Validate production Compose configuration
+        env:
+          POSTGRES_DB: workos
+          POSTGRES_USER: workos
+          POSTGRES_PASSWORD: synthetic-ci-password
+          DATABASE_URL: postgresql://workos:synthetic-ci-password@db:5432/workos
+          API_SESSION_SECRET: synthetic-ci-session-secret-with-more-than-32-characters
+          APP_URL: https://workos.example.test
+          IDENTITY_PROVIDER: entra
+          ENTRA_TENANT_ID: 00000000-0000-0000-0000-000000000001
+          ENTRA_CLIENT_ID: 00000000-0000-0000-0000-000000000002
+          ENTRA_CLIENT_SECRET: synthetic-client-secret
+          ENTRA_REDIRECT_URI: https://workos.example.test/api/auth/entra/callback
+        run: docker compose config --quiet
+
+      - name: Build production container
+        run: |
+          APP_VERSION="$(node -p "require('./package.json').version")"
+          docker build --build-arg BUILD_SHA="$GITHUB_SHA" --build-arg APP_VERSION="$APP_VERSION" -t workos-ci:"$GITHUB_SHA" .
+
+      - name: Verify container refuses incomplete production configuration
+        run: |
+          set -euo pipefail
+          if docker run --rm workos-ci:"$GITHUB_SHA" > /tmp/workos-startup.log 2>&1; then
+            echo "Production startup unexpectedly accepted an incomplete environment."
+            exit 1
+          fi
+          if ! grep -q 'DATABASE_URL' /tmp/workos-startup.log; then
+            echo "Production startup failed without identifying the missing database setting."
+            exit 1
+          fi
+
+  secret-scan:
+    name: Scan full history for secrets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan with Gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"

@@ -8,6 +8,8 @@ import express from 'express';
 import pg from 'pg';
 import { z } from 'zod';
 import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
+import {validateRuntimeEnvironment} from './environment.mjs';
+import {registerHealthRoutes} from './health.mjs';
 import { listAuthorizedOrganizationScopes, registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
@@ -16,24 +18,15 @@ const { Pool } = pg;
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const distDir = join(serverDir, '..', 'dist');
-const isProduction = process.env.NODE_ENV === 'production';
+const runtimeEnvironment = validateRuntimeEnvironment(process.env, {purpose: 'server'});
+const isProduction = runtimeEnvironment.nodeEnv === 'production';
 const sessionSecret = process.env.API_SESSION_SECRET || 'dev-only-change-me';
 
-if (isProduction) {
-  const missing = [];
-  if (!process.env.DATABASE_URL) missing.push('DATABASE_URL');
-  if (!process.env.API_SESSION_SECRET || process.env.API_SESSION_SECRET === 'dev-only-change-me') missing.push('API_SESSION_SECRET');
-  if (missing.length > 0) {
-    console.error(`Production startup blocked. Missing or unsafe environment variable(s): ${missing.join(', ')}`);
-    process.exit(1);
-  }
-}
-
 const app = express();
-const port = Number(process.env.PORT || process.env.API_PORT || 4000);
+const port = runtimeEnvironment.port;
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.PGSSLMODE === 'require' ? { rejectUnauthorized: false } : undefined,
+  connectionString: runtimeEnvironment.databaseUrl,
+  ssl: runtimeEnvironment.pgSslMode === 'require' ? { rejectUnauthorized: false } : undefined,
 });
 const round1 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
 
@@ -1149,18 +1142,7 @@ const sendNotification = async (client, req, {
   return event;
 };
 
-app.get('/api/health', async (_req, res) => {
-  if (!process.env.DATABASE_URL) {
-    res.json({ status: 'ok', database: 'not_configured' });
-    return;
-  }
-  try {
-    await pool.query('select 1');
-    res.json({ status: 'ok', database: 'connected' });
-  } catch {
-    res.status(503).json({ status: 'degraded', database: 'unreachable' });
-  }
-});
+registerHealthRoutes({app, pool, rootDir: serverDir});
 
 app.get('/api/auth/entra/config', requireDatabase, async (_req, res) => {
   res.json({

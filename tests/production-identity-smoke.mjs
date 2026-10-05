@@ -90,7 +90,7 @@ const cleanEnvironment = (overrides = {}) => {
     RESET_DEMO_DATA: 'false',
     DATABASE_URL: databaseUrl,
     PGSSLMODE: 'disable',
-    API_SESSION_SECRET: 'workos-test-only',
+    API_SESSION_SECRET: 'workos-test-only-session-secret-with-at-least-32-characters',
     IDENTITY_PROVIDER: 'entra',
     ENTRA_TENANT_ID: '00000000-0000-0000-0000-000000000001',
     ENTRA_CLIENT_ID: '00000000-0000-0000-0000-000000000002',
@@ -230,6 +230,7 @@ const signIdToken = (nonce, overrides = {}) => {
 };
 
 let invalidDiscovery = false;
+let discoveryUnavailable = false;
 let discoveryRequests = 0;
 let callbackNonce = '';
 let nextTokenClaimOverrides = {};
@@ -237,7 +238,10 @@ const discoveryServer = createServer({key: readFileSync(privateKeyPath), cert: r
   discoveryRequests += 1;
   response.statusCode = 200;
   response.setHeader('content-type', 'application/json');
-  if (request.url?.endsWith('/oauth2/v2.0/token')) {
+  if (discoveryUnavailable) {
+    response.statusCode = 503;
+    response.end(JSON.stringify({error: 'synthetic provider outage'}));
+  } else if (request.url?.endsWith('/oauth2/v2.0/token')) {
     const claimOverrides = nextTokenClaimOverrides;
     nextTokenClaimOverrides = {};
     response.end(JSON.stringify({id_token: signIdToken(callbackNonce, claimOverrides)}));
@@ -304,25 +308,25 @@ try {
     name: 'missing-app-url',
     port: positivePort + 7,
     overrides: {APP_URL: undefined},
-    expected: /APP_URL is invalid/,
+    expected: /APP_URL is required in production/,
   }));
   results.push(await assertStartupFailure({
     name: 'http-app-url',
     port: positivePort + 8,
     overrides: {APP_URL: 'http://app.example.test'},
-    expected: /APP_URL must use HTTPS/,
+    expected: /APP_URL must be a public HTTPS origin/,
   }));
   results.push(await assertStartupFailure({
     name: 'loopback-callback',
     port: positivePort + 9,
     overrides: {ENTRA_REDIRECT_URI: 'https://localhost/api/auth/entra/callback'},
-    expected: /ENTRA_REDIRECT_URI must not use a loopback host/,
+    expected: /ENTRA_REDIRECT_URI must match the HTTPS APP_URL origin and callback path/,
   }));
   results.push(await assertStartupFailure({
     name: 'wrong-callback-route',
     port: positivePort + 10,
     overrides: {ENTRA_REDIRECT_URI: `${rootOrigin}/wrong`},
-    expected: /ENTRA_REDIRECT_URI must use the APP_URL origin and exact \/api\/auth\/entra\/callback route/,
+    expected: /ENTRA_REDIRECT_URI must match the HTTPS APP_URL origin and callback path/,
   }));
   results.push(await assertStartupFailure({
     name: 'missing-identity-setting',
@@ -334,7 +338,7 @@ try {
     name: 'local-provider-prohibited',
     port: positivePort + 12,
     overrides: {IDENTITY_PROVIDER: 'local'},
-    expected: /IDENTITY_PROVIDER must select the implemented governed Entra provider in production\./,
+    expected: /IDENTITY_PROVIDER must select the configured Entra provider/,
   }));
   results.push(await assertStartupFailure({
     name: 'unavailable-discovery',
@@ -356,6 +360,13 @@ try {
     expected: /Identity provider discovery is missing authorization_endpoint/,
   }));
   invalidDiscovery = false;
+
+  results.push(await assertStartupFailure({
+    name: 'placeholder-client-secret',
+    port: positivePort + 15,
+    overrides: {ENTRA_CLIENT_SECRET: 'replace_me'},
+    expected: /ENTRA_CLIENT_SECRET must be a configured non-placeholder secret/,
+  }));
 
   const beforeUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);
   const beforeEmployees = Number((await pool.query('select count(*)::int as count from employees')).rows[0].count);
@@ -389,6 +400,10 @@ try {
   assert.ok(health, `production server did not become ready: ${production.output()}`);
   assert.equal(health.status, 'ok');
   assert.equal(health.database, 'connected');
+
+  const initialReadiness = await fetchWithTimeout(`${serviceOrigin}/api/health/ready`, {}, 1000);
+  assert.equal(initialReadiness.status, 200);
+  assert.equal((await initialReadiness.json()).identityProvider, 'available');
 
   const identityConfig = await fetchWithTimeout(`${serviceOrigin}/api/auth/entra/config`, {}, 1000);
   assert.equal(identityConfig.status, 200);
@@ -498,12 +513,44 @@ try {
   assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');
   await pool.query("delete from users where username = 'synthetic-user'");
 
-  await closeDiscovery();
-  const outageExit = await waitForExit(productionChild, 15_000);
-  assert.notEqual(outageExit.code, 0, 'identity-provider outage must terminate production readiness');
-  assert.match(production.output(), /Identity provider discovery recheck failed: Identity provider discovery is unavailable/);
+  const discoveryRequestsBeforeOutage = discoveryRequests;
+  discoveryUnavailable = true;
+  let outageReadiness = null;
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    assert.equal(productionChild.exitCode, null, 'the process should remain available to serve an unready health response');
+    const response = await fetchWithTimeout(`${serviceOrigin}/api/health/ready`, {}, 1000);
+    const body = await response.json();
+    if (response.status === 503 && body.identityProvider === 'unavailable') {
+      outageReadiness = {status: response.status, body};
+      break;
+    }
+    await delay(100);
+  }
+  assert.ok(discoveryRequests > discoveryRequestsBeforeOutage,
+    'the periodic identity-provider probe must observe the outage before readiness changes');
+  assert.ok(outageReadiness, `readiness must return 503 after an identity-provider probe fails: ${production.output()}`);
+  const liveWhileProviderUnavailable = await fetchWithTimeout(`${serviceOrigin}/api/health/live`, {}, 1000);
+  assert.equal(liveWhileProviderUnavailable.status, 200, 'identity outage should not make liveness fail');
+  assert.match(production.output(), /Identity provider discovery recheck failed: Identity provider discovery returned HTTP 503/);
+
+  const discoveryRequestsBeforeRecovery = discoveryRequests;
+  discoveryUnavailable = false;
+  let recoveredReadiness = null;
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    assert.equal(productionChild.exitCode, null, 'the process should remain available for the next identity-provider probe');
+    const response = await fetchWithTimeout(`${serviceOrigin}/api/health/ready`, {}, 1000);
+    const body = await response.json();
+    if (response.status === 200 && body.identityProvider === 'available') {
+      recoveredReadiness = {status: response.status, body};
+      break;
+    }
+    await delay(100);
+  }
+  assert.ok(discoveryRequests > discoveryRequestsBeforeRecovery,
+    'a later successful identity-provider probe must run after the outage');
+  assert.ok(recoveredReadiness, `readiness should recover after the provider responds again: ${production.output()}`);
+  await terminate(productionChild);
   productionChild = null;
-  await assertNotServingReadiness(positivePort);
 
   results.push({
     name: 'configured-provider-ready-then-unavailable',
@@ -515,7 +562,8 @@ try {
     usersAfter: afterRejectedUsers,
     employeesBefore: beforeEmployees,
     employeesAfter: afterRejectedEmployees,
-    outageReadiness: 'closed',
+    outageReadiness: outageReadiness.status,
+    recoveryReadiness: recoveredReadiness.status,
   });
 } finally {
   await closeDiscovery();

@@ -1,8 +1,17 @@
 import 'dotenv/config';
 import {getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
+import {createIdentityProviderReadinessMonitor, setIdentityProviderAvailability} from './identity-readiness.mjs';
+import {validateRuntimeEnvironment} from './environment.mjs';
+import {formatSafeMigrationFailure, runMigrations} from './migration-runner.mjs';
 
 process.env.NODE_ENV = 'production';
 process.env.APP_MODE = 'production';
+
+if (String(process.env.LOCAL_LOGIN_ENABLED || '').toLowerCase() === 'true') {
+  throw new Error('LOCAL_LOGIN_ENABLED is prohibited in production.');
+}
+process.env.LOCAL_LOGIN_ENABLED = 'false';
+const runtimeEnvironment = validateRuntimeEnvironment(process.env, {purpose: 'production'});
 
 const boundedNumber = (value, fallback, minimum, maximum) => {
   const parsed = Number(value);
@@ -13,10 +22,6 @@ const boundedNumber = (value, fallback, minimum, maximum) => {
 if (String(process.env.AUTO_SEED_DEMO || '').toLowerCase() === 'true') {
   throw new Error('AUTO_SEED_DEMO is prohibited in production.');
 }
-if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required in production.');
-if (!process.env.API_SESSION_SECRET || process.env.API_SESSION_SECRET === 'dev-only-change-me') {
-  throw new Error('A non-default API_SESSION_SECRET is required in production.');
-}
 const identityProvider = String(process.env.IDENTITY_PROVIDER || '').trim().toLowerCase();
 if (identityProvider !== 'entra') {
   throw new Error('IDENTITY_PROVIDER must select the implemented governed Entra provider in production.');
@@ -26,11 +31,14 @@ for (const setting of requiredIdentitySettings) {
   if (!String(process.env[setting] || '').trim()) throw new Error(setting + ' is required in production.');
 }
 getGovernedAppUrls();
-process.env.LOCAL_LOGIN_ENABLED = 'false';
 
 const probeIdentityProvider = loadEntraOpenIdConfiguration;
+const refreshIdentityProviderReadiness = createIdentityProviderReadinessMonitor({
+  probe: probeIdentityProvider,
+  onAvailabilityChange: setIdentityProviderAvailability,
+});
 
-await probeIdentityProvider();
+await refreshIdentityProviderReadiness();
 
 const discoveryRecheckMs = boundedNumber(
   process.env.IDENTITY_DISCOVERY_RECHECK_MS,
@@ -39,12 +47,19 @@ const discoveryRecheckMs = boundedNumber(
   300000,
 );
 const identityReadinessTimer = setInterval(() => {
-  void probeIdentityProvider().catch((error) => {
+  void refreshIdentityProviderReadiness().catch((error) => {
     console.error(`Identity provider discovery recheck failed: ${error.message}`);
-    process.exit(1);
   });
 }, discoveryRecheckMs);
 identityReadinessTimer.unref();
 
-await import('./migrate.mjs');
-await import('./index.mjs');
+let migrationsReady = false;
+try {
+  await runMigrations({databaseUrl: runtimeEnvironment.databaseUrl, sslMode: runtimeEnvironment.pgSslMode});
+  migrationsReady = true;
+} catch (error) {
+  console.error(`Production startup blocked: ${formatSafeMigrationFailure(error)}`);
+}
+
+if (migrationsReady) await import('./index.mjs');
+else process.exitCode = 1;
