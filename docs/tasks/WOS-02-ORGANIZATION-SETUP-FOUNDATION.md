@@ -5,6 +5,7 @@
 - **Workstream:** WOS-02
 - **Issue:** #4
 - **Target branch:** `codex/wos-02-organization-setup-foundation`
+- **Controller continuation lane:** `product-implementation`
 - **Base:** accepted WOS-01A `main@3070c80a71640fa4275477d0d2f1538cc8d2a819`
 - **Lifecycle:** Draft product implementation only until exact-head acceptance and independent confirmation are clean.
 
