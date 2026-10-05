@@ -54,9 +54,9 @@ export const getMigrationManifest = async ({rootDir = serverDir} = {}) => {
   ];
 };
 
-export const getMigrationStatus = async (pool, {rootDir = serverDir} = {}) => {
+export const getMigrationStatus = async (queryable, {rootDir = serverDir} = {}) => {
   const expected = await getMigrationManifest({rootDir});
-  const result = await pool.query('select id, checksum from schema_migrations');
+  const result = await queryable.query('select id, checksum from schema_migrations');
   const byId = new Map(result.rows.map(row => [row.id, row.checksum || null]));
   const expectedIds = expected.map(item => item.id);
   const unknownIds = [...byId.keys()].filter(id => !expectedIds.includes(id));
@@ -185,7 +185,7 @@ export const runMigrations = async ({
 
     await client.query('commit');
     transactionOpen = false;
-    return {applied, skipped, status: await getMigrationStatus(pool, {rootDir})};
+    return {applied, skipped, status: await getMigrationStatus(client, {rootDir})};
   } catch (error) {
     if (transactionOpen) await client?.query('rollback').catch(() => {});
     throw error;

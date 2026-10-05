@@ -24,7 +24,7 @@ if (!allowedHosts.has(adminUrl.hostname.toLowerCase())) {
 }
 
 const quoteIdentifier = (value) => `"${String(value).replaceAll('"', '""')}"`;
-const withDisposableDatabase = async (test) => {
+const withDisposableDatabase = async (test, {maxPoolSize = 4} = {}) => {
   const name = `workos_migration_smoke_${randomBytes(8).toString('hex')}`;
   const admin = new Client({connectionString: adminUrl.toString()});
   let created = false;
@@ -34,7 +34,7 @@ const withDisposableDatabase = async (test) => {
     created = true;
     const databaseUrl = new URL(testDatabaseUrl);
     databaseUrl.pathname = `/${name}`;
-    const pool = new Pool({connectionString: databaseUrl.toString(), max: 4});
+    const pool = new Pool({connectionString: databaseUrl.toString(), max: maxPoolSize});
     try {
       return await test(pool);
     } finally {
@@ -54,6 +54,36 @@ const withDisposableDatabase = async (test) => {
 
 const manifest = await getMigrationManifest({rootDir: serverDir});
 const quietLogger = {log() {}};
+
+await withDisposableDatabase(async (pool) => {
+  let checkedOutClients = 0;
+  const guardedPool = {
+    async connect() {
+      const client = await pool.connect();
+      checkedOutClients += 1;
+      const release = client.release.bind(client);
+      let released = false;
+      client.release = (...args) => {
+        if (!released) {
+          released = true;
+          checkedOutClients -= 1;
+        }
+        return release(...args);
+      };
+      return client;
+    },
+    query(...args) {
+      assert.equal(checkedOutClients, 0,
+        'migration status must use the checked-out client or release it before querying through the pool');
+      return pool.query(...args);
+    },
+  };
+
+  const result = await runMigrations({pool: guardedPool, rootDir: serverDir, logger: quietLogger});
+  assert.equal(result.status.isCurrent, true,
+    'a single-connection pool must return migration status after applying migrations');
+  assert.equal(checkedOutClients, 0, 'the migration runner releases its checked-out client');
+}, {maxPoolSize: 1});
 
 await withDisposableDatabase(async (pool) => {
   const concurrent = await Promise.all([
