@@ -277,6 +277,7 @@ const beginAuthorization = async () => {
 };
 
 const callbackRejections = [];
+let productionOutputForCallback = () => '';
 const assertCallbackRejected = async ({name, claimOverrides, expectedLocation = '/login?error=entra_callback_failed'}) => {
   const {nonce, state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = typeof claimOverrides === 'function'
@@ -289,7 +290,8 @@ const assertCallbackRejected = async ({name, claimOverrides, expectedLocation = 
   );
   const location = callback.headers.get('location');
   assert.equal(callback.status, 302, `${name} must terminate through a redirect`);
-  assert.equal(location, expectedLocation, `${name} must fail closed at the governed error route`);
+  assert.equal(location, expectedLocation,
+    `${name} must fail closed at the governed error route. Production server output: ${productionOutputForCallback()}`);
   assert.equal(hasSetCookie(callback.headers, 'workos_session'), false, `${name} must not create a WorkOS session`);
   callbackRejections.push({
     name,
@@ -380,6 +382,7 @@ try {
   });
   const production = spawnProduction(environment);
   productionChild = production.child;
+  productionOutputForCallback = production.output;
 
   let health = null;
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -566,6 +569,7 @@ try {
     recoveryReadiness: recoveredReadiness.status,
   });
 } finally {
+  productionOutputForCallback = () => '';
   await closeDiscovery();
   await terminate(productionChild);
   await pool.end();
