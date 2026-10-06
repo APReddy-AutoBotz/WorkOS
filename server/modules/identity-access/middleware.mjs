@@ -1,4 +1,4 @@
-const readCookie = (req, name) => {
+export const readCookie = (req, name) => {
   const cookieHeader = req.headers?.cookie || '';
   return cookieHeader
     .split(';')

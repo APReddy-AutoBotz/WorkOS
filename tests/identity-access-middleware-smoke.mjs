@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createIdentityAccessMiddleware} from '../server/modules/identity-access/middleware.mjs';
+import {createIdentityAccessMiddleware, readCookie} from '../server/modules/identity-access/middleware.mjs';
 
 const createRequest = ({authorization, cookie} = {}) => ({
   headers: {
@@ -40,6 +40,11 @@ const resolveOrganizationScope = async (_database, request) => {
 const verifyToken = token => token === 'valid-session'
   ? {sub: 'user-test', username: 'synthetic', activeRole: 'Admin'}
   : null;
+
+assert.equal(readCookie(createRequest({cookie: 'other=value; workos_session=valid-session'}), 'workos_session'),
+  'valid-session', 'shared identity utility must read the Entra callback session cookie');
+assert.equal(readCookie(createRequest({cookie: 'workos_session_suffix=wrong'}), 'workos_session'), undefined,
+  'cookie names must match exactly');
 
 const normal = createIdentityAccessMiddleware({verifyToken, database, resolveOrganizationScope});
 

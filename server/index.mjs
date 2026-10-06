@@ -13,7 +13,7 @@ import {registerHealthRoutes} from './health.mjs';
 import { listAuthorizedOrganizationScopes, registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
 import {createRequestContextMiddleware} from './api/request-context.mjs';
 import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/error-contract.mjs';
-import {createIdentityAccessMiddleware} from './modules/identity-access/middleware.mjs';
+import {createIdentityAccessMiddleware, readCookie} from './modules/identity-access/middleware.mjs';
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
