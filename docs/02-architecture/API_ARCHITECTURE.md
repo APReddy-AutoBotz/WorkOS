@@ -4,6 +4,14 @@
 
 New productized contracts are introduced under `/api/v1`. Existing imported routes may remain temporarily behind compatibility adapters while behavior is migrated and tested.
 
+The WOS-03 API foundation begins with an incremental pilot: identity reads (`/auth/me` and `/auth/organization-scopes`) and organization setup are mounted under both their legacy `/api/...` paths and `/api/v1/...` paths through the same handlers. A `/api/v1` route must preserve the legacy authorization and business rules while returning the versioned error contract below. New routes should be added under `/api/v1`; legacy routes remain available until an explicit deprecation plan removes them. This pilot does not claim that every existing API route has already been migrated.
+
+## Module boundaries
+
+The server remains a modular monolith. New seams belong under `server/modules/<capability>/` for domain/application behavior and under `server/api/` for transport concerns. A module may depend on shared domain services and injected infrastructure, but should not import the Express application entry point or register routes as a side effect. Route registration stays explicit in `server/index.mjs` or a capability router factory; compatibility prefixes mount the same router/handler so they cannot drift. Transport middleware validates and translates requests, while authorization, organization scope and business rules remain server-owned.
+
+The initial identity-access and audit modules extract reusable seams from the existing application entry point. Further extraction is incremental and tied to a concrete boundary; it does not authorize a broad rewrite or service split.
+
 ## Contract principles
 
 - Request, query and response schemas are explicit and validated.
@@ -136,7 +144,13 @@ Notification commands create scoped notification records and delivery attempts s
 
 ## Observability
 
-Every request receives a correlation ID. Structured logs record safe route, status, duration, user/role identifiers and denial/error code without exposing credentials or unrestricted personal/financial payloads.
+Every API request receives a correlation ID. A caller-provided `X-Correlation-ID` is accepted only when it matches the bounded safe-character format; otherwise the server generates one. State-changing HTTP methods also receive a server-generated operation ID. Both are returned as response headers and are exposed through CORS for browser clients. These identifiers are tracing aids, not authentication, idempotency or authorization tokens.
+
+Failures served under `/api/v1` use `{ "error": { "code", "message", "correlationId", "operationId?" } }`. Codes are stable uppercase identifiers, messages are user-safe, and unexpected 5xx details are not returned. Legacy paths preserve their existing response shapes during the adapter period. The frontend error type retains HTTP status and available trace IDs for support diagnostics.
+
+Production mutation code uses the shared audit writer. It records actor identity, active role, source, module/action, entity identity, before/after values, reason/details and request correlation/operation IDs when present. System operations may omit request IDs. New audit fields are nullable and added with an additive migration so historical rows are not assigned fabricated request context. The existing append-only database guard remains in force; configurable retention and wider provenance coverage remain open requirements.
+
+Structured logs record safe route, status, duration, user/role identifiers and denial/error code without exposing credentials or unrestricted personal/financial payloads.
 
 ## Compatibility and deprecation
 

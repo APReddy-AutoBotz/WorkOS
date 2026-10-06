@@ -11,6 +11,11 @@ import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from
 import {validateRuntimeEnvironment} from './environment.mjs';
 import {registerHealthRoutes} from './health.mjs';
 import { listAuthorizedOrganizationScopes, registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
+import {createRequestContextMiddleware} from './api/request-context.mjs';
+import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/error-contract.mjs';
+import {createIdentityAccessMiddleware} from './modules/identity-access/middleware.mjs';
+import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
+import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
@@ -31,7 +36,13 @@ const pool = new Pool({
 const round1 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
 
 app.set('trust proxy', 1);
-app.use(cors({ origin: process.env.APP_URL || 'http://localhost:3000', credentials: true }));
+app.use(cors({
+  origin: process.env.APP_URL || 'http://localhost:3000',
+  credentials: true,
+  exposedHeaders: ['X-Correlation-ID', 'X-Operation-ID'],
+}));
+app.use('/api', createRequestContextMiddleware());
+app.use('/api/v1', versionedApiResponseContract);
 app.use(express.json({ limit: '1mb' }));
 
 const signToken = (payload) => {
@@ -58,6 +69,13 @@ const verifyToken = (token) => {
   }
 };
 
+const {requireIdentity, requireAuth} = createIdentityAccessMiddleware({
+  verifyToken,
+  database: pool,
+  resolveOrganizationScope,
+  allowTestFallback: () => process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true',
+});
+
 const loginAttempts = new Map();
 const loginRateLimit = (req, res, next) => {
   const windowMs = 15 * 60 * 1000;
@@ -78,54 +96,6 @@ const loginRateLimit = (req, res, next) => {
     return;
   }
   next();
-};
-
-const readCookie = (req, name) => {
-  const cookieHeader = req.headers.cookie || '';
-  return cookieHeader
-    .split(';')
-    .map(part => part.trim())
-    .find(part => part.startsWith(`${name}=`))
-    ?.slice(name.length + 1);
-};
-
-const attachVerifiedIdentity = (req, res) => {
-  const authHeader = req.headers.authorization || '';
-  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
-  const cookieToken = readCookie(req, 'workos_session');
-  const payload = verifyToken(bearerToken || cookieToken);
-  if (!payload) {
-    res.status(401).json({ error: 'Authentication required' });
-    return false;
-  }
-  req.user = payload;
-  return true;
-};
-
-// Identity-only routes may establish or refresh a session before the user has
-// chosen one of several authorized data scopes. They must not read or mutate
-// organization data without the separate requireAuth scope check below.
-const requireIdentity = (req, res, next) => {
-  if (attachVerifiedIdentity(req, res)) next();
-};
-
-const requireAuth = async (req, res, next) => {
-  if (!attachVerifiedIdentity(req, res)) return;
-  try {
-    const scope = await resolveOrganizationScope(pool, req);
-    req.organizationScope = scope;
-    req.user.organizationId = scope.organizationId;
-    req.user.legalEntityId = scope.legalEntityId;
-    next();
-  } catch (error) {
-    const allowFallback = process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true';
-    if (allowFallback && error?.code === '42P01') {
-      req.organizationScope = { organizationId: 'org-default', legalEntityId: 'legal-default' };
-      next();
-      return;
-    }
-    res.status(error?.statusCode || 503).json({ error: 'Authoritative organization scope is unavailable', code: error?.code || 'ORG_SCOPE_UNAVAILABLE' });
-  }
 };
 
 const requireRoles = (...roles) => (req, res, next) => {
@@ -451,33 +421,7 @@ const getSetting = async (key, fallback) => {
   return raw === undefined ? fallback : raw;
 };
 
-const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '').split(',')[0].trim();
-
-const audit = async (client, req, { module, action, entityType, entityId, oldValue, newValue, details, reason, source = 'Web' }) => {
-  await client.query(`
-    insert into audit_logs (
-      user_id, user_name, user_role, active_role, source, module, action, entity_type, entity_id,
-      old_value, new_value, details, reason, ip_address, session_id
-    )
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-  `, [
-    req.user?.sub || 'system',
-    req.user?.username || 'system',
-    req.user?.activeRole || 'system',
-    req.user?.activeRole || 'system',
-    source,
-    module,
-    action,
-    entityType,
-    entityId,
-    oldValue ? JSON.stringify(oldValue) : null,
-    newValue ? JSON.stringify(newValue) : null,
-    details,
-    reason || null,
-    getRequestIp(req) || null,
-    req.user?.sub || null,
-  ]);
-};
+const audit = recordAuditEvent;
 
 const workerExitDependencies = async (client, employeeId, { organizationId, legalEntityId }) => client.query(`select kind,id from (
   select 'active_assignment' kind,id from project_allocations where employee_id=$1 and organization_id=$2 and legal_entity_id=$3 and status='Active'
@@ -1390,14 +1334,14 @@ app.post('/api/auth/logout', (_req, res) => {
 
 // Scope discovery deliberately authenticates identity without resolving a
 // context first; it is the only endpoint used to choose among multiple scopes.
-app.get('/api/auth/organization-scopes', requireDatabase, requireIdentity, async (req, res) => {
+const listOrganizationScopes = async (req, res) => {
   try {
     res.json(await listAuthorizedOrganizationScopes(pool, req.user.sub));
   } catch (error) {
     console.error(error);
     res.status(503).json({ error: 'Authoritative organization scopes are unavailable', code: 'ORG_SCOPE_UNAVAILABLE' });
   }
-});
+};
 
 app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res) => {
   const schema = z.object({ role: z.string().min(1) });
@@ -1463,7 +1407,7 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
   }
 });
 
-app.get('/api/auth/me', requireDatabase, requireIdentity, async (req, res) => {
+const refreshIdentitySession = async (req, res) => {
   try {
     const result = await pool.query(`
       select u.id, u.username, u.employee_id, u.email, u.must_change_password, u.status,
@@ -1523,7 +1467,16 @@ app.get('/api/auth/me', requireDatabase, requireIdentity, async (req, res) => {
     console.error(error);
     res.status(500).json({ error: 'Session refresh failed' });
   }
-});
+};
+
+const identityReadRouteDependencies = {
+  requireDatabase,
+  requireIdentity,
+  listOrganizationScopes,
+  refreshSession: refreshIdentitySession,
+};
+app.use('/api/auth', createIdentityReadRouter(identityReadRouteDependencies));
+app.use('/api/v1/auth', createIdentityReadRouter(identityReadRouteDependencies));
 
 app.post('/api/auth/change-password', requireDatabase, requireAuth, async (req, res) => {
   const schema = z.object({
@@ -7307,7 +7260,17 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
   }
 });
 
-registerOrganizationSetupRoutes({ app, pool, requireDatabase, requireAuth, requirePermission, audit });
+registerOrganizationSetupRoutes({
+  app,
+  pool,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  audit,
+  mountPaths: ['/api/organization-setup', '/api/v1/organization-setup'],
+});
+
+app.use('/api/v1', versionedApiErrorHandler);
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });

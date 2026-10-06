@@ -22,9 +22,9 @@ A requirement cannot be marked accepted from a PR description or implementation-
 |---|---|---|---|
 | WOS-CORE-001, 006–007 | PR-003 | Configurable branding/terminology, demo-production separation and forbidden-term evidence | Blueprint |
 | WOS-CORE-002 | PR-004 | Organization/legal-entity ownership, setup and cross-scope evidence | Blueprint |
-| WOS-CORE-003 | PR-006 | Modular-monolith, versioned API and compatibility evidence | Blueprint |
+| WOS-CORE-003 | PR-006 | Modular-monolith, versioned API and compatibility evidence | Partial; WOS-03B pilot in progress; completion evidence pending |
 | WOS-CORE-004 | PR-004, 007–012 | Effective dates, historical versions, immutable history and controlled corrections | Blueprint |
-| WOS-CORE-005 | PR-006 through PR-014 | Common and module-specific production-mutation/audit evidence | Blueprint |
+| WOS-CORE-005 | PR-006 through PR-014 | Common and module-specific production-mutation/audit evidence | Partial; WOS-03B shared writer in progress; module coverage remains open |
 | WOS-CORE-008 | PR-010 through PR-013 | Decimal-safe deterministic calculations, immutable evidence and reconciliation | Blueprint |
 | WOS-ORG-001–010 | PR-004 | Fresh/upgrade migrations, organization-scoped uniqueness across effective identifier ranges (including concurrency), scope negatives and guided-setup journeys | Not started |
 | WOS-IAM-001–010 | PR-003, 004, 006, 014 | Mandatory configured production OIDC/named accounts, fail-closed startup/authentication for missing/invalid/unavailable identity configuration, non-production/demo-only local/shared identities, session and authorization evidence | Not started |
@@ -40,18 +40,18 @@ A requirement cannot be marked accepted from a PR description or implementation-
 | WOS-INV-001–008 | PR-012 | Source eligibility, one-to-one approved-unbilled register, direct-bypass rejection, database-unique current occupancy with same-batch/cross-batch/concurrent/idempotency/route/split-line vectors, cancellation/re-batching, permanent final occupancy, Approved-only provider/CSV acceptance, corrections and source-to-export reconciliation | Not started |
 | WOS-RPT-001–007 | PR-013 | Scoped reports, leakage/data quality, Approved-only initial finance export, final-state retrieval/status controls and snapshot/event/register/batch/export reconciliation | Not started |
 | WOS-INT-001–006 | PR-013, 014 | Thirteen canonical notification events/templates, four policy classes, mutually exclusive generic-pending versus pre-submission/domain-remediation triggers, default relationship recipients, preferences/mandatory decisions, in-app/email/collaboration delivery evidence, idempotency/failure isolation/health, worklog/finance adapters and production identity evidence | Not started |
-| WOS-GOV-001–005 | PR-002, 005, 006, 016 | Append-only audit, provenance, export and release traceability | Partial; PR-005 release traceability in progress; remaining controls stay open |
-| WOS-OPS-001–010 | PR-003, 005, 015, 016 | Build/container, mandatory production OIDC environment/startup validation, migration, recovery, monitoring and handover | Partial; PR-005 CI/migration/profile work in progress; recovery and handover remain open |
-| WOS-NFR-SEC-001–014 | PR-003, 005, 006, 009, 010, 012, 013, 014, 016 | Threat, mandatory configured production OIDC, no production local/shared fallback, authorization, secure configuration and scan evidence | Partial; PR-005 environment and scan controls in progress; remaining controls stay open |
+| WOS-GOV-001–005 | PR-002, 005, 006, 016 | Append-only audit, provenance, export and release traceability | Partial; PR-005 release traceability merged; PR-006 shared audit/provenance seams are in progress; remaining controls stay open |
+| WOS-OPS-001–010 | PR-003, 005, 015, 016 | Build/container, mandatory production OIDC environment/startup validation, migration, recovery, monitoring and handover | Partial; PR-005 CI/migration/profile controls merged; recovery and handover remain open |
+| WOS-NFR-SEC-001–014 | PR-003, 005, 006, 009, 010, 012, 013, 014, 016 | Threat, mandatory configured production OIDC, no production local/shared fallback, authorization, secure configuration and scan evidence | Partial; PR-005 production configuration and scan controls merged; remaining security controls stay open |
 | WOS-NFR-PRV-001–006 | PR-004, 008, 010, 012, 013, 014, 016 | Minimization, sensitive-field scope, retention/anonymization and privacy export | Blueprint |
-| WOS-NFR-REL-001–009 | PR-005, 006, 008, 009, 011, 012, 013, 015, 016 | Fail-closed, transaction/idempotency, recovery and exact-head reliability | Partial; PR-005 migration lock/health work in progress; remaining controls stay open |
+| WOS-NFR-REL-001–009 | PR-005, 006, 008, 009, 011, 012, 013, 015, 016 | Fail-closed, transaction/idempotency, recovery and exact-head reliability | Partial; PR-005 migration lock/health controls merged; recovery and remaining controls stay open |
 | WOS-NFR-PERF-001–008 | PR-006, 008, 011, 012, 013, 015, 016 | Pagination/query review, bounded jobs/exports and Standard-profile performance | Blueprint |
 | WOS-NFR-DAT-001–008 | PR-004, 007–013, 016 | Ownership, temporal integrity, precision, constraints, lineage and reconciliation | Blueprint |
-| WOS-NFR-MNT-001–008 | PR-002 through PR-016 | Modules, typed contracts, complexity, documentation and maintainability | Blueprint |
-| WOS-NFR-DPL-001–007 | PR-003, 005, 015, 016 | Container/environment portability, mandatory production identity configuration, migration and deployment | Partial; PR-005 image/profile/environment work in progress; rollback/recovery remain open |
-| WOS-NFR-OBS-001–006 | PR-005, 006, 009, 011, 012, 013, 015, 016 | Correlation, logs, job/integration/notification health and alerts | Partial; PR-005 health/build metadata in progress; broader observability remains open |
+| WOS-NFR-MNT-001–008 | PR-002 through PR-016 | Modules, typed contracts, complexity, documentation and maintainability | Partial; WOS-03B conventions and first seams in progress; remaining controls stay open |
+| WOS-NFR-DPL-001–007 | PR-003, 005, 015, 016 | Container/environment portability, mandatory production identity configuration, migration and deployment | Partial; PR-005 image/profile/environment controls merged; rollback/recovery remain open |
+| WOS-NFR-OBS-001–006 | PR-005, 006, 009, 011, 012, 013, 015, 016 | Correlation, logs, job/integration/notification health and alerts | Partial; PR-005 health/build metadata merged; PR-006 request IDs are in progress; broader observability remains open |
 | WOS-NFR-UX-001–006 | PR-003, 004, 008, 009, 012, 013, 016 | Accessibility, responsive journeys, terminology/locale and errors | Blueprint |
-| WOS-NFR-CMP-001–004 | PR-003, 004, 006, 008, 013, 014, 016 | Browser/API/version compatibility and provider-neutral contracts | Blueprint |
+| WOS-NFR-CMP-001–004 | PR-003, 004, 006, 008, 013, 014, 016 | Browser/API/version compatibility and provider-neutral contracts | Partial; initial v1 compatibility path is in progress; wider browser/provider evidence remains open |
 | WOS-NFR-RELSE-001–005 | PR-002 through PR-016 | Version, changelog, migration/rollback, artifact and release evidence | Blueprint |
 
 ## 3. Work-package traceability
@@ -64,8 +64,8 @@ PR identifiers after PR #1 are planned sequence identifiers until opened.
 | WOS-01A | Source provenance/bootstrap | #3 | Draft PR #12 | Pending | v0.2.0 | Dependency-blocked; no resume, rebase, source import or implementation until PR #14 is clean exact-head reviewed, guarded-merged, the corrected exact `main` SHA is recorded, the controller explicitly reauthorizes WOS-01A, and PR #12 is recreated or rebased from that corrected baseline |
 | WOS-01B | Neutral branding/configuration | #3 | Planned PR-003 | Pending | v0.2.0 | Not started |
 | WOS-02 | Organization/setup | #4 | Planned PR-004 | Pending | v0.4.0 | Not started |
-| WOS-03A | CI/migration/deployment | #5 | Planned PR-005 | Pending | v0.4.0 | In progress; candidate not yet published or accepted |
-| WOS-03B | Modular/API foundation | #5 | Planned PR-006 | Pending | v0.4.0 | Not started |
+| WOS-03A | CI/migration/deployment | #5 | PR-005 / #40 | PR head `f704dde68ac7d11ac00c082786a9f96474e2b665`; merge commit `b9a57f8a462d8585bb3f73129080d6fae5173343` | v0.4.0 | Merged; exact-head CI and controller acceptance passed. Production-configured container/Compose startup remains untested |
+| WOS-03B | Modular/API foundation | #5 | Planned PR-006 | Pending | v0.4.0 | In progress under next-stage authorization; local candidate only, publication and exact-head CI/review pending |
 | WOS-04A | Contracts/engagements | #6 | Planned PR-007 | Pending | v0.5.0 | Not started |
 | WOS-04B | Assignments/work capture | #6 | Planned PR-008 | Pending | v0.5.0 | Not started |
 | WOS-05 | Approval/policy engine | #7 | Planned PR-009 | Pending | v0.5.0 | Not started |
@@ -216,15 +216,27 @@ Owner Gate D approval:
 
 The WOS approval, invoice and integration requirement families are clarified by WOS-00F. PR-009 owns generic approval finality, stable conflicts and authorization evidence; PR-012 owns invoice-batch cancellation/replacement, reversal/supersession, occupancy and export evidence; PR-013 owns bounded server-side recipient resolution, atomic all-or-nothing protected event/in-app recipient and reason-mapping persistence, zero-partial-state negatives, corrected exactly-once retry, downstream external-channel isolation, delivery idempotency and event exclusivity. Historical PR #1 evidence remains distinct from active PR #14 evidence. PR #12 remains blocked while the merged baseline is under corrective hold and until the complete five-part WOS-01A dependency law is satisfied.
 
-## WOS-03A — PR-005 CI, migrations and production profiles (in progress)
+## WOS-03A — PR-005 CI, migrations and production profiles (merged)
 
-This is a local candidate based on current `main`; no accepted commit or remote PR head exists yet. This section records the intended evidence mapping only.
+PR #40 merged the accepted PR-005 head `f704dde68ac7d11ac00c082786a9f96474e2b665` as main commit `b9a57f8a462d8585bb3f73129080d6fae5173343`. Exact-head CI [run #37307197672](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/37307197672), configured review and controller acceptance passed. The PR record retains the complete check matrix and acceptance details.
 
-| Requirement group | Candidate implementation/evidence | Acceptance status |
+| Requirement group | Merged implementation/evidence | Acceptance status |
 |---|---|---|
-| WOS-OPS-001–004, WOS-OPS-007, WOS-OPS-009; WOS-NFR-DPL-001–006 | `.github/workflows/workos-ci.yml`, `Dockerfile`, `compose.yaml`, `server/environment.mjs`, `server/health.mjs`, `server/migration-runner.mjs`, `server/migrate.mjs`, `tests/runtime-environment-smoke.mjs`, `tests/health-endpoints-smoke.mjs`, `tests/migration-manifest-smoke.mjs`, `tests/migration-runner-smoke.mjs` | Pending exact-head checks and review |
-| WOS-NFR-SEC-006, WOS-NFR-SEC-011 | Full-history Gitleaks step with comments/artifact upload disabled; `npm audit --audit-level=high`; production fallback/secret validation | Pending exact-head scans and finding disposition |
-| WOS-NFR-REL-002, WOS-NFR-MNT-004–007 | Separate liveness/readiness/build metadata (database, migration and production OIDC readiness), ordered migration ledger, transaction advisory lock, new-file checksums and migration operations documentation | Pending exact-head tests and review |
-| WOS-GOV-005 | PR-005 task authority and traceability documentation linked to Issue #5 | Pending publication and acceptance |
+| WOS-OPS-001–004, WOS-OPS-007, WOS-OPS-009; WOS-NFR-DPL-001–006 | `.github/workflows/workos-ci.yml`, `Dockerfile`, `compose.yaml`, `server/environment.mjs`, `server/health.mjs`, `server/migration-runner.mjs`, `server/migrate.mjs`, and exact-head CI | Passed at PR #40 head |
+| WOS-NFR-SEC-006, WOS-NFR-SEC-011 | Full-history Gitleaks step with comments/artifact upload disabled; locked dependency audit; production fallback/secret validation | Passed at PR #40 head; five low and two moderate dependency advisories remain |
+| WOS-NFR-REL-002, WOS-NFR-MNT-004–007 | Separate liveness/readiness/build metadata, ordered migration ledger, transaction advisory lock, new-file checksums and migration operations documentation | Passed at PR #40 head |
+| WOS-GOV-005 | PR-005 task authority and traceability documentation linked to Issue #5 | Merged with PR #40 |
 
-Full backup/restore rehearsal, monitoring ownership, broader structured logging and v1 handover remain with the later operations/recovery packages. WOS-03B modular/API foundation remains PR-006 and is outside this package.
+CI built the production image and verified its fail-closed startup path, but did not start the image or Compose stack with valid production configuration. The positive identity/readiness smoke used Node, disposable PostgreSQL and a local identity fixture; no production credentials, customer data or external identity provider were used. Full backup/restore rehearsal, monitoring ownership, broader structured logging and v1 handover remain with later operations/recovery packages.
+
+## WOS-03B — PR-006 modular and API foundation (in progress)
+
+This bounded candidate is based on the merged PR-005 main commit. It introduces shared identity, API request-context, versioned error and audit seams while preserving existing route behavior. It does not claim completion of all WOS-CORE-003, WOS-CORE-005 or WOS-GOV-001–004 requirements; additional domain extraction, audit/provenance coverage and retention work remain in this and later packages.
+
+| Requirement group | Candidate implementation/evidence | Current acceptance status |
+|---|---|---|
+| WOS-CORE-003; WOS-NFR-MNT-001–008 | `server/modules/identity-access/`, `server/modules/audit/`, `server/api/`, this API architecture contract, shared router mounts, compatibility tests and bounded extraction from `server/index.mjs` | Local lint, typecheck, build, full test suite and independent read-only review passed; exact-head CI pending |
+| WOS-CORE-005; WOS-GOV-001–004 | Shared `recordAuditEvent` writer and additive migration `033_wos03_audit_operation_context.sql`; records actor, role, source, entity/action, reason/details, before/after and nullable request-context IDs | Contract tests passed locally; database-backed fresh/upgrade test pending PostgreSQL CI; configurable retention and wider provenance coverage remain open |
+| WOS-CORE-003; WOS-NFR-OBS-001–006; WOS-NFR-CMP-001–004 | Validated correlation IDs, generated state-changing operation IDs, `/api/v1` stable errors and legacy-compatible error parsing; shared identity/organization-setup routers mounted on legacy and v1 prefixes | Targeted API and route-parity tests plus full `npm test` passed with CI test-mode environment; exact-head CI and browser/controller acceptance pending |
+
+Local migration-runner execution was unavailable because the authoring container has no PostgreSQL server or Docker. The required workflow provisions disposable PostgreSQL and runs fresh-install, upgrade, checksum and single-connection-pool migration tests; completion remains pending until that exact-head run passes.

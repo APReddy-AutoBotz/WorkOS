@@ -117,7 +117,15 @@ const legalSelect = `select le.id,le.organization_id,le.code,p.legal_name name,p
   p.effective_from profile_effective_from,p.effective_to profile_effective_to
   from legal_entities le join legal_entity_profile_versions p on p.legal_entity_id=le.id and p.organization_id=le.organization_id`;
 
-export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, requireAuth, requirePermission, audit }) => {
+export const registerOrganizationSetupRoutes = ({
+  app,
+  pool,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  audit,
+  mountPaths = ['/api/organization-setup'],
+}) => {
   const router = Router();
   router.use(requireDatabase, requireAuth, async (req, res, next) => {
     try {
@@ -621,5 +629,6 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     if(!result.rowCount)return res.status(404).json({error:'Worker history not found'});
     res.json(result.rows);
   });
-  app.use('/api/organization-setup',router);
+  for (const mountPath of mountPaths) app.use(mountPath, router);
+  return router;
 };

@@ -83,6 +83,10 @@ await withDisposableDatabase(async (pool) => {
   assert.equal(result.status.isCurrent, true,
     'a single-connection pool must return migration status after applying migrations');
   assert.equal(checkedOutClients, 0, 'the migration runner releases its checked-out client');
+  const auditColumns = await pool.query(`select column_name from information_schema.columns
+    where table_schema='public' and table_name='audit_logs' and column_name in ('correlation_id','operation_id')`);
+  assert.deepEqual(auditColumns.rows.map(row => row.column_name).sort(), ['correlation_id', 'operation_id'],
+    'fresh installs must include request correlation and operation audit fields');
 }, {maxPoolSize: 1});
 
 await withDisposableDatabase(async (pool) => {
@@ -122,8 +126,8 @@ await withDisposableDatabase(async (pool) => {
   const client = await pool.connect();
   try {
     await client.query('begin');
-    // Recreate the ledger/schema shape written by the supported pre-PR-005
-    // migration runner, then apply the exact published migration set.
+    // Recreate the current schema and the last published migration level, then
+    // add an existing audit row before exercising the additive PR-006 upgrade.
     await client.query(`
       create table schema_migrations (
         id text primary key,
@@ -133,11 +137,13 @@ await withDisposableDatabase(async (pool) => {
     const baselineSql = await readFile(join(serverDir, 'schema.sql'), 'utf8');
     await client.query(baselineSql);
     await client.query('insert into schema_migrations (id) values ($1)', [manifest[0].id]);
-    for (const migration of manifest.slice(1)) {
+    for (const migration of manifest.slice(1, -1)) {
       const sql = await readFile(join(serverDir, 'migrations', migration.file), 'utf8');
       await client.query(sql);
       await client.query('insert into schema_migrations (id) values ($1)', [migration.id]);
     }
+    await client.query(`insert into audit_logs (user_id,user_name,user_role,module,action,details)
+      values ('legacy-actor','Legacy actor','Admin','Test','Before request IDs','existing audit evidence')`);
     await client.query('commit');
   } catch (error) {
     await client.query('rollback').catch(() => {});
@@ -149,15 +155,23 @@ await withDisposableDatabase(async (pool) => {
   const before = await pool.query('select count(*)::int as count from schema_migrations');
   const upgrade = await runMigrations({pool, rootDir: serverDir, logger: quietLogger});
   const after = await pool.query('select count(*)::int as count from schema_migrations');
-  assert.deepEqual(upgrade.applied, [], 'upgrade from the current supported migration level is non-destructive');
-  assert.equal(upgrade.skipped.length, manifest.length);
-  assert.deepEqual(after.rows[0], before.rows[0], 'upgrade preserves the prior migration ledger');
+  assert.deepEqual(upgrade.applied, [manifest.at(-1).id], 'upgrade applies only the new additive audit-context migration');
+  assert.equal(upgrade.skipped.length, manifest.length - 1);
+  assert.equal(after.rows[0].count, before.rows[0].count + 1, 'upgrade appends one migration ledger row');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
-  assert.deepEqual(status.legacyUnverifiedIds, manifest.map(item => item.id),
-    'old rows without a recorded digest remain explicitly marked unverifiable');
+  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -1).map(item => item.id),
+    'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
-  assert(ledger.rows.every(row => row.checksum === null), 'upgrade must not invent historical checksums');
+  const newMigration = ledger.rows.find(row => row.id === manifest.at(-1).id);
+  assert.match(newMigration?.checksum || '', /^[0-9a-f]{64}$/, 'new migration records its actual SHA-256 checksum');
+  assert(ledger.rows.filter(row => row.id !== manifest.at(-1).id).every(row => row.checksum === null),
+    'upgrade must not invent historical checksums');
+  const legacyAudit = await pool.query(`select correlation_id,operation_id from audit_logs
+    where user_id='legacy-actor' and action='Before request IDs'`);
+  assert.equal(legacyAudit.rowCount, 1);
+  assert.equal(legacyAudit.rows[0].correlation_id, null, 'existing audit history must not receive invented correlation IDs');
+  assert.equal(legacyAudit.rows[0].operation_id, null, 'existing audit history must not receive invented operation IDs');
 });
 
 const failedMigrationRoot = await mkdtemp(join(tmpdir(), 'workos-failed-migration-'));

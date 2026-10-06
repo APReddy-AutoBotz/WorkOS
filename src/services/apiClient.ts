@@ -92,7 +92,61 @@ export const selectOrganizationScope = async (scope: OrganizationScope) => {
 
 // ─── Core fetch wrapper ───────────────────────────────────────────────────────
 
-type ApiError = { error: string; reason?: string };
+export type ApiErrorPayload = {
+  error?: string | {
+    code?: string;
+    message?: string;
+    correlationId?: string;
+    operationId?: string;
+  };
+  code?: string;
+  reason?: string;
+  correlationId?: string;
+  operationId?: string;
+};
+
+export type ApiClientErrorDetails = {
+  status: number;
+  code?: string;
+  correlationId?: string;
+  operationId?: string;
+};
+
+export class ApiClientError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly correlationId?: string;
+  readonly operationId?: string;
+
+  constructor(message: string, details: ApiClientErrorDetails) {
+    super(message);
+    this.name = 'ApiClientError';
+    this.status = details.status;
+    this.code = details.code;
+    this.correlationId = details.correlationId;
+    this.operationId = details.operationId;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export const parseApiClientError = (
+  status: number,
+  payload: unknown,
+  headers?: Pick<Headers, 'get'>,
+): ApiClientError => {
+  const body = payload && typeof payload === 'object' ? payload as ApiErrorPayload : {};
+  const envelope = body.error && typeof body.error === 'object' ? body.error : undefined;
+  const message = envelope?.message
+    || (typeof body.error === 'string' ? body.error : '')
+    || body.reason
+    || `API error ${status}`;
+  return new ApiClientError(message, {
+    status,
+    code: envelope?.code || body.code,
+    correlationId: envelope?.correlationId || body.correlationId || headers?.get('X-Correlation-ID') || undefined,
+    operationId: envelope?.operationId || body.operationId || headers?.get('X-Operation-ID') || undefined,
+  });
+};
 
 export const getApiHeaders = (): HeadersInit => {
   const token = getToken();
@@ -117,17 +171,17 @@ async function apiFetch<T>(
   });
 
   if (res.status === 401) {
+    const payload = await res.json().catch(() => ({}));
     clearToken();
     if (window.location.pathname !== '/login') {
       window.location.href = '/login';
     }
-    throw new Error('Authentication required');
+    throw parseApiClientError(401, payload, res.headers);
   }
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = json as ApiError;
-    throw new Error(err.error || `API error ${res.status}`);
+    throw parseApiClientError(res.status, json, res.headers);
   }
   if (method !== 'GET' && path === '/api/organization-setup/terminology') {
     window.dispatchEvent(new Event('workos:organization-scope-changed'));

@@ -34,6 +34,8 @@ for (const invalidTerms of [
 ]) assert(!validateTerminology({terms:invalidTerms,effectiveFrom:'2026-01-01'}).success, 'invalid terminology must fail closed');
 assert.deepEqual(normalizePersistedTerminology({employee:'person'}).employee,{singular:'person',plural:'persons',helpText:''});
 const server = readFileSync('server/index.mjs', 'utf8');
+const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
+const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
 const api = readFileSync('src/services/api.ts', 'utf8');
 const runtimeTerminology = readFileSync('src/config/RuntimeTerminology.tsx', 'utf8');
@@ -372,9 +374,11 @@ assert.equal(lifecycleQueries.length, 2, 'employee updates and import replays mu
 assert.equal((server.match(/initializeNewWorkerLifecycle\(client,/g) || []).length, 2, 'canonical employee save and import must both initialize new worker state');
 assert.match(server, /employee:\$\{req\.organizationScope\.organizationId\}:\$\{parsed\.data\.employee_id\}[\s\S]*isNew: !previous/, 'canonical employee save must serialize organization-scoped new-record detection before worker initialization');
 assert.match(server, /api\/imports\/employees\/apply[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{row\.employeeId\}[\s\S]*isNew: !previous/, 'employee import must serialize organization-scoped new-record detection before worker initialization');
-assert.match(server, /const requireIdentity = \(req, res, next\)[\s\S]*const requireAuth = async[\s\S]*resolveOrganizationScope\(pool, req\)/, 'identity-only session bootstrap must stay separate from protected data scope enforcement');
-assert.match(server, /app\.get\('\/api\/auth\/me', requireDatabase, requireIdentity/, 'session bootstrap may refresh identity before an organization scope is selected');
-assert.match(server, /app\.get\('\/api\/auth\/organization-scopes', requireDatabase, requireIdentity[\s\S]*listAuthorizedOrganizationScopes/, 'scope discovery must authenticate identity without requiring an already-selected scope');
+assert.match(identityMiddleware, /const requireIdentity =[\s\S]*const requireAuth = async[\s\S]*resolveOrganizationScope\(database, req\)/, 'identity-only session bootstrap must stay separate from protected data scope enforcement');
+assert.match(identityReadRoutes, /router\.get\('\/me', requireDatabase, requireIdentity, refreshSession\)/, 'session bootstrap may refresh identity before an organization scope is selected');
+assert.match(identityReadRoutes, /router\.get\('\/organization-scopes', requireDatabase, requireIdentity, listOrganizationScopes\)/, 'scope discovery must authenticate identity without requiring an already-selected scope');
+assert.match(server, /app\.use\('\/api\/auth', createIdentityReadRouter[\s\S]*app\.use\('\/api\/v1\/auth', createIdentityReadRouter/, 'legacy and versioned identity reads must share one route contract');
+assert.match(server, /mountPaths: \['\/api\/organization-setup', '\/api\/v1\/organization-setup'\]/, 'organization setup paths must share the same compatibility router');
 assert.match(service, /const currentOrganizationScopeSource[\s\S]*legal_entity_profile_versions lp[\s\S]*current_date between lp\.effective_from[\s\S]*listAuthorizedOrganizationScopes[\s\S]*where \$\{currentOrganizationScopePredicate\}/, 'scope discovery and protected scope resolution must share current effective-profile authority');
 assert.match(service, /join users u on u\.id=s\.user_id and u\.status='Active'[\s\S]*coalesce\(op\.name,o\.name\)[\s\S]*coalesce\(lp\.legal_name,le\.name\)/, 'scope discovery must hide disabled accounts and use current effective profile labels');
 assert.match(authService, /fetch\('\/api\/auth\/switch-role'[\s\S]*headers: getApiHeaders\(\)/, 'role switching must propagate the explicitly selected organization scope');
