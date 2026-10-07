@@ -5,9 +5,10 @@ const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for'] || re
 export const AUDIT_INSERT_SQL = `
   insert into audit_logs (
     user_id, user_name, user_role, active_role, source, module, action, entity_type, entity_id,
-    old_value, new_value, details, reason, ip_address, session_id, correlation_id, operation_id
+    old_value, new_value, details, reason, ip_address, session_id, correlation_id, operation_id,
+    import_batch_id, source_identifier, import_processing_result
   )
-  values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+  values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 `;
 
 /**
@@ -25,6 +26,9 @@ export const recordAuditEvent = async (client, req = {}, {
   details,
   reason,
   source = 'Web',
+  importBatchId = null,
+  sourceIdentifier = null,
+  importProcessingResult = null,
 }) => {
   await client.query(AUDIT_INSERT_SQL, [
     req.user?.sub || 'system',
@@ -44,5 +48,8 @@ export const recordAuditEvent = async (client, req = {}, {
     req.user?.sub || null,
     req.correlationId || null,
     req.operationId || null,
+    importBatchId,
+    sourceIdentifier,
+    importProcessingResult,
   ]);
 };

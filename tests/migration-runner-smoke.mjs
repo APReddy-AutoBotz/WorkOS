@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
-import {randomBytes} from 'node:crypto';
+import {createHmac, randomBytes, randomUUID} from 'node:crypto';
+import {spawn} from 'node:child_process';
 import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {tmpdir} from 'node:os';
+import {createServer} from 'node:net';
+import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
 import {getMigrationManifest, getMigrationStatus, runMigrations} from '../server/migrate.mjs';
 
@@ -36,7 +39,7 @@ const withDisposableDatabase = async (test, {maxPoolSize = 4} = {}) => {
     databaseUrl.pathname = `/${name}`;
     const pool = new Pool({connectionString: databaseUrl.toString(), max: maxPoolSize});
     try {
-      return await test(pool);
+      return await test(pool, databaseUrl.toString());
     } finally {
       await pool.end();
     }
@@ -55,7 +58,105 @@ const withDisposableDatabase = async (test, {maxPoolSize = 4} = {}) => {
 const manifest = await getMigrationManifest({rootDir: serverDir});
 const quietLogger = {log() {}};
 
-await withDisposableDatabase(async (pool) => {
+const findAvailablePort = async () => {
+  const server = createServer();
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  const port = server.address().port;
+  await new Promise((resolveClose, rejectClose) => {
+    server.close(error => error ? rejectClose(error) : resolveClose());
+  });
+  return port;
+};
+
+const signTestSession = (payload, secret) => {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = createHmac('sha256', secret).update(body).digest('base64url');
+  return `${body}.${signature}`;
+};
+
+const waitForChildExit = child => new Promise(resolveExit => {
+  if (child.exitCode !== null || child.signalCode !== null) resolveExit();
+  else child.once('exit', resolveExit);
+});
+
+const stopChild = async child => {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill('SIGTERM');
+  const graceful = await Promise.race([waitForChildExit(child).then(() => true), delay(2500).then(() => false)]);
+  if (!graceful) {
+    child.kill('SIGKILL');
+    await Promise.race([waitForChildExit(child), delay(2500)]);
+  }
+};
+
+const withEmployeeImportApi = async (databaseUrl, actorId, test) => {
+  const port = await findAvailablePort();
+  const secret = 'synthetic-employee-import-session-secret-only';
+  const childEnvironment = {
+    PATH: process.env.PATH,
+    TZ: 'UTC',
+    NODE_ENV: 'test',
+    APP_MODE: 'test',
+    PORT: String(port),
+    DATABASE_URL: databaseUrl,
+    PGSSLMODE: 'disable',
+    API_SESSION_SECRET: secret,
+    APP_URL: `http://127.0.0.1:${port}`,
+    IDENTITY_PROVIDER: 'local',
+    AUTO_SEED_DEMO: 'false',
+    RESET_DEMO_DATA: 'false',
+    ALLOW_TEST_FALLBACK: 'false',
+    VITE_ALLOW_TEST_FALLBACK: 'false',
+  };
+  const child = spawn(process.execPath, ['server/index.mjs'], {
+    cwd: process.cwd(),
+    env: childEnvironment,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  const collectOutput = chunk => {
+    output = `${output}${chunk}`;
+    if (output.length > 12_000) output = output.slice(-12_000);
+  };
+  child.stdout.on('data', collectOutput);
+  child.stderr.on('data', collectOutput);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const token = signTestSession({
+    sub: actorId,
+    username: 'synthetic-import-admin',
+    activeRole: 'Admin',
+    exp: Date.now() + 60_000,
+  }, secret);
+
+  try {
+    const deadline = Date.now() + 10_000;
+    let ready = false;
+    while (Date.now() < deadline) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error(`Employee-import API exited before listening: ${output}`);
+      }
+      try {
+        const response = await fetch(`${baseUrl}/api/health/live`, {signal: AbortSignal.timeout(300)});
+        if (response.status === 200) {
+          ready = true;
+          break;
+        }
+      } catch {
+        // The child may still be importing modules or binding its port.
+      }
+      await delay(100);
+    }
+    assert.equal(ready, true, `employee-import API must start for its PostgreSQL contract test: ${output}`);
+    await test({baseUrl, token});
+  } finally {
+    await stopChild(child);
+  }
+};
+
+await withDisposableDatabase(async (pool, databaseUrl) => {
   let checkedOutClients = 0;
   const guardedPool = {
     async connect() {
@@ -84,9 +185,136 @@ await withDisposableDatabase(async (pool) => {
     'a single-connection pool must return migration status after applying migrations');
   assert.equal(checkedOutClients, 0, 'the migration runner releases its checked-out client');
   const auditColumns = await pool.query(`select column_name from information_schema.columns
-    where table_schema='public' and table_name='audit_logs' and column_name in ('correlation_id','operation_id')`);
-  assert.deepEqual(auditColumns.rows.map(row => row.column_name).sort(), ['correlation_id', 'operation_id'],
-    'fresh installs must include request correlation and operation audit fields');
+    where table_schema='public' and table_name='audit_logs'
+      and column_name in ('correlation_id','operation_id','import_batch_id','source_identifier','import_processing_result')`);
+  assert.deepEqual(auditColumns.rows.map(row => row.column_name).sort(), [
+    'correlation_id', 'import_batch_id', 'import_processing_result', 'operation_id', 'source_identifier',
+  ], 'fresh installs must include request trace and employee-import provenance fields');
+  const batchIndex = await pool.query(`select indexdef from pg_indexes
+    where schemaname='public' and tablename='audit_logs' and indexname='audit_logs_import_batch_id_idx'`);
+  assert.equal(batchIndex.rowCount, 1, 'fresh installs must index import-batch audit lookups');
+  assert.match(batchIndex.rows[0].indexdef, /where\s+\(import_batch_id is not null\)/i,
+    'the batch index must omit audit rows with no import provenance');
+
+  const actorId = randomUUID();
+  await pool.query(`insert into roles(name) values ('Admin'),('Employee') on conflict (name) do nothing`);
+  await pool.query(`insert into users (id,username,email,status)
+    values ($1,'synthetic-import-admin','synthetic-import-admin@example.test','Active')`, [actorId]);
+  await pool.query(`insert into user_roles (user_id,role_id)
+    select $1,id from roles where name='Admin'`, [actorId]);
+  await pool.query(`insert into user_permission_grants (user_id,permission_key,granted_by,active_role)
+    values ($1,'imports.manage',$1,'Admin')`, [actorId]);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+    values ($1,'org-default','legal-default',true) on conflict do nothing`, [actorId]);
+  await pool.query(`insert into country_directors (id,name,region)
+    values ('cd-import-provenance-test','Synthetic Director','Synthetic') on conflict (id) do nothing`);
+
+  // Exercise the real route as a signed user with an explicit organization scope and imports.manage grant.
+  await withEmployeeImportApi(databaseUrl, actorId, async ({baseUrl, token}) => {
+    const apply = body => fetch(`${baseUrl}/api/imports/employees/apply`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Organization-ID': 'org-default',
+        'X-Legal-Entity-ID': 'legal-default',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    const partialResponse = await apply({
+      fileName: 'synthetic-partial.csv',
+      totalRows: 2,
+      rows: [
+        {
+          employeeId: 'EMP-IMPORT-SUCCESS',
+          name: 'Synthetic Success Row',
+          email: 'employee-import-success@example.test',
+          primaryCountryDirectorId: 'cd-import-provenance-test',
+          initialPassword: 'Synthetic-import-test-password-1',
+        },
+        {
+          employeeId: 'EMP-IMPORT-FAILED',
+          name: 'Synthetic Failed Row',
+          email: 'employee-import-failed@example.test',
+        },
+      ],
+    });
+    assert.equal(partialResponse.status, 200);
+    const partialBody = await partialResponse.json();
+    assert.deepEqual({status: partialBody.status, totalRows: partialBody.totalRows,
+      validRows: partialBody.validRows, errorRows: partialBody.errorRows},
+    {status: 'Partial', totalRows: 2, validRows: 1, errorRows: 1},
+    'the real employee apply route must preserve its partial result counts');
+    assert.deepEqual(partialBody.errors, [{
+      rowNumber: 3,
+      field: 'primaryCountryDirectorId',
+      message: 'Primary country director is required.',
+    }], 'the real employee apply route must preserve its existing row-error shape');
+    const partialLog = (await pool.query(`select * from import_export_logs where id=$1`, [partialBody.log.id])).rows[0];
+    const partialAudit = await pool.query(`select source,source_identifier,import_batch_id,import_processing_result,details
+      from audit_logs where import_batch_id=$1`, [partialBody.log.id]);
+    assert.equal(partialLog.status, 'Partial');
+    assert.equal(partialLog.total_rows, 2);
+    assert.equal(partialLog.valid_rows, 1);
+    assert.equal(partialLog.error_rows, 1);
+    assert.equal(partialAudit.rowCount, 1, 'a partial batch must audit only the successful row');
+    assert.deepEqual(partialAudit.rows[0], {
+      source: 'Employee Master CSV',
+      source_identifier: 'EMP-IMPORT-SUCCESS',
+      import_batch_id: partialBody.log.id,
+      import_processing_result: 'Success',
+      details: 'Created employee master record from CSV import',
+    }, 'the persisted success audit must link source, identifier, result and batch');
+    assert.doesNotMatch(partialAudit.rows[0].details, /EMP-IMPORT-SUCCESS|synthetic-partial\.csv/,
+      'audit details must not duplicate row identifiers or expose uploaded file contents');
+
+    const failedResponse = await apply({
+      fileName: 'synthetic-failed.csv',
+      rows: [{
+        employeeId: 'EMP-IMPORT-ALL-FAILED',
+        name: 'Synthetic Failed Batch Row',
+        email: 'employee-import-all-failed@example.test',
+      }],
+    });
+    assert.equal(failedResponse.status, 200);
+    const failedBody = await failedResponse.json();
+    assert.equal(failedBody.status, 'Failed');
+    assert.equal(failedBody.validRows, 0);
+    assert.equal(failedBody.errorRows, 1);
+    const failedBatch = await pool.query(`select l.status,count(a.id)::int as audit_rows
+      from import_export_logs l left join audit_logs a on a.import_batch_id=l.id
+      where l.id=$1 group by l.id`, [failedBody.log.id]);
+    assert.deepEqual(failedBatch.rows, [{status: 'Failed', audit_rows: 0}],
+      'a validation-failed batch must retain its result without success audit events');
+
+    await pool.query(`create or replace function reject_synthetic_employee_import_log()
+      returns trigger language plpgsql as $$ begin
+        if new.file_name='synthetic-rollback.csv' then raise exception 'synthetic import-log failure'; end if;
+        return new;
+      end; $$`);
+    await pool.query(`create trigger reject_synthetic_employee_import_log
+      before insert on import_export_logs for each row execute function reject_synthetic_employee_import_log()`);
+    const rollbackResponse = await apply({
+      fileName: 'synthetic-rollback.csv',
+      rows: [{
+        employeeId: 'EMP-IMPORT-ROLLBACK',
+        name: 'Synthetic Rolled Back Row',
+        email: 'employee-import-rollback@example.test',
+        primaryCountryDirectorId: 'cd-import-provenance-test',
+        initialPassword: 'Synthetic-import-test-password-2',
+      }],
+    });
+    assert.equal(rollbackResponse.status, 500, 'a failed batch-log write must return the legacy generic failure');
+    assert.deepEqual(await rollbackResponse.json(), {error: 'Employee import apply failed'});
+    const rollbackRows = await pool.query(`select
+        (select count(*)::int from employees where employee_id='EMP-IMPORT-ROLLBACK') as employee_rows,
+        (select count(*)::int from audit_logs where source_identifier='EMP-IMPORT-ROLLBACK') as audit_rows,
+        (select count(*)::int from import_export_logs where file_name='synthetic-rollback.csv') as batch_rows`);
+    assert.deepEqual(rollbackRows.rows, [{employee_rows: 0, audit_rows: 0, batch_rows: 0}],
+      'an import-log failure must roll back employee writes and row audits with no orphan batch reference');
+  });
 }, {maxPoolSize: 1});
 
 await withDisposableDatabase(async (pool) => {
@@ -126,8 +354,8 @@ await withDisposableDatabase(async (pool) => {
   const client = await pool.connect();
   try {
     await client.query('begin');
-    // Recreate the current schema and the last published migration level, then
-    // add an existing audit row before exercising the additive PR-006 upgrade.
+    // Recreate the merged main level through migration 032, then add an existing
+    // audit row before exercising both additive PR-006 migrations.
     await client.query(`
       create table schema_migrations (
         id text primary key,
@@ -137,7 +365,7 @@ await withDisposableDatabase(async (pool) => {
     const baselineSql = await readFile(join(serverDir, 'schema.sql'), 'utf8');
     await client.query(baselineSql);
     await client.query('insert into schema_migrations (id) values ($1)', [manifest[0].id]);
-    for (const migration of manifest.slice(1, -1)) {
+    for (const migration of manifest.slice(1, -2)) {
       const sql = await readFile(join(serverDir, 'migrations', migration.file), 'utf8');
       await client.query(sql);
       await client.query('insert into schema_migrations (id) values ($1)', [migration.id]);
@@ -155,23 +383,34 @@ await withDisposableDatabase(async (pool) => {
   const before = await pool.query('select count(*)::int as count from schema_migrations');
   const upgrade = await runMigrations({pool, rootDir: serverDir, logger: quietLogger});
   const after = await pool.query('select count(*)::int as count from schema_migrations');
-  assert.deepEqual(upgrade.applied, [manifest.at(-1).id], 'upgrade applies only the new additive audit-context migration');
-  assert.equal(upgrade.skipped.length, manifest.length - 1);
-  assert.equal(after.rows[0].count, before.rows[0].count + 1, 'upgrade appends one migration ledger row');
+  const candidateMigrations = manifest.slice(-2);
+  assert.deepEqual(candidateMigrations.map(item => item.id), [
+    '033_wos03_audit_operation_context',
+    '034_wos03_employee_import_provenance',
+  ], 'PR-006 adds only its two ordered audit migrations');
+  assert.deepEqual(upgrade.applied, candidateMigrations.map(item => item.id),
+    'upgrade from merged main applies both additive PR-006 audit migrations');
+  assert.equal(upgrade.skipped.length, manifest.length - 2);
+  assert.equal(after.rows[0].count, before.rows[0].count + 2, 'upgrade appends both migration ledger rows');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
-  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -1).map(item => item.id),
+  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -2).map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
-  const newMigration = ledger.rows.find(row => row.id === manifest.at(-1).id);
-  assert.match(newMigration?.checksum || '', /^[0-9a-f]{64}$/, 'new migration records its actual SHA-256 checksum');
-  assert(ledger.rows.filter(row => row.id !== manifest.at(-1).id).every(row => row.checksum === null),
+  const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
+  assert.equal(newMigrations.length, 2, 'both PR-006 migrations are ledgered');
+  assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
+    'each new migration records its actual SHA-256 checksum');
+  assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),
     'upgrade must not invent historical checksums');
-  const legacyAudit = await pool.query(`select correlation_id,operation_id from audit_logs
+  const legacyAudit = await pool.query(`select correlation_id,operation_id,import_batch_id,source_identifier,import_processing_result from audit_logs
     where user_id='legacy-actor' and action='Before request IDs'`);
   assert.equal(legacyAudit.rowCount, 1);
   assert.equal(legacyAudit.rows[0].correlation_id, null, 'existing audit history must not receive invented correlation IDs');
   assert.equal(legacyAudit.rows[0].operation_id, null, 'existing audit history must not receive invented operation IDs');
+  assert.equal(legacyAudit.rows[0].import_batch_id, null, 'existing audit history must not receive invented import batches');
+  assert.equal(legacyAudit.rows[0].source_identifier, null, 'existing audit history must not receive invented source identifiers');
+  assert.equal(legacyAudit.rows[0].import_processing_result, null, 'existing audit history must not receive invented import results');
 });
 
 const failedMigrationRoot = await mkdtemp(join(tmpdir(), 'workos-failed-migration-'));

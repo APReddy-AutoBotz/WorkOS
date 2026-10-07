@@ -6248,6 +6248,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
     { field: 'email', value: row.email, label: 'email' },
   ]);
   const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  const importBatchId = crypto.randomUUID();
   let saved = 0;
   try {
     await client.query('begin');
@@ -6496,17 +6497,22 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         entityId: employee.id,
         oldValue: previous,
         newValue: employee,
-        details: `${previous ? 'Updated' : 'Created'} employee ${employee.employee_id} from ${parsed.data.fileName}`,
+        details: `${previous ? 'Updated' : 'Created'} employee master record from CSV import`,
+        source: 'Employee Master CSV',
+        importBatchId,
+        sourceIdentifier: employee.employee_id,
+        importProcessingResult: 'Success',
       });
       saved += 1;
     }
 
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Employee Master',$1,$2,$3,$4,$5,$6,$7)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
+      values ($1,'Import','Employee Master',$2,$3,$4,$5,$6,$7,$8)
       returning *
     `, [
+      importBatchId,
       parsed.data.fileName,
       status,
       parsed.data.totalRows ?? parsed.data.rows.length,
