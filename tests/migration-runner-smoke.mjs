@@ -92,7 +92,7 @@ const stopChild = async child => {
   }
 };
 
-const withEmployeeImportApi = async (databaseUrl, actorId, test) => {
+const withImportApi = async (databaseUrl, actorId, test) => {
   const port = await findAvailablePort();
   const secret = 'synthetic-employee-import-session-secret-only';
   const childEnvironment = {
@@ -136,7 +136,7 @@ const withEmployeeImportApi = async (databaseUrl, actorId, test) => {
     let ready = false;
     while (Date.now() < deadline) {
       if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error(`Employee-import API exited before listening: ${output}`);
+        throw new Error(`Import API exited before listening: ${output}`);
       }
       try {
         const response = await fetch(`${baseUrl}/api/health/live`, {signal: AbortSignal.timeout(300)});
@@ -149,7 +149,7 @@ const withEmployeeImportApi = async (databaseUrl, actorId, test) => {
       }
       await delay(100);
     }
-    assert.equal(ready, true, `employee-import API must start for its PostgreSQL contract test: ${output}`);
+    assert.equal(ready, true, `import API must start for its PostgreSQL contract test: ${output}`);
     await test({baseUrl, token});
   } finally {
     await stopChild(child);
@@ -210,8 +210,19 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ('cd-import-provenance-test','Synthetic Director','Synthetic') on conflict (id) do nothing`);
 
   // Exercise the real route as a signed user with an explicit organization scope and imports.manage grant.
-  await withEmployeeImportApi(databaseUrl, actorId, async ({baseUrl, token}) => {
+  await withImportApi(databaseUrl, actorId, async ({baseUrl, token}) => {
     const apply = body => fetch(`${baseUrl}/api/imports/employees/apply`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Organization-ID': 'org-default',
+        'X-Legal-Entity-ID': 'legal-default',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+    const applyClients = body => fetch(`${baseUrl}/api/imports/clients/apply`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -314,6 +325,149 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         (select count(*)::int from import_export_logs where file_name='synthetic-rollback.csv') as batch_rows`);
     assert.deepEqual(rollbackRows.rows, [{employee_rows: 0, audit_rows: 0, batch_rows: 0}],
       'an import-log failure must roll back employee writes and row audits with no orphan batch reference');
+
+    const clientPartialResponse = await applyClients({
+      fileName: 'synthetic-client-partial.csv',
+      totalRows: 3,
+      rows: [
+        {id: 'client-import-source-1', name: 'Synthetic Client With Source ID'},
+        {name: 'Synthetic Client Without Source ID'},
+        {id: 'client-import-rejected', name: 'Synthetic Client Rejected', accountOwnerId: 'missing-owner'},
+      ],
+    });
+    assert.equal(clientPartialResponse.status, 200);
+    const clientPartialBody = await clientPartialResponse.json();
+    assert.deepEqual({status: clientPartialBody.status, totalRows: clientPartialBody.totalRows,
+      validRows: clientPartialBody.validRows, errorRows: clientPartialBody.errorRows},
+    {status: 'Partial', totalRows: 3, validRows: 2, errorRows: 1},
+    'the real client apply route must preserve its partial batch counts');
+    assert.deepEqual(clientPartialBody.errors, [{
+      rowNumber: 4,
+      field: 'accountOwnerId',
+      message: 'Account owner employee record does not exist or is exited.',
+    }], 'the real client apply route must preserve its row-error shape');
+    const clientPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [clientPartialBody.log.id])).rows[0];
+    assert.equal(clientPartialLog.id, clientPartialBody.log.id, 'client batch history must return its persisted server batch ID');
+    assert.equal(clientPartialLog.status, 'Partial');
+    assert.equal(clientPartialLog.total_rows, 3);
+    assert.equal(clientPartialLog.valid_rows, 2);
+    assert.equal(clientPartialLog.error_rows, 1);
+    const clientPartialAudit = await pool.query(`select source,source_identifier,import_batch_id,import_processing_result,details
+      from audit_logs where import_batch_id=$1 order by source_identifier nulls last`, [clientPartialBody.log.id]);
+    assert.equal(clientPartialAudit.rowCount, 2, 'a partial client batch must audit only the successful rows');
+    assert.deepEqual(clientPartialAudit.rows, [
+      {
+        source: 'Client Master CSV',
+        source_identifier: 'client-import-source-1',
+        import_batch_id: clientPartialBody.log.id,
+        import_processing_result: 'Success',
+        details: 'Created client Synthetic Client With Source ID from synthetic-client-partial.csv',
+      },
+      {
+        source: 'Client Master CSV',
+        source_identifier: null,
+        import_batch_id: clientPartialBody.log.id,
+        import_processing_result: 'Success',
+        details: 'Created client Synthetic Client Without Source ID from synthetic-client-partial.csv',
+      },
+    ], 'client row audits must retain the input source ID only when supplied and link to the same batch');
+
+    const clientFailedResponse = await applyClients({
+      fileName: 'synthetic-client-failed.csv',
+      rows: [{name: 'Synthetic Client Failed Batch', accountOwnerId: 'missing-owner'}],
+    });
+    assert.equal(clientFailedResponse.status, 200);
+    const clientFailedBody = await clientFailedResponse.json();
+    assert.equal(clientFailedBody.status, 'Failed');
+    assert.equal(clientFailedBody.validRows, 0);
+    assert.equal(clientFailedBody.errorRows, 1);
+    const clientFailedBatch = await pool.query(`select l.status,count(a.id)::int as audit_rows
+      from import_export_logs l left join audit_logs a on a.import_batch_id=l.id
+      where l.id=$1 group by l.id`, [clientFailedBody.log.id]);
+    assert.deepEqual(clientFailedBatch.rows, [{status: 'Failed', audit_rows: 0}],
+      'a client batch with no saved rows must retain its failed result without success audit events');
+
+    await pool.query(`insert into organizations (id,code,name,effective_from)
+      values ('org-client-outside','CLIENT-OUTSIDE','Synthetic Client Outside Organization',date '1970-01-01')`);
+    await pool.query(`insert into legal_entities (id,organization_id,code,name,effective_from)
+      values ('legal-client-outside','org-client-outside','CLIENT-OUTSIDE','Synthetic Client Outside Legal Entity',date '1970-01-01')`);
+    await pool.query(`insert into clients (id,name,industry,status,organization_id,legal_entity_id)
+      values ('client-import-cross-scope','Synthetic Client Outside Scope','Outside Industry','Active','org-client-outside','legal-client-outside')`);
+    const clientCrossScopeResponse = await applyClients({
+      fileName: 'synthetic-client-cross-scope.csv',
+      rows: [{id: 'client-import-cross-scope', name: 'Synthetic Client Outside Scope', industry: 'Unauthorized Change'}],
+    });
+    assert.equal(clientCrossScopeResponse.status, 200);
+    const clientCrossScopeBody = await clientCrossScopeResponse.json();
+    assert.equal(clientCrossScopeBody.status, 'Failed');
+    assert.equal(clientCrossScopeBody.validRows, 0);
+    assert.deepEqual(clientCrossScopeBody.errors, [{
+      rowNumber: 2,
+      field: 'id',
+      message: 'Client is not available in the authorized organization and legal entity.',
+    }], 'the client apply route must preserve its existing non-disclosing cross-scope error');
+    const clientCrossScopeState = await pool.query(`select c.name,c.industry,c.organization_id,c.legal_entity_id,
+        count(a.id)::int as audit_rows
+      from clients c left join audit_logs a on a.source_identifier='client-import-cross-scope'
+      where c.id='client-import-cross-scope'
+      group by c.id`);
+    assert.deepEqual(clientCrossScopeState.rows, [{
+      name: 'Synthetic Client Outside Scope',
+      industry: 'Outside Industry',
+      organization_id: 'org-client-outside',
+      legal_entity_id: 'legal-client-outside',
+      audit_rows: 0,
+    }], 'a cross-scope client import must not update the foreign row or write an audit event');
+
+    await pool.query(`insert into legal_entities (id,organization_id,code,name,effective_from)
+      values ('legal-client-outside-same-org','org-default','CLIENT-OTHER-LEGAL','Synthetic Other Legal Entity',date '1970-01-01')`);
+    await pool.query(`insert into clients (id,name,industry,status,organization_id,legal_entity_id)
+      values ('client-import-cross-legal','Synthetic Client Outside Legal Scope','Other Legal Industry','Active','org-default','legal-client-outside-same-org')`);
+    const clientCrossLegalResponse = await applyClients({
+      fileName: 'synthetic-client-cross-legal.csv',
+      rows: [{id: 'client-import-cross-legal', name: 'Synthetic Client Outside Legal Scope', industry: 'Unauthorized Change'}],
+    });
+    assert.equal(clientCrossLegalResponse.status, 200);
+    const clientCrossLegalBody = await clientCrossLegalResponse.json();
+    assert.equal(clientCrossLegalBody.status, 'Failed');
+    assert.equal(clientCrossLegalBody.validRows, 0);
+    assert.deepEqual(clientCrossLegalBody.errors, [{
+      rowNumber: 2,
+      field: 'id',
+      message: 'Client is not available in the authorized organization and legal entity.',
+    }], 'the client apply route must reject a foreign legal entity inside the same organization');
+    const clientCrossLegalState = await pool.query(`select c.name,c.industry,c.organization_id,c.legal_entity_id,
+        count(a.id)::int as audit_rows
+      from clients c left join audit_logs a on a.source_identifier='client-import-cross-legal'
+      where c.id='client-import-cross-legal'
+      group by c.id`);
+    assert.deepEqual(clientCrossLegalState.rows, [{
+      name: 'Synthetic Client Outside Legal Scope',
+      industry: 'Other Legal Industry',
+      organization_id: 'org-default',
+      legal_entity_id: 'legal-client-outside-same-org',
+      audit_rows: 0,
+    }], 'a same-organization cross-legal-entity import must not update the foreign row or write an audit event');
+
+    await pool.query(`create or replace function reject_synthetic_client_import_log()
+      returns trigger language plpgsql as $$ begin
+        if new.file_name='synthetic-client-rollback.csv' then raise exception 'synthetic client import-log failure'; end if;
+        return new;
+      end; $$`);
+    await pool.query(`create trigger reject_synthetic_client_import_log
+      before insert on import_export_logs for each row execute function reject_synthetic_client_import_log()`);
+    const clientRollbackResponse = await applyClients({
+      fileName: 'synthetic-client-rollback.csv',
+      rows: [{id: 'client-import-rollback', name: 'Synthetic Client Rolled Back'}],
+    });
+    assert.equal(clientRollbackResponse.status, 500, 'a failed client batch-log write must return the legacy generic failure');
+    assert.deepEqual(await clientRollbackResponse.json(), {error: 'Client import apply failed'});
+    const clientRollbackRows = await pool.query(`select
+        (select count(*)::int from clients where organization_id='org-default' and legal_entity_id='legal-default' and name='Synthetic Client Rolled Back') as client_rows,
+        (select count(*)::int from audit_logs where source_identifier='client-import-rollback') as audit_rows,
+        (select count(*)::int from import_export_logs where file_name='synthetic-client-rollback.csv') as batch_rows`);
+    assert.deepEqual(clientRollbackRows.rows, [{client_rows: 0, audit_rows: 0, batch_rows: 0}],
+      'a failed client batch-log write must roll back the client row and audit with no orphan batch reference');
   });
 }, {maxPoolSize: 1});
 

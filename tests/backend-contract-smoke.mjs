@@ -6,6 +6,10 @@ const employeeImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/employees/apply'"),
   server.indexOf("app.post('/api/imports/clients/apply'"),
 );
+const clientImportRoute = server.slice(
+  server.indexOf("app.post('/api/imports/clients/apply'"),
+  server.indexOf("app.post('/api/imports/projects/apply'"),
+);
 const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
 const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
 const requestContext = readFileSync('server/api/request-context.mjs', 'utf8');
@@ -94,6 +98,22 @@ assert.match(employeeImportRoute, /const status = saved === 0 \? 'Failed' : erro
 assert.doesNotMatch(employeeImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'employee import provenance must not persist raw CSV contents');
 assert.match(server, /app\.post\('\/api\/imports\/clients\/apply'/, 'client import apply route must exist');
+assert.match(clientImportRoute, /requirePermission\('imports\.manage'\)/,
+  'client import apply must retain its imports.manage authorization gate');
+assert.match(clientImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
+  'client imports must receive a server-generated batch ID after request validation');
+assert.match(clientImportRoute, /source: 'Client Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.id \?\? null,[\s\S]*importProcessingResult: 'Success'/,
+  'successful client row audits must retain source, only a supplied source ID, batch and processing result');
+assert.match(clientImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Client Master'/,
+  'client batch history must use the same ID as its row-level audit events');
+assert.match(clientImportRoute, /\[\s*importBatchId,[\s\S]*parsed\.data\.fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
+  'the client batch result must preserve aggregate status, counts and existing row errors');
+assert.match(clientImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
+  'client mutations, row audits and the batch result must commit or roll back together');
+assert.match(clientImportRoute, /const status = saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
+  'client import success, partial and failed outcomes must retain their existing semantics');
+assert.doesNotMatch(clientImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
+  'client import provenance must not persist raw CSV contents');
 assert.match(server, /app\.post\('\/api\/imports\/projects\/apply'/, 'project import apply route must exist');
 assert.match(server, /app\.post\('\/api\/imports\/allocations\/apply'/, 'allocation import apply route must exist');
 assert.match(server, /app\.post\('\/api\/imports\/timesheets\/apply'/, 'timesheet import apply route must exist');
