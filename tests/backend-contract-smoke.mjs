@@ -14,6 +14,10 @@ const projectImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/projects/apply'"),
   server.indexOf("app.post('/api/imports/allocations/apply'"),
 );
+const allocationImportRoute = server.slice(
+  server.indexOf("app.post('/api/imports/allocations/apply'"),
+  server.indexOf("app.post('/api/imports/timesheets/apply'"),
+);
 const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
 const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
 const requestContext = readFileSync('server/api/request-context.mjs', 'utf8');
@@ -140,6 +144,26 @@ assert.match(projectImportRoute, /const status = saved === 0 \? 'Failed' : error
 assert.doesNotMatch(projectImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'project import provenance must not persist raw CSV contents');
 assert.match(server, /app\.post\('\/api\/imports\/allocations\/apply'/, 'allocation import apply route must exist');
+assert.match(allocationImportRoute, /requirePermission\('imports\.manage'\)/,
+  'allocation import must retain its imports.manage authorization gate');
+assert.match(allocationImportRoute, /id: z\.string\(\)\.min\(1\)\.optional\(\)/,
+  'allocation import must preserve its optional source ID semantics');
+assert.match(allocationImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
+  'allocation imports must receive a server-generated batch ID after request validation');
+assert.match(allocationImportRoute, /source: 'Allocation Control CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.id \?\? null,[\s\S]*importProcessingResult: 'Success'/,
+  'successful allocation row audits must retain source, optional source ID, batch and processing result');
+assert.match(allocationImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Allocation Control'/,
+  'allocation batch history must use the same ID as its row-level audit events');
+assert.match(allocationImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
+  'allocation mutations, row audits and the batch result must commit or roll back together');
+assert.match(allocationImportRoute, /where project_allocations\.organization_id=excluded\.organization_id and project_allocations\.legal_entity_id=excluded\.legal_entity_id/,
+  'allocation upserts must remain restricted to the authorized organization and legal entity');
+assert.match(allocationImportRoute, /pg_advisory_xact_lock[\s\S]*Allocation would exceed 100% for overlapping dates/,
+  'allocation imports must preserve the existing scoped over-allocation check');
+assert.match(allocationImportRoute, /const status = saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
+  'allocation import success, partial and failed outcomes must retain their existing semantics');
+assert.doesNotMatch(allocationImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
+  'allocation import provenance must not persist raw CSV contents');
 assert.match(server, /app\.post\('\/api\/imports\/timesheets\/apply'/, 'timesheet import apply route must exist');
 assert.match(server, /collectDuplicateImportRows/, 'import apply routes must share duplicate-row detection');
 assert.match(server, /Duplicate \$\{label \|\| field\} also appears on row/, 'duplicate import rows must return row-level errors');

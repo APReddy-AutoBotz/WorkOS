@@ -244,6 +244,17 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
+    const applyAllocations = body => fetch(`${baseUrl}/api/imports/allocations/apply`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Organization-ID': 'org-default',
+        'X-Legal-Entity-ID': 'legal-default',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
 
     const partialResponse = await apply({
       fileName: 'synthetic-partial.csv',
@@ -753,6 +764,214 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         (select count(*)::int from import_export_logs where file_name='synthetic-client-rollback.csv') as batch_rows`);
     assert.deepEqual(clientRollbackRows.rows, [{client_rows: 0, audit_rows: 0, batch_rows: 0}],
       'a failed client batch-log write must roll back the client row and audit with no orphan batch reference');
+
+    await pool.query(`insert into project_allocations
+        (id,employee_id,project_id,role_on_project,percentage,start_date,end_date,billable,status,comments,organization_id,legal_entity_id)
+      values ('allocation-import-cross-legal','e-project-race-other','project-import-cross-legal','Synthetic Manager',15,
+        date '2026-02-01',date '2026-03-01',true,'Active','Synthetic foreign allocation','org-default','legal-client-outside-same-org')`);
+    const allocationPartialResponse = await applyAllocations({
+      fileName: 'synthetic-allocation-partial.csv',
+      totalRows: 3,
+      rows: [
+        {
+          id: 'allocation-import-source-1',
+          employeeId: 'EMP-IMPORT-SUCCESS',
+          projectId: 'PROJECT-IMPORT-SOURCE-1',
+          percentage: 25,
+          startDate: '2026-02-01',
+          endDate: '2026-03-01',
+          status: 'Active',
+        },
+        {
+          employeeId: 'EMP-IMPORT-SUCCESS',
+          projectId: 'PROJECT-IMPORT-SOURCE-1',
+          percentage: 10,
+          startDate: '2026-02-01',
+          endDate: '2026-03-01',
+          status: 'Active',
+        },
+        {
+          id: 'allocation-import-cross-legal',
+          employeeId: 'EMP-IMPORT-SUCCESS',
+          projectId: 'PROJECT-IMPORT-SOURCE-1',
+          percentage: 5,
+          startDate: '2026-02-01',
+          endDate: '2026-03-01',
+          status: 'Active',
+        },
+      ],
+    });
+    assert.equal(allocationPartialResponse.status, 200);
+    const allocationPartialBody = await allocationPartialResponse.json();
+    assert.deepEqual({status: allocationPartialBody.status, totalRows: allocationPartialBody.totalRows,
+      validRows: allocationPartialBody.validRows, errorRows: allocationPartialBody.errorRows},
+    {status: 'Partial', totalRows: 3, validRows: 2, errorRows: 1},
+    'the real allocation apply route must preserve its partial batch counts');
+    assert.deepEqual(allocationPartialBody.errors, [{
+      rowNumber: 4,
+      field: 'id',
+      message: 'Allocation is not available in the authorized organization and legal entity.',
+    }], 'the real allocation apply route must preserve its existing non-disclosing cross-legal error');
+    const allocationPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [allocationPartialBody.log.id])).rows[0];
+    assert.equal(allocationPartialLog.id, allocationPartialBody.log.id,
+      'allocation batch history must return its persisted server batch ID');
+    assert.equal(allocationPartialLog.status, 'Partial');
+    assert.equal(allocationPartialLog.total_rows, 3);
+    assert.equal(allocationPartialLog.valid_rows, 2);
+    assert.equal(allocationPartialLog.error_rows, 1);
+    const allocationPartialAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result,details
+      from audit_logs where import_batch_id=$1 order by source_identifier nulls last`, [allocationPartialBody.log.id]);
+    assert.deepEqual(allocationPartialAudit.rows, [
+      {
+        action: 'Import Create Allocation',
+        source: 'Allocation Control CSV',
+        source_identifier: 'allocation-import-source-1',
+        import_batch_id: allocationPartialBody.log.id,
+        import_processing_result: 'Success',
+        details: 'Created allocation for EMP-IMPORT-SUCCESS on PROJECT-IMPORT-SOURCE-1 from synthetic-allocation-partial.csv',
+      },
+      {
+        action: 'Import Create Allocation',
+        source: 'Allocation Control CSV',
+        source_identifier: null,
+        import_batch_id: allocationPartialBody.log.id,
+        import_processing_result: 'Success',
+        details: 'Created allocation for EMP-IMPORT-SUCCESS on PROJECT-IMPORT-SOURCE-1 from synthetic-allocation-partial.csv',
+      },
+    ], 'successful allocation row audits must preserve only supplied source IDs and share the batch ID');
+    const crossLegalAllocationState = await pool.query(`select pa.id,pa.employee_id,pa.project_id,pa.percentage,
+        pa.organization_id,pa.legal_entity_id,count(a.id)::int as audit_rows
+      from project_allocations pa
+      left join audit_logs a on a.entity_type='Allocation' and a.entity_id=pa.id
+      where pa.id='allocation-import-cross-legal'
+      group by pa.id`);
+    assert.deepEqual(crossLegalAllocationState.rows, [{
+      id: 'allocation-import-cross-legal',
+      employee_id: 'e-project-race-other',
+      project_id: 'project-import-cross-legal',
+      percentage: '15',
+      organization_id: 'org-default',
+      legal_entity_id: 'legal-client-outside-same-org',
+      audit_rows: 0,
+    }], 'an allocation in another legal entity must remain unchanged and unaudited by the rejected import');
+
+    const allocationUpdateResponse = await applyAllocations({
+      fileName: 'synthetic-allocation-update.csv',
+      rows: [{
+        id: 'allocation-import-source-1',
+        employeeId: 'EMP-IMPORT-SUCCESS',
+        projectId: 'PROJECT-IMPORT-SOURCE-1',
+        percentage: 40,
+        startDate: '2026-02-01',
+        endDate: '2026-03-01',
+        status: 'Active',
+        comments: 'Synthetic same-scope update',
+      }],
+    });
+    assert.equal(allocationUpdateResponse.status, 200);
+    const allocationUpdateBody = await allocationUpdateResponse.json();
+    assert.equal(allocationUpdateBody.status, 'Success', 'same-scope allocation upserts must remain supported');
+    assert.equal(allocationUpdateBody.validRows, 1);
+    assert.equal(allocationUpdateBody.errorRows, 0);
+    const allocationUpdateState = await pool.query(`select percentage,comments,organization_id,legal_entity_id
+      from project_allocations where id='allocation-import-source-1'`);
+    assert.deepEqual(allocationUpdateState.rows, [{
+      percentage: '40',
+      comments: 'Synthetic same-scope update',
+      organization_id: 'org-default',
+      legal_entity_id: 'legal-default',
+    }], 'same-scope allocation reimports must retain their existing update behavior');
+    const allocationUpdateAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result
+      from audit_logs where import_batch_id=$1`, [allocationUpdateBody.log.id]);
+    assert.deepEqual(allocationUpdateAudit.rows, [{
+      action: 'Import Update Allocation',
+      source: 'Allocation Control CSV',
+      source_identifier: 'allocation-import-source-1',
+      import_batch_id: allocationUpdateBody.log.id,
+      import_processing_result: 'Success',
+    }], 'same-scope allocation upserts must preserve update audit behavior and provenance');
+
+    const allocationFailedResponse = await applyAllocations({
+      fileName: 'synthetic-allocation-failed.csv',
+      rows: [{
+        id: 'allocation-import-failed-source',
+        employeeId: 'missing-allocation-employee',
+        projectId: 'PROJECT-IMPORT-SOURCE-1',
+        percentage: 10,
+        startDate: '2026-02-01',
+        endDate: '2026-03-01',
+      }],
+    });
+    assert.equal(allocationFailedResponse.status, 200);
+    const allocationFailedBody = await allocationFailedResponse.json();
+    assert.equal(allocationFailedBody.status, 'Failed');
+    assert.equal(allocationFailedBody.validRows, 0);
+    assert.equal(allocationFailedBody.errorRows, 1);
+    const allocationFailedBatch = await pool.query(`select l.status,count(a.id)::int as audit_rows
+      from import_export_logs l left join audit_logs a on a.import_batch_id=l.id
+      where l.id=$1 group by l.id`, [allocationFailedBody.log.id]);
+    assert.deepEqual(allocationFailedBatch.rows, [{status: 'Failed', audit_rows: 0}],
+      'a validation-failed allocation batch must retain its result without success audit events');
+
+    await pool.query(`insert into system_settings (key,value,updated_at)
+      values ('blockOverAllocation','true'::jsonb,now())
+      on conflict (key) do update set value=excluded.value,updated_at=excluded.updated_at`);
+    const allocationOverLimitResponse = await applyAllocations({
+      fileName: 'synthetic-allocation-over-limit.csv',
+      rows: [{
+        id: 'allocation-import-over-limit',
+        employeeId: 'EMP-IMPORT-SUCCESS',
+        projectId: 'PROJECT-IMPORT-SOURCE-1',
+        percentage: 60,
+        startDate: '2026-02-01',
+        endDate: '2026-03-01',
+      }],
+    });
+    assert.equal(allocationOverLimitResponse.status, 200);
+    const allocationOverLimitBody = await allocationOverLimitResponse.json();
+    assert.deepEqual({status: allocationOverLimitBody.status, validRows: allocationOverLimitBody.validRows,
+      errorRows: allocationOverLimitBody.errorRows},
+    {status: 'Failed', validRows: 0, errorRows: 1},
+    'the enabled over-allocation policy must reject the row without changing batch result semantics');
+    assert.deepEqual(allocationOverLimitBody.errors, [{
+      rowNumber: 2,
+      field: 'percentage',
+      message: 'Allocation would exceed 100% for overlapping dates (110%).',
+    }], 'the real allocation apply route must preserve its scoped over-allocation guard');
+    const allocationOverLimitAudit = await pool.query(`select count(*)::int as audit_rows
+      from audit_logs where import_batch_id=$1`, [allocationOverLimitBody.log.id]);
+    assert.deepEqual(allocationOverLimitAudit.rows, [{audit_rows: 0}],
+      'an over-allocation rejection must not write a success audit');
+    await pool.query(`update system_settings set value='false'::jsonb,updated_at=now()
+      where key='blockOverAllocation'`);
+
+    await pool.query(`create or replace function reject_synthetic_allocation_import_log()
+      returns trigger language plpgsql as $$ begin
+        if new.file_name='synthetic-allocation-rollback.csv' then raise exception 'synthetic allocation import-log failure'; end if;
+        return new;
+      end; $$`);
+    await pool.query(`create trigger reject_synthetic_allocation_import_log
+      before insert on import_export_logs for each row execute function reject_synthetic_allocation_import_log()`);
+    const allocationRollbackResponse = await applyAllocations({
+      fileName: 'synthetic-allocation-rollback.csv',
+      rows: [{
+        id: 'allocation-import-rollback',
+        employeeId: 'EMP-IMPORT-SUCCESS',
+        projectId: 'PROJECT-IMPORT-SOURCE-1',
+        percentage: 5,
+        startDate: '2026-02-01',
+        endDate: '2026-03-01',
+      }],
+    });
+    assert.equal(allocationRollbackResponse.status, 500,
+      'a failed allocation batch-log write must return the legacy generic failure');
+    assert.deepEqual(await allocationRollbackResponse.json(), {error: 'Allocation import apply failed'});
+    const allocationRollbackRows = await pool.query(`select
+        (select count(*)::int from project_allocations where id='allocation-import-rollback') as allocation_rows,
+        (select count(*)::int from audit_logs where source_identifier='allocation-import-rollback') as audit_rows,
+        (select count(*)::int from import_export_logs where file_name='synthetic-allocation-rollback.csv') as batch_rows`);
+    assert.deepEqual(allocationRollbackRows.rows, [{allocation_rows: 0,audit_rows: 0,batch_rows: 0}],
+      'a failed allocation batch-log write must roll back the allocation and audit with no orphan batch reference');
   });
 }, {maxPoolSize: 1});
 

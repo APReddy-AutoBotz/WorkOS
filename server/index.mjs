@@ -6912,6 +6912,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
     { field: 'id', value: row.id, label: 'allocation ID' },
   ]);
   const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  const importBatchId = crypto.randomUUID();
   let saved = 0;
   try {
     await client.query('begin');
@@ -7021,16 +7022,21 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
         oldValue: previous,
         newValue: allocation,
         details: `${previous ? 'Updated' : 'Created'} allocation for ${employee.employee_id} on ${project.project_code} from ${parsed.data.fileName}`,
+        source: 'Allocation Control CSV',
+        importBatchId,
+        sourceIdentifier: row.id ?? null,
+        importProcessingResult: 'Success',
       });
       saved += 1;
     }
 
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Allocation Control',$1,$2,$3,$4,$5,$6,$7)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
+      values ($1,'Import','Allocation Control',$2,$3,$4,$5,$6,$7,$8)
       returning *
     `, [
+      importBatchId,
       parsed.data.fileName,
       status,
       parsed.data.totalRows ?? parsed.data.rows.length,
