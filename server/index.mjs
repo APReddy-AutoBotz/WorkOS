@@ -6739,6 +6739,7 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
     { field: 'projectCode', value: row.projectCode, label: 'project code' },
   ]);
   const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  const importBatchId = crypto.randomUUID();
   let saved = 0;
   try {
     await client.query('begin');
@@ -6803,6 +6804,8 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
           country = excluded.country,
           notes = excluded.notes,
           updated_at = now()
+        where projects.organization_id = excluded.organization_id
+          and projects.legal_entity_id = excluded.legal_entity_id
         returning *
       `, [
         previous?.id || null,
@@ -6821,6 +6824,10 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
         row.notes || previous?.notes || null,
         req.organizationScope.organizationId, req.organizationScope.legalEntityId,
       ]);
+      if (result.rowCount === 0) {
+        errors.push({ rowNumber, field: 'projectCode', message: 'Project code belongs to another legal entity in this organization.', code: 'PROJECT_SCOPE_CONFLICT' });
+        continue;
+      }
       const project = result.rows[0];
       await audit(client, req, {
         module: 'Import',
@@ -6830,16 +6837,21 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
         oldValue: previous,
         newValue: project,
         details: `${previous ? 'Updated' : 'Created'} project ${project.project_code} from ${parsed.data.fileName}`,
+        source: 'Project Master CSV',
+        importBatchId,
+        sourceIdentifier: row.projectCode,
+        importProcessingResult: 'Success',
       });
       saved += 1;
     }
 
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Project Master',$1,$2,$3,$4,$5,$6,$7)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
+      values ($1,'Import','Project Master',$2,$3,$4,$5,$6,$7,$8)
       returning *
     `, [
+      importBatchId,
       parsed.data.fileName,
       status,
       parsed.data.totalRows ?? parsed.data.rows.length,

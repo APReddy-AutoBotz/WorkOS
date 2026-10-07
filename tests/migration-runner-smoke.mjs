@@ -233,6 +233,17 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
+    const applyProjects = (body, legalEntityId = 'legal-default') => fetch(`${baseUrl}/api/imports/projects/apply`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Organization-ID': 'org-default',
+        'X-Legal-Entity-ID': legalEntityId,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
 
     const partialResponse = await apply({
       fileName: 'synthetic-partial.csv',
@@ -421,6 +432,11 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
 
     await pool.query(`insert into legal_entities (id,organization_id,code,name,effective_from)
       values ('legal-client-outside-same-org','org-default','CLIENT-OTHER-LEGAL','Synthetic Other Legal Entity',date '1970-01-01')`);
+    await pool.query(`insert into legal_entity_profile_versions
+        (legal_entity_id,organization_id,legal_name,reporting_currency,address,effective_from,country_code,status)
+      values ('legal-client-outside-same-org','org-default','Synthetic Other Legal Entity LLC','USD',
+        jsonb_build_object('line1','Synthetic Test Address','city','Test City','countryCode','US'),
+        date '1970-01-01','US','Active')`);
     await pool.query(`insert into clients (id,name,industry,status,organization_id,legal_entity_id)
       values ('client-import-cross-legal','Synthetic Client Outside Legal Scope','Other Legal Industry','Active','org-default','legal-client-outside-same-org')`);
     const clientCrossLegalResponse = await applyClients({
@@ -448,6 +464,275 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       legal_entity_id: 'legal-client-outside-same-org',
       audit_rows: 0,
     }], 'a same-organization cross-legal-entity import must not update the foreign row or write an audit event');
+    await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+      values ($1,'org-default','legal-client-outside-same-org',true) on conflict do nothing`, [actorId]);
+    await pool.query(`insert into employees
+        (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+      values
+        ('e-project-race-other','EMP-PROJECT-RACE-OTHER','Synthetic Other-Legal Project Manager',
+          'project-race-manager@example.test','Manager','Delivery','US','cd-import-provenance-test','Active',
+          'org-default','legal-client-outside-same-org')`);
+
+    const projectPartialResponse = await applyProjects({
+      fileName: 'synthetic-project-partial.csv',
+      totalRows: 2,
+      rows: [
+        {
+          projectCode: 'PROJECT-IMPORT-SOURCE-1',
+          name: 'Synthetic Project With Provenance',
+          clientId: 'client-import-source-1',
+          client: 'Synthetic Client With Source ID',
+          managerId: 'EMP-IMPORT-SUCCESS',
+          startDate: '2026-01-01',
+          endDate: '2026-12-31',
+        },
+        {
+          projectCode: 'PROJECT-IMPORT-REJECTED',
+          name: 'Synthetic Project Rejected',
+          clientId: 'client-import-source-1',
+          client: 'Synthetic Client With Source ID',
+          managerId: 'missing-project-manager',
+          startDate: '2026-01-01',
+          endDate: '2026-12-31',
+        },
+      ],
+    });
+    assert.equal(projectPartialResponse.status, 200);
+    const projectPartialBody = await projectPartialResponse.json();
+    assert.deepEqual({status: projectPartialBody.status, totalRows: projectPartialBody.totalRows,
+      validRows: projectPartialBody.validRows, errorRows: projectPartialBody.errorRows},
+    {status: 'Partial', totalRows: 2, validRows: 1, errorRows: 1},
+    'the real project apply route must preserve its partial batch counts');
+    assert.deepEqual(projectPartialBody.errors, [{
+      rowNumber: 3,
+      field: 'managerId',
+      message: 'Project manager employee record does not exist or is exited.',
+    }], 'the real project apply route must preserve its row-error shape');
+    const projectPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [projectPartialBody.log.id])).rows[0];
+    assert.equal(projectPartialLog.id, projectPartialBody.log.id, 'project batch history must return its persisted server batch ID');
+    assert.equal(projectPartialLog.status, 'Partial');
+    assert.equal(projectPartialLog.total_rows, 2);
+    assert.equal(projectPartialLog.valid_rows, 1);
+    assert.equal(projectPartialLog.error_rows, 1);
+    const projectPartialAudit = await pool.query(`select source,source_identifier,import_batch_id,import_processing_result,details
+      from audit_logs where import_batch_id=$1`, [projectPartialBody.log.id]);
+    assert.deepEqual(projectPartialAudit.rows, [{
+      source: 'Project Master CSV',
+      source_identifier: 'PROJECT-IMPORT-SOURCE-1',
+      import_batch_id: projectPartialBody.log.id,
+      import_processing_result: 'Success',
+      details: 'Created project PROJECT-IMPORT-SOURCE-1 from synthetic-project-partial.csv',
+    }], 'project row audits must retain required source code, result and shared batch linkage');
+
+    const projectUpdateResponse = await applyProjects({
+      fileName: 'synthetic-project-update.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-SOURCE-1',
+        name: 'Synthetic Project Updated In Same Legal Entity',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+        status: 'Active',
+      }],
+    });
+    assert.equal(projectUpdateResponse.status, 200);
+    const projectUpdateBody = await projectUpdateResponse.json();
+    assert.equal(projectUpdateBody.status, 'Success', 'same-scope project-code reimports must retain the existing upsert behavior');
+    assert.equal(projectUpdateBody.validRows, 1);
+    assert.equal(projectUpdateBody.errorRows, 0);
+    const projectUpdateState = await pool.query(`select name,status,organization_id,legal_entity_id
+      from projects where organization_id='org-default' and legal_entity_id='legal-default' and project_code='PROJECT-IMPORT-SOURCE-1'`);
+    assert.deepEqual(projectUpdateState.rows, [{
+      name: 'Synthetic Project Updated In Same Legal Entity',
+      status: 'Active',
+      organization_id: 'org-default',
+      legal_entity_id: 'legal-default',
+    }], 'same-legal-entity project reimports must update the existing scoped project');
+    const projectUpdateAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result
+      from audit_logs where import_batch_id=$1`, [projectUpdateBody.log.id]);
+    assert.deepEqual(projectUpdateAudit.rows, [{
+      action: 'Import Update Project',
+      source: 'Project Master CSV',
+      source_identifier: 'PROJECT-IMPORT-SOURCE-1',
+      import_batch_id: projectUpdateBody.log.id,
+      import_processing_result: 'Success',
+    }], 'same-scope project upserts must retain update audit behavior and provenance');
+
+    const projectFailedResponse = await applyProjects({
+      fileName: 'synthetic-project-failed.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-FAILED',
+        name: 'Synthetic Project Failed Batch',
+        client: 'Missing Active Client',
+        managerId: 'missing-project-manager',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }],
+    });
+    assert.equal(projectFailedResponse.status, 200);
+    const projectFailedBody = await projectFailedResponse.json();
+    assert.equal(projectFailedBody.status, 'Failed');
+    assert.equal(projectFailedBody.validRows, 0);
+    assert.equal(projectFailedBody.errorRows, 2);
+    const projectFailedBatch = await pool.query(`select l.status,count(a.id)::int as audit_rows
+      from import_export_logs l left join audit_logs a on a.import_batch_id=l.id
+      where l.id=$1 group by l.id`, [projectFailedBody.log.id]);
+    assert.deepEqual(projectFailedBatch.rows, [{status: 'Failed', audit_rows: 0}],
+      'a project batch with no saved rows must retain its failed result without success audit events');
+
+    await pool.query(`insert into projects (id,project_code,name,client,manager_name,start_date,end_date,status,organization_id,legal_entity_id)
+      values ('project-import-cross-legal','PROJECT-IMPORT-CROSS-LEGAL','Synthetic Foreign Project','Foreign Client','Foreign Manager',
+        date '2026-01-01',date '2026-12-31','Proposed','org-default','legal-client-outside-same-org')`);
+    const projectCrossLegalResponse = await applyProjects({
+      fileName: 'synthetic-project-cross-legal.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-CROSS-LEGAL',
+        name: 'Unauthorized Project Import Change',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }],
+    });
+    assert.equal(projectCrossLegalResponse.status, 200);
+    const projectCrossLegalBody = await projectCrossLegalResponse.json();
+    assert.equal(projectCrossLegalBody.status, 'Failed');
+    assert.equal(projectCrossLegalBody.validRows, 0);
+    assert.deepEqual(projectCrossLegalBody.errors, [{
+      rowNumber: 2,
+      field: 'projectCode',
+      message: 'Project code belongs to another legal entity in this organization.',
+      code: 'PROJECT_SCOPE_CONFLICT',
+    }], 'the project import must retain its same-organization cross-legal code conflict');
+    const projectCrossLegalState = await pool.query(`select p.name,p.organization_id,p.legal_entity_id,
+        count(a.id)::int as audit_rows
+      from projects p left join audit_logs a on a.source_identifier='PROJECT-IMPORT-CROSS-LEGAL'
+      where p.id='project-import-cross-legal'
+      group by p.id`);
+    assert.deepEqual(projectCrossLegalState.rows, [{
+      name: 'Synthetic Foreign Project',
+      organization_id: 'org-default',
+      legal_entity_id: 'legal-client-outside-same-org',
+      audit_rows: 0,
+    }], 'a cross-legal project import must not adopt or audit the foreign project');
+
+    await pool.query(`create sequence synthetic_project_import_race_barrier start with 1`);
+    await pool.query(`create or replace function synchronize_synthetic_project_import_race()
+      returns trigger language plpgsql as $$
+      declare
+        attempt integer := 0;
+        arrivals_seen bigint;
+      begin
+        if new.project_code = 'PROJECT-IMPORT-CROSS-LEGAL-RACE' then
+          perform nextval('synthetic_project_import_race_barrier');
+          loop
+            select last_value into arrivals_seen from synthetic_project_import_race_barrier;
+            exit when arrivals_seen >= 2;
+            attempt := attempt + 1;
+            if attempt > 200 then raise exception 'second project import did not reach the overlap barrier'; end if;
+            perform pg_sleep(0.01);
+          end loop;
+        end if;
+        return new;
+      end; $$`);
+    await pool.query(`create trigger synchronize_synthetic_project_import_race
+      before insert on projects for each row execute function synchronize_synthetic_project_import_race()`);
+    const projectRaceResponses = await Promise.all([
+      applyProjects({
+        fileName: 'synthetic-project-race-default.csv',
+        rows: [{
+          projectCode: 'PROJECT-IMPORT-CROSS-LEGAL-RACE',
+          name: 'Synthetic Default-Legal Project',
+          clientId: 'client-import-source-1',
+          client: 'Synthetic Client With Source ID',
+          managerId: 'EMP-IMPORT-SUCCESS',
+          startDate: '2026-01-01',
+          endDate: '2026-12-31',
+        }],
+      }),
+      applyProjects({
+        fileName: 'synthetic-project-race-other.csv',
+        rows: [{
+          projectCode: 'PROJECT-IMPORT-CROSS-LEGAL-RACE',
+          name: 'Synthetic Other-Legal Project',
+          clientId: 'client-import-cross-legal',
+          client: 'Synthetic Client Outside Legal Scope',
+          managerId: 'EMP-PROJECT-RACE-OTHER',
+          startDate: '2026-01-01',
+          endDate: '2026-12-31',
+        }],
+      }, 'legal-client-outside-same-org'),
+    ]);
+    const projectRaceBodies = await Promise.all(projectRaceResponses.map(response => response.json()));
+    assert.deepEqual(projectRaceResponses.map(response => response.status), [200, 200],
+      'both concurrent project import requests must return their row-level outcomes');
+    assert.deepEqual(projectRaceBodies.map(body => body.status).sort(), ['Failed', 'Success'],
+      'concurrent project-code imports across legal entities must commit one winner and reject one row');
+    const projectRaceFailure = projectRaceBodies.find(body => body.status === 'Failed');
+    assert.deepEqual(projectRaceFailure.errors, [{
+      rowNumber: 2,
+      field: 'projectCode',
+      message: 'Project code belongs to another legal entity in this organization.',
+      code: 'PROJECT_SCOPE_CONFLICT',
+    }], 'a project-code loser at the database conflict boundary must receive the existing row-local scope error');
+    const projectRaceWinner = projectRaceBodies.find(body => body.status === 'Success');
+    assert.equal(projectRaceWinner.validRows, 1);
+    const projectRaceState = await pool.query(`select p.name,p.client_id,p.manager_id,p.legal_entity_id,
+        count(a.id)::int as audit_rows,
+        (count(a.id) filter (where a.import_batch_id=$1))::int as winning_batch_audits
+      from projects p left join audit_logs a on a.source_identifier=p.project_code
+      where p.organization_id='org-default' and p.project_code='PROJECT-IMPORT-CROSS-LEGAL-RACE'
+      group by p.id`, [projectRaceWinner.log.id]);
+    assert.equal(projectRaceState.rowCount, 1, 'concurrent imports must leave one organization-scoped project');
+    const committedProject = projectRaceState.rows[0];
+    assert.equal(projectRaceState.rows[0].audit_rows, 1, 'the losing legal entity must not write a row audit');
+    assert.equal(projectRaceState.rows[0].winning_batch_audits, 1,
+      'the surviving project audit must link to the successful batch only');
+    if (committedProject.legal_entity_id === 'legal-default') {
+      assert.equal(committedProject.name, 'Synthetic Default-Legal Project');
+      assert.equal(committedProject.client_id, 'client-import-source-1');
+      assert.equal(committedProject.manager_id, (await pool.query(`select id from employees where employee_id='EMP-IMPORT-SUCCESS'`)).rows[0].id);
+    } else {
+      assert.equal(committedProject.legal_entity_id, 'legal-client-outside-same-org');
+      assert.equal(committedProject.name, 'Synthetic Other-Legal Project');
+      assert.equal(committedProject.client_id, 'client-import-cross-legal');
+      assert.equal(committedProject.manager_id, 'e-project-race-other');
+    }
+    const projectRaceFailureAudit = await pool.query(`select count(*)::int as audit_rows
+      from audit_logs where import_batch_id=$1`, [projectRaceFailure.log.id]);
+    assert.deepEqual(projectRaceFailureAudit.rows, [{audit_rows: 0}],
+      'a rejected race-loser batch must not contain row audit events');
+
+    await pool.query(`create or replace function reject_synthetic_project_import_log()
+      returns trigger language plpgsql as $$ begin
+        if new.file_name='synthetic-project-rollback.csv' then raise exception 'synthetic project import-log failure'; end if;
+        return new;
+      end; $$`);
+    await pool.query(`create trigger reject_synthetic_project_import_log
+      before insert on import_export_logs for each row execute function reject_synthetic_project_import_log()`);
+    const projectRollbackResponse = await applyProjects({
+      fileName: 'synthetic-project-rollback.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-ROLLBACK',
+        name: 'Synthetic Project Rolled Back',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }],
+    });
+    assert.equal(projectRollbackResponse.status, 500, 'a failed project batch-log write must return the legacy generic failure');
+    assert.deepEqual(await projectRollbackResponse.json(), {error: 'Project import apply failed'});
+    const projectRollbackRows = await pool.query(`select
+        (select count(*)::int from projects where organization_id='org-default' and legal_entity_id='legal-default' and project_code='PROJECT-IMPORT-ROLLBACK') as project_rows,
+        (select count(*)::int from audit_logs where source_identifier='PROJECT-IMPORT-ROLLBACK') as audit_rows,
+        (select count(*)::int from import_export_logs where file_name='synthetic-project-rollback.csv') as batch_rows`);
+    assert.deepEqual(projectRollbackRows.rows, [{project_rows: 0, audit_rows: 0, batch_rows: 0}],
+      'a failed project batch-log write must roll back the project row and audit with no orphan batch reference');
 
     await pool.query(`create or replace function reject_synthetic_client_import_log()
       returns trigger language plpgsql as $$ begin

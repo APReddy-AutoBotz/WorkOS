@@ -10,6 +10,10 @@ const clientImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/clients/apply'"),
   server.indexOf("app.post('/api/imports/projects/apply'"),
 );
+const projectImportRoute = server.slice(
+  server.indexOf("app.post('/api/imports/projects/apply'"),
+  server.indexOf("app.post('/api/imports/allocations/apply'"),
+);
 const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
 const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
 const requestContext = readFileSync('server/api/request-context.mjs', 'utf8');
@@ -115,6 +119,26 @@ assert.match(clientImportRoute, /const status = saved === 0 \? 'Failed' : errors
 assert.doesNotMatch(clientImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'client import provenance must not persist raw CSV contents');
 assert.match(server, /app\.post\('\/api\/imports\/projects\/apply'/, 'project import apply route must exist');
+assert.match(projectImportRoute, /requirePermission\('imports\.manage'\)/,
+  'project import apply must retain its imports.manage authorization gate');
+assert.match(projectImportRoute, /projectCode: z\.string\(\)\.min\(1\)/,
+  'project import provenance must use the existing required source project code');
+assert.match(projectImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
+  'project imports must receive a server-generated batch ID after request validation');
+assert.match(projectImportRoute, /source: 'Project Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.projectCode,[\s\S]*importProcessingResult: 'Success'/,
+  'successful project row audits must retain source, required source ID, batch and processing result');
+assert.match(projectImportRoute, /on conflict \(organization_id,project_code\) do update set[\s\S]*where projects\.organization_id = excluded\.organization_id[\s\S]*and projects\.legal_entity_id = excluded\.legal_entity_id[\s\S]*returning \*[\s\S]*if \(result\.rowCount === 0\)[\s\S]*PROJECT_SCOPE_CONFLICT/,
+  'a racing project-code conflict must update only inside the same organization and legal entity or remain a row-local conflict');
+assert.match(projectImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Project Master'/,
+  'project batch history must use the same ID as its row-level audit events');
+assert.match(projectImportRoute, /\[\s*importBatchId,[\s\S]*parsed\.data\.fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
+  'the project batch result must preserve aggregate status, counts and existing row errors');
+assert.match(projectImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
+  'project mutations, row audits and the batch result must commit or roll back together');
+assert.match(projectImportRoute, /const status = saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
+  'project import success, partial and failed outcomes must retain their existing semantics');
+assert.doesNotMatch(projectImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
+  'project import provenance must not persist raw CSV contents');
 assert.match(server, /app\.post\('\/api\/imports\/allocations\/apply'/, 'allocation import apply route must exist');
 assert.match(server, /app\.post\('\/api\/imports\/timesheets\/apply'/, 'timesheet import apply route must exist');
 assert.match(server, /collectDuplicateImportRows/, 'import apply routes must share duplicate-row detection');
