@@ -7101,6 +7101,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
   }]);
   const client = await pool.connect();
   const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  const importBatchId = crypto.randomUUID();
   const groups = new Map();
   let validEntryRows = 0;
   try {
@@ -7254,15 +7255,20 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
         newValue: timesheet,
         details: `${previous ? 'Updated' : 'Created'} ${group.status} timesheet for ${group.employee.employee_id}, week ending ${group.weekEnding} from ${parsed.data.fileName}`,
         reason: group.rejectionReason,
+        source: 'Timesheet Import CSV',
+        importBatchId,
+        sourceIdentifier: null,
+        importProcessingResult: 'Success',
       });
     }
 
     const status = validEntryRows === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Timesheet Import',$1,$2,$3,$4,$5,$6,$7)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
+      values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8)
       returning *
     `, [
+      importBatchId,
       parsed.data.fileName,
       status,
       parsed.data.totalRows ?? parsed.data.rows.length,

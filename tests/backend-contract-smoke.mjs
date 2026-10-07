@@ -18,6 +18,10 @@ const allocationImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/allocations/apply'"),
   server.indexOf("app.post('/api/imports/timesheets/apply'"),
 );
+const timesheetImportRoute = server.slice(
+  server.indexOf("app.post('/api/imports/timesheets/apply'"),
+  server.indexOf('registerOrganizationSetupRoutes({'),
+);
 const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
 const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
 const requestContext = readFileSync('server/api/request-context.mjs', 'utf8');
@@ -165,6 +169,28 @@ assert.match(allocationImportRoute, /const status = saved === 0 \? 'Failed' : er
 assert.doesNotMatch(allocationImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'allocation import provenance must not persist raw CSV contents');
 assert.match(server, /app\.post\('\/api\/imports\/timesheets\/apply'/, 'timesheet import apply route must exist');
+assert.match(timesheetImportRoute, /requirePermission\('imports\.manage'\)/,
+  'timesheet import must retain its imports.manage authorization gate');
+const timesheetRowSchema = timesheetImportRoute.slice(
+  timesheetImportRoute.indexOf('const rowSchema = z.object('),
+  timesheetImportRoute.indexOf('const schema = z.object('),
+);
+assert.doesNotMatch(timesheetRowSchema, /^\s*id\s*:/m,
+  'timesheet provenance must not invent an upstream row ID absent from the import contract');
+assert.match(timesheetImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
+  'timesheet imports must receive one server-generated batch ID after request validation');
+assert.match(timesheetImportRoute, /for \(const group of groups\.values\(\)\)[\s\S]*await audit\(client, req,[\s\S]*entityType: 'Timesheet'[\s\S]*source: 'Timesheet Import CSV',[\s\S]*importBatchId,[\s\S]*sourceIdentifier: null,[\s\S]*importProcessingResult: 'Success'/,
+  'successful timesheet group audits must retain source, null unavailable source ID, batch and result once per group');
+assert.match(timesheetImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Timesheet Import'/,
+  'timesheet batch history must use the same ID as its group-level audit events');
+assert.match(timesheetImportRoute, /await client\.query\('begin'\)[\s\S]*for \(const group of groups\.values\(\)\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
+  'timesheet updates, entries, group audits and import history must commit or roll back together');
+assert.match(timesheetImportRoute, /assertReportingPeriodAllows[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT[\s\S]*on conflict \(organization_id, employee_id, week_ending\) do update set/,
+  'timesheet provenance must preserve authoritative period checks and existing scoped group upserts');
+assert.match(timesheetImportRoute, /const status = validEntryRows === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
+  'timesheet import success, partial and failed counts must retain their existing row semantics');
+assert.doesNotMatch(timesheetImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
+  'timesheet import provenance must not persist raw CSV contents');
 assert.match(server, /collectDuplicateImportRows/, 'import apply routes must share duplicate-row detection');
 assert.match(server, /Duplicate \$\{label \|\| field\} also appears on row/, 'duplicate import rows must return row-level errors');
 assert.match(server, /field: 'employeeId'[\s\S]*field: 'email'/, 'employee import must reject duplicate employee IDs and emails within a file');

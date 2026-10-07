@@ -208,6 +208,17 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ($1,'org-default','legal-default',true) on conflict do nothing`, [actorId]);
   await pool.query(`insert into country_directors (id,name,region)
     values ('cd-import-provenance-test','Synthetic Director','Synthetic') on conflict (id) do nothing`);
+  await pool.query(`insert into reporting_periods
+      (id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
+    values
+      ('period-timesheet-import-week-06','org-default','legal-default','WOS03B-WEEK-2026-06',
+        'Synthetic Weekly Test Period 06',date '2026-02-01',date '2026-02-07','Open','Weekly'),
+      ('period-timesheet-import-week-07','org-default','legal-default','WOS03B-WEEK-2026-07',
+        'Synthetic Weekly Test Period 07',date '2026-02-08',date '2026-02-14','Open','Weekly'),
+      ('period-timesheet-import-week-08','org-default','legal-default','WOS03B-WEEK-2026-08',
+        'Synthetic Weekly Test Period 08',date '2026-02-15',date '2026-02-21','Open','Weekly'),
+      ('period-timesheet-import-week-09','org-default','legal-default','WOS03B-WEEK-2026-09',
+        'Synthetic Weekly Test Period 09',date '2026-02-22',date '2026-02-28','Open','Weekly')`);
 
   // Exercise the real route as a signed user with an explicit organization scope and imports.manage grant.
   await withImportApi(databaseUrl, actorId, async ({baseUrl, token}) => {
@@ -245,6 +256,17 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       signal: AbortSignal.timeout(5000),
     });
     const applyAllocations = body => fetch(`${baseUrl}/api/imports/allocations/apply`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Organization-ID': 'org-default',
+        'X-Legal-Entity-ID': 'legal-default',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+    const applyTimesheets = body => fetch(`${baseUrl}/api/imports/timesheets/apply`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -972,6 +994,261 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         (select count(*)::int from import_export_logs where file_name='synthetic-allocation-rollback.csv') as batch_rows`);
     assert.deepEqual(allocationRollbackRows.rows, [{allocation_rows: 0,audit_rows: 0,batch_rows: 0}],
       'a failed allocation batch-log write must roll back the allocation and audit with no orphan batch reference');
+
+    const timesheetPartialResponse = await applyTimesheets({
+      fileName: 'synthetic-timesheet-partial.csv',
+      totalRows: 4,
+      rows: [
+        {
+          employeeId: 'EMP-IMPORT-SUCCESS',
+          weekEnding: '2026-02-06',
+          workType: 'Project Work',
+          projectId: 'PROJECT-IMPORT-SOURCE-1',
+          category: 'Delivery',
+          date: '2026-02-02',
+          hours: 8,
+          remark: 'Synthetic project delivery',
+          billable: true,
+          status: 'Submitted',
+        },
+        {
+          employeeId: 'EMP-IMPORT-SUCCESS',
+          weekEnding: '2026-02-06',
+          workType: 'Client Misc Task',
+          clientName: 'Synthetic Client With Source ID',
+          category: 'Workshop',
+          date: '2026-02-03',
+          hours: 4,
+          remark: 'Synthetic client workshop',
+          billable: false,
+          status: 'Submitted',
+        },
+        {
+          employeeId: 'EMP-IMPORT-SUCCESS',
+          weekEnding: '2026-02-13',
+          workType: 'Client Misc Task',
+          clientName: 'Synthetic Client With Source ID',
+          category: 'Support',
+          date: '2026-02-11',
+          hours: 3,
+          billable: false,
+          status: 'Submitted',
+        },
+        {
+          employeeId: 'EMP-PROJECT-RACE-OTHER',
+          weekEnding: '2026-02-06',
+          workType: 'Client Misc Task',
+          clientName: 'Synthetic Client With Source ID',
+          category: 'Support',
+          date: '2026-02-04',
+          hours: 2,
+          billable: false,
+          status: 'Submitted',
+        },
+      ],
+    });
+    assert.equal(timesheetPartialResponse.status, 200);
+    const timesheetPartialBody = await timesheetPartialResponse.json();
+    assert.deepEqual({status: timesheetPartialBody.status, totalRows: timesheetPartialBody.totalRows,
+      validRows: timesheetPartialBody.validRows, errorRows: timesheetPartialBody.errorRows},
+    {status: 'Partial', totalRows: 4, validRows: 3, errorRows: 1},
+    'the real timesheet apply route must preserve its input-entry partial counts');
+    assert.deepEqual(timesheetPartialBody.errors, [{
+      rowNumber: 5,
+      field: 'employeeId',
+      message: 'Timesheet must reference an active employee.',
+    }], 'a foreign legal-entity employee must remain a row-local timesheet import denial');
+    const timesheetPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [timesheetPartialBody.log.id])).rows[0];
+    assert.equal(timesheetPartialLog.id, timesheetPartialBody.log.id,
+      'timesheet batch history must return its persisted server batch ID');
+    assert.equal(timesheetPartialLog.status, 'Partial');
+    assert.equal(timesheetPartialLog.total_rows, 4);
+    assert.equal(timesheetPartialLog.valid_rows, 3,
+      'the aggregate timesheet log must continue counting accepted input entries, not groups');
+    assert.equal(timesheetPartialLog.error_rows, 1);
+    const timesheetPartialAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result,details,entity_id
+      from audit_logs where import_batch_id=$1 order by details`, [timesheetPartialBody.log.id]);
+    assert.equal(timesheetPartialAudit.rowCount, 2,
+      'the import must write one audit event per persisted employee/week group, not one per CSV row');
+    assert.deepEqual(timesheetPartialAudit.rows.map(row => ({
+      action: row.action,
+      source: row.source,
+      source_identifier: row.source_identifier,
+      import_batch_id: row.import_batch_id,
+      import_processing_result: row.import_processing_result,
+      details: row.details,
+    })), [
+      {
+        action: 'Import Create Timesheet',
+        source: 'Timesheet Import CSV',
+        source_identifier: null,
+        import_batch_id: timesheetPartialBody.log.id,
+        import_processing_result: 'Success',
+        details: 'Created Submitted timesheet for EMP-IMPORT-SUCCESS, week ending 2026-02-06 from synthetic-timesheet-partial.csv',
+      },
+      {
+        action: 'Import Create Timesheet',
+        source: 'Timesheet Import CSV',
+        source_identifier: null,
+        import_batch_id: timesheetPartialBody.log.id,
+        import_processing_result: 'Success',
+        details: 'Created Submitted timesheet for EMP-IMPORT-SUCCESS, week ending 2026-02-13 from synthetic-timesheet-partial.csv',
+      },
+    ], 'timesheet group audits must retain source, null absent upstream IDs, success result and shared batch link');
+    assert(timesheetPartialAudit.rows.every(row => /^[0-9a-f-]{36}$/.test(row.entity_id)),
+      'each timesheet group audit must point at its persisted timesheet entity');
+    const timesheetPartialState = await pool.query(`select t.id::text as id,e.employee_id,t.week_ending::text as week_ending,t.status,
+        t.total_hours::text as total_hours,t.billable_hours::text as billable_hours,count(te.id)::int as entries
+      from timesheets t
+      join employees e on e.id=t.employee_id
+      left join timesheet_entries te on te.timesheet_id=t.id
+      where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending in (date '2026-02-06',date '2026-02-13')
+      group by t.id,e.employee_id order by t.week_ending`);
+    assert.deepEqual(timesheetPartialState.rows.map(({id, ...row}) => row), [
+      {employee_id:'EMP-IMPORT-SUCCESS',week_ending:'2026-02-06',status:'Submitted',total_hours:'12',billable_hours:'8',entries:2},
+      {employee_id:'EMP-IMPORT-SUCCESS',week_ending:'2026-02-13',status:'Submitted',total_hours:'3',billable_hours:'0',entries:1},
+    ], 'timesheet provenance must preserve one grouped timesheet per employee/week and its input entries');
+    const rejectedScopeTimesheet = await pool.query(`select
+        (select count(*)::int from timesheets where employee_id='e-project-race-other' and week_ending=date '2026-02-06') as rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1
+          and details like '%EMP-PROJECT-RACE-OTHER%') as audit_rows`,
+    [timesheetPartialBody.log.id]);
+    assert.deepEqual(rejectedScopeTimesheet.rows, [{rows:0,audit_rows:0}],
+      'the rejected cross-legal employee row must not create timesheets or a successful group audit');
+
+    const timesheetUpdateResponse = await applyTimesheets({
+      fileName: 'synthetic-timesheet-update.csv',
+      rows: [{
+        employeeId: 'EMP-IMPORT-SUCCESS',
+        weekEnding: '2026-02-06',
+        workType: 'Client Misc Task',
+        clientName: 'Synthetic Client With Source ID',
+        category: 'Updated Category',
+        date: '2026-02-04',
+        hours: 6,
+        remark: 'Synthetic same-scope group update',
+        billable: false,
+        status: 'Submitted',
+      }],
+    });
+    assert.equal(timesheetUpdateResponse.status, 200);
+    const timesheetUpdateBody = await timesheetUpdateResponse.json();
+    assert.equal(timesheetUpdateBody.status, 'Success', 'same-scope timesheet imports must retain their group upsert behavior');
+    assert.equal(timesheetUpdateBody.validRows, 1);
+    assert.equal(timesheetUpdateBody.errorRows, 0);
+    const timesheetUpdateState = await pool.query(`select t.id::text as id,t.status,t.total_hours::text as total_hours,
+        t.billable_hours::text as billable_hours,count(te.id)::int as entries
+      from timesheets t join employees e on e.id=t.employee_id
+      left join timesheet_entries te on te.timesheet_id=t.id
+      where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-06'
+      group by t.id`);
+    assert.deepEqual(timesheetUpdateState.rows, [{
+      id: timesheetPartialState.rows[0].id,
+      status: 'Submitted',
+      total_hours: '6',
+      billable_hours: '0',
+      entries: 1,
+    }], 'same-scope timesheet upserts must preserve the group ID while replacing its entries');
+    const timesheetUpdateAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result
+      from audit_logs where import_batch_id=$1`, [timesheetUpdateBody.log.id]);
+    assert.deepEqual(timesheetUpdateAudit.rows, [{
+      action: 'Import Update Timesheet',
+      source: 'Timesheet Import CSV',
+      source_identifier: null,
+      import_batch_id: timesheetUpdateBody.log.id,
+      import_processing_result: 'Success',
+    }], 'same-scope timesheet group updates must preserve provenance and update audit behavior');
+
+    const timesheetFutureResponse = await applyTimesheets({
+      fileName: 'synthetic-timesheet-future.csv',
+      rows: [{
+        employeeId: 'EMP-IMPORT-SUCCESS',
+        weekEnding: '2099-12-31',
+        workType: 'Client Misc Task',
+        clientName: 'Synthetic Client With Source ID',
+        date: '2099-12-30',
+        hours: 2,
+        status: 'Submitted',
+      }],
+    });
+    assert.equal(timesheetFutureResponse.status, 200);
+    const timesheetFutureBody = await timesheetFutureResponse.json();
+    assert.equal(timesheetFutureBody.status, 'Failed');
+    assert.equal(timesheetFutureBody.validRows, 0);
+    assert.deepEqual(timesheetFutureBody.errors, [{
+      rowNumber: 2,
+      field: 'date',
+      message: 'Future week timesheets and future-dated entries cannot be imported.',
+    }], 'future timesheet rows must retain their pre-existing rejection and error shape');
+    const timesheetFutureAudit = await pool.query(`select count(*)::int as audit_rows
+      from audit_logs where import_batch_id=$1`, [timesheetFutureBody.log.id]);
+    assert.deepEqual(timesheetFutureAudit.rows, [{audit_rows:0}],
+      'a future-dated failed batch must not write a group audit event');
+
+    await pool.query(`update reporting_periods set status='Closed' where id='period-timesheet-import-week-08'`);
+    const timesheetClosedPeriodResponse = await applyTimesheets({
+      fileName: 'synthetic-timesheet-closed-period.csv',
+      rows: [{
+        employeeId: 'EMP-IMPORT-SUCCESS',
+        weekEnding: '2026-02-20',
+        workType: 'Client Misc Task',
+        clientName: 'Synthetic Client With Source ID',
+        date: '2026-02-18',
+        hours: 2,
+        status: 'Submitted',
+      }],
+    });
+    assert.equal(timesheetClosedPeriodResponse.status, 200);
+    const timesheetClosedPeriodBody = await timesheetClosedPeriodResponse.json();
+    assert.equal(timesheetClosedPeriodBody.status, 'Failed');
+    assert.deepEqual(timesheetClosedPeriodBody.errors, [{
+      rowNumber: 2,
+      field: 'date',
+      message: 'Reporting period WOS03B-WEEK-2026-08 does not permit this timesheet operation',
+      code: 'REPORTING_PERIOD_CLOSED',
+    }], 'closed-period failures must preserve their scoped row-level outcome');
+    const timesheetClosedPeriodState = await pool.query(`select
+        (select count(*)::int from timesheets t join employees e on e.id=t.employee_id
+          where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-20') as rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1) as audit_rows`,
+    [timesheetClosedPeriodBody.log.id]);
+    assert.deepEqual(timesheetClosedPeriodState.rows, [{rows:0,audit_rows:0}],
+      'a closed reporting period must not persist a timesheet or success audit');
+    await pool.query(`update reporting_periods set status='Open' where id='period-timesheet-import-week-08'`);
+
+    await pool.query(`create or replace function reject_synthetic_timesheet_import_log()
+      returns trigger language plpgsql as $$ begin
+        if new.file_name='synthetic-timesheet-rollback.csv' then raise exception 'synthetic timesheet import-log failure'; end if;
+        return new;
+      end; $$`);
+    await pool.query(`create trigger reject_synthetic_timesheet_import_log
+      before insert on import_export_logs for each row execute function reject_synthetic_timesheet_import_log()`);
+    const timesheetRollbackResponse = await applyTimesheets({
+      fileName: 'synthetic-timesheet-rollback.csv',
+      rows: [{
+        employeeId: 'EMP-IMPORT-SUCCESS',
+        weekEnding: '2026-02-27',
+        workType: 'Client Misc Task',
+        clientName: 'Synthetic Client With Source ID',
+        date: '2026-02-25',
+        hours: 2,
+        status: 'Submitted',
+      }],
+    });
+    assert.equal(timesheetRollbackResponse.status, 500,
+      'a failed timesheet batch-log write must return the legacy generic failure');
+    assert.deepEqual(await timesheetRollbackResponse.json(), {error: 'Timesheet import apply failed'});
+    const timesheetRollbackRows = await pool.query(`select
+        (select count(*)::int from timesheets t join employees e on e.id=t.employee_id
+          where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-27') as timesheet_rows,
+        (select count(*)::int from timesheet_entries te join timesheets t on t.id=te.timesheet_id
+          join employees e on e.id=t.employee_id
+          where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-27') as entry_rows,
+        (select count(*)::int from audit_logs where source='Timesheet Import CSV'
+          and details like '%synthetic-timesheet-rollback.csv%') as audit_rows,
+        (select count(*)::int from import_export_logs where file_name='synthetic-timesheet-rollback.csv') as batch_rows`);
+    assert.deepEqual(timesheetRollbackRows.rows, [{timesheet_rows:0,entry_rows:0,audit_rows:0,batch_rows:0}],
+      'a failed timesheet batch-log write must roll back the timesheet, entries and group audit');
   });
 }, {maxPoolSize: 1});
 
