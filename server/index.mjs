@@ -1142,6 +1142,11 @@ app.get('/api/auth/entra/start', requireDatabase, async (req, res) => {
 });
 
 app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req, res) => {
+  // This OAuth callback is a GET for protocol compatibility, but consumes state
+  // and may synchronize an identity link. Give this side-effect boundary its
+  // own server-generated operation ID without changing GET handling globally.
+  req.operationId = crypto.randomUUID();
+  res.setHeader('X-Operation-ID', req.operationId);
   const client = await pool.connect();
   try {
     const code = req.query.code ? String(req.query.code) : '';
@@ -1190,7 +1195,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
         entityType: 'IdentityProviderLink',
         entityId: providerSubject || upn || null,
         status: 'Failed',
-        responsePayload: { reason: 'No active linked user', upn, providerSubject },
+        responsePayload: { reason: 'No active linked user', upn, providerSubject, operationId: req.operationId },
       });
       await client.query('commit');
       res.redirect('/login?error=entra_unlinked_user');
@@ -1227,6 +1232,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
         upn,
         providerSubject,
         identityLinkProvenanceReference,
+        operationId: req.operationId,
         mappedRoles,
         groupCount: Array.isArray(claims.groups) ? claims.groups.length : 0,
         groupOverage: Boolean(claims._claim_names?.groups),
@@ -4615,7 +4621,10 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
       entityType: 'EntraRoleMapping',
       entityId: result.rows[0].id,
       responsePayload: result.rows[0],
-      organizationScope: req.organizationScope,
+      // Group-role mappings configure the isolated deployment, not one
+      // organization/legal entity. Keep their history as a null-scope system
+      // event so scoped history readers do not assign it to the caller's scope.
+      organizationScope: null,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4626,6 +4635,7 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
       newValue: result.rows[0],
       details: `${previous ? 'Updated' : 'Created'} Entra mapping for ${parsed.data.role_name}`,
       source: 'System',
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);

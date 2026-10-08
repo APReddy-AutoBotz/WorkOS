@@ -29,6 +29,7 @@ export const recordAuditEvent = async (client, req = {}, {
   importBatchId = null,
   sourceIdentifier = null,
   importProcessingResult = null,
+  organizationScope = req.organizationScope,
 }) => {
   await client.query(AUDIT_INSERT_SQL, [
     req.user?.sub || 'system',
@@ -51,7 +52,7 @@ export const recordAuditEvent = async (client, req = {}, {
     importBatchId,
     sourceIdentifier,
     importProcessingResult,
-    req.organizationScope?.organizationId || null,
-    req.organizationScope?.legalEntityId || null,
+    organizationScope?.organizationId || null,
+    organizationScope?.legalEntityId || null,
   ]);
 };

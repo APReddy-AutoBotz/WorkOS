@@ -516,7 +516,10 @@ try {
   const {state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = {};
   const callbackUrl = `${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`;
-  const callback = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
+  const callback = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {
+    cookie: stateCookie,
+    'x-operation-id': 'caller-selected-callback-operation',
+  }}, 2000);
   assert.equal(callback.status, 302);
   assert.equal(
     callback.headers.get('location'),
@@ -524,6 +527,11 @@ try {
     `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
   );
   assert.equal(hasSetCookie(callback.headers, 'workos_session'), true, 'valid linked callback must create a WorkOS session');
+  const callbackOperationId = callback.headers.get('x-operation-id');
+  assert.match(callbackOperationId || '', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    'the side-effecting Entra callback must expose its server-generated operation ID');
+  assert.notEqual(callbackOperationId, 'caller-selected-callback-operation',
+    'the callback must ignore a caller-supplied operation ID');
   const syncedIdentityLink = await pool.query(`select id,provider_subject,provenance_reference
     from identity_provider_links where employee_id=$1 and provider='entra'`, [syntheticEmployee.rows[0].id]);
   assert.equal(syncedIdentityLink.rowCount, 1, 'a legacy identity match must retain its Entra link upsert');
@@ -537,11 +545,18 @@ try {
   assert.equal(loginEvent.rows[0]?.response_payload.identityLinkProvenanceReference,
     syncedIdentityLink.rows[0].provenance_reference,
   'the successful Entra login result must reference the identity-link record without using its business ID');
-  const loginAudit = await pool.query(`select new_value from audit_logs where action='Entra Login' and user_id=$1 order by created_at desc limit 1`,
+  assert.equal(loginEvent.rows[0]?.response_payload.operationId, callbackOperationId,
+    'the Entra login event must carry the same server-generated operation ID as the callback response');
+  const loginAudit = await pool.query(`select new_value,operation_id,correlation_id from audit_logs
+    where action='Entra Login' and user_id=$1 order by created_at desc limit 1`,
     [syntheticUser.rows[0].id]);
   assert.equal(loginAudit.rows[0]?.new_value.identityLinkProvenanceReference,
     syncedIdentityLink.rows[0].provenance_reference,
   'the Entra login audit must retain the safe identity-link provenance reference');
+  assert.equal(loginAudit.rows[0]?.operation_id, callbackOperationId,
+    'the Entra login audit must persist the callback operation ID');
+  assert.ok(loginAudit.rows[0]?.correlation_id,
+    'the Entra login audit must retain the callback correlation ID');
   const replay = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
   assert.equal(replay.status, 302, 'consumed callback replay must reach the OAuth state handler');
   assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');

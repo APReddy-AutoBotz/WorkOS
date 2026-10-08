@@ -97,8 +97,8 @@ assert.match(schema, /create table if not exists import_export_logs/, 'import/ex
 assert.match(server, /app\.post\('\/api\/settings'/, 'settings save route must exist');
 assert.match(server, /app\.post\('\/api\/import-export-logs'/, 'import/export history POST route must exist');
 assert.match(server, /app\.post\('\/api\/audit-events'/, 'manual audit event POST route must exist for UI exports');
-assert.match(auditRecord, /organization_id, legal_entity_id[\s\S]*req\.organizationScope\?\.organizationId[\s\S]*req\.organizationScope\?\.legalEntityId/,
-  'new audit rows must use only the server-resolved organization and legal-entity scope');
+assert.match(auditRecord, /organizationScope = req\.organizationScope[\s\S]*organizationScope\?\.organizationId[\s\S]*organizationScope\?\.legalEntityId/,
+  'new audit rows must default to server-resolved scope while allowing explicit null scope for deployment-level system events');
 assert.match(scopedHistoryMigration, /alter table audit_logs add column organization_id text[\s\S]*alter table import_export_logs add column organization_id text[\s\S]*alter table integration_event_logs add column organization_id text/,
   'scoped history migration must add nullable tenant scope without updating historical rows');
 assert.doesNotMatch(scopedHistoryMigration, /update\s+audit_logs/i,

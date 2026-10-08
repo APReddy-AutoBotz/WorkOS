@@ -68,6 +68,23 @@ await recordAuditEvent(client, {
 assert.equal(captured.values[20], 'org-test', 'audit scope comes from verified server request context');
 assert.equal(captured.values[21], 'legal-test', 'audit legal-entity scope comes from verified server request context');
 
+await recordAuditEvent(client, {
+  user: {sub: 'user-test', username: 'synthetic', activeRole: 'Admin'},
+  organizationScope: {organizationId: 'org-test', legalEntityId: 'legal-test'},
+}, {
+  module: 'Integrations',
+  action: 'Create Entra Role Mapping',
+  entityType: 'EntraRoleMapping',
+  entityId: 'role-mapping-test',
+  details: 'Created a deployment-level Entra role mapping',
+  source: 'System',
+  organizationScope: null,
+});
+assert.equal(captured.values[20], null,
+  'deployment-level audit evidence must not inherit the caller’s selected organization');
+assert.equal(captured.values[21], null,
+  'deployment-level audit evidence must not inherit the caller’s selected legal entity');
+
 await recordAuditEvent(client, undefined, {
   module: 'Platform', action: 'System Maintenance', entityType: 'System', entityId: 'workos', details: 'Synthetic system event',
 });

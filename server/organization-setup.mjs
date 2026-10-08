@@ -533,8 +533,11 @@ export const registerOrganizationSetupRoutes = ({
         join employees e on e.id=u.employee_record_id and e.organization_id=s.organization_id and e.legal_entity_id=s.legal_entity_id
         join identity_provider_links i on i.employee_id=e.id and i.provider='entra' and i.status='Linked'
         where s.organization_id=$1 and s.legal_entity_id=$2 and s.active=true) identity,
-      exists(select 1 from audit_logs a where a.module='Import'
-        and a.organization_id=$1 and a.legal_entity_id=$2) imports,
+      exists(select 1 from audit_logs a
+        where a.module='Import' and a.action like 'Import %'
+          and ((a.organization_id=$1 and a.legal_entity_id=$2)
+            or (a.organization_id is null and a.legal_entity_id is null
+              and a.new_value->>'organization_id'=$1 and a.new_value->>'legal_entity_id'=$2))) imports,
       (select count(*)=3 from system_settings where (key='currency' and jsonb_typeof(value)='string' and length(value#>>'{}')>0)
         or (key='expectedWeeklyHours' and jsonb_typeof(value)='number' and (value#>>'{}')::numeric>0)
         or (key='timesheetPolicyMaxHours' and jsonb_typeof(value)='number' and (value#>>'{}')::numeric>0)) commercial_defaults,

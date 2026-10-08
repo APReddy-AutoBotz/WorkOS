@@ -264,12 +264,20 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ('legal-scope-beta','org-scope-beta','Synthetic Scope Beta Legal Entity LLC','USD',
       jsonb_build_object('line1','Synthetic Test Address','city','Test City','countryCode','US'),
       date '1970-01-01','US','Active')`);
+  await pool.query(`insert into legal_entities (id,organization_id,code,name,country_code,effective_from)
+    values ('legal-default-other','org-default','DEFAULT-OTHER','Synthetic Other Default Legal Entity','US',date '1970-01-01')`);
+  await pool.query(`insert into legal_entity_profile_versions
+      (legal_entity_id,organization_id,legal_name,reporting_currency,address,effective_from,country_code,status)
+    values ('legal-default-other','org-default','Synthetic Other Default Legal Entity LLC','USD',
+      jsonb_build_object('line1','Synthetic Test Address','city','Other Test City','countryCode','US'),
+      date '1970-01-01','US','Active')`);
   await pool.query(`insert into users (id,username,email,status)
     values ($1,'synthetic-multi-scope-admin','synthetic-multi-scope-admin@example.test','Active')`, [multiScopeActorId]);
   await pool.query(`insert into user_roles (user_id,role_id)
     select $1,id from roles where name='Admin'`, [multiScopeActorId]);
   await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
-    values ($1,'org-default','legal-default',true),($1,'org-scope-beta','legal-scope-beta',true)`, [multiScopeActorId]);
+    values ($1,'org-default','legal-default',true),($1,'org-default','legal-default-other',true),
+      ($1,'org-scope-beta','legal-scope-beta',true)`, [multiScopeActorId]);
   await pool.query(`insert into country_directors (id,name,region)
     values ('cd-import-provenance-test','Synthetic Director','Synthetic') on conflict (id) do nothing`);
   await pool.query(`insert into employees
@@ -305,6 +313,122 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'X-Legal-Entity-ID': legalEntityId,
       ...extra,
     });
+    const multiScopeReadinessToken = tokenFor(multiScopeActorId, 'synthetic-multi-scope-admin');
+    await pool.query(`insert into audit_logs
+        (user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,new_value,details)
+      values
+        ('legacy-import-readiness','Legacy importer','Admin','Admin','Employee Master CSV','Import',
+          'Import Create Employee','Employee','legacy-import-readiness',
+          '{"id":"employee-legacy-readiness","employee_id":"EMP-LEGACY-READINESS","organization_id":"org-default","legal_entity_id":"legal-default"}'::jsonb,
+          'Historical employee import retained its exact scope in the saved row')`);
+
+    const defaultReadinessResponse = await fetch(`${baseUrl}/api/organization-setup/readiness`, {
+      headers: scopedHeaders(token, 'org-default', 'legal-default'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(defaultReadinessResponse.status, 200);
+    const defaultReadiness = await defaultReadinessResponse.json();
+    assert.equal(defaultReadiness.checks.imports, true,
+      'readiness must preserve a legitimate legacy import whose saved row identifies the exact selected scope');
+    const legacyReadinessAudit = await pool.query(`select organization_id,legal_entity_id,new_value
+      from audit_logs where entity_id='legacy-import-readiness'`);
+    assert.deepEqual(legacyReadinessAudit.rows, [{
+      organization_id: null,
+      legal_entity_id: null,
+      new_value: {
+        id: 'employee-legacy-readiness',
+        employee_id: 'EMP-LEGACY-READINESS',
+        organization_id: 'org-default',
+        legal_entity_id: 'legal-default',
+      },
+    }], 'readiness compatibility must leave the historical audit row and its null scope unchanged');
+    const defaultAuditResponse = await fetch(`${baseUrl}/api/audit-logs`, {
+      headers: scopedHeaders(token, 'org-default', 'legal-default'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(defaultAuditResponse.status, 200);
+    const defaultAuditHistory = await defaultAuditResponse.json();
+    assert.equal(defaultAuditHistory.some(row => row.entity_id === 'legacy-import-readiness'), false,
+      'the compatibility readiness check must not expose a null-scope legacy row in ordinary scoped history');
+
+    const otherLegalReadinessResponse = await fetch(`${baseUrl}/api/organization-setup/readiness`, {
+      headers: scopedHeaders(multiScopeReadinessToken, 'org-default', 'legal-default-other'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(otherLegalReadinessResponse.status, 200);
+    const otherLegalReadiness = await otherLegalReadinessResponse.json();
+    assert.equal(otherLegalReadiness.checks.imports, false,
+      'an import from another legal entity in the same organization must not satisfy selected-scope readiness');
+
+    const genericImportAuditResponse = await fetch(`${baseUrl}/api/audit-events`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeReadinessToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({
+        action: 'Import',
+        module: 'Import',
+        details: 'Synthetic generic audit marker, not an applied import',
+        entityType: 'Import',
+        entityId: 'generic-import-marker-beta',
+        newValue: {organization_id: 'org-scope-beta', legal_entity_id: 'legal-scope-beta'},
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(genericImportAuditResponse.status, 201,
+      'the existing generic audit event endpoint remains available for its supported action');
+    const betaReadinessResponse = await fetch(`${baseUrl}/api/organization-setup/readiness`, {
+      headers: scopedHeaders(multiScopeReadinessToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(betaReadinessResponse.status, 200);
+    const betaReadiness = await betaReadinessResponse.json();
+    assert.equal(betaReadiness.checks.imports, false,
+      'a generic Import audit marker must not satisfy readiness even when its scope and payload match');
+
+    const roleMappingResponse = await fetch(`${baseUrl}/api/integrations/entra-role-mappings`, {
+      method: 'POST',
+      headers: scopedHeaders(token, 'org-default', 'legal-default', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({
+        group_id: 'synthetic-deployment-role-map',
+        group_name: 'Synthetic Deployment Role',
+        role_name: 'Employee',
+        active: true,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(roleMappingResponse.status, 200,
+      'deployment-level Entra role mappings must retain their current API behavior');
+    const roleMapping = await roleMappingResponse.json();
+    const roleMappingAudit = await pool.query(`select organization_id,legal_entity_id
+      from audit_logs where entity_type='EntraRoleMapping' and entity_id=$1`, [roleMapping.id]);
+    assert.deepEqual(roleMappingAudit.rows, [{organization_id: null, legal_entity_id: null}],
+      'deployment-level role mapping audit must not be attributed to the caller’s selected scope');
+    const roleMappingEvent = await pool.query(`select organization_id,legal_entity_id
+      from integration_event_logs where event_type='RoleMappingUpserted' and entity_id=$1`, [roleMapping.id]);
+    assert.deepEqual(roleMappingEvent.rows, [{organization_id: null, legal_entity_id: null}],
+      'deployment-level role mapping integration event must remain unscoped');
+    for (const [authToken, organizationId, legalEntityId] of [
+      [token, 'org-default', 'legal-default'],
+      [multiScopeReadinessToken, 'org-scope-beta', 'legal-scope-beta'],
+    ]) {
+      const [auditResponse, eventResponse] = await Promise.all([
+        fetch(`${baseUrl}/api/audit-logs`, {
+          headers: scopedHeaders(authToken, organizationId, legalEntityId),
+          signal: AbortSignal.timeout(5000),
+        }),
+        fetch(`${baseUrl}/api/integrations/events`, {
+          headers: scopedHeaders(authToken, organizationId, legalEntityId),
+          signal: AbortSignal.timeout(5000),
+        }),
+      ]);
+      assert.equal(auditResponse.status, 200);
+      assert.equal(eventResponse.status, 200);
+      const [auditHistory, eventHistory] = await Promise.all([auditResponse.json(), eventResponse.json()]);
+      assert.equal(auditHistory.some(row => row.entity_id === roleMapping.id), false,
+        'scoped audit history must omit deployment-level role mapping mutations for every organization');
+      assert.equal(eventHistory.some(row => row.entity_id === roleMapping.id), false,
+        'scoped integration history must omit deployment-level role mapping mutations for every organization');
+    }
+
     const apply = body => fetch(`${baseUrl}/api/imports/employees/apply`, {
       method: 'POST',
       headers: {
