@@ -226,6 +226,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     'identity-link provenance references must be unique');
 
   const actorId = randomUUID();
+  const singleScopeActorId = randomUUID();
   const multiScopeActorId = randomUUID();
   const auditDeniedActorId = randomUUID();
   await pool.query(`insert into roles(name) values ('Admin'),('Employee') on conflict (name) do nothing`);
@@ -237,6 +238,12 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ($1,'imports.manage',$1,'Admin')`, [actorId]);
   await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
     values ($1,'org-default','legal-default',true) on conflict do nothing`, [actorId]);
+  await pool.query(`insert into users (id,username,email,status)
+    values ($1,'synthetic-single-scope-admin','synthetic-single-scope-admin@example.test','Active')`, [singleScopeActorId]);
+  await pool.query(`insert into user_roles (user_id,role_id)
+    select $1,id from roles where name='Admin'`, [singleScopeActorId]);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+    values ($1,'org-default','legal-default',true)`, [singleScopeActorId]);
   await pool.query(`insert into users (id,username,email,status)
     values ($1,'synthetic-no-audit','synthetic-no-audit@example.test','Active')`, [auditDeniedActorId]);
   await pool.query(`insert into user_roles (user_id,role_id)
@@ -1614,7 +1621,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'legacy and versioned audit history must return the same rows and redacted DTO shape',
     );
     const auditSingleScopeNoSelector = await fetch(`${baseUrl}/api/v1/audit-logs`, {
-      headers: {Authorization: `Bearer ${token}`},
+      headers: {Authorization: `Bearer ${tokenFor(singleScopeActorId, 'synthetic-single-scope-admin')}`},
       signal: AbortSignal.timeout(5000),
     });
     assert.equal(auditSingleScopeNoSelector.status, 200,
@@ -1668,7 +1675,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'versioned import history must retain the legacy payload, exact scope and null-scope exclusion',
     );
     const importSingleScopeNoSelector = await fetch(`${baseUrl}/api/v1/import-export-logs`, {
-      headers: {Authorization: `Bearer ${token}`},
+      headers: {Authorization: `Bearer ${tokenFor(singleScopeActorId, 'synthetic-single-scope-admin')}`},
       signal: AbortSignal.timeout(5000),
     });
     assert.equal(importSingleScopeNoSelector.status, 200,
