@@ -4,7 +4,7 @@
 
 New productized contracts are introduced under `/api/v1`. Existing imported routes may remain temporarily behind compatibility adapters while behavior is migrated and tested.
 
-The WOS-03 API foundation begins with an incremental pilot: identity reads (`/api/auth/me` and `/api/auth/organization-scopes`), organization setup, and scoped audit history (`/api/audit-logs` and `/api/v1/audit-logs`) are mounted through shared handlers. A `/api/v1` route must preserve the legacy authorization and business rules while returning the versioned error contract below. New routes should be added under `/api/v1`; legacy routes remain available until an explicit deprecation plan removes them. This pilot does not claim that every existing API route has already been migrated.
+The WOS-03 API foundation begins with an incremental pilot: identity reads (`/api/auth/me` and `/api/auth/organization-scopes`), organization setup, and scoped audit/import history (`/api/audit-logs`, `/api/import-export-logs`, and their `/api/v1/...` aliases) are mounted through shared handlers. A `/api/v1` route must preserve the legacy authorization and business rules while returning the versioned error contract below. New routes should be added under `/api/v1`; legacy routes remain available until an explicit deprecation plan removes them. This pilot does not claim that every existing API route has already been migrated.
 
 ## Module boundaries
 

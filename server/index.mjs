@@ -18,6 +18,7 @@ import {createIdentityReadRouter} from './modules/identity-access/read-router.mj
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
 import {redactAuditHistoryRows, redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
+import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
@@ -6275,12 +6276,9 @@ app.get('/api/reports/dashboard', requireDatabase, requireAuth, requirePermissio
   }
 });
 
-app.get('/api/import-export-logs', requireDatabase, requireAuth, requirePermission('employees.manage'), (req, res) => {
-  runScopedHistory(req, res,
-    `select * from import_export_logs
-     where organization_id=$1 and legal_entity_id=$2
-     order by created_at desc limit 100`);
-});
+const importHistoryRouter = createImportHistoryRouter({pool, requireDatabase, requireAuth, requirePermission});
+app.use('/api', importHistoryRouter);
+app.use('/api/v1', importHistoryRouter);
 app.post('/api/import-export-logs', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
   const schema = z.object({
     operation: z.enum(['Import', 'Export']),

@@ -1339,7 +1339,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'a failed timesheet batch-log write must roll back the timesheet, entries and group audit');
 
     const multiScopeToken = tokenFor(multiScopeActorId, 'synthetic-multi-scope-admin');
-    const auditDeniedToken = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Employee');
+    const employeeTokenWithoutAdminPermissions = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Employee');
     const postScopedJson = (path, authToken, organizationId, legalEntityId, body) => fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: scopedHeaders(authToken, organizationId, legalEntityId, {'Content-Type': 'application/json'}),
@@ -1613,10 +1613,21 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       [...auditRowsA].sort((left, right) => String(left.id).localeCompare(String(right.id))),
       'legacy and versioned audit history must return the same rows and redacted DTO shape',
     );
+    const auditSingleScopeNoSelector = await fetch(`${baseUrl}/api/v1/audit-logs`, {
+      headers: {Authorization: `Bearer ${token}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(auditSingleScopeNoSelector.status, 200,
+      'the existing server resolver may select the only authorized scope when headers are absent');
+    const auditRowsSingleScope = await auditSingleScopeNoSelector.json();
+    assert.deepEqual(
+      [...auditRowsSingleScope].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      [...auditRowsA].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+    );
 
-    const auditDeniedLegacy = await getScoped('/api/audit-logs', auditDeniedToken, 'org-default', 'legal-default');
+    const auditDeniedLegacy = await getScoped('/api/audit-logs', employeeTokenWithoutAdminPermissions, 'org-default', 'legal-default');
     assert.equal(auditDeniedLegacy.status, 403, 'an Employee without audit.view must be denied the legacy audit route');
-    const auditDeniedV1 = await getScoped('/api/v1/audit-logs', auditDeniedToken, 'org-default', 'legal-default');
+    const auditDeniedV1 = await getScoped('/api/v1/audit-logs', employeeTokenWithoutAdminPermissions, 'org-default', 'legal-default');
     assert.equal(auditDeniedV1.status, 403, 'an Employee without audit.view must be denied the versioned audit route');
     assert.equal((await auditDeniedV1.json()).error.code, 'FORBIDDEN',
       'versioned permission denial must use the stable API error envelope');
@@ -1648,11 +1659,54 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert(!importRowsA.some(row => row.file_name === 'scope-b-history.csv'));
     assert(!importRowsA.some(row => row.file_name === 'legacy-null-scope.csv'));
     assert(importRowsA.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
+    const importReadAV1 = await getScoped('/api/v1/import-export-logs', token, 'org-default', 'legal-default');
+    assert.equal(importReadAV1.status, 200);
+    const importRowsAV1 = await importReadAV1.json();
+    assert.deepEqual(
+      [...importRowsAV1].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      [...importRowsA].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      'versioned import history must retain the legacy payload, exact scope and null-scope exclusion',
+    );
+    const importSingleScopeNoSelector = await fetch(`${baseUrl}/api/v1/import-export-logs`, {
+      headers: {Authorization: `Bearer ${token}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(importSingleScopeNoSelector.status, 200,
+      'the existing server resolver may select the only authorized import-history scope when headers are absent');
+    const importRowsSingleScope = await importSingleScopeNoSelector.json();
+    assert.deepEqual(
+      [...importRowsSingleScope].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      [...importRowsA].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+    );
     const importReadB = await getScoped('/api/import-export-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
     const importRowsB = await importReadB.json();
     assert(importRowsB.some(row => row.file_name === 'scope-b-history.csv'));
     assert(!importRowsB.some(row => row.file_name === 'scope-a-history.csv'));
     assert(!importRowsB.some(row => row.file_name === 'legacy-null-scope.csv'));
+    const importReadBV1 = await getScoped('/api/v1/import-export-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    assert.equal(importReadBV1.status, 200);
+    const importRowsBV1 = await importReadBV1.json();
+    assert.deepEqual(
+      [...importRowsBV1].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      [...importRowsB].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      'versioned import history must preserve authorized multi-scope selection and its legacy payload',
+    );
+    const importDeniedLegacy = await getScoped('/api/import-export-logs', employeeTokenWithoutAdminPermissions,
+      'org-default', 'legal-default');
+    assert.equal(importDeniedLegacy.status, 403,
+      'an Employee without employees.manage must be denied the legacy import-history route');
+    const importDeniedV1 = await getScoped('/api/v1/import-export-logs', employeeTokenWithoutAdminPermissions,
+      'org-default', 'legal-default');
+    assert.equal(importDeniedV1.status, 403,
+      'the versioned route must preserve employees.manage authorization');
+    assert.equal((await importDeniedV1.json()).error.code, 'FORBIDDEN');
+    const ambiguousImportHistoryV1 = await fetch(`${baseUrl}/api/v1/import-export-logs`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ambiguousImportHistoryV1.status, 403,
+      'the versioned route must require an explicit scope for a multi-scope Admin');
+    assert.equal((await ambiguousImportHistoryV1.json()).error.code, 'ORG_SCOPE_DENIED');
 
     const eventReadA = await getScoped('/api/integrations/events', token, 'org-default', 'legal-default');
     const eventRowsA = await eventReadA.json();
@@ -1688,7 +1742,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert(!teamsRowsB.some(row => row.teams_user_id === 'scope-a-teams-user'));
 
     for (const path of [
-      '/api/audit-logs', '/api/v1/audit-logs', '/api/import-export-logs', '/api/integrations/events',
+      '/api/audit-logs', '/api/v1/audit-logs', '/api/import-export-logs', '/api/v1/import-export-logs', '/api/integrations/events',
       '/api/integrations/health', '/api/integrations/teams-user-links',
     ]) {
       const denied = await getScoped(path, token, 'org-scope-beta', 'legal-scope-beta');

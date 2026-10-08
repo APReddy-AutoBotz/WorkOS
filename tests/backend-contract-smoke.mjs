@@ -28,6 +28,7 @@ const requestContext = readFileSync('server/api/request-context.mjs', 'utf8');
 const versionedErrors = readFileSync('server/api/v1/error-contract.mjs', 'utf8');
 const auditRecord = readFileSync('server/modules/audit/audit-record.mjs', 'utf8');
 const auditHistoryRouter = readFileSync('server/modules/audit/audit-history-router.mjs', 'utf8');
+const importHistoryRouter = readFileSync('server/modules/imports/import-history-router.mjs', 'utf8');
 const schema = readFileSync('server/schema.sql', 'utf8');
 const leaveMigration = readFileSync('server/migrations/007_workforce_os_leave.sql', 'utf8');
 const approvalMigration = readFileSync('server/migrations/008_workforce_os_approvals.sql', 'utf8');
@@ -93,7 +94,6 @@ assert.match(seedDemo, /insert into user_roles/, 'demo seed must provision user 
 assert.match(seedDemo, /insert into timesheets/, 'demo seed must include timesheets');
 assert.match(schema, /create table if not exists import_export_logs/, 'import/export history table must exist');
 assert.match(server, /app\.post\('\/api\/settings'/, 'settings save route must exist');
-assert.match(server, /app\.get\('\/api\/import-export-logs'/, 'import/export history GET route must exist');
 assert.match(server, /app\.post\('\/api\/import-export-logs'/, 'import/export history POST route must exist');
 assert.match(server, /app\.post\('\/api\/audit-events'/, 'manual audit event POST route must exist for UI exports');
 assert.match(auditRecord, /organization_id, legal_entity_id[\s\S]*req\.organizationScope\?\.organizationId[\s\S]*req\.organizationScope\?\.legalEntityId/,
@@ -110,7 +110,15 @@ assert.match(auditHistoryRouter, /router\.get\('\/audit-logs', requireDatabase, 
   'both compatibility paths must use the authorized audit view');
 assert.equal(packageJson.scripts['test:audit-history-router'], 'node tests/audit-history-router-smoke.mjs',
   'the audit history compatibility route test must be available in the standard suite');
-assert.match(server, /app\.get\('\/api\/import-export-logs'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
+assert.match(server, /const importHistoryRouter = createImportHistoryRouter\([\s\S]*app\.use\('\/api', importHistoryRouter\)[\s\S]*app\.use\('\/api\/v1', importHistoryRouter\)/,
+  'legacy and versioned import history must mount one shared module router');
+assert.match(importHistoryRouter, /const importHistoryQuery = `select \* from import_export_logs[\s\S]*where organization_id=\$1 and legal_entity_id=\$2[\s\S]*order by created_at desc limit 100/,
+  'import history must preserve its exact selected-scope query, limit and ordering');
+assert.match(importHistoryRouter, /router\.get\('\/import-export-logs', requireDatabase, requireAuth, requirePermission\('employees\.manage'\)[\s\S]*res\.json\(result\.rows\)/,
+  'import history must preserve its existing permission and payload');
+assert.equal(packageJson.scripts['test:import-history-router'], 'node tests/import-history-router-smoke.mjs',
+  'the import history compatibility route test must run in the standard suite');
+assert.match(importHistoryRouter, /where organization_id=\$1 and legal_entity_id=\$2/,
   'import history must filter by the verified selected scope');
 assert.match(server, /app\.get\('\/api\/integrations\/events'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
   'integration event history must filter by the verified selected scope');
