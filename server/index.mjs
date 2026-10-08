@@ -17,8 +17,9 @@ import {createIdentityAccessMiddleware, readCookie} from './modules/identity-acc
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
-import {redactAuditHistoryRows, redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
+import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
+import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
@@ -269,19 +270,6 @@ const run = async (res, query, params = []) => {
   try {
     const result = await pool.query(query, params);
     res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Database operation failed' });
-  }
-};
-
-const runScopedHistory = async (req, res, query, viewRows = rows => rows) => {
-  try {
-    const result = await pool.query(query, [
-      req.organizationScope.organizationId,
-      req.organizationScope.legalEntityId,
-    ]);
-    res.json(viewRows(result.rows));
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Database operation failed' });
@@ -4977,13 +4965,9 @@ app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, r
   }
 });
 
-app.get('/api/integrations/events', requireDatabase, requireAuth, requirePermission('integrations.identity'), (req, res) => {
-  runScopedHistory(req, res,
-    `select * from integration_event_logs
-     where organization_id=$1 and legal_entity_id=$2
-     order by created_at desc limit 300`,
-    redactIntegrationHistoryRows);
-});
+const integrationHistoryRouter = createIntegrationHistoryRouter({pool, requireDatabase, requireAuth, requirePermission});
+app.use('/api', integrationHistoryRouter);
+app.use('/api/v1', integrationHistoryRouter);
 
 app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermission('integrations.identity'), async (req, res) => {
   try {

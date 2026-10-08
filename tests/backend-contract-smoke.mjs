@@ -29,6 +29,7 @@ const versionedErrors = readFileSync('server/api/v1/error-contract.mjs', 'utf8')
 const auditRecord = readFileSync('server/modules/audit/audit-record.mjs', 'utf8');
 const auditHistoryRouter = readFileSync('server/modules/audit/audit-history-router.mjs', 'utf8');
 const importHistoryRouter = readFileSync('server/modules/imports/import-history-router.mjs', 'utf8');
+const integrationHistoryRouter = readFileSync('server/modules/integrations/integration-history-router.mjs', 'utf8');
 const schema = readFileSync('server/schema.sql', 'utf8');
 const leaveMigration = readFileSync('server/migrations/007_workforce_os_leave.sql', 'utf8');
 const approvalMigration = readFileSync('server/migrations/008_workforce_os_approvals.sql', 'utf8');
@@ -120,8 +121,14 @@ assert.equal(packageJson.scripts['test:import-history-router'], 'node tests/impo
   'the import history compatibility route test must run in the standard suite');
 assert.match(importHistoryRouter, /where organization_id=\$1 and legal_entity_id=\$2/,
   'import history must filter by the verified selected scope');
-assert.match(server, /app\.get\('\/api\/integrations\/events'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
-  'integration event history must filter by the verified selected scope');
+assert.match(server, /const integrationHistoryRouter = createIntegrationHistoryRouter\([\s\S]*app\.use\('\/api', integrationHistoryRouter\)[\s\S]*app\.use\('\/api\/v1', integrationHistoryRouter\)/,
+  'legacy and versioned integration history must mount one shared module router');
+assert.match(integrationHistoryRouter, /const integrationHistoryQuery = `select \* from integration_event_logs[\s\S]*where organization_id=\$1 and legal_entity_id=\$2[\s\S]*order by created_at desc limit 300/,
+  'integration event history must preserve its exact selected-scope query, ordering and limit');
+assert.match(integrationHistoryRouter, /router\.get\('\/integrations\/events', requireDatabase, requireAuth, requirePermission\('integrations\.identity'\)[\s\S]*redactIntegrationHistoryRows/,
+  'both integration-history paths must preserve the identity permission and redacted DTO');
+assert.equal(packageJson.scripts['test:integration-history-router'], 'node tests/integration-history-router-smoke.mjs',
+  'the integration history compatibility-route test must run in the standard suite');
 assert.match(server, /e\.organization_id=\$4 and e\.legal_entity_id=\$5[\s\S]*where status = 'Failed' and organization_id=\$4 and legal_entity_id=\$5/,
   'integration health aggregates over scoped workers and events must use the verified selected scope');
 assert.match(server, /app\.post\('\/api\/imports\/employees\/apply'/, 'employee import apply route must exist');

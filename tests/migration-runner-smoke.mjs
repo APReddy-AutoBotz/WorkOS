@@ -1583,7 +1583,9 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         (id,provider,event_type,entity_type,entity_id,status,response_payload,organization_id,legal_entity_id)
       values
         ('scope-a-failure','test','ScopeAFailure','ScopedTest','scope-a','Failed','{"provider_subject":"failure-subject-a"}'::jsonb,'org-default','legal-default'),
-        ('scope-b-failure','test','ScopeBFailure','ScopedTest','scope-b','Failed','{"provider_subject":"failure-subject-b"}'::jsonb,'org-scope-beta','legal-scope-beta')`);
+        ('scope-b-failure','test','ScopeBFailure','ScopedTest','scope-b','Failed','{"provider_subject":"failure-subject-b"}'::jsonb,'org-scope-beta','legal-scope-beta'),
+        ('same-org-other-legal-event','test','SameOrgOtherLegal','ScopedTest','same-org-other-legal','Failed',
+          '{"provider_subject":"failure-subject-same-org"}'::jsonb,'org-default','legal-client-outside-same-org')`);
 
     const auditReadA = await getScoped('/api/audit-logs', token, 'org-default', 'legal-default');
     assert.equal(auditReadA.status, 200);
@@ -1720,24 +1722,71 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert(eventRowsA.some(row => row.id === `integration-event-${identityA.provenance_reference}` || row.entity_id === identityA.provenance_reference),
       'identity integration events must remain available in the selected scope');
     assert(eventRowsA.some(row => row.id === 'scope-a-failure'));
-    assert(!eventRowsA.some(row => row.id === 'scope-b-failure' || row.id === 'legacy-null-scope-event'));
+    assert(!eventRowsA.some(row => row.id === 'scope-b-failure'
+      || row.id === 'legacy-null-scope-event' || row.id === 'same-org-other-legal-event'));
     assert(eventRowsA.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
     assert(!JSON.stringify(eventRowsA).includes('scope-a-provider-subject'));
     assert(!JSON.stringify(eventRowsA).includes('scope-a-provider@example.test'));
     assert(!JSON.stringify(eventRowsA).includes('scope-a-provider-updated@example.test'));
     assert(!JSON.stringify(eventRowsA).includes(actionA.action_url),
       'integration history must not expose bearer action URLs recorded at token creation');
+    const eventReadAV1 = await getScoped('/api/v1/integrations/events', token, 'org-default', 'legal-default');
+    assert.equal(eventReadAV1.status, 200);
+    const eventRowsAV1 = await eventReadAV1.json();
+    assert.deepEqual(
+      [...eventRowsAV1].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      [...eventRowsA].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      'the versioned integration reader must preserve the scoped legacy payload and redaction',
+    );
+    const eventReadOtherLegalV1 = await getScoped('/api/v1/integrations/events', token,
+      'org-default', 'legal-client-outside-same-org');
+    assert.equal(eventReadOtherLegalV1.status, 200);
+    const eventRowsOtherLegalV1 = await eventReadOtherLegalV1.json();
+    assert.deepEqual(eventRowsOtherLegalV1.map(row => row.id), ['same-org-other-legal-event'],
+      'the exact legal-entity filter must exclude another legal entity in the same organization');
+    const eventSingleScopeNoSelector = await fetch(`${baseUrl}/api/v1/integrations/events`, {
+      headers: {Authorization: `Bearer ${tokenFor(singleScopeActorId, 'synthetic-single-scope-admin')}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(eventSingleScopeNoSelector.status, 200,
+      'the versioned integration reader may use the server-resolved sole authorized scope');
+    const eventRowsSingleScope = await eventSingleScopeNoSelector.json();
+    assert.deepEqual(
+      [...eventRowsSingleScope].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      [...eventRowsA].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+    );
     const eventReadB = await getScoped('/api/integrations/events', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
     const eventRowsB = await eventReadB.json();
     assert(eventRowsB.some(row => row.id === 'scope-b-failure'));
     assert(eventRowsB.some(row => row.entity_id === identityB.provenance_reference), 'scope B identity events must remain available within scope B');
-    assert(!eventRowsB.some(row => row.id === 'scope-a-failure' || row.id === 'legacy-null-scope-event'));
+    assert(!eventRowsB.some(row => row.id === 'scope-a-failure'
+      || row.id === 'legacy-null-scope-event' || row.id === 'same-org-other-legal-event'));
     assert(eventRowsB.every(row => row.organization_id === 'org-scope-beta' && row.legal_entity_id === 'legal-scope-beta'));
     assert(!JSON.stringify(eventRowsB).includes('scope-b-provider-subject'));
     assert(!JSON.stringify(eventRowsB).includes('scope-b-provider@example.test'));
     assert(!JSON.stringify(eventRowsB).includes('scope-b-provider-updated@example.test'));
     assert(!JSON.stringify(eventRowsB).includes(actionB.action_url),
       'integration history must not expose bearer action URLs for another action in this scope');
+    const eventReadBV1 = await getScoped('/api/v1/integrations/events', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    assert.equal(eventReadBV1.status, 200);
+    const eventRowsBV1 = await eventReadBV1.json();
+    assert.deepEqual(
+      [...eventRowsBV1].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      [...eventRowsB].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      'the versioned integration reader must preserve explicit multi-scope selection',
+    );
+    const eventReadDeniedV1 = await getScoped('/api/v1/integrations/events', employeeTokenWithoutAdminPermissions,
+      'org-default', 'legal-default');
+    assert.equal(eventReadDeniedV1.status, 403,
+      'an Employee without integrations.identity must be denied the versioned integration-history route');
+    assert.equal((await eventReadDeniedV1.json()).error.code, 'FORBIDDEN');
+    const ambiguousEventReadV1 = await fetch(`${baseUrl}/api/v1/integrations/events`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ambiguousEventReadV1.status, 403,
+      'the versioned integration reader must require an explicit pair for a multi-scope Admin');
+    assert.equal((await ambiguousEventReadV1.json()).error.code, 'ORG_SCOPE_DENIED');
 
     const teamsReadA = await getScoped('/api/integrations/teams-user-links', token, 'org-default', 'legal-default');
     const teamsRowsA = await teamsReadA.json();
@@ -1749,7 +1798,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert(!teamsRowsB.some(row => row.teams_user_id === 'scope-a-teams-user'));
 
     for (const path of [
-      '/api/audit-logs', '/api/v1/audit-logs', '/api/import-export-logs', '/api/v1/import-export-logs', '/api/integrations/events',
+      '/api/audit-logs', '/api/v1/audit-logs', '/api/import-export-logs', '/api/v1/import-export-logs',
+      '/api/integrations/events', '/api/v1/integrations/events',
       '/api/integrations/health', '/api/integrations/teams-user-links',
     ]) {
       const denied = await getScoped(path, token, 'org-scope-beta', 'legal-scope-beta');
