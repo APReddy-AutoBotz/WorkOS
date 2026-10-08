@@ -1210,8 +1210,9 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
       ? { organizationId: user.employee_organization_id, legalEntityId: user.employee_legal_entity_id }
       : null;
     req.organizationScope = loginScope;
+    let identityLinkProvenanceReference = null;
     if (providerSubject && user.employee_record_id) {
-      await client.query(`
+      const identityLink = await client.query(`
         insert into identity_provider_links (id, employee_id, provider, provider_subject, provider_upn, status)
         values ('identity-link-' || gen_random_uuid()::text, $1, 'entra', $2, $3, 'Linked')
         on conflict (employee_id, provider) do update set
@@ -1219,7 +1220,9 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
           provider_upn = excluded.provider_upn,
           status = 'Linked',
           updated_at = now()
+        returning provenance_reference
       `, [user.employee_record_id, providerSubject, upn || null]);
+      identityLinkProvenanceReference = identityLink.rows[0]?.provenance_reference || null;
       await client.query('update employees set entra_object_id = coalesce(entra_object_id, $2), updated_at = now() where id = $1', [user.employee_record_id, providerSubject]);
     }
     const mappedRoles = await mappedRolesFromEntraGroups(client, claims.groups || []);
@@ -1233,6 +1236,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
       responsePayload: {
         upn,
         providerSubject,
+        identityLinkProvenanceReference,
         mappedRoles,
         groupCount: Array.isArray(claims.groups) ? claims.groups.length : 0,
         groupOverage: Boolean(claims._claim_names?.groups),
@@ -1246,7 +1250,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
       entityType: 'User',
       entityId: user.id,
       details: `Signed in through Microsoft Entra as ${session.activeRole}`,
-      newValue: { upn, activeRole: session.activeRole, mappedRoles },
+      newValue: { upn, identityLinkProvenanceReference, activeRole: session.activeRole, mappedRoles },
       source: 'System',
     });
     await client.query('commit');
@@ -4540,23 +4544,38 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
       'update employees set entra_object_id = $2, updated_at = now() where id = $1 and organization_id = $3 and legal_entity_id = $4',
       [employee.id, parsed.data.provider_subject, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
     );
+    const providerIdentifierChanged = previous ? previous.provider_subject !== result.rows[0].provider_subject : true;
+    const providerAccountChanged = previous
+      ? previous.provider_upn !== result.rows[0].provider_upn
+      : Boolean(result.rows[0].provider_upn);
+    const safeLinkProvenance = {
+      provenanceReference: result.rows[0].provenance_reference,
+      provider: result.rows[0].provider,
+      mutation: previous ? 'Updated' : 'Created',
+      status: result.rows[0].status,
+      providerIdentifierChanged,
+      providerAccountChanged,
+    };
     await logIntegrationEvent(client, {
       provider: parsed.data.provider,
       eventType: 'IdentityLinkUpserted',
       entityType: 'IdentityProviderLink',
-      entityId: result.rows[0].id,
-      responsePayload: result.rows[0],
+      entityId: result.rows[0].provenance_reference,
+      requestPayload: {status: parsed.data.status},
+      responsePayload: safeLinkProvenance,
       organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
       action: previous ? 'Update Identity Link' : 'Create Identity Link',
       entityType: 'IdentityProviderLink',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
+      entityId: result.rows[0].provenance_reference,
+      oldValue: previous ? {provenanceReference: previous.provenance_reference, provider: previous.provider, status: previous.status} : null,
+      newValue: safeLinkProvenance,
       details: `${previous ? 'Updated' : 'Created'} ${parsed.data.provider} identity link`,
-      source: 'System',
+      source: parsed.data.provider === 'entra' ? 'Entra' : 'Local Identity',
+      sourceIdentifier: result.rows[0].provenance_reference,
+      importProcessingResult: 'Success',
     });
     await client.query('commit');
     res.json(result.rows[0]);

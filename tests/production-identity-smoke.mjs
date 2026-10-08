@@ -498,7 +498,20 @@ try {
   assert.equal(afterRejectedUsers, beforeUsers, 'rejected callbacks must not create users');
   assert.equal(afterRejectedEmployees, beforeEmployees, 'rejected callbacks must not create employees');
 
-  const syntheticUser = await pool.query("insert into users (username, email, entra_object_id, status) values ('synthetic-user', 'synthetic.user@example.test', 'synthetic-provider-subject', 'Active') returning id");
+  await pool.query(`insert into country_directors (id,name,region)
+    values ('synthetic-login-director','Synthetic login director','Synthetic region')`);
+  const syntheticEmployee = await pool.query(`insert into employees
+      (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,
+        entra_object_id,organization_id,legal_entity_id)
+    values ('synthetic-login-employee','SYNTHETIC-LOGIN-EMP','Synthetic login employee',
+      'synthetic.employee@example.test','Consultant','Synthetic','US','synthetic-login-director','Active',
+      'synthetic-provider-subject','org-default','legal-default') returning id`);
+  const syntheticUser = await pool.query(`insert into users
+      (username,employee_id,employee_record_id,email,entra_object_id,status)
+    values ('synthetic-user','SYNTHETIC-LOGIN-EMP',$1,'synthetic.user@example.test','synthetic-provider-subject','Active')
+    returning id`, [syntheticEmployee.rows[0].id]);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id)
+    values ($1,'org-default','legal-default')`, [syntheticUser.rows[0].id]);
   await pool.query('insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1', [syntheticUser.rows[0].id]);
   const {state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = {};
@@ -511,10 +524,31 @@ try {
     `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
   );
   assert.equal(hasSetCookie(callback.headers, 'workos_session'), true, 'valid linked callback must create a WorkOS session');
+  const syncedIdentityLink = await pool.query(`select id,provider_subject,provenance_reference
+    from identity_provider_links where employee_id=$1 and provider='entra'`, [syntheticEmployee.rows[0].id]);
+  assert.equal(syncedIdentityLink.rowCount, 1, 'a legacy identity match must retain its Entra link upsert');
+  assert.equal(syncedIdentityLink.rows[0].provider_subject, 'synthetic-provider-subject');
+  assert.match(syncedIdentityLink.rows[0].provenance_reference,
+    /^identity-link-ref-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    'the Entra callback must use the server-owned identity-link provenance reference');
+  const loginEvent = await pool.query(`select response_payload
+    from integration_event_logs where event_type='EntraLoginSucceeded' and entity_id=$1 order by created_at desc limit 1`,
+  [syntheticUser.rows[0].id]);
+  assert.equal(loginEvent.rows[0]?.response_payload.identityLinkProvenanceReference,
+    syncedIdentityLink.rows[0].provenance_reference,
+  'the successful Entra login result must reference the identity-link record without using its business ID');
+  const loginAudit = await pool.query(`select new_value from audit_logs where action='Entra Login' and user_id=$1 order by created_at desc limit 1`,
+    [syntheticUser.rows[0].id]);
+  assert.equal(loginAudit.rows[0]?.new_value.identityLinkProvenanceReference,
+    syncedIdentityLink.rows[0].provenance_reference,
+  'the Entra login audit must retain the safe identity-link provenance reference');
   const replay = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
   assert.equal(replay.status, 302, 'consumed callback replay must reach the OAuth state handler');
   assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');
+  await pool.query('delete from identity_provider_links where employee_id=$1', [syntheticEmployee.rows[0].id]);
   await pool.query("delete from users where username = 'synthetic-user'");
+  await pool.query('delete from employees where id=$1', [syntheticEmployee.rows[0].id]);
+  await pool.query("delete from country_directors where id='synthetic-login-director'");
 
   const discoveryRequestsBeforeOutage = discoveryRequests;
   discoveryUnavailable = true;

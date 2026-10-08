@@ -210,6 +210,20 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
   assert.equal(batchIndex.rowCount, 1, 'fresh installs must index import-batch audit lookups');
   assert.match(batchIndex.rows[0].indexdef, /where\s+\(import_batch_id is not null\)/i,
     'the batch index must omit audit rows with no import provenance');
+  const provenanceReferenceColumn = await pool.query(`select is_nullable,column_default
+    from information_schema.columns where table_schema='public' and table_name='identity_provider_links'
+      and column_name='provenance_reference'`);
+  assert.equal(provenanceReferenceColumn.rowCount, 1);
+  assert.equal(provenanceReferenceColumn.rows[0].is_nullable, 'NO',
+    'identity-link provenance references must be present on every row');
+  assert.match(provenanceReferenceColumn.rows[0].column_default, /gen_random_uuid\(\)/i,
+    'new identity-link provenance references must be generated independently of provider identity values');
+  const provenanceReferenceIndex = await pool.query(`select indexdef from pg_indexes
+    where schemaname='public' and tablename='identity_provider_links'
+      and indexname='identity_provider_links_provenance_reference_uidx'`);
+  assert.equal(provenanceReferenceIndex.rowCount, 1);
+  assert.match(provenanceReferenceIndex.rows[0].indexdef, /unique/i,
+    'identity-link provenance references must be unique');
 
   const actorId = randomUUID();
   const multiScopeActorId = randomUUID();
@@ -1372,15 +1386,43 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const employeeA = (await pool.query(`select id from employees where employee_id='EMP-IMPORT-SUCCESS'`)).rows[0];
     assert.ok(employeeA, 'the default-scope identity link fixture exists');
     const identityAResponse = await postScopedJson('/api/integrations/identity-links', token, 'org-default', 'legal-default', {
+      id: 'scope-a-provider-subject',
+      provenance_reference: 'caller-selected-provider-subject',
       employee_id: employeeA.id,
       provider: 'entra',
       provider_subject: 'scope-a-provider-subject',
-      provider_upn: 'scope-a-provider@example.test',
       status: 'Linked',
     });
     assert.equal(identityAResponse.status, 200, 'identity-link writes must remain available inside the selected scope');
     const identityA = await identityAResponse.json();
+    assert.match(identityA.provenance_reference,
+      /^identity-link-ref-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      'identity-link history references must have a server-owned opaque UUID form');
+    assert.notEqual(identityA.provenance_reference, 'scope-a-provider-subject',
+      'history provenance references must not reuse client or provider identity values');
+    assert.notEqual(identityA.provenance_reference, 'caller-selected-provider-subject',
+      'the identity API must ignore caller attempts to choose its history reference');
+    await assert.rejects(
+      () => pool.query(`update identity_provider_links set provenance_reference=$2 where id=$1`,
+        [identityA.id, `identity-link-ref-${randomUUID()}`]),
+      error => error.code === '23514',
+      'the database must reject mutation of a link provenance reference',
+    );
+    const identityAUpdateResponse = await postScopedJson('/api/integrations/identity-links', token, 'org-default', 'legal-default', {
+      employee_id: employeeA.id,
+      provider: 'entra',
+      provider_subject: 'scope-a-provider-subject-updated',
+      provider_upn: 'scope-a-provider-updated@example.test',
+      status: 'Linked',
+    });
+    assert.equal(identityAUpdateResponse.status, 200, 'same-scope identity-link updates must retain their existing upsert behavior');
+    const identityAUpdate = await identityAUpdateResponse.json();
+    assert.equal(identityAUpdate.id, identityA.id,
+      'a same-scope upsert without an optional source ID must preserve the existing business row ID');
+    assert.equal(identityAUpdate.provenance_reference, identityA.provenance_reference,
+      'identity provenance references must remain stable across updates');
     const identityBResponse = await postScopedJson('/api/integrations/identity-links', multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {
+      id: 'scope-b-provider@example.test',
       employee_id: 'employee-scope-beta',
       provider: 'entra',
       provider_subject: 'scope-b-provider-subject',
@@ -1389,6 +1431,66 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(identityBResponse.status, 200);
     const identityB = await identityBResponse.json();
+    assert.notEqual(identityB.provenance_reference, 'scope-b-provider@example.test',
+      'history provenance references must not reuse provider UPN values');
+    assert.notEqual(identityB.provenance_reference, identityA.provenance_reference,
+      'server-owned identity-link provenance references must be unique across links');
+    await assert.rejects(
+      () => pool.query(`insert into identity_provider_links
+          (id,employee_id,provider,provider_subject,status,provenance_reference)
+        values ('duplicate-provenance-row',$1,'local','duplicate-provenance-subject','Linked',$2)`,
+      [employeeA.id, identityA.provenance_reference]),
+      error => error.code === '23505',
+      'the database must reject a duplicate identity-link provenance reference',
+    );
+
+    const identityAuditProvenance = await pool.query(`select action,source,entity_id,source_identifier,import_batch_id,
+        import_processing_result,correlation_id,operation_id,old_value,new_value
+      from audit_logs where entity_id=$1 and action in ('Create Identity Link','Update Identity Link') order by created_at`, [identityA.provenance_reference]);
+    assert.equal(identityAuditProvenance.rowCount, 2, 'identity-link create and update must each retain an audit provenance record');
+    assert(identityAuditProvenance.rows.every(row => row.source === 'Entra'
+      && row.source_identifier === identityA.provenance_reference
+      && row.entity_id === identityA.provenance_reference
+      && row.import_batch_id === null
+      && row.import_processing_result === 'Success'
+      && row.correlation_id && row.operation_id),
+    'identity provenance must identify the provider, safe internal link ID, successful result and request trace without inventing a batch');
+    const identityUpdateAudit = identityAuditProvenance.rows.find(row => row.action === 'Update Identity Link');
+    assert.equal(identityUpdateAudit.new_value.mutation, 'Updated');
+    assert.equal(identityUpdateAudit.new_value.providerIdentifierChanged, true,
+      'identity audit history must record a provider identifier change without storing its value');
+    assert.equal(identityUpdateAudit.new_value.providerAccountChanged, true,
+      'identity audit history must record an account-address change without storing its value');
+    const identityCreateAudit = identityAuditProvenance.rows.find(row => row.action === 'Create Identity Link');
+    assert.equal(identityCreateAudit.source_identifier, identityA.provenance_reference);
+    assert.equal(identityCreateAudit.new_value.mutation, 'Created');
+    assert.equal(identityCreateAudit.new_value.providerAccountChanged, false,
+      'identity audit history must not claim an account-address change when the optional UPN is absent');
+    assert(!JSON.stringify(identityAuditProvenance.rows).includes('scope-a-provider-subject')
+      && !JSON.stringify(identityAuditProvenance.rows).includes('scope-a-provider@example.test')
+      && !JSON.stringify(identityAuditProvenance.rows).includes('scope-a-provider-updated@example.test'),
+    'audit provenance must not copy external identity identifiers or UPNs into history');
+    const identityUpsertEvents = await pool.query(`select provider,event_type,entity_id,status,request_payload,response_payload
+      from integration_event_logs where event_type='IdentityLinkUpserted' and entity_id=$1 order by created_at`, [identityA.provenance_reference]);
+    assert.equal(identityUpsertEvents.rowCount, 2, 'identity-link create and update must each retain an integration result event');
+    assert(identityUpsertEvents.rows.every(row => row.provider === 'entra' && row.status === 'Success'
+      && row.entity_id === identityA.provenance_reference
+      && row.response_payload.provenanceReference === identityA.provenance_reference
+      && row.response_payload.status === 'Linked'), 'identity event provenance must retain source and processing result');
+    const identityUpdateEvent = identityUpsertEvents.rows.find(row => row.response_payload.mutation === 'Updated');
+    assert.ok(identityUpdateEvent, 'integration provenance must distinguish the identity-link update');
+    assert.equal(identityUpdateEvent.response_payload.providerIdentifierChanged, true,
+      'identity updates must record that the external provider identifier changed without storing its value');
+    assert.equal(identityUpdateEvent.response_payload.providerAccountChanged, true,
+      'identity updates must record that the external account address changed without storing its value');
+    const identityCreateEvent = identityUpsertEvents.rows.find(row => row.response_payload.mutation === 'Created');
+    assert.ok(identityCreateEvent);
+    assert.equal(identityCreateEvent.response_payload.providerAccountChanged, false,
+      'identity event provenance must not imply an account address changed when the optional UPN is absent');
+    assert(!JSON.stringify(identityUpsertEvents.rows).includes('scope-a-provider-subject')
+      && !JSON.stringify(identityUpsertEvents.rows).includes('scope-a-provider@example.test')
+      && !JSON.stringify(identityUpsertEvents.rows).includes('scope-a-provider-updated@example.test'),
+    'integration provenance payloads must not duplicate external identifiers already held in the protected identity-link row');
 
     const teamsAResponse = await postScopedJson('/api/integrations/teams-user-links', token, 'org-default', 'legal-default', {
       employee_id: employeeA.id,
@@ -1481,8 +1583,16 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'general audit DTOs must redact nested identity subjects as well as top-level values');
     assert.equal(scopedMarkerA.new_value.nested.upn, undefined,
       'general audit DTOs must redact nested UPNs');
-    const identityAuditA = auditRowsA.find(row => row.entity_id === identityA.id);
+    const identityAuditA = auditRowsA.find(row => row.entity_id === identityA.provenance_reference && row.action === 'Create Identity Link');
     assert.ok(identityAuditA, 'the scoped identity mutation must remain auditable inside its scope');
+    assert.equal(identityAuditA.source, 'Entra');
+    assert.equal(identityAuditA.source_identifier, identityA.provenance_reference);
+    assert.equal(identityAuditA.entity_id, identityA.provenance_reference);
+    assert.equal(identityAuditA.import_batch_id, null);
+    assert.equal(identityAuditA.import_processing_result, 'Success');
+    const identityAuditAUpdate = auditRowsA.find(row => row.entity_id === identityA.provenance_reference && row.action === 'Update Identity Link');
+    assert.ok(identityAuditAUpdate, 'the identity update must remain auditable under its stable provenance reference');
+    assert.equal(identityAuditAUpdate.source_identifier, identityA.provenance_reference);
     assert.equal(identityAuditA.new_value.provider_subject, undefined, 'audit DTOs must redact identity provider subjects');
     assert.equal(identityAuditA.new_value.provider_upn, undefined, 'audit DTOs must redact identity provider UPNs');
     assert.equal(identityAuditA.new_value.status, 'Linked');
@@ -1515,23 +1625,25 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
 
     const eventReadA = await getScoped('/api/integrations/events', token, 'org-default', 'legal-default');
     const eventRowsA = await eventReadA.json();
-    assert(eventRowsA.some(row => row.id === `integration-event-${identityA.id}` || row.entity_id === identityA.id),
+    assert(eventRowsA.some(row => row.id === `integration-event-${identityA.provenance_reference}` || row.entity_id === identityA.provenance_reference),
       'identity integration events must remain available in the selected scope');
     assert(eventRowsA.some(row => row.id === 'scope-a-failure'));
     assert(!eventRowsA.some(row => row.id === 'scope-b-failure' || row.id === 'legacy-null-scope-event'));
     assert(eventRowsA.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
     assert(!JSON.stringify(eventRowsA).includes('scope-a-provider-subject'));
     assert(!JSON.stringify(eventRowsA).includes('scope-a-provider@example.test'));
+    assert(!JSON.stringify(eventRowsA).includes('scope-a-provider-updated@example.test'));
     assert(!JSON.stringify(eventRowsA).includes(actionA.action_url),
       'integration history must not expose bearer action URLs recorded at token creation');
     const eventReadB = await getScoped('/api/integrations/events', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
     const eventRowsB = await eventReadB.json();
     assert(eventRowsB.some(row => row.id === 'scope-b-failure'));
-    assert(eventRowsB.some(row => row.entity_id === identityB.id), 'scope B identity events must remain available within scope B');
+    assert(eventRowsB.some(row => row.entity_id === identityB.provenance_reference), 'scope B identity events must remain available within scope B');
     assert(!eventRowsB.some(row => row.id === 'scope-a-failure' || row.id === 'legacy-null-scope-event'));
     assert(eventRowsB.every(row => row.organization_id === 'org-scope-beta' && row.legal_entity_id === 'legal-scope-beta'));
     assert(!JSON.stringify(eventRowsB).includes('scope-b-provider-subject'));
     assert(!JSON.stringify(eventRowsB).includes('scope-b-provider@example.test'));
+    assert(!JSON.stringify(eventRowsB).includes('scope-b-provider-updated@example.test'));
     assert(!JSON.stringify(eventRowsB).includes(actionB.action_url),
       'integration history must not expose bearer action URLs for another action in this scope');
 
@@ -1636,7 +1748,7 @@ await withDisposableDatabase(async (pool) => {
     const baselineSql = await readFile(join(serverDir, 'schema.sql'), 'utf8');
     await client.query(baselineSql);
     await client.query('insert into schema_migrations (id) values ($1)', [manifest[0].id]);
-    for (const migration of manifest.slice(1, -3)) {
+    for (const migration of manifest.slice(1, -4)) {
       const sql = await readFile(join(serverDir, 'migrations', migration.file), 'utf8');
       await client.query(sql);
       await client.query('insert into schema_migrations (id) values ($1)', [migration.id]);
@@ -1649,6 +1761,14 @@ await withDisposableDatabase(async (pool) => {
       values ('legacy-scope-event','test','LegacyEvent','LegacyEntity','legacy-entity','Success','{"retained":"unchanged"}'::jsonb)`);
     await client.query(`insert into teams_action_tokens (token,entity_type,entity_id,action,expires_at)
       values ('legacy-scope-token','PortalLink','legacy-portal','open_portal',now()+interval '1 hour')`);
+    await client.query(`insert into country_directors (id,name,region)
+      values ('legacy-link-director','Legacy link director','Legacy region')`);
+    await client.query(`insert into employees (id,employee_id,name,email,designation,department,country,
+        primary_country_director_id,status,organization_id,legal_entity_id)
+      values ('legacy-link-employee','LEGACY-LINK-EMP','Legacy link employee','legacy-link@example.test',
+        'Consultant','Legacy','US','legacy-link-director','Active','org-default','legal-default')`);
+    await client.query(`insert into identity_provider_links (id,employee_id,provider,provider_subject,provider_upn,status)
+      values ('legacy-link-id','legacy-link-employee','entra','legacy-provider-subject','legacy-provider@example.test','Linked')`);
     await client.query('commit');
   } catch (error) {
     await client.query('rollback').catch(() => {});
@@ -1660,27 +1780,41 @@ await withDisposableDatabase(async (pool) => {
   const before = await pool.query('select count(*)::int as count from schema_migrations');
   const upgrade = await runMigrations({pool, rootDir: serverDir, logger: quietLogger});
   const after = await pool.query('select count(*)::int as count from schema_migrations');
-  const candidateMigrations = manifest.slice(-3);
+  const candidateMigrations = manifest.slice(-4);
   assert.deepEqual(candidateMigrations.map(item => item.id), [
     '033_wos03_audit_operation_context',
     '034_wos03_employee_import_provenance',
     '035_wos03_scoped_history',
-  ], 'PR-006 adds ordered request, import provenance, and history-scope migrations');
+    '036_wos03_identity_link_provenance_reference',
+  ], 'PR-006 adds ordered request, import provenance, scoped history and identity-link provenance migrations');
   assert.deepEqual(upgrade.applied, candidateMigrations.map(item => item.id),
     'upgrade from merged main applies all additive PR-006 migrations');
-  assert.equal(upgrade.skipped.length, manifest.length - 3);
-  assert.equal(after.rows[0].count, before.rows[0].count + 3, 'upgrade appends all three migration ledger rows');
+  assert.equal(upgrade.skipped.length, manifest.length - 4);
+  assert.equal(after.rows[0].count, before.rows[0].count + 4, 'upgrade appends all four migration ledger rows');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
-  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -3).map(item => item.id),
+  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -4).map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 3, 'all PR-006 migrations are ledgered');
+  assert.equal(newMigrations.length, 4, 'all PR-006 migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),
     'upgrade must not invent historical checksums');
+  const upgradedIdentityLink = await pool.query(`select id,provider_subject,provider_upn,provenance_reference
+    from identity_provider_links where id='legacy-link-id'`);
+  assert.equal(upgradedIdentityLink.rowCount, 1, 'the identity-link upgrade fixture remains present');
+  assert.equal(upgradedIdentityLink.rows[0].id, 'legacy-link-id');
+  assert.equal(upgradedIdentityLink.rows[0].provider_subject, 'legacy-provider-subject',
+    'the provenance migration must not rewrite existing external subjects');
+  assert.equal(upgradedIdentityLink.rows[0].provider_upn, 'legacy-provider@example.test',
+    'the provenance migration must not rewrite existing external account addresses');
+  assert.match(upgradedIdentityLink.rows[0].provenance_reference,
+    /^identity-link-ref-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    'the upgrade must backfill a random opaque reference independently of provider identity values');
+  assert(!upgradedIdentityLink.rows[0].provenance_reference.includes('legacy-provider-subject')
+    && !upgradedIdentityLink.rows[0].provenance_reference.includes('legacy-provider@example.test'));
   const legacyAudit = await pool.query(`select correlation_id,operation_id,import_batch_id,source_identifier,import_processing_result,organization_id,legal_entity_id from audit_logs
     where user_id='legacy-actor' and action='Before request IDs'`);
   assert.equal(legacyAudit.rowCount, 1);
