@@ -16,6 +16,7 @@ import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/e
 import {createIdentityAccessMiddleware, readCookie} from './modules/identity-access/middleware.mjs';
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
+import {redactAuditHistoryRows, redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
@@ -266,6 +267,19 @@ const run = async (res, query, params = []) => {
   try {
     const result = await pool.query(query, params);
     res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Database operation failed' });
+  }
+};
+
+const runScopedHistory = async (req, res, query, viewRows = rows => rows) => {
+  try {
+    const result = await pool.query(query, [
+      req.organizationScope.organizationId,
+      req.organizationScope.legalEntityId,
+    ]);
+    res.json(viewRows(result.rows));
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Database operation failed' });
@@ -796,7 +810,8 @@ const verifyEntraIdToken = async (idToken, { nonce, config }) => {
 
 const userAuthSelect = `
   select u.id, u.username, u.employee_id, u.email, u.must_change_password, u.status,
-    e.id as employee_record_id, e.name, cd.id as country_director_id,
+    e.id as employee_record_id, e.organization_id as employee_organization_id,
+    e.legal_entity_id as employee_legal_entity_id, e.name, cd.id as country_director_id,
     coalesce(json_agg(distinct r.name) filter (where r.name is not null), '[]') as roles
   from users u
   left join employees e on e.id = u.employee_record_id
@@ -813,7 +828,7 @@ const fetchUserAuthRowByWhere = async (clientOrPool, whereSql, params) => {
   const result = await clientOrPool.query(`
     ${userAuthSelect}
     ${whereSql}
-    group by u.id, e.id, e.name, cd.id
+    group by u.id, e.id, e.organization_id, e.legal_entity_id, e.name, cd.id
     limit 1
   `, params);
   return result.rows[0] || null;
@@ -1052,6 +1067,7 @@ const sendNotification = async (client, req, {
           entityId: entityId || event.id,
           status: 'Success',
           responsePayload: metadata,
+          organizationScope: req?.organizationScope,
         });
       }
     } catch (error) {
@@ -1070,6 +1086,7 @@ const sendNotification = async (client, req, {
         entityId: entityId || event.id,
         status: 'Failed',
         responsePayload: { error: error.message },
+        organizationScope: req?.organizationScope,
       });
     }
   }
@@ -1189,6 +1206,10 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
       res.redirect('/login?error=entra_unlinked_user');
       return;
     }
+    const loginScope = user.employee_organization_id && user.employee_legal_entity_id
+      ? { organizationId: user.employee_organization_id, legalEntityId: user.employee_legal_entity_id }
+      : null;
+    req.organizationScope = loginScope;
     if (providerSubject && user.employee_record_id) {
       await client.query(`
         insert into identity_provider_links (id, employee_id, provider, provider_subject, provider_upn, status)
@@ -1216,6 +1237,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
         groupCount: Array.isArray(claims.groups) ? claims.groups.length : 0,
         groupOverage: Boolean(claims._claim_names?.groups),
       },
+      organizationScope: loginScope,
     });
     req.user = { sub: user.id, username: user.username, activeRole: session.activeRole };
     await audit(client, req, {
@@ -4389,12 +4411,18 @@ const logIntegrationEvent = async (client, {
   status = 'Success',
   requestPayload = null,
   responsePayload = null,
+  organizationScope = null,
 }) => {
   const result = await client.query(`
-    insert into integration_event_logs (provider, event_type, entity_type, entity_id, status, request_payload, response_payload)
-    values ($1,$2,$3,$4,$5,$6,$7)
+    insert into integration_event_logs (provider, event_type, entity_type, entity_id, status, request_payload, response_payload, organization_id, legal_entity_id)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     returning *
-  `, [provider, eventType, entityType, entityId, status, requestPayload ? JSON.stringify(requestPayload) : null, responsePayload ? JSON.stringify(responsePayload) : null]);
+  `, [provider, eventType, entityType, entityId, status,
+    requestPayload ? JSON.stringify(requestPayload) : null,
+    responsePayload ? JSON.stringify(responsePayload) : null,
+    organizationScope?.organizationId || null,
+    organizationScope?.legalEntityId || null,
+  ]);
   return result.rows[0];
 };
 
@@ -4518,6 +4546,7 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
       entityType: 'IdentityProviderLink',
       entityId: result.rows[0].id,
       responsePayload: result.rows[0],
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4577,6 +4606,7 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
       entityType: 'EntraRoleMapping',
       entityId: result.rows[0].id,
       responsePayload: result.rows[0],
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4599,13 +4629,14 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
   }
 });
 
-app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), (_req, res) => {
+app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), (req, res) => {
   run(res, `
     select tul.*, e.name as employee_name
     from teams_user_links tul
     join employees e on e.id = tul.employee_id
+    where e.organization_id=$1 and e.legal_entity_id=$2
     order by e.name
-  `);
+  `, [req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
 });
 
 app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), async (req, res) => {
@@ -4625,7 +4656,22 @@ app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, req
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from teams_user_links where employee_id = $1', [parsed.data.employee_id])).rows[0];
+    const employee = (await client.query(`
+      select id from employees
+      where id=$1 and organization_id=$2 and legal_entity_id=$3
+      for update
+    `, [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
+    if (!employee) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Employee not found' });
+      return;
+    }
+    const previous = (await client.query(`
+      select tul.* from teams_user_links tul
+      join employees e on e.id=tul.employee_id
+      where tul.employee_id=$1 and e.organization_id=$2 and e.legal_entity_id=$3
+      for update
+    `, [employee.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     const result = await client.query(`
       insert into teams_user_links (id, employee_id, teams_user_id, teams_upn, teams_tenant_id, status)
       values (coalesce($1, 'teams-link-' || gen_random_uuid()::text), $2, $3, $4, $5, $6)
@@ -4636,14 +4682,18 @@ app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, req
         status = excluded.status,
         updated_at = now()
       returning *
-    `, [parsed.data.id || null, parsed.data.employee_id, parsed.data.teams_user_id, parsed.data.teams_upn || null, parsed.data.teams_tenant_id || null, parsed.data.status]);
-    await client.query('update employees set teams_user_id = $2, updated_at = now() where id = $1', [parsed.data.employee_id, parsed.data.teams_user_id]);
+    `, [parsed.data.id || null, employee.id, parsed.data.teams_user_id, parsed.data.teams_upn || null, parsed.data.teams_tenant_id || null, parsed.data.status]);
+    await client.query(`
+      update employees set teams_user_id=$2, updated_at=now()
+      where id=$1 and organization_id=$3 and legal_entity_id=$4
+    `, [employee.id, parsed.data.teams_user_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     await logIntegrationEvent(client, {
       provider: 'teams',
       eventType: 'TeamsUserLinkUpserted',
       entityType: 'TeamsUserLink',
       entityId: result.rows[0].id,
       responsePayload: result.rows[0],
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4690,10 +4740,12 @@ app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, 
     }
     const token = crypto.randomUUID();
     const result = await client.query(`
-      insert into teams_action_tokens (token, entity_type, entity_id, action, target_url, expires_at, created_by)
-      values ($1,$2,$3,$4,$5,$6,$7)
+      insert into teams_action_tokens (token, entity_type, entity_id, action, target_url, expires_at, created_by, organization_id, legal_entity_id)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       returning *
-    `, [token, parsed.data.entity_type, parsed.data.entity_id, parsed.data.action, parsed.data.target_url || null, parsed.data.expires_at, req.user.sub]);
+    `, [token, parsed.data.entity_type, parsed.data.entity_id, parsed.data.action,
+      parsed.data.target_url || null, parsed.data.expires_at, req.user.sub,
+      req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     const responseToken = { ...result.rows[0], action_url: buildTeamsActionUrl(token) };
     await logIntegrationEvent(client, {
       provider: 'teams',
@@ -4701,6 +4753,7 @@ app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, 
       entityType: parsed.data.entity_type,
       entityId: parsed.data.entity_id,
       responsePayload: { action: parsed.data.action, actionUrl: responseToken.action_url, deterministic: true },
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4735,6 +4788,13 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
     const lookup = await client.query('select * from teams_action_tokens where token = $1 for update', [req.params.token]);
     const actionToken = lookup.rows[0];
     if (!actionToken) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Teams action token not found' });
+      return;
+    }
+    if (!actionToken.organization_id || !actionToken.legal_entity_id
+      || actionToken.organization_id !== req.organizationScope?.organizationId
+      || actionToken.legal_entity_id !== req.organizationScope?.legalEntityId) {
       await client.query('rollback');
       res.status(404).json({ error: 'Teams action token not found' });
       return;
@@ -4777,6 +4837,7 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
       entityId: actionToken.entity_id,
       requestPayload: { action: actionToken.action },
       responsePayload: { deterministic: true },
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4814,6 +4875,13 @@ app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, r
     await client.query('begin');
     const actionToken = (await client.query('select * from teams_action_tokens where token = $1', [req.params.token])).rows[0];
     if (!actionToken) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Teams action token not found' });
+      return;
+    }
+    if (!actionToken.organization_id || !actionToken.legal_entity_id
+      || actionToken.organization_id !== req.organizationScope?.organizationId
+      || actionToken.legal_entity_id !== req.organizationScope?.legalEntityId) {
       await client.query('rollback');
       res.status(404).json({ error: 'Teams action token not found' });
       return;
@@ -4866,6 +4934,7 @@ app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, r
       entityId: actionToken.entity_id,
       requestPayload: { recipientEmployeeId: recipient.id, action: actionToken.action },
       responsePayload: { notificationId: event.id, actionUrl },
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4887,11 +4956,15 @@ app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, r
   }
 });
 
-app.get('/api/integrations/events', requireDatabase, requireAuth, requirePermission('integrations.identity'), (_req, res) => {
-  run(res, 'select * from integration_event_logs order by created_at desc limit 300');
+app.get('/api/integrations/events', requireDatabase, requireAuth, requirePermission('integrations.identity'), (req, res) => {
+  runScopedHistory(req, res,
+    `select * from integration_event_logs
+     where organization_id=$1 and legal_entity_id=$2
+     order by created_at desc limit 300`,
+    redactIntegrationHistoryRows);
 });
 
-app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermission('integrations.identity'), async (_req, res) => {
+app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermission('integrations.identity'), async (req, res) => {
   try {
     const graphReady = Boolean((process.env.GRAPH_TENANT_ID || process.env.ENTRA_TENANT_ID || process.env.TEAMS_TENANT_ID)
       && (process.env.GRAPH_CLIENT_ID || process.env.ENTRA_CLIENT_ID)
@@ -4902,21 +4975,38 @@ app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermiss
       || (graphReady && Boolean(process.env.TEAMS_APP_ID));
     const result = await pool.query(`
       with active_employees as (
-        select id from employees where status = 'Active'
+        select id from employees
+        where status = 'Active' and organization_id=$4 and legal_entity_id=$5
       )
       select
         $1::text as identity_provider,
         $2::text as teams_provider,
         $3::text as email_provider,
-        (select count(distinct employee_id)::int from identity_provider_links where status = 'Linked') as linked_identity_count,
-        (select count(distinct employee_id)::int from teams_user_links where status = 'Linked') as linked_teams_count,
+        (select count(distinct ipl.employee_id)::int
+         from identity_provider_links ipl join employees e on e.id=ipl.employee_id
+         where ipl.status = 'Linked' and e.organization_id=$4 and e.legal_entity_id=$5) as linked_identity_count,
+        (select count(distinct tul.employee_id)::int
+         from teams_user_links tul join employees e on e.id=tul.employee_id
+         where tul.status = 'Linked' and e.organization_id=$4 and e.legal_entity_id=$5) as linked_teams_count,
         (select count(*)::int from entra_group_role_mappings where active = true) as active_role_mappings,
-        (select count(*)::int from teams_action_tokens where used_at is null and expires_at > now()) as open_action_tokens,
-        (select count(*)::int from integration_event_logs where status = 'Failed') as recent_failures,
-        (select count(*)::int from active_employees ae where not exists (select 1 from identity_provider_links ipl where ipl.employee_id = ae.id and ipl.status = 'Linked')) as missing_identity_links,
-        (select count(*)::int from active_employees ae where not exists (select 1 from teams_user_links tul where tul.employee_id = ae.id and tul.status = 'Linked')) as missing_teams_links
-    `, [process.env.IDENTITY_PROVIDER || 'local', process.env.TEAMS_PROVIDER || 'mock', process.env.EMAIL_PROVIDER || 'mock']);
-    const events = await pool.query('select * from integration_event_logs order by created_at desc limit 25');
+        (select count(*)::int from teams_action_tokens
+         where used_at is null and expires_at > now()
+           and organization_id=$4 and legal_entity_id=$5) as open_action_tokens,
+        (select count(*)::int from integration_event_logs
+         where status = 'Failed' and organization_id=$4 and legal_entity_id=$5) as recent_failures,
+        (select count(*)::int from active_employees ae where not exists (
+          select 1 from identity_provider_links ipl where ipl.employee_id = ae.id and ipl.status = 'Linked'
+        )) as missing_identity_links,
+        (select count(*)::int from active_employees ae where not exists (
+          select 1 from teams_user_links tul where tul.employee_id = ae.id and tul.status = 'Linked'
+        )) as missing_teams_links
+    `, [process.env.IDENTITY_PROVIDER || 'local', process.env.TEAMS_PROVIDER || 'mock',
+      process.env.EMAIL_PROVIDER || 'mock', req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
+    const events = await pool.query(`
+      select * from integration_event_logs
+      where organization_id=$1 and legal_entity_id=$2
+      order by created_at desc limit 25
+    `, [req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     const row = result.rows[0] || {};
     res.json({
       generatedAt: new Date().toISOString(),
@@ -4945,7 +5035,7 @@ app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermiss
       teamsCredentialReady: teamsReady,
       teamsActivityType: process.env.TEAMS_ACTIVITY_TYPE || 'systemDefault',
       credentialChecks: credentialChecks(),
-      events: events.rows,
+      events: redactIntegrationHistoryRows(events.rows),
     });
   } catch (error) {
     console.error(error);
@@ -5524,7 +5614,13 @@ app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePer
     client.release();
   }
 });
-app.get('/api/audit-logs', requireDatabase, requireAuth, requirePermission('audit.view'), (_req, res) => run(res, 'select * from audit_logs order by created_at desc limit 500'));
+app.get('/api/audit-logs', requireDatabase, requireAuth, requirePermission('audit.view'), (req, res) => {
+  runScopedHistory(req, res,
+    `select * from audit_logs
+     where organization_id=$1 and legal_entity_id=$2
+     order by created_at desc limit 500`,
+    redactAuditHistoryRows);
+});
 
 app.post('/api/audit-events', requireDatabase, requireAuth, async (req, res) => {
   const schema = z.object({
@@ -6163,7 +6259,12 @@ app.get('/api/reports/dashboard', requireDatabase, requireAuth, requirePermissio
   }
 });
 
-app.get('/api/import-export-logs', requireDatabase, requireAuth, requirePermission('employees.manage'), (_req, res) => run(res, 'select * from import_export_logs order by created_at desc limit 100'));
+app.get('/api/import-export-logs', requireDatabase, requireAuth, requirePermission('employees.manage'), (req, res) => {
+  runScopedHistory(req, res,
+    `select * from import_export_logs
+     where organization_id=$1 and legal_entity_id=$2
+     order by created_at desc limit 100`);
+});
 app.post('/api/import-export-logs', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
   const schema = z.object({
     operation: z.enum(['Import', 'Export']),
@@ -6185,8 +6286,8 @@ app.post('/api/import-export-logs', requireDatabase, requireAuth, requirePermiss
     return;
   }
   await run(res, `
-    insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     returning *
   `, [
     parsed.data.operation,
@@ -6198,6 +6299,8 @@ app.post('/api/import-export-logs', requireDatabase, requireAuth, requirePermiss
     parsed.data.errorRows,
     parsed.data.errors ? JSON.stringify(parsed.data.errors) : null,
     req.user.username,
+    req.organizationScope.organizationId,
+    req.organizationScope.legalEntityId,
   ]);
 });
 
@@ -6508,8 +6611,8 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
 
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ($1,'Import','Employee Master',$2,$3,$4,$5,$6,$7,$8)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
+      values ($1,'Import','Employee Master',$2,$3,$4,$5,$6,$7,$8,$9,$10)
       returning *
     `, [
       importBatchId,
@@ -6520,6 +6623,8 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
       errors.length,
       errors.length ? JSON.stringify(errors) : null,
       req.user.username,
+      req.organizationScope.organizationId,
+      req.organizationScope.legalEntityId,
     ]);
     await client.query('commit');
     res.json({
@@ -6672,8 +6777,8 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
 
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ($1,'Import','Client Master',$2,$3,$4,$5,$6,$7,$8)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
+      values ($1,'Import','Client Master',$2,$3,$4,$5,$6,$7,$8,$9,$10)
       returning *
     `, [
       importBatchId,
@@ -6684,6 +6789,8 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       errors.length,
       errors.length ? JSON.stringify(errors) : null,
       req.user.username,
+      req.organizationScope.organizationId,
+      req.organizationScope.legalEntityId,
     ]);
     await client.query('commit');
     res.json({
@@ -6847,8 +6954,8 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
 
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ($1,'Import','Project Master',$2,$3,$4,$5,$6,$7,$8)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
+      values ($1,'Import','Project Master',$2,$3,$4,$5,$6,$7,$8,$9,$10)
       returning *
     `, [
       importBatchId,
@@ -6859,6 +6966,8 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
       errors.length,
       errors.length ? JSON.stringify(errors) : null,
       req.user.username,
+      req.organizationScope.organizationId,
+      req.organizationScope.legalEntityId,
     ]);
     await client.query('commit');
     res.json({
@@ -7032,8 +7141,8 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
 
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ($1,'Import','Allocation Control',$2,$3,$4,$5,$6,$7,$8)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
+      values ($1,'Import','Allocation Control',$2,$3,$4,$5,$6,$7,$8,$9,$10)
       returning *
     `, [
       importBatchId,
@@ -7044,6 +7153,8 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
       errors.length,
       errors.length ? JSON.stringify(errors) : null,
       req.user.username,
+      req.organizationScope.organizationId,
+      req.organizationScope.legalEntityId,
     ]);
     await client.query('commit');
     res.json({
@@ -7264,8 +7375,8 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
 
     const status = validEntryRows === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
+      values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8,$9,$10)
       returning *
     `, [
       importBatchId,
@@ -7276,6 +7387,8 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
       errors.length,
       errors.length ? JSON.stringify(errors) : null,
       req.user.username,
+      req.organizationScope.organizationId,
+      req.organizationScope.legalEntityId,
     ]);
     await client.query('commit');
     res.json({

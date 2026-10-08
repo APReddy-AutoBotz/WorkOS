@@ -124,12 +124,13 @@ const withImportApi = async (databaseUrl, actorId, test) => {
   child.stdout.on('data', collectOutput);
   child.stderr.on('data', collectOutput);
   const baseUrl = `http://127.0.0.1:${port}`;
-  const token = signTestSession({
-    sub: actorId,
-    username: 'synthetic-import-admin',
+  const tokenFor = (userId, username = `synthetic-scope-${userId}`) => signTestSession({
+    sub: userId,
+    username,
     activeRole: 'Admin',
-    exp: Date.now() + 60_000,
+    exp: Date.now() + 15 * 60_000,
   }, secret);
+  const token = tokenFor(actorId, 'synthetic-import-admin');
 
   try {
     const deadline = Date.now() + 10_000;
@@ -150,7 +151,7 @@ const withImportApi = async (databaseUrl, actorId, test) => {
       await delay(100);
     }
     assert.equal(ready, true, `import API must start for its PostgreSQL contract test: ${output}`);
-    await test({baseUrl, token});
+    await test({baseUrl, token, tokenFor});
   } finally {
     await stopChild(child);
   }
@@ -186,10 +187,24 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
   assert.equal(checkedOutClients, 0, 'the migration runner releases its checked-out client');
   const auditColumns = await pool.query(`select column_name from information_schema.columns
     where table_schema='public' and table_name='audit_logs'
-      and column_name in ('correlation_id','operation_id','import_batch_id','source_identifier','import_processing_result')`);
+      and column_name in ('correlation_id','operation_id','import_batch_id','source_identifier','import_processing_result','organization_id','legal_entity_id')`);
   assert.deepEqual(auditColumns.rows.map(row => row.column_name).sort(), [
-    'correlation_id', 'import_batch_id', 'import_processing_result', 'operation_id', 'source_identifier',
-  ], 'fresh installs must include request trace and employee-import provenance fields');
+    'correlation_id', 'import_batch_id', 'import_processing_result', 'legal_entity_id', 'operation_id',
+    'organization_id', 'source_identifier',
+  ], 'fresh installs must include request trace, import provenance, and nullable audit scope fields');
+  const scopedHistoryColumns = await pool.query(`select table_name,column_name from information_schema.columns
+    where table_schema='public'
+      and table_name in ('import_export_logs','integration_event_logs','teams_action_tokens')
+      and column_name in ('organization_id','legal_entity_id')
+    order by table_name,column_name`);
+  assert.deepEqual(scopedHistoryColumns.rows, [
+    {table_name: 'import_export_logs', column_name: 'legal_entity_id'},
+    {table_name: 'import_export_logs', column_name: 'organization_id'},
+    {table_name: 'integration_event_logs', column_name: 'legal_entity_id'},
+    {table_name: 'integration_event_logs', column_name: 'organization_id'},
+    {table_name: 'teams_action_tokens', column_name: 'legal_entity_id'},
+    {table_name: 'teams_action_tokens', column_name: 'organization_id'},
+  ], 'fresh installs must scope histories and open action-token aggregates');
   const batchIndex = await pool.query(`select indexdef from pg_indexes
     where schemaname='public' and tablename='audit_logs' and indexname='audit_logs_import_batch_id_idx'`);
   assert.equal(batchIndex.rowCount, 1, 'fresh installs must index import-batch audit lookups');
@@ -197,6 +212,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     'the batch index must omit audit rows with no import provenance');
 
   const actorId = randomUUID();
+  const multiScopeActorId = randomUUID();
   await pool.query(`insert into roles(name) values ('Admin'),('Employee') on conflict (name) do nothing`);
   await pool.query(`insert into users (id,username,email,status)
     values ($1,'synthetic-import-admin','synthetic-import-admin@example.test','Active')`, [actorId]);
@@ -206,8 +222,41 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ($1,'imports.manage',$1,'Admin')`, [actorId]);
   await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
     values ($1,'org-default','legal-default',true) on conflict do nothing`, [actorId]);
+  await pool.query(`insert into organizations (id,code,name,effective_from)
+    values ('org-scope-beta','SCOPE-BETA','Synthetic Scope Beta',date '1970-01-01')`);
+  await pool.query(`insert into organization_profile_versions
+      (organization_id,name,legal_name,product_display_name,support_contact,default_locale,default_time_zone,
+       base_currency,fiscal_year_start,default_week_start,effective_from)
+    values ('org-scope-beta','Synthetic Scope Beta LLC','Synthetic Scope Beta LLC','Synthetic WorkOS',
+      'support@example.invalid','en-US','UTC','USD','01-01',1,date '1970-01-01')`);
+  await pool.query(`insert into legal_entities (id,organization_id,code,name,country_code,effective_from)
+    values ('legal-scope-beta','org-scope-beta','SCOPE-BETA','Synthetic Scope Beta Legal Entity','US',date '1970-01-01')`);
+  await pool.query(`insert into legal_entity_profile_versions
+      (legal_entity_id,organization_id,legal_name,reporting_currency,address,effective_from,country_code,status)
+    values ('legal-scope-beta','org-scope-beta','Synthetic Scope Beta Legal Entity LLC','USD',
+      jsonb_build_object('line1','Synthetic Test Address','city','Test City','countryCode','US'),
+      date '1970-01-01','US','Active')`);
+  await pool.query(`insert into users (id,username,email,status)
+    values ($1,'synthetic-multi-scope-admin','synthetic-multi-scope-admin@example.test','Active')`, [multiScopeActorId]);
+  await pool.query(`insert into user_roles (user_id,role_id)
+    select $1,id from roles where name='Admin'`, [multiScopeActorId]);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+    values ($1,'org-default','legal-default',true),($1,'org-scope-beta','legal-scope-beta',true)`, [multiScopeActorId]);
   await pool.query(`insert into country_directors (id,name,region)
     values ('cd-import-provenance-test','Synthetic Director','Synthetic') on conflict (id) do nothing`);
+  await pool.query(`insert into employees
+      (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+    values ('employee-scope-beta','EMP-SCOPE-BETA','Synthetic Beta Employee','beta-employee@example.test',
+      'Consultant','Engineering','US','cd-import-provenance-test','Active','org-scope-beta','legal-scope-beta')`);
+  await pool.query(`insert into audit_logs (user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,details)
+    values ('legacy-null-scope-actor','Legacy actor','Admin','Admin','Web','Legacy','Legacy Scope Row','Test','legacy-null-audit','historical row without scope')`);
+  await pool.query(`insert into import_export_logs (operation,channel,file_name,status,user_name)
+    values ('Import','Legacy','legacy-null-scope.csv','Success','Legacy actor')`);
+  await pool.query(`insert into integration_event_logs (id,provider,event_type,entity_type,entity_id,status,response_payload)
+    values ('legacy-null-scope-event','entra','LegacyScopeEvent','IdentityProviderLink','legacy-subject','Failed',
+      '{"provider_subject":"legacy-subject","provider_upn":"legacy@example.test"}'::jsonb)`);
+  await pool.query(`insert into teams_action_tokens (token,entity_type,entity_id,action,expires_at)
+    values ('legacy-null-scope-token','PortalLink','legacy-portal','open_portal',now()+interval '1 hour')`);
   await pool.query(`insert into reporting_periods
       (id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
     values
@@ -221,7 +270,13 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         'Synthetic Weekly Test Period 09',date '2026-02-22',date '2026-02-28','Open','Weekly')`);
 
   // Exercise the real route as a signed user with an explicit organization scope and imports.manage grant.
-  await withImportApi(databaseUrl, actorId, async ({baseUrl, token}) => {
+  await withImportApi(databaseUrl, actorId, async ({baseUrl, token, tokenFor}) => {
+    const scopedHeaders = (authToken, organizationId = 'org-default', legalEntityId = 'legal-default', extra = {}) => ({
+      Authorization: `Bearer ${authToken}`,
+      'X-Organization-ID': organizationId,
+      'X-Legal-Entity-ID': legalEntityId,
+      ...extra,
+    });
     const apply = body => fetch(`${baseUrl}/api/imports/employees/apply`, {
       method: 'POST',
       headers: {
@@ -308,12 +363,14 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       message: 'Primary country director is required.',
     }], 'the real employee apply route must preserve its existing row-error shape');
     const partialLog = (await pool.query(`select * from import_export_logs where id=$1`, [partialBody.log.id])).rows[0];
-    const partialAudit = await pool.query(`select source,source_identifier,import_batch_id,import_processing_result,details
+    const partialAudit = await pool.query(`select source,source_identifier,import_batch_id,import_processing_result,details,organization_id,legal_entity_id
       from audit_logs where import_batch_id=$1`, [partialBody.log.id]);
     assert.equal(partialLog.status, 'Partial');
     assert.equal(partialLog.total_rows, 2);
     assert.equal(partialLog.valid_rows, 1);
     assert.equal(partialLog.error_rows, 1);
+    assert.equal(partialLog.organization_id, 'org-default');
+    assert.equal(partialLog.legal_entity_id, 'legal-default');
     assert.equal(partialAudit.rowCount, 1, 'a partial batch must audit only the successful row');
     assert.deepEqual(partialAudit.rows[0], {
       source: 'Employee Master CSV',
@@ -321,6 +378,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       import_batch_id: partialBody.log.id,
       import_processing_result: 'Success',
       details: 'Created employee master record from CSV import',
+      organization_id: 'org-default',
+      legal_entity_id: 'legal-default',
     }, 'the persisted success audit must link source, identifier, result and batch');
     assert.doesNotMatch(partialAudit.rows[0].details, /EMP-IMPORT-SUCCESS|synthetic-partial\.csv/,
       'audit details must not duplicate row identifiers or expose uploaded file contents');
@@ -393,6 +452,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const clientPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [clientPartialBody.log.id])).rows[0];
     assert.equal(clientPartialLog.id, clientPartialBody.log.id, 'client batch history must return its persisted server batch ID');
     assert.equal(clientPartialLog.status, 'Partial');
+    assert.equal(clientPartialLog.organization_id, 'org-default');
+    assert.equal(clientPartialLog.legal_entity_id, 'legal-default');
     assert.equal(clientPartialLog.total_rows, 3);
     assert.equal(clientPartialLog.valid_rows, 2);
     assert.equal(clientPartialLog.error_rows, 1);
@@ -544,6 +605,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const projectPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [projectPartialBody.log.id])).rows[0];
     assert.equal(projectPartialLog.id, projectPartialBody.log.id, 'project batch history must return its persisted server batch ID');
     assert.equal(projectPartialLog.status, 'Partial');
+    assert.equal(projectPartialLog.organization_id, 'org-default');
+    assert.equal(projectPartialLog.legal_entity_id, 'legal-default');
     assert.equal(projectPartialLog.total_rows, 2);
     assert.equal(projectPartialLog.valid_rows, 1);
     assert.equal(projectPartialLog.error_rows, 1);
@@ -838,6 +901,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(allocationPartialLog.id, allocationPartialBody.log.id,
       'allocation batch history must return its persisted server batch ID');
     assert.equal(allocationPartialLog.status, 'Partial');
+    assert.equal(allocationPartialLog.organization_id, 'org-default');
+    assert.equal(allocationPartialLog.legal_entity_id, 'legal-default');
     assert.equal(allocationPartialLog.total_rows, 3);
     assert.equal(allocationPartialLog.valid_rows, 2);
     assert.equal(allocationPartialLog.error_rows, 1);
@@ -1062,6 +1127,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(timesheetPartialLog.id, timesheetPartialBody.log.id,
       'timesheet batch history must return its persisted server batch ID');
     assert.equal(timesheetPartialLog.status, 'Partial');
+    assert.equal(timesheetPartialLog.organization_id, 'org-default');
+    assert.equal(timesheetPartialLog.legal_entity_id, 'legal-default');
     assert.equal(timesheetPartialLog.total_rows, 4);
     assert.equal(timesheetPartialLog.valid_rows, 3,
       'the aggregate timesheet log must continue counting accepted input entries, not groups');
@@ -1249,6 +1316,275 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         (select count(*)::int from import_export_logs where file_name='synthetic-timesheet-rollback.csv') as batch_rows`);
     assert.deepEqual(timesheetRollbackRows.rows, [{timesheet_rows:0,entry_rows:0,audit_rows:0,batch_rows:0}],
       'a failed timesheet batch-log write must roll back the timesheet, entries and group audit');
+
+    const multiScopeToken = tokenFor(multiScopeActorId, 'synthetic-multi-scope-admin');
+    const postScopedJson = (path, authToken, organizationId, legalEntityId, body) => fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: scopedHeaders(authToken, organizationId, legalEntityId, {'Content-Type': 'application/json'}),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+    const getScoped = (path, authToken, organizationId, legalEntityId) => fetch(`${baseUrl}${path}`, {
+      headers: scopedHeaders(authToken, organizationId, legalEntityId),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    const auditAResponse = await postScopedJson('/api/audit-events', token, 'org-default', 'legal-default', {
+      action: 'Import',
+      module: 'Scoped History Test',
+      details: 'Synthetic scope A audit marker',
+      entityType: 'ScopedHistoryTest',
+      entityId: 'scope-a-audit',
+      newValue: {status: 'Linked', nested: {provider_subject: 'audit-subject-a', upn: 'audit-a@example.test'}},
+    });
+    assert.equal(auditAResponse.status, 201, 'scoped audit writes must retain the authenticated selected scope');
+    const auditBResponse = await postScopedJson('/api/audit-events', multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {
+      action: 'Import',
+      module: 'Scoped History Test',
+      details: 'Synthetic scope B audit marker',
+      entityType: 'ScopedHistoryTest',
+      entityId: 'scope-b-audit',
+      newValue: {status: 'Linked', provider_subject: 'audit-subject-b'},
+    });
+    assert.equal(auditBResponse.status, 201, 'a multi-scope Admin may select an explicitly authorized second scope');
+    const auditScopes = await pool.query(`select entity_id,organization_id,legal_entity_id from audit_logs
+      where entity_id in ('scope-a-audit','scope-b-audit') order by entity_id`);
+    assert.deepEqual(auditScopes.rows, [
+      {entity_id: 'scope-a-audit', organization_id: 'org-default', legal_entity_id: 'legal-default'},
+      {entity_id: 'scope-b-audit', organization_id: 'org-scope-beta', legal_entity_id: 'legal-scope-beta'},
+    ], 'the audit writer must persist the verified request scope rather than a client body value');
+
+    const importAResponse = await postScopedJson('/api/import-export-logs', token, 'org-default', 'legal-default', {
+      operation: 'Import', channel: 'Scoped Test', fileName: 'scope-a-history.csv', status: 'Success',
+      totalRows: 1, validRows: 1, errorRows: 0,
+      organizationId: 'org-scope-beta', legalEntityId: 'legal-scope-beta',
+    });
+    assert.equal(importAResponse.status, 200);
+    const importARows = await importAResponse.json();
+    assert.equal(importARows[0].organization_id, 'org-default');
+    assert.equal(importARows[0].legal_entity_id, 'legal-default', 'the import log route must ignore client scope fields');
+    const importBResponse = await postScopedJson('/api/import-export-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {
+      operation: 'Import', channel: 'Scoped Test', fileName: 'scope-b-history.csv', status: 'Success',
+      totalRows: 1, validRows: 1, errorRows: 0,
+    });
+    assert.equal(importBResponse.status, 200);
+
+    const employeeA = (await pool.query(`select id from employees where employee_id='EMP-IMPORT-SUCCESS'`)).rows[0];
+    assert.ok(employeeA, 'the default-scope identity link fixture exists');
+    const identityAResponse = await postScopedJson('/api/integrations/identity-links', token, 'org-default', 'legal-default', {
+      employee_id: employeeA.id,
+      provider: 'entra',
+      provider_subject: 'scope-a-provider-subject',
+      provider_upn: 'scope-a-provider@example.test',
+      status: 'Linked',
+    });
+    assert.equal(identityAResponse.status, 200, 'identity-link writes must remain available inside the selected scope');
+    const identityA = await identityAResponse.json();
+    const identityBResponse = await postScopedJson('/api/integrations/identity-links', multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {
+      employee_id: 'employee-scope-beta',
+      provider: 'entra',
+      provider_subject: 'scope-b-provider-subject',
+      provider_upn: 'scope-b-provider@example.test',
+      status: 'Linked',
+    });
+    assert.equal(identityBResponse.status, 200);
+    const identityB = await identityBResponse.json();
+
+    const teamsAResponse = await postScopedJson('/api/integrations/teams-user-links', token, 'org-default', 'legal-default', {
+      employee_id: employeeA.id,
+      teams_user_id: 'scope-a-teams-user',
+      teams_upn: 'scope-a-teams@example.test',
+      teams_tenant_id: 'scope-a-tenant',
+      status: 'Linked',
+    });
+    assert.equal(teamsAResponse.status, 200, 'Teams link writes must retain existing behavior inside scope');
+    const teamsBResponse = await postScopedJson('/api/integrations/teams-user-links', multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {
+      employee_id: 'employee-scope-beta',
+      teams_user_id: 'scope-b-teams-user',
+      teams_upn: 'scope-b-teams@example.test',
+      teams_tenant_id: 'scope-b-tenant',
+      status: 'Linked',
+    });
+    assert.equal(teamsBResponse.status, 200);
+    const teamsCrossScopeWrite = await postScopedJson('/api/integrations/teams-user-links', token, 'org-default', 'legal-default', {
+      employee_id: 'employee-scope-beta',
+      teams_user_id: 'unauthorized-teams-user',
+      status: 'Linked',
+    });
+    assert.equal(teamsCrossScopeWrite.status, 404,
+      'Teams integration writes must not associate an out-of-scope employee with the selected scope');
+
+    const actionExpiry = new Date(Date.now() + 15 * 60_000).toISOString();
+    const actionAResponse = await postScopedJson('/api/integrations/teams-action-tokens', token, 'org-default', 'legal-default', {
+      entity_type: 'PortalLink', entity_id: 'scope-a-portal', action: 'open_portal',
+      target_url: '/approvals', expires_at: actionExpiry,
+    });
+    assert.equal(actionAResponse.status, 200);
+    const actionA = await actionAResponse.json();
+    assert.ok(actionA.token);
+    assert.ok(actionA.action_url);
+    const actionBResponse = await postScopedJson('/api/integrations/teams-action-tokens', multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {
+      entity_type: 'PortalLink', entity_id: 'scope-b-portal', action: 'open_portal',
+      target_url: '/approvals', expires_at: actionExpiry,
+    });
+    assert.equal(actionBResponse.status, 200);
+    const actionB = await actionBResponse.json();
+    assert.ok(actionB.token);
+    assert.ok(actionB.action_url);
+
+    await pool.query(`insert into teams_action_tokens (token,entity_type,entity_id,action,expires_at)
+      values ('scope-legacy-null-token','PortalLink','legacy-null-portal','open_portal',now()+interval '15 minutes')`);
+    const beforeCrossScopeTokenActions = await pool.query(`select
+        (select count(*)::int from integration_event_logs where event_type in ('TeamsActionTokenExecuted','TeamsActionNotificationSent')) as events,
+        (select count(*)::int from audit_logs where action in ('Execute Teams Action Token','Send Teams Action Notification')) as audits,
+        (select count(*)::int from notification_events where event_type='TeamsAction') as notifications`);
+    for (const [candidate, label] of [
+      [actionA.token, 'scope A token used from scope B'],
+      ['scope-legacy-null-token', 'legacy null-scope token used from scope B'],
+    ]) {
+      const executeResponse = await postScopedJson(`/api/integrations/teams-action-tokens/${encodeURIComponent(candidate)}/execute`,
+        multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {comments: 'must not execute cross-scope'});
+      assert.equal(executeResponse.status, 404, `${label} must fail closed before execution`);
+      const sendResponse = await postScopedJson(`/api/integrations/teams-action-tokens/${encodeURIComponent(candidate)}/send`,
+        multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {recipient_employee_id: 'employee-scope-beta'});
+      assert.equal(sendResponse.status, 404, `${label} must fail closed before notification send`);
+    }
+    const afterCrossScopeTokenActions = await pool.query(`select
+        (select count(*)::int from integration_event_logs where event_type in ('TeamsActionTokenExecuted','TeamsActionNotificationSent')) as events,
+        (select count(*)::int from audit_logs where action in ('Execute Teams Action Token','Send Teams Action Notification')) as audits,
+        (select count(*)::int from notification_events where event_type='TeamsAction') as notifications`);
+    assert.deepEqual(afterCrossScopeTokenActions.rows, beforeCrossScopeTokenActions.rows,
+      'rejected cross-scope and legacy token attempts must not create event, audit, or notification side effects');
+    const rejectedTokenState = await pool.query(`select token,used_at from teams_action_tokens
+      where token in ($1,'scope-legacy-null-token') order by token`, [actionA.token]);
+    assert.deepEqual(rejectedTokenState.rows, [
+      {token: actionA.token, used_at: null},
+      {token: 'scope-legacy-null-token', used_at: null},
+    ], 'rejected cross-scope and legacy token attempts must leave tokens unused');
+
+    await pool.query(`insert into integration_event_logs
+        (id,provider,event_type,entity_type,entity_id,status,response_payload,organization_id,legal_entity_id)
+      values
+        ('scope-a-failure','test','ScopeAFailure','ScopedTest','scope-a','Failed','{"provider_subject":"failure-subject-a"}'::jsonb,'org-default','legal-default'),
+        ('scope-b-failure','test','ScopeBFailure','ScopedTest','scope-b','Failed','{"provider_subject":"failure-subject-b"}'::jsonb,'org-scope-beta','legal-scope-beta')`);
+
+    const auditReadA = await getScoped('/api/audit-logs', token, 'org-default', 'legal-default');
+    assert.equal(auditReadA.status, 200);
+    const auditRowsA = await auditReadA.json();
+    assert(auditRowsA.length > 0);
+    assert(auditRowsA.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'),
+      'Admin audit reads must be restricted to the exact selected organization and legal entity');
+    assert(!auditRowsA.some(row => row.entity_id === 'legacy-null-audit'), 'null-scope legacy audit rows must remain hidden');
+    assert(!auditRowsA.some(row => row.entity_id === 'scope-b-audit'), 'Admin must not bypass scope for the second organization');
+    const scopedMarkerA = auditRowsA.find(row => row.entity_id === 'scope-a-audit');
+    assert.equal(scopedMarkerA.new_value.nested.provider_subject, undefined,
+      'general audit DTOs must redact nested identity subjects as well as top-level values');
+    assert.equal(scopedMarkerA.new_value.nested.upn, undefined,
+      'general audit DTOs must redact nested UPNs');
+    const identityAuditA = auditRowsA.find(row => row.entity_id === identityA.id);
+    assert.ok(identityAuditA, 'the scoped identity mutation must remain auditable inside its scope');
+    assert.equal(identityAuditA.new_value.provider_subject, undefined, 'audit DTOs must redact identity provider subjects');
+    assert.equal(identityAuditA.new_value.provider_upn, undefined, 'audit DTOs must redact identity provider UPNs');
+    assert.equal(identityAuditA.new_value.status, 'Linked');
+
+    const auditReadB = await getScoped('/api/audit-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    assert.equal(auditReadB.status, 200);
+    const auditRowsB = await auditReadB.json();
+    assert(auditRowsB.some(row => row.entity_id === 'scope-b-audit'));
+    assert(!auditRowsB.some(row => row.entity_id === 'scope-a-audit'));
+    assert(!auditRowsB.some(row => row.entity_id === 'legacy-null-audit'));
+    assert(auditRowsB.every(row => row.organization_id === 'org-scope-beta' && row.legal_entity_id === 'legal-scope-beta'));
+    const ambiguousMultiScopeRead = await fetch(`${baseUrl}/api/audit-logs`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ambiguousMultiScopeRead.status, 403,
+      'multi-scope Admin must select one authorized scope instead of receiving a global audit aggregation');
+
+    const importReadA = await getScoped('/api/import-export-logs', token, 'org-default', 'legal-default');
+    const importRowsA = await importReadA.json();
+    assert(importRowsA.some(row => row.file_name === 'scope-a-history.csv'));
+    assert(!importRowsA.some(row => row.file_name === 'scope-b-history.csv'));
+    assert(!importRowsA.some(row => row.file_name === 'legacy-null-scope.csv'));
+    assert(importRowsA.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
+    const importReadB = await getScoped('/api/import-export-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    const importRowsB = await importReadB.json();
+    assert(importRowsB.some(row => row.file_name === 'scope-b-history.csv'));
+    assert(!importRowsB.some(row => row.file_name === 'scope-a-history.csv'));
+    assert(!importRowsB.some(row => row.file_name === 'legacy-null-scope.csv'));
+
+    const eventReadA = await getScoped('/api/integrations/events', token, 'org-default', 'legal-default');
+    const eventRowsA = await eventReadA.json();
+    assert(eventRowsA.some(row => row.id === `integration-event-${identityA.id}` || row.entity_id === identityA.id),
+      'identity integration events must remain available in the selected scope');
+    assert(eventRowsA.some(row => row.id === 'scope-a-failure'));
+    assert(!eventRowsA.some(row => row.id === 'scope-b-failure' || row.id === 'legacy-null-scope-event'));
+    assert(eventRowsA.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
+    assert(!JSON.stringify(eventRowsA).includes('scope-a-provider-subject'));
+    assert(!JSON.stringify(eventRowsA).includes('scope-a-provider@example.test'));
+    assert(!JSON.stringify(eventRowsA).includes(actionA.action_url),
+      'integration history must not expose bearer action URLs recorded at token creation');
+    const eventReadB = await getScoped('/api/integrations/events', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    const eventRowsB = await eventReadB.json();
+    assert(eventRowsB.some(row => row.id === 'scope-b-failure'));
+    assert(eventRowsB.some(row => row.entity_id === identityB.id), 'scope B identity events must remain available within scope B');
+    assert(!eventRowsB.some(row => row.id === 'scope-a-failure' || row.id === 'legacy-null-scope-event'));
+    assert(eventRowsB.every(row => row.organization_id === 'org-scope-beta' && row.legal_entity_id === 'legal-scope-beta'));
+    assert(!JSON.stringify(eventRowsB).includes('scope-b-provider-subject'));
+    assert(!JSON.stringify(eventRowsB).includes('scope-b-provider@example.test'));
+    assert(!JSON.stringify(eventRowsB).includes(actionB.action_url),
+      'integration history must not expose bearer action URLs for another action in this scope');
+
+    const teamsReadA = await getScoped('/api/integrations/teams-user-links', token, 'org-default', 'legal-default');
+    const teamsRowsA = await teamsReadA.json();
+    assert(teamsRowsA.some(row => row.teams_user_id === 'scope-a-teams-user'));
+    assert(!teamsRowsA.some(row => row.teams_user_id === 'scope-b-teams-user'));
+    const teamsReadB = await getScoped('/api/integrations/teams-user-links', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    const teamsRowsB = await teamsReadB.json();
+    assert(teamsRowsB.some(row => row.teams_user_id === 'scope-b-teams-user'));
+    assert(!teamsRowsB.some(row => row.teams_user_id === 'scope-a-teams-user'));
+
+    for (const path of [
+      '/api/audit-logs', '/api/import-export-logs', '/api/integrations/events',
+      '/api/integrations/health', '/api/integrations/teams-user-links',
+    ]) {
+      const denied = await getScoped(path, token, 'org-scope-beta', 'legal-scope-beta');
+      assert.equal(denied.status, 403, `Admin without an assigned pair must not bypass scope for ${path}`);
+    }
+
+    const expectedBetaMetrics = await pool.query(`select
+        (select count(distinct ipl.employee_id)::int from identity_provider_links ipl join employees e on e.id=ipl.employee_id
+          where ipl.status='Linked' and e.organization_id='org-scope-beta' and e.legal_entity_id='legal-scope-beta') as linked_identity_count,
+        (select count(distinct tul.employee_id)::int from teams_user_links tul join employees e on e.id=tul.employee_id
+          where tul.status='Linked' and e.organization_id='org-scope-beta' and e.legal_entity_id='legal-scope-beta') as linked_teams_count,
+        (select count(*)::int from integration_event_logs where status='Failed' and organization_id='org-scope-beta' and legal_entity_id='legal-scope-beta') as recent_failures,
+        (select count(*)::int from teams_action_tokens where used_at is null and expires_at>now()
+          and organization_id='org-scope-beta' and legal_entity_id='legal-scope-beta') as open_action_tokens`);
+    const healthBResponse = await getScoped('/api/integrations/health', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    assert.equal(healthBResponse.status, 200);
+    const healthB = await healthBResponse.json();
+    assert.equal(healthB.linked_identity_count, expectedBetaMetrics.rows[0].linked_identity_count);
+    assert.equal(healthB.linked_teams_count, expectedBetaMetrics.rows[0].linked_teams_count);
+    assert.equal(healthB.recent_failures, expectedBetaMetrics.rows[0].recent_failures);
+    assert.equal(healthB.open_action_tokens, expectedBetaMetrics.rows[0].open_action_tokens);
+    assert.equal(healthB.linked_identity_count, 1);
+    assert.equal(healthB.linked_teams_count, 1);
+    assert.equal(healthB.open_action_tokens, 1, 'null-scope legacy tokens must not enter scoped aggregates');
+    assert(healthB.events.every(row => row.organization_id === 'org-scope-beta' && row.legal_entity_id === 'legal-scope-beta'));
+    assert(!JSON.stringify(healthB.events).includes('scope-b-provider-subject'));
+    assert(!JSON.stringify(healthB.events).includes(actionB.action_url),
+      'integration health events must not expose bearer action URLs');
+
+    const healthAResponse = await getScoped('/api/integrations/health', token, 'org-default', 'legal-default');
+    assert.equal(healthAResponse.status, 200);
+    const healthA = await healthAResponse.json();
+    assert.equal(healthA.recent_failures,
+      (await pool.query(`select count(*)::int as count from integration_event_logs where status='Failed' and organization_id='org-default' and legal_entity_id='legal-default'`)).rows[0].count,
+      'integration health failure counts must not include another authorized scope or unscoped legacy events');
+    assert.equal(healthA.open_action_tokens, 1, 'open-action-token counts must be scope-owned');
+    assert(healthA.events.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
+    assert(!JSON.stringify(healthA.events).includes(actionA.action_url),
+      'integration health events must not expose bearer action URLs');
   });
 }, {maxPoolSize: 1});
 
@@ -1289,8 +1625,8 @@ await withDisposableDatabase(async (pool) => {
   const client = await pool.connect();
   try {
     await client.query('begin');
-    // Recreate the merged main level through migration 032, then add an existing
-    // audit row before exercising both additive PR-006 migrations.
+    // Recreate the merged main level through migration 032, then add historical
+    // rows before exercising the additive PR-006 migrations.
     await client.query(`
       create table schema_migrations (
         id text primary key,
@@ -1300,13 +1636,19 @@ await withDisposableDatabase(async (pool) => {
     const baselineSql = await readFile(join(serverDir, 'schema.sql'), 'utf8');
     await client.query(baselineSql);
     await client.query('insert into schema_migrations (id) values ($1)', [manifest[0].id]);
-    for (const migration of manifest.slice(1, -2)) {
+    for (const migration of manifest.slice(1, -3)) {
       const sql = await readFile(join(serverDir, 'migrations', migration.file), 'utf8');
       await client.query(sql);
       await client.query('insert into schema_migrations (id) values ($1)', [migration.id]);
     }
     await client.query(`insert into audit_logs (user_id,user_name,user_role,module,action,details)
       values ('legacy-actor','Legacy actor','Admin','Test','Before request IDs','existing audit evidence')`);
+    await client.query(`insert into import_export_logs (operation,channel,file_name,status,user_name)
+      values ('Import','Legacy','legacy-scope.csv','Success','Legacy actor')`);
+    await client.query(`insert into integration_event_logs (id,provider,event_type,entity_type,entity_id,status,response_payload)
+      values ('legacy-scope-event','test','LegacyEvent','LegacyEntity','legacy-entity','Success','{"retained":"unchanged"}'::jsonb)`);
+    await client.query(`insert into teams_action_tokens (token,entity_type,entity_id,action,expires_at)
+      values ('legacy-scope-token','PortalLink','legacy-portal','open_portal',now()+interval '1 hour')`);
     await client.query('commit');
   } catch (error) {
     await client.query('rollback').catch(() => {});
@@ -1318,27 +1660,28 @@ await withDisposableDatabase(async (pool) => {
   const before = await pool.query('select count(*)::int as count from schema_migrations');
   const upgrade = await runMigrations({pool, rootDir: serverDir, logger: quietLogger});
   const after = await pool.query('select count(*)::int as count from schema_migrations');
-  const candidateMigrations = manifest.slice(-2);
+  const candidateMigrations = manifest.slice(-3);
   assert.deepEqual(candidateMigrations.map(item => item.id), [
     '033_wos03_audit_operation_context',
     '034_wos03_employee_import_provenance',
-  ], 'PR-006 adds only its two ordered audit migrations');
+    '035_wos03_scoped_history',
+  ], 'PR-006 adds ordered request, import provenance, and history-scope migrations');
   assert.deepEqual(upgrade.applied, candidateMigrations.map(item => item.id),
-    'upgrade from merged main applies both additive PR-006 audit migrations');
-  assert.equal(upgrade.skipped.length, manifest.length - 2);
-  assert.equal(after.rows[0].count, before.rows[0].count + 2, 'upgrade appends both migration ledger rows');
+    'upgrade from merged main applies all additive PR-006 migrations');
+  assert.equal(upgrade.skipped.length, manifest.length - 3);
+  assert.equal(after.rows[0].count, before.rows[0].count + 3, 'upgrade appends all three migration ledger rows');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
-  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -2).map(item => item.id),
+  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -3).map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 2, 'both PR-006 migrations are ledgered');
+  assert.equal(newMigrations.length, 3, 'all PR-006 migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),
     'upgrade must not invent historical checksums');
-  const legacyAudit = await pool.query(`select correlation_id,operation_id,import_batch_id,source_identifier,import_processing_result from audit_logs
+  const legacyAudit = await pool.query(`select correlation_id,operation_id,import_batch_id,source_identifier,import_processing_result,organization_id,legal_entity_id from audit_logs
     where user_id='legacy-actor' and action='Before request IDs'`);
   assert.equal(legacyAudit.rowCount, 1);
   assert.equal(legacyAudit.rows[0].correlation_id, null, 'existing audit history must not receive invented correlation IDs');
@@ -1346,6 +1689,18 @@ await withDisposableDatabase(async (pool) => {
   assert.equal(legacyAudit.rows[0].import_batch_id, null, 'existing audit history must not receive invented import batches');
   assert.equal(legacyAudit.rows[0].source_identifier, null, 'existing audit history must not receive invented source identifiers');
   assert.equal(legacyAudit.rows[0].import_processing_result, null, 'existing audit history must not receive invented import results');
+  assert.equal(legacyAudit.rows[0].organization_id, null, 'existing append-only audit history must not receive guessed organization scope');
+  assert.equal(legacyAudit.rows[0].legal_entity_id, null, 'existing append-only audit history must not receive guessed legal-entity scope');
+  const legacyImportLog = await pool.query(`select file_name,status,organization_id,legal_entity_id from import_export_logs where file_name='legacy-scope.csv'`);
+  assert.deepEqual(legacyImportLog.rows, [{file_name: 'legacy-scope.csv', status: 'Success', organization_id: null, legal_entity_id: null}],
+    'historical import history must remain unchanged and explicitly unscoped');
+  const legacyIntegrationLog = await pool.query(`select entity_id,response_payload,organization_id,legal_entity_id from integration_event_logs where id='legacy-scope-event'`);
+  assert.deepEqual(legacyIntegrationLog.rows, [{
+    entity_id: 'legacy-entity', response_payload: {retained: 'unchanged'}, organization_id: null, legal_entity_id: null,
+  }], 'historical integration events must remain unchanged and explicitly unscoped');
+  const legacyActionToken = await pool.query(`select token,organization_id,legal_entity_id from teams_action_tokens where token='legacy-scope-token'`);
+  assert.deepEqual(legacyActionToken.rows, [{token: 'legacy-scope-token', organization_id: null, legal_entity_id: null}],
+    'historical action tokens must remain unchanged and explicitly unscoped');
 });
 
 const failedMigrationRoot = await mkdtemp(join(tmpdir(), 'workos-failed-migration-'));

@@ -37,6 +37,7 @@
     "test:authorization-convergence": "node tests/authorization-convergence-smoke.mjs",
     "test:identity-access": "node tests/identity-access-middleware-smoke.mjs",
     "test:audit-record": "node tests/audit-record-smoke.mjs",
+    "test:scoped-history-view": "node tests/scoped-history-view-smoke.mjs",
     "test:api-v1-contract": "node --import tsx tests/api-v1-contract-smoke.mjs",
     "test:organization-setup": "node tests/organization-setup-smoke.mjs",
     "test:organization-setup-v1": "node tests/organization-setup-v1-router-smoke.mjs",
@@ -50,7 +51,7 @@
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",
     "test:document-metadata": "node tests/document-metadata-smoke.mjs",
-    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:organization-setup && npm run test:organization-setup-v1 && npm run test:authorization-convergence && npm run test:identity-access && npm run test:audit-record && npm run test:api-v1-contract && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging"
+    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:organization-setup && npm run test:organization-setup-v1 && npm run test:authorization-convergence && npm run test:identity-access && npm run test:audit-record && npm run test:scoped-history-view && npm run test:api-v1-contract && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging"
   },
   "dependencies": {
     "clsx": "^2.1.1",

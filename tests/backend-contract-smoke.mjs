@@ -32,6 +32,7 @@ const leaveMigration = readFileSync('server/migrations/007_workforce_os_leave.sq
 const approvalMigration = readFileSync('server/migrations/008_workforce_os_approvals.sql', 'utf8');
 const notificationMigration = readFileSync('server/migrations/009_workforce_os_notifications.sql', 'utf8');
 const integrationMigration = readFileSync('server/migrations/010_workforce_os_integrations.sql', 'utf8');
+const scopedHistoryMigration = readFileSync('server/migrations/035_wos03_scoped_history.sql', 'utf8');
 const seedDemo = readFileSync('server/seed-demo.mjs', 'utf8');
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 
@@ -94,13 +95,27 @@ assert.match(server, /app\.post\('\/api\/settings'/, 'settings save route must e
 assert.match(server, /app\.get\('\/api\/import-export-logs'/, 'import/export history GET route must exist');
 assert.match(server, /app\.post\('\/api\/import-export-logs'/, 'import/export history POST route must exist');
 assert.match(server, /app\.post\('\/api\/audit-events'/, 'manual audit event POST route must exist for UI exports');
+assert.match(auditRecord, /organization_id, legal_entity_id[\s\S]*req\.organizationScope\?\.organizationId[\s\S]*req\.organizationScope\?\.legalEntityId/,
+  'new audit rows must use only the server-resolved organization and legal-entity scope');
+assert.match(scopedHistoryMigration, /alter table audit_logs add column organization_id text[\s\S]*alter table import_export_logs add column organization_id text[\s\S]*alter table integration_event_logs add column organization_id text/,
+  'scoped history migration must add nullable tenant scope without updating historical rows');
+assert.doesNotMatch(scopedHistoryMigration, /update\s+audit_logs/i,
+  'scoped history migration must not rewrite append-only audit history');
+assert.match(server, /app\.get\('\/api\/audit-logs'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
+  'audit history must filter by the verified selected scope');
+assert.match(server, /app\.get\('\/api\/import-export-logs'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
+  'import history must filter by the verified selected scope');
+assert.match(server, /app\.get\('\/api\/integrations\/events'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
+  'integration event history must filter by the verified selected scope');
+assert.match(server, /e\.organization_id=\$4 and e\.legal_entity_id=\$5[\s\S]*where status = 'Failed' and organization_id=\$4 and legal_entity_id=\$5/,
+  'integration health aggregates over scoped workers and events must use the verified selected scope');
 assert.match(server, /app\.post\('\/api\/imports\/employees\/apply'/, 'employee import apply route must exist');
 assert.match(employeeImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
   'employee imports must receive a server-generated batch ID after request validation');
 assert.match(employeeImportRoute, /source: 'Employee Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: employee\.employee_id,[\s\S]*importProcessingResult: 'Success'/,
   'successful employee row audits must retain source, source identifier, batch and processing result');
-assert.match(employeeImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Employee Master'/,
-  'employee batch history must use the same ID as its row-level audit events');
+assert.match(employeeImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Employee Master'/,
+  'employee batch history must use the same ID as row audits and retain the selected scope');
 assert.match(employeeImportRoute, /\[\s*importBatchId,[\s\S]*parsed\.data\.fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
   'the employee batch result must preserve aggregate status, counts and existing row errors');
 assert.match(employeeImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
@@ -116,8 +131,8 @@ assert.match(clientImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
   'client imports must receive a server-generated batch ID after request validation');
 assert.match(clientImportRoute, /source: 'Client Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.id \?\? null,[\s\S]*importProcessingResult: 'Success'/,
   'successful client row audits must retain source, only a supplied source ID, batch and processing result');
-assert.match(clientImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Client Master'/,
-  'client batch history must use the same ID as its row-level audit events');
+assert.match(clientImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Client Master'/,
+  'client batch history must use the same ID as row audits and retain the selected scope');
 assert.match(clientImportRoute, /\[\s*importBatchId,[\s\S]*parsed\.data\.fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
   'the client batch result must preserve aggregate status, counts and existing row errors');
 assert.match(clientImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
@@ -137,8 +152,8 @@ assert.match(projectImportRoute, /source: 'Project Master CSV'[\s\S]*importBatch
   'successful project row audits must retain source, required source ID, batch and processing result');
 assert.match(projectImportRoute, /on conflict \(organization_id,project_code\) do update set[\s\S]*where projects\.organization_id = excluded\.organization_id[\s\S]*and projects\.legal_entity_id = excluded\.legal_entity_id[\s\S]*returning \*[\s\S]*if \(result\.rowCount === 0\)[\s\S]*PROJECT_SCOPE_CONFLICT/,
   'a racing project-code conflict must update only inside the same organization and legal entity or remain a row-local conflict');
-assert.match(projectImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Project Master'/,
-  'project batch history must use the same ID as its row-level audit events');
+assert.match(projectImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Project Master'/,
+  'project batch history must use the same ID as row audits and retain the selected scope');
 assert.match(projectImportRoute, /\[\s*importBatchId,[\s\S]*parsed\.data\.fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
   'the project batch result must preserve aggregate status, counts and existing row errors');
 assert.match(projectImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
@@ -156,8 +171,8 @@ assert.match(allocationImportRoute, /const importBatchId = crypto\.randomUUID\(\
   'allocation imports must receive a server-generated batch ID after request validation');
 assert.match(allocationImportRoute, /source: 'Allocation Control CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.id \?\? null,[\s\S]*importProcessingResult: 'Success'/,
   'successful allocation row audits must retain source, optional source ID, batch and processing result');
-assert.match(allocationImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Allocation Control'/,
-  'allocation batch history must use the same ID as its row-level audit events');
+assert.match(allocationImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Allocation Control'/,
+  'allocation batch history must use the same ID as row audits and retain the selected scope');
 assert.match(allocationImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'allocation mutations, row audits and the batch result must commit or roll back together');
 assert.match(allocationImportRoute, /where project_allocations\.organization_id=excluded\.organization_id and project_allocations\.legal_entity_id=excluded\.legal_entity_id/,
@@ -181,8 +196,8 @@ assert.match(timesheetImportRoute, /const importBatchId = crypto\.randomUUID\(\)
   'timesheet imports must receive one server-generated batch ID after request validation');
 assert.match(timesheetImportRoute, /for \(const group of groups\.values\(\)\)[\s\S]*await audit\(client, req,[\s\S]*entityType: 'Timesheet'[\s\S]*source: 'Timesheet Import CSV',[\s\S]*importBatchId,[\s\S]*sourceIdentifier: null,[\s\S]*importProcessingResult: 'Success'/,
   'successful timesheet group audits must retain source, null unavailable source ID, batch and result once per group');
-assert.match(timesheetImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name\)[\s\S]*values \(\$1,'Import','Timesheet Import'/,
-  'timesheet batch history must use the same ID as its group-level audit events');
+assert.match(timesheetImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Timesheet Import'/,
+  'timesheet batch history must use the same ID as group audits and retain the selected scope');
 assert.match(timesheetImportRoute, /await client\.query\('begin'\)[\s\S]*for \(const group of groups\.values\(\)\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'timesheet updates, entries, group audits and import history must commit or roll back together');
 assert.match(timesheetImportRoute, /assertReportingPeriodAllows[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT[\s\S]*on conflict \(organization_id, employee_id, week_ending\) do update set/,

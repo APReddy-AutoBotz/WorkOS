@@ -159,7 +159,7 @@ assert.equal(identityReadinessFromEnvironment({ ...productionEnvironment, ENTRA_
 assert.deepEqual(Object.keys(buildSetupReadiness(completeSetupFacts, productionEnvironment).checks), REQUIRED_SETUP_CHECKS, 'readiness payload keys must remain stable and complete');
 assert.match(service, /user_organization_scopes[\s\S]*where s\.organization_id=\$1 and s\.legal_entity_id=\$2/, 'user, role, and identity readiness evidence must remain in the selected organization/legal scope');
 assert.match(service, /notification_preferences[\s\S]*e\.organization_id=\$1 and e\.legal_entity_id=\$2/, 'notification readiness evidence must remain in the selected organization/legal scope');
-assert.match(service, /new_value->>'organization_id'=\$1 and a\.new_value->>'legal_entity_id'=\$2/, 'imports from another scope must not satisfy readiness');
+assert.match(service, /a\.organization_id=\$1 and a\.legal_entity_id=\$2/, 'imports from another scope or unscoped legacy imports must not satisfy readiness');
 assert.match(ui, /Object\.entries\(setupReadiness\.checks\)/, 'AdminSettings must dynamically expose every server readiness area');
 
 for (const table of ['organizations','legal_entities','user_organization_scopes','organization_catalog_items','working_calendars','reporting_periods','terminology_versions','worker_profiles','organization_history','worker_history']) {
