@@ -27,6 +27,7 @@ const identityReadRoutes = readFileSync('server/modules/identity-access/read-rou
 const requestContext = readFileSync('server/api/request-context.mjs', 'utf8');
 const versionedErrors = readFileSync('server/api/v1/error-contract.mjs', 'utf8');
 const auditRecord = readFileSync('server/modules/audit/audit-record.mjs', 'utf8');
+const auditHistoryRouter = readFileSync('server/modules/audit/audit-history-router.mjs', 'utf8');
 const schema = readFileSync('server/schema.sql', 'utf8');
 const leaveMigration = readFileSync('server/migrations/007_workforce_os_leave.sql', 'utf8');
 const approvalMigration = readFileSync('server/migrations/008_workforce_os_approvals.sql', 'utf8');
@@ -101,8 +102,14 @@ assert.match(scopedHistoryMigration, /alter table audit_logs add column organiza
   'scoped history migration must add nullable tenant scope without updating historical rows');
 assert.doesNotMatch(scopedHistoryMigration, /update\s+audit_logs/i,
   'scoped history migration must not rewrite append-only audit history');
-assert.match(server, /app\.get\('\/api\/audit-logs'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
+assert.match(server, /const auditHistoryRouter = createAuditHistoryRouter\([\s\S]*app\.use\('\/api', auditHistoryRouter\)[\s\S]*app\.use\('\/api\/v1', auditHistoryRouter\)/,
+  'legacy and versioned audit history must mount one shared module router');
+assert.match(auditHistoryRouter, /const auditHistoryQuery = `select \* from audit_logs[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
   'audit history must filter by the verified selected scope');
+assert.match(auditHistoryRouter, /router\.get\('\/audit-logs', requireDatabase, requireAuth, requirePermission\('audit\.view'\)[\s\S]*redactAuditHistoryRows/,
+  'both compatibility paths must use the authorized audit view');
+assert.equal(packageJson.scripts['test:audit-history-router'], 'node tests/audit-history-router-smoke.mjs',
+  'the audit history compatibility route test must be available in the standard suite');
 assert.match(server, /app\.get\('\/api\/import-export-logs'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,
   'import history must filter by the verified selected scope');
 assert.match(server, /app\.get\('\/api\/integrations\/events'[\s\S]*where organization_id=\$1 and legal_entity_id=\$2/,

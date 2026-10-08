@@ -16,6 +16,7 @@ import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/e
 import {createIdentityAccessMiddleware, readCookie} from './modules/identity-access/middleware.mjs';
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
+import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
 import {redactAuditHistoryRows, redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
@@ -5633,13 +5634,9 @@ app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePer
     client.release();
   }
 });
-app.get('/api/audit-logs', requireDatabase, requireAuth, requirePermission('audit.view'), (req, res) => {
-  runScopedHistory(req, res,
-    `select * from audit_logs
-     where organization_id=$1 and legal_entity_id=$2
-     order by created_at desc limit 500`,
-    redactAuditHistoryRows);
-});
+const auditHistoryRouter = createAuditHistoryRouter({pool, requireDatabase, requireAuth, requirePermission});
+app.use('/api', auditHistoryRouter);
+app.use('/api/v1', auditHistoryRouter);
 
 app.post('/api/audit-events', requireDatabase, requireAuth, async (req, res) => {
   const schema = z.object({

@@ -124,10 +124,10 @@ const withImportApi = async (databaseUrl, actorId, test) => {
   child.stdout.on('data', collectOutput);
   child.stderr.on('data', collectOutput);
   const baseUrl = `http://127.0.0.1:${port}`;
-  const tokenFor = (userId, username = `synthetic-scope-${userId}`) => signTestSession({
+  const tokenFor = (userId, username = `synthetic-scope-${userId}`, activeRole = 'Admin') => signTestSession({
     sub: userId,
     username,
-    activeRole: 'Admin',
+    activeRole,
     exp: Date.now() + 15 * 60_000,
   }, secret);
   const token = tokenFor(actorId, 'synthetic-import-admin');
@@ -227,6 +227,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
 
   const actorId = randomUUID();
   const multiScopeActorId = randomUUID();
+  const auditDeniedActorId = randomUUID();
   await pool.query(`insert into roles(name) values ('Admin'),('Employee') on conflict (name) do nothing`);
   await pool.query(`insert into users (id,username,email,status)
     values ($1,'synthetic-import-admin','synthetic-import-admin@example.test','Active')`, [actorId]);
@@ -236,6 +237,12 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ($1,'imports.manage',$1,'Admin')`, [actorId]);
   await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
     values ($1,'org-default','legal-default',true) on conflict do nothing`, [actorId]);
+  await pool.query(`insert into users (id,username,email,status)
+    values ($1,'synthetic-no-audit','synthetic-no-audit@example.test','Active')`, [auditDeniedActorId]);
+  await pool.query(`insert into user_roles (user_id,role_id)
+    select $1,id from roles where name='Employee'`, [auditDeniedActorId]);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+    values ($1,'org-default','legal-default',true)`, [auditDeniedActorId]);
   await pool.query(`insert into organizations (id,code,name,effective_from)
     values ('org-scope-beta','SCOPE-BETA','Synthetic Scope Beta',date '1970-01-01')`);
   await pool.query(`insert into organization_profile_versions
@@ -1332,6 +1339,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'a failed timesheet batch-log write must roll back the timesheet, entries and group audit');
 
     const multiScopeToken = tokenFor(multiScopeActorId, 'synthetic-multi-scope-admin');
+    const auditDeniedToken = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Employee');
     const postScopedJson = (path, authToken, organizationId, legalEntityId, body) => fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: scopedHeaders(authToken, organizationId, legalEntityId, {'Content-Type': 'application/json'}),
@@ -1597,6 +1605,22 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(identityAuditA.new_value.provider_upn, undefined, 'audit DTOs must redact identity provider UPNs');
     assert.equal(identityAuditA.new_value.status, 'Linked');
 
+    const auditReadAV1 = await getScoped('/api/v1/audit-logs', token, 'org-default', 'legal-default');
+    assert.equal(auditReadAV1.status, 200, 'the versioned audit-history route must return a scoped authorized history');
+    const auditRowsAV1 = await auditReadAV1.json();
+    assert.deepEqual(
+      [...auditRowsAV1].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      [...auditRowsA].sort((left, right) => String(left.id).localeCompare(String(right.id))),
+      'legacy and versioned audit history must return the same rows and redacted DTO shape',
+    );
+
+    const auditDeniedLegacy = await getScoped('/api/audit-logs', auditDeniedToken, 'org-default', 'legal-default');
+    assert.equal(auditDeniedLegacy.status, 403, 'an Employee without audit.view must be denied the legacy audit route');
+    const auditDeniedV1 = await getScoped('/api/v1/audit-logs', auditDeniedToken, 'org-default', 'legal-default');
+    assert.equal(auditDeniedV1.status, 403, 'an Employee without audit.view must be denied the versioned audit route');
+    assert.equal((await auditDeniedV1.json()).error.code, 'FORBIDDEN',
+      'versioned permission denial must use the stable API error envelope');
+
     const auditReadB = await getScoped('/api/audit-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
     assert.equal(auditReadB.status, 200);
     const auditRowsB = await auditReadB.json();
@@ -1610,6 +1634,13 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(ambiguousMultiScopeRead.status, 403,
       'multi-scope Admin must select one authorized scope instead of receiving a global audit aggregation');
+    const ambiguousMultiScopeReadV1 = await fetch(`${baseUrl}/api/v1/audit-logs`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ambiguousMultiScopeReadV1.status, 403,
+      'the versioned audit route must require one explicitly selected scope for a multi-scope Admin');
+    assert.equal((await ambiguousMultiScopeReadV1.json()).error.code, 'ORG_SCOPE_DENIED');
 
     const importReadA = await getScoped('/api/import-export-logs', token, 'org-default', 'legal-default');
     const importRowsA = await importReadA.json();
@@ -1657,7 +1688,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert(!teamsRowsB.some(row => row.teams_user_id === 'scope-a-teams-user'));
 
     for (const path of [
-      '/api/audit-logs', '/api/import-export-logs', '/api/integrations/events',
+      '/api/audit-logs', '/api/v1/audit-logs', '/api/import-export-logs', '/api/integrations/events',
       '/api/integrations/health', '/api/integrations/teams-user-links',
     ]) {
       const denied = await getScoped(path, token, 'org-scope-beta', 'legal-scope-beta');
