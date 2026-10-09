@@ -5168,6 +5168,9 @@ app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requ
       oldValue: previous,
       newValue: result.rows[0],
       details: `${parsed.data.enabled ? 'Enabled' : 'Disabled'} ${parsed.data.permissionKey} for ${req.params.roleName}`,
+      // Role permissions apply across this isolated deployment, not the
+      // organization/legal entity selected for this request.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5313,6 +5316,8 @@ app.post('/api/settings', requireDatabase, requireAuth, requirePermission('setti
       oldValue: previous,
       newValue: parsed.data,
       details: 'Updated system settings',
+      // These settings govern the whole deployment and have no organization owner.
+      organizationScope: null,
     });
     await client.query('commit');
     const result = await pool.query('select key, value from system_settings order by key');

@@ -8,6 +8,7 @@ const sensitiveIdentityKeys = new Set([
   'upn',
 ]);
 const sensitiveHistoryKeys = new Set(['actionurl']);
+const bearerTeamsActionUrlPattern = /(?:https?:\/\/[^\s\"'<>]*)?\/teams\/actions\/[a-z0-9_-]+/gi;
 
 const normalizeKey = key => key.toLowerCase().replaceAll('_', '').replaceAll('-', '');
 
@@ -29,6 +30,9 @@ export const redactIdentityFields = value => {
 };
 
 const redactIdentityFieldsWithValues = (value, sensitiveValues) => {
+  if (typeof value === 'string') {
+    return value.replace(bearerTeamsActionUrlPattern, '[redacted action URL]');
+  }
   if (Array.isArray(value)) return value.map(item => redactIdentityFieldsWithValues(item, sensitiveValues));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value)

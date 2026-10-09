@@ -1482,6 +1482,42 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       signal: AbortSignal.timeout(5000),
     });
 
+    const globalSettingsResponse = await postScopedJson('/api/settings', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        expectedWeeklyHours: 40,
+        utilizationThresholdHigh: 100,
+        utilizationThresholdLow: 80,
+        benchThreshold: 20,
+      });
+    assert.equal(globalSettingsResponse.status, 200,
+      'deployment-wide settings must retain their existing API behavior for a multi-scope Admin');
+    const globalRolePermissionResponse = await fetch(`${baseUrl}/api/permissions/roles/Admin`, {
+      method: 'PATCH',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({permissionKey: 'employees.view', enabled: true}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(globalRolePermissionResponse.status, 200,
+      'deployment-wide role permissions must retain their existing API behavior for a multi-scope Admin');
+    const globalAuditScopes = await pool.query(`select entity_type,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type in ('SystemSettings','RolePermission')
+      order by entity_type`, [multiScopeActorId]);
+    assert.deepEqual(globalAuditScopes.rows, [
+      {entity_type: 'RolePermission', organization_id: null, legal_entity_id: null},
+      {entity_type: 'SystemSettings', organization_id: null, legal_entity_id: null},
+    ], 'deployment-wide mutations must remain unscoped even when the Admin selected one legal entity');
+    for (const [organizationId, legalEntityId] of [
+      ['org-default', 'legal-default'],
+      ['org-scope-beta', 'legal-scope-beta'],
+    ]) {
+      const response = await getScoped('/api/audit-logs', multiScopeToken, organizationId, legalEntityId);
+      assert.equal(response.status, 200);
+      const rows = await response.json();
+      assert(!rows.some(row => row.user_id === multiScopeActorId
+        && ['SystemSettings', 'RolePermission'].includes(row.entity_type)),
+      'ordinary scoped history must not attribute deployment-wide configuration to the caller’s selected entity');
+    }
+
     const auditAResponse = await postScopedJson('/api/audit-events', token, 'org-default', 'legal-default', {
       action: 'Import',
       module: 'Scoped History Test',
@@ -1673,6 +1709,16 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.ok(actionB.token);
     assert.ok(actionB.action_url);
 
+    const actionSendResponse = await postScopedJson(
+      `/api/integrations/teams-action-tokens/${encodeURIComponent(actionA.token)}/send`,
+      token, 'org-default', 'legal-default', {
+        recipient_employee_id: employeeA.id,
+        title: 'Synthetic action notification',
+        body: 'Please review this item.',
+      });
+    assert.equal(actionSendResponse.status, 200,
+      'a scoped Teams action notification must keep its existing send behavior');
+
     await pool.query(`insert into teams_action_tokens (token,entity_type,entity_id,action,expires_at)
       values ('scope-legacy-null-token','PortalLink','legacy-null-portal','open_portal',now()+interval '15 minutes')`);
     const beforeCrossScopeTokenActions = await pool.query(`select
@@ -1737,6 +1783,13 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(identityAuditA.new_value.provider_subject, undefined, 'audit DTOs must redact identity provider subjects');
     assert.equal(identityAuditA.new_value.provider_upn, undefined, 'audit DTOs must redact identity provider UPNs');
     assert.equal(identityAuditA.new_value.status, 'Linked');
+    const actionNotificationAudit = auditRowsA.find(row => row.entity_id === 'scope-a-portal' && row.action === 'Send Notification');
+    assert.ok(actionNotificationAudit,
+      'the real Teams send route must retain its notification audit event inside the selected scope');
+    assert.match(actionNotificationAudit.new_value.body, /Action link: \[redacted action URL\]/,
+      'scoped audit history must replace the bearer action URL embedded in notification text');
+    assert(!JSON.stringify(actionNotificationAudit).includes(actionA.action_url),
+      'scoped audit history must not reveal the bearer action URL embedded in notification text');
 
     const auditReadAV1 = await getScoped('/api/v1/audit-logs', token, 'org-default', 'legal-default');
     assert.equal(auditReadAV1.status, 200, 'the versioned audit-history route must return a scoped authorized history');

@@ -7,12 +7,17 @@ import {
 
 const beforeAfter = redactAuditHistoryRows([{
   old_value: {provider_subject: 'subject-old', provider_upn: 'old@example.test', status: 'Linked'},
-  new_value: {entra_object_id: 'subject-new', actionUrl: 'https://app.example.test/action/bearer-token', nested: [{upn: 'new@example.test', status: 'Linked'}]},
+  new_value: {
+    entra_object_id: 'subject-new',
+    actionUrl: 'https://app.example.test/action/bearer-token',
+    body: 'Please review. Action link: https://app.example.test/teams/actions/bearer-token.',
+    nested: [{upn: 'new@example.test', status: 'Linked'}],
+  },
 }])[0];
 assert.deepEqual(beforeAfter, {
   old_value: {status: 'Linked'},
-  new_value: {nested: [{status: 'Linked'}]},
-}, 'general audit history must redact provider subjects, UPNs, Entra object IDs, and bearer action URLs recursively');
+  new_value: {body: 'Please review. Action link: [redacted action URL].', nested: [{status: 'Linked'}]},
+}, 'general audit history must redact identity fields and bearer action URLs recursively, including embedded text');
 
 const identityAudit = redactAuditHistoryRows([{
   entity_id: 'identity-link-old-provider-subject',
@@ -46,6 +51,11 @@ const events = redactIntegrationHistoryRows([
     response_payload: {provider_subject: 'raw-subject', provider_upn: 'linked@example.test', action_url: 'https://app.example.test/action/bearer-token', status: 'Linked'},
   },
   {
+    event_type: 'TeamsActionNotificationSent',
+    entity_id: 'portal-link-test',
+    response_payload: {body: 'Action link: https://app.example.test/teams/actions/bearer-token.', status: 'Sent'},
+  },
+  {
     event_type: 'IdentityLinkUpserted',
     entity_id: 'identity-link-raw-subject',
     response_payload: {nested: {id: 'identity-link-raw-subject'}, provider_subject: 'raw-subject', provider_upn: 'legacy@example.test', status: 'Linked'},
@@ -55,8 +65,11 @@ assert.equal(events[0].entity_id, null, 'failed unscoped SSO events must not exp
 assert.deepEqual(events[0].response_payload, {reason: 'No active linked user'});
 assert.equal(events[1].entity_id, 'identity-link-test', 'internal identity-link IDs may remain as audit references');
 assert.deepEqual(events[1].response_payload, {status: 'Linked'}, 'integration history must redact identity fields and token-bearing action URLs');
-assert.equal(events[2].entity_id, null, 'integration history must hide a legacy row ID containing a provider subject');
-assert.deepEqual(events[2].response_payload, {nested: {}, status: 'Linked'},
+assert.deepEqual(events[2].response_payload, {body: 'Action link: [redacted action URL].', status: 'Sent'},
+  'integration history must redact bearer action URLs embedded in notification text');
+assert.equal(events[2].entity_id, 'portal-link-test');
+assert.equal(events[3].entity_id, null, 'integration history must hide a legacy row ID containing a provider subject');
+assert.deepEqual(events[3].response_payload, {nested: {}, status: 'Linked'},
   'integration history must also hide a nested ID whose matching subject appears elsewhere in the row');
 
 console.log('Scoped history view smoke tests passed.');
