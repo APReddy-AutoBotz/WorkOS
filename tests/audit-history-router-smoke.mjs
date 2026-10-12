@@ -18,12 +18,43 @@ const rows = [{
   old_value: {id: 'legacy-link-subject-a', nested: {provider_subject: 'subject-a'}},
   new_value: {nested: {id: 'legacy-user@example.test'}, provider_upn: 'user@example.test', status: 'Linked'},
 }];
+const deploymentRows = [
+  {
+    id: 'deployment-global-row',
+    organization_id: null,
+    legal_entity_id: null,
+    entity_id: 'legacy-global-subject',
+    source_identifier: 'global-user@example.test',
+    old_value: {provider_subject: 'global-subject', nested: {id: 'global-user@example.test'}},
+    new_value: {provider_upn: 'global-user@example.test', status: 'Updated'},
+  },
+  {id: 'deployment-half-null-row', organization_id: null, legal_entity_id: 'legal-a', entity_id: 'half-null'},
+  {id: 'deployment-scoped-row', organization_id: 'org-a', legal_entity_id: 'legal-a', entity_id: 'scoped'},
+];
 const poolQueries = [];
 let failQuery = false;
 const pool = {
   async query(sql, params) {
     poolQueries.push({sql, params});
     if (failQuery) throw new Error('synthetic database detail');
+    if (sql.includes('al.organization_id is null and al.legal_entity_id is null')) {
+      const globalRows = deploymentRows.filter(row => row.organization_id === null && row.legal_entity_id === null);
+      return {rows: globalRows, rowCount: globalRows.length};
+    }
+    if (sql.includes('where user_id=$1 and permission_key=$2')) {
+      const rowsForUser = params[0] === 'audit-designated-auditor' && params[1] === 'audit.deployment.view'
+        ? [{permission_key: 'audit.deployment.view'}]
+        : [];
+      return {rows: rowsForUser, rowCount: rowsForUser.length};
+    }
+    if (sql.includes('where u.id::text=$1 and u.status=\'Active\' and r.name=$2')) {
+      const assignedActiveRoles = new Set([
+        'audit-reader:Admin',
+        'audit-designated-auditor:Employee',
+      ]);
+      const rowsForUser = assignedActiveRoles.has(`${params[0]}:${params[1]}`) ? [{exists: 1}] : [];
+      return {rows: rowsForUser, rowCount: rowsForUser.length};
+    }
     return {rows};
   },
 };
@@ -55,6 +86,21 @@ const requireAuth = (req, res, next) => {
   req.organizationScope = scope;
   next();
 };
+const requireIdentity = (req, res, next) => {
+  const identity = {
+    'Bearer audit-reader': {sub: 'audit-reader', activeRole: 'Admin'},
+    'Bearer audit-designated-reader': {sub: 'audit-designated-auditor', activeRole: 'Employee'},
+    'Bearer audit-employee-reader': {sub: 'audit-employee', activeRole: 'Employee'},
+    'Bearer audit-disabled-reader': {sub: 'audit-disabled-auditor', activeRole: 'Employee'},
+    'Bearer audit-unassigned-role-reader': {sub: 'audit-designated-auditor', activeRole: 'Admin'},
+  }[req.get('authorization')];
+  if (!identity) {
+    res.status(401).json({error: 'Authentication required'});
+    return;
+  }
+  req.user = identity;
+  next();
+};
 const permissionChecks = [];
 const requirePermission = permission => (req, res, next) => {
   permissionChecks.push(permission);
@@ -68,6 +114,7 @@ const router = createAuditHistoryRouter({
   pool,
   requireDatabase,
   requireAuth,
+  requireIdentity,
   requirePermission,
   logError: () => {},
 });
@@ -108,7 +155,31 @@ try {
     ['org-a', 'legal-a'],
     ['org-a', 'legal-a'],
     ['org-a', 'legal-a'],
-  ], 'both routes must query only the server-resolved organization/legal-entity pair');
+  ], 'ordinary routes must query only the server-resolved organization/legal-entity pair');
+
+  const deploymentHeaders = {Authorization: 'Bearer audit-designated-reader'};
+  const deploymentLegacy = await fetch(`${baseUrl}/api/deployment-audit-logs`, {headers: deploymentHeaders});
+  const deploymentV1 = await fetch(`${baseUrl}/api/v1/deployment-audit-logs`, {headers: deploymentHeaders});
+  assert.equal(deploymentLegacy.status, 200);
+  assert.equal(deploymentV1.status, 200);
+  const deploymentLegacyRows = await deploymentLegacy.json();
+  const deploymentV1Rows = await deploymentV1.json();
+  assert.deepEqual(deploymentV1Rows, deploymentLegacyRows,
+    'both deployment audit aliases must share one reader and response shape');
+  assert.deepEqual(deploymentLegacyRows.map(row => row.id), ['deployment-global-row'],
+    'the deployment reader must include only records whose organization and legal-entity scopes are both null');
+  assert.equal(deploymentLegacyRows[0].entity_id, null);
+  assert.equal(deploymentLegacyRows[0].source_identifier, null);
+  assert.deepEqual(deploymentLegacyRows[0].old_value, {nested: {}},
+    'deployment audit records must use the same recursive identifier redaction as scoped history');
+  assert.deepEqual(deploymentLegacyRows[0].new_value, {status: 'Updated'});
+  assert(poolQueries.some(query => query.sql.includes('al.organization_id is null and al.legal_entity_id is null')
+    && query.sql.includes('order by al.created_at desc limit 500')
+    && query.sql.includes("u.status='Active'")
+    && query.sql.includes('r.name=$2')
+    && query.sql.includes('upg.permission_key=$3')
+    && query.params?.[2] === 'audit.deployment.view'),
+  'the final deployment read must revalidate the active assigned role, exact user grant, null scopes, fixed limit, and ordering');
 
   const queriesBeforeDeniedReads = poolQueries.length;
   const deniedRequests = [
@@ -123,6 +194,18 @@ try {
   assert.equal(poolQueries.length, queriesBeforeDeniedReads,
     'denied, ambiguous multi-scope, and unauthorized-scope reads must not query audit data');
 
+  const deniedGlobalReads = await Promise.all([
+    fetch(`${baseUrl}/api/deployment-audit-logs`, {headers: {Authorization: 'Bearer audit-reader'}}),
+    fetch(`${baseUrl}/api/v1/deployment-audit-logs`, {headers: {...deploymentHeaders, 'x-audit-permission': 'deny'}}),
+    fetch(`${baseUrl}/api/v1/deployment-audit-logs`, {headers: {Authorization: 'Bearer audit-employee-reader'}}),
+    fetch(`${baseUrl}/api/v1/deployment-audit-logs`, {headers: {Authorization: 'Bearer audit-disabled-reader'}}),
+    fetch(`${baseUrl}/api/v1/deployment-audit-logs`, {headers: {Authorization: 'Bearer audit-unassigned-role-reader'}}),
+  ]);
+  assert.deepEqual(deniedGlobalReads.map(response => response.status), [403, 403, 403, 403, 403],
+    'deployment-wide reads must deny users without a grant, denied permissions, inactive accounts, and sessions whose active role is no longer assigned');
+  assert.equal(poolQueries.filter(query => query.sql.includes('al.organization_id is null and al.legal_entity_id is null')).length, 2,
+    'negative deployment reads must not query global audit rows');
+
   failQuery = true;
   const [legacyFailure, versionedFailure] = await Promise.all([
     fetch(`${baseUrl}/api/audit-logs`, {headers}),
@@ -136,8 +219,13 @@ try {
   assert.equal(versionedError.error.code, 'INTERNAL_ERROR');
   assert.equal(versionedError.error.message, 'The request could not be completed.');
   assert.equal(versionedError.error.correlationId, versionedFailure.headers.get('x-correlation-id'));
-  assert.deepEqual(permissionChecks, Array(7).fill('audit.view'),
-    'both aliases use the same audit.view permission guard');
+  assert.deepEqual(permissionChecks, [
+    'audit.view', 'audit.view', 'audit.view',
+    'audit.deployment.view', 'audit.deployment.view',
+    'audit.view', 'audit.view',
+    'audit.deployment.view', 'audit.deployment.view',
+    'audit.view', 'audit.view',
+  ], 'each alias must use the intended scoped or deployment audit permission');
 } finally {
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 }

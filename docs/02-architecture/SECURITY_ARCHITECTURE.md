@@ -43,6 +43,8 @@ Encryption in transit is mandatory. Managed database/storage encryption at rest 
 
 Security-relevant events include login failures, session/role changes, permission changes, denials, exports, commercial changes, integration failures and administrative configuration changes. Logs use correlation IDs and avoid secret/full-payload exposure.
 
+Organization/legal-entity audit reads remain restricted to the exact server-resolved pair. Null-scope deployment records use a separate read-only view that requires an active account, an active role still assigned to that account, and an explicit per-user `audit.deployment.view` grant. The permission is protected, denied to every role by default, and cannot be enabled role-wide. The existing permission-management path can assign it to a different active user of any role; no user can grant it to themself. The deployment query selects only rows with both scope columns null and applies the shared audit-history redaction. No auditor grant is provisioned by the application or migration.
+
 ## Verification
 
 Each protected module includes positive and negative authorization tests, cross-organization scope tests, direct API tests and browser journeys. Production-mode tests prove that missing, invalid or unavailable required OIDC configuration fails closed and never enables local authentication. Security review and vulnerability disposition are release gates; buyer-specific penetration testing remains part of deployment acceptance.

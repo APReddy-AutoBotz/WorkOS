@@ -111,6 +111,7 @@ const requireRoles = (...roles) => (req, res, next) => {
   next();
 };
 
+const deploymentAuditPermissionKey = 'audit.deployment.view';
 const systemRoles = ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead', 'Employee'];
 const permissionDefinitions = [
   ['dashboard.view', 'Home', 'Overview Dashboard', false],
@@ -144,12 +145,13 @@ const permissionDefinitions = [
   ['integrations.teams_actions', 'Integrations', 'Teams Actions', false],
   ['imports.manage', 'Admin', 'Import / Export', false],
   ['audit.view', 'Admin', 'Audit Trail', true],
+  [deploymentAuditPermissionKey, 'Admin', 'Deployment Audit View', true],
   ['settings.manage', 'Admin', 'Governance Settings', false],
   ['permissions.manage', 'Admin', 'Permission Settings', true],
 ];
 const protectedPermissionKeys = new Set(permissionDefinitions.filter(([, , , protectedCore]) => protectedCore).map(([key]) => key));
 const defaultRolePermissions = {
-  Admin: permissionDefinitions.map(([key]) => key),
+  Admin: permissionDefinitions.filter(([key]) => key !== deploymentAuditPermissionKey).map(([key]) => key),
   HR: ['dashboard.view', 'employees.view', 'employees.manage', 'employees.password_reset', 'projects.view', 'projects.manage', 'projects.status_update', 'clients.view', 'clients.manage', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'leave.admin', 'approvals.view', 'notifications.view', 'notifications.manage', 'integrations.identity', 'integrations.teams', 'integrations.teams_actions', 'settings.manage'],
   CountryDirector: ['dashboard.view', 'employees.view', 'projects.view', 'clients.view', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
   ProjectManager: ['pm_workspace.view', 'employees.view', 'projects.view', 'projects.status_update', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
@@ -161,7 +163,9 @@ const permissionPayloadDefinitions = () => permissionDefinitions.map(([key, modu
   key,
   module,
   label,
-  description: label,
+  description: key === deploymentAuditPermissionKey
+    ? 'Read null-scope deployment audit records through an explicit individual user grant.'
+    : label,
   protected: Boolean(protectedCore),
 }));
 
@@ -200,6 +204,14 @@ const requirePermission = (permissionKey) => async (req, res, next) => {
     console.error(error);
     res.status(500).json({ error: 'Permission check failed' });
   }
+};
+
+const hasActiveAssignedRole = async (client, userId, activeRole) => {
+  const result = await client.query(`select 1 from users u
+    join user_roles ur on ur.user_id=u.id
+    join roles r on r.id=ur.role_id
+    where u.id=$1 and u.status='Active' and r.name=$2`, [userId, activeRole]);
+  return result.rowCount > 0;
 };
 
 const verifyPassword = async (password, passwordHash) => {
@@ -5125,6 +5137,10 @@ app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requ
     res.status(400).json({ error: 'Unknown permission key' });
     return;
   }
+  if (parsed.data.permissionKey === deploymentAuditPermissionKey && parsed.data.enabled) {
+    res.status(422).json({ error: 'Deployment audit access can be granted only to individual users.' });
+    return;
+  }
   if (protectedPermissionKeys.has(parsed.data.permissionKey) && req.params.roleName !== 'Admin') {
     res.status(422).json({ error: 'Protected permissions can be enabled only for Admin.' });
     return;
@@ -5200,8 +5216,15 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
   const client = await pool.connect();
   try {
     await client.query('begin');
+    if (parsed.data.permissionKey === deploymentAuditPermissionKey
+        && !(await hasActiveAssignedRole(client, req.user.sub, req.user.activeRole))) {
+      await client.query('rollback');
+      res.status(403).json({ error: 'The permission manager active role is no longer assigned.' });
+      return;
+    }
     const target = (await client.query(`
-      select u.id, u.username, u.employee_id, coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
+      select u.id, u.username, u.employee_id, u.status,
+        coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
       from users u
       left join user_roles ur on ur.user_id = u.id
       left join roles r on r.id = ur.role_id
@@ -5213,7 +5236,15 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
       res.status(404).json({ error: 'User was not found' });
       return;
     }
-    if (protectedPermissionKeys.has(parsed.data.permissionKey) && !target.roles.includes('Admin')) {
+    if (parsed.data.permissionKey === deploymentAuditPermissionKey
+        && (target.status !== 'Active' || target.roles.length === 0 || target.id.toString() === req.user.sub)) {
+      await client.query('rollback');
+      res.status(422).json({ error: 'Deployment audit access requires a different active user with an assigned role.' });
+      return;
+    }
+    if (protectedPermissionKeys.has(parsed.data.permissionKey)
+        && parsed.data.permissionKey !== deploymentAuditPermissionKey
+        && !target.roles.includes('Admin')) {
       await client.query('rollback');
       res.status(422).json({ error: 'Protected permissions can be granted only to Admin users.' });
       return;
@@ -5235,6 +5266,7 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
       entityId: result.rows[0].id,
       newValue: result.rows[0],
       details: `Granted ${parsed.data.permissionKey} to ${target.username}`,
+      organizationScope: parsed.data.permissionKey === deploymentAuditPermissionKey ? null : req.organizationScope,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5257,6 +5289,12 @@ app.delete('/api/permissions/user-grants/:id', requireDatabase, requireAuth, req
       res.status(404).json({ error: 'User permission grant was not found' });
       return;
     }
+    if (previous.permission_key === deploymentAuditPermissionKey
+        && !(await hasActiveAssignedRole(client, req.user.sub, req.user.activeRole))) {
+      await client.query('rollback');
+      res.status(403).json({ error: 'The permission manager active role is no longer assigned.' });
+      return;
+    }
     await client.query(`
       insert into permission_change_history (change_type, user_id, permission_key, old_value, changed_by, active_role)
       values ('UserGrantRevoked', $1, $2, $3::jsonb, $4, $5)
@@ -5268,6 +5306,7 @@ app.delete('/api/permissions/user-grants/:id', requireDatabase, requireAuth, req
       entityId: previous.id,
       oldValue: previous,
       details: `Revoked ${previous.permission_key}`,
+      organizationScope: previous.permission_key === deploymentAuditPermissionKey ? null : req.organizationScope,
     });
     await client.query('commit');
     res.json({ status: 'ok' });
@@ -5634,7 +5673,13 @@ app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePer
     client.release();
   }
 });
-const auditHistoryRouter = createAuditHistoryRouter({pool, requireDatabase, requireAuth, requirePermission});
+const auditHistoryRouter = createAuditHistoryRouter({
+  pool,
+  requireDatabase,
+  requireAuth,
+  requireIdentity,
+  requirePermission,
+});
 app.use('/api', auditHistoryRouter);
 app.use('/api/v1', auditHistoryRouter);
 

@@ -66,6 +66,7 @@ export const PermissionSettings = ({ onNotice }: PermissionSettingsProps) => {
     roleSettings.find(setting => setting.roleName === roleName && setting.permissionKey === permissionKey)?.enabled ?? false;
 
   const isLocked = (roleName: UserRole, permissionKey: PermissionKey) =>
+    permissionKey === 'audit.deployment.view' ||
     (PROTECTED_PERMISSION_KEYS.has(permissionKey) && roleName !== 'Admin') ||
     (permissionKey === 'permissions.manage' && roleName === 'Admin');
 

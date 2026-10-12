@@ -224,11 +224,27 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
   assert.equal(provenanceReferenceIndex.rowCount, 1);
   assert.match(provenanceReferenceIndex.rows[0].indexdef, /unique/i,
     'identity-link provenance references must be unique');
+  const deploymentAuditPermission = await pool.query(`select pd.protected,rp.role_name,rp.enabled
+    from permission_definitions pd join role_permissions rp on rp.permission_key=pd.permission_key
+    where pd.permission_key='audit.deployment.view' order by rp.role_name`);
+  assert.deepEqual(deploymentAuditPermission.rows, [
+    {protected: true, role_name: 'Admin', enabled: false},
+    {protected: true, role_name: 'CountryDirector', enabled: false},
+    {protected: true, role_name: 'Employee', enabled: false},
+    {protected: true, role_name: 'HR', enabled: false},
+    {protected: true, role_name: 'ProjectManager', enabled: false},
+    {protected: true, role_name: 'TeamLead', enabled: false},
+  ], 'fresh installs must register deployment audit as protected and deny it to every role by default');
+  const defaultDeploymentAuditGrants = await pool.query(`select count(*)::int as count from user_permission_grants
+    where permission_key='audit.deployment.view'`);
+  assert.equal(defaultDeploymentAuditGrants.rows[0].count, 0,
+    'fresh installs must not create any live deployment audit user grants');
 
   const actorId = randomUUID();
   const singleScopeActorId = randomUUID();
   const multiScopeActorId = randomUUID();
   const auditDeniedActorId = randomUUID();
+  const unassignedAuditActorId = randomUUID();
   await pool.query(`insert into roles(name) values ('Admin'),('Employee') on conflict (name) do nothing`);
   await pool.query(`insert into users (id,username,email,status)
     values ($1,'synthetic-import-admin','synthetic-import-admin@example.test','Active')`, [actorId]);
@@ -246,6 +262,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ($1,'org-default','legal-default',true)`, [singleScopeActorId]);
   await pool.query(`insert into users (id,username,email,status)
     values ($1,'synthetic-no-audit','synthetic-no-audit@example.test','Active')`, [auditDeniedActorId]);
+  await pool.query(`insert into users (id,username,email,status)
+    values ($1,'synthetic-unassigned-auditor','synthetic-unassigned-auditor@example.test','Active')`, [unassignedAuditActorId]);
   await pool.query(`insert into user_roles (user_id,role_id)
     select $1,id from roles where name='Employee'`, [auditDeniedActorId]);
   await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
@@ -1506,6 +1524,178 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       {entity_type: 'RolePermission', organization_id: null, legal_entity_id: null},
       {entity_type: 'SystemSettings', organization_id: null, legal_entity_id: null},
     ], 'deployment-wide mutations must remain unscoped even when the Admin selected one legal entity');
+
+    const ungrantedGlobalRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ungrantedGlobalRead.status, 403,
+      'an Admin without the explicit deployment-audit user grant must be denied even when role defaults are broad');
+    await pool.query(`update role_permissions set enabled=true
+      where role_name='Admin' and permission_key='audit.deployment.view'`);
+    const roleOnlyGlobalRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
+      headers: {Authorization: `Bearer ${token}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(roleOnlyGlobalRead.status, 403,
+      'an accidental role-wide permission row must not substitute for the explicit per-user auditor designation');
+    await pool.query(`update role_permissions set enabled=false
+      where role_name='Admin' and permission_key='audit.deployment.view'`);
+    const employeeGlobalRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
+      headers: {Authorization: `Bearer ${employeeTokenWithoutAdminPermissions}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(employeeGlobalRead.status, 403, 'an active non-Admin without an explicit user grant must not read deployment-wide history');
+
+    const selfGrantResponse = await fetch(`${baseUrl}/api/permissions/user-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: multiScopeActorId, permissionKey: 'audit.deployment.view'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(selfGrantResponse.status, 422, 'a permission manager cannot designate their own account');
+    await pool.query(`update users set status='Disabled' where id=$1`, [auditDeniedActorId]);
+    const inactiveTargetGrant = await fetch(`${baseUrl}/api/permissions/user-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: auditDeniedActorId, permissionKey: 'audit.deployment.view'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(inactiveTargetGrant.status, 422, 'inactive accounts cannot be designated as deployment auditors');
+    await pool.query(`update users set status='Active' where id=$1`, [auditDeniedActorId]);
+    const rolelessTargetGrant = await fetch(`${baseUrl}/api/permissions/user-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: unassignedAuditActorId, permissionKey: 'audit.deployment.view'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(rolelessTargetGrant.status, 422,
+      'an active account without an assigned role cannot be designated as an auditor');
+
+    await pool.query(`delete from user_roles
+      where user_id=$1 and role_id=(select id from roles where name='Admin')`, [multiScopeActorId]);
+    const staleManagerGrant = await fetch(`${baseUrl}/api/permissions/user-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: auditDeniedActorId, permissionKey: 'audit.deployment.view'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(staleManagerGrant.status, 403,
+      'a stale Admin session cannot designate an auditor after its active role has been removed');
+    await pool.query(`insert into user_roles (user_id,role_id)
+      select $1,id from roles where name='Admin'`, [multiScopeActorId]);
+
+    const roleWideAuditGrant = await fetch(`${baseUrl}/api/permissions/roles/Admin`, {
+      method: 'PATCH',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({permissionKey: 'audit.deployment.view', enabled: true}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(roleWideAuditGrant.status, 422,
+      'deployment audit access must not be enabled for all Admin accounts through role settings');
+    const roleWideAuditState = await pool.query(`select role_name,enabled from role_permissions
+      where permission_key='audit.deployment.view' order by role_name`);
+    assert(roleWideAuditState.rows.every(row => row.enabled === false),
+      'a rejected role-wide grant must leave every role denied');
+
+    await pool.query(`insert into audit_logs
+        (user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,source_identifier,
+         old_value,new_value,organization_id,legal_entity_id)
+      values
+        ($1,'Synthetic multi-scope Admin','Admin','Admin','Synthetic deployment test','Deployment Audit Test',
+         'Sensitive Global Row','DeploymentAuditTest','deployment-global-sensitive','global-user@example.test',
+         '{"provider_subject":"global-subject","nested":{"id":"global-user@example.test"}}'::jsonb,
+         '{"provider_upn":"global-user@example.test","status":"Observed"}'::jsonb,null,null),
+        ($1,'Synthetic multi-scope Admin','Admin','Admin','Synthetic deployment test','Deployment Audit Test',
+         'Scoped Beta Row','DeploymentAuditTest','deployment-scoped-beta',null,null,null,'org-scope-beta','legal-scope-beta'),
+        ($1,'Synthetic multi-scope Admin','Admin','Admin','Synthetic deployment test','Deployment Audit Test',
+         'Scoped Row','DeploymentAuditTest','deployment-scoped',null,null,null,'org-default','legal-default')`, [multiScopeActorId]);
+
+    const deploymentGrantResponse = await fetch(`${baseUrl}/api/permissions/user-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: auditDeniedActorId, permissionKey: 'audit.deployment.view'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(deploymentGrantResponse.status, 200,
+      'the existing permission-management path may designate an active non-Admin user explicitly');
+    const deploymentGrant = await deploymentGrantResponse.json();
+    assert.equal(deploymentGrant.permission_key, 'audit.deployment.view');
+    const deploymentGrantAudit = await pool.query(`select organization_id,legal_entity_id from audit_logs
+      where user_id=$1 and entity_type='UserPermissionGrant' and entity_id=$2`, [multiScopeActorId, deploymentGrant.id]);
+    assert.deepEqual(deploymentGrantAudit.rows, [{organization_id: null, legal_entity_id: null}],
+      'granting deployment-level audit access must itself appear as a null-scope audit event');
+
+    const deploymentAuditResponse = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
+      headers: {Authorization: `Bearer ${employeeTokenWithoutAdminPermissions}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(deploymentAuditResponse.status, 200,
+      'a specifically granted non-Admin can read deployment history without selecting an organization scope');
+    const deploymentAuditRows = await deploymentAuditResponse.json();
+    assert(deploymentAuditRows.some(row => row.entity_id === 'deployment-global-sensitive'),
+      'deployment history must include exact null-scope audit records');
+    assert(!deploymentAuditRows.some(row => ['deployment-scoped-beta', 'deployment-scoped'].includes(row.entity_id)),
+      'deployment history must exclude tenant-scoped records');
+    const redactedGlobalRow = deploymentAuditRows.find(row => row.entity_id === 'deployment-global-sensitive');
+    assert.equal(redactedGlobalRow.source_identifier, null,
+      'deployment history must redact external identifiers using the shared audit DTO');
+    assert.deepEqual(redactedGlobalRow.old_value, {nested: {}},
+      'deployment history must recursively redact provider and personal identifiers');
+    assert.deepEqual(redactedGlobalRow.new_value, {status: 'Observed'});
+
+    const staleActiveRoleToken = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Admin');
+    const staleActiveRoleRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
+      headers: {Authorization: `Bearer ${staleActiveRoleToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(staleActiveRoleRead.status, 403,
+      'a permission grant cannot preserve access when the token role has been removed from the active account');
+
+    await pool.query(`delete from user_roles
+      where user_id=$1 and role_id=(select id from roles where name='Admin')`, [multiScopeActorId]);
+    const staleManagerRevoke = await fetch(`${baseUrl}/api/permissions/user-grants/${deploymentGrant.id}`, {
+      method: 'DELETE',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(staleManagerRevoke.status, 403,
+      'a stale Admin session cannot revoke grants after its active role has been removed');
+    const retainedAfterStaleRevoke = await pool.query(`select count(*)::int as count
+      from user_permission_grants where id=$1`, [deploymentGrant.id]);
+    assert.equal(retainedAfterStaleRevoke.rows[0].count, 1,
+      'a rejected stale-role revocation must leave the explicit user grant intact');
+    await pool.query(`insert into user_roles (user_id,role_id)
+      select $1,id from roles where name='Admin'`, [multiScopeActorId]);
+
+    await pool.query(`update users set status='Disabled' where id=$1`, [auditDeniedActorId]);
+    const disabledAuditorRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
+      headers: {Authorization: `Bearer ${employeeTokenWithoutAdminPermissions}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(disabledAuditorRead.status, 403,
+      'a previously designated but currently disabled account must lose deployment audit access immediately');
+    await pool.query(`update users set status='Active' where id=$1`, [auditDeniedActorId]);
+
+    const deploymentRevokeResponse = await fetch(`${baseUrl}/api/permissions/user-grants/${deploymentGrant.id}`, {
+      method: 'DELETE',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(deploymentRevokeResponse.status, 200, 'the authorized permission manager can revoke an individual deployment-audit grant');
+    const deploymentRevokeAudit = await pool.query(`select organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type='UserPermissionGrant' and entity_id=$2`,
+    [multiScopeActorId, deploymentGrant.id]);
+    assert.equal(deploymentRevokeAudit.rowCount, 2,
+      'the deployment auditor grant and revocation must both be recorded');
+    assert(deploymentRevokeAudit.rows.every(row => row.organization_id === null && row.legal_entity_id === null),
+      'the deployment auditor grant and revocation must both be recorded outside any selected tenant scope');
+    const revokedAuditorRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
+      headers: {Authorization: `Bearer ${employeeTokenWithoutAdminPermissions}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(revokedAuditorRead.status, 403, 'revocation must remove deployment audit access immediately');
+
     for (const [organizationId, legalEntityId] of [
       ['org-default', 'legal-default'],
       ['org-scope-beta', 'legal-scope-beta'],
@@ -1514,8 +1704,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       assert.equal(response.status, 200);
       const rows = await response.json();
       assert(!rows.some(row => row.user_id === multiScopeActorId
-        && ['SystemSettings', 'RolePermission'].includes(row.entity_type)),
-      'ordinary scoped history must not attribute deployment-wide configuration to the caller’s selected entity');
+        && ['SystemSettings', 'RolePermission', 'UserPermissionGrant'].includes(row.entity_type)),
+      'ordinary scoped history must not attribute deployment-wide configuration or auditor grants to the caller’s selected entity');
     }
 
     const auditAResponse = await postScopedJson('/api/audit-events', token, 'org-default', 'legal-default', {
@@ -2067,7 +2257,7 @@ await withDisposableDatabase(async (pool) => {
     const baselineSql = await readFile(join(serverDir, 'schema.sql'), 'utf8');
     await client.query(baselineSql);
     await client.query('insert into schema_migrations (id) values ($1)', [manifest[0].id]);
-    for (const migration of manifest.slice(1, -4)) {
+    for (const migration of manifest.slice(1, -5)) {
       const sql = await readFile(join(serverDir, 'migrations', migration.file), 'utf8');
       await client.query(sql);
       await client.query('insert into schema_migrations (id) values ($1)', [migration.id]);
@@ -2099,24 +2289,25 @@ await withDisposableDatabase(async (pool) => {
   const before = await pool.query('select count(*)::int as count from schema_migrations');
   const upgrade = await runMigrations({pool, rootDir: serverDir, logger: quietLogger});
   const after = await pool.query('select count(*)::int as count from schema_migrations');
-  const candidateMigrations = manifest.slice(-4);
+  const candidateMigrations = manifest.slice(-5);
   assert.deepEqual(candidateMigrations.map(item => item.id), [
     '033_wos03_audit_operation_context',
     '034_wos03_employee_import_provenance',
     '035_wos03_scoped_history',
     '036_wos03_identity_link_provenance_reference',
-  ], 'PR-006 adds ordered request, import provenance, scoped history and identity-link provenance migrations');
+    '037_wos03_deployment_audit_permission',
+  ], 'PR-006 adds ordered request, import provenance, scoped history, identity-link provenance and deployment audit permission migrations');
   assert.deepEqual(upgrade.applied, candidateMigrations.map(item => item.id),
     'upgrade from merged main applies all additive PR-006 migrations');
-  assert.equal(upgrade.skipped.length, manifest.length - 4);
-  assert.equal(after.rows[0].count, before.rows[0].count + 4, 'upgrade appends all four migration ledger rows');
+  assert.equal(upgrade.skipped.length, manifest.length - 5);
+  assert.equal(after.rows[0].count, before.rows[0].count + 5, 'upgrade appends all five migration ledger rows');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
-  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -4).map(item => item.id),
+  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -5).map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 4, 'all PR-006 migrations are ledgered');
+  assert.equal(newMigrations.length, 5, 'all PR-006 migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),

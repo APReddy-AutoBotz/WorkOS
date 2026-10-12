@@ -24,6 +24,9 @@ const { employeeService, projectService, allocationService } = await import('../
 const { authService } = await import('../src/services/authService.ts');
 const {
   ROUTE_ROLES,
+  canOpenDeploymentAuditWithoutOrganizationScope,
+  canFetchScopedAuditHistory,
+  canFetchScopedWorkspaceData,
   canAccessEmployeeDetail,
   canAccessProjectDetail,
   canEditEmployeeData,
@@ -64,6 +67,34 @@ assert.equal(hasRouteRole(hr, ROUTE_ROLES.dashboard), true, 'HR should access th
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.planningWorkspace), true, 'HR should access the planning workspace');
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.adminSettings), true, 'HR should access governance settings');
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.auditTrail), false, 'HR should not access audit trail');
+const designatedHrAuditor = { ...hr, permissions: [...(hr.permissions || []), 'audit.deployment.view'] };
+assert.equal(hasRouteRole(designatedHrAuditor, ROUTE_ROLES.auditTrail), true,
+  'an HR account with an explicit deployment-audit grant should access the audit page without Admin role');
+assert.equal(canOpenDeploymentAuditWithoutOrganizationScope(designatedHrAuditor), true,
+  'an explicitly designated auditor should reach the global reader without an organization scope');
+assert.equal(canOpenDeploymentAuditWithoutOrganizationScope(admin), false,
+  'an ordinary Admin still must pass the existing organization scope gate');
+const designatedAdminAuditor = { ...admin, permissions: [...(admin.permissions || []), 'audit.deployment.view'] };
+assert.equal(designatedAdminAuditor.permissions.includes('audit.view'), true,
+  'the dual-permission fixture retains its ordinary scoped-audit permission');
+assert.equal(canOpenDeploymentAuditWithoutOrganizationScope(designatedAdminAuditor), true,
+  'an explicitly designated Admin who also has scoped audit permission must reach the deployment reader without selecting a scope');
+assert.equal(canFetchScopedAuditHistory(designatedAdminAuditor, false), false,
+  'a dual-permission auditor without a validated scope must not fetch scoped history');
+assert.equal(canFetchScopedAuditHistory(designatedAdminAuditor, true), true,
+  'a dual-permission auditor may fetch scoped history after a scope is validated');
+assert.equal(canFetchScopedAuditHistory(designatedHrAuditor, false), false,
+  'a deployment-only auditor must not fetch scoped history');
+assert.equal(canFetchScopedAuditHistory(admin, false, true), true,
+  'ordinary demo-mode audit behavior remains available without a backend scope');
+assert.equal(canFetchScopedAuditHistory(designatedAdminAuditor, false, true), false,
+  'demo fallback must not bypass the selected-scope requirement for a deployment auditor with scoped permission');
+assert.equal(canFetchScopedWorkspaceData(designatedHrAuditor, false, true), false,
+  'the scope-free deployment audit shell must not preload tenant workspace data in demo fallback');
+assert.equal(canFetchScopedWorkspaceData(admin, false, true), true,
+  'ordinary demo sessions may retain their existing local workspace-data fallback');
+assert.equal(canFetchScopedWorkspaceData(designatedAdminAuditor, true), true,
+  'a designated auditor with a validated scope may use the scoped workspace shell');
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.brdTraceability), true, 'HR should access BRD traceability');
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.leaveAdmin), true, 'HR should access feature-gated leave administration when enabled');
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.identityIntegrations), true, 'HR should access feature-gated identity integrations when enabled');

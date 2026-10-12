@@ -23,7 +23,7 @@ const { DataStorage } = await import('../src/services/storage.ts');
 const { adminService, employeeService } = await import('../src/services/api.ts');
 const { authService } = await import('../src/services/authService.ts');
 const { ROUTE_ROLES, canManageAllocations, canManagePermissions, hasRouteRole } = await import('../src/services/accessControl.ts');
-const { PERMISSION_DEFINITIONS, PROTECTED_PERMISSION_KEYS } = await import('../src/services/permissions.ts');
+const { PERMISSION_DEFINITIONS, PROTECTED_PERMISSION_KEYS, hasPermission } = await import('../src/services/permissions.ts');
 const { STORAGE_KEYS } = await import('../src/services/storage.ts');
 
 DataStorage.resetDemoData();
@@ -43,6 +43,10 @@ assert.ok(config.permissions.length >= 20, 'permission registry should expose en
 assert.ok(config.rolePermissions.some(item => item.roleName === 'Admin' && item.permissionKey === 'permissions.manage' && item.enabled), 'Admin must retain permission management by default');
 assert.ok(PROTECTED_PERMISSION_KEYS.has('permissions.manage'), 'permission management must be protected');
 assert.ok(PERMISSION_DEFINITIONS.some(permission => permission.key === 'allocations.manage'), 'allocation management permission must exist');
+assert.ok(PROTECTED_PERMISSION_KEYS.has('audit.deployment.view'), 'deployment-wide audit access must be protected');
+assert.ok(!config.rolePermissions.some(item => item.permissionKey === 'audit.deployment.view' && item.enabled),
+  'deployment-wide audit access must default off for every role, including Admin');
+assert.equal(hasPermission(admin, 'audit.deployment.view'), false, 'an Admin must not receive deployment audit access by default');
 
 assert.equal(hasRouteRole(admin, ROUTE_ROLES.auditTrail), true, 'Admin should keep audit access through default permissions');
 
@@ -54,7 +58,8 @@ assert.ok(employee, 'employee login should work');
 assert.equal(hasRouteRole(employee, ROUTE_ROLES.planningWorkspace), false, 'Employee should not see planning by default');
 assert.equal(canManageAllocations(employee), false, 'Employee should not manage allocations by default');
 
-await authService.login('admin-1', 'workos-test-only');
+const permissionManager = await authService.login('admin-1', 'workos-test-only');
+assert.ok(permissionManager, 'the permission manager can log in for protected grant tests');
 const user = (await adminService.getPermissionConfig()).users.find(item => item.employeeId === deliveryEmployee.employeeId);
 assert.ok(user, 'permission users should include the selected employee');
 await adminService.grantUserPermission(user.id, 'allocations.view');
@@ -81,6 +86,19 @@ await assert.rejects(
   'protected permissions cannot be granted to non-Admin users',
 );
 await assert.rejects(
+  () => adminService.grantUserPermission(permissionManager.id, 'audit.deployment.view'),
+  /different active user with an assigned role/,
+  'a permission manager cannot grant deployment-wide audit access to their own account',
+);
+const deploymentAuditGrant = await adminService.grantUserPermission(user.id, 'audit.deployment.view');
+assert.equal(deploymentAuditGrant.permissionKey, 'audit.deployment.view',
+  'an active non-Admin account can receive deployment-wide audit access through the existing per-user exception path');
+await assert.rejects(
+  () => adminService.setRolePermission('Admin', 'audit.deployment.view', true),
+  /individual users/,
+  'deployment-wide audit access cannot be enabled for an entire role',
+);
+await assert.rejects(
   () => adminService.setRolePermission('TeamLead', 'permissions.manage', true),
   /Protected permissions/,
   'protected permission toggles must stay locked for non-Admin roles',
@@ -90,10 +108,25 @@ await assert.rejects(
   /cannot be disabled/,
   'Admin permission management cannot be removed',
 );
+await authService.logout();
+employee = await authService.login(deliveryEmployee.employeeId, 'workos-test-only', 'Employee');
+assert.ok(employee?.permissions?.includes('audit.deployment.view'),
+  'the selected active non-Admin user should receive the explicit deployment audit permission');
+assert.equal(hasRouteRole(employee, ROUTE_ROLES.auditTrail), true,
+  'a specifically designated non-Admin user should be able to open the audit page');
+await authService.login('admin-1', 'workos-test-only');
+await adminService.deleteUserPermissionGrant(deploymentAuditGrant.id);
+await authService.logout();
+employee = await authService.login(deliveryEmployee.employeeId, 'workos-test-only', 'Employee');
+assert.equal(hasPermission(employee, 'audit.deployment.view'), false,
+  'revoking the explicit deployment audit grant must remove the permission on the next login');
+assert.equal(hasRouteRole(employee, ROUTE_ROLES.auditTrail), false,
+  'revoking the explicit deployment audit grant must remove access to the audit page');
 
 console.log(JSON.stringify({
   status: 'passed',
   permissions: config.permissions.length,
   protectedPermissions: [...PROTECTED_PERMISSION_KEYS],
+  deploymentAuditDefault: 'denied',
   extraGrant: 'allocations.view',
 }, null, 2));

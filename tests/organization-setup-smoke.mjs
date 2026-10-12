@@ -43,6 +43,9 @@ const apiClient = readFileSync('src/services/apiClient.ts', 'utf8');
 const authService = readFileSync('src/services/authService.ts', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 const scopeGate = readFileSync('src/components/auth/OrganizationScopeGate.tsx', 'utf8');
+const auditTrail = readFileSync('src/pages/AuditTrail.tsx', 'utf8');
+const sidebar = readFileSync('src/components/Layout/Sidebar.tsx', 'utf8');
+const header = readFileSync('src/components/Layout/Header.tsx', 'utf8');
 const productConfig = readFileSync('src/config/productConfig.ts', 'utf8');
 
 const routeSource = (start, end) => {
@@ -388,7 +391,15 @@ assert.match(authService, /fetch\('\/api\/auth\/switch-role'[\s\S]*headers: getA
 assert.match(authService, /completeEntraLogin:[\s\S]*clearToken\(\)[\s\S]*fetch\('\/api\/auth\/me'/, 'Entra completion must discard stale tab identity and bootstrap from the session cookie');
 assert.match(apiClient, /export const getApiHeaders[\s\S]*X-Organization-Id[\s\S]*X-Legal-Entity-Id/, 'scope-bound raw auth actions must share the selected-scope headers');
 assert.match(apiClient, /export const clearOrganizationScope/, 'the scope gate must be able to clear an expired or unauthorized selection');
-assert.match(appSource, /<OrganizationScopeGate><RuntimeTerminology>\{children\}<\/RuntimeTerminology><\/OrganizationScopeGate>/, 'authenticated application routes and scoped terminology must not mount until a valid scope is selected');
+assert.match(appSource, /<OrganizationScopeGate allowDeploymentAuditWithoutScope=\{deploymentAuditScopeFreePath\}>[\s\S]*<RuntimeTerminology>\{children\}<\/RuntimeTerminology>/, 'only the root and audit routes for explicitly designated auditors may use the scope-free reader path');
+assert.match(appSource, /if \(canOpenDeploymentAuditWithoutOrganizationScope\(user\) && !getOrganizationScope\(\)\)[\s\S]*Navigate to="\/audit-trail"/, 'a designated auditor logging in without a selected scope must land on the global audit reader');
+assert.match(scopeGate, /allowDeploymentAuditWithoutScope && status !== 'checking'[\s\S]*deployment-audit-without-organization-scope/, 'scope-free audit access may render only after scope discovery has completed or failed closed');
+assert.match(auditTrail, /canFetchScopedAuditHistory\([\s\S]*hasSelectedOrganizationScope/, 'the audit page must gate scoped reads on validated scope state');
+assert.match(auditTrail, /canViewScopedAudit && !hasSelectedOrganizationScope && canViewDeploymentAudit/, 'a scope-free dual-permission audit page must explain that tenant history needs a selected organization scope');
+assert.match(sidebar, /name: 'Audit Trail', path: '\/audit-trail',[\s\S]*roles: ROUTE_ROLES\.auditTrail/, 'explicitly designated auditors must retain a sidebar path to the audit page');
+assert.match(header, /id: 'page-audit',[\s\S]*path: '\/audit-trail',[\s\S]*roles: ROUTE_ROLES\.auditTrail/, 'explicitly designated auditors must retain the audit page in navigation search');
+assert.match(header, /canLoadScopedWorkspaceData = canFetchScopedWorkspaceData\([\s\S]*Boolean\(getOrganizationScope\(\)\)[\s\S]*isDemoFallbackAllowed\(\)/, 'the application header must make its scoped preload decision from the validated scope and safe demo mode rules');
+assert.match(header, /if \(!canLoadScopedWorkspaceData\)[\s\S]*setAllEmployees\(\[\]\)[\s\S]*return;/, 'the application header must not request scoped workspace data when the helper denies it');
 assert.match(scopeGate, /\/api\/auth\/organization-scopes[\s\S]*status === 'choosing'[\s\S]*data-testid=\{`organization-scope-option-/, 'the scope gate must render authorized choices before mounting protected application content');
 assert.match(scopeGate, /No active organization access/, 'users with no currently authorized scope must fail closed');
 assert.match(runtimeTerminology, /if \(!getOrganizationScope\(\)\)[\s\S]*applyPersistedTerminology\(\{\}\)/, 'runtime profile data must not be requested before a scope is chosen');

@@ -1719,6 +1719,16 @@ export const adminService = {
     }
     return DataStorage.get<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, []);
   },
+  getDeploymentAuditLogs: async (): Promise<AuditLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) return [];
+    if (!(await checkBackend())) return [];
+    try {
+      const raw = await api.get<Record<string, unknown>[]>('/api/deployment-audit-logs');
+      return raw.map(normalizeAuditLog);
+    } catch {
+      return [];
+    }
+  },
   getImportExportLogs: async (): Promise<ImportExportLog[]> => {
     if (await checkBackend()) {
       const raw = await api.get<Record<string, unknown>[]>('/api/import-export-logs');
@@ -1915,6 +1925,9 @@ export const adminService = {
     }
     requireLocalPermissionManager();
     const permission = PERMISSION_DEFINITIONS.find(item => item.key === permissionKey);
+    if (permissionKey === 'audit.deployment.view' && enabled) {
+      throw new Error('Deployment audit access can be granted only to individual users.');
+    }
     if (permission?.protected && roleName !== 'Admin') {
       throw new Error('Protected permissions can be assigned only to Admin.');
     }
@@ -1944,7 +1957,12 @@ export const adminService = {
     const account = accounts.find(item => item.employeeRecordId === userId || item.id === userId);
     const permission = PERMISSION_DEFINITIONS.find(item => item.key === permissionKey);
     if (!account) throw new Error('User was not found.');
-    if (permission?.protected && !account.roles.includes('Admin')) {
+    if (permissionKey === 'audit.deployment.view'
+        && (account.status !== 'Active' || account.roles.length === 0
+          || authService.getCurrentUser()?.id === account.employeeRecordId)) {
+      throw new Error('Deployment audit access requires a different active user with an assigned role.');
+    }
+    if (permission?.protected && permissionKey !== 'audit.deployment.view' && !account.roles.includes('Admin')) {
       throw new Error('Protected permissions can be granted only to Admin users.');
     }
     const grants = DataStorage.get<UserPermissionGrant[]>(STORAGE_KEYS.PERMISSION_USER_GRANTS, []);

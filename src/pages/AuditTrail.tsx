@@ -18,6 +18,10 @@ import {
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { adminService } from '../services/api';
+import { authService } from '../services/authService';
+import { hasPermission } from '../services/permissions';
+import { getOrganizationScope, isDemoFallbackAllowed } from '../services/apiClient';
+import { canFetchScopedAuditHistory } from '../services/accessControl';
 import { AuditLog } from '../types';
 import { downloadCsv } from '../lib/csv';
 import { NoticeBanner } from '../components/ui/NoticeBanner';
@@ -49,7 +53,17 @@ const formatLog = (log: AuditLog) => ({
 });
 
 export const AuditTrail = () => {
+  const canViewScopedAudit = hasPermission(authService.getCurrentUser(), 'audit.view');
+  const canViewDeploymentAudit = hasPermission(authService.getCurrentUser(), 'audit.deployment.view');
+  const hasSelectedOrganizationScope = Boolean(getOrganizationScope());
+  const canFetchScopedAudit = canFetchScopedAuditHistory(
+    authService.getCurrentUser(),
+    hasSelectedOrganizationScope,
+    isDemoFallbackAllowed(),
+  );
   const [auditLogs, setAuditLogs] = useState<ReturnType<typeof formatLog>[]>([]);
+  const [deploymentAuditLogs, setDeploymentAuditLogs] = useState<ReturnType<typeof formatLog>[]>([]);
+  const [auditView, setAuditView] = useState<'scope' | 'deployment'>(canFetchScopedAudit ? 'scope' : 'deployment');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLog, setSelectedLog] = useState<ReturnType<typeof formatLog> | null>(null);
   const [moduleFilter, setModuleFilter] = useState('All Modules');
@@ -58,10 +72,24 @@ export const AuditTrail = () => {
   const [notice, setNotice] = useState('');
 
   useEffect(() => {
-    adminService.getAuditLogs().then(logs => setAuditLogs(logs.map(formatLog)));
-  }, []);
+    if (canFetchScopedAudit) {
+      adminService.getAuditLogs().then(logs => setAuditLogs(logs.map(formatLog)));
+    } else {
+      setAuditLogs([]);
+      if (canViewDeploymentAudit) setAuditView('deployment');
+    }
+    if (canViewDeploymentAudit) {
+      adminService.getDeploymentAuditLogs().then(logs => setDeploymentAuditLogs(logs.map(formatLog)));
+    } else {
+      setDeploymentAuditLogs([]);
+      setAuditView('scope');
+    }
+  }, [canFetchScopedAudit, canViewDeploymentAudit]);
+
+  const activeLogs = auditView === 'deployment' ? deploymentAuditLogs : auditLogs;
 
   const exportLogs = () => {
+    if (auditView === 'deployment') return;
     downloadCsv(`audit-logs-${new Date().toISOString().split('T')[0]}.csv`, filteredLogs.map(log => ({
       timestamp: log.timestamp,
       user: log.user,
@@ -80,7 +108,7 @@ export const AuditTrail = () => {
   const filteredLogs = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     const criticalActions = new Set(['Create', 'Update', 'Delete', 'Close', 'Reset', 'Approve', 'Reject']);
-    return auditLogs.filter(log => {
+    return activeLogs.filter(log => {
       const matchesSearch = log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
                              log.target.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesModule = moduleFilter === 'All Modules' || log.module === moduleFilter;
@@ -88,9 +116,9 @@ export const AuditTrail = () => {
       const matchesCritical = !criticalOnly || criticalActions.has(log.action);
       return matchesSearch && matchesModule && matchesDate && matchesCritical;
     });
-  }, [auditLogs, searchQuery, moduleFilter, todayOnly, criticalOnly]);
+  }, [activeLogs, searchQuery, moduleFilter, todayOnly, criticalOnly]);
 
-  const modules = useMemo(() => ['All Modules', ...Array.from(new Set(auditLogs.map(log => log.module))).sort()], [auditLogs]);
+  const modules = useMemo(() => ['All Modules', ...Array.from(new Set(activeLogs.map(log => log.module))).sort()], [activeLogs]);
 
   const getEntityPath = (log: ReturnType<typeof formatLog>) => {
     if (!log.target || log.target.includes(' ')) return '';
@@ -101,7 +129,7 @@ export const AuditTrail = () => {
   };
 
   const exportSelectedLog = () => {
-    if (!selectedLog) return;
+    if (!selectedLog || auditView === 'deployment') return;
     downloadCsv(`audit-log-${selectedLog.id}.csv`, [{
       timestamp: selectedLog.timestamp,
       user: selectedLog.user,
@@ -124,11 +152,45 @@ export const AuditTrail = () => {
         subtitle="End-to-end operational traceability for enterprise data integrity."
         breadcrumb={['System', 'Traceability']}
         actions={
-           <button onClick={exportLogs} className="btn-secondary py-2.5 px-6 flex items-center gap-2 shadow-sm uppercase tracking-widest text-[10px] font-bold">
+          auditView === 'scope' ? (
+            <button onClick={exportLogs} className="btn-secondary py-2.5 px-6 flex items-center gap-2 shadow-sm uppercase tracking-widest text-[10px] font-bold">
               <Download size={14} /> Export Logs
-           </button>
+            </button>
+          ) : undefined
         }
       />
+
+      {canViewDeploymentAudit && (
+        <div className="flex items-center gap-2 mb-6" role="tablist" aria-label="Audit record scope">
+          {canFetchScopedAudit && <button
+            type="button"
+            role="tab"
+            aria-selected={auditView === 'scope'}
+            onClick={() => { setAuditView('scope'); setSelectedLog(null); }}
+            className={cn('rounded-xl border px-4 py-2 text-xs font-bold transition-colors',
+              auditView === 'scope' ? 'border-primary bg-orange-50 text-primary' : 'border-slate-200 bg-white text-slate-500')}
+          >Selected organization
+          </button>}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={auditView === 'deployment'}
+            onClick={() => { setAuditView('deployment'); setSelectedLog(null); }}
+            className={cn('rounded-xl border px-4 py-2 text-xs font-bold transition-colors',
+              auditView === 'deployment' ? 'border-primary bg-orange-50 text-primary' : 'border-slate-200 bg-white text-slate-500')}
+          >Deployment-wide
+          </button>
+        </div>
+      )}
+
+      {auditView === 'deployment' && (
+        <p className="mb-6 text-xs font-medium text-slate-500">These records have no organization or legal-entity scope. Export is unavailable in this view.</p>
+      )}
+      {canViewScopedAudit && !hasSelectedOrganizationScope && canViewDeploymentAudit && (
+        <p className="mb-6 text-xs font-medium text-slate-500" role="status">
+          Select an organization and legal entity to access its scoped audit records. Deployment-wide records remain available below.
+        </p>
+      )}
 
       {/* Filter Section */}
       <div className="bg-white border border-border-light rounded-2xl p-6 mb-8 flex flex-wrap items-center gap-4 shadow-sm">
@@ -353,12 +415,14 @@ export const AuditTrail = () => {
                </div>
 
                <div className="p-8 border-t border-slate-50 bg-slate-50/30 grid grid-cols-2 gap-4">
-                  <button
-                    onClick={exportSelectedLog}
-                    className="py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest text-heading hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
-                  >
-                      <FileText size={14} /> Report
-                  </button>
+                  {auditView === 'scope' && (
+                    <button
+                      onClick={exportSelectedLog}
+                      className="py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-widest text-heading hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+                    >
+                        <FileText size={14} /> Report
+                    </button>
+                  )}
                   {getEntityPath(selectedLog) ? (
                     <Link
                       to={getEntityPath(selectedLog)}

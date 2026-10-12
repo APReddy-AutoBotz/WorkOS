@@ -3,14 +3,14 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { authService } from '../../services/authService';
 import { useNavigate } from 'react-router-dom';
 import { adminService, allocationService, clientService, employeeService, projectService } from '../../services/api';
-import { hasRouteRole, ROUTE_ROLES } from '../../services/accessControl';
+import { canFetchScopedWorkspaceData, hasRouteRole, ROUTE_ROLES } from '../../services/accessControl';
 import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from '../../config/featureFlags';
 import { filterEmployeesByOrgVisibility, filterProjectsByOrgVisibility } from '../../services/orgChart';
 import type { UserRole } from '../../types';
 
 import { productConfig } from '../../config/productConfig';
 import { term, termPluralTitle, termTitle } from '../../config/terminology';
-import { api, getOrganizationScope, selectOrganizationScope, type OrganizationScope } from '../../services/apiClient';
+import { api, getOrganizationScope, isDemoFallbackAllowed, selectOrganizationScope, type OrganizationScope } from '../../services/apiClient';
 type SearchResult = {
   id: string;
   title: string;
@@ -37,6 +37,11 @@ export const Header = () => {
   const [organizationScopes, setOrganizationScopes] = useState<OrganizationScope[]>([]);
   const [organizationScope, setOrganizationScopeState] = useState(getOrganizationScope());
   const user = authService.getCurrentUser();
+  const canLoadScopedWorkspaceData = canFetchScopedWorkspaceData(
+    user,
+    Boolean(getOrganizationScope()),
+    isDemoFallbackAllowed(),
+  );
   const navigate = useNavigate();
   const isPasswordChangeRequired = Boolean(user?.mustChangePassword);
 
@@ -50,6 +55,14 @@ export const Header = () => {
   const [allDirectors, setAllDirectors] = useState<any[]>([]);
 
   useEffect(() => {
+    if (!canLoadScopedWorkspaceData) {
+      setAllEmployees([]);
+      setAllProjects([]);
+      setAllocations([]);
+      setAllClients([]);
+      setAllDirectors([]);
+      return;
+    }
     const load = async () => {
       const [emps, projs, allocs, clients, directors] = await Promise.all([
         employeeService.getAll().catch(() => []),
@@ -65,7 +78,7 @@ export const Header = () => {
       setAllDirectors(directors);
     };
     load();
-  }, []);
+  }, [canLoadScopedWorkspaceData]);
 
   useEffect(() => {
     if (isPasswordChangeRequired) {
@@ -113,7 +126,7 @@ export const Header = () => {
       { id: 'page-identity-integration', title: 'Identity Mapping', subtitle: 'Entra-ready identity provider links and role mapping', path: '/integrations/identity', icon: ShieldCheck, keywords: 'identity mapping entra sso group role provider integration', roles: ROUTE_ROLES.identityIntegrations, feature: 'entra' },
       { id: 'page-teams-integration', title: 'Teams Mapping', subtitle: 'Teams-ready user mapping and deterministic action foundation', path: '/integrations/teams', icon: LinkIcon, keywords: 'teams mapping adaptive cards action tokens deterministic approvals', roles: ROUTE_ROLES.teamsIntegrations, feature: 'teams' },
       { id: 'page-import', title: 'Import / Export', subtitle: 'CSV imports, exports, history', path: '/import-export', icon: Database, keywords: 'import export csv data bulk', roles: ['Admin'] },
-      { id: 'page-audit', title: 'Audit Trail', subtitle: 'System activity and traceability', path: '/audit-trail', icon: ShieldCheck, keywords: 'audit logs history traceability', roles: ['Admin'] },
+      { id: 'page-audit', title: 'Audit Trail', subtitle: 'System activity and traceability', path: '/audit-trail', icon: ShieldCheck, keywords: 'audit logs history traceability', roles: ROUTE_ROLES.auditTrail },
       { id: 'page-admin', title: 'Admin Settings', subtitle: 'Roles, directors, thresholds, policies', path: '/admin', icon: SettingsIcon, keywords: 'admin settings roles country directors thresholds', roles: ['Admin', 'HR'] },
     ];
 

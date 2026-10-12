@@ -4,7 +4,7 @@
 
 New productized contracts are introduced under `/api/v1`. Existing imported routes may remain temporarily behind compatibility adapters while behavior is migrated and tested.
 
-The WOS-03 API foundation begins with an incremental pilot: identity reads (`/api/auth/me` and `/api/auth/organization-scopes`), organization setup, and scoped audit, import, and integration-event history (`/api/audit-logs`, `/api/import-export-logs`, `/api/integrations/events`, and their `/api/v1/...` aliases) are mounted through shared handlers. A `/api/v1` route must preserve the legacy authorization and business rules while returning the versioned error contract below. New routes should be added under `/api/v1`; legacy routes remain available until an explicit deprecation plan removes them. This pilot does not claim that every existing API route has already been migrated.
+The WOS-03 API foundation begins with an incremental pilot: identity reads (`/api/auth/me` and `/api/auth/organization-scopes`), organization setup, and scoped audit, import, and integration-event history (`/api/audit-logs`, `/api/import-export-logs`, `/api/integrations/events`, and their `/api/v1/...` aliases) are mounted through shared handlers. The pilot also has a separate deployment audit read at `/api/deployment-audit-logs` and `/api/v1/deployment-audit-logs` for records whose organization and legal-entity scope are both null. That read requires the protected `audit.deployment.view` permission, an active account, an active role still assigned to that account, and an explicit per-user grant. The existing `permissions.manage` path may designate a different active user of any role; role-wide grants are rejected. It does not grant access by default. The reader reuses audit-history redaction and does not change the exact-pair filters on ordinary scoped history. A `/api/v1` route must preserve the legacy authorization and business rules while returning the versioned error contract below. New routes should be added under `/api/v1`; legacy routes remain available until an explicit deprecation plan removes them. This pilot does not claim that every existing API route has already been migrated.
 
 ## Module boundaries
 
@@ -34,6 +34,8 @@ authenticated identity
 ```
 
 Authorization runs before data is returned or mutated. UI state and request-supplied ownership fields are not trusted.
+
+Deployment audit history is a narrow read-only exception to organization/legal-entity scoping, not a cross-scope bypass. The server authenticates the named identity without resolving a selected organization, then verifies the account is active, the token's active role remains assigned, and the user has both effective permission and the explicit `user_permission_grants` row for `audit.deployment.view`. The permission is protected, all role defaults are false, and role-wide enablement is rejected. The existing `permissions.manage` path can grant it to a different active user of any role, and that grant/revoke is recorded as a deployment-level null-scope audit event. The query returns only rows with both scope columns null and passes them through the same redaction used by scoped audit history. The existing `/api/audit-logs` query remains exact-pair scoped for every role.
 
 ## Commands and queries
 
