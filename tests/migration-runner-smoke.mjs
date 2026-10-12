@@ -1599,17 +1599,17 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'a rejected role-wide grant must leave every role denied');
 
     await pool.query(`insert into audit_logs
-        (user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,source_identifier,
+        (user_id,user_name,user_role,active_role,source,module,action,details,entity_type,entity_id,source_identifier,
          old_value,new_value,organization_id,legal_entity_id)
       values
         ($1,'Synthetic multi-scope Admin','Admin','Admin','Synthetic deployment test','Deployment Audit Test',
-         'Sensitive Global Row','DeploymentAuditTest','deployment-global-sensitive','global-user@example.test',
+         'Sensitive Global Row','Synthetic deployment audit fixture','DeploymentAuditTest','deployment-global-sensitive','global-user@example.test',
          '{"provider_subject":"global-subject","nested":{"id":"global-user@example.test"}}'::jsonb,
          '{"provider_upn":"global-user@example.test","status":"Observed"}'::jsonb,null,null),
         ($1,'Synthetic multi-scope Admin','Admin','Admin','Synthetic deployment test','Deployment Audit Test',
-         'Scoped Beta Row','DeploymentAuditTest','deployment-scoped-beta',null,null,null,'org-scope-beta','legal-scope-beta'),
+         'Scoped Beta Row','Synthetic deployment audit fixture','DeploymentAuditTest','deployment-scoped-beta',null,null,null,'org-scope-beta','legal-scope-beta'),
         ($1,'Synthetic multi-scope Admin','Admin','Admin','Synthetic deployment test','Deployment Audit Test',
-         'Scoped Row','DeploymentAuditTest','deployment-scoped',null,null,null,'org-default','legal-default')`, [multiScopeActorId]);
+         'Scoped Row','Synthetic deployment audit fixture','DeploymentAuditTest','deployment-scoped',null,null,null,'org-default','legal-default')`, [multiScopeActorId]);
 
     const deploymentGrantResponse = await fetch(`${baseUrl}/api/permissions/user-grants`, {
       method: 'POST',
