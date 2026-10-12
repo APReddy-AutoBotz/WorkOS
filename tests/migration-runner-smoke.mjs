@@ -1701,7 +1701,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'the versioned organization-audit scope reader supports identity-only access');
     assert.deepEqual(await organizationScopesResponse.json(), [{
       organization_id: 'org-scope-beta', organization_code: 'SCOPE-BETA',
-      organization_name: 'Synthetic Scope Beta', status: 'Active',
+      organization_name: 'Synthetic Scope Beta Updated', status: 'Active',
     }], 'an auditor must list only the organization explicitly designated for them');
     await pool.query(`insert into audit_logs
         (user_id,user_name,user_role,active_role,source,module,action,details,entity_type,entity_id,organization_id,legal_entity_id)
