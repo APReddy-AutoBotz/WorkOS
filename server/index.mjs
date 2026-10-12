@@ -5467,6 +5467,7 @@ app.post('/api/catalogs/:catalogType', requireDatabase, requireAuth, requirePerm
       oldValue: previous,
       newValue: result.rows[0],
       details: `${previous ? 'Updated' : 'Created'} ${catalogModules[catalogType.data]} item ${result.rows[0].name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5509,6 +5510,7 @@ app.delete('/api/catalogs/:catalogType/:id', requireDatabase, requireAuth, requi
         oldValue: item,
         details: `Blocked deactivation of ${item.name}; it is still referenced`,
         reason: usage.reason,
+        organizationScope: null,
       });
       await client.query('commit');
       res.status(409).json({ error: 'Catalog item is still in use', reason: usage.reason });
@@ -5523,6 +5525,7 @@ app.delete('/api/catalogs/:catalogType/:id', requireDatabase, requireAuth, requi
       oldValue: item,
       newValue: result.rows[0],
       details: `Deactivated ${catalogModules[catalogType.data]} item ${item.name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5567,6 +5570,7 @@ app.post('/api/country-directors', requireDatabase, requireAuth, requirePermissi
       oldValue: previous || null,
       newValue: result.rows[0],
       details: `${previous ? 'Updated' : 'Created'} Country Director ${parsed.data.name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5604,6 +5608,7 @@ app.delete('/api/country-directors/:id', requireDatabase, requireAuth, requirePe
         oldValue: director,
         details: `Blocked deletion of ${director.name}; scope mappings still exist`,
         reason: `${employeeCount} employee mapping(s), ${clientCount} client mapping(s)`,
+        organizationScope: null,
       });
       await client.query('commit');
       res.status(409).json({ error: 'Country Director is still mapped to employees or clients', employeeCount, clientCount });
@@ -5617,6 +5622,7 @@ app.delete('/api/country-directors/:id', requireDatabase, requireAuth, requirePe
       entityId: req.params.id,
       oldValue: director,
       details: `Deleted Country Director ${director.name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);

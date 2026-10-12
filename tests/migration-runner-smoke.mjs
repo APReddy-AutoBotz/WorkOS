@@ -1573,6 +1573,45 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(organizationTerminologyResponse.status, 201,
       'organization terminology updates retain the versioned selected-scope mutation route');
+    const newLegalEntityDate = new Date().toISOString().slice(0, 10);
+    const newLegalEntityResponse = await postScopedJson('/api/organization-setup/legal-entities', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        code: 'SYNTH-BETA-2',
+        legalName: 'Synthetic Scope Beta Second Legal Entity LLC',
+        reportingCurrency: 'USD',
+        address: {line1: 'Synthetic second address', city: 'Test City', countryCode: 'US'},
+        status: 'Active',
+        effectiveFrom: newLegalEntityDate,
+      });
+    assert.equal(newLegalEntityResponse.status, 201,
+      'an organization-scoped Admin can create a legal entity through the existing API route');
+    const createdLegalEntity = await newLegalEntityResponse.json();
+    const legalEntityCreateAudit = await pool.query(`select action,organization_id,legal_entity_id
+      from audit_logs where entity_id=$1 and entity_type='Legal Entity'`, [createdLegalEntity.id]);
+    assert.deepEqual(legalEntityCreateAudit.rows, [{
+      action: 'Create Legal Entity', organization_id: 'org-scope-beta', legal_entity_id: null,
+    }], 'creating a legal entity must record its organization owner without inheriting the previously selected entity');
+    const newLegalEntityUpdateResponse = await fetch(`${baseUrl}/api/organization-setup/legal-entities/${encodeURIComponent(createdLegalEntity.id)}`, {
+      method: 'PUT',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', createdLegalEntity.id, {'Content-Type': 'application/json'}),
+      body: JSON.stringify({
+        code: 'SYNTH-BETA-2',
+        legalName: 'Synthetic Scope Beta Second Legal Entity Updated LLC',
+        reportingCurrency: 'USD',
+        address: {line1: 'Synthetic second address', city: 'Updated Test City', countryCode: 'US'},
+        status: 'Active',
+        effectiveFrom: newLegalEntityDate,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(newLegalEntityUpdateResponse.status, 200,
+      'a legal-entity update retains its existing exact legal-entity scope');
+    const legalEntityOwnershipRows = await pool.query(`select action,organization_id,legal_entity_id
+      from audit_logs where entity_id=$1 and entity_type='Legal Entity' order by action`, [createdLegalEntity.id]);
+    assert.deepEqual(legalEntityOwnershipRows.rows, [
+      {action: 'Create Legal Entity', organization_id: 'org-scope-beta', legal_entity_id: null},
+      {action: 'Update Legal Entity', organization_id: 'org-scope-beta', legal_entity_id: createdLegalEntity.id},
+    ], 'creation must be organization-owned and later edits must remain owned by the exact legal entity');
     const organizationOwnershipRows = await pool.query(`select entity_type,entity_id,organization_id,legal_entity_id
       from audit_logs where user_id=$1 and entity_type in ('Organization','Terminology') order by entity_type`, [multiScopeActorId]);
     assert.deepEqual(organizationOwnershipRows.rows, [
@@ -1723,6 +1762,12 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'the organization view includes profile changes logged at organization scope');
     assert(organizationAuditRows.some(row => row.entity_type === 'Terminology' && row.action === 'Version Terminology'),
       'the organization view includes terminology changes logged at organization scope');
+    assert(organizationAuditRows.some(row => row.entity_type === 'Legal Entity'
+      && row.entity_id === createdLegalEntity.id && row.action === 'Create Legal Entity'),
+    'the organization auditor can find legal-entity creation under its organization owner');
+    assert(!organizationAuditRows.some(row => row.entity_type === 'Legal Entity'
+      && row.entity_id === createdLegalEntity.id && row.action === 'Update Legal Entity'),
+    'the organization reader excludes later legal-entity-specific edits');
     assert(organizationAuditRows.some(row => row.entity_type === 'OrganizationAuditGrant' && row.action === 'Grant Organization Audit Access'),
       'the organization view includes its explicit grant event');
     assert(!organizationAuditRows.some(row => ['deployment-scoped-beta','organization-audit-other-org'].includes(row.entity_id)),
@@ -1738,6 +1783,16 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const ordinaryBetaAuditRows = await ordinaryBetaAudit.json();
     assert(!ordinaryBetaAuditRows.some(row => row.entity_type === 'Organization' || row.entity_type === 'Terminology'),
       'ordinary exact-pair history must not relabel or expose organization-wide audit records');
+    assert(!ordinaryBetaAuditRows.some(row => row.entity_type === 'Legal Entity' && row.entity_id === createdLegalEntity.id),
+      'the previously selected legal entity cannot read a new entity’s organization-owned creation event');
+    const newLegalEntityAudit = await getScoped('/api/audit-logs', multiScopeToken, 'org-scope-beta', createdLegalEntity.id);
+    const newLegalEntityAuditRows = await newLegalEntityAudit.json();
+    assert(newLegalEntityAuditRows.some(row => row.entity_type === 'Legal Entity'
+      && row.entity_id === createdLegalEntity.id && row.action === 'Update Legal Entity'),
+    'the new legal entity’s exact-pair reader can see its subsequent update');
+    assert(!newLegalEntityAuditRows.some(row => row.entity_type === 'Legal Entity'
+      && row.entity_id === createdLegalEntity.id && row.action === 'Create Legal Entity'),
+    'the legal-entity reader does not absorb the organization-owned creation event');
     await pool.query('delete from user_organization_scopes where user_id=$1', [auditDeniedActorId]);
     const scopeFreeOrganizationAudit = await fetch(`${baseUrl}/api/organization-audit-logs?organizationId=org-scope-beta`, {
       headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
@@ -1801,6 +1856,61 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       {entity_type: 'RolePermission', organization_id: null, legal_entity_id: null},
       {entity_type: 'SystemSettings', organization_id: null, legal_entity_id: null},
     ], 'deployment-wide mutations must remain unscoped even when the Admin selected one legal entity');
+
+    const globalCatalogCreate = await postScopedJson('/api/catalogs/industries', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {id: 'synthetic-global-audit-industry', name: 'Synthetic Global Audit Industry'});
+    assert.equal(globalCatalogCreate.status, 200, 'deployment catalog creation must retain its current API behavior');
+    const globalCatalogUpdate = await postScopedJson('/api/catalogs/industries', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {id: 'synthetic-global-audit-industry', name: 'Synthetic Global Audit Industry Updated'});
+    assert.equal(globalCatalogUpdate.status, 200, 'deployment catalog updates must retain their current API behavior');
+    const blockedDepartment = await pool.query(`select id from catalog_items
+      where catalog_type='departments' and name='Engineering' limit 1`);
+    assert.equal(blockedDepartment.rowCount, 1, 'the fixture must contain the department used by the synthetic employee');
+    const blockedCatalogDelete = await fetch(`${baseUrl}/api/catalogs/departments/${encodeURIComponent(blockedDepartment.rows[0].id)}`, {
+      method: 'DELETE', headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(blockedCatalogDelete.status, 409, 'a catalog item used by an employee must remain undeletable');
+    const globalCatalogDelete = await fetch(`${baseUrl}/api/catalogs/industries/synthetic-global-audit-industry`, {
+      method: 'DELETE', headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(globalCatalogDelete.status, 200, 'an unused deployment catalog item can retain its existing delete behavior');
+
+    const globalCountryDirectorCreate = await postScopedJson('/api/country-directors', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {id: 'synthetic-global-audit-director', name: 'Synthetic Global Audit Director', region: 'Synthetic'});
+    assert.equal(globalCountryDirectorCreate.status, 200, 'deployment country-director creation must retain its current API behavior');
+    const globalCountryDirectorUpdate = await postScopedJson('/api/country-directors', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {id: 'synthetic-global-audit-director', name: 'Synthetic Global Audit Director Updated', region: 'Synthetic'});
+    assert.equal(globalCountryDirectorUpdate.status, 200, 'deployment country-director updates must retain their current API behavior');
+    const blockedCountryDirectorDelete = await fetch(`${baseUrl}/api/country-directors/cd-import-provenance-test`, {
+      method: 'DELETE', headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(blockedCountryDirectorDelete.status, 409,
+      'a country director referenced by an employee must remain undeletable');
+    const globalCountryDirectorDelete = await fetch(`${baseUrl}/api/country-directors/synthetic-global-audit-director`, {
+      method: 'DELETE', headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(globalCountryDirectorDelete.status, 200, 'an unmapped deployment country director can retain its existing delete behavior');
+    const globalProducerAuditRows = await pool.query(`select entity_type,entity_id,action,organization_id,legal_entity_id
+      from audit_logs where entity_id=any($1::text[]) and user_id=$2 order by entity_id,action`, [[
+      'synthetic-global-audit-industry', blockedDepartment.rows[0].id, 'synthetic-global-audit-director', 'cd-import-provenance-test',
+    ], multiScopeActorId]);
+    assert.equal(globalProducerAuditRows.rowCount, 8,
+      'create, update, blocked delete and successful delete outcomes must each leave an audit row for both deployment-wide producer families');
+    assert(globalProducerAuditRows.rows.every(row => row.organization_id === null && row.legal_entity_id === null),
+      'global catalog and country-director mutations, including blocked outcomes, must remain null-scope under tenant selection');
+    assert(globalProducerAuditRows.rows.some(row => row.entity_id === blockedDepartment.rows[0].id && row.action === 'Deactivate Blocked'),
+      'the blocked catalog mutation must preserve its audited failure outcome');
+    assert(globalProducerAuditRows.rows.some(row => row.entity_id === 'cd-import-provenance-test' && row.action === 'Delete Blocked'),
+      'the blocked country-director mutation must preserve its audited failure outcome');
+    const scopedGlobalProducerAudit = await getScoped('/api/audit-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    const scopedGlobalProducerAuditRows = await scopedGlobalProducerAudit.json();
+    assert(!scopedGlobalProducerAuditRows.some(row => ['synthetic-global-audit-industry', blockedDepartment.rows[0].id,
+      'synthetic-global-audit-director', 'cd-import-provenance-test'].includes(row.entity_id)),
+    'ordinary selected-entity audit history must exclude deployment-wide catalog and country-director changes');
 
     const ungrantedGlobalRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
       headers: {Authorization: `Bearer ${multiScopeToken}`},
@@ -1936,6 +2046,9 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(redactedGlobalRow.new_value, {status: 'Observed'});
     assert(deploymentAuditRows.some(row => row.entity_id === ordinaryUserGrant.id),
       'the explicitly designated deployment reader must see deployment-wide user permission grants');
+    assert(globalProducerAuditRows.rows.every(expected => deploymentAuditRows.some(row => row.entity_id === expected.entity_id
+      && row.action === expected.action)),
+    'the designated deployment reader must be able to retrieve every global catalog and country-director outcome');
 
     const scopeFreeWrongPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
       method: 'POST',
@@ -2064,6 +2177,9 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       const response = await getScoped('/api/audit-logs', multiScopeToken, organizationId, legalEntityId);
       assert.equal(response.status, 200);
       const rows = await response.json();
+      assert(!rows.some(row => ['synthetic-global-audit-industry', blockedDepartment.rows[0].id,
+        'synthetic-global-audit-director', 'cd-import-provenance-test'].includes(row.entity_id)),
+      'selected-organization readers must exclude deployment-global catalog and country-director outcomes');
       assert(!rows.some(row => row.user_id === multiScopeActorId
         && ['SystemSettings', 'RolePermission', 'UserPermissionGrant'].includes(row.entity_type)),
       'ordinary scoped history must not attribute deployment-wide configuration or auditor grants to the caller’s selected entity');
