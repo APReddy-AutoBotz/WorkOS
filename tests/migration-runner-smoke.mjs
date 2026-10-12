@@ -1912,6 +1912,92 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'synthetic-global-audit-director', 'cd-import-provenance-test'].includes(row.entity_id)),
     'ordinary selected-entity audit history must exclude deployment-wide catalog and country-director changes');
 
+    const notificationTemplateCreate = await postScopedJson('/api/notification-templates', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        event_type: 'SyntheticDeploymentAuditTemplate',
+        channel: 'InApp',
+        subject: 'Synthetic audit subject',
+        body: 'Synthetic audit template body',
+        active: true,
+      });
+    assert.equal(notificationTemplateCreate.status, 200,
+      'deployment-wide notification-template creation must retain its existing API behavior');
+    const notificationTemplate = await notificationTemplateCreate.json();
+    const notificationTemplateUpdate = await postScopedJson('/api/notification-templates', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: notificationTemplate.id,
+        event_type: 'SyntheticDeploymentAuditTemplate',
+        channel: 'InApp',
+        subject: 'Synthetic updated audit subject',
+        body: 'Synthetic updated audit template body',
+        active: true,
+      });
+    assert.equal(notificationTemplateUpdate.status, 200,
+      'deployment-wide notification-template updates must retain their existing API behavior');
+    const notificationTemplateAuditRows = await pool.query(`select action,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type='NotificationTemplate' and entity_id=$2 order by action`,
+    [multiScopeActorId, notificationTemplate.id]);
+    assert.deepEqual(notificationTemplateAuditRows.rows, [
+      {action: 'Create Notification Template', organization_id: null, legal_entity_id: null},
+      {action: 'Update Notification Template', organization_id: null, legal_entity_id: null},
+    ], 'notification-template create and update audit events must remain deployment-owned despite a selected legal entity');
+
+    const blockedRoleDefinitionId = 'synthetic-global-audit-role-definition-blocked';
+    const blockedRoleDefinitionCreate = await postScopedJson('/api/role-definitions', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: blockedRoleDefinitionId,
+        name: 'Consultant',
+        department: 'Engineering',
+        description: 'Synthetic blocked global audit fixture',
+        active: true,
+      });
+    assert.equal(blockedRoleDefinitionCreate.status, 200,
+      'deployment-wide role-definition creation must retain its existing API behavior');
+    const blockedRoleDefinitionDelete = await fetch(`${baseUrl}/api/role-definitions/${encodeURIComponent(blockedRoleDefinitionId)}`, {
+      method: 'DELETE', headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(blockedRoleDefinitionDelete.status, 409,
+      'a role definition used by an employee must remain undeactivatable');
+    const blockedRoleDefinitionAudit = await pool.query(`select action,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2`,
+    [multiScopeActorId, blockedRoleDefinitionId]);
+    assert.deepEqual(blockedRoleDefinitionAudit.rows, [
+      {action: 'Delete Blocked', organization_id: null, legal_entity_id: null},
+    ], 'a blocked deployment-wide role deactivation must be recorded at deployment scope');
+    await pool.query(`delete from role_definitions where id=$1`, [blockedRoleDefinitionId]);
+
+    const successfulRoleDefinitionId = 'synthetic-global-audit-role-definition-success';
+    const successfulRoleDefinitionCreate = await postScopedJson('/api/role-definitions', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: successfulRoleDefinitionId,
+        name: 'Synthetic Unused Global Audit Role',
+        department: 'Engineering',
+        description: 'Synthetic successful global audit fixture',
+        active: true,
+      });
+    assert.equal(successfulRoleDefinitionCreate.status, 200,
+      'deployment-wide role-definition creation must retain its existing API behavior');
+    const roleDefinitionDelete = await fetch(`${baseUrl}/api/role-definitions/${encodeURIComponent(successfulRoleDefinitionId)}`, {
+      method: 'DELETE', headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(roleDefinitionDelete.status, 200,
+      'an unused deployment-wide role definition must retain its existing deactivation behavior');
+    const roleDefinitionAuditRows = await pool.query(`select action,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type='RoleDefinition' and entity_id=$2 order by created_at`,
+    [multiScopeActorId, successfulRoleDefinitionId]);
+    assert.deepEqual(roleDefinitionAuditRows.rows, [
+      {action: 'Deactivate Role Definition', organization_id: null, legal_entity_id: null},
+    ], 'successful deployment-wide role deactivation must be recorded at deployment scope');
+
+    const classifiedGlobalAuditIds = [notificationTemplate.id, blockedRoleDefinitionId, successfulRoleDefinitionId];
+    const scopedGlobalConfigurationAudit = await getScoped('/api/audit-logs', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta');
+    const scopedGlobalConfigurationAuditRows = await scopedGlobalConfigurationAudit.json();
+    assert(!scopedGlobalConfigurationAuditRows.some(row => classifiedGlobalAuditIds.includes(row.entity_id)),
+      'ordinary selected-entity audit history must exclude deployment-wide notification-template and role-definition changes');
+
     const ungrantedGlobalRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
       headers: {Authorization: `Bearer ${multiScopeToken}`},
       signal: AbortSignal.timeout(5000),
@@ -2049,6 +2135,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert(globalProducerAuditRows.rows.every(expected => deploymentAuditRows.some(row => row.entity_id === expected.entity_id
       && row.action === expected.action)),
     'the designated deployment reader must be able to retrieve every global catalog and country-director outcome');
+    assert(classifiedGlobalAuditIds.every(entityId => deploymentAuditRows.some(row => row.entity_id === entityId)),
+      'the designated deployment reader must be able to retrieve the classified notification-template and role-definition outcomes');
 
     const scopeFreeWrongPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
       method: 'POST',

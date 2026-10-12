@@ -4289,6 +4289,7 @@ app.post('/api/notification-templates', requireDatabase, requireAuth, requirePer
       oldValue: previous,
       newValue: result.rows[0],
       details: `${previous ? 'Updated' : 'Created'} notification template ${result.rows[0].event_type}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5681,6 +5682,7 @@ app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePer
         oldValue: role,
         details: `Blocked deactivation of role ${role.name}; it is still in use`,
         reason: `${employeeCount} employee(s), ${allocationCount} allocation(s)`,
+        organizationScope: null,
       });
       await client.query('commit');
       res.status(409).json({ error: 'Role definition is still used by employees or allocations', employeeCount, allocationCount });
@@ -5695,6 +5697,7 @@ app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePer
       oldValue: role,
       newValue: result.rows[0],
       details: `Deactivated role definition ${role.name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
