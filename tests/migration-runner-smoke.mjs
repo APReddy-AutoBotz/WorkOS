@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createHmac, randomBytes, randomUUID} from 'node:crypto';
+import {createHmac, randomBytes, randomUUID, scryptSync} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
@@ -245,6 +245,9 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
   const multiScopeActorId = randomUUID();
   const auditDeniedActorId = randomUUID();
   const unassignedAuditActorId = randomUUID();
+  const scopeFreeAuditorId = randomUUID();
+  const scopeFreeAuditorPassword = 'Synthetic-Temporary-Audit-Passphrase-71';
+  const scopeFreeAuditorPasswordSalt = 'synthetic-scope-free-auditor-test-salt';
   await pool.query(`insert into roles(name) values ('Admin'),('Employee') on conflict (name) do nothing`);
   await pool.query(`insert into users (id,username,email,status)
     values ($1,'synthetic-import-admin','synthetic-import-admin@example.test','Active')`, [actorId]);
@@ -268,6 +271,15 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     select $1,id from roles where name='Employee'`, [auditDeniedActorId]);
   await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
     values ($1,'org-default','legal-default',true)`, [auditDeniedActorId]);
+  await pool.query(`insert into users (id,username,email,password_hash,status,must_change_password)
+    values ($1,'synthetic-scope-free-auditor','synthetic-scope-free-auditor@example.test',$2,'Active',true)`, [
+    scopeFreeAuditorId,
+    `scrypt$${scopeFreeAuditorPasswordSalt}$${scryptSync(scopeFreeAuditorPassword, scopeFreeAuditorPasswordSalt, 64).toString('hex')}`,
+  ]);
+  await pool.query(`insert into user_roles (user_id,role_id)
+    select $1,id from roles where name='Employee'`, [scopeFreeAuditorId]);
+  await pool.query(`insert into user_permission_grants (user_id,permission_key,granted_by,active_role)
+    values ($1,'audit.deployment.view',$2,'Admin')`, [scopeFreeAuditorId, actorId]);
   await pool.query(`insert into organizations (id,code,name,effective_from)
     values ('org-scope-beta','SCOPE-BETA','Synthetic Scope Beta',date '1970-01-01')`);
   await pool.query(`insert into organization_profile_versions
@@ -1489,6 +1501,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
 
     const multiScopeToken = tokenFor(multiScopeActorId, 'synthetic-multi-scope-admin');
     const employeeTokenWithoutAdminPermissions = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Employee');
+    const scopeFreeAuditorToken = tokenFor(scopeFreeAuditorId, 'synthetic-scope-free-auditor', 'Employee');
     const postScopedJson = (path, authToken, organizationId, legalEntityId, body) => fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: scopedHeaders(authToken, organizationId, legalEntityId, {'Content-Type': 'application/json'}),
@@ -1626,6 +1639,20 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(deploymentGrantAudit.rows, [{organization_id: null, legal_entity_id: null}],
       'granting deployment-level audit access must itself appear as a null-scope audit event');
 
+    const ordinaryUserGrantResponse = await fetch(`${baseUrl}/api/permissions/user-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: auditDeniedActorId, permissionKey: 'projects.manage'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ordinaryUserGrantResponse.status, 200,
+      'user-specific grants must preserve their existing permission-management behavior');
+    const ordinaryUserGrant = await ordinaryUserGrantResponse.json();
+    const ordinaryUserGrantAudit = await pool.query(`select organization_id,legal_entity_id from audit_logs
+      where user_id=$1 and entity_type='UserPermissionGrant' and entity_id=$2`, [multiScopeActorId, ordinaryUserGrant.id]);
+    assert.deepEqual(ordinaryUserGrantAudit.rows, [{organization_id: null, legal_entity_id: null}],
+      'deployment-wide user permission grants must not inherit the permission manager selected legal entity');
+
     const deploymentAuditResponse = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
       headers: {Authorization: `Bearer ${employeeTokenWithoutAdminPermissions}`},
       signal: AbortSignal.timeout(5000),
@@ -1643,6 +1670,76 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(redactedGlobalRow.old_value, {nested: {}},
       'deployment history must recursively redact provider and personal identifiers');
     assert.deepEqual(redactedGlobalRow.new_value, {status: 'Observed'});
+    assert(deploymentAuditRows.some(row => row.entity_id === ordinaryUserGrant.id),
+      'the explicitly designated deployment reader must see deployment-wide user permission grants');
+
+    const scopeFreeWrongPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
+      method: 'POST',
+      headers: {Authorization: `Bearer ${scopeFreeAuditorToken}`, 'Content-Type': 'application/json'},
+      body: JSON.stringify({currentPassword: 'incorrect-synthetic-password', newPassword: 'Synthetic-Updated-Audit-Passphrase-83'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(scopeFreeWrongPassword.status, 401,
+      'scope-free auditors must reach current-password verification without bypassing it');
+    const unchangedScopeFreePassword = await pool.query(`select must_change_password from users where id=$1`, [scopeFreeAuditorId]);
+    assert.equal(unchangedScopeFreePassword.rows[0].must_change_password, true,
+      'an incorrect current password must not clear mandatory password change');
+
+    const scopeFreePasswordChange = await fetch(`${baseUrl}/api/auth/change-password`, {
+      method: 'POST',
+      headers: {Authorization: `Bearer ${scopeFreeAuditorToken}`, 'Content-Type': 'application/json'},
+      body: JSON.stringify({currentPassword: scopeFreeAuditorPassword, newPassword: 'Synthetic-Updated-Audit-Passphrase-83'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(scopeFreePasswordChange.status, 200,
+      'a designated auditor without organization scope must complete a mandatory account password change');
+    assert.deepEqual(await scopeFreePasswordChange.json(), {status: 'ok', mustChangePassword: false});
+    const changedScopeFreePassword = await pool.query(`select password_hash,must_change_password from users where id=$1`, [scopeFreeAuditorId]);
+    const [updatedPasswordScheme,updatedPasswordSalt,updatedPasswordHash] = changedScopeFreePassword.rows[0].password_hash.split('$');
+    assert.equal(updatedPasswordScheme, 'scrypt', 'scope-free password change must retain the existing password hash scheme');
+    assert.equal(changedScopeFreePassword.rows[0].must_change_password, false,
+      'a successful password change must clear the mandatory-change flag');
+    assert.equal(scryptSync('Synthetic-Updated-Audit-Passphrase-83', updatedPasswordSalt, 64).toString('hex'), updatedPasswordHash,
+      'scope-free password change must store a hash of the submitted new password');
+    const passwordChangeAudit = await pool.query(`select organization_id,legal_entity_id from audit_logs
+      where user_id=$1 and action='Change Password' and entity_id=$1`, [scopeFreeAuditorId]);
+    assert.deepEqual(passwordChangeAudit.rows, [{organization_id: null, legal_entity_id: null}],
+      'account-wide password changes must be recorded without assigning them to one legal entity');
+    const scopeFreeAuditorGlobalRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
+      headers: {Authorization: `Bearer ${scopeFreeAuditorToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(scopeFreeAuditorGlobalRead.status, 200,
+      'a designated scope-free auditor must retain access to the deployment audit reader after changing password');
+    const scopeFreeAuditorRows = await scopeFreeAuditorGlobalRead.json();
+    assert(scopeFreeAuditorRows.some(row => row.entity_type === 'User' && row.entity_id === scopeFreeAuditorId
+      && row.action === 'Change Password'), 'the designated deployment reader must find the scope-free password audit event');
+
+    const ordinaryUserRevoke = await fetch(`${baseUrl}/api/permissions/user-grants/${ordinaryUserGrant.id}`, {
+      method: 'DELETE',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ordinaryUserRevoke.status, 200,
+      'user-specific permission revocation must preserve its existing management behavior');
+    const ordinaryUserGrantAndRevokeAudit = await pool.query(`select organization_id,legal_entity_id from audit_logs
+      where user_id=$1 and entity_type='UserPermissionGrant' and entity_id=$2 order by created_at`,
+    [multiScopeActorId, ordinaryUserGrant.id]);
+    assert.deepEqual(ordinaryUserGrantAndRevokeAudit.rows, [
+      {organization_id: null, legal_entity_id: null},
+      {organization_id: null, legal_entity_id: null},
+    ], 'both deployment-wide user grant and revoke events must be null-scope');
+
+    await pool.query(`update users set status='Disabled' where id=$1`, [scopeFreeAuditorId]);
+    const disabledScopeFreePasswordChange = await fetch(`${baseUrl}/api/auth/change-password`, {
+      method: 'POST',
+      headers: {Authorization: `Bearer ${scopeFreeAuditorToken}`, 'Content-Type': 'application/json'},
+      body: JSON.stringify({currentPassword: 'Synthetic-Updated-Audit-Passphrase-83', newPassword: 'Another-Updated-Audit-Passphrase-92'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(disabledScopeFreePasswordChange.status, 404,
+      'scope-free password changes must continue to reject disabled accounts');
+    await pool.query(`update users set status='Active' where id=$1`, [scopeFreeAuditorId]);
 
     const staleActiveRoleToken = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Admin');
     const staleActiveRoleRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {

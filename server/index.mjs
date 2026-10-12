@@ -1512,7 +1512,7 @@ const identityReadRouteDependencies = {
 app.use('/api/auth', createIdentityReadRouter(identityReadRouteDependencies));
 app.use('/api/v1/auth', createIdentityReadRouter(identityReadRouteDependencies));
 
-app.post('/api/auth/change-password', requireDatabase, requireAuth, async (req, res) => {
+app.post('/api/auth/change-password', requireDatabase, requireIdentity, async (req, res) => {
   const schema = z.object({
     currentPassword: z.string().min(1),
     newPassword: z.string().min(1),
@@ -1557,6 +1557,8 @@ app.post('/api/auth/change-password', requireDatabase, requireAuth, async (req, 
       entityType: 'User',
       entityId: user.id,
       details: `Changed password for ${user.username}`,
+      // Password changes affect the account across organization scopes.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json({ status: 'ok', mustChangePassword: false });
@@ -5266,7 +5268,8 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
       entityId: result.rows[0].id,
       newValue: result.rows[0],
       details: `Granted ${parsed.data.permissionKey} to ${target.username}`,
-      organizationScope: parsed.data.permissionKey === deploymentAuditPermissionKey ? null : req.organizationScope,
+      // User-specific grants are effective for the account across this deployment.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5306,7 +5309,8 @@ app.delete('/api/permissions/user-grants/:id', requireDatabase, requireAuth, req
       entityId: previous.id,
       oldValue: previous,
       details: `Revoked ${previous.permission_key}`,
-      organizationScope: previous.permission_key === deploymentAuditPermissionKey ? null : req.organizationScope,
+      // User-specific grants are effective for the account across this deployment.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json({ status: 'ok' });
