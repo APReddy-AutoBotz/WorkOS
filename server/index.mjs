@@ -17,6 +17,7 @@ import {createIdentityAccessMiddleware, readCookie} from './modules/identity-acc
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
+import {createOrganizationAuditRouter} from './modules/audit/organization-audit-router.mjs';
 import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
 import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
@@ -112,6 +113,7 @@ const requireRoles = (...roles) => (req, res, next) => {
 };
 
 const deploymentAuditPermissionKey = 'audit.deployment.view';
+const organizationAuditPermissionKey = 'audit.organization.view';
 const systemRoles = ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead', 'Employee'];
 const permissionDefinitions = [
   ['dashboard.view', 'Home', 'Overview Dashboard', false],
@@ -146,12 +148,13 @@ const permissionDefinitions = [
   ['imports.manage', 'Admin', 'Import / Export', false],
   ['audit.view', 'Admin', 'Audit Trail', true],
   [deploymentAuditPermissionKey, 'Admin', 'Deployment Audit View', true],
+  [organizationAuditPermissionKey, 'Admin', 'Organization Audit View', true],
   ['settings.manage', 'Admin', 'Governance Settings', false],
   ['permissions.manage', 'Admin', 'Permission Settings', true],
 ];
 const protectedPermissionKeys = new Set(permissionDefinitions.filter(([, , , protectedCore]) => protectedCore).map(([key]) => key));
 const defaultRolePermissions = {
-  Admin: permissionDefinitions.filter(([key]) => key !== deploymentAuditPermissionKey).map(([key]) => key),
+  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey].includes(key)).map(([key]) => key),
   HR: ['dashboard.view', 'employees.view', 'employees.manage', 'employees.password_reset', 'projects.view', 'projects.manage', 'projects.status_update', 'clients.view', 'clients.manage', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'leave.admin', 'approvals.view', 'notifications.view', 'notifications.manage', 'integrations.identity', 'integrations.teams', 'integrations.teams_actions', 'settings.manage'],
   CountryDirector: ['dashboard.view', 'employees.view', 'projects.view', 'clients.view', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
   ProjectManager: ['pm_workspace.view', 'employees.view', 'projects.view', 'projects.status_update', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
@@ -165,7 +168,9 @@ const permissionPayloadDefinitions = () => permissionDefinitions.map(([key, modu
   label,
   description: key === deploymentAuditPermissionKey
     ? 'Read null-scope deployment audit records through an explicit individual user grant.'
-    : label,
+    : key === organizationAuditPermissionKey
+      ? 'Read organization-scoped audit records through an explicit per-organization user grant.'
+      : label,
   protected: Boolean(protectedCore),
 }));
 
@@ -184,7 +189,17 @@ const getEffectivePermissionsForUser = async (client, userId, activeRole) => {
       'select permission_key from user_permission_grants where user_id = $1',
       [userId],
     );
-    return [...new Set([...rolePermissions, ...grantResult.rows.map(row => row.permission_key)])];
+    const effectivePermissions = [...new Set([...rolePermissions, ...grantResult.rows.map(row => row.permission_key)])];
+    try {
+      const organizationAuditGrant = await client.query(
+        'select 1 from organization_audit_grants where user_id = $1 limit 1',
+        [userId],
+      );
+      if (organizationAuditGrant.rowCount > 0) effectivePermissions.push(organizationAuditPermissionKey);
+    } catch (error) {
+      if (error?.code !== '42P01') throw error;
+    }
+    return [...new Set(effectivePermissions)];
   } catch (error) {
     if (error?.code === '42P01') return getDefaultPermissionsForRole(activeRole);
     throw error;
@@ -5143,6 +5158,10 @@ app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requ
     res.status(422).json({ error: 'Deployment audit access can be granted only to individual users.' });
     return;
   }
+  if (parsed.data.permissionKey === organizationAuditPermissionKey && parsed.data.enabled) {
+    res.status(422).json({ error: 'Organization audit access can be granted only to an individual for a selected organization.' });
+    return;
+  }
   if (protectedPermissionKeys.has(parsed.data.permissionKey) && req.params.roleName !== 'Admin') {
     res.status(422).json({ error: 'Protected permissions can be enabled only for Admin.' });
     return;
@@ -5213,6 +5232,10 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
   }
   if (!permissionDefinitions.some(([key]) => key === parsed.data.permissionKey)) {
     res.status(400).json({ error: 'Unknown permission key' });
+    return;
+  }
+  if (parsed.data.permissionKey === organizationAuditPermissionKey) {
+    res.status(422).json({ error: 'Organization audit access must be designated for a specific organization.' });
     return;
   }
   const client = await pool.connect();
@@ -5686,6 +5709,17 @@ const auditHistoryRouter = createAuditHistoryRouter({
 });
 app.use('/api', auditHistoryRouter);
 app.use('/api/v1', auditHistoryRouter);
+const organizationAuditRouter = createOrganizationAuditRouter({
+  pool,
+  requireDatabase,
+  requireAuth,
+  requireIdentity,
+  requirePermission,
+  getEffectivePermissionsForUser,
+  audit,
+});
+app.use('/api', organizationAuditRouter);
+app.use('/api/v1', organizationAuditRouter);
 
 app.post('/api/audit-events', requireDatabase, requireAuth, async (req, res) => {
   const schema = z.object({

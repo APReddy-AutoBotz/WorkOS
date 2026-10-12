@@ -3,7 +3,7 @@
  * AUTO-DETECTS backend: if /api/health returns database:connected → uses REST API.
  * Otherwise → falls back to localStorage (demo mode). Zero code change needed to switch.
  */
-import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportExportLog, SystemSettings, CountryDirector, RoleDefinition, Client, CatalogItem, UtilizationReport, UtilizationReportMode, UserAccount, DataQualityReport, DashboardReport, LeaveType, LeavePolicy, HolidayCalendar, LeaveBalance, LeaveRequest, LeaveAvailabilityEntry, ApprovalRecord, ApprovalDelegation, ApprovalSlaReport, NotificationEvent, NotificationTemplate, NotificationPreference, NotificationDeliveryAttempt, IdentityProviderLink, EntraRoleMapping, TeamsUserLink, TeamsActionToken, IntegrationEventLog, IntegrationHealthReport, ResourcePlanningReport, WorkforceCommandCenterReport, PermissionConfig, PermissionDefinition, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant, OrganizationSetupReadiness, OrganizationProfile, LegalEntityProfile } from '../types';
+import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportExportLog, SystemSettings, CountryDirector, RoleDefinition, Client, CatalogItem, UtilizationReport, UtilizationReportMode, UserAccount, DataQualityReport, DashboardReport, LeaveType, LeavePolicy, HolidayCalendar, LeaveBalance, LeaveRequest, LeaveAvailabilityEntry, ApprovalRecord, ApprovalDelegation, ApprovalSlaReport, NotificationEvent, NotificationTemplate, NotificationPreference, NotificationDeliveryAttempt, IdentityProviderLink, EntraRoleMapping, TeamsUserLink, TeamsActionToken, IntegrationEventLog, IntegrationHealthReport, ResourcePlanningReport, WorkforceCommandCenterReport, PermissionConfig, PermissionDefinition, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant, OrganizationAuditScope, OrganizationAuditGrantConfig, OrganizationAuditGrant, OrganizationSetupReadiness, OrganizationProfile, LegalEntityProfile } from '../types';
 import { DataStorage, STORAGE_KEYS } from './storage';
 import { authService } from './authService';
 import {
@@ -1729,6 +1729,31 @@ export const adminService = {
       return [];
     }
   },
+  getOrganizationAuditScopes: async (): Promise<OrganizationAuditScope[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) return [];
+    if (!(await checkBackend())) return [];
+    try {
+      const rows = await api.get<Record<string, unknown>[]>('/api/organization-audit-scopes');
+      return rows.map(row => ({
+        organizationId: String(row.organization_id),
+        organizationCode: String(row.organization_code),
+        organizationName: String(row.organization_name),
+        status: String(row.status),
+      }));
+    } catch {
+      return [];
+    }
+  },
+  getOrganizationAuditLogs: async (organizationId: string): Promise<AuditLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) return [];
+    if (!(await checkBackend())) return [];
+    try {
+      const raw = await api.get<Record<string, unknown>[]>(`/api/organization-audit-logs?organizationId=${encodeURIComponent(organizationId)}`);
+      return raw.map(normalizeAuditLog);
+    } catch {
+      return [];
+    }
+  },
   getImportExportLogs: async (): Promise<ImportExportLog[]> => {
     if (await checkBackend()) {
       const raw = await api.get<Record<string, unknown>[]>('/api/import-export-logs');
@@ -1928,6 +1953,9 @@ export const adminService = {
     if (permissionKey === 'audit.deployment.view' && enabled) {
       throw new Error('Deployment audit access can be granted only to individual users.');
     }
+    if (permissionKey === 'audit.organization.view' && enabled) {
+      throw new Error('Organization audit access must be designated for a specific organization.');
+    }
     if (permission?.protected && roleName !== 'Admin') {
       throw new Error('Protected permissions can be assigned only to Admin.');
     }
@@ -1961,6 +1989,9 @@ export const adminService = {
         && (account.status !== 'Active' || account.roles.length === 0
           || authService.getCurrentUser()?.id === account.employeeRecordId)) {
       throw new Error('Deployment audit access requires a different active user with an assigned role.');
+    }
+    if (permissionKey === 'audit.organization.view') {
+      throw new Error('Organization audit access must be designated for a specific organization.');
     }
     if (permission?.protected && permissionKey !== 'audit.deployment.view' && !account.roles.includes('Admin')) {
       throw new Error('Protected permissions can be granted only to Admin users.');
@@ -2002,6 +2033,48 @@ export const adminService = {
         await authService.refreshSession();
       }
     }
+  },
+  getOrganizationAuditGrantConfig: async (): Promise<OrganizationAuditGrantConfig> => {
+    const raw = await api.get<Record<string, unknown>>('/api/permissions/organization-audit-grants');
+    const eligibleUsers = Array.isArray(raw.eligibleUsers) ? raw.eligibleUsers as Record<string, unknown>[] : [];
+    const grants = Array.isArray(raw.grants) ? raw.grants as Record<string, unknown>[] : [];
+    return {
+      organizationId: String(raw.organizationId || ''),
+      eligibleUsers: eligibleUsers.map(row => ({
+        id: String(row.id),
+        userName: String(row.username || ''),
+        employeeId: row.employee_id == null ? null : String(row.employee_id),
+        displayName: String(row.display_name || row.username || ''),
+        roles: Array.isArray(row.roles) ? row.roles.map(String) : [],
+      })),
+      grants: grants.map(row => ({
+        id: String(row.id),
+        organizationId: String(row.organization_id),
+        userId: String(row.user_id),
+        grantedBy: row.granted_by == null ? null : String(row.granted_by),
+        grantedByActiveRole: String(row.granted_by_active_role || ''),
+        createdAt: String(row.created_at),
+        userName: String(row.username || ''),
+        employeeId: row.employee_id == null ? null : String(row.employee_id),
+        displayName: String(row.display_name || row.username || ''),
+      })),
+    };
+  },
+  grantOrganizationAuditAccess: async (userId: string): Promise<OrganizationAuditGrant> => {
+    const row = await api.post<Record<string, unknown>>('/api/permissions/organization-audit-grants', {userId});
+    return {
+      id: String(row.id),
+      organizationId: String(row.organization_id),
+      userId: String(row.user_id),
+      grantedBy: row.granted_by == null ? null : String(row.granted_by),
+      grantedByActiveRole: String(row.granted_by_active_role || ''),
+      createdAt: String(row.created_at),
+      userName: '',
+      displayName: '',
+    };
+  },
+  revokeOrganizationAuditAccess: async (grantId: string): Promise<void> => {
+    await api.delete(`/api/permissions/organization-audit-grants/${encodeURIComponent(grantId)}`);
   },
   getSettings: async (): Promise<SystemSettings> => {
     if (await checkBackend()) {

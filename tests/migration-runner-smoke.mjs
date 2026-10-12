@@ -239,12 +239,27 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     where permission_key='audit.deployment.view'`);
   assert.equal(defaultDeploymentAuditGrants.rows[0].count, 0,
     'fresh installs must not create any live deployment audit user grants');
+  const organizationAuditPermission = await pool.query(`select pd.protected,rp.role_name,rp.enabled
+    from permission_definitions pd join role_permissions rp on rp.permission_key=pd.permission_key
+    where pd.permission_key='audit.organization.view' order by rp.role_name`);
+  assert.deepEqual(organizationAuditPermission.rows, [
+    {protected: true, role_name: 'Admin', enabled: false},
+    {protected: true, role_name: 'CountryDirector', enabled: false},
+    {protected: true, role_name: 'Employee', enabled: false},
+    {protected: true, role_name: 'HR', enabled: false},
+    {protected: true, role_name: 'ProjectManager', enabled: false},
+    {protected: true, role_name: 'TeamLead', enabled: false},
+  ], 'fresh installs must register organization audit as protected and deny it to every role by default');
+  const defaultOrganizationAuditGrants = await pool.query('select count(*)::int as count from organization_audit_grants');
+  assert.equal(defaultOrganizationAuditGrants.rows[0].count, 0,
+    'fresh installs must not create any live organization audit designations');
 
   const actorId = randomUUID();
   const singleScopeActorId = randomUUID();
   const multiScopeActorId = randomUUID();
   const auditDeniedActorId = randomUUID();
   const unassignedAuditActorId = randomUUID();
+  const disabledOrganizationAuditorId = randomUUID();
   const scopeFreeAuditorId = randomUUID();
   const scopeFreeAuditorPassword = 'Synthetic-Temporary-Audit-Passphrase-71';
   const scopeFreeAuditorPasswordSalt = 'synthetic-scope-free-auditor-test-salt';
@@ -294,6 +309,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ('legal-scope-beta','org-scope-beta','Synthetic Scope Beta Legal Entity LLC','USD',
       jsonb_build_object('line1','Synthetic Test Address','city','Test City','countryCode','US'),
       date '1970-01-01','US','Active')`);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+    values ($1,'org-scope-beta','legal-scope-beta',true)`, [auditDeniedActorId]);
   await pool.query(`insert into legal_entities (id,organization_id,code,name,country_code,effective_from)
     values ('legal-default-other','org-default','DEFAULT-OTHER','Synthetic Other Default Legal Entity','US',date '1970-01-01')`);
   await pool.query(`insert into legal_entity_profile_versions
@@ -1513,6 +1530,253 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       signal: AbortSignal.timeout(5000),
     });
 
+    await assert.rejects(
+      () => pool.query(`insert into audit_logs
+        (user_id,user_name,user_role,module,action,details,organization_id,legal_entity_id)
+        values ($1,'Synthetic actor','Admin','Scope Test','Reject Partial Scope','Must remain invalid',null,'legal-default')`, [multiScopeActorId]),
+      error => error.code === '23514' && error.constraint === 'audit_logs_scope_pair_check',
+      'organization audit migration must still reject a legal-entity owner without its organization',
+    );
+    await assert.rejects(
+      () => pool.query(`insert into audit_logs
+        (user_id,user_name,user_role,module,action,details,organization_id,legal_entity_id)
+        values ($1,'Synthetic actor','Admin','Scope Test','Reject Unknown Organization','Must remain invalid','missing-organization',null)`, [multiScopeActorId]),
+      error => error.code === '23503' && error.constraint === 'audit_logs_scope_organization_fk',
+      'organization-level audit scope must reference a real organization',
+    );
+
+    const organizationProfileResponse = await fetch(`${baseUrl}/api/organization-setup/profile`, {
+      method: 'PUT',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({
+        name: 'Synthetic Scope Beta Updated',
+        legalName: 'Synthetic Scope Beta Updated LLC',
+        productDisplayName: 'Synthetic WorkOS Updated',
+        supportContact: 'support@example.test',
+        defaultLocale: 'en-US',
+        defaultTimeZone: 'UTC',
+        baseCurrency: 'USD',
+        fiscalYearStart: '01-01',
+        defaultWeekStart: 1,
+        effectiveFrom: new Date().toISOString().slice(0, 10),
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(organizationProfileResponse.status, 200, 'organization profile updates retain the selected-scope mutation route');
+    const terminologyTerms = Object.fromEntries(['employee','manager','teamLead','businessUnit','region','regionalOwner','engagement','project','worklog']
+      .map(key => [key, {singular: `Synthetic ${key}`, plural: `Synthetic ${key}s`, helpText: 'synthetic test label'}]));
+    const organizationTerminologyResponse = await fetch(`${baseUrl}/api/v1/organization-setup/terminology`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({terms: terminologyTerms, effectiveFrom: new Date().toISOString().slice(0, 10)}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(organizationTerminologyResponse.status, 201,
+      'organization terminology updates retain the versioned selected-scope mutation route');
+    const organizationOwnershipRows = await pool.query(`select entity_type,entity_id,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type in ('Organization','Terminology') order by entity_type`, [multiScopeActorId]);
+    assert.deepEqual(organizationOwnershipRows.rows, [
+      {entity_type: 'Organization', entity_id: 'org-scope-beta', organization_id: 'org-scope-beta', legal_entity_id: null},
+      {entity_type: 'Terminology', entity_id: `org-scope-beta:${new Date().toISOString().slice(0, 10)}`, organization_id: 'org-scope-beta', legal_entity_id: null},
+    ], 'organization-wide profile and terminology mutations must be audited at organization scope, not the selected legal entity');
+
+    const ungrantedOrganizationScopes = await fetch(`${baseUrl}/api/organization-audit-scopes`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ungrantedOrganizationScopes.status, 403,
+      'organization audit designation must be required even for a multi-scope Admin');
+    const ungrantedOrganizationRead = await fetch(`${baseUrl}/api/organization-audit-logs?organizationId=org-scope-beta`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ungrantedOrganizationRead.status, 403,
+      'organization audit data must be denied before an explicit designation exists');
+    const genericOrganizationGrant = await fetch(`${baseUrl}/api/permissions/user-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: auditDeniedActorId, permissionKey: 'audit.organization.view'}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(genericOrganizationGrant.status, 422,
+      'organization audit access must not be granted by the deployment-wide generic user grant route');
+    const roleWideOrganizationGrant = await fetch(`${baseUrl}/api/permissions/roles/Admin`, {
+      method: 'PATCH',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({permissionKey: 'audit.organization.view', enabled: true}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(roleWideOrganizationGrant.status, 422,
+      'organization audit access must not be enabled for all users with a role');
+    const selfOrganizationGrant = await fetch(`${baseUrl}/api/permissions/organization-audit-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: multiScopeActorId}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(selfOrganizationGrant.status, 422, 'a manager cannot designate themself as an organization auditor');
+    const crossOrganizationGrant = await fetch(`${baseUrl}/api/permissions/organization-audit-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: singleScopeActorId}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(crossOrganizationGrant.status, 422,
+      'an organization manager cannot designate a user who has no active access to that organization');
+  const employeeGrantAttempt = await fetch(`${baseUrl}/api/permissions/organization-audit-grants`, {
+    method: 'POST',
+    headers: scopedHeaders(employeeTokenWithoutAdminPermissions, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+    body: JSON.stringify({userId: auditDeniedActorId}),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(employeeGrantAttempt.status, 403,
+    'an active organization member without permission-management authority cannot designate auditors');
+  await pool.query(`insert into users (id,username,email,status)
+    values ($1,'synthetic-disabled-org-auditor','synthetic-disabled-org-auditor@example.test','Disabled')`, [disabledOrganizationAuditorId]);
+  await pool.query(`insert into user_roles (user_id,role_id)
+    select $1,id from roles where name='Employee'`, [disabledOrganizationAuditorId]);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+    values ($1,'org-scope-beta','legal-scope-beta',true)`, [disabledOrganizationAuditorId]);
+  const organizationGrantConfigResponse = await fetch(`${baseUrl}/api/permissions/organization-audit-grants`, {
+    headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(organizationGrantConfigResponse.status, 200);
+  const organizationGrantConfig = await organizationGrantConfigResponse.json();
+  assert.equal(organizationGrantConfig.organizationId, 'org-scope-beta');
+  assert.deepEqual(organizationGrantConfig.eligibleUsers.map(user => user.id), [auditDeniedActorId],
+    'grant management must list only active, non-self users who currently belong to the selected organization');
+  const employeeRevokeAttempt = await fetch(`${baseUrl}/api/permissions/organization-audit-grants/nonexistent-grant`, {
+    method: 'DELETE',
+    headers: scopedHeaders(employeeTokenWithoutAdminPermissions, 'org-scope-beta', 'legal-scope-beta'),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(employeeRevokeAttempt.status, 403,
+    'a user without permission-management authority cannot revoke organization auditor designations');
+  const disabledTargetGrant = await fetch(`${baseUrl}/api/permissions/organization-audit-grants`, {
+    method: 'POST',
+    headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+    body: JSON.stringify({userId: disabledOrganizationAuditorId}),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(disabledTargetGrant.status, 422,
+    'a permission manager cannot designate a disabled account, even when it retains a role and organization-scope row');
+  await pool.query(`delete from user_roles where user_id=$1 and role_id=(select id from roles where name='Admin')`, [multiScopeActorId]);
+  const staleOrganizationGrantManager = await fetch(`${baseUrl}/api/permissions/organization-audit-grants`, {
+    method: 'POST',
+    headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+    body: JSON.stringify({userId: auditDeniedActorId}),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(staleOrganizationGrantManager.status, 403,
+    'a manager whose active role was removed must lose grant authority immediately');
+  await pool.query(`insert into user_roles (user_id,role_id) select $1,id from roles where name='Admin'`, [multiScopeActorId]);
+    const organizationGrantResponse = await fetch(`${baseUrl}/api/permissions/organization-audit-grants`, {
+      method: 'POST',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {'Content-Type': 'application/json'}),
+      body: JSON.stringify({userId: auditDeniedActorId}),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(organizationGrantResponse.status, 201,
+      'a scoped permission manager can explicitly designate a different active user of any role for this organization');
+    const organizationGrant = await organizationGrantResponse.json();
+    assert.equal(organizationGrant.organization_id, 'org-scope-beta');
+    const organizationGrantAudit = await pool.query(`select organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type='OrganizationAuditGrant' and entity_id=$2`,
+    [multiScopeActorId, organizationGrant.id]);
+    assert.deepEqual(organizationGrantAudit.rows, [{organization_id: 'org-scope-beta', legal_entity_id: null}],
+      'grant administration must be auditable at the affected organization scope');
+
+    const organizationAuditorToken = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Employee');
+    const organizationAuditorSession = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(organizationAuditorSession.status, 200,
+      'an explicitly designated organization auditor can refresh identity without selecting a legal entity');
+    const organizationAuditorPermissions = await organizationAuditorSession.json();
+    assert(organizationAuditorPermissions.permissions.includes('audit.organization.view'),
+      'the refreshed session receives the explicit organization-audit permission');
+    const organizationScopesResponse = await fetch(`${baseUrl}/api/v1/organization-audit-scopes`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(organizationScopesResponse.status, 200,
+      'the versioned organization-audit scope reader supports identity-only access');
+    assert.deepEqual(await organizationScopesResponse.json(), [{
+      organization_id: 'org-scope-beta', organization_code: 'SCOPE-BETA',
+      organization_name: 'Synthetic Scope Beta', status: 'Active',
+    }], 'an auditor must list only the organization explicitly designated for them');
+    await pool.query(`insert into audit_logs
+        (user_id,user_name,user_role,active_role,source,module,action,details,entity_type,entity_id,organization_id,legal_entity_id)
+      values ($1,'Synthetic multi-scope Admin','Admin','Admin','Synthetic organization test','Organization Audit Test',
+        'Other Organization Row','Must remain hidden','OrganizationAuditTest','organization-audit-other-org','org-default',null)`, [multiScopeActorId]);
+    const organizationAuditLegacy = await fetch(`${baseUrl}/api/organization-audit-logs?organizationId=org-scope-beta`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    const organizationAuditVersioned = await fetch(`${baseUrl}/api/v1/organization-audit-logs?organizationId=org-scope-beta`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(organizationAuditLegacy.status, 200,
+      'an explicit organization auditor may read its organization-owned history without a selected scope');
+    assert.equal(organizationAuditVersioned.status, 200);
+    const organizationAuditRows = await organizationAuditLegacy.json();
+    assert.deepEqual(await organizationAuditVersioned.json(), organizationAuditRows,
+      'legacy and versioned organization-audit routes must preserve identical response data');
+    assert(organizationAuditRows.some(row => row.entity_type === 'Organization' && row.action === 'Update Organization Profile'),
+      'the organization view includes profile changes logged at organization scope');
+    assert(organizationAuditRows.some(row => row.entity_type === 'Terminology' && row.action === 'Version Terminology'),
+      'the organization view includes terminology changes logged at organization scope');
+    assert(organizationAuditRows.some(row => row.entity_type === 'OrganizationAuditGrant' && row.action === 'Grant Organization Audit Access'),
+      'the organization view includes its explicit grant event');
+    assert(!organizationAuditRows.some(row => ['deployment-scoped-beta','organization-audit-other-org'].includes(row.entity_id)),
+      'the organization view must exclude legal-entity-scoped rows and every other organization');
+    assert(!organizationAuditRows.some(row => row.organization_id === null || row.legal_entity_id !== null),
+      'the organization view must exclude null-scope deployment and legal-entity records');
+    const otherOrganizationAuditRead = await fetch(`${baseUrl}/api/organization-audit-logs?organizationId=org-default`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(otherOrganizationAuditRead.status, 404,
+      'an organization auditor must not learn whether a different organization has audit records');
+    const ordinaryBetaAudit = await getScoped('/api/audit-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    const ordinaryBetaAuditRows = await ordinaryBetaAudit.json();
+    assert(!ordinaryBetaAuditRows.some(row => row.entity_type === 'Organization' || row.entity_type === 'Terminology'),
+      'ordinary exact-pair history must not relabel or expose organization-wide audit records');
+    await pool.query('delete from user_organization_scopes where user_id=$1', [auditDeniedActorId]);
+    const scopeFreeOrganizationAudit = await fetch(`${baseUrl}/api/organization-audit-logs?organizationId=org-scope-beta`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(scopeFreeOrganizationAudit.status, 200,
+      'an explicitly designated organization auditor can continue reading the organization-only view without legal-entity membership');
+    await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+      values ($1,'org-default','legal-default',true),($1,'org-scope-beta','legal-scope-beta',true)`, [auditDeniedActorId]);
+    await pool.query(`delete from user_roles where user_id=$1 and role_id=(select id from roles where name='Employee')`, [auditDeniedActorId]);
+    const staleOrganizationAuditor = await fetch(`${baseUrl}/api/organization-audit-scopes`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(staleOrganizationAuditor.status, 403,
+      'removing the auditor active role must immediately deny organization audit access');
+    await pool.query(`insert into user_roles (user_id,role_id) select $1,id from roles where name='Employee'`, [auditDeniedActorId]);
+    await pool.query(`update users set status='Disabled' where id=$1`, [auditDeniedActorId]);
+    const disabledOrganizationAuditor = await fetch(`${baseUrl}/api/organization-audit-logs?organizationId=org-scope-beta`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(disabledOrganizationAuditor.status, 403, 'disabled organization auditors must lose access immediately');
+    await pool.query(`update users set status='Active' where id=$1`, [auditDeniedActorId]);
+    const organizationRevokeResponse = await fetch(`${baseUrl}/api/permissions/organization-audit-grants/${encodeURIComponent(organizationGrant.id)}`, {
+      method: 'DELETE',
+      headers: scopedHeaders(multiScopeToken, 'org-scope-beta', 'legal-scope-beta'),
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(organizationRevokeResponse.status, 200, 'the selected-organization permission manager can revoke its auditor designation');
+    const revokedOrganizationAuditor = await fetch(`${baseUrl}/api/organization-audit-logs?organizationId=org-scope-beta`, {
+      headers: {Authorization: `Bearer ${organizationAuditorToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(revokedOrganizationAuditor.status, 403,
+      'revoking the organization designation must remove access immediately');
+    const organizationGrantAuditHistory = await pool.query(`select action,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type='OrganizationAuditGrant' order by action`, [multiScopeActorId]);
+    assert.deepEqual(organizationGrantAuditHistory.rows, [
+      {action: 'Grant Organization Audit Access', organization_id: 'org-scope-beta', legal_entity_id: null},
+      {action: 'Revoke Organization Audit Access', organization_id: 'org-scope-beta', legal_entity_id: null},
+    ], 'grant and revoke history must remain append-only and organization-scoped');
+
     const globalSettingsResponse = await postScopedJson('/api/settings', multiScopeToken,
       'org-scope-beta', 'legal-scope-beta', {
         expectedWeeklyHours: 40,
@@ -2306,6 +2570,14 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
   });
 }, {maxPoolSize: 1});
 
+const preOrganizationAuditMigrationRoot = await mkdtemp(join(tmpdir(), 'workos-pr006-before-organization-audit-'));
+await mkdir(join(preOrganizationAuditMigrationRoot, 'migrations'));
+await writeFile(join(preOrganizationAuditMigrationRoot, 'schema.sql'), await readFile(join(serverDir, 'schema.sql'), 'utf8'));
+for (const migration of manifest.slice(1, -1)) {
+  await writeFile(join(preOrganizationAuditMigrationRoot, 'migrations', migration.file),
+    await readFile(join(serverDir, 'migrations', migration.file), 'utf8'));
+}
+
 await withDisposableDatabase(async (pool) => {
   const concurrent = await Promise.all([
     runMigrations({pool, rootDir: serverDir, logger: quietLogger}),
@@ -2354,7 +2626,7 @@ await withDisposableDatabase(async (pool) => {
     const baselineSql = await readFile(join(serverDir, 'schema.sql'), 'utf8');
     await client.query(baselineSql);
     await client.query('insert into schema_migrations (id) values ($1)', [manifest[0].id]);
-    for (const migration of manifest.slice(1, -5)) {
+    for (const migration of manifest.slice(1, -6)) {
       const sql = await readFile(join(serverDir, 'migrations', migration.file), 'utf8');
       await client.query(sql);
       await client.query('insert into schema_migrations (id) values ($1)', [migration.id]);
@@ -2383,32 +2655,60 @@ await withDisposableDatabase(async (pool) => {
     client.release();
   }
 
+  const preOrganizationAuditUpgrade = await runMigrations({
+    pool,
+    rootDir: preOrganizationAuditMigrationRoot,
+    logger: quietLogger,
+  });
+  const preOrganizationAuditMigrations = manifest.slice(-6, -1);
+  assert.deepEqual(preOrganizationAuditUpgrade.applied, preOrganizationAuditMigrations.map(item => item.id),
+    'the upgrade through migration 037 must complete before exercising the organization-scope migration boundary');
+  const preExistingAuditScopes = await pool.query(`insert into audit_logs
+      (user_id,user_name,user_role,module,action,entity_type,entity_id,details,organization_id,legal_entity_id)
+    values
+      ('legacy-scoped-actor','Legacy scoped actor','Admin','Legacy','Before organization scope','LegacyAudit','scoped-before-038','preserve exact scope','org-default','legal-default'),
+      ('legacy-deployment-actor','Legacy deployment actor','Admin','Legacy','Null scope before organization scope','LegacyAudit','null-before-038','preserve null scope',null,null)
+    returning entity_id,organization_id,legal_entity_id`);
+  assert.deepEqual(preExistingAuditScopes.rows, [
+    {entity_id: 'scoped-before-038', organization_id: 'org-default', legal_entity_id: 'legal-default'},
+    {entity_id: 'null-before-038', organization_id: null, legal_entity_id: null},
+  ], 'pre-038 audit evidence is inserted with both existing ownership forms before migration 038');
+
   const before = await pool.query('select count(*)::int as count from schema_migrations');
   const upgrade = await runMigrations({pool, rootDir: serverDir, logger: quietLogger});
   const after = await pool.query('select count(*)::int as count from schema_migrations');
-  const candidateMigrations = manifest.slice(-5);
+  const candidateMigrations = manifest.slice(-6);
   assert.deepEqual(candidateMigrations.map(item => item.id), [
     '033_wos03_audit_operation_context',
     '034_wos03_employee_import_provenance',
     '035_wos03_scoped_history',
     '036_wos03_identity_link_provenance_reference',
     '037_wos03_deployment_audit_permission',
-  ], 'PR-006 adds ordered request, import provenance, scoped history, identity-link provenance and deployment audit permission migrations');
-  assert.deepEqual(upgrade.applied, candidateMigrations.map(item => item.id),
-    'upgrade from merged main applies all additive PR-006 migrations');
-  assert.equal(upgrade.skipped.length, manifest.length - 5);
-  assert.equal(after.rows[0].count, before.rows[0].count + 5, 'upgrade appends all five migration ledger rows');
+    '038_wos03_organization_audit_access',
+  ], 'PR-006 adds ordered request, provenance, scoped history, and protected deployment/organization audit access migrations');
+  assert.deepEqual([...preOrganizationAuditUpgrade.applied, ...upgrade.applied], candidateMigrations.map(item => item.id),
+    'upgrade from merged main applies all additive PR-006 migrations in order');
+  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access'],
+    'the organization-scope migration is applied after historical and legal-entity audit rows already exist');
+  assert.equal(upgrade.skipped.length, manifest.length - 1);
+  assert.equal(after.rows[0].count, before.rows[0].count + 1, 'the final upgrade appends migration 038 to its ledger');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
-  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -5).map(item => item.id),
+  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -6).map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 5, 'all PR-006 migrations are ledgered');
+  assert.equal(newMigrations.length, 6, 'all PR-006 migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),
     'upgrade must not invent historical checksums');
+  const preservedOrganizationAuditScopes = await pool.query(`select entity_id,organization_id,legal_entity_id from audit_logs
+    where entity_id in ('scoped-before-038','null-before-038') order by entity_id`);
+  assert.deepEqual(preservedOrganizationAuditScopes.rows, [
+    {entity_id: 'null-before-038', organization_id: null, legal_entity_id: null},
+    {entity_id: 'scoped-before-038', organization_id: 'org-default', legal_entity_id: 'legal-default'},
+  ], 'migration 038 must preserve existing scoped and null-scope audit rows without rewriting their ownership');
   const upgradedIdentityLink = await pool.query(`select id,provider_subject,provider_upn,provenance_reference
     from identity_provider_links where id='legacy-link-id'`);
   assert.equal(upgradedIdentityLink.rowCount, 1, 'the identity-link upgrade fixture remains present');
@@ -2443,6 +2743,7 @@ await withDisposableDatabase(async (pool) => {
   assert.deepEqual(legacyActionToken.rows, [{token: 'legacy-scope-token', organization_id: null, legal_entity_id: null}],
     'historical action tokens must remain unchanged and explicitly unscoped');
 });
+await rm(preOrganizationAuditMigrationRoot, {recursive: true, force: true});
 
 const failedMigrationRoot = await mkdtemp(join(tmpdir(), 'workos-failed-migration-'));
 try {

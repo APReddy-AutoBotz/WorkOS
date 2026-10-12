@@ -44,9 +44,11 @@ assert.ok(config.rolePermissions.some(item => item.roleName === 'Admin' && item.
 assert.ok(PROTECTED_PERMISSION_KEYS.has('permissions.manage'), 'permission management must be protected');
 assert.ok(PERMISSION_DEFINITIONS.some(permission => permission.key === 'allocations.manage'), 'allocation management permission must exist');
 assert.ok(PROTECTED_PERMISSION_KEYS.has('audit.deployment.view'), 'deployment-wide audit access must be protected');
+assert.ok(PROTECTED_PERMISSION_KEYS.has('audit.organization.view'), 'organization audit access must be protected');
 assert.ok(!config.rolePermissions.some(item => item.permissionKey === 'audit.deployment.view' && item.enabled),
   'deployment-wide audit access must default off for every role, including Admin');
 assert.equal(hasPermission(admin, 'audit.deployment.view'), false, 'an Admin must not receive deployment audit access by default');
+assert.equal(hasPermission(admin, 'audit.organization.view'), false, 'an Admin must not receive organization audit access by default');
 
 assert.equal(hasRouteRole(admin, ROUTE_ROLES.auditTrail), true, 'Admin should keep audit access through default permissions');
 
@@ -80,6 +82,19 @@ assert.ok(employee?.permissions?.includes('allocations.manage'), 'session refres
 assert.equal(canManageAllocations(employee), true, 'refreshed session should expose newly granted action permissions');
 
 await authService.login('admin-1', 'workos-test-only');
+await assert.rejects(
+  () => adminService.grantUserPermission(user.id, 'audit.organization.view'),
+  /specific organization/,
+  'organization audit access cannot be granted through deployment-wide user exceptions',
+);
+await assert.rejects(
+  () => adminService.setRolePermission('Admin', 'audit.organization.view', true),
+  /specific organization/,
+  'organization audit access cannot be enabled role-wide',
+);
+const designatedOrganizationAuditor = {...employee, permissions: ['audit.organization.view']};
+assert.equal(hasRouteRole(designatedOrganizationAuditor, ROUTE_ROLES.auditTrail), true,
+  'an explicitly designated non-Admin organization auditor may open the audit route');
 await assert.rejects(
   () => adminService.grantUserPermission(user.id, 'audit.view'),
   /Protected permissions/,

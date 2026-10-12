@@ -183,7 +183,8 @@ export const registerOrganizationSetupRoutes = ({
       await client.query(`update organizations set name=$2,updated_at=now()
         where id=$1 and $3::date <= current_date`,[req.organizationScope.organizationId,parsed.data.name,parsed.data.effectiveFrom]);
       await audit(client,req,{module:'Organization Setup',action:'Update Organization Profile',entityType:'Organization',entityId:req.organizationScope.organizationId,
-        oldValue:{...latest,name:organization.name},newValue:{...result.rows[0],name:parsed.data.name},details:'Versioned organization profile using authoritative request scope'});
+        oldValue:{...latest,name:organization.name},newValue:{...result.rows[0],name:parsed.data.name},details:'Versioned organization profile using authoritative request scope',
+        organizationScope:{organizationId:req.organizationScope.organizationId,legalEntityId:null}});
       const response=await client.query(`${profileSelect} where o.id=$1 and p.id=$2`,[req.organizationScope.organizationId,result.rows[0].id]);
       await client.query('commit');res.json(response.rows[0]);
     }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Organization profile version conflicts with existing history',code:'ORGANIZATION_PROFILE_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Organization profile mutation failed',code:'ORGANIZATION_PROFILE_MUTATION_FAILED'});}finally{client.release();}
@@ -497,7 +498,8 @@ export const registerOrganizationSetupRoutes = ({
       if(!exact&&latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Terminology version is stale',code:'TERMINOLOGY_VERSION_CONFLICT'});}
       let result;if(exact) result=await client.query('update terminology_versions set terms=$3,created_by=$4 where organization_id=$1 and effective_from=$2 returning *',[req.organizationScope.organizationId,parsed.data.effectiveFrom,JSON.stringify(parsed.data.terms),req.user.sub]);
       else {if(latest)await client.query("update terminology_versions set effective_to=($2::date-interval '1 day')::date where organization_id=$1 and effective_to is null",[req.organizationScope.organizationId,parsed.data.effectiveFrom]);result=await client.query('insert into terminology_versions(organization_id,terms,effective_from,created_by) values($1,$2,$3,$4) returning *',[req.organizationScope.organizationId,JSON.stringify(parsed.data.terms),parsed.data.effectiveFrom,req.user.sub]);}
-      await audit(client,req,{module:'Organization Setup',action:exact?'Update Terminology':'Version Terminology',entityType:'Terminology',entityId:`${req.organizationScope.organizationId}:${parsed.data.effectiveFrom}`,oldValue:exact||null,newValue:result.rows[0],details:'Updated effective-dated terminology labels and help text'});
+      await audit(client,req,{module:'Organization Setup',action:exact?'Update Terminology':'Version Terminology',entityType:'Terminology',entityId:`${req.organizationScope.organizationId}:${parsed.data.effectiveFrom}`,oldValue:exact||null,newValue:result.rows[0],details:'Updated effective-dated terminology labels and help text',
+        organizationScope:{organizationId:req.organizationScope.organizationId,legalEntityId:null}});
       await client.query('commit');res.status(exact?200:201).json(result.rows[0]);
     }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Terminology version conflicts with existing history',code:'TERMINOLOGY_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Terminology mutation failed'});}finally{client.release();}
   });

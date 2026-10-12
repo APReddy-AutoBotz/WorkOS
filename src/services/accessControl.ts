@@ -38,7 +38,9 @@ export const hasRouteRole = (user: UserSession | null | undefined, roles: readon
   if (!user) return false;
   const routeKey = Object.entries(ROUTE_ROLES).find(([, routeRoles]) => routeRoles === roles)?.[0];
   if (routeKey === 'auditTrail') {
-    return hasPermission(user, 'audit.view') || hasPermission(user, 'audit.deployment.view');
+    return hasPermission(user, 'audit.view')
+      || hasPermission(user, 'audit.deployment.view')
+      || hasPermission(user, 'audit.organization.view');
   }
   const permissionKey = routeKey ? ROUTE_PERMISSION_KEYS[routeKey as keyof typeof ROUTE_PERMISSION_KEYS] : undefined;
   return permissionKey ? hasPermission(user, permissionKey) : roles.includes(user.role);
@@ -47,19 +49,22 @@ export const hasRouteRole = (user: UserSession | null | undefined, roles: readon
 export const canOpenDeploymentAuditWithoutOrganizationScope = (user: UserSession | null | undefined) =>
   hasPermission(user, 'audit.deployment.view');
 
+export const canOpenAuditWithoutOrganizationScope = (user: UserSession | null | undefined) =>
+  hasPermission(user, 'audit.deployment.view') || hasPermission(user, 'audit.organization.view');
+
 export const canFetchScopedAuditHistory = (
   user: UserSession | null | undefined,
   hasValidatedOrganizationScope: boolean,
   allowDemoFallback = false,
 ) => hasPermission(user, 'audit.view') && (hasValidatedOrganizationScope
-  || (allowDemoFallback && !hasPermission(user, 'audit.deployment.view')));
+  || (allowDemoFallback && !hasPermission(user, 'audit.deployment.view') && !hasPermission(user, 'audit.organization.view')));
 
 export const canFetchScopedWorkspaceData = (
   user: UserSession | null | undefined,
   hasValidatedOrganizationScope: boolean,
   allowDemoFallback = false,
 ) => hasValidatedOrganizationScope
-  || (allowDemoFallback && !hasPermission(user, 'audit.deployment.view'));
+  || (allowDemoFallback && !hasPermission(user, 'audit.deployment.view') && !hasPermission(user, 'audit.organization.view'));
 
 interface EmployeeAccessInput {
   user: UserSession | null | undefined;

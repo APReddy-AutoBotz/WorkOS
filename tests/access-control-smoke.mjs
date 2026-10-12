@@ -25,6 +25,7 @@ const { authService } = await import('../src/services/authService.ts');
 const {
   ROUTE_ROLES,
   canOpenDeploymentAuditWithoutOrganizationScope,
+  canOpenAuditWithoutOrganizationScope,
   canFetchScopedAuditHistory,
   canFetchScopedWorkspaceData,
   canAccessEmployeeDetail,
@@ -95,6 +96,17 @@ assert.equal(canFetchScopedWorkspaceData(admin, false, true), true,
   'ordinary demo sessions may retain their existing local workspace-data fallback');
 assert.equal(canFetchScopedWorkspaceData(designatedAdminAuditor, true), true,
   'a designated auditor with a validated scope may use the scoped workspace shell');
+const designatedOrganizationAuditor = { ...hr, permissions: ['audit.organization.view'] };
+assert.equal(hasRouteRole(designatedOrganizationAuditor, ROUTE_ROLES.auditTrail), true,
+  'a specifically designated non-Admin organization auditor may open the audit page');
+assert.equal(canOpenAuditWithoutOrganizationScope(designatedOrganizationAuditor), true,
+  'an organization auditor may use the organization-only reader without selecting a legal entity');
+assert.equal(canFetchScopedAuditHistory(designatedOrganizationAuditor, false, true), false,
+  'an organization auditor without audit.view must not fetch ordinary scoped history through demo fallback');
+assert.equal(canFetchScopedWorkspaceData(designatedOrganizationAuditor, false, true), false,
+  'a scope-free organization auditor must not preload demo tenant workspace data');
+assert.equal(canFetchScopedWorkspaceData(designatedOrganizationAuditor, true), true,
+  'an organization auditor who also has a validated data scope may use only that scoped workspace');
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.brdTraceability), true, 'HR should access BRD traceability');
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.leaveAdmin), true, 'HR should access feature-gated leave administration when enabled');
 assert.equal(hasRouteRole(hr, ROUTE_ROLES.identityIntegrations), true, 'HR should access feature-gated identity integrations when enabled');

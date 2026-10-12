@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } f
 import { AppLayout } from './components/Layout/AppLayout';
 import { authService } from './services/authService';
 import { getOrganizationScope } from './services/apiClient';
-import { canOpenDeploymentAuditWithoutOrganizationScope, hasRouteRole, ROUTE_ROLES } from './services/accessControl';
+import { canOpenAuditWithoutOrganizationScope, hasRouteRole, ROUTE_ROLES } from './services/accessControl';
 import { UserRole } from './types';
 import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from './config/featureFlags';
 import { RuntimeTerminology } from './config/RuntimeTerminology';
@@ -50,10 +50,10 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     return <Navigate to="/login" replace />;
   }
   const user = authService.getCurrentUser();
-  const canUseDeploymentAudit = canOpenDeploymentAuditWithoutOrganizationScope(user);
-  const deploymentAuditScopeFreePath = canUseDeploymentAudit
+  const canUseScopeFreeAudit = canOpenAuditWithoutOrganizationScope(user);
+  const auditScopeFreePath = canUseScopeFreeAudit
     && ['/', '/audit', '/audit-trail'].includes(location.pathname);
-  return <OrganizationScopeGate allowDeploymentAuditWithoutScope={deploymentAuditScopeFreePath}>
+  return <OrganizationScopeGate allowAuditWithoutScope={auditScopeFreePath}>
     <RuntimeTerminology>{children}</RuntimeTerminology>
   </OrganizationScopeGate>;
 };
@@ -91,7 +91,7 @@ const getRoleHomePath = (role: UserRole) => {
 const DashboardRoute = () => {
   const user = authService.getCurrentUser();
   if (!user) return <Navigate to="/login" replace />;
-  if (canOpenDeploymentAuditWithoutOrganizationScope(user) && !getOrganizationScope()) {
+  if (canOpenAuditWithoutOrganizationScope(user) && !getOrganizationScope()) {
     return <Navigate to="/audit-trail" replace />;
   }
   if (!hasRouteRole(user, ROUTE_ROLES.dashboard)) {

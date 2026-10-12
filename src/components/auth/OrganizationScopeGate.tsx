@@ -9,10 +9,10 @@ const sameScope = (left: OrganizationScope | null, right: OrganizationScope) =>
 
 export const OrganizationScopeGate = ({
   children,
-  allowDeploymentAuditWithoutScope = false,
+  allowAuditWithoutScope = false,
 }: {
   children: ReactNode;
-  allowDeploymentAuditWithoutScope?: boolean;
+  allowAuditWithoutScope?: boolean;
 }) => {
   const [status, setStatus] = useState<GateStatus>('checking');
   const [scopes, setScopes] = useState<OrganizationScope[]>([]);
@@ -29,7 +29,7 @@ export const OrganizationScopeGate = ({
       try {
         const backendConnected = await checkBackend();
         if (!backendConnected) {
-          if (allowDeploymentAuditWithoutScope) {
+          if (allowAuditWithoutScope) {
             clearOrganizationScope();
             if (active) {
               setSelectedScope(null);
@@ -67,7 +67,7 @@ export const OrganizationScopeGate = ({
         }
       } catch (cause) {
         if (!active) return;
-        if (allowDeploymentAuditWithoutScope) {
+        if (allowAuditWithoutScope) {
           clearOrganizationScope();
           setSelectedScope(null);
         }
@@ -77,7 +77,7 @@ export const OrganizationScopeGate = ({
     };
     void resolveScope();
     return () => { active = false; };
-  }, [retry, allowDeploymentAuditWithoutScope]);
+  }, [retry, allowAuditWithoutScope]);
 
   const chooseScope = async (scope: OrganizationScope) => {
     const key = `${scope.organizationId}:${scope.legalEntityId}`;
@@ -107,9 +107,9 @@ export const OrganizationScopeGate = ({
     );
   }
 
-  if (allowDeploymentAuditWithoutScope && status !== 'checking') {
+  if (allowAuditWithoutScope && status !== 'checking') {
     return (
-      <div className="contents" data-testid="deployment-audit-without-organization-scope">
+      <div className="contents" data-testid="audit-without-organization-scope">
         {children}
       </div>
     );

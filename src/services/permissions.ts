@@ -36,12 +36,13 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'imports.manage', module: 'Admin', label: 'Import / Export', description: 'Run controlled CSV imports and view import/export history.' },
   { key: 'audit.view', module: 'Admin', label: 'Audit Trail', description: 'View immutable platform audit logs.', protected: true },
   { key: 'audit.deployment.view', module: 'Admin', label: 'Deployment Audit View', description: 'Read null-scope deployment audit records through an explicit individual user grant.', protected: true },
+  { key: 'audit.organization.view', module: 'Admin', label: 'Organization Audit View', description: 'Read organization-owned audit records through an explicit organization-specific designation.', protected: true },
   { key: 'settings.manage', module: 'Admin', label: 'Governance Settings', description: 'Manage business settings and catalogs.' },
   { key: 'permissions.manage', module: 'Admin', label: 'Permission Settings', description: 'Manage role permissions and user-specific permission grants.', protected: true },
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, PermissionKey[]> = {
-  Admin: PERMISSION_DEFINITIONS.filter(permission => permission.key !== 'audit.deployment.view').map(permission => permission.key),
+  Admin: PERMISSION_DEFINITIONS.filter(permission => !['audit.deployment.view', 'audit.organization.view'].includes(permission.key)).map(permission => permission.key),
   HR: [
     'dashboard.view',
     'employees.view',

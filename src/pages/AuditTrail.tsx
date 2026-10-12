@@ -22,7 +22,7 @@ import { authService } from '../services/authService';
 import { hasPermission } from '../services/permissions';
 import { getOrganizationScope, isDemoFallbackAllowed } from '../services/apiClient';
 import { canFetchScopedAuditHistory } from '../services/accessControl';
-import { AuditLog } from '../types';
+import { AuditLog, OrganizationAuditScope } from '../types';
 import { downloadCsv } from '../lib/csv';
 import { NoticeBanner } from '../components/ui/NoticeBanner';
 import { Link } from 'react-router-dom';
@@ -55,6 +55,7 @@ const formatLog = (log: AuditLog) => ({
 export const AuditTrail = () => {
   const canViewScopedAudit = hasPermission(authService.getCurrentUser(), 'audit.view');
   const canViewDeploymentAudit = hasPermission(authService.getCurrentUser(), 'audit.deployment.view');
+  const canViewOrganizationAudit = hasPermission(authService.getCurrentUser(), 'audit.organization.view');
   const hasSelectedOrganizationScope = Boolean(getOrganizationScope());
   const canFetchScopedAudit = canFetchScopedAuditHistory(
     authService.getCurrentUser(),
@@ -63,7 +64,14 @@ export const AuditTrail = () => {
   );
   const [auditLogs, setAuditLogs] = useState<ReturnType<typeof formatLog>[]>([]);
   const [deploymentAuditLogs, setDeploymentAuditLogs] = useState<ReturnType<typeof formatLog>[]>([]);
-  const [auditView, setAuditView] = useState<'scope' | 'deployment'>(canFetchScopedAudit ? 'scope' : 'deployment');
+  const [organizationAuditResult, setOrganizationAuditResult] = useState<{
+    organizationId: string;
+    logs: ReturnType<typeof formatLog>[];
+  } | null>(null);
+  const [organizationAuditScopes, setOrganizationAuditScopes] = useState<OrganizationAuditScope[]>([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState('');
+  const initialView = canFetchScopedAudit ? 'scope' : canViewOrganizationAudit ? 'organization' : 'deployment';
+  const [auditView, setAuditView] = useState<'scope' | 'organization' | 'deployment'>(initialView);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLog, setSelectedLog] = useState<ReturnType<typeof formatLog> | null>(null);
   const [moduleFilter, setModuleFilter] = useState('All Modules');
@@ -76,20 +84,56 @@ export const AuditTrail = () => {
       adminService.getAuditLogs().then(logs => setAuditLogs(logs.map(formatLog)));
     } else {
       setAuditLogs([]);
-      if (canViewDeploymentAudit) setAuditView('deployment');
     }
     if (canViewDeploymentAudit) {
       adminService.getDeploymentAuditLogs().then(logs => setDeploymentAuditLogs(logs.map(formatLog)));
     } else {
       setDeploymentAuditLogs([]);
-      setAuditView('scope');
     }
   }, [canFetchScopedAudit, canViewDeploymentAudit]);
 
-  const activeLogs = auditView === 'deployment' ? deploymentAuditLogs : auditLogs;
+  useEffect(() => {
+    if (!canViewOrganizationAudit) {
+      setOrganizationAuditScopes([]);
+      setOrganizationAuditResult(null);
+      setSelectedOrganizationId('');
+      return;
+    }
+    adminService.getOrganizationAuditScopes().then(scopes => {
+      setOrganizationAuditScopes(scopes);
+      setSelectedOrganizationId(current => scopes.some(scope => scope.organizationId === current)
+        ? current
+        : scopes[0]?.organizationId || '');
+    });
+  }, [canViewOrganizationAudit]);
+
+  useEffect(() => {
+    let current = true;
+    setOrganizationAuditResult(null);
+    if (!canViewOrganizationAudit || !selectedOrganizationId) {
+      return () => { current = false; };
+    }
+    adminService.getOrganizationAuditLogs(selectedOrganizationId)
+      .then(logs => {
+        if (current) {
+          setOrganizationAuditResult({organizationId: selectedOrganizationId, logs: logs.map(formatLog)});
+        }
+      })
+      .catch(() => {
+        if (current) setOrganizationAuditResult(null);
+      });
+    return () => { current = false; };
+  }, [canViewOrganizationAudit, selectedOrganizationId]);
+
+  const organizationAuditLogs = organizationAuditResult?.organizationId === selectedOrganizationId
+    ? organizationAuditResult.logs
+    : [];
+  const activeLogs = auditView === 'deployment'
+    ? deploymentAuditLogs
+    : auditView === 'organization' ? organizationAuditLogs : auditLogs;
 
   const exportLogs = () => {
-    if (auditView === 'deployment') return;
+    if (auditView !== 'scope') return;
     downloadCsv(`audit-logs-${new Date().toISOString().split('T')[0]}.csv`, filteredLogs.map(log => ({
       timestamp: log.timestamp,
       user: log.user,
@@ -129,7 +173,7 @@ export const AuditTrail = () => {
   };
 
   const exportSelectedLog = () => {
-    if (!selectedLog || auditView === 'deployment') return;
+    if (!selectedLog || auditView !== 'scope') return;
     downloadCsv(`audit-log-${selectedLog.id}.csv`, [{
       timestamp: selectedLog.timestamp,
       user: selectedLog.user,
@@ -160,7 +204,7 @@ export const AuditTrail = () => {
         }
       />
 
-      {canViewDeploymentAudit && (
+      {(canViewDeploymentAudit || canViewOrganizationAudit || canFetchScopedAudit) && (
         <div className="flex items-center gap-2 mb-6" role="tablist" aria-label="Audit record scope">
           {canFetchScopedAudit && <button
             type="button"
@@ -171,7 +215,16 @@ export const AuditTrail = () => {
               auditView === 'scope' ? 'border-primary bg-orange-50 text-primary' : 'border-slate-200 bg-white text-slate-500')}
           >Selected organization
           </button>}
-          <button
+          {canViewOrganizationAudit && <button
+            type="button"
+            role="tab"
+            aria-selected={auditView === 'organization'}
+            onClick={() => { setAuditView('organization'); setSelectedLog(null); }}
+            className={cn('rounded-xl border px-4 py-2 text-xs font-bold transition-colors',
+              auditView === 'organization' ? 'border-primary bg-orange-50 text-primary' : 'border-slate-200 bg-white text-slate-500')}
+          >Organization-wide
+          </button>}
+          {canViewDeploymentAudit && <button
             type="button"
             role="tab"
             aria-selected={auditView === 'deployment'}
@@ -179,16 +232,41 @@ export const AuditTrail = () => {
             className={cn('rounded-xl border px-4 py-2 text-xs font-bold transition-colors',
               auditView === 'deployment' ? 'border-primary bg-orange-50 text-primary' : 'border-slate-200 bg-white text-slate-500')}
           >Deployment-wide
-          </button>
+          </button>}
         </div>
       )}
 
+      {auditView === 'organization' && organizationAuditScopes.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center gap-3">
+          <label htmlFor="organization-audit-scope" className="text-xs font-bold text-slate-600">Designated organization</label>
+          <select
+            id="organization-audit-scope"
+            value={selectedOrganizationId}
+            onChange={event => {
+              setOrganizationAuditResult(null);
+              setSelectedOrganizationId(event.target.value);
+              setSelectedLog(null);
+            }}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold outline-none focus:border-primary"
+          >
+            {organizationAuditScopes.map(scope => (
+              <option key={scope.organizationId} value={scope.organizationId}>
+                {scope.organizationName} ({scope.organizationCode})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {auditView === 'organization' && organizationAuditScopes.length === 0 && (
+        <p className="mb-6 text-xs font-medium text-slate-500" role="status">No organization audit designations are currently active for this account.</p>
+      )}
       {auditView === 'deployment' && (
         <p className="mb-6 text-xs font-medium text-slate-500">These records have no organization or legal-entity scope. Export is unavailable in this view.</p>
       )}
-      {canViewScopedAudit && !hasSelectedOrganizationScope && canViewDeploymentAudit && (
+      {canFetchScopedAudit && !hasSelectedOrganizationScope && (
         <p className="mb-6 text-xs font-medium text-slate-500" role="status">
-          Select an organization and legal entity to access its scoped audit records. Deployment-wide records remain available below.
+          Select an organization and legal entity to access its selected-scope audit records.
         </p>
       )}
 
