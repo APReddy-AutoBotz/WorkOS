@@ -3483,7 +3483,7 @@ app.post('/api/leave/balances', requireDatabase, requireAuth, requirePermission(
       insert into leave_balances (id, employee_id, leave_type_id, policy_id, balance_year, opening_days, accrued_days, adjusted_days, available_days)
       values (
         coalesce($1, 'leave-balance-' || gen_random_uuid()::text), $2, $3, $4, $5, $6, $7, $8,
-        greatest(0, $6 + $7 + $8)
+        greatest(0::numeric, $6::numeric + $7::numeric + $8::numeric)
       )
       on conflict (employee_id, leave_type_id, balance_year) do update set
         policy_id = excluded.policy_id,
