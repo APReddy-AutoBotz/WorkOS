@@ -3444,7 +3444,41 @@ app.post('/api/leave/balances', requireDatabase, requireAuth, requirePermission(
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = parsed.data.id ? (await client.query('select * from leave_balances where id = $1', [parsed.data.id])).rows[0] : null;
+    const employeeScopeParams = [parsed.data.employee_id];
+    const employeeScopeWhere = buildEmployeeScopeWhere(req, employeeScopeParams, 'e');
+    const employee = (await client.query(`
+      select e.id, e.employee_id, e.organization_id, e.legal_entity_id
+      from employees e
+      where e.id = $1 and ${employeeScopeWhere}
+      limit 1
+      for no key update of e
+    `, employeeScopeParams)).rows[0];
+    if (!employee) {
+      await client.query('rollback');
+      res.status(422).json({ error: 'Leave balance employee is not available in the active scope' });
+      return;
+    }
+
+    const previous = parsed.data.id ? (await client.query(`
+      select lb.*
+      from leave_balances lb
+      where lb.id = $1
+        and lb.employee_id = $2
+        and lb.leave_type_id = $3
+        and lb.balance_year = $4
+      for update of lb
+    `, [parsed.data.id, employee.id, parsed.data.leave_type_id, parsed.data.year])).rows[0]
+      : (await client.query(`
+        select lb.*
+        from leave_balances lb
+        where lb.employee_id = $1 and lb.leave_type_id = $2 and lb.balance_year = $3
+        for update of lb
+      `, [employee.id, parsed.data.leave_type_id, parsed.data.year])).rows[0] ?? null;
+    if (parsed.data.id && !previous) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Leave balance not found' });
+      return;
+    }
     const result = await client.query(`
       insert into leave_balances (id, employee_id, leave_type_id, policy_id, balance_year, opening_days, accrued_days, adjusted_days, available_days)
       values (
@@ -3459,8 +3493,8 @@ app.post('/api/leave/balances', requireDatabase, requireAuth, requirePermission(
         available_days = greatest(0, excluded.opening_days + excluded.accrued_days + excluded.adjusted_days - leave_balances.used_days - leave_balances.pending_days),
         updated_at = now()
       returning *
-    `, [parsed.data.id || null, parsed.data.employee_id, parsed.data.leave_type_id, parsed.data.policy_id || null, parsed.data.year, parsed.data.opening_days, parsed.data.accrued_days, parsed.data.adjusted_days]);
-    await refreshLeaveBalancesForEmployee(client, parsed.data.employee_id, parsed.data.year);
+    `, [parsed.data.id || null, employee.id, parsed.data.leave_type_id, parsed.data.policy_id || null, parsed.data.year, parsed.data.opening_days, parsed.data.accrued_days, parsed.data.adjusted_days]);
+    await refreshLeaveBalancesForEmployee(client, employee.id, parsed.data.year);
     await audit(client, req, {
       module: 'Leave',
       action: previous ? 'Update Leave Balance' : 'Create Leave Balance',
@@ -3468,7 +3502,11 @@ app.post('/api/leave/balances', requireDatabase, requireAuth, requirePermission(
       entityId: result.rows[0].id,
       oldValue: previous,
       newValue: result.rows[0],
-      details: `${previous ? 'Updated' : 'Created'} leave balance for ${parsed.data.employee_id}`,
+      details: `${previous ? 'Updated' : 'Created'} leave balance for ${employee.employee_id}`,
+      organizationScope: {
+        organizationId: employee.organization_id,
+        legalEntityId: employee.legal_entity_id,
+      },
     });
     await client.query('commit');
     res.json(result.rows[0]);

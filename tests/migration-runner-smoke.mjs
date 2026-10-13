@@ -1632,6 +1632,150 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       signal: AbortSignal.timeout(5000),
     });
 
+    const crossScopeBalanceId = 'synthetic-cross-scope-leave-balance';
+    await pool.query(`insert into leave_balances
+        (id,employee_id,leave_type_id,policy_id,balance_year,opening_days,accrued_days,used_days,adjusted_days,pending_days,available_days)
+      values ($1,'employee-scope-beta','leave-type-annual','leave-policy-global',2099,8,2,0,1,0,11)`, [crossScopeBalanceId]);
+    const crossScopeBalanceAttempt = await postScopedJson('/api/leave/balances', multiScopeToken,
+      'org-default', 'legal-default', {
+        id: crossScopeBalanceId,
+        employee_id: 'employee-scope-beta',
+        leave_type_id: 'leave-type-annual',
+        policy_id: 'leave-policy-global',
+        year: 2099,
+        opening_days: 88,
+        accrued_days: 4,
+        adjusted_days: 2,
+      });
+    assert.equal(crossScopeBalanceAttempt.status, 422,
+      'a leave administrator cannot upsert another legal entity employee balance through the selected scope');
+    assert.deepEqual(await crossScopeBalanceAttempt.json(), {
+      error: 'Leave balance employee is not available in the active scope',
+    }, 'an out-of-scope balance attempt must return a generic error without employee or balance data');
+    const crossScopeBalanceAfterDenial = await pool.query(`select id,employee_id,opening_days,accrued_days,adjusted_days,available_days
+      from leave_balances where id=$1`, [crossScopeBalanceId]);
+    assert.deepEqual(crossScopeBalanceAfterDenial.rows, [{
+      id: crossScopeBalanceId,
+      employee_id: 'employee-scope-beta',
+      opening_days: '8',
+      accrued_days: '2',
+      adjusted_days: '1',
+      available_days: '11',
+    }], 'a rejected cross-scope balance attempt must not mutate the employee balance');
+    const crossScopeBalanceAuditAfterDenial = await pool.query(`select id from audit_logs
+      where user_id=$1 and entity_type='LeaveBalance' and entity_id=$2`, [multiScopeActorId, crossScopeBalanceId]);
+    assert.equal(crossScopeBalanceAuditAfterDenial.rowCount, 0,
+      'a rejected cross-scope balance attempt must not create an audit row in the caller-selected scope');
+
+    const defaultScopeEmployeeId = (await pool.query(`select id from employees where employee_id='EMP-IMPORT-SUCCESS'`)).rows[0]?.id;
+    assert.ok(defaultScopeEmployeeId, 'the default-scope leave balance fixture employee exists');
+    const balanceIdProbeBody = {
+      employee_id: defaultScopeEmployeeId,
+      leave_type_id: 'leave-type-annual',
+      policy_id: 'leave-policy-global',
+      year: 2100,
+      opening_days: 5,
+      accrued_days: 0,
+      adjusted_days: 0,
+    };
+    const crossScopeBalanceIdProbe = await postScopedJson('/api/leave/balances', multiScopeToken,
+      'org-default', 'legal-default', {...balanceIdProbeBody, id: crossScopeBalanceId});
+    const unknownBalanceIdProbe = await postScopedJson('/api/leave/balances', multiScopeToken,
+      'org-default', 'legal-default', {...balanceIdProbeBody, id: 'synthetic-unseen-leave-balance'});
+    assert.equal(crossScopeBalanceIdProbe.status, 404,
+      'a selected-scope employee cannot reveal another scope balance by supplying its ID');
+    assert.equal(unknownBalanceIdProbe.status, crossScopeBalanceIdProbe.status,
+      'an unknown ID and an out-of-scope ID must have the same response status');
+    assert.deepEqual(await unknownBalanceIdProbe.json(), await crossScopeBalanceIdProbe.json(),
+      'an unknown ID and an out-of-scope ID must have the same generic response body');
+    const balanceIdProbeAudit = await pool.query(`select id from audit_logs
+      where user_id=$1 and entity_type='LeaveBalance' and entity_id in ($2,$3)`,
+    [multiScopeActorId, crossScopeBalanceId, 'synthetic-unseen-leave-balance']);
+    assert.equal(balanceIdProbeAudit.rowCount, 0,
+      'probing known or unknown IDs must not mutate a balance or create audit evidence');
+
+    const authorizedBalanceCreate = await postScopedJson('/api/leave/balances', multiScopeToken,
+      'org-default', 'legal-default', balanceIdProbeBody);
+    assert.equal(authorizedBalanceCreate.status, 200,
+      'a balance can still be created without a client-supplied ID');
+    const authorizedBalanceCreateBody = await authorizedBalanceCreate.json();
+    assert.match(authorizedBalanceCreateBody.id, /^leave-balance-/,
+      'the server must generate the ID for a balance creation');
+    assert.equal(authorizedBalanceCreateBody.employee_id, defaultScopeEmployeeId);
+    const authorizedBalanceCreateAudit = await pool.query(`select action,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type='LeaveBalance' and entity_id=$2`,
+    [multiScopeActorId, authorizedBalanceCreateBody.id]);
+    assert.deepEqual(authorizedBalanceCreateAudit.rows, [{
+      action: 'Create Leave Balance', organization_id: 'org-default', legal_entity_id: 'legal-default',
+    }], 'a no-ID creation must retain normal scoped audit ownership');
+    const authorizedBalanceNaturalUpsert = await postScopedJson('/api/leave/balances', multiScopeToken,
+      'org-default', 'legal-default', {...balanceIdProbeBody, opening_days: 7});
+    assert.equal(authorizedBalanceNaturalUpsert.status, 200,
+      'a no-ID upsert of an existing natural key must retain its existing API behavior');
+    assert.equal((await authorizedBalanceNaturalUpsert.json()).id, authorizedBalanceCreateBody.id,
+      'a no-ID upsert must update the existing employee/type/year balance');
+    const authorizedBalanceNaturalUpsertAudit = await pool.query(`select action,old_value,new_value,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_type='LeaveBalance' and entity_id=$2`,
+    [multiScopeActorId, authorizedBalanceCreateBody.id]);
+    assert.equal(authorizedBalanceNaturalUpsertAudit.rowCount, 2,
+      'a no-ID natural-key update must append a second audit outcome');
+    const naturalKeyUpdateAudit = authorizedBalanceNaturalUpsertAudit.rows.find(row => row.action === 'Update Leave Balance');
+    assert.ok(naturalKeyUpdateAudit, 'a no-ID natural-key upsert must be audited as an update');
+    assert.deepEqual({
+      old_opening_days: Number(naturalKeyUpdateAudit.old_value.opening_days),
+      new_opening_days: Number(naturalKeyUpdateAudit.new_value.opening_days),
+      organization_id: naturalKeyUpdateAudit.organization_id,
+      legal_entity_id: naturalKeyUpdateAudit.legal_entity_id,
+    }, {
+      old_opening_days: 5,
+      new_opening_days: 7,
+      organization_id: 'org-default',
+      legal_entity_id: 'legal-default',
+    }, 'a no-ID natural-key update must retain accurate before/after and owner evidence');
+
+    const authorizedBalanceUpdate = await postScopedJson('/api/leave/balances', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: crossScopeBalanceId,
+        employee_id: 'employee-scope-beta',
+        leave_type_id: 'leave-type-annual',
+        policy_id: 'leave-policy-global',
+        year: 2099,
+        opening_days: 13,
+        accrued_days: 3,
+        adjusted_days: 1,
+      });
+    assert.equal(authorizedBalanceUpdate.status, 200,
+      'a leave administrator can still update a balance within the selected employee scope');
+    const authorizedBalanceBody = await authorizedBalanceUpdate.json();
+    assert.equal(authorizedBalanceBody.id, crossScopeBalanceId);
+    assert.equal(authorizedBalanceBody.employee_id, 'employee-scope-beta');
+    const authorizedBalanceAudit = await pool.query(`select action,organization_id,legal_entity_id,old_value,new_value
+      from audit_logs where user_id=$1 and entity_type='LeaveBalance' and entity_id=$2`,
+    [multiScopeActorId, crossScopeBalanceId]);
+    assert.equal(authorizedBalanceAudit.rowCount, 1,
+      'an authorized in-scope balance update must retain its existing audit outcome');
+    assert.deepEqual({
+      action: authorizedBalanceAudit.rows[0].action,
+      organization_id: authorizedBalanceAudit.rows[0].organization_id,
+      legal_entity_id: authorizedBalanceAudit.rows[0].legal_entity_id,
+      old_employee_id: authorizedBalanceAudit.rows[0].old_value.employee_id,
+      new_employee_id: authorizedBalanceAudit.rows[0].new_value.employee_id,
+      new_opening_days: Number(authorizedBalanceAudit.rows[0].new_value.opening_days),
+    }, {
+      action: 'Update Leave Balance',
+      organization_id: 'org-scope-beta',
+      legal_entity_id: 'legal-scope-beta',
+      old_employee_id: 'employee-scope-beta',
+      new_employee_id: 'employee-scope-beta',
+      new_opening_days: 13,
+    }, 'leave balance audit ownership must be derived from the server-resolved employee row');
+    const unauthorizedBalanceHistory = await getScoped('/api/audit-logs', multiScopeToken, 'org-default', 'legal-default');
+    const authorizedBalanceHistory = await getScoped('/api/audit-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
+    assert.equal((await unauthorizedBalanceHistory.json()).some(row => row.entity_id === crossScopeBalanceId), false,
+      'the employee balance audit must remain absent from another legal entity history');
+    assert.equal((await authorizedBalanceHistory.json()).some(row => row.entity_id === crossScopeBalanceId), true,
+      'the employee balance audit must be visible in its server-resolved legal entity history');
+
     await assert.rejects(
       () => pool.query(`insert into audit_logs
         (user_id,user_name,user_role,module,action,details,organization_id,legal_entity_id)
