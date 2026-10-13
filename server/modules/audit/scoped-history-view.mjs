@@ -3,6 +3,7 @@ const sensitiveIdentityKeys = new Set([
   'providersubject',
   'providerupn',
   'teamstenantid',
+  'teamsuser',
   'teamsupn',
   'teamsuserid',
   'upn',

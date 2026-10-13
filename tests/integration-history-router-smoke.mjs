@@ -60,6 +60,7 @@ const pool = {
   },
 };
 const requireDatabase = (_req, _res, next) => next();
+const requireIdentity = (_req, _res, next) => next();
 const requireAuth = (req, res, next) => {
   const authorizedScopes = req.get('authorization') === 'Bearer integration-reader'
     ? [{organizationId: 'org-a', legalEntityId: 'legal-a'}]
@@ -100,6 +101,7 @@ const router = createIntegrationHistoryRouter({
   pool,
   requireDatabase,
   requireAuth,
+  requireIdentity,
   requirePermission,
   logError: error => loggedErrors.push(error.message),
 });

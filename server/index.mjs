@@ -5005,7 +5005,7 @@ app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, r
   }
 });
 
-const integrationHistoryRouter = createIntegrationHistoryRouter({pool, requireDatabase, requireAuth, requirePermission});
+const integrationHistoryRouter = createIntegrationHistoryRouter({pool, requireDatabase, requireAuth, requireIdentity, requirePermission});
 app.use('/api', integrationHistoryRouter);
 app.use('/api/v1', integrationHistoryRouter);
 

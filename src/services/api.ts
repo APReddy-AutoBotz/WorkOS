@@ -1729,6 +1729,16 @@ export const adminService = {
       return [];
     }
   },
+  getDeploymentIntegrationEvents: async (): Promise<IntegrationEventLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) return [];
+    if (!(await checkBackend())) return [];
+    try {
+      const raw = await api.get<Record<string, unknown>[]>('/api/v1/deployment-integration-events');
+      return raw.map(normalizeIntegrationEventLog);
+    } catch {
+      return [];
+    }
+  },
   getOrganizationAuditScopes: async (): Promise<OrganizationAuditScope[]> => {
     if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) return [];
     if (!(await checkBackend())) return [];

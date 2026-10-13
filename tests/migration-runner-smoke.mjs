@@ -2012,6 +2012,12 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(roleOnlyGlobalRead.status, 403,
       'an accidental role-wide permission row must not substitute for the explicit per-user auditor designation');
+    const roleOnlyIntegrationRead = await fetch(`${baseUrl}/api/deployment-integration-events`, {
+      headers: {Authorization: `Bearer ${token}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(roleOnlyIntegrationRead.status, 403,
+      'a role-wide default must not substitute for an explicit deployment-audit grant on integration history');
     await pool.query(`update role_permissions set enabled=false
       where role_name='Admin' and permission_key='audit.deployment.view'`);
     const employeeGlobalRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
@@ -2257,6 +2263,12 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       signal: AbortSignal.timeout(5000),
     });
     assert.equal(revokedAuditorRead.status, 403, 'revocation must remove deployment audit access immediately');
+    const revokedIntegrationAuditorRead = await fetch(`${baseUrl}/api/v1/deployment-integration-events`, {
+      headers: {Authorization: `Bearer ${employeeTokenWithoutAdminPermissions}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(revokedIntegrationAuditorRead.status, 403,
+      'revoking the shared deployment-audit designation must immediately remove integration-history access too');
 
     for (const [organizationId, legalEntityId] of [
       ['org-default', 'legal-default'],
@@ -2649,13 +2661,81 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'the versioned route must require an explicit scope for a multi-scope Admin');
     assert.equal((await ambiguousImportHistoryV1.json()).error.code, 'ORG_SCOPE_DENIED');
 
+    await pool.query(`insert into integration_event_logs
+        (id,provider,event_type,entity_type,entity_id,status,request_payload,response_payload,created_at,organization_id,legal_entity_id)
+      values
+        ('deployment-entra-login-rejected','entra','EntraLoginRejected','IdentityProviderLink','deployment-private-subject','Failed',
+          '{"provider_subject":"deployment-private-subject","provider_upn":"deployment-private@example.test","reason":"No linked identity matched"}'::jsonb,
+          '{"entra_object_id":"deployment-private-object","status":"Rejected"}'::jsonb,
+          timestamptz '2026-10-12 12:00:00+00',null,null),
+        ('deployment-teams-action-notification','teams','TeamsActionNotificationSent','PortalLink','deployment-portal','Success',
+          '{"action":"open_portal"}'::jsonb,
+          jsonb_build_object('actionUrl',$1::text),
+          timestamptz '2026-10-12 11:00:00+00',null,null),
+        ('deployment-teams-notification-delivered','teams','TeamsNotificationDelivered','NotificationEvent','deployment-notification','Success',
+          null,
+          jsonb_build_object('statusCode',202,'teamsUser',$2::text,'activityType','systemDefault'),
+          timestamptz '2026-10-12 11:30:00+00',null,null)`, [actionA.action_url, 'deployment-teams-user@example.test']);
+
+    const ungrantedIntegrationHistory = await fetch(`${baseUrl}/api/deployment-integration-events`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ungrantedIntegrationHistory.status, 403,
+      'an authenticated Admin without an explicit deployment-audit grant must not read deployment integration events');
+    const ungrantedIntegrationHistoryV1 = await fetch(`${baseUrl}/api/v1/deployment-integration-events`, {
+      headers: {Authorization: `Bearer ${multiScopeToken}`},
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(ungrantedIntegrationHistoryV1.status, 403);
+    assert.equal((await ungrantedIntegrationHistoryV1.json()).error.code, 'FORBIDDEN');
+
+    const deploymentIntegrationHeaders = {Authorization: `Bearer ${scopeFreeAuditorToken}`};
+    const deploymentIntegrationRead = await fetch(`${baseUrl}/api/deployment-integration-events`, {
+      headers: deploymentIntegrationHeaders,
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(deploymentIntegrationRead.status, 200,
+      'an explicitly designated non-Admin auditor must read deployment events without selecting organization scope');
+    const deploymentIntegrationRows = await deploymentIntegrationRead.json();
+    assert(deploymentIntegrationRows.some(row => row.id === 'deployment-entra-login-rejected'));
+    assert(deploymentIntegrationRows.some(row => row.id === 'deployment-teams-action-notification'));
+    assert(deploymentIntegrationRows.some(row => row.id === 'deployment-teams-notification-delivered'));
+    assert(deploymentIntegrationRows.some(row => row.id === 'legacy-null-scope-event'),
+      'the deployment reader may expose retained null-scope history only to the designated auditor');
+    const rejectedDeploymentEvent = deploymentIntegrationRows.find(row => row.id === 'deployment-entra-login-rejected');
+    assert.equal(rejectedDeploymentEvent.entity_id, null,
+      'unmatched deployment-wide login attempts must not expose provider subjects through entity IDs');
+    assert.deepEqual(rejectedDeploymentEvent.request_payload, {reason: 'No linked identity matched'});
+    assert.deepEqual(rejectedDeploymentEvent.response_payload, {status: 'Rejected'});
+    const deploymentTeamsEvent = deploymentIntegrationRows.find(row => row.id === 'deployment-teams-action-notification');
+    assert.deepEqual(deploymentTeamsEvent.response_payload, {},
+      'the deployment reader must redact bearer action URLs before returning events');
+    const deploymentTeamsDeliveryEvent = deploymentIntegrationRows.find(row => row.id === 'deployment-teams-notification-delivered');
+    assert.deepEqual(deploymentTeamsDeliveryEvent.response_payload, {statusCode: 202, activityType: 'systemDefault'},
+      'the deployment reader must preserve Teams delivery status while redacting provider user IDs and UPNs');
+    assert(!JSON.stringify(deploymentIntegrationRows).includes('deployment-private-subject'));
+    assert(!JSON.stringify(deploymentIntegrationRows).includes('deployment-private@example.test'));
+    assert(!JSON.stringify(deploymentIntegrationRows).includes('deployment-private-object'));
+    assert(!JSON.stringify(deploymentIntegrationRows).includes('deployment-teams-user@example.test'));
+    assert(!JSON.stringify(deploymentIntegrationRows).includes(actionA.action_url));
+    const deploymentIntegrationReadV1 = await fetch(`${baseUrl}/api/v1/deployment-integration-events`, {
+      headers: deploymentIntegrationHeaders,
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(deploymentIntegrationReadV1.status, 200);
+    assert.deepEqual(await deploymentIntegrationReadV1.json(), deploymentIntegrationRows,
+      'legacy and v1 deployment integration readers must return the same redacted exact-null/null history');
+
     const eventReadA = await getScoped('/api/integrations/events', token, 'org-default', 'legal-default');
     const eventRowsA = await eventReadA.json();
     assert(eventRowsA.some(row => row.id === `integration-event-${identityA.provenance_reference}` || row.entity_id === identityA.provenance_reference),
       'identity integration events must remain available in the selected scope');
     assert(eventRowsA.some(row => row.id === 'scope-a-failure'));
     assert(!eventRowsA.some(row => row.id === 'scope-b-failure'
-      || row.id === 'legacy-null-scope-event' || row.id === 'same-org-other-legal-event'));
+      || row.id === 'legacy-null-scope-event' || row.id === 'same-org-other-legal-event'
+      || row.id === 'deployment-entra-login-rejected' || row.id === 'deployment-teams-action-notification'
+      || row.id === 'deployment-teams-notification-delivered'));
     assert(eventRowsA.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
     assert(!JSON.stringify(eventRowsA).includes('scope-a-provider-subject'));
     assert(!JSON.stringify(eventRowsA).includes('scope-a-provider@example.test'));
@@ -2692,7 +2772,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert(eventRowsB.some(row => row.id === 'scope-b-failure'));
     assert(eventRowsB.some(row => row.entity_id === identityB.provenance_reference), 'scope B identity events must remain available within scope B');
     assert(!eventRowsB.some(row => row.id === 'scope-a-failure'
-      || row.id === 'legacy-null-scope-event' || row.id === 'same-org-other-legal-event'));
+      || row.id === 'legacy-null-scope-event' || row.id === 'same-org-other-legal-event'
+      || row.id === 'deployment-entra-login-rejected' || row.id === 'deployment-teams-action-notification'));
     assert(eventRowsB.every(row => row.organization_id === 'org-scope-beta' && row.legal_entity_id === 'legal-scope-beta'));
     assert(!JSON.stringify(eventRowsB).includes('scope-b-provider-subject'));
     assert(!JSON.stringify(eventRowsB).includes('scope-b-provider@example.test'));

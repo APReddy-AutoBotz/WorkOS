@@ -22,7 +22,7 @@ import { authService } from '../services/authService';
 import { hasPermission } from '../services/permissions';
 import { getOrganizationScope, isDemoFallbackAllowed } from '../services/apiClient';
 import { canFetchScopedAuditHistory } from '../services/accessControl';
-import { AuditLog, OrganizationAuditScope } from '../types';
+import { AuditLog, IntegrationEventLog, OrganizationAuditScope } from '../types';
 import { downloadCsv } from '../lib/csv';
 import { NoticeBanner } from '../components/ui/NoticeBanner';
 import { Link } from 'react-router-dom';
@@ -52,6 +52,21 @@ const formatLog = (log: AuditLog) => ({
   details: log.reason || log.details
 });
 
+const formatIntegrationEvent = (event: IntegrationEventLog): ReturnType<typeof formatLog> => ({
+  id: event.id,
+  rawTimestamp: event.createdAt,
+  timestamp: new Date(event.createdAt).toLocaleString('en-GB', { hour12: false }),
+  user: event.provider,
+  role: 'Integration',
+  module: 'Integration events',
+  action: event.eventType,
+  target: event.entityId || event.entityType || event.eventType,
+  oldVal: renderAuditValue(event.requestPayload, 'No request payload'),
+  newVal: renderAuditValue(event.responsePayload, event.status),
+  status: event.status,
+  details: `${event.provider} integration event${event.entityType ? ` for ${event.entityType}` : ''}`,
+});
+
 export const AuditTrail = () => {
   const canViewScopedAudit = hasPermission(authService.getCurrentUser(), 'audit.view');
   const canViewDeploymentAudit = hasPermission(authService.getCurrentUser(), 'audit.deployment.view');
@@ -64,6 +79,7 @@ export const AuditTrail = () => {
   );
   const [auditLogs, setAuditLogs] = useState<ReturnType<typeof formatLog>[]>([]);
   const [deploymentAuditLogs, setDeploymentAuditLogs] = useState<ReturnType<typeof formatLog>[]>([]);
+  const [deploymentIntegrationLogs, setDeploymentIntegrationLogs] = useState<ReturnType<typeof formatLog>[]>([]);
   const [organizationAuditResult, setOrganizationAuditResult] = useState<{
     organizationId: string;
     logs: ReturnType<typeof formatLog>[];
@@ -71,7 +87,7 @@ export const AuditTrail = () => {
   const [organizationAuditScopes, setOrganizationAuditScopes] = useState<OrganizationAuditScope[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState('');
   const initialView = canFetchScopedAudit ? 'scope' : canViewOrganizationAudit ? 'organization' : 'deployment';
-  const [auditView, setAuditView] = useState<'scope' | 'organization' | 'deployment'>(initialView);
+  const [auditView, setAuditView] = useState<'scope' | 'organization' | 'deployment' | 'deployment-integration'>(initialView);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLog, setSelectedLog] = useState<ReturnType<typeof formatLog> | null>(null);
   const [moduleFilter, setModuleFilter] = useState('All Modules');
@@ -87,8 +103,10 @@ export const AuditTrail = () => {
     }
     if (canViewDeploymentAudit) {
       adminService.getDeploymentAuditLogs().then(logs => setDeploymentAuditLogs(logs.map(formatLog)));
+      adminService.getDeploymentIntegrationEvents().then(logs => setDeploymentIntegrationLogs(logs.map(formatIntegrationEvent)));
     } else {
       setDeploymentAuditLogs([]);
+      setDeploymentIntegrationLogs([]);
     }
   }, [canFetchScopedAudit, canViewDeploymentAudit]);
 
@@ -128,9 +146,11 @@ export const AuditTrail = () => {
   const organizationAuditLogs = organizationAuditResult?.organizationId === selectedOrganizationId
     ? organizationAuditResult.logs
     : [];
-  const activeLogs = auditView === 'deployment'
-    ? deploymentAuditLogs
-    : auditView === 'organization' ? organizationAuditLogs : auditLogs;
+  const activeLogs = auditView === 'deployment-integration'
+    ? canViewDeploymentAudit ? deploymentIntegrationLogs : []
+    : auditView === 'deployment'
+      ? canViewDeploymentAudit ? deploymentAuditLogs : []
+      : auditView === 'organization' ? organizationAuditLogs : auditLogs;
 
   const exportLogs = () => {
     if (auditView !== 'scope') return;
@@ -233,6 +253,15 @@ export const AuditTrail = () => {
               auditView === 'deployment' ? 'border-primary bg-orange-50 text-primary' : 'border-slate-200 bg-white text-slate-500')}
           >Deployment-wide
           </button>}
+          {canViewDeploymentAudit && <button
+            type="button"
+            role="tab"
+            aria-selected={auditView === 'deployment-integration'}
+            onClick={() => { setAuditView('deployment-integration'); setSelectedLog(null); }}
+            className={cn('rounded-xl border px-4 py-2 text-xs font-bold transition-colors',
+              auditView === 'deployment-integration' ? 'border-primary bg-orange-50 text-primary' : 'border-slate-200 bg-white text-slate-500')}
+          >Integration events
+          </button>}
         </div>
       )}
 
@@ -263,6 +292,9 @@ export const AuditTrail = () => {
       )}
       {auditView === 'deployment' && (
         <p className="mb-6 text-xs font-medium text-slate-500">These records have no organization or legal-entity scope. Export is unavailable in this view.</p>
+      )}
+      {auditView === 'deployment-integration' && (
+        <p className="mb-6 text-xs font-medium text-slate-500">These integration events have no organization or legal-entity scope. Identity fields and bearer action URLs are redacted. Export is unavailable in this view.</p>
       )}
       {canFetchScopedAudit && !hasSelectedOrganizationScope && (
         <p className="mb-6 text-xs font-medium text-slate-500" role="status">
@@ -331,7 +363,7 @@ export const AuditTrail = () => {
                   <tr>
                      <th className="py-4 px-8 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Event Timeline</th>
                      <th className="py-4 px-6 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Operational Lead</th>
-                     <th className="py-4 px-6 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Scope</th>
+                     <th className="py-4 px-6 text-[10px] font-bold text-gray-400 uppercase tracking-widest">{auditView === 'deployment-integration' ? 'Source' : 'Scope'}</th>
                      <th className="py-4 px-6 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Action Details</th>
                      <th className="py-4 px-6 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Status</th>
                      <th className="py-4 px-8"></th>
@@ -404,7 +436,7 @@ export const AuditTrail = () => {
 
       {/* Detail Panel Placeholder (Simplified for prompt context) */}
       <AnimatePresence>
-        {selectedLog && (
+        {selectedLog && (auditView !== 'deployment-integration' || canViewDeploymentAudit) && (
           <>
             <motion.div
                initial={{ opacity: 0 }}
@@ -474,11 +506,11 @@ export const AuditTrail = () => {
                      <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Structural Change</h4>
                      <div className="grid grid-cols-1 gap-3">
                         <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl relative overflow-hidden group hover:border-primary/20 transition-colors">
-                           <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Old Matrix Value</p>
+                           <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{auditView === 'deployment-integration' ? 'Request Payload' : 'Old Matrix Value'}</p>
                            <p className="text-sm font-bold text-heading mt-1">{selectedLog.oldVal}</p>
                         </div>
                         <div className="p-4 bg-orange-50 border border-primary/10 rounded-xl relative overflow-hidden group border-dashed hover:border-primary/40 transition-colors">
-                           <p className="text-[9px] font-bold text-primary uppercase tracking-widest">New Committed Value</p>
+                           <p className="text-[9px] font-bold text-primary uppercase tracking-widest">{auditView === 'deployment-integration' ? 'Response Payload' : 'New Committed Value'}</p>
                            <p className="text-sm font-bold text-heading mt-1">{selectedLog.newVal}</p>
                         </div>
                      </div>
