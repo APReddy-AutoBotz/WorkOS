@@ -17,6 +17,7 @@ import { cn } from '../lib/utils';
 import { allocationService, clientService, employeeService, projectService, timesheetService, adminService } from '../services/api';
 import { Employee, Project, Allocation, ImportExportLog, Client, TimesheetSummary, WorkType } from '../types';
 import { downloadAuditedCsv, downloadReportExport, getReportExportOptions } from '../lib/reportExport';
+import { attachPreflightSourceIdentifiers } from '../lib/importErrorProvenance';
 import { termPluralTitle, termTitle } from '../config/terminology';
 
 type ImportChannel = 'employees' | 'clients' | 'projects' | 'allocations' | 'timesheets';
@@ -25,6 +26,7 @@ type ImportErrorRow = {
   rowNumber: number;
   field?: string;
   message: string;
+  sourceIdentifier?: string | null;
 };
 type PendingImport = {
   id: ImportChannel;
@@ -308,7 +310,7 @@ export const ImportExport = () => {
       ? { validRows: [], errors: [] }
       : await validateRows(id, rows);
     const validRows = validationResult.validRows;
-    const errors = [...structureErrors, ...validationResult.errors];
+    const errors = attachPreflightSourceIdentifiers(id, rows, [...structureErrors, ...validationResult.errors]);
     const status: ImportExportLog['status'] = validRows.length === 0 ? 'Failed' : 'Dry Run';
 
     setPendingImport({ id, title: option?.title || id, fileName: file.name, rows, validRows, errors });
@@ -557,6 +559,7 @@ export const ImportExport = () => {
       rowNumber: error.rowNumber,
       field: error.field || '',
       message: error.message,
+      sourceIdentifier: error.sourceIdentifier || '',
     })), `${pendingImport.title} Error Report`);
   };
 

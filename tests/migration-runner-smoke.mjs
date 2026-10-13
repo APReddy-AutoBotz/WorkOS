@@ -534,8 +534,19 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
 
     const partialResponse = await apply({
       fileName: 'synthetic-partial.csv',
-      totalRows: 2,
+      totalRows: 3,
+      clientErrors: [{
+        rowNumber: 2,
+        field: 'email',
+        message: 'Email is required.',
+        sourceIdentifier: 'EMP-IMPORT-PREFLIGHT-FAILED',
+      }],
       rows: [
+        {
+          employeeId: 'EMP-IMPORT-FAILED',
+          name: 'Synthetic Failed Row',
+          email: 'employee-import-failed@example.test',
+        },
         {
           employeeId: 'EMP-IMPORT-SUCCESS',
           name: 'Synthetic Success Row',
@@ -543,31 +554,36 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
           primaryCountryDirectorId: 'cd-import-provenance-test',
           initialPassword: 'Synthetic-import-test-password-1',
         },
-        {
-          employeeId: 'EMP-IMPORT-FAILED',
-          name: 'Synthetic Failed Row',
-          email: 'employee-import-failed@example.test',
-        },
       ],
     });
     assert.equal(partialResponse.status, 200);
     const partialBody = await partialResponse.json();
     assert.deepEqual({status: partialBody.status, totalRows: partialBody.totalRows,
       validRows: partialBody.validRows, errorRows: partialBody.errorRows},
-    {status: 'Partial', totalRows: 2, validRows: 1, errorRows: 1},
+    {status: 'Partial', totalRows: 3, validRows: 1, errorRows: 2},
     'the real employee apply route must preserve its partial result counts');
     assert.deepEqual(partialBody.errors, [{
+      rowNumber: 2,
+      field: 'email',
+      message: 'Email is required.',
+      sourceIdentifier: 'EMP-IMPORT-PREFLIGHT-FAILED',
+    }, {
       rowNumber: 3,
       field: 'primaryCountryDirectorId',
       message: 'Primary country director is required.',
+      sourceIdentifier: 'EMP-IMPORT-FAILED',
     }], 'the real employee apply route must preserve its existing row-error shape');
     const partialLog = (await pool.query(`select * from import_export_logs where id=$1`, [partialBody.log.id])).rows[0];
     const partialAudit = await pool.query(`select source,source_identifier,import_batch_id,import_processing_result,details,organization_id,legal_entity_id
       from audit_logs where import_batch_id=$1`, [partialBody.log.id]);
     assert.equal(partialLog.status, 'Partial');
-    assert.equal(partialLog.total_rows, 2);
+    assert.equal(partialLog.total_rows, 3);
     assert.equal(partialLog.valid_rows, 1);
-    assert.equal(partialLog.error_rows, 1);
+    assert.equal(partialLog.error_rows, 2);
+    assert.deepEqual(partialLog.errors, partialBody.errors,
+      'employee rejection identifiers and original row numbers must match between HTTP response and persisted history');
+    assert.doesNotMatch(JSON.stringify(partialLog.errors), /employee-failed@example\.test|Synthetic Failed Row/,
+      'rejection provenance must not retain raw CSV fields');
     assert.equal(partialLog.organization_id, 'org-default');
     assert.equal(partialLog.legal_entity_id, 'legal-default');
     assert.equal(partialAudit.rowCount, 1, 'a partial batch must audit only the successful row');
@@ -582,6 +598,19 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     }, 'the persisted success audit must link source, identifier, result and batch');
     assert.doesNotMatch(partialAudit.rows[0].details, /EMP-IMPORT-SUCCESS|synthetic-partial\.csv/,
       'audit details must not duplicate row identifiers or expose uploaded file contents');
+
+    const malformedIdentifierResponse = await apply({
+      fileName: 'synthetic-malformed-error-id.csv',
+      totalRows: 1,
+      rows: [{
+        employeeId: 'EMP-IMPORT-MALFORMED-ERROR',
+        name: 'Synthetic Malformed Error ID',
+        email: 'employee-malformed-error@example.test',
+      }],
+      clientErrors: [{rowNumber: 2, field: 'email', message: 'Invalid.', sourceIdentifier: `EMP-${'X'.repeat(200)}`}],
+    });
+    assert.equal(malformedIdentifierResponse.status, 400,
+      'an overlong client-supplied source identifier must fail validation before import side effects');
 
     const failedResponse = await apply({
       fileName: 'synthetic-failed.csv',
@@ -647,6 +676,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       rowNumber: 4,
       field: 'accountOwnerId',
       message: 'Account owner employee record does not exist or is exited.',
+      sourceIdentifier: 'client-import-rejected',
     }], 'the real client apply route must preserve its row-error shape');
     const clientPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [clientPartialBody.log.id])).rows[0];
     assert.equal(clientPartialLog.id, clientPartialBody.log.id, 'client batch history must return its persisted server batch ID');
@@ -656,6 +686,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(clientPartialLog.total_rows, 3);
     assert.equal(clientPartialLog.valid_rows, 2);
     assert.equal(clientPartialLog.error_rows, 1);
+    assert.deepEqual(clientPartialLog.errors, clientPartialBody.errors,
+      'client rejection identifier must match between HTTP response and persisted history');
     const clientPartialAudit = await pool.query(`select source,source_identifier,import_batch_id,import_processing_result,details
       from audit_logs where import_batch_id=$1 order by source_identifier nulls last`, [clientPartialBody.log.id]);
     assert.equal(clientPartialAudit.rowCount, 2, 'a partial client batch must audit only the successful rows');
@@ -685,6 +717,11 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(clientFailedBody.status, 'Failed');
     assert.equal(clientFailedBody.validRows, 0);
     assert.equal(clientFailedBody.errorRows, 1);
+    assert.equal(clientFailedBody.errors[0].sourceIdentifier, null,
+      'a rejected client row without an upstream ID must retain null provenance');
+    const clientFailedLog = (await pool.query(`select errors from import_export_logs where id=$1`, [clientFailedBody.log.id])).rows[0];
+    assert.deepEqual(clientFailedLog.errors, clientFailedBody.errors,
+      'failed client import history must preserve its null source-ID response shape');
     const clientFailedBatch = await pool.query(`select l.status,count(a.id)::int as audit_rows
       from import_export_logs l left join audit_logs a on a.import_batch_id=l.id
       where l.id=$1 group by l.id`, [clientFailedBody.log.id]);
@@ -709,6 +746,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       rowNumber: 2,
       field: 'id',
       message: 'Client is not available in the authorized organization and legal entity.',
+      sourceIdentifier: 'client-import-cross-scope',
     }], 'the client apply route must preserve its existing non-disclosing cross-scope error');
     const clientCrossScopeState = await pool.query(`select c.name,c.industry,c.organization_id,c.legal_entity_id,
         count(a.id)::int as audit_rows
@@ -744,6 +782,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       rowNumber: 2,
       field: 'id',
       message: 'Client is not available in the authorized organization and legal entity.',
+      sourceIdentifier: 'client-import-cross-legal',
     }], 'the client apply route must reject a foreign legal entity inside the same organization');
     const clientCrossLegalState = await pool.query(`select c.name,c.industry,c.organization_id,c.legal_entity_id,
         count(a.id)::int as audit_rows
@@ -800,6 +839,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       rowNumber: 3,
       field: 'managerId',
       message: 'Project manager employee record does not exist or is exited.',
+      sourceIdentifier: 'PROJECT-IMPORT-REJECTED',
     }], 'the real project apply route must preserve its row-error shape');
     const projectPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [projectPartialBody.log.id])).rows[0];
     assert.equal(projectPartialLog.id, projectPartialBody.log.id, 'project batch history must return its persisted server batch ID');
@@ -809,6 +849,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(projectPartialLog.total_rows, 2);
     assert.equal(projectPartialLog.valid_rows, 1);
     assert.equal(projectPartialLog.error_rows, 1);
+    assert.deepEqual(projectPartialLog.errors, projectPartialBody.errors,
+      'project rejection identifier must match between HTTP response and persisted history');
     const projectPartialAudit = await pool.query(`select source,source_identifier,import_batch_id,import_processing_result,details
       from audit_logs where import_batch_id=$1`, [projectPartialBody.log.id]);
     assert.deepEqual(projectPartialAudit.rows, [{
@@ -901,6 +943,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       field: 'projectCode',
       message: 'Project code belongs to another legal entity in this organization.',
       code: 'PROJECT_SCOPE_CONFLICT',
+      sourceIdentifier: 'PROJECT-IMPORT-CROSS-LEGAL',
     }], 'the project import must retain its same-organization cross-legal code conflict');
     const projectCrossLegalState = await pool.query(`select p.name,p.organization_id,p.legal_entity_id,
         count(a.id)::int as audit_rows
@@ -972,6 +1015,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       field: 'projectCode',
       message: 'Project code belongs to another legal entity in this organization.',
       code: 'PROJECT_SCOPE_CONFLICT',
+      sourceIdentifier: 'PROJECT-IMPORT-CROSS-LEGAL-RACE',
     }], 'a project-code loser at the database conflict boundary must receive the existing row-local scope error');
     const projectRaceWinner = projectRaceBodies.find(body => body.status === 'Success');
     assert.equal(projectRaceWinner.validRows, 1);
@@ -1095,6 +1139,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       rowNumber: 4,
       field: 'id',
       message: 'Allocation is not available in the authorized organization and legal entity.',
+      sourceIdentifier: 'allocation-import-cross-legal',
     }], 'the real allocation apply route must preserve its existing non-disclosing cross-legal error');
     const allocationPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [allocationPartialBody.log.id])).rows[0];
     assert.equal(allocationPartialLog.id, allocationPartialBody.log.id,
@@ -1105,6 +1150,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(allocationPartialLog.total_rows, 3);
     assert.equal(allocationPartialLog.valid_rows, 2);
     assert.equal(allocationPartialLog.error_rows, 1);
+    assert.deepEqual(allocationPartialLog.errors, allocationPartialBody.errors,
+      'allocation rejection identifier must match between HTTP response and persisted history');
     const allocationPartialAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result,details
       from audit_logs where import_batch_id=$1 order by source_identifier nulls last`, [allocationPartialBody.log.id]);
     assert.deepEqual(allocationPartialAudit.rows, [
@@ -1223,6 +1270,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       rowNumber: 2,
       field: 'percentage',
       message: 'Allocation would exceed 100% for overlapping dates (110%).',
+      sourceIdentifier: 'allocation-import-over-limit',
     }], 'the real allocation apply route must preserve its scoped over-allocation guard');
     const allocationOverLimitAudit = await pool.query(`select count(*)::int as audit_rows
       from audit_logs where import_batch_id=$1`, [allocationOverLimitBody.log.id]);
@@ -1258,6 +1306,55 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         (select count(*)::int from import_export_logs where file_name='synthetic-allocation-rollback.csv') as batch_rows`);
     assert.deepEqual(allocationRollbackRows.rows, [{allocation_rows: 0,audit_rows: 0,batch_rows: 0}],
       'a failed allocation batch-log write must roll back the allocation and audit with no orphan batch reference');
+
+    const timesheetForgedIdentifierResponse = await applyTimesheets({
+      fileName: 'synthetic-timesheet-forged-source-id.csv',
+      totalRows: 2,
+      clientErrors: [{
+        rowNumber: 2,
+        field: 'employeeId',
+        message: 'Preflight rejected the row.',
+        sourceIdentifier: 'FORGED-TIMESHEET-EMPLOYEE-ID',
+      }],
+      rows: [{
+        employeeId: 'EMP-PROJECT-RACE-OTHER',
+        weekEnding: '2026-02-06',
+        workType: 'Client Misc Task',
+        clientName: 'Synthetic Client',
+        category: 'Support',
+        date: '2026-02-04',
+        hours: 2,
+        billable: false,
+        status: 'Submitted',
+      }],
+    });
+    assert.equal(timesheetForgedIdentifierResponse.status, 200);
+    const timesheetForgedIdentifierBody = await timesheetForgedIdentifierResponse.json();
+    assert.deepEqual(timesheetForgedIdentifierBody.errors, [{
+      rowNumber: 2,
+      field: 'employeeId',
+      message: 'Preflight rejected the row.',
+      sourceIdentifier: null,
+    }, {
+      rowNumber: 3,
+      field: 'employeeId',
+      message: 'Timesheet must reference an active employee.',
+      sourceIdentifier: null,
+    }], 'timesheet apply must discard client-claimed upstream IDs for both preflight and server rejections');
+    const timesheetForgedIdentifierLog = (await pool.query(
+      `select errors from import_export_logs where id=$1`,
+      [timesheetForgedIdentifierBody.log.id],
+    )).rows[0];
+    assert.deepEqual(timesheetForgedIdentifierLog.errors, timesheetForgedIdentifierBody.errors,
+      'timesheet rejection IDs must be null in both HTTP output and stored history');
+    assert.equal(JSON.stringify(timesheetForgedIdentifierLog.errors).includes('FORGED-TIMESHEET-EMPLOYEE-ID'), false,
+      'timesheet import history must not retain a client-forged source identifier');
+    const timesheetForgedIdentifierState = await pool.query(`select
+        (select count(*)::int from timesheets where employee_id='e-project-race-other' and week_ending=date '2026-02-06') as rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1) as audit_rows`,
+    [timesheetForgedIdentifierBody.log.id]);
+    assert.deepEqual(timesheetForgedIdentifierState.rows, [{rows:0,audit_rows:0}],
+      'the invalid timesheet batch must not mutate a cross-legal employee or create success audits');
 
     const timesheetPartialResponse = await applyTimesheets({
       fileName: 'synthetic-timesheet-partial.csv',
@@ -1321,6 +1418,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       rowNumber: 5,
       field: 'employeeId',
       message: 'Timesheet must reference an active employee.',
+      sourceIdentifier: null,
     }], 'a foreign legal-entity employee must remain a row-local timesheet import denial');
     const timesheetPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [timesheetPartialBody.log.id])).rows[0];
     assert.equal(timesheetPartialLog.id, timesheetPartialBody.log.id,
@@ -1332,6 +1430,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(timesheetPartialLog.valid_rows, 3,
       'the aggregate timesheet log must continue counting accepted input entries, not groups');
     assert.equal(timesheetPartialLog.error_rows, 1);
+    assert.deepEqual(timesheetPartialLog.errors, timesheetPartialBody.errors,
+      'timesheet rejection must preserve null upstream ID in HTTP response and persisted history');
     const timesheetPartialAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result,details,entity_id
       from audit_logs where import_batch_id=$1 order by details`, [timesheetPartialBody.log.id]);
     assert.equal(timesheetPartialAudit.rowCount, 2,
@@ -1445,6 +1545,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       rowNumber: 2,
       field: 'date',
       message: 'Future week timesheets and future-dated entries cannot be imported.',
+      sourceIdentifier: null,
     }], 'future timesheet rows must retain their pre-existing rejection and error shape');
     const timesheetFutureAudit = await pool.query(`select count(*)::int as audit_rows
       from audit_logs where import_batch_id=$1`, [timesheetFutureBody.log.id]);
@@ -1472,6 +1573,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       field: 'date',
       message: 'Reporting period WOS03B-WEEK-2026-08 does not permit this timesheet operation',
       code: 'REPORTING_PERIOD_CLOSED',
+      sourceIdentifier: null,
     }], 'closed-period failures must preserve their scoped row-level outcome');
     const timesheetClosedPeriodState = await pool.query(`select
         (select count(*)::int from timesheets t join employees e on e.id=t.employee_id
@@ -2311,14 +2413,21 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     ], 'the audit writer must persist the verified request scope rather than a client body value');
 
     const importAResponse = await postScopedJson('/api/import-export-logs', token, 'org-default', 'legal-default', {
-      operation: 'Import', channel: 'Scoped Test', fileName: 'scope-a-history.csv', status: 'Success',
-      totalRows: 1, validRows: 1, errorRows: 0,
+      operation: 'Import', channel: 'Scoped Test', fileName: 'scope-a-history.csv', status: 'Partial',
+      totalRows: 1, validRows: 0, errorRows: 1,
+      errors: [{rowNumber: 2, field: 'client', message: 'Invalid client.', sourceIdentifier: 'CLIENT-SCOPED-ERROR'}],
       organizationId: 'org-scope-beta', legalEntityId: 'legal-scope-beta',
     });
     assert.equal(importAResponse.status, 200);
     const importARows = await importAResponse.json();
     assert.equal(importARows[0].organization_id, 'org-default');
     assert.equal(importARows[0].legal_entity_id, 'legal-default', 'the import log route must ignore client scope fields');
+    assert.deepEqual(importARows[0].errors, [{
+      rowNumber: 2,
+      field: 'client',
+      message: 'Invalid client.',
+      sourceIdentifier: 'CLIENT-SCOPED-ERROR',
+    }], 'the legacy import-history writer must preserve the optional validated source identifier');
     const importBResponse = await postScopedJson('/api/import-export-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {
       operation: 'Import', channel: 'Scoped Test', fileName: 'scope-b-history.csv', status: 'Success',
       totalRows: 1, validRows: 1, errorRows: 0,
@@ -2609,6 +2718,11 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const importReadA = await getScoped('/api/import-export-logs', token, 'org-default', 'legal-default');
     const importRowsA = await importReadA.json();
     assert(importRowsA.some(row => row.file_name === 'scope-a-history.csv'));
+    const scopedImportErrorHistory = importRowsA.find(row => row.id === partialBody.log.id);
+    assert(scopedImportErrorHistory,
+      'the originating legal-entity reader must return the batch that contains its rejected-row source IDs');
+    assert.deepEqual(scopedImportErrorHistory.errors, partialBody.errors,
+      'scoped import history must preserve the exact rejected-row identifiers and original CSV row numbers');
     assert(!importRowsA.some(row => row.file_name === 'scope-b-history.csv'));
     assert(!importRowsA.some(row => row.file_name === 'legacy-null-scope.csv'));
     assert(importRowsA.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
@@ -2635,6 +2749,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const importRowsB = await importReadB.json();
     assert(importRowsB.some(row => row.file_name === 'scope-b-history.csv'));
     assert(!importRowsB.some(row => row.file_name === 'scope-a-history.csv'));
+    assert(!importRowsB.some(row => row.id === partialBody.log.id),
+      'another legal-entity history reader must not retrieve import errors or source identifiers from this batch');
+    assert(!JSON.stringify(importRowsB).includes('EMP-IMPORT-PREFLIGHT-FAILED'),
+      'source identifiers in import errors must stay inside the selected history scope');
     assert(!importRowsB.some(row => row.file_name === 'legacy-null-scope.csv'));
     const importReadBV1 = await getScoped('/api/v1/import-export-logs', multiScopeToken, 'org-scope-beta', 'legal-scope-beta');
     assert.equal(importReadBV1.status, 200);

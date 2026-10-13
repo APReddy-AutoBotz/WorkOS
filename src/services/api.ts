@@ -40,6 +40,7 @@ type ImportApplyError = {
   rowNumber: number;
   field?: string;
   message: string;
+  sourceIdentifier?: string | null;
 };
 type ImportApplyResult = {
   status: ImportExportLog['status'];

@@ -143,6 +143,7 @@ export interface ImportExportLog {
     rowNumber: number;
     field?: string;
     message: string;
+    sourceIdentifier?: string | null;
   }>;
   userName: string;
   timestamp: string;

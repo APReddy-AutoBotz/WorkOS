@@ -19,6 +19,7 @@ import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
 import {createOrganizationAuditRouter} from './modules/audit/organization-audit-router.mjs';
 import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
+import {attachImportErrorSourceIdentifiers, importErrorRowSchema, resolveImportApplyRowNumbers} from './modules/imports/import-error-provenance.mjs';
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
 import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
@@ -338,12 +339,12 @@ const splitPipeList = (value) => {
   return String(value || '').split('|').map(item => item.trim()).filter(Boolean);
 };
 const normalizeImportKey = (value) => String(value || '').trim().toLowerCase();
-const collectDuplicateImportRows = (rows, getKeys) => {
+const collectDuplicateImportRows = (rows, getKeys, getRowNumber = index => index + 2) => {
   const seen = new Map();
   const duplicateRowNumbers = new Set();
   const errors = [];
   rows.forEach((row, index) => {
-    const rowNumber = index + 2;
+    const rowNumber = getRowNumber(index);
     for (const { field, value, label } of getKeys(row)) {
       const normalizedValue = normalizeImportKey(value);
       if (!normalizedValue) continue;
@@ -6379,11 +6380,7 @@ app.post('/api/import-export-logs', requireDatabase, requireAuth, requirePermiss
     totalRows: z.number().int().min(0),
     validRows: z.number().int().min(0),
     errorRows: z.number().int().min(0),
-    errors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
+    errors: z.array(importErrorRowSchema).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -6438,11 +6435,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
     fileName: z.string().min(1),
     rows: z.array(rowSchema).min(1),
     totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -6451,11 +6444,17 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
   }
 
   const client = await pool.connect();
+  const clientErrors = parsed.data.clientErrors || [];
+  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
+    rows: parsed.data.rows,
+    totalRows: parsed.data.totalRows,
+    clientErrors,
+  });
   const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
     { field: 'employeeId', value: row.employeeId, label: 'employee ID' },
     { field: 'email', value: row.email, label: 'email' },
-  ]);
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  ], index => rowNumbers[index]);
+  const errors = [...clientErrors, ...duplicateImportRows.errors];
   const importBatchId = crypto.randomUUID();
   let saved = 0;
   try {
@@ -6465,7 +6464,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
     const employeeRole = (await client.query('select id from roles where name = $1', ['Employee'])).rows[0];
 
     for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
+      const rowNumber = rowNumbers[index];
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
       await client.query('select pg_advisory_xact_lock(hashtext($1))', [
         `employee:${req.organizationScope.organizationId}:${row.employeeId}`,
@@ -6714,6 +6713,10 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
       saved += 1;
     }
 
+    const responseErrors = attachImportErrorSourceIdentifiers({
+      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
+      sourceIdentifierForRow: row => row.employeeId,
+    });
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
       insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
@@ -6726,7 +6729,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
       parsed.data.totalRows ?? parsed.data.rows.length,
       saved,
       errors.length,
-      errors.length ? JSON.stringify(errors) : null,
+      errors.length ? JSON.stringify(responseErrors) : null,
       req.user.username,
       req.organizationScope.organizationId,
       req.organizationScope.legalEntityId,
@@ -6737,7 +6740,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
       totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
       validRows: saved,
       errorRows: errors.length,
-      errors,
+      errors: responseErrors,
       log: logResult.rows[0],
     });
   } catch (error) {
@@ -6766,11 +6769,7 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
     fileName: z.string().min(1),
     rows: z.array(rowSchema).min(1),
     totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -6779,11 +6778,17 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
   }
 
   const client = await pool.connect();
+  const clientErrors = parsed.data.clientErrors || [];
+  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
+    rows: parsed.data.rows,
+    totalRows: parsed.data.totalRows,
+    clientErrors,
+  });
   const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
     { field: 'id', value: row.id, label: 'client ID' },
     { field: 'name', value: row.name, label: 'client name' },
-  ]);
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  ], index => rowNumbers[index]);
+  const errors = [...clientErrors, ...duplicateImportRows.errors];
   const importBatchId = crypto.randomUUID();
   let saved = 0;
   try {
@@ -6792,7 +6797,7 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
     const directorIds = new Set(directorResult.rows.map(row => row.id));
 
     for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
+      const rowNumber = rowNumbers[index];
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
       const countryDirectorIds = splitPipeList(row.countryDirectorIds);
       const rowErrors = [];
@@ -6880,6 +6885,10 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       saved += 1;
     }
 
+    const responseErrors = attachImportErrorSourceIdentifiers({
+      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
+      sourceIdentifierForRow: row => row.id ?? null,
+    });
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
       insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
@@ -6892,7 +6901,7 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       parsed.data.totalRows ?? parsed.data.rows.length,
       saved,
       errors.length,
-      errors.length ? JSON.stringify(errors) : null,
+      errors.length ? JSON.stringify(responseErrors) : null,
       req.user.username,
       req.organizationScope.organizationId,
       req.organizationScope.legalEntityId,
@@ -6903,7 +6912,7 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
       validRows: saved,
       errorRows: errors.length,
-      errors,
+      errors: responseErrors,
       log: logResult.rows[0],
     });
   } catch (error) {
@@ -6934,11 +6943,7 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
     fileName: z.string().min(1),
     rows: z.array(rowSchema).min(1),
     totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -6947,17 +6952,23 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
   }
 
   const client = await pool.connect();
+  const clientErrors = parsed.data.clientErrors || [];
+  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
+    rows: parsed.data.rows,
+    totalRows: parsed.data.totalRows,
+    clientErrors,
+  });
   const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
     { field: 'projectCode', value: row.projectCode, label: 'project code' },
-  ]);
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  ], index => rowNumbers[index]);
+  const errors = [...clientErrors, ...duplicateImportRows.errors];
   const importBatchId = crypto.randomUUID();
   let saved = 0;
   try {
     await client.query('begin');
 
     for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
+      const rowNumber = rowNumbers[index];
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
       const rowErrors = [];
       if (row.endDate < row.startDate) {
@@ -7057,6 +7068,10 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
       saved += 1;
     }
 
+    const responseErrors = attachImportErrorSourceIdentifiers({
+      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
+      sourceIdentifierForRow: row => row.projectCode,
+    });
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
       insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
@@ -7069,7 +7084,7 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
       parsed.data.totalRows ?? parsed.data.rows.length,
       saved,
       errors.length,
-      errors.length ? JSON.stringify(errors) : null,
+      errors.length ? JSON.stringify(responseErrors) : null,
       req.user.username,
       req.organizationScope.organizationId,
       req.organizationScope.legalEntityId,
@@ -7080,7 +7095,7 @@ app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePer
       totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
       validRows: saved,
       errorRows: errors.length,
-      errors,
+      errors: responseErrors,
       log: logResult.rows[0],
     });
   } catch (error) {
@@ -7109,11 +7124,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
     fileName: z.string().min(1),
     rows: z.array(rowSchema).min(1),
     totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -7122,10 +7133,16 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
   }
 
   const client = await pool.connect();
+  const clientErrors = parsed.data.clientErrors || [];
+  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
+    rows: parsed.data.rows,
+    totalRows: parsed.data.totalRows,
+    clientErrors,
+  });
   const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
     { field: 'id', value: row.id, label: 'allocation ID' },
-  ]);
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  ], index => rowNumbers[index]);
+  const errors = [...clientErrors, ...duplicateImportRows.errors];
   const importBatchId = crypto.randomUUID();
   let saved = 0;
   try {
@@ -7133,7 +7150,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
     const blockOverAllocation = await getSetting('blockOverAllocation', false);
 
     for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
+      const rowNumber = rowNumbers[index];
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
       const rowErrors = [];
       if (row.endDate < row.startDate) {
@@ -7244,6 +7261,10 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
       saved += 1;
     }
 
+    const responseErrors = attachImportErrorSourceIdentifiers({
+      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
+      sourceIdentifierForRow: row => row.id ?? null,
+    });
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
       insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
@@ -7256,7 +7277,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
       parsed.data.totalRows ?? parsed.data.rows.length,
       saved,
       errors.length,
-      errors.length ? JSON.stringify(errors) : null,
+      errors.length ? JSON.stringify(responseErrors) : null,
       req.user.username,
       req.organizationScope.organizationId,
       req.organizationScope.legalEntityId,
@@ -7267,7 +7288,7 @@ app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, require
       totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
       validRows: saved,
       errorRows: errors.length,
-      errors,
+      errors: responseErrors,
       log: logResult.rows[0],
     });
   } catch (error) {
@@ -7298,11 +7319,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     fileName: z.string().min(1),
     rows: z.array(rowSchema).min(1),
     totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -7310,13 +7327,19 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     return;
   }
 
+  const clientErrors = parsed.data.clientErrors || [];
+  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
+    rows: parsed.data.rows,
+    totalRows: parsed.data.totalRows,
+    clientErrors,
+  });
   const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [{
     field: 'timesheetEntryKey',
     label: 'Timesheet entry key',
     value: [row.employeeId, row.weekEnding, row.date, row.workType, row.projectId || row.clientName].join('|'),
-  }]);
+  }], index => rowNumbers[index]);
   const client = await pool.connect();
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  const errors = [...clientErrors, ...duplicateImportRows.errors];
   const importBatchId = crypto.randomUUID();
   const groups = new Map();
   let validEntryRows = 0;
@@ -7324,7 +7347,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
     await client.query('begin');
 
     for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
+      const rowNumber = rowNumbers[index];
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
       const rowErrors = [];
       if (isAfterToday(row.weekEnding) || isAfterToday(row.date)) {
@@ -7478,6 +7501,11 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
       });
     }
 
+    const responseErrors = attachImportErrorSourceIdentifiers({
+      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
+      sourceIdentifierForRow: () => null,
+      allowClientSourceIdentifiers: false,
+    });
     const status = validEntryRows === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
       insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
@@ -7490,7 +7518,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
       parsed.data.totalRows ?? parsed.data.rows.length,
       validEntryRows,
       errors.length,
-      errors.length ? JSON.stringify(errors) : null,
+      errors.length ? JSON.stringify(responseErrors) : null,
       req.user.username,
       req.organizationScope.organizationId,
       req.organizationScope.legalEntityId,
@@ -7501,7 +7529,7 @@ app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requireP
       totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
       validRows: validEntryRows,
       errorRows: errors.length,
-      errors,
+      errors: responseErrors,
       log: logResult.rows[0],
     });
   } catch (error) {
