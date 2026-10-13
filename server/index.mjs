@@ -3262,6 +3262,8 @@ app.post('/api/leave/types', requireDatabase, requireAuth, requirePermission('le
       oldValue: previous,
       newValue: result.rows[0],
       details: `${previous ? 'Updated' : 'Created'} leave type ${result.rows[0].name}`,
+      // Leave-type definitions are shared deployment configuration.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -3319,6 +3321,8 @@ app.post('/api/leave/policies', requireDatabase, requireAuth, requirePermission(
       oldValue: previous,
       newValue: next,
       details: `${previous ? 'Updated' : 'Created'} leave policy ${next.name}`,
+      // Leave policies and their type links are shared deployment configuration.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(next);
@@ -3394,6 +3398,8 @@ app.post('/api/holiday-calendars', requireDatabase, requireAuth, requirePermissi
       oldValue: previous,
       newValue: { ...result.rows[0], holidays: parsed.data.holidays },
       details: `${previous ? 'Updated' : 'Created'} holiday calendar ${result.rows[0].name}`,
+      // Holiday calendars and their holiday rows are shared deployment configuration.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json({ ...result.rows[0], holidays: parsed.data.holidays });

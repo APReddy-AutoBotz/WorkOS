@@ -2044,6 +2044,96 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       {action: 'Update Notification Template', organization_id: null, legal_entity_id: null},
     ], 'notification-template create and update audit events must remain deployment-owned despite a selected legal entity');
 
+    const globalLeaveTypeId = 'synthetic-global-audit-leave-type';
+    const globalLeaveTypeCreate = await postScopedJson('/api/leave/types', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: globalLeaveTypeId,
+        code: 'SYN_AUDIT_GLOBAL',
+        name: 'Synthetic Global Audit Leave',
+        paid: true,
+        requires_approval: true,
+        active: true,
+      });
+    assert.equal(globalLeaveTypeCreate.status, 200,
+      'deployment-wide leave-type creation must retain its existing API behavior');
+    const globalLeaveTypeUpdate = await postScopedJson('/api/leave/types', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: globalLeaveTypeId,
+        code: 'SYN_AUDIT_GLOBAL',
+        name: 'Synthetic Global Audit Leave Updated',
+        paid: true,
+        requires_approval: false,
+        active: true,
+      });
+    assert.equal(globalLeaveTypeUpdate.status, 200,
+      'deployment-wide leave-type updates must retain their existing API behavior');
+
+    const globalLeavePolicyId = 'synthetic-global-audit-leave-policy';
+    const globalLeavePolicyCreate = await postScopedJson('/api/leave/policies', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: globalLeavePolicyId,
+        name: 'Synthetic Global Audit Leave Policy',
+        annual_allowance_days: 12,
+        carry_forward_days: 2,
+        accrual_method: 'Annual',
+        status: 'Active',
+        leave_type_ids: [globalLeaveTypeId],
+      });
+    assert.equal(globalLeavePolicyCreate.status, 200,
+      'deployment-wide leave-policy creation must retain its existing API behavior');
+    const globalLeavePolicyUpdate = await postScopedJson('/api/leave/policies', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: globalLeavePolicyId,
+        name: 'Synthetic Global Audit Leave Policy Updated',
+        annual_allowance_days: 15,
+        carry_forward_days: 3,
+        accrual_method: 'Monthly',
+        status: 'Active',
+        leave_type_ids: [globalLeaveTypeId],
+      });
+    assert.equal(globalLeavePolicyUpdate.status, 200,
+      'deployment-wide leave-policy updates and type-link replacement must retain their existing API behavior');
+
+    const globalHolidayCalendarId = 'synthetic-global-audit-holiday-calendar';
+    const globalHolidayCalendarCreate = await postScopedJson('/api/holiday-calendars', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: globalHolidayCalendarId,
+        name: 'Synthetic Global Audit Calendar',
+        country: 'GB',
+        year: 2098,
+        status: 'Active',
+        holidays: [{id: 'synthetic-global-audit-holiday', name: 'Synthetic Audit Holiday', date: '2098-05-01', type: 'Public'}],
+      });
+    assert.equal(globalHolidayCalendarCreate.status, 200,
+      'deployment-wide holiday-calendar creation must retain its existing API behavior');
+    const globalHolidayCalendarUpdate = await postScopedJson('/api/holiday-calendars', multiScopeToken,
+      'org-scope-beta', 'legal-scope-beta', {
+        id: globalHolidayCalendarId,
+        name: 'Synthetic Global Audit Calendar Updated',
+        country: 'GB',
+        year: 2098,
+        status: 'Active',
+        holidays: [{id: 'synthetic-global-audit-holiday', name: 'Synthetic Audit Holiday Updated', date: '2098-05-02', type: 'Company'}],
+      });
+    assert.equal(globalHolidayCalendarUpdate.status, 200,
+      'deployment-wide holiday-calendar updates must retain their existing API behavior');
+
+    const leaveConfigEntityIds = [globalLeaveTypeId, globalLeavePolicyId, globalHolidayCalendarId];
+    const leaveConfigAuditRows = await pool.query(`select entity_type,entity_id,action,organization_id,legal_entity_id
+      from audit_logs where user_id=$1 and entity_id=any($2::text[]) order by entity_type,action`,
+    [multiScopeActorId, leaveConfigEntityIds]);
+    assert.deepEqual(leaveConfigAuditRows.rows, [
+      {entity_type: 'HolidayCalendar', entity_id: globalHolidayCalendarId, action: 'Create Holiday Calendar', organization_id: null, legal_entity_id: null},
+      {entity_type: 'HolidayCalendar', entity_id: globalHolidayCalendarId, action: 'Update Holiday Calendar', organization_id: null, legal_entity_id: null},
+      {entity_type: 'LeavePolicy', entity_id: globalLeavePolicyId, action: 'Create Leave Policy', organization_id: null, legal_entity_id: null},
+      {entity_type: 'LeavePolicy', entity_id: globalLeavePolicyId, action: 'Update Leave Policy', organization_id: null, legal_entity_id: null},
+      {entity_type: 'LeaveType', entity_id: globalLeaveTypeId, action: 'Create Leave Type', organization_id: null, legal_entity_id: null},
+      {entity_type: 'LeaveType', entity_id: globalLeaveTypeId, action: 'Update Leave Type', organization_id: null, legal_entity_id: null},
+    ], 'leave definitions, policies and calendars must be audited as deployment-owned despite a selected legal entity');
+    assert(!JSON.stringify(leaveConfigAuditRows.rows).includes('org-scope-beta')
+      && !JSON.stringify(leaveConfigAuditRows.rows).includes('legal-scope-beta'),
+    'global leave-configuration audit metadata must not retain the caller selected scope');
+
     const blockedRoleDefinitionId = 'synthetic-global-audit-role-definition-blocked';
     const blockedRoleDefinitionCreate = await postScopedJson('/api/role-definitions', multiScopeToken,
       'org-scope-beta', 'legal-scope-beta', {
@@ -2093,12 +2183,12 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       {action: 'Deactivate Role Definition', organization_id: null, legal_entity_id: null},
     ], 'successful deployment-wide role deactivation must be recorded at deployment scope');
 
-    const classifiedGlobalAuditIds = [notificationTemplate.id, blockedRoleDefinitionId, successfulRoleDefinitionId];
+    const classifiedGlobalAuditIds = [notificationTemplate.id, blockedRoleDefinitionId, successfulRoleDefinitionId, ...leaveConfigEntityIds];
     const scopedGlobalConfigurationAudit = await getScoped('/api/audit-logs', multiScopeToken,
       'org-scope-beta', 'legal-scope-beta');
     const scopedGlobalConfigurationAuditRows = await scopedGlobalConfigurationAudit.json();
     assert(!scopedGlobalConfigurationAuditRows.some(row => classifiedGlobalAuditIds.includes(row.entity_id)),
-      'ordinary selected-entity audit history must exclude deployment-wide notification-template and role-definition changes');
+      'ordinary selected-entity audit history must exclude deployment-wide notification, role-definition and leave-configuration changes');
 
     const ungrantedGlobalRead = await fetch(`${baseUrl}/api/deployment-audit-logs`, {
       headers: {Authorization: `Bearer ${multiScopeToken}`},
@@ -2244,7 +2334,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       && row.action === expected.action)),
     'the designated deployment reader must be able to retrieve every global catalog and country-director outcome');
     assert(classifiedGlobalAuditIds.every(entityId => deploymentAuditRows.some(row => row.entity_id === entityId)),
-      'the designated deployment reader must be able to retrieve the classified notification-template and role-definition outcomes');
+      'the designated deployment reader must be able to retrieve classified notification, role-definition and leave-configuration outcomes');
 
     const scopeFreeWrongPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
       method: 'POST',
@@ -2380,8 +2470,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       assert.equal(response.status, 200);
       const rows = await response.json();
       assert(!rows.some(row => ['synthetic-global-audit-industry', blockedDepartment.rows[0].id,
-        'synthetic-global-audit-director', 'cd-import-provenance-test'].includes(row.entity_id)),
-      'selected-organization readers must exclude deployment-global catalog and country-director outcomes');
+        'synthetic-global-audit-director', 'cd-import-provenance-test', ...classifiedGlobalAuditIds].includes(row.entity_id)),
+      'selected-organization readers must exclude deployment-global catalog, country-director, notification, role-definition and leave-configuration outcomes');
       assert(!rows.some(row => row.user_id === multiScopeActorId
         && ['SystemSettings', 'RolePermission', 'UserPermissionGrant'].includes(row.entity_type)),
       'ordinary scoped history must not attribute deployment-wide configuration or auditor grants to the caller’s selected entity');
