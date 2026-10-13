@@ -2335,6 +2335,9 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     'the designated deployment reader must be able to retrieve every global catalog and country-director outcome');
     assert(classifiedGlobalAuditIds.every(entityId => deploymentAuditRows.some(row => row.entity_id === entityId)),
       'the designated deployment reader must be able to retrieve classified notification, role-definition and leave-configuration outcomes');
+    assert(leaveConfigAuditRows.rows.every(expected => deploymentAuditRows.some(row => row.entity_id === expected.entity_id
+      && row.action === expected.action)),
+    'the designated deployment reader must expose all leave-type, leave-policy and holiday-calendar create/update outcomes');
 
     const scopeFreeWrongPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
       method: 'POST',
