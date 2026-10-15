@@ -80,6 +80,14 @@ assert.notEqual(hashEmployeeImportRequest(employeeImport), hashEmployeeImportReq
   ...employeeImport,
   rows: [{...employeeImport.rows[0], name: 'Changed Synthetic Employee'}],
 }), 'other canonical Employee Master fields must remain part of retry identity');
+const employeeDryRunRow = {...employeeImport.rows[0], initialPasswordPresent: true};
+const employeeDryRunWithChangedCredential = {...employeeDryRunRow, initialPassword: initialPasswordTwo};
+assert.equal(hashEmployeeImportRequest({...employeeImport, rows: [employeeDryRunRow]}),
+  hashEmployeeImportRequest({...employeeImport, rows: [employeeDryRunWithChangedCredential]}),
+  'Employee preview identity uses only the nonsecret credential-presence indicator, never a credential value');
+assert.notEqual(hashEmployeeImportRequest({...employeeImport, rows: [employeeDryRunRow]}),
+  hashEmployeeImportRequest({...employeeImport, rows: [{...employeeDryRunRow, initialPasswordPresent: false}]}),
+  'changing new-account credential readiness changes the dry-run payload identity');
 assert.notEqual(hashEmployeeImportRequest(employeeImport), hashImportRequest(employeeImport),
   'durable Employee Master request identity must exclude initialPassword rather than hash it');
 assert(!hashEmployeeImportRequest(employeeImport).includes(initialPasswordOne));

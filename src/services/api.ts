@@ -1854,6 +1854,44 @@ export const adminService = {
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
+  runVersionedEmployeeImport: async (request: {
+    rows: CsvImportRow[];
+    clientErrors?: ImportApplyError[];
+    totalRows: number;
+    idempotencyKey: string;
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
+    if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
+    const rows = request.rows.map(({initialPassword, ...row}) => ({
+      ...row,
+      initialPasswordPresent: Boolean(initialPassword),
+    }));
+    const clientErrors = (request.clientErrors || []).map(error => ({
+      rowNumber: error.rowNumber,
+      ...(error.field ? {field: error.field} : {}),
+      message: 'The Employee Master row failed preflight validation.',
+    }));
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/employees/apply', {
+      schemaVersion: 'employee-master/1',
+      dryRun: true,
+      fileName: 'Employee Master import.csv',
+      rows,
+      totalRows: request.totalRows,
+      clientErrors,
+    }, {'Idempotency-Key': request.idempotencyKey});
+    const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
+    return {
+      status: raw.status as ImportExportLog['status'],
+      totalRows: Number(raw.totalRows ?? request.totalRows),
+      validRows: Number(raw.validRows ?? 0),
+      errorRows: Number(raw.errorRows ?? 0),
+      errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      replayed: raw.replayed === true,
+      log: log ? normalizeImportExportLog(log) : undefined,
+      schemaVersion: typeof log?.schema_version === 'string' ? log.schema_version : '',
+      dryRun: log?.dry_run === true,
+    };
+  },
   applyClientImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
     assertExpectedImportScope(expectedScope);

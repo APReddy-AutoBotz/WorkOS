@@ -20,13 +20,14 @@ import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs
 import {createOrganizationAuditRouter} from './modules/audit/organization-audit-router.mjs';
 import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
 import {attachImportErrorSourceIdentifiers, importErrorRowSchema, resolveImportApplyRowNumbers} from './modules/imports/import-error-provenance.mjs';
+import {safeEmployeeImportDryRunErrors, validateEmployeeImportDryRun} from './modules/imports/employee-import-dry-run.mjs';
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
 import {createProjectImportRouter} from './modules/imports/project-import-router.mjs';
 import {createOperationalImportRouter} from './modules/imports/operational-import-router.mjs';
 import {createProjectCodeLockKey, createScopedIdempotencyLockKey, hashEmployeeImportRequest, hashImportRequest, normalizeEmployeeImportClientErrors, normalizeIdempotencyKey, redactCredentialEchoes} from './modules/imports/idempotency.mjs';
 import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
 import {createNotificationRouter} from './modules/notifications/notification-router.mjs';
-import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
+import { assertWorkerMayReactivate, disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
 const { Pool } = pg;
@@ -459,17 +460,25 @@ const getSetting = async (key, fallback) => {
 
 const audit = recordAuditEvent;
 
-const workerExitDependencies = async (client, employeeId, { organizationId, legalEntityId }) => client.query(`select kind,id from (
+const workerExitDependencies = async (client, employeeId, { organizationId, legalEntityId }, simulatedDirectReportIds) => {
+  const directReportQuery = Array.isArray(simulatedDirectReportIds)
+    ? `union all select 'direct_report',id from unnest($4::text[]) as simulated_reports(id)`
+    : `union all select 'direct_report',id from employees where reporting_manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status<>'Exited'`;
+  const params = Array.isArray(simulatedDirectReportIds)
+    ? [employeeId, organizationId, legalEntityId, simulatedDirectReportIds]
+    : [employeeId, organizationId, legalEntityId];
+  return client.query(`select kind,id from (
   select 'active_assignment' kind,id from project_allocations where employee_id=$1 and organization_id=$2 and legal_entity_id=$3 and status='Active'
   union all select 'pending_approval',id::text from approval_records where subject_employee_id=$1 and status='Pending'
   union all select 'open_work',id::text from timesheets where employee_id=$1 and organization_id=$2 and legal_entity_id=$3 and status in ('Draft','Submitted')
   union all select 'project_owner',id from projects where manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status in ('Proposed','Active','On Hold')
-  union all select 'direct_report',id from employees where reporting_manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status<>'Exited'
-) d limit 101`, [employeeId, organizationId, legalEntityId]);
+  ${directReportQuery}
+) d limit 101`, params);
+};
 
 const isoDateOnly = value => typeof value === 'string' ? value.slice(0, 10) : value.toISOString().slice(0, 10);
 
-const assertWorkerMayExit = async (client, employee, scope, effectiveFrom) => {
+const assertWorkerMayExit = async (client, employee, scope, effectiveFrom, {simulatedDirectReportIds} = {}) => {
   if (!employee) return effectiveFrom;
   if (employee.status === 'Exited') {
     const terminal = (await client.query(`select effective_from from worker_history where employee_id=$1 and organization_id=$2 and legal_entity_id=$3 and status='Exited' order by effective_from desc limit 1 for update`,
@@ -487,7 +496,7 @@ const assertWorkerMayExit = async (client, employee, scope, effectiveFrom) => {
     }
     return authoritativeExitDate;
   }
-  const dependencies = await workerExitDependencies(client, employee.id, scope);
+  const dependencies = await workerExitDependencies(client, employee.id, scope, simulatedDirectReportIds);
   if (dependencies.rowCount) {
     const error = new Error('Worker has active dependencies');
     error.code = 'WORKER_DEPENDENCY_CONFLICT';
@@ -6267,10 +6276,6 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
       res.status(400).json({error: {code: 'UNSUPPORTED_SCHEMA_VERSION', message: 'The Employee Master import schema version is not supported.'}});
       return;
     }
-    if (Object.hasOwn(req.body, 'dryRun') && req.body.dryRun !== false) {
-      res.status(400).json({error: {code: 'UNSUPPORTED_DRY_RUN', message: 'Employee Master server dry runs are not supported by this contract.'}});
-      return;
-    }
     actorId = typeof req.user?.sub === 'string' || typeof req.user?.sub === 'number' ? String(req.user.sub) : '';
     if (!actorId) {
       res.status(401).json({error: {code: 'AUTHENTICATION_REQUIRED', message: 'An authenticated account is required.'}});
@@ -6301,12 +6306,26 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
     roles: z.union([z.string(), z.array(z.string())]).optional(),
     initialPassword: z.string().optional(),
   });
-  const schema = z.object({
+  const versionedRowSchema = rowSchema.extend({initialPasswordPresent: z.boolean().optional()});
+  const legacySchema = z.object({
     fileName: z.string().min(1),
     rows: z.array(rowSchema).min(1),
     totalRows: z.number().int().min(0).optional(),
     clientErrors: z.array(importErrorRowSchema).optional(),
   });
+  const versionedSchema = z.object({
+    schemaVersion: z.literal('employee-master/1'),
+    dryRun: z.boolean().default(false),
+    fileName: z.string().min(1),
+    rows: z.array(versionedRowSchema),
+    totalRows: z.number().int().min(0).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
+  }).superRefine((data, context) => {
+    if (!data.dryRun && data.rows.length === 0) {
+      context.addIssue({code: z.ZodIssueCode.custom, path: ['rows'], message: 'At least one valid row is required to apply an import.'});
+    }
+  });
+  const schema = versioned ? versionedSchema : legacySchema;
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json(versioned
@@ -6315,7 +6334,21 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
     return;
   }
 
-  const credentials = parsed.data.rows.map(row => row.initialPassword).filter(Boolean);
+  const dryRun = versioned && parsed.data.dryRun === true;
+  if (dryRun && parsed.data.rows.some(row => Object.hasOwn(row, 'initialPassword'))) {
+    res.status(400).json({error: {code: 'EMPLOYEE_DRY_RUN_CREDENTIAL_FORBIDDEN', message: 'Employee Master dry-run requests must not include credential values.'}});
+    return;
+  }
+  if (dryRun && parsed.data.fileName !== 'Employee Master import.csv') {
+    res.status(400).json({error: {code: 'EMPLOYEE_DRY_RUN_LABEL_REQUIRED', message: 'Employee Master dry-run requests must use the server-controlled import label.'}});
+    return;
+  }
+  if (versioned && !dryRun && parsed.data.rows.some(row => Object.hasOwn(row, 'initialPasswordPresent'))) {
+    res.status(400).json({error: {code: 'INVALID_IMPORT_REQUEST', message: 'The Employee Master import request is invalid.'}});
+    return;
+  }
+
+  const credentials = dryRun ? [] : parsed.data.rows.map(row => row.initialPassword).filter(Boolean);
   const fileName = versioned
     ? 'Employee Master import.csv'
     : redactCredentialEchoes(parsed.data.fileName, credentials);
@@ -6323,25 +6356,33 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
   const clientErrors = versioned
     ? normalizeEmployeeImportClientErrors(redactedClientErrors)
     : redactedClientErrors;
+  const operationClientErrors = dryRun
+    ? clientErrors.map(({rowNumber, field}) => ({
+      rowNumber,
+      ...(field ? {field} : {}),
+      message: 'The Employee Master row failed preflight validation.',
+    }))
+    : clientErrors;
   const requestHash = versioned ? hashEmployeeImportRequest({
     schemaVersion: 'employee-master/1',
     totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-    clientErrors,
+    clientErrors: operationClientErrors,
     rows: parsed.data.rows,
   }) : null;
   const client = await pool.connect();
   const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
     rows: parsed.data.rows,
     totalRows: parsed.data.totalRows,
-    clientErrors,
+    clientErrors: operationClientErrors,
   });
   const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
     { field: 'employeeId', value: row.employeeId, label: 'employee ID' },
     { field: 'email', value: row.email, label: 'email' },
   ], index => rowNumbers[index]);
-  const errors = [...clientErrors, ...duplicateImportRows.errors];
+  const errors = [...operationClientErrors, ...duplicateImportRows.errors];
   const importBatchId = crypto.randomUUID();
   let saved = 0;
+  const idempotencyChannel = dryRun ? 'Employee Master Dry Run' : 'Employee Master';
   try {
     await client.query('begin');
     if (versioned) {
@@ -6350,13 +6391,13 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
         organizationId: scope.organizationId,
         legalEntityId: scope.legalEntityId,
         actorId,
-        channel: 'Employee Master',
+        channel: idempotencyChannel,
         idempotencyKey,
       });
       await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [lockKey]);
       const existing = await client.query(
         'select request_hash, batch_id from import_export_idempotency where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and channel=$4 and idempotency_key=$5',
-        [scope.organizationId, scope.legalEntityId, actorId, 'Employee Master', idempotencyKey],
+        [scope.organizationId, scope.legalEntityId, actorId, idempotencyChannel, idempotencyKey],
       );
       if (existing.rowCount > 0) {
         if (existing.rows[0].request_hash !== requestHash) {
@@ -6382,6 +6423,64 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
         });
         return;
       }
+    }
+    if (dryRun) {
+      const scope = req.organizationScope;
+      const validation = await validateEmployeeImportDryRun({
+        client,
+        rows: parsed.data.rows,
+        rowNumbers,
+        duplicateRowNumbers: duplicateImportRows.duplicateRowNumbers,
+        duplicateErrors: duplicateImportRows.errors,
+        scope,
+        assertMayExit: assertWorkerMayExit,
+        assertMayReactivate: assertWorkerMayReactivate,
+      });
+      const safeErrors = safeEmployeeImportDryRunErrors([...operationClientErrors, ...validation.errors]);
+      const totalRows = parsed.data.totalRows ?? parsed.data.rows.length;
+      await audit(client, req, {
+        module: 'Import',
+        action: 'Dry Run Employee Master Import',
+        entityType: 'ImportBatch',
+        entityId: importBatchId,
+        oldValue: null,
+        newValue: {schemaVersion: 'employee-master/1', status: 'Dry Run', totalRows,
+          validRows: validation.validRows, errorRows: safeErrors.length},
+        details: 'Validated Employee Master import without applying employee, account, role, scope, lifecycle, or credential changes',
+        source: 'Employee Master CSV',
+        importBatchId,
+        importProcessingResult: 'Dry Run',
+      });
+      const logResult = await client.query(`
+        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run)
+        values ($1,'Import','Employee Master',$2,'Dry Run',$3,$4,$5,$6,$7,$8,$9,'employee-master/1',true)
+        returning *
+      `, [
+        importBatchId,
+        'Employee Master import.csv',
+        totalRows,
+        validation.validRows,
+        safeErrors.length,
+        safeErrors.length ? JSON.stringify(safeErrors) : null,
+        req.user.username,
+        scope.organizationId,
+        scope.legalEntityId,
+      ]);
+      await client.query(
+        'insert into import_export_idempotency (organization_id, legal_entity_id, actor_id, channel, idempotency_key, request_hash, batch_id) values ($1,$2,$3,$4,$5,$6,$7)',
+        [scope.organizationId, scope.legalEntityId, actorId, idempotencyChannel, idempotencyKey, requestHash, importBatchId],
+      );
+      await client.query('commit');
+      res.json({
+        status: 'Dry Run',
+        totalRows,
+        validRows: validation.validRows,
+        errorRows: safeErrors.length,
+        errors: safeErrors,
+        replayed: false,
+        log: logResult.rows[0],
+      });
+      return;
     }
     const directorResult = await client.query('select id from country_directors');
     const directorIds = new Set(directorResult.rows.map(row => row.id));

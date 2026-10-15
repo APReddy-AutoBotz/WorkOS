@@ -251,7 +251,25 @@ try {
   submittedEmployeePasswords.push(firstEmployeePassword);
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectEmployeeCsv('employees-first.csv', employeeCsv('EMP-UI-101', 'Synthetic Employee 101', firstEmployeePassword));
-  await page.getByRole('button', {name: 'Apply Valid Rows'}).waitFor();
+  await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  const firstEmployeeDryRun = lastRequest();
+  assert.equal(firstEmployeeDryRun.body.dryRun, true);
+  assert.equal(firstEmployeeDryRun.body.fileName, 'Employee Master import.csv');
+  assert.equal(firstEmployeeDryRun.body.rows[0].initialPasswordPresent, true);
+  assert.equal(Object.hasOwn(firstEmployeeDryRun.body.rows[0], 'initialPassword'), false);
+  assert.equal(JSON.stringify(firstEmployeeDryRun.body).includes(firstEmployeePassword), false,
+    'Employee server preview must not send the credential or a credential-derived filename/diagnostic');
+  const firstEmployeeDryRunKey = firstEmployeeDryRun.headers['idempotency-key'];
+  assert.ok(firstEmployeeDryRunKey);
+  responsePlans.push({status: 200, body: operationResult(firstEmployeeDryRun.body)});
+  await page.getByRole('button', {name: 'Retry Validation'}).click();
+  await page.getByText('Server dry run complete for employees-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  assert.equal(lastRequest().headers['idempotency-key'], firstEmployeeDryRunKey,
+    'Employee server preview retry keeps the same key');
+  assert.deepEqual(lastRequest().body, firstEmployeeDryRun.body,
+    'Employee server preview retry preserves its exact nonsecret payload');
+
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText(/The Employee Master apply result for employees-first\.csv was not confirmed\./).waitFor();
   const firstEmployeeApply = lastRequest();
@@ -260,6 +278,8 @@ try {
   assert.equal(firstEmployeeApply.body.rows[0].initialPassword, firstEmployeePassword);
   const firstEmployeeKey = firstEmployeeApply.headers['idempotency-key'];
   assert.ok(firstEmployeeKey);
+  assert.notEqual(firstEmployeeKey, firstEmployeeDryRunKey,
+    'Employee Master apply has a separate operation key from its password-free preview');
   responsePlans.push({status: 200, body: {...operationResult(firstEmployeeApply.body), replayed: true}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText('Confirmed the saved Employee Master result for employees-first.csv. This retry replayed the first accepted result and did not change credentials.', {exact: true}).waitFor();
@@ -272,32 +292,53 @@ try {
 
   const diagnosticEmployeePassword = randomBytes(30).toString('base64url');
   submittedEmployeePasswords.push(diagnosticEmployeePassword);
-  const employeePreflightLogged = page.waitForResponse(response => (
-    new URL(response.url()).pathname === '/api/import-export-logs' && response.request().method() === 'POST'
-  ));
   await selectEmployeeCsv(`employees-${diagnosticEmployeePassword}.csv`, employeeCsv(
     'EMP-UI-103', 'Synthetic Employee 103', diagnosticEmployeePassword, diagnosticEmployeePassword,
   ));
-  await page.getByText('Employee Master validation failed for employees-.csv. Download the error report and correct the file.', {exact: true}).waitFor();
-  await employeePreflightLogged;
+  await page.getByText('Server dry run complete for employees-.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'an Employee row with a client-side diagnostic is excluded from apply');
-  const diagnosticPreflightLog = genericLogBodies.at(-1);
-  assert.equal(diagnosticPreflightLog.fileName, 'employees-.csv', 'Employee preflight history must redact credentials from filenames');
-  assert.equal(JSON.stringify(diagnosticPreflightLog).includes(diagnosticEmployeePassword), false,
-    'Employee preflight diagnostics and filenames must not retain an echoed credential');
+  const diagnosticPreview = lastRequest();
+  assert.equal(diagnosticPreview.body.fileName, 'Employee Master import.csv');
+  assert.equal(JSON.stringify(diagnosticPreview.body).includes(diagnosticEmployeePassword), false,
+    'Employee preview must omit the filename, diagnostic text, source ID and password value');
 
   const changedEmployeePassword = randomBytes(30).toString('base64url');
   submittedEmployeePasswords.push(changedEmployeePassword);
-  responsePlans.push({status: 409, body: {error: {code: 'IDEMPOTENCY_KEY_REUSED', message: 'This key was already used with different data.'}}});
   await selectEmployeeCsv('employees-changed.csv', employeeCsv('EMP-UI-102', 'Synthetic Employee 102', changedEmployeePassword));
+  await page.getByText('Server dry run complete for employees-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  const changedEmployeeDryRun = lastRequest();
+  assert.notEqual(changedEmployeeDryRun.headers['idempotency-key'], firstEmployeeDryRunKey,
+    'a newly selected Employee file gets a fresh dry-run key');
+  responsePlans.push({status: 409, body: {error: {code: 'IDEMPOTENCY_KEY_REUSED', message: 'This key was already used with different data.'}}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText(/The Employee Master key for employees-changed\.csv is tied to different non-credential data\./).waitFor();
   const conflictedEmployeeApply = lastRequest();
   assert.notEqual(conflictedEmployeeApply.headers['idempotency-key'], firstEmployeeKey,
-    'a newly selected Employee Master CSV gets a fresh key');
+    'a newly selected Employee Master CSV gets a fresh apply key');
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a key conflict blocks repeat apply until a new CSV selection creates fresh operation state');
+
+  const managerPassword = randomBytes(30).toString('base64url');
+  const reportPassword = randomBytes(30).toString('base64url');
+  submittedEmployeePasswords.push(managerPassword, reportPassword);
+  const employeeManagerHeader = employeeCsv('EMP-UI-MANAGER-1', 'Synthetic Manager 1', managerPassword).split('\n')[0];
+  const employeeManagerRow = employeeCsv('EMP-UI-MANAGER-1', 'Synthetic Manager 1', managerPassword).split('\n')[1];
+  const employeeReportRow = employeeCsv('EMP-UI-REPORT-1', 'Synthetic Report 1', reportPassword).split('\n')[1].split(',');
+  employeeReportRow[8] = 'EMP-UI-MANAGER-1';
+  responsePlans.push({status: 200, body: operationResult({
+    dryRun: true, totalRows: 2, schemaVersion: 'employee-master/1', fileName: 'Employee Master import.csv',
+  }, {validRows: 2})});
+  await selectEmployeeCsv('employees-manager-chain.csv', [employeeManagerHeader, employeeManagerRow, employeeReportRow.join(',')].join('\n'));
+  await page.getByText('Server dry run complete for employees-manager-chain.csv: 2/2 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  const employeeManagerPreview = lastRequest();
+  assert.equal(employeeManagerPreview.body.rows.length, 2,
+    'Employee preflight allows a later row to reference an earlier valid employee from the same file');
+  assert.equal(employeeManagerPreview.body.rows[1].reportingManagerId, 'EMP-UI-MANAGER-1');
+  assert(employeeManagerPreview.body.rows.every(row => row.initialPasswordPresent === true
+    && Object.hasOwn(row, 'initialPassword') === false));
+  assert.equal(JSON.stringify(employeeManagerPreview.body).includes(managerPassword), false);
+  assert.equal(JSON.stringify(employeeManagerPreview.body).includes(reportPassword), false);
 
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectProjectCsv('projects-first.csv', csv('PROJECT-UI-101'));
@@ -366,8 +407,8 @@ try {
   assert.equal(rejectedPreview.body.clientErrors.length, 1);
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a zero-valid-row dry run cannot be applied');
-  assert.equal(requests.length, 10,
-    'the first rejected Project preview includes three earlier Employee apply/retry requests');
+  assert.equal(requests.length, 15,
+    'the first rejected Project preview includes eight Employee preview/apply requests and six earlier Project requests');
   const malformedCsv = csv('PROJECT-UI-404').replace('projectCode,name', 'projectCodeMissing,name');
   await selectProjectCsv('projects-malformed-header.csv', malformedCsv);
   await page.getByText('Server dry run complete for projects-malformed-header.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
@@ -378,7 +419,7 @@ try {
   assert.equal(malformedPreview.body.dryRun, true);
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a malformed-header dry run cannot apply source rows that were not submitted');
-  assert.equal(requests.length, 11,
+  assert.equal(requests.length, 16,
     'the malformed-header Project preview is counted after prior Employee and Project requests');
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectClientCsv('clients-first.csv', clientCsv('', 'Synthetic Client', ''));
@@ -418,7 +459,7 @@ try {
   assert.notEqual(changedClientPreview.headers['idempotency-key'], firstClientPreviewKey,
     'a newly selected Client Master file starts fresh idempotency keys');
   assert.equal(changedClientPreview.body.schemaVersion, 'client-master/1');
-  assert.equal(requests.length, 15,
+  assert.equal(requests.length, 20,
     'Client preview, validation retry and apply requests are included in the v1 request count');
 
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
@@ -618,7 +659,7 @@ try {
   assert.equal(await page.locator('input[type="file"]').nth(2).isDisabled(), false,
     'file selection becomes available once the stale error response finishes');
 
-  assert.equal(genericLogWrites, 3, 'Employee local preflight retains one legacy marker per selected file, while versioned applies create no duplicate generic history logs');
+  assert.equal(genericLogWrites, 0, 'backend Employee previews and applies record only their server-owned operation batches, with no duplicate generic history writes');
   assert(genericLogBodies.every(entry => submittedEmployeePasswords.every(password => !JSON.stringify(entry).includes(password))),
     'Employee generic preflight logs must never contain any submitted initial credential');
 

@@ -249,11 +249,19 @@ assert.match(employeeImportRoute, /const reactivationSavepoint = previous\?\.sta
 assert.match(employeeImportRoute, /rollback to savepoint \$\{reactivationSavepoint\}[\s\S]*release savepoint \$\{reactivationSavepoint\}[\s\S]*errors\.push\(\{ rowNumber, field: 'status'[\s\S]*continue;/, 'a rejected reactivation must roll back only its import row and continue with valid rows');
 for (const [name, route] of [['direct employee save', employeeSaveRoute], ['employee import', employeeImportRoute]]) {
   const begin = route.indexOf("await client.query('begin')");
-  const scopeWrite = route.indexOf('insert into user_organization_scopes');
-  const lifecycleWrite = route.indexOf('await synchronizeWorkerReactivation');
-  const auditWrite = route.indexOf('await audit');
-  const commit = route.indexOf("await client.query('commit')", auditWrite);
-  assert.ok(begin >= 0 && scopeWrite > begin && lifecycleWrite > scopeWrite && auditWrite > lifecycleWrite && commit > auditWrite,
+  const applyRoute = name === 'employee import'
+    ? route.slice(route.indexOf('const directorResult = await client.query'))
+    : route;
+  const scopeWrite = applyRoute.indexOf('insert into user_organization_scopes');
+  const lifecycleWrite = applyRoute.indexOf('await synchronizeWorkerReactivation');
+  const auditWrite = applyRoute.indexOf('await audit');
+  const commit = applyRoute.indexOf("await client.query('commit')", auditWrite);
+  const writePathStart = name === 'employee import'
+    ? route.indexOf('const directorResult = await client.query')
+    : scopeWrite;
+  assert.ok(begin >= 0 && writePathStart > begin,
+    `${name} must begin a transaction before the business-write path`);
+  assert.ok(scopeWrite >= 0 && lifecycleWrite > scopeWrite && auditWrite > lifecycleWrite && commit > auditWrite,
     `${name} must keep employee, identity scope, lifecycle history/profile, and audit in one transaction`);
   assert.match(route, /catch \(error\)[\s\S]*await client\.query\('rollback'\)/, `${name} must roll back the whole operation if reactivation synchronization fails`);
 }

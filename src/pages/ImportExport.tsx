@@ -47,7 +47,9 @@ type PendingImport = {
   };
   employeeImportOperation?: {
     schemaVersion: 'employee-master/1';
+    dryRunKey: string;
     applyKey: string;
+    validationState: 'checking' | 'failed' | 'complete';
     requiresNewImport?: boolean;
   };
 };
@@ -75,6 +77,7 @@ const requiredImportHeaders: Record<ImportChannel, string[]> = {
   timesheets: ['employeeId', 'weekEnding', 'workType', 'projectId', 'clientName', 'category', 'date', 'hours', 'remark', 'billable', 'status', 'rejectionReason'],
 };
 const versionedImportSchemas: Partial<Record<ImportChannel, string>> = {
+  employees: 'employee-master/1',
   projects: 'project-master/1',
   clients: 'client-master/1',
   allocations: 'allocation-control/1',
@@ -195,11 +198,12 @@ export const ImportExport = () => {
     version === importRequestVersion.current && scopeKey === currentImportScopeKey()
   );
   const runVersionedImport = (
-    channel: 'projects' | 'clients' | 'allocations' | 'timesheets',
+    channel: 'employees' | 'projects' | 'clients' | 'allocations' | 'timesheets',
     request: {fileName: string; rows: CsvRow[]; clientErrors: ImportErrorRow[]; totalRows: number; dryRun: boolean; idempotencyKey: string},
     expectedScope: OrganizationScope | null,
   ) => {
     switch (channel) {
+      case 'employees': return adminService.runVersionedEmployeeImport(request, expectedScope);
       case 'projects': return adminService.runVersionedProjectImport(request, expectedScope);
       case 'clients': return adminService.runVersionedClientImport(request, expectedScope);
       case 'allocations': return adminService.runVersionedAllocationImport(request, expectedScope);
@@ -411,6 +415,7 @@ export const ImportExport = () => {
       }
 
       if (errors.length > before) rowsWithErrors.add(rowNumber);
+      else if (id === 'employees' && row.employeeId) employeeIds.add(row.employeeId);
     });
 
     return {
@@ -498,7 +503,9 @@ export const ImportExport = () => {
       ...(id === 'employees' ? {
         employeeImportOperation: {
           schemaVersion: 'employee-master/1' as const,
+          dryRunKey: crypto.randomUUID(),
           applyKey: crypto.randomUUID(),
+          validationState: 'checking' as const,
         },
       } : {}),
     };
@@ -507,7 +514,7 @@ export const ImportExport = () => {
     if (schemaVersion) {
       setLastResult(`Checking ${fileName} against the server without applying ${option?.title || id} changes…`);
       try {
-        const result = await runVersionedImport(id as 'projects' | 'clients' | 'allocations' | 'timesheets', {
+        const result = await runVersionedImport(id, {
           fileName,
           rows: validRows,
           clientErrors: errors,
@@ -518,7 +525,13 @@ export const ImportExport = () => {
         if (!isCurrentRequest()) return;
         if (result === null) {
           // Preserve explicit local/demo mode; production fails closed in checkBackend.
-          setPendingImport({...basePending, versionedOperation: undefined});
+          setPendingImport({
+            ...basePending,
+            versionedOperation: undefined,
+            ...(id === 'employees' && basePending.employeeImportOperation
+              ? {employeeImportOperation: {...basePending.employeeImportOperation, validationState: 'complete'}}
+              : {}),
+          });
           setLastResult(
             status === 'Failed'
               ? `${option?.title || id} validation failed for ${fileName}. Download the error report and correct the file.`
@@ -534,7 +547,12 @@ export const ImportExport = () => {
         if (result.schemaVersion !== schemaVersion || result.dryRun !== true || result.status !== 'Dry Run') {
           throw new Error('The server did not confirm the expected versioned dry-run result.');
         }
-        const serverErrors = result.errors;
+        const serverErrors = id === 'employees'
+          ? redactCredentialEchoes(
+            attachPreflightSourceIdentifiers('employees', rows, result.errors),
+            employeeCredentials,
+          )
+          : result.errors;
         const serverValidRows = filterAcceptedImportRows(rows, validRows, serverErrors);
         if (serverValidRows.length !== result.validRows) {
           throw new Error('The server validation result did not match the source row mapping.');
@@ -544,6 +562,9 @@ export const ImportExport = () => {
           validRows: serverValidRows,
           errors: serverErrors,
           versionedOperation: {...basePending.versionedOperation!, validationState: 'complete'},
+          ...(id === 'employees' && basePending.employeeImportOperation
+            ? {employeeImportOperation: {...basePending.employeeImportOperation, validationState: 'complete'}}
+            : {}),
         });
         setLastResult(`Server dry run complete for ${fileName}: ${serverValidRows.length}/${rows.length} rows are valid. Review saved errors before applying.`);
         refreshHistory();
@@ -559,6 +580,13 @@ export const ImportExport = () => {
             validationState: 'failed',
             ...(code === 'IDEMPOTENCY_KEY_REUSED' ? {requiresNewImport: true} : {}),
           },
+          ...(id === 'employees' && basePending.employeeImportOperation
+            ? {employeeImportOperation: {
+              ...basePending.employeeImportOperation,
+              validationState: 'failed',
+              ...(code === 'IDEMPOTENCY_KEY_REUSED' ? {requiresNewImport: true} : {}),
+            }}
+            : {}),
         });
         setLastResult(code === 'IDEMPOTENCY_KEY_REUSED'
           ? `The validation key for ${fileName} is tied to different data. Choose the CSV again to start a fresh import.`
@@ -586,7 +614,7 @@ export const ImportExport = () => {
 
   const retryVersionedImportDryRun = async () => {
     if (!pendingImport || !pendingImport.versionedOperation
-        || !['projects', 'clients', 'allocations', 'timesheets'].includes(pendingImport.id)
+        || !['employees', 'projects', 'clients', 'allocations', 'timesheets'].includes(pendingImport.id)
         || pendingImport.versionedOperation.validationState !== 'failed' || pendingImport.versionedOperation.requiresNewImport
         || isPreviewing || applyLock.current) return;
     if (pendingImport.scopeKey !== currentImportScopeKey()) {
@@ -602,7 +630,7 @@ export const ImportExport = () => {
     setIsPreviewing(true);
     setLastResult(`Retrying server validation for ${snapshot.fileName} with the same import key…`);
     try {
-      const result = await runVersionedImport(snapshot.id as 'projects' | 'clients' | 'allocations' | 'timesheets', {
+      const result = await runVersionedImport(snapshot.id, {
         fileName: snapshot.fileName,
         rows: snapshot.validRows,
         clientErrors: snapshot.errors,
@@ -614,13 +642,22 @@ export const ImportExport = () => {
       if (!result || result.schemaVersion !== snapshot.versionedOperation.schemaVersion || result.dryRun !== true || result.status !== 'Dry Run') {
         throw new Error('The server did not confirm the expected versioned dry-run result.');
       }
-      const validRows = filterAcceptedImportRows(snapshot.rows, snapshot.validRows, result.errors);
+      const serverErrors = snapshot.id === 'employees'
+        ? redactCredentialEchoes(
+          attachPreflightSourceIdentifiers('employees', snapshot.rows, result.errors),
+          snapshot.rows.map(row => row.initialPassword).filter((value): value is string => Boolean(value)),
+        )
+        : result.errors;
+      const validRows = filterAcceptedImportRows(snapshot.rows, snapshot.validRows, serverErrors);
       if (validRows.length !== result.validRows) throw new Error('The server validation result did not match the source row mapping.');
       setPendingImport({
         ...snapshot,
         validRows,
-        errors: result.errors,
+        errors: serverErrors,
         versionedOperation: {...snapshot.versionedOperation, validationState: 'complete'},
+        ...(snapshot.id === 'employees' && snapshot.employeeImportOperation
+          ? {employeeImportOperation: {...snapshot.employeeImportOperation, validationState: 'complete'}}
+          : {}),
       });
       setLastResult(`Server dry run complete for ${snapshot.fileName}: ${validRows.length}/${snapshot.totalRows} rows are valid. Review saved errors before applying.`);
       refreshHistory();
@@ -636,6 +673,13 @@ export const ImportExport = () => {
           validationState: 'failed',
           ...(code === 'IDEMPOTENCY_KEY_REUSED' ? {requiresNewImport: true} : {}),
         },
+        ...(snapshot.id === 'employees' && snapshot.employeeImportOperation
+          ? {employeeImportOperation: {
+            ...snapshot.employeeImportOperation,
+            validationState: 'failed',
+            ...(code === 'IDEMPOTENCY_KEY_REUSED' ? {requiresNewImport: true} : {}),
+          }}
+          : {}),
       });
       setLastResult(code === 'IDEMPOTENCY_KEY_REUSED'
         ? `The validation key for ${snapshot.fileName} is tied to different data. Choose the CSV again to start a fresh import.`
@@ -710,7 +754,7 @@ export const ImportExport = () => {
 
     if (pendingImport.id === 'employees') {
       const operation = pendingImport.employeeImportOperation;
-      if (!operation || operation.requiresNewImport || applyLock.current) return;
+      if (!operation || operation.validationState !== 'complete' || operation.requiresNewImport || applyLock.current) return;
       applyLock.current = true;
       setIsApplying(true);
       try {

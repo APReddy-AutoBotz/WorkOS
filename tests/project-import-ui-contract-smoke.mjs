@@ -119,12 +119,19 @@ const timesheetPreview = await adminService.runVersionedTimesheetImport({
   fileName: 'timesheets.csv', rows: [{employeeId: 'EMP-101', weekEnding: '2026-09-27', date: '2026-09-25', workType: 'Client Misc Task', clientName: 'Synthetic Client', hours: 7.5}],
   clientErrors: [], totalRows: 1, dryRun: true, idempotencyKey: 'timesheet-dry-run-key',
 });
+const employeePreviewCredential = 'Synthetic-Preview-Credential-19af';
+const employeePreview = await adminService.runVersionedEmployeeImport({
+  rows: [{employeeId: 'EMP-101', name: 'Synthetic Employee', email: 'employee@example.test', initialPassword: employeePreviewCredential}],
+  clientErrors: [{rowNumber: 3, field: 'email', message: `Old diagnostic ${employeePreviewCredential}`, sourceIdentifier: employeePreviewCredential}],
+  totalRows: 1,
+  idempotencyKey: 'employee-dry-run-key',
+});
 const employeeApply = await adminService.applyEmployeeImport(
   'employees.csv', [{employeeId: 'EMP-101', name: 'Synthetic Employee', email: 'employee@example.test'}],
   'employee-apply-key', [], 1,
 );
 
-assert.equal(calls.length, 7);
+assert.equal(calls.length, 8);
 const projectCalls = calls.filter(call => call.url === '/api/v1/imports/projects/apply');
 assert.equal(projectCalls.length, 3, 'the project import service must use the versioned API');
 assert.deepEqual(projectCalls.map(call => call.init.headers['Idempotency-Key']), [
@@ -160,10 +167,24 @@ assert.equal(timesheetCall.body.schemaVersion, 'timesheet-import/1');
 assert.equal(timesheetCall.body.dryRun, true);
 assert.equal(timesheetCall.init.headers['Idempotency-Key'], 'timesheet-dry-run-key');
 assert.equal(timesheetPreview?.schemaVersion, 'timesheet-import/1');
+assert.equal(employeePreview?.schemaVersion, 'employee-master/1');
+assert.equal(employeePreview?.dryRun, true);
+assert.equal(employeePreview?.replayed, true);
+const employeePreviewCall = calls.find(call => call.url === '/api/v1/imports/employees/apply' && call.body.dryRun === true);
+assert.ok(employeePreviewCall, 'Employee Master dry-run uses the versioned API');
+assert.deepEqual(employeePreviewCall.body, {
+  schemaVersion: 'employee-master/1', dryRun: true, fileName: 'Employee Master import.csv',
+  rows: [{employeeId: 'EMP-101', name: 'Synthetic Employee', email: 'employee@example.test', initialPasswordPresent: true}],
+  totalRows: 1,
+  clientErrors: [{rowNumber: 3, field: 'email', message: 'The Employee Master row failed preflight validation.'}],
+}, 'Employee preview sends only nonsecret business rows, a credential-presence indicator and generic diagnostics');
+assert.equal(JSON.stringify(employeePreviewCall.body).includes(employeePreviewCredential), false,
+  'the Employee preview request must not transmit the credential or stale diagnostic/source-ID echo');
+assert.equal(employeePreviewCall.init.headers['Idempotency-Key'], 'employee-dry-run-key');
 assert.equal(timesheetPreview?.dryRun, true);
 assert.equal(employeeApply?.validRows, 1);
 assert.equal(employeeApply?.replayed, true, 'Employee v1 retry response exposes the first-result replay status');
-const employeeCall = calls.find(call => call.url === '/api/v1/imports/employees/apply');
+const employeeCall = calls.find(call => call.url === '/api/v1/imports/employees/apply' && call.body.dryRun !== true);
 assert.ok(employeeCall, 'Employee Master uses the versioned API');
 assert.deepEqual(employeeCall.body, {
   schemaVersion: 'employee-master/1', fileName: 'employees.csv',
@@ -187,6 +208,7 @@ assert.deepEqual(redactCredentialEchoes({
 }, 'Employee client preflight filenames and diagnostics must remove exact initial-password echoes');
 
 const page = readFileSync('src/pages/ImportExport.tsx', 'utf8');
+const apiSource = readFileSync('src/services/api.ts', 'utf8');
 assert.match(page, /dryRunKey:\s*crypto\.randomUUID\(\)/, 'a newly uploaded project CSV gets a fresh dry-run key');
 assert.match(page, /applyKey:\s*crypto\.randomUUID\(\)/, 'a newly uploaded project CSV gets a distinct apply key');
 assert.match(page, /idempotencyKey:\s*basePending\.versionedOperation!\.dryRunKey/, 'initial dry run uses the pending operation key');
@@ -200,6 +222,9 @@ assert.match(page, /runVersionedImport\([\s\S]*\}, scope\)/, 'versioned dry runs
 assert.match(page, /pendingImport\.rows\.length,[\s\S]*pendingImport\.scope/, 'Employee apply carries its scope snapshot');
 assert.match(page, /filterAcceptedImportRows\(rows, validRows, serverErrors\)/, 'only client-approved, server-approved rows remain eligible for apply');
 assert.match(page, /client-master\/1/, 'Client Master is bound to its explicit schema version in the UI');
+assert.match(page, /employees: 'employee-master\/1'/, 'Employee Master is included in the versioned server-preview contract');
+assert.match(page, /runVersionedEmployeeImport/, 'Employee preview uses the dedicated credential-safe API method');
+assert.match(apiSource, /initialPasswordPresent: Boolean\(initialPassword\)/, 'Employee preview sends a nonsecret credential-presence indicator only');
 assert.match(page, /employeeImportOperation:\s*\{[\s\S]*applyKey:\s*crypto\.randomUUID\(\)/,
   'a newly selected Employee Master CSV gets a fresh in-memory apply key');
 assert.match(page, /operation\.applyKey,[\s\S]*pendingImport\.errors,[\s\S]*pendingImport\.rows\.length/,
@@ -224,7 +249,7 @@ sessionValues.set('workos_organization_scope', JSON.stringify({organizationId: '
 releaseHealthCheck();
 await assert.rejects(scopeBoundPreview, /scope changed before the import request was sent/i,
   'an organization/entity change during the async health check blocks sending the import to a different scope');
-assert.equal(calls.length, 7, 'scope mismatch after health check sends no import POST');
+assert.equal(calls.length, 8, 'scope mismatch after health check sends no import POST');
 
 resetBackendCheck();
 prepareDeferredHealthCheck();
@@ -236,7 +261,7 @@ await healthCheckStarted;
 releaseHealthCheck();
 await assert.rejects(scopeBoundLegacyLog, /scope changed before the import request was sent/i,
   'a generic import-history write remains bound to the captured organization/entity after async health detection');
-assert.equal(calls.length, 7, 'a stale-scope generic import-history write sends no POST');
+assert.equal(calls.length, 8, 'a stale-scope generic import-history write sends no POST');
 
 assert.equal(await downloadAuditedCsv('stale-export.csv', [], 'Synthetic Export', 'Success', originalScope), 'cancelled',
   'a generic CSV export must not start after its expected organization/entity scope changed');

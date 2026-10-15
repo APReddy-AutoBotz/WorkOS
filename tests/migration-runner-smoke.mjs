@@ -355,6 +355,22 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
     values ('employee-allocation-target','EMP-ALLOCATION-TARGET','Synthetic Allocation Target','allocation-target@example.test',
       'Consultant','Engineering','US','cd-import-provenance-test','Active','org-default','legal-default')`);
+  await pool.query(`insert into employees
+      (id,employee_id,name,email,designation,department,country,reporting_manager_id,primary_country_director_id,status,organization_id,legal_entity_id)
+    values
+      ('employee-dryrun-cycle-a','EMP-DRYRUN-CYCLE-A','Synthetic Dry Run Cycle A','dryrun-cycle-a@example.test',
+        'Consultant','Engineering','US','employee-allocation-target','cd-import-provenance-test','Active','org-default','legal-default'),
+      ('employee-dryrun-cycle-b','EMP-DRYRUN-CYCLE-B','Synthetic Dry Run Cycle B','dryrun-cycle-b@example.test',
+        'Consultant','Engineering','US','employee-allocation-target','cd-import-provenance-test','Active','org-default','legal-default')`);
+  await pool.query(`insert into employees
+      (id,employee_id,name,email,designation,department,country,reporting_manager_id,primary_country_director_id,status,organization_id,legal_entity_id)
+    values
+      ('employee-dryrun-exit-a','EMP-DRYRUN-EXIT-A','Synthetic Dry Run Exit Report','dryrun-exit-a@example.test',
+        'Consultant','Engineering','US','employee-dryrun-exit-b','cd-import-provenance-test','Active','org-default','legal-default'),
+      ('employee-dryrun-exit-b','EMP-DRYRUN-EXIT-B','Synthetic Dry Run Exit Manager','dryrun-exit-b@example.test',
+        'Consultant','Engineering','US',null,'cd-import-provenance-test','Active','org-default','legal-default'),
+      ('employee-dryrun-exit-c','EMP-DRYRUN-EXIT-C','Synthetic Dry Run New Manager','dryrun-exit-c@example.test',
+        'Consultant','Engineering','US',null,'cd-import-provenance-test','Active','org-default','legal-default')`);
   await pool.query(`insert into audit_logs (user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,details)
     values ('legacy-null-scope-actor','Legacy actor','Admin','Admin','Web','Legacy','Legacy Scope Row','Test','legacy-null-audit','historical row without scope')`);
   await pool.query(`insert into import_export_logs (operation,channel,file_name,status,user_name)
@@ -650,12 +666,220 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     }, 'employee-master-unsupported-schema');
     assert.equal(employeeUnsupportedSchemaResponse.status, 400);
     assert.equal((await employeeUnsupportedSchemaResponse.json()).error.code, 'UNSUPPORTED_SCHEMA_VERSION');
-    const employeeDryRunResponse = await applyEmployeesV1({...employeeV1Request, dryRun: true}, 'employee-master-dry-run-unsupported');
-    assert.equal(employeeDryRunResponse.status, 400,
-      'an unimplemented Employee Master server dry run must fail closed instead of applying data');
-    assert.equal((await employeeDryRunResponse.json()).error.code, 'UNSUPPORTED_DRY_RUN');
+    const previewCredentialEcho = randomBytes(32).toString('base64url');
+    const employeeDryRunRequest = {
+      schemaVersion: 'employee-master/1',
+      dryRun: true,
+      fileName: 'Employee Master import.csv',
+      totalRows: 2,
+      clientErrors: [{
+        rowNumber: 2,
+        field: 'email',
+        message: `Untrusted preview diagnostic echoed ${previewCredentialEcho}`,
+        sourceIdentifier: previewCredentialEcho,
+      }],
+      rows: [{
+        employeeId: 'EMP-IMPORT-V1-IDEMPOTENT',
+        name: 'Synthetic Idempotent Employee',
+        email: 'employee-import-v1-idempotent@example.test',
+        primaryCountryDirectorId: 'cd-import-provenance-test',
+        initialPasswordPresent: true,
+      }],
+    };
+    const unsafeEmployeeDryRunResponse = await applyEmployeesV1({
+      ...employeeDryRunRequest,
+      rows: [{...employeeDryRunRequest.rows[0], initialPassword: previewCredentialEcho}],
+    }, 'employee-master-dry-run-unsafe-credential');
+    assert.equal(unsafeEmployeeDryRunResponse.status, 400,
+      'server dry-run rejects credential values instead of accepting or retaining them');
+    assert.equal((await unsafeEmployeeDryRunResponse.json()).error.code, 'EMPLOYEE_DRY_RUN_CREDENTIAL_FORBIDDEN');
+    const unsafeLabelResponse = await applyEmployeesV1({
+      ...employeeDryRunRequest, fileName: `synthetic-${previewCredentialEcho}.csv`,
+    }, 'employee-master-dry-run-unsafe-label');
+    assert.equal(unsafeLabelResponse.status, 400,
+      'server dry-run requires the fixed safe batch label');
+    assert.equal((await unsafeLabelResponse.json()).error.code, 'EMPLOYEE_DRY_RUN_LABEL_REQUIRED');
+    const employeeDryRunKey = 'employee-master-dry-run-idempotency-test';
+    const dryRunStateBefore = await pool.query(`select
+        (select count(*)::int from employees where employee_id='EMP-IMPORT-V1-IDEMPOTENT') as employee_rows,
+        (select count(*)::int from users where employee_id='EMP-IMPORT-V1-IDEMPOTENT') as user_rows,
+        (select count(*)::int from user_roles ur join users u on u.id=ur.user_id where u.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as role_rows,
+        (select count(*)::int from user_organization_scopes s join users u on u.id=s.user_id where u.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as scope_rows,
+        (select count(*)::int from worker_profiles wp join employees e on e.id=wp.employee_id where e.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as worker_profile_rows,
+        (select count(*)::int from worker_history wh join employees e on e.id=wh.employee_id where e.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as worker_history_rows`);
+    const employeeDryRunResponses = await Promise.all([
+      applyEmployeesV1(employeeDryRunRequest, employeeDryRunKey),
+      applyEmployeesV1(employeeDryRunRequest, employeeDryRunKey),
+    ]);
+    assert.deepEqual(employeeDryRunResponses.map(response => response.status), [200, 200],
+      'same-key Employee dry-run requests serialize and return the saved result');
+    const employeeDryRunBodies = await Promise.all(employeeDryRunResponses.map(response => response.json()));
+    assert.deepEqual(employeeDryRunBodies.map(body => body.replayed).sort(), [false, true],
+      'Employee dry-run replay distinguishes the first accepted response from the stored result');
+    assert(employeeDryRunBodies.every(body => body.status === 'Dry Run' && body.validRows === 1 && body.errorRows === 1));
+    assert(employeeDryRunBodies.every(body => body.log.schema_version === 'employee-master/1' && body.log.dry_run === true));
+    assert(employeeDryRunBodies.every(body => body.log.file_name === 'Employee Master import.csv'));
+    assert.equal(JSON.stringify(employeeDryRunBodies).includes(previewCredentialEcho), false,
+      'server dry-run response and diagnostics omit untrusted client messages/source identifiers');
+    const employeeDryRunBatchId = employeeDryRunBodies[0].log.id;
+    assert.equal(employeeDryRunBodies[1].log.id, employeeDryRunBatchId);
+    const employeeDryRunAfter = await pool.query(`select
+        (select count(*)::int from employees where employee_id='EMP-IMPORT-V1-IDEMPOTENT') as employee_rows,
+        (select count(*)::int from users where employee_id='EMP-IMPORT-V1-IDEMPOTENT') as user_rows,
+        (select count(*)::int from user_roles ur join users u on u.id=ur.user_id where u.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as role_rows,
+        (select count(*)::int from user_organization_scopes s join users u on u.id=s.user_id where u.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as scope_rows,
+        (select count(*)::int from worker_profiles wp join employees e on e.id=wp.employee_id where e.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as worker_profile_rows,
+        (select count(*)::int from worker_history wh join employees e on e.id=wh.employee_id where e.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as worker_history_rows`);
+    assert.deepEqual(employeeDryRunAfter.rows, dryRunStateBefore.rows,
+      'Employee dry-run leaves employee, linked account, role, scope and lifecycle data unchanged');
+    const employeeDryRunEvidence = await pool.query(`select l.file_name,l.errors,l.schema_version,l.dry_run,
+        i.channel,i.request_hash,count(distinct a.id)::int as audit_rows
+      from import_export_logs l
+      join import_export_idempotency i on i.batch_id=l.id
+      left join audit_logs a on a.import_batch_id=l.id
+      where l.id=$1 group by l.id,i.channel,i.request_hash`, [employeeDryRunBatchId]);
+    assert.equal(employeeDryRunEvidence.rowCount, 1);
+    const savedDryRun = employeeDryRunEvidence.rows[0];
+    assert.equal(savedDryRun.file_name, 'Employee Master import.csv');
+    assert.equal(savedDryRun.schema_version, 'employee-master/1');
+    assert.equal(savedDryRun.dry_run, true);
+    assert.equal(savedDryRun.channel, 'Employee Master Dry Run');
+    assert.equal(savedDryRun.audit_rows, 1,
+      'dry-run stores one batch audit and no per-employee row audit');
+    assert.equal(JSON.stringify(savedDryRun).includes(previewCredentialEcho), false,
+      'preview batch, diagnostic, idempotency channel and durable request hash retain no echoed credential text');
+    assert.equal(savedDryRun.request_hash, hashEmployeeImportRequest({
+      schemaVersion: 'employee-master/1',
+      totalRows: 2,
+      clientErrors: [{rowNumber: 2, field: 'email'}],
+      rows: employeeDryRunRequest.rows,
+    }), 'dry-run request identity stores only canonical nonsecret employee fields and safe error structure');
+    const employeeManagerCycleBefore = await pool.query(`select id,reporting_manager_id
+      from employees where id in ('employee-dryrun-cycle-a','employee-dryrun-cycle-b') order by id`);
+    const employeeManagerCyclePreview = await applyEmployeesV1({
+      schemaVersion: 'employee-master/1',
+      dryRun: true,
+      fileName: 'Employee Master import.csv',
+      totalRows: 2,
+      rows: [
+        {...employeeDryRunRequest.rows[0], employeeId: 'EMP-DRYRUN-CYCLE-A',
+          name: 'Synthetic Dry Run Cycle A', email: 'dryrun-cycle-a@example.test', reportingManagerId: 'EMP-DRYRUN-CYCLE-B'},
+        {...employeeDryRunRequest.rows[0], employeeId: 'EMP-DRYRUN-CYCLE-B',
+          name: 'Synthetic Dry Run Cycle B', email: 'dryrun-cycle-b@example.test', reportingManagerId: 'EMP-DRYRUN-CYCLE-A'},
+      ],
+    }, 'employee-master-dry-run-manager-cycle-test');
+    assert.equal(employeeManagerCyclePreview.status, 200);
+    const employeeManagerCycleBody = await employeeManagerCyclePreview.json();
+    assert.equal(employeeManagerCycleBody.validRows, 1,
+      'dry-run simulates an earlier accepted reporting-manager edge before validating later rows');
+    assert.equal(employeeManagerCycleBody.errors[0].rowNumber, 3);
+    assert.equal(employeeManagerCycleBody.errors[0].field, 'reportingManagerId');
+    assert.equal(JSON.stringify(employeeManagerCycleBody).includes('EMP-DRYRUN-CYCLE-A'), false,
+      'the manager-cycle diagnostic omits employee source identifiers');
+    const employeeManagerCycleAfter = await pool.query(`select id,reporting_manager_id
+      from employees where id in ('employee-dryrun-cycle-a','employee-dryrun-cycle-b') order by id`);
+    assert.deepEqual(employeeManagerCycleAfter.rows, employeeManagerCycleBefore.rows,
+      'manager-cycle preview performs no employee relationship changes');
+    const employeeExitSimulationBefore = await pool.query(`select id,status,reporting_manager_id
+      from employees where id in ('employee-dryrun-exit-a','employee-dryrun-exit-b','employee-dryrun-exit-c') order by id`);
+    const employeeExitWithReportPreview = await applyEmployeesV1({
+      ...employeeDryRunRequest,
+      totalRows: 1,
+      clientErrors: [],
+      rows: [{...employeeDryRunRequest.rows[0], employeeId: 'EMP-DRYRUN-EXIT-B',
+        name: 'Synthetic Dry Run Exit Manager', email: 'dryrun-exit-b@example.test',
+        status: 'Exited', exitDate: '2026-10-01', reportingManagerId: undefined}],
+    }, 'employee-master-dry-run-exit-with-report-test');
+    assert.equal(employeeExitWithReportPreview.status, 200);
+    const employeeExitWithReportBody = await employeeExitWithReportPreview.json();
+    assert.equal(employeeExitWithReportBody.validRows, 0,
+      'preview still refuses to exit a manager with an active report remaining in scope');
+    assert.equal(employeeExitWithReportBody.errors[0].code, 'WORKER_DEPENDENCY_CONFLICT');
+    const employeeExitAfterReportMovePreview = await applyEmployeesV1({
+      ...employeeDryRunRequest,
+      totalRows: 2,
+      clientErrors: [],
+      rows: [
+        {...employeeDryRunRequest.rows[0], employeeId: 'EMP-DRYRUN-EXIT-A',
+          name: 'Synthetic Dry Run Exit Report', email: 'dryrun-exit-a@example.test',
+          reportingManagerId: 'employee-dryrun-exit-c'},
+        {...employeeDryRunRequest.rows[0], employeeId: 'EMP-DRYRUN-EXIT-B',
+          name: 'Synthetic Dry Run Exit Manager', email: 'dryrun-exit-b@example.test',
+          status: 'Exited', exitDate: '2026-10-01', reportingManagerId: undefined},
+      ],
+    }, 'employee-master-dry-run-exit-after-report-move-test');
+    assert.equal(employeeExitAfterReportMovePreview.status, 200);
+    const employeeExitAfterReportMoveBody = await employeeExitAfterReportMovePreview.json();
+    assert.equal(employeeExitAfterReportMoveBody.validRows, 2,
+      'exit preflight accounts for an earlier same-file manager reassignment');
+    assert.equal(employeeExitAfterReportMoveBody.errorRows, 0);
+    const employeeExitSimulationAfter = await pool.query(`select id,status,reporting_manager_id
+      from employees where id in ('employee-dryrun-exit-a','employee-dryrun-exit-b','employee-dryrun-exit-c') order by id`);
+    assert.deepEqual(employeeExitSimulationAfter.rows, employeeExitSimulationBefore.rows,
+      'exit preview simulates the report move without changing employee rows');
+    const crossLegalManagerPreview = await applyEmployeesV1({
+      ...employeeDryRunRequest,
+      totalRows: 1,
+      clientErrors: [],
+      rows: [{
+        ...employeeDryRunRequest.rows[0],
+        employeeId: 'EMP-IMPORT-V1-MANAGER-SCOPE-TEST',
+        name: 'Synthetic Employee With Out-of-Scope Manager',
+        email: 'employee-import-v1-manager-scope@example.test',
+        reportingManagerId: 'EMP-SCOPE-BETA',
+      }],
+    }, 'employee-master-dry-run-manager-scope-test');
+    assert.equal(crossLegalManagerPreview.status, 200);
+    const crossLegalManagerBody = await crossLegalManagerPreview.json();
+    assert.equal(crossLegalManagerBody.validRows, 0,
+      'Employee dry-run rejects manager references outside the selected legal entity');
+    assert.equal(crossLegalManagerBody.errors[0].field, 'reportingManagerId');
+    assert.equal(JSON.stringify(crossLegalManagerBody).includes('EMP-SCOPE-BETA'), false,
+      'scope-conflict diagnostics do not disclose the out-of-scope employee identifier');
+    assert.equal((await pool.query(`select count(*)::int as rows from employees where employee_id='EMP-IMPORT-V1-MANAGER-SCOPE-TEST'`)).rows[0].rows, 0,
+      'a rejected cross-legal-entity manager reference cannot create an employee');
+    const crossLegalEmployeePreview = await applyEmployeesV1({
+      ...employeeDryRunRequest,
+      totalRows: 1,
+      clientErrors: [],
+      rows: [{
+        ...employeeDryRunRequest.rows[0],
+        employeeId: 'EMP-SCOPE-BETA',
+        name: 'Synthetic Colliding Employee Identifier',
+        email: 'employee-import-v1-cross-legal@example.test',
+        reportingManagerId: undefined,
+      }],
+    }, 'employee-master-dry-run-cross-legal-employee-test');
+    assert.equal(crossLegalEmployeePreview.status, 200);
+    const crossLegalEmployeeBody = await crossLegalEmployeePreview.json();
+    assert.equal(crossLegalEmployeeBody.validRows, 0,
+      'Employee dry-run detects identifiers owned by another legal entity within the same organization');
+    assert.equal(crossLegalEmployeeBody.errors[0].code, 'EMPLOYEE_SCOPE_CONFLICT');
+    assert.equal(JSON.stringify(crossLegalEmployeeBody).includes('EMP-SCOPE-BETA'), false,
+      'scope conflicts use a generic safe preview diagnostic');
+    const changedDryRunPresence = await applyEmployeesV1({
+      ...employeeDryRunRequest,
+      rows: [{...employeeDryRunRequest.rows[0], initialPasswordPresent: false}],
+    }, employeeDryRunKey);
+    assert.equal(changedDryRunPresence.status, 409,
+      'a changed non-secret credential-presence indicator conflicts under a reused preview key');
+    assert.equal((await changedDryRunPresence.json()).error.code, 'IDEMPOTENCY_KEY_REUSED');
+    assert.equal((await pool.query(`select count(*)::int as batches from import_export_logs where id=$1`, [employeeDryRunBatchId])).rows[0].batches, 1,
+      'replayed or conflicting preview requests create no additional batches');
+    const missingPreviewCredential = await applyEmployeesV1({
+      ...employeeDryRunRequest,
+      clientErrors: [],
+      rows: [{...employeeDryRunRequest.rows[0], initialPasswordPresent: false}],
+    }, 'employee-master-dry-run-missing-initial-password');
+    assert.equal(missingPreviewCredential.status, 200);
+    const missingPreviewCredentialBody = await missingPreviewCredential.json();
+    assert.equal(missingPreviewCredentialBody.validRows, 0);
+    assert.equal(missingPreviewCredentialBody.errors[0].field, 'initialPassword');
+    assert.equal(missingPreviewCredentialBody.errors[0].message,
+      'A new employee account requires an initial password before apply.');
+    assert.equal(JSON.stringify(missingPreviewCredentialBody).includes(previewCredentialEcho), false);
     assert.equal((await pool.query(`select count(*)::int as rows from employees where employee_id='EMP-IMPORT-V1-IDEMPOTENT'`)).rows[0].rows, 0,
-      'contract rejects must not write Employee Master rows');
+      'Employee Master preview and rejected requests must not write employee rows');
     const employeeRequestHash = hashEmployeeImportRequest(employeeV1Request);
     assert.equal(employeeRequestHash, hashEmployeeImportRequest(employeeV1Retry(replayEmployeePasswordA)),
       'Employee password-only retries retain the first request’s unchanged filename and diagnostic text without fingerprinting either');
