@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const server = readFileSync('server/index.mjs', 'utf8');
+const projectSaveRoute = server.slice(
+  server.indexOf("app.post('/api/projects'"),
+  server.indexOf("app.patch('/api/projects/:id/status'"),
+);
 const employeeImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/employees/apply'"),
   server.indexOf("app.post('/api/imports/clients/apply'"),
@@ -10,10 +14,9 @@ const clientImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/clients/apply'"),
   server.indexOf("app.post('/api/imports/projects/apply'"),
 );
-const projectImportRoute = server.slice(
-  server.indexOf("app.post('/api/imports/projects/apply'"),
-  server.indexOf("app.post('/api/imports/allocations/apply'"),
-);
+const projectImportRouter = readFileSync('server/modules/imports/project-import-router.mjs', 'utf8');
+const importIdempotency = readFileSync('server/modules/imports/idempotency.mjs', 'utf8');
+const importOperationMigration = readFileSync('server/migrations/039_wos03_import_operation_contract.sql', 'utf8');
 const allocationImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/allocations/apply'"),
   server.indexOf("app.post('/api/imports/timesheets/apply'"),
@@ -166,26 +169,43 @@ assert.match(clientImportRoute, /const status = saved === 0 \? 'Failed' : errors
   'client import success, partial and failed outcomes must retain their existing semantics');
 assert.doesNotMatch(clientImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'client import provenance must not persist raw CSV contents');
-assert.match(server, /app\.post\('\/api\/imports\/projects\/apply'/, 'project import apply route must exist');
-assert.match(projectImportRoute, /requirePermission\('imports\.manage'\)/,
+assert.match(server, /const projectImportRouter = createProjectImportRouter\([\s\S]*app\.use\('\/api', projectImportRouter\)[\s\S]*app\.use\('\/api\/v1', projectImportRouter\)/,
+  'legacy and versioned project import routes must share the same module router');
+assert.match(projectImportRouter, /router\.post\('\/imports\/projects\/apply', requireDatabase, requireAuth, requirePermission\('imports\.manage'\)/,
   'project import apply must retain its imports.manage authorization gate');
-assert.match(projectImportRoute, /projectCode: z\.string\(\)\.min\(1\)/,
+assert.match(projectImportRouter, /projectCode: z\.string\(\)\.min\(1\)/,
   'project import provenance must use the existing required source project code');
-assert.match(projectImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
+assert.match(projectImportRouter, /const importBatchId = randomUUID\(\)/,
   'project imports must receive a server-generated batch ID after request validation');
-assert.match(projectImportRoute, /source: 'Project Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.projectCode,[\s\S]*importProcessingResult: 'Success'/,
+assert.match(projectImportRouter, /source: 'Project Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.projectCode,[\s\S]*importProcessingResult: 'Success'/,
   'successful project row audits must retain source, required source ID, batch and processing result');
-assert.match(projectImportRoute, /on conflict \(organization_id,project_code\) do update set[\s\S]*where projects\.organization_id = excluded\.organization_id[\s\S]*and projects\.legal_entity_id = excluded\.legal_entity_id[\s\S]*returning \*[\s\S]*if \(result\.rowCount === 0\)[\s\S]*PROJECT_SCOPE_CONFLICT/,
+assert.match(projectImportRouter, /on conflict \(organization_id,project_code\) do update set[\s\S]*where projects\.organization_id=excluded\.organization_id and projects\.legal_entity_id=excluded\.legal_entity_id returning \*[\s\S]*if \(result\.rowCount === 0\)[\s\S]*PROJECT_SCOPE_CONFLICT/,
   'a racing project-code conflict must update only inside the same organization and legal entity or remain a row-local conflict');
-assert.match(projectImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Project Master'/,
-  'project batch history must use the same ID as row audits and retain the selected scope');
-assert.match(projectImportRoute, /\[\s*importBatchId,[\s\S]*parsed\.data\.fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
-  'the project batch result must preserve aggregate status, counts and existing row errors');
-assert.match(projectImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
+assert.match(projectImportRouter, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run\)/,
+  'project batch history must retain the same batch ID and server-verified scope with schema and dry-run metadata');
+assert.match(projectImportRouter, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'project mutations, row audits and the batch result must commit or roll back together');
-assert.match(projectImportRoute, /const status = saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
+assert.match(projectImportRouter, /const status = dryRun \? 'Dry Run' : saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
   'project import success, partial and failed outcomes must retain their existing semantics');
-assert.doesNotMatch(projectImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
+assert.match(projectImportRouter, /Idempotency-Key[\s\S]*schemaVersion[\s\S]*dryRun[\s\S]*IDEMPOTENCY_KEY_REUSED/,
+  'the v1 project import contract must require a schema version and key and protect changed-payload replays');
+assert.match(projectImportRouter, /pg_advisory_xact_lock\(hashtextextended\(\$1, 0\)\)[\s\S]*import_export_idempotency/,
+  'same-key project imports must serialize through a database transaction lock and durable idempotency record');
+assert.match(projectImportRouter, /const projectCodeLockKeys[\s\S]*\.sort\(\(left, right\) => left < right \? -1 : left > right \? 1 : 0\)[\s\S]*for \(const projectCodeLockKey of projectCodeLockKeys\)/,
+  'overlapping project imports must acquire all org-scoped project-code locks in a stable order');
+assert.match(projectSaveRoute, /createProjectCodeLockKey[\s\S]*\.sort\(\(left, right\) => left < right \? -1 : left > right \? 1 : 0\)[\s\S]*pg_advisory_xact_lock\(hashtextextended\(\$1, 0\)\)[\s\S]*select \* from projects[\s\S]*for update/,
+  'normal project create/update must share sorted org-scoped project-code locks with import before reading its locked prior value');
+assert.match(projectSaveRoute, /Boolean\(observedPrevious\) !== Boolean\(previous\)[\s\S]*status\(409\)/,
+  'normal project saves must fail with a stable conflict when the prior row changes before shared-lock acquisition');
+assert.match(projectImportRouter, /versioned && row\.clientId[\s\S]*where id=\$1 and organization_id=\$2 and legal_entity_id=\$3/,
+  'the versioned contract must treat clientId as authoritative within the server-resolved scope');
+assert.match(projectImportRouter, /versioned\s*\?\s*'Project code is not available in the authorized scope\.'/,
+  'versioned cross-scope conflicts must not reveal an out-of-scope project-code match');
+assert.match(importOperationMigration, /add column if not exists schema_version text[\s\S]*add column if not exists dry_run boolean not null default false[\s\S]*create table if not exists import_export_idempotency[\s\S]*primary key \(organization_id, legal_entity_id, actor_id, channel, idempotency_key\)[\s\S]*on delete cascade/,
+  'migration 039 must add scoped operation metadata and idempotency records linked to the batch lifecycle');
+assert.match(importIdempotency, /normalizeIdempotencyKey[\s\S]*stableJsonStringify[\s\S]*createHash\('sha256'\)/,
+  'idempotency keys and canonical payload hashes must be validated and stable');
+assert.doesNotMatch(projectImportRouter, /csvContents|rawCsv|parsed\.data\.csv/i,
   'project import provenance must not persist raw CSV contents');
 assert.match(server, /app\.post\('\/api\/imports\/allocations\/apply'/, 'allocation import apply route must exist');
 assert.match(allocationImportRoute, /requirePermission\('imports\.manage'\)/,
@@ -234,7 +254,7 @@ assert.doesNotMatch(timesheetImportRoute, /csvContents|rawCsv|parsed\.data\.csv/
 assert.match(server, /collectDuplicateImportRows/, 'import apply routes must share duplicate-row detection');
 assert.match(server, /Duplicate \$\{label \|\| field\} also appears on row/, 'duplicate import rows must return row-level errors');
 assert.match(server, /field: 'employeeId'[\s\S]*field: 'email'/, 'employee import must reject duplicate employee IDs and emails within a file');
-assert.match(server, /field: 'projectCode'/, 'project import must reject duplicate project codes within a file');
+assert.match(projectImportRouter, /field: 'projectCode'/, 'project import must reject duplicate project codes within a file');
 assert.match(server, /field: 'id', value: row\.id, label: 'client ID'[\s\S]*field: 'name', value: row\.name, label: 'client name'/, 'client import must reject duplicate client IDs and names within a file');
 assert.match(server, /duplicateImportRows\.duplicateRowNumbers\.has\(rowNumber\)/, 'duplicate import rows must be skipped instead of upserted');
 assert.match(server, /action: previous \? 'Update Client' : 'Create Client'/, 'client master changes must be audited with create/update actions');

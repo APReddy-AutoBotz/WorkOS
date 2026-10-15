@@ -53,7 +53,8 @@ export const createImportHistoryRouter = ({
       const result = await pool.query(`
         insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-        returning *
+        returning id, operation, channel, file_name, status, total_rows, valid_rows, error_rows,
+          errors, user_name, created_at, organization_id, legal_entity_id
       `, [
         parsed.data.operation,
         parsed.data.channel,

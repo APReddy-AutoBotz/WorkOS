@@ -139,6 +139,8 @@ export interface ImportExportLog {
   totalRows: number;
   validRows: number;
   errorRows: number;
+  schemaVersion?: string;
+  dryRun?: boolean;
   errors?: Array<{
     rowNumber: number;
     field?: string;

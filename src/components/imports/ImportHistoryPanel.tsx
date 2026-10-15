@@ -16,6 +16,8 @@ export const ImportHistoryDetails = ({item}: {item: ImportExportLog}) => {
         <div><dt className="font-bold">Batch reference</dt><dd>{item.id}</dd></div>
         <div><dt className="font-bold">Channel</dt><dd>{item.channel}</dd></div>
         <div><dt className="font-bold">Processing result</dt><dd>{item.status}: {item.validRows} valid, {item.errorRows} errors, {item.totalRows} total rows</dd></div>
+        {item.schemaVersion && <div><dt className="font-bold">Schema version</dt><dd>{item.schemaVersion}</dd></div>}
+        {item.schemaVersion && item.dryRun !== undefined && <div><dt className="font-bold">Server-side dry run</dt><dd>{item.dryRun ? 'Yes' : 'No'}</dd></div>}
       </dl>
       {errors.length > 0 ? (
         <div className="mt-4">

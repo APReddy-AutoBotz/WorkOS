@@ -41,6 +41,7 @@
     "test:audit-history-router": "node tests/audit-history-router-smoke.mjs",
     "test:organization-audit-router": "node tests/organization-audit-router-smoke.mjs",
     "test:import-history-router": "node tests/import-history-router-smoke.mjs",
+    "test:import-idempotency": "node tests/import-idempotency-smoke.mjs",
     "test:import-error-provenance": "node --import tsx tests/import-error-provenance-smoke.mjs",
     "test:integration-history-router": "node tests/integration-history-router-smoke.mjs",
     "test:deployment-integration-history-router": "node tests/deployment-integration-history-router-smoke.mjs",
@@ -57,7 +58,7 @@
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",
     "test:document-metadata": "node tests/document-metadata-smoke.mjs",
-    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:organization-setup && npm run test:organization-setup-v1 && npm run test:authorization-convergence && npm run test:identity-access && npm run test:audit-record && npm run test:scoped-history-view && npm run test:audit-history-router && npm run test:organization-audit-router && npm run test:import-history-router && npm run test:import-history-view && npm run test:import-error-provenance && npm run test:integration-history-router && npm run test:deployment-integration-history-router && npm run test:api-v1-contract && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging",
+    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:organization-setup && npm run test:organization-setup-v1 && npm run test:authorization-convergence && npm run test:identity-access && npm run test:audit-record && npm run test:scoped-history-view && npm run test:audit-history-router && npm run test:organization-audit-router && npm run test:import-history-router && npm run test:import-history-view && npm run test:import-idempotency && npm run test:import-error-provenance && npm run test:integration-history-router && npm run test:deployment-integration-history-router && npm run test:api-v1-contract && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging",
     "test:import-history-view": "node --import tsx tests/import-history-view-smoke.mjs",
     "test:import-history-browser": "node tests/import-history-browser-smoke.mjs"
   },

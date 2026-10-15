@@ -21,6 +21,8 @@ import {createOrganizationAuditRouter} from './modules/audit/organization-audit-
 import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
 import {attachImportErrorSourceIdentifiers, importErrorRowSchema, resolveImportApplyRowNumbers} from './modules/imports/import-error-provenance.mjs';
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
+import {createProjectImportRouter} from './modules/imports/project-import-router.mjs';
+import {createProjectCodeLockKey} from './modules/imports/idempotency.mjs';
 import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
@@ -2118,9 +2120,25 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
       res.status(422).json({ error: 'Project manager must reference an active employee' });
       return;
     }
-    const previous = parsed.data.id
-      ? (await client.query('select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0]
+    const projectLookupParams = [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId];
+    const observedPrevious = parsed.data.id
+      ? (await client.query('select project_code from projects where id = $1 and organization_id = $2 and legal_entity_id = $3', projectLookupParams)).rows[0]
       : null;
+    const projectCodeLockKeys = [...new Set([
+      createProjectCodeLockKey({organizationId: req.organizationScope.organizationId, projectCode: parsed.data.project_code}),
+      ...(observedPrevious ? [createProjectCodeLockKey({organizationId: req.organizationScope.organizationId, projectCode: observedPrevious.project_code})] : []),
+    ])].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+    for (const projectCodeLockKey of projectCodeLockKeys) {
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [projectCodeLockKey]);
+    }
+    const previous = parsed.data.id
+      ? (await client.query('select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', projectLookupParams)).rows[0]
+      : null;
+    if (Boolean(observedPrevious) !== Boolean(previous) || (observedPrevious && observedPrevious.project_code !== previous.project_code)) {
+      await client.query('rollback');
+      res.status(409).json({error: 'Project changed while saving; retry the request'});
+      return;
+    }
     if (parsed.data.id && !previous) {
       const unavailableId = (await client.query('select 1 from projects where id = $1', [parsed.data.id])).rows[0];
       if (unavailableId) {
@@ -6415,6 +6433,21 @@ app.get('/api/reports/dashboard', requireDatabase, requireAuth, requirePermissio
 const importHistoryRouter = createImportHistoryRouter({pool, requireDatabase, requireAuth, requirePermission});
 app.use('/api', importHistoryRouter);
 app.use('/api/v1', importHistoryRouter);
+const projectImportRouter = createProjectImportRouter({
+  pool,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  audit,
+  importErrorRowSchema,
+  strictIsoDateSchema,
+  parseBoolean,
+  collectDuplicateImportRows,
+  resolveImportApplyRowNumbers,
+  attachImportErrorSourceIdentifiers,
+});
+app.use('/api', projectImportRouter);
+app.use('/api/v1', projectImportRouter);
 
 app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
   const rowSchema = z.object({
@@ -6929,189 +6962,6 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
     await client.query('rollback');
     console.error(error);
     res.status(500).json({ error: 'Client import apply failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const rowSchema = z.object({
-    projectCode: z.string().min(1),
-    name: z.string().min(1),
-    clientId: z.string().optional(),
-    client: z.string().min(1),
-    managerId: z.string().min(1),
-    startDate: strictIsoDateSchema,
-    endDate: strictIsoDateSchema,
-    status: z.enum(['Proposed', 'Active', 'On Hold', 'Completed']).optional(),
-    billable: z.union([z.boolean(), z.string()]).optional(),
-    projectType: z.string().optional(),
-    country: z.string().optional(),
-    notes: z.string().optional(),
-  });
-  const schema = z.object({
-    fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
-    totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(importErrorRowSchema).optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-
-  const client = await pool.connect();
-  const clientErrors = parsed.data.clientErrors || [];
-  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
-    rows: parsed.data.rows,
-    totalRows: parsed.data.totalRows,
-    clientErrors,
-  });
-  const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
-    { field: 'projectCode', value: row.projectCode, label: 'project code' },
-  ], index => rowNumbers[index]);
-  const errors = [...clientErrors, ...duplicateImportRows.errors];
-  const importBatchId = crypto.randomUUID();
-  let saved = 0;
-  try {
-    await client.query('begin');
-
-    for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = rowNumbers[index];
-      if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
-      const rowErrors = [];
-      if (row.endDate < row.startDate) {
-        rowErrors.push({ rowNumber, field: 'endDate', message: 'End date must be on or after start date.' });
-      }
-
-      const clientRecord = (await client.query(`
-        select id, name, status
-        from clients
-        where (($1::text is not null and id = $1) or lower(name) = lower($2))
-          and organization_id=$3 and legal_entity_id=$4
-        limit 1
-      `, [row.clientId || null, row.client, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (!clientRecord || clientRecord.status !== 'Active') {
-        rowErrors.push({ rowNumber, field: 'client', message: 'Project must reference an active client.' });
-      }
-
-      const manager = (await client.query(`
-        select id, name, status
-        from employees
-        where (id = $1 or employee_id = $1) and status = 'Active'
-          and organization_id=$2 and legal_entity_id=$3
-        limit 1
-      `, [row.managerId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (!manager) {
-        rowErrors.push({ rowNumber, field: 'managerId', message: 'Project manager employee record does not exist or is exited.' });
-      }
-
-      if (rowErrors.length > 0) {
-        errors.push(...rowErrors);
-        continue;
-      }
-
-      const previous = (await client.query(`select * from projects where project_code=$1 and organization_id=$2 and legal_entity_id=$3 limit 1`,
-        [row.projectCode, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      const crossLegalCollision = !previous && (await client.query(`select 1 from projects where project_code=$1 and organization_id=$2 and legal_entity_id<>$3 limit 1`,
-        [row.projectCode, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (crossLegalCollision) {
-        errors.push({ rowNumber, field: 'projectCode', message: 'Project code belongs to another legal entity in this organization.', code: 'PROJECT_SCOPE_CONFLICT' });
-        continue;
-      }
-      const result = await client.query(`
-        insert into projects (id, project_code, name, client_id, client, manager_id, manager_name, start_date, end_date, status, billable, project_type, country, notes, organization_id, legal_entity_id)
-        values (coalesce($1, 'p-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-        on conflict (organization_id,project_code) do update set
-          name = excluded.name,
-          client_id = excluded.client_id,
-          client = excluded.client,
-          manager_id = excluded.manager_id,
-          manager_name = excluded.manager_name,
-          start_date = excluded.start_date,
-          end_date = excluded.end_date,
-          status = excluded.status,
-          billable = excluded.billable,
-          project_type = excluded.project_type,
-          country = excluded.country,
-          notes = excluded.notes,
-          updated_at = now()
-        where projects.organization_id = excluded.organization_id
-          and projects.legal_entity_id = excluded.legal_entity_id
-        returning *
-      `, [
-        previous?.id || null,
-        row.projectCode,
-        row.name,
-        clientRecord.id,
-        clientRecord.name,
-        manager.id,
-        manager.name,
-        row.startDate,
-        row.endDate,
-        row.status || previous?.status || 'Proposed',
-        parseBoolean(row.billable, previous?.billable ?? true),
-        row.projectType || previous?.project_type || null,
-        row.country || previous?.country || null,
-        row.notes || previous?.notes || null,
-        req.organizationScope.organizationId, req.organizationScope.legalEntityId,
-      ]);
-      if (result.rowCount === 0) {
-        errors.push({ rowNumber, field: 'projectCode', message: 'Project code belongs to another legal entity in this organization.', code: 'PROJECT_SCOPE_CONFLICT' });
-        continue;
-      }
-      const project = result.rows[0];
-      await audit(client, req, {
-        module: 'Import',
-        action: previous ? 'Import Update Project' : 'Import Create Project',
-        entityType: 'Project',
-        entityId: project.id,
-        oldValue: previous,
-        newValue: project,
-        details: `${previous ? 'Updated' : 'Created'} project ${project.project_code} from ${parsed.data.fileName}`,
-        source: 'Project Master CSV',
-        importBatchId,
-        sourceIdentifier: row.projectCode,
-        importProcessingResult: 'Success',
-      });
-      saved += 1;
-    }
-
-    const responseErrors = attachImportErrorSourceIdentifiers({
-      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
-      sourceIdentifierForRow: row => row.projectCode,
-    });
-    const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
-    const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
-      values ($1,'Import','Project Master',$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      returning *
-    `, [
-      importBatchId,
-      parsed.data.fileName,
-      status,
-      parsed.data.totalRows ?? parsed.data.rows.length,
-      saved,
-      errors.length,
-      errors.length ? JSON.stringify(responseErrors) : null,
-      req.user.username,
-      req.organizationScope.organizationId,
-      req.organizationScope.legalEntityId,
-    ]);
-    await client.query('commit');
-    res.json({
-      status,
-      totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-      validRows: saved,
-      errorRows: errors.length,
-      errors: responseErrors,
-      log: logResult.rows[0],
-    });
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Project import apply failed' });
   } finally {
     client.release();
   }

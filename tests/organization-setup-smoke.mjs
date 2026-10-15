@@ -34,6 +34,7 @@ for (const invalidTerms of [
 ]) assert(!validateTerminology({terms:invalidTerms,effectiveFrom:'2026-01-01'}).success, 'invalid terminology must fail closed');
 assert.deepEqual(normalizePersistedTerminology({employee:'person'}).employee,{singular:'person',plural:'persons',helpText:''});
 const server = readFileSync('server/index.mjs', 'utf8');
+const projectImportRouter = readFileSync('server/modules/imports/project-import-router.mjs', 'utf8');
 const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
 const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
@@ -251,8 +252,8 @@ assert.match(server, /app\.delete\('\/api\/employees\/:id'[\s\S]*assertWorkerMay
 assert.match(server, /api\/projects[\s\S]*select \* from projects where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*Project not found in the authorized organization and legal entity/, 'project ID updates must deny cross-scope rows before upsert');
 const projectSaveRoute = routeSource("app.post('/api/projects'", "app.patch('/api/projects/:id/status'");
 assert.match(projectSaveRoute, /on conflict \(id\) do update set[\s\S]*where projects\.organization_id = excluded\.organization_id[\s\S]*and projects\.legal_entity_id = excluded\.legal_entity_id[\s\S]*returning \*[\s\S]*if \(result\.rowCount === 0\)[\s\S]*Project not found in the authorized organization and legal entity/, 'a racing project ID conflict must update only inside the same organization and legal entity and otherwise roll back with a non-disclosing not-found response');
-assert.match(server, /api\/imports\/projects\/apply[\s\S]*from clients[\s\S]*organization_id=\$3 and legal_entity_id=\$4[\s\S]*from employees[\s\S]*organization_id=\$2 and legal_entity_id=\$3/, 'project imports must resolve clients and managers in the exact request scope');
-assert.match(server, /select \* from projects where project_code=\$1 and organization_id=\$2 and legal_entity_id=\$3[\s\S]*legal_entity_id<>\$3[\s\S]*PROJECT_SCOPE_CONFLICT/, 'project imports must not adopt foreign primary keys and must reject same-organization cross-legal code collisions');
+assert.match(projectImportRouter, /router\.post\('\/imports\/projects\/apply'[\s\S]*from clients[\s\S]*organization_id=\$3 and legal_entity_id=\$4[\s\S]*from employees[\s\S]*organization_id=\$2 and legal_entity_id=\$3/, 'project imports must resolve clients and managers in the exact request scope');
+assert.match(projectImportRouter, /select \* from projects where project_code=\$1 and organization_id=\$2 and legal_entity_id=\$3[\s\S]*legal_entity_id<>\$3[\s\S]*PROJECT_SCOPE_CONFLICT/, 'project imports must not adopt foreign primary keys and must reject same-organization cross-legal code collisions');
 assert.match(server, /api\/allocations[\s\S]*from project_allocations where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*insert into project_allocations \(id,[\s\S]*organization_id, legal_entity_id\)/, 'allocation save must scope existing rows and persist legal ownership');
 assert.match(server, /const allocationIdExistsOutsideScope = parsed\.data\.id && !previous[\s\S]*select 1 from project_allocations where id = \$1[\s\S]*if \(allocationIdExistsOutsideScope\)/, 'a new explicit allocation ID must create while an existing cross-scope ID is denied');
 assert.match(server, /on conflict \(id\) do update set[\s\S]*where project_allocations\.organization_id = excluded\.organization_id[\s\S]*project_allocations\.legal_entity_id = excluded\.legal_entity_id[\s\S]*returning \*/, 'same-scope allocation IDs must update without permitting a cross-scope conflict mutation');

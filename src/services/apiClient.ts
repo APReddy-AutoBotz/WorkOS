@@ -403,6 +403,8 @@ export const normalizeImportExportLog = (r: Record<string, unknown>): ImportExpo
   totalRows: Number(r.total_rows),
   validRows: Number(r.valid_rows),
   errorRows: Number(r.error_rows),
+  schemaVersion: typeof r.schema_version === 'string' && r.schema_version.trim() ? r.schema_version : undefined,
+  dryRun: typeof r.dry_run === 'boolean' ? r.dry_run : undefined,
   errors: Array.isArray(r.errors) ? r.errors as ImportExportLog['errors'] : undefined,
   userName: String(r.user_name),
   timestamp: String(r.created_at),

@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {createServer} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
+import {createProjectCodeLockKey} from '../server/modules/imports/idempotency.mjs';
 import {getMigrationManifest, getMigrationStatus, runMigrations} from '../server/migrate.mjs';
 
 const {Client, Pool} = pg;
@@ -509,6 +510,27 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
+    const applyProjectsV1 = (body, idempotencyKey, legalEntityId = 'legal-default') => {
+      const headers = {
+        Authorization: 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'X-Organization-ID': 'org-default',
+        'X-Legal-Entity-ID': legalEntityId,
+      };
+      if (idempotencyKey !== undefined) headers['Idempotency-Key'] = idempotencyKey;
+      return fetch(baseUrl + '/api/v1/imports/projects/apply', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5000),
+      });
+    };
+    const saveProject = body => fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: scopedHeaders(token, 'org-default', 'legal-default', {'Content-Type': 'application/json'}),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
     const applyAllocations = body => fetch(`${baseUrl}/api/imports/allocations/apply`, {
       method: 'POST',
       headers: {
@@ -769,6 +791,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         jsonb_build_object('line1','Synthetic Test Address','city','Test City','countryCode','US'),
         date '1970-01-01','US','Active')`);
     await pool.query(`insert into clients (id,name,industry,status,organization_id,legal_entity_id)
+      values ('client-import-v1-ambiguous-label','Synthetic Different Client Label','Synthetic Industry','Active','org-default','legal-default')`);
+    await pool.query(`insert into clients (id,name,industry,status,organization_id,legal_entity_id)
       values ('client-import-cross-legal','Synthetic Client Outside Legal Scope','Other Legal Industry','Active','org-default','legal-client-outside-same-org')`);
     const clientCrossLegalResponse = await applyClients({
       fileName: 'synthetic-client-cross-legal.csv',
@@ -841,6 +865,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       message: 'Project manager employee record does not exist or is exited.',
       sourceIdentifier: 'PROJECT-IMPORT-REJECTED',
     }], 'the real project apply route must preserve its row-error shape');
+    assert.equal(Object.hasOwn(projectPartialBody.log, 'schema_version'), false,
+      'the legacy project apply response must preserve its established batch DTO');
+    assert.equal(Object.hasOwn(projectPartialBody.log, 'dry_run'), false,
+      'new import contract fields must not change the legacy project apply response');
     const projectPartialLog = (await pool.query(`select * from import_export_logs where id=$1`, [projectPartialBody.log.id])).rows[0];
     assert.equal(projectPartialLog.id, projectPartialBody.log.id, 'project batch history must return its persisted server batch ID');
     assert.equal(projectPartialLog.status, 'Partial');
@@ -896,6 +924,403 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       import_batch_id: projectUpdateBody.log.id,
       import_processing_result: 'Success',
     }], 'same-scope project upserts must retain update audit behavior and provenance');
+
+    const projectV1Body = {
+      schemaVersion: 'project-master/1',
+      fileName: 'synthetic-project-v1-idempotent.csv',
+      totalRows: 1,
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-V1-IDEMPOTENT',
+        name: 'Synthetic Project Idempotent Apply',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }],
+    };
+    const projectV1Reordered = {
+      rows: [{
+        endDate: '2026-12-31',
+        startDate: '2026-01-01',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        client: 'Synthetic Client With Source ID',
+        clientId: 'client-import-source-1',
+        name: 'Synthetic Project Idempotent Apply',
+        projectCode: 'PROJECT-IMPORT-V1-IDEMPOTENT',
+      }],
+      totalRows: 1,
+      fileName: 'synthetic-project-v1-idempotent.csv',
+      schemaVersion: 'project-master/1',
+    };
+    const projectV1Key = 'synthetic-project-import-key-0001';
+    const [projectV1Response1, projectV1Response2] = await Promise.all([
+      applyProjectsV1(projectV1Body, projectV1Key),
+      applyProjectsV1(projectV1Reordered, projectV1Key),
+    ]);
+    assert.deepEqual([projectV1Response1.status, projectV1Response2.status], [200, 200],
+      'concurrent identical versioned project imports must both return success');
+    const [projectV1Result1, projectV1Result2] = await Promise.all([
+      projectV1Response1.json(),
+      projectV1Response2.json(),
+    ]);
+    assert.deepEqual(projectV1Result2, projectV1Result1,
+      'same-key equivalent requests must replay the original result independent of JSON property order');
+    assert.equal(projectV1Result1.status, 'Success');
+    assert.equal(projectV1Result1.log.schema_version, 'project-master/1');
+    assert.equal(projectV1Result1.log.dry_run, false);
+    assert.equal(Object.hasOwn(projectV1Result1.log, 'idempotency_key'), false,
+      'the retry credential must not be returned in the public batch DTO');
+    const projectV1Persisted = await pool.query(
+      "select (select count(*)::int from projects where project_code='PROJECT-IMPORT-V1-IDEMPOTENT' and organization_id='org-default' and legal_entity_id='legal-default') as project_rows, (select count(*)::int from import_export_logs where file_name='synthetic-project-v1-idempotent.csv') as batch_rows, (select count(*)::int from audit_logs where import_batch_id=$1) as audit_rows, (select count(*)::int from import_export_idempotency where batch_id=$1 and organization_id='org-default' and legal_entity_id='legal-default' and actor_id=$2 and channel='Project Master' and idempotency_key=$3 and request_hash ~ '^[a-f0-9]{64}$') as idempotency_rows",
+      [projectV1Result1.log.id, actorId, projectV1Key],
+    );
+    assert.deepEqual(projectV1Persisted.rows, [{
+      project_rows: 1,
+      batch_rows: 1,
+      audit_rows: 1,
+      idempotency_rows: 1,
+    }], 'concurrent retries must apply one project, audit and batch and bind the key to actor and scope');
+
+    const projectV1ReplayResponse = await applyProjectsV1(projectV1Body, projectV1Key);
+    assert.equal(projectV1ReplayResponse.status, 200);
+    assert.deepEqual(await projectV1ReplayResponse.json(), projectV1Result1,
+      'an identical later retry must return the saved batch result without mutation');
+    const projectV1ConflictResponse = await applyProjectsV1({
+      ...projectV1Body,
+      rows: [{...projectV1Body.rows[0], name: 'Changed Payload Must Not Apply'}],
+    }, projectV1Key);
+    assert.equal(projectV1ConflictResponse.status, 409);
+    assert.equal((await projectV1ConflictResponse.json()).error.code, 'IDEMPOTENCY_KEY_REUSED',
+      'reusing the same key for a changed payload must return a stable conflict');
+    const projectV1ConflictState = await pool.query(
+      "select p.name, (select count(*)::int from import_export_logs where file_name='synthetic-project-v1-idempotent.csv') as batch_rows, (select count(*)::int from audit_logs where import_batch_id=$1) as audit_rows from projects p where p.project_code='PROJECT-IMPORT-V1-IDEMPOTENT' and p.organization_id='org-default' and p.legal_entity_id='legal-default'",
+      [projectV1Result1.log.id],
+    );
+    assert.deepEqual(projectV1ConflictState.rows, [{
+      name: 'Synthetic Project Idempotent Apply',
+      batch_rows: 1,
+      audit_rows: 1,
+    }], 'a changed-payload conflict must leave the original project, batch and audit untouched');
+
+    const projectRaceCode = 'PROJECT-IMPORT-V1-DIFFERENT-KEY-RACE';
+    const projectRaceRequest = (name, fileName) => ({
+      schemaVersion: 'project-master/1',
+      fileName,
+      rows: [{
+        projectCode: projectRaceCode,
+        name,
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }],
+    });
+    const [projectRaceResponse1, projectRaceResponse2] = await Promise.all([
+      applyProjectsV1(projectRaceRequest('Synthetic Project Race Writer One', 'synthetic-project-race-one.csv'), 'synthetic-project-race-key-0001'),
+      applyProjectsV1(projectRaceRequest('Synthetic Project Race Writer Two', 'synthetic-project-race-two.csv'), 'synthetic-project-race-key-0002'),
+    ]);
+    assert.deepEqual([projectRaceResponse1.status, projectRaceResponse2.status], [200, 200],
+      'concurrent distinct-key project imports must serialize without losing either accepted outcome');
+    const [projectRaceResult1, projectRaceResult2] = await Promise.all([
+      projectRaceResponse1.json(),
+      projectRaceResponse2.json(),
+    ]);
+    assert.deepEqual([projectRaceResult1.status, projectRaceResult2.status], ['Success', 'Success']);
+    const projectRaceAudit = await pool.query(
+      'select count(*)::int as audit_rows, count(*) filter (where action=\'Import Create Project\' and old_value is null)::int as creates, count(*) filter (where action=\'Import Update Project\' and old_value is not null)::int as updates_with_prior from audit_logs where import_batch_id=any($1::uuid[]) and source_identifier=$2',
+      [[projectRaceResult1.log.id, projectRaceResult2.log.id], projectRaceCode],
+    );
+    assert.deepEqual(projectRaceAudit.rows, [{audit_rows: 2, creates: 1, updates_with_prior: 1}],
+      'distinct-key concurrent reimports must record one create and one update with its true prior state');
+    const projectRaceFinal = await pool.query(
+      'select count(*)::int as project_rows, min(name) as only_name from projects where project_code=$1 and organization_id=\'org-default\' and legal_entity_id=\'legal-default\'',
+      [projectRaceCode],
+    );
+    assert.equal(projectRaceFinal.rows[0].project_rows, 1);
+    assert(['Synthetic Project Race Writer One', 'Synthetic Project Race Writer Two'].includes(projectRaceFinal.rows[0].only_name),
+      'concurrent project updates must retain exactly one latest project row');
+
+    const projectAmbiguousClientResponse = await applyProjectsV1({
+      schemaVersion: 'project-master/1',
+      fileName: 'synthetic-project-v1-client-id-authority.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-V1-CLIENT-ID-AUTHORITY',
+        name: 'Synthetic Project Uses Authoritative Client ID',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Different Client Label',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }],
+    }, 'synthetic-project-client-id-authority-key');
+    assert.equal(projectAmbiguousClientResponse.status, 200);
+    assert.equal((await projectAmbiguousClientResponse.json()).status, 'Success');
+    const projectAmbiguousClientState = await pool.query(
+      "select client_id,client from projects where project_code='PROJECT-IMPORT-V1-CLIENT-ID-AUTHORITY' and organization_id='org-default' and legal_entity_id='legal-default'",
+    );
+    assert.deepEqual(projectAmbiguousClientState.rows, [{
+      client_id: 'client-import-source-1',
+      client: 'Synthetic Client With Source ID',
+    }], 'a versioned clientId is authoritative; a conflicting label must not bind the project to a different client');
+
+    const projectLockOrderRows = {
+      A: {
+        projectCode: 'PROJECT-IMPORT-V1-LOCK-ORDER-A',
+        name: 'Synthetic Lock-Order Project A',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      },
+      B: {
+        projectCode: 'PROJECT-IMPORT-V1-LOCK-ORDER-B',
+        name: 'Synthetic Lock-Order Project B',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      },
+    };
+    const [projectLockOrderResponse1, projectLockOrderResponse2] = await Promise.all([
+      applyProjectsV1({schemaVersion: 'project-master/1', fileName: 'synthetic-project-lock-order-ab.csv', rows: [projectLockOrderRows.A, projectLockOrderRows.B]}, 'synthetic-project-lock-order-key-1'),
+      applyProjectsV1({schemaVersion: 'project-master/1', fileName: 'synthetic-project-lock-order-ba.csv', rows: [projectLockOrderRows.B, projectLockOrderRows.A]}, 'synthetic-project-lock-order-key-2'),
+    ]);
+    assert.deepEqual([projectLockOrderResponse1.status, projectLockOrderResponse2.status], [200, 200],
+      'reversed-order overlapping multi-row imports must avoid advisory-lock deadlock');
+    const [projectLockOrderResult1, projectLockOrderResult2] = await Promise.all([
+      projectLockOrderResponse1.json(),
+      projectLockOrderResponse2.json(),
+    ]);
+    assert.deepEqual([projectLockOrderResult1.status, projectLockOrderResult2.status], ['Success', 'Success']);
+    const projectLockOrderState = await pool.query(
+      "select (select count(*)::int from projects where project_code=any(array['PROJECT-IMPORT-V1-LOCK-ORDER-A','PROJECT-IMPORT-V1-LOCK-ORDER-B']) and organization_id='org-default' and legal_entity_id='legal-default') as project_rows, (select count(*)::int from audit_logs where import_batch_id=any($1::uuid[])) as audit_rows, (select count(*)::int from audit_logs where import_batch_id=any($1::uuid[]) and action='Import Create Project') as create_audits, (select count(*)::int from audit_logs where import_batch_id=any($1::uuid[]) and action='Import Update Project' and old_value is not null) as update_audits",
+      [[projectLockOrderResult1.log.id, projectLockOrderResult2.log.id]],
+    );
+    assert.deepEqual(projectLockOrderState.rows, [{project_rows: 2, audit_rows: 4, create_audits: 2, update_audits: 2}],
+      'sorted project-code locks must allow both concurrent batches to commit one create and one update per project');
+
+    const crossRouteProjectCode = 'PROJECT-IMPORT-V1-CROSS-ROUTE-LOCK';
+    const crossRouteBarrierKey = 'synthetic-cross-route-trigger-barrier';
+    const crossRouteLockKey = createProjectCodeLockKey({organizationId: 'org-default', projectCode: crossRouteProjectCode});
+    await pool.query('create sequence synthetic_project_cross_route_barrier start with 1');
+    await pool.query(`create or replace function pause_synthetic_project_cross_route_insert()
+      returns trigger language plpgsql as $$ begin
+        if new.project_code='${crossRouteProjectCode}' then
+          perform nextval('synthetic_project_cross_route_barrier');
+          perform pg_advisory_xact_lock(hashtextextended('${crossRouteBarrierKey}', 0));
+        end if;
+        return new;
+      end; $$`);
+    await pool.query(`create trigger pause_synthetic_project_cross_route_insert
+      before insert on projects for each row execute function pause_synthetic_project_cross_route_insert()`);
+    const crossRouteManagerId = (await pool.query(
+      "select id from employees where employee_id='EMP-IMPORT-SUCCESS' and organization_id='org-default' and legal_entity_id='legal-default'",
+    )).rows[0].id;
+    const crossRouteBarrierClient = new Client({connectionString: databaseUrl});
+    await crossRouteBarrierClient.connect();
+    let directProjectSave;
+    let concurrentProjectImport;
+    try {
+      await crossRouteBarrierClient.query('select pg_advisory_lock(hashtextextended($1, 0))', [crossRouteBarrierKey]);
+      directProjectSave = saveProject({
+        project_code: crossRouteProjectCode,
+        name: 'Synthetic Project Created Through Projects API',
+        client_id: 'client-import-source-1',
+        manager_id: crossRouteManagerId,
+        start_date: '2026-01-01',
+        end_date: '2026-12-31',
+        status: 'Active',
+        billable: true,
+      });
+      let directInsertStarted = false;
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const barrier = await pool.query('select is_called from synthetic_project_cross_route_barrier');
+        if (barrier.rows[0]?.is_called) {
+          directInsertStarted = true;
+          break;
+        }
+        await delay(10);
+      }
+      assert.equal(directInsertStarted, true, 'the direct projects writer must reach its controlled insert barrier');
+
+      const readProjectCodeLockCounts = async granted => (await pool.query(`
+        select count(*)::int as count
+        from pg_locks l
+        cross join (select hashtextextended($1, 0) as lock_key) expected
+        where l.locktype='advisory' and l.granted=$2 and l.objsubid=1
+          and l.classid::bigint=((expected.lock_key >> 32) & 4294967295)
+          and l.objid::bigint=(expected.lock_key & 4294967295)
+      `, [crossRouteLockKey, granted])).rows[0].count;
+      assert.equal(await readProjectCodeLockCounts(true), 1,
+        'the direct project writer must hold the shared project-code lock before its insert proceeds');
+
+      concurrentProjectImport = applyProjectsV1({
+        schemaVersion: 'project-master/1',
+        fileName: 'synthetic-project-cross-route-lock.csv',
+        rows: [{
+          projectCode: crossRouteProjectCode,
+          name: 'Synthetic Project Updated Through Import API',
+          clientId: 'client-import-source-1',
+          client: 'Synthetic Client With Source ID',
+          managerId: 'EMP-IMPORT-SUCCESS',
+          startDate: '2026-01-01',
+          endDate: '2026-12-31',
+          status: 'Active',
+        }],
+      }, 'synthetic-project-cross-route-key');
+      let importWaitingForProjectCodeLock = false;
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if (await readProjectCodeLockCounts(false) > 0) {
+          importWaitingForProjectCodeLock = true;
+          break;
+        }
+        await delay(10);
+      }
+      assert.equal(importWaitingForProjectCodeLock, true,
+        'the import request must reach and wait on the held project-code lock before the direct insert is released');
+    } finally {
+      await crossRouteBarrierClient.query('select pg_advisory_unlock(hashtextextended($1, 0))', [crossRouteBarrierKey]);
+      await crossRouteBarrierClient.end();
+      await Promise.allSettled([directProjectSave, concurrentProjectImport].filter(Boolean));
+    }
+    const [directProjectSaveResponse, concurrentProjectImportResponse] = await Promise.all([
+      directProjectSave,
+      concurrentProjectImport,
+    ]);
+    assert.deepEqual([directProjectSaveResponse.status, concurrentProjectImportResponse.status], [200, 200],
+      'the direct project writer and concurrent import must serialize without a uniqueness failure');
+    const [directProjectSaveResult, concurrentProjectImportResult] = await Promise.all([
+      directProjectSaveResponse.json(),
+      concurrentProjectImportResponse.json(),
+    ]);
+    assert.equal(concurrentProjectImportResult.status, 'Success');
+    assert.equal(directProjectSaveResult.name, 'Synthetic Project Created Through Projects API');
+    const crossRouteProjectAudit = await pool.query(`select action,old_value,import_batch_id,source_identifier
+      from audit_logs where entity_id=$1 or source_identifier=$2 order by created_at`,
+    [directProjectSaveResult.id, crossRouteProjectCode]);
+    assert.equal(crossRouteProjectAudit.rowCount, 2,
+      'the cross-route create and import update must each retain one project audit');
+    assert.equal(crossRouteProjectAudit.rows.filter(row => row.action === 'Create Project' && row.old_value === null).length, 1,
+      'the direct project save must be audited as a create with no prior value');
+    assert.equal(crossRouteProjectAudit.rows.filter(row => row.action === 'Import Update Project' && row.old_value !== null && row.import_batch_id === concurrentProjectImportResult.log.id).length, 1,
+      'the serialized import must be audited as an update with the direct save as its prior value');
+    const crossRouteFinalProject = await pool.query(
+      'select name from projects where project_code=$1 and organization_id=\'org-default\' and legal_entity_id=\'legal-default\'',
+      [crossRouteProjectCode],
+    );
+    assert.deepEqual(crossRouteFinalProject.rows, [{name: 'Synthetic Project Updated Through Import API'}],
+      'the import update must remain the committed final project state');
+    await pool.query('drop trigger pause_synthetic_project_cross_route_insert on projects');
+    await pool.query('drop function pause_synthetic_project_cross_route_insert()');
+    await pool.query('drop sequence synthetic_project_cross_route_barrier');
+
+    const projectV1NoKey = await applyProjectsV1(projectV1Body, undefined);
+    assert.equal(projectV1NoKey.status, 400);
+    assert.equal((await projectV1NoKey.json()).error.code, 'IDEMPOTENCY_KEY_REQUIRED',
+      'the versioned project contract must require an idempotency key');
+    const projectV1UnsupportedSchema = await applyProjectsV1({
+      ...projectV1Body,
+      schemaVersion: 'project-master/99',
+    }, 'synthetic-project-import-key-unsupported');
+    assert.equal(projectV1UnsupportedSchema.status, 400);
+    assert.equal((await projectV1UnsupportedSchema.json()).error.code, 'UNSUPPORTED_SCHEMA_VERSION',
+      'unsupported project schema versions must fail before any data write');
+
+    const projectV1OtherScopeBody = {
+      schemaVersion: 'project-master/1',
+      fileName: 'synthetic-project-v1-other-scope.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-V1-OTHER-SCOPE',
+        name: 'Synthetic Project In Other Legal Entity',
+        clientId: 'client-import-cross-legal',
+        client: 'Synthetic Client Outside Legal Scope',
+        managerId: 'EMP-PROJECT-RACE-OTHER',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }],
+    };
+    const projectV1OtherScopeResponse = await applyProjectsV1(
+      projectV1OtherScopeBody,
+      projectV1Key,
+      'legal-client-outside-same-org',
+    );
+    assert.equal(projectV1OtherScopeResponse.status, 200,
+      'the same actor and key must be independent in a different legal-entity scope');
+    const projectV1OtherScopeResult = await projectV1OtherScopeResponse.json();
+    assert.equal(projectV1OtherScopeResult.status, 'Success');
+    const sameKeyScopes = await pool.query(
+      "select organization_id,legal_entity_id,count(*)::int as rows from import_export_idempotency where actor_id=$1 and channel='Project Master' and idempotency_key=$2 group by organization_id,legal_entity_id order by legal_entity_id",
+      [actorId, projectV1Key],
+    );
+    assert.deepEqual(sameKeyScopes.rows, [
+      {organization_id: 'org-default', legal_entity_id: 'legal-client-outside-same-org', rows: 1},
+      {organization_id: 'org-default', legal_entity_id: 'legal-default', rows: 1},
+    ], 'idempotency keys must be isolated by the server-resolved legal-entity scope');
+
+    const projectDryRunBody = {
+      schemaVersion: 'project-master/1',
+      dryRun: true,
+      fileName: 'synthetic-project-dry-run.csv',
+      totalRows: 2,
+      rows: [
+        {
+          projectCode: 'PROJECT-IMPORT-SOURCE-1',
+          name: 'Dry Run Must Not Change This Project',
+          clientId: 'client-import-source-1',
+          client: 'Synthetic Client With Source ID',
+          managerId: 'EMP-IMPORT-SUCCESS',
+          startDate: '2026-01-01',
+          endDate: '2026-12-31',
+        },
+        {
+          projectCode: 'PROJECT-IMPORT-DRY-RUN-REJECTED',
+          name: 'Invalid Dry Run Project',
+          clientId: 'client-import-source-1',
+          client: 'Synthetic Client With Source ID',
+          managerId: 'missing-project-manager',
+          startDate: '2026-01-01',
+          endDate: '2026-12-31',
+        },
+      ],
+    };
+    const projectDryRunKey = 'synthetic-project-dry-run-key-0001';
+    const projectDryRunResponse = await applyProjectsV1(projectDryRunBody, projectDryRunKey);
+    assert.equal(projectDryRunResponse.status, 200);
+    const projectDryRunResult = await projectDryRunResponse.json();
+    assert.deepEqual({
+      status: projectDryRunResult.status,
+      totalRows: projectDryRunResult.totalRows,
+      validRows: projectDryRunResult.validRows,
+      errorRows: projectDryRunResult.errorRows,
+    }, {status: 'Dry Run', totalRows: 2, validRows: 1, errorRows: 1},
+    'a dry run must report rows that would apply and row validation errors');
+    assert.deepEqual(projectDryRunResult.errors, [{
+      rowNumber: 3,
+      field: 'managerId',
+      message: 'Project manager employee record does not exist or is exited.',
+      sourceIdentifier: 'PROJECT-IMPORT-DRY-RUN-REJECTED',
+    }]);
+    assert.equal(projectDryRunResult.log.dry_run, true);
+    assert.equal(projectDryRunResult.log.schema_version, 'project-master/1');
+    const projectDryRunState = await pool.query(
+      "select (select name from projects where project_code='PROJECT-IMPORT-SOURCE-1' and organization_id='org-default' and legal_entity_id='legal-default') as existing_name, (select count(*)::int from projects where project_code='PROJECT-IMPORT-DRY-RUN-REJECTED' and organization_id='org-default' and legal_entity_id='legal-default') as rejected_project_rows, (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='Project') as project_audits, (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='ImportBatch' and import_processing_result='Dry Run') as dry_run_audits, (select count(*)::int from import_export_logs where id=$1 and dry_run=true and schema_version='project-master/1' and status='Dry Run') as batch_rows",
+      [projectDryRunResult.log.id],
+    );
+    assert.deepEqual(projectDryRunState.rows, [{
+      existing_name: 'Synthetic Project Updated In Same Legal Entity',
+      rejected_project_rows: 0,
+      project_audits: 0,
+      dry_run_audits: 1,
+      batch_rows: 1,
+    }], 'dry-run may retain its batch/audit evidence but must not write project records or row audits');
+    const projectDryRunReplay = await applyProjectsV1(projectDryRunBody, projectDryRunKey);
+    assert.equal(projectDryRunReplay.status, 200);
+    assert.deepEqual(await projectDryRunReplay.json(), projectDryRunResult,
+      'a repeated dry run must replay the same stored result without duplicate audit or batch records');
 
     const projectFailedResponse = await applyProjects({
       fileName: 'synthetic-project-failed.csv',
@@ -956,28 +1381,30 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       legal_entity_id: 'legal-client-outside-same-org',
       audit_rows: 0,
     }], 'a cross-legal project import must not adopt or audit the foreign project');
+    const projectV1CrossLegalResponse = await applyProjectsV1({
+      schemaVersion: 'project-master/1',
+      fileName: 'synthetic-project-v1-cross-legal.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-CROSS-LEGAL',
+        name: 'Synthetic Versioned Cross-Legal Attempt',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+      }],
+    }, 'synthetic-project-v1-cross-legal-key');
+    assert.equal(projectV1CrossLegalResponse.status, 200);
+    const projectV1CrossLegalResult = await projectV1CrossLegalResponse.json();
+    assert.equal(projectV1CrossLegalResult.status, 'Failed');
+    assert.deepEqual(projectV1CrossLegalResult.errors, [{
+      rowNumber: 2,
+      field: 'projectCode',
+      message: 'Project code is not available in the authorized scope.',
+      code: 'PROJECT_SCOPE_CONFLICT',
+      sourceIdentifier: 'PROJECT-IMPORT-CROSS-LEGAL',
+    }], 'the versioned scope-conflict response must not confirm a project exists in a different legal entity');
 
-    await pool.query(`create sequence synthetic_project_import_race_barrier start with 1`);
-    await pool.query(`create or replace function synchronize_synthetic_project_import_race()
-      returns trigger language plpgsql as $$
-      declare
-        attempt integer := 0;
-        arrivals_seen bigint;
-      begin
-        if new.project_code = 'PROJECT-IMPORT-CROSS-LEGAL-RACE' then
-          perform nextval('synthetic_project_import_race_barrier');
-          loop
-            select last_value into arrivals_seen from synthetic_project_import_race_barrier;
-            exit when arrivals_seen >= 2;
-            attempt := attempt + 1;
-            if attempt > 200 then raise exception 'second project import did not reach the overlap barrier'; end if;
-            perform pg_sleep(0.01);
-          end loop;
-        end if;
-        return new;
-      end; $$`);
-    await pool.query(`create trigger synchronize_synthetic_project_import_race
-      before insert on projects for each row execute function synchronize_synthetic_project_import_race()`);
     const projectRaceResponses = await Promise.all([
       applyProjects({
         fileName: 'synthetic-project-race-default.csv',
@@ -1008,7 +1435,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(projectRaceResponses.map(response => response.status), [200, 200],
       'both concurrent project import requests must return their row-level outcomes');
     assert.deepEqual(projectRaceBodies.map(body => body.status).sort(), ['Failed', 'Success'],
-      'concurrent project-code imports across legal entities must commit one winner and reject one row');
+      'concurrent project-code imports across legal entities must serialize one winner and reject one row');
     const projectRaceFailure = projectRaceBodies.find(body => body.status === 'Failed');
     assert.deepEqual(projectRaceFailure.errors, [{
       rowNumber: 2,
@@ -1016,7 +1443,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       message: 'Project code belongs to another legal entity in this organization.',
       code: 'PROJECT_SCOPE_CONFLICT',
       sourceIdentifier: 'PROJECT-IMPORT-CROSS-LEGAL-RACE',
-    }], 'a project-code loser at the database conflict boundary must receive the existing row-local scope error');
+    }], 'a serialized project-code loser must receive the existing row-local scope error');
     const projectRaceWinner = projectRaceBodies.find(body => body.status === 'Success');
     assert.equal(projectRaceWinner.validRows, 1);
     const projectRaceState = await pool.query(`select p.name,p.client_id,p.manager_id,p.legal_entity_id,
@@ -3259,7 +3686,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
 const preOrganizationAuditMigrationRoot = await mkdtemp(join(tmpdir(), 'workos-pr006-before-organization-audit-'));
 await mkdir(join(preOrganizationAuditMigrationRoot, 'migrations'));
 await writeFile(join(preOrganizationAuditMigrationRoot, 'schema.sql'), await readFile(join(serverDir, 'schema.sql'), 'utf8'));
-for (const migration of manifest.slice(1, -1)) {
+for (const migration of manifest.slice(1, -2)) {
   await writeFile(join(preOrganizationAuditMigrationRoot, 'migrations', migration.file),
     await readFile(join(serverDir, 'migrations', migration.file), 'utf8'));
 }
@@ -3312,7 +3739,7 @@ await withDisposableDatabase(async (pool) => {
     const baselineSql = await readFile(join(serverDir, 'schema.sql'), 'utf8');
     await client.query(baselineSql);
     await client.query('insert into schema_migrations (id) values ($1)', [manifest[0].id]);
-    for (const migration of manifest.slice(1, -6)) {
+    for (const migration of manifest.slice(1, -7)) {
       const sql = await readFile(join(serverDir, 'migrations', migration.file), 'utf8');
       await client.query(sql);
       await client.query('insert into schema_migrations (id) values ($1)', [migration.id]);
@@ -3346,7 +3773,7 @@ await withDisposableDatabase(async (pool) => {
     rootDir: preOrganizationAuditMigrationRoot,
     logger: quietLogger,
   });
-  const preOrganizationAuditMigrations = manifest.slice(-6, -1);
+  const preOrganizationAuditMigrations = manifest.slice(-7, -2);
   assert.deepEqual(preOrganizationAuditUpgrade.applied, preOrganizationAuditMigrations.map(item => item.id),
     'the upgrade through migration 037 must complete before exercising the organization-scope migration boundary');
   const preExistingAuditScopes = await pool.query(`insert into audit_logs
@@ -3363,7 +3790,7 @@ await withDisposableDatabase(async (pool) => {
   const before = await pool.query('select count(*)::int as count from schema_migrations');
   const upgrade = await runMigrations({pool, rootDir: serverDir, logger: quietLogger});
   const after = await pool.query('select count(*)::int as count from schema_migrations');
-  const candidateMigrations = manifest.slice(-6);
+  const candidateMigrations = manifest.slice(-7);
   assert.deepEqual(candidateMigrations.map(item => item.id), [
     '033_wos03_audit_operation_context',
     '034_wos03_employee_import_provenance',
@@ -3371,20 +3798,21 @@ await withDisposableDatabase(async (pool) => {
     '036_wos03_identity_link_provenance_reference',
     '037_wos03_deployment_audit_permission',
     '038_wos03_organization_audit_access',
-  ], 'PR-006 adds ordered request, provenance, scoped history, and protected deployment/organization audit access migrations');
+    '039_wos03_import_operation_contract',
+  ], 'PR-006 adds ordered request, provenance, scoped history, protected audit access, and import-operation contract migrations');
   assert.deepEqual([...preOrganizationAuditUpgrade.applied, ...upgrade.applied], candidateMigrations.map(item => item.id),
     'upgrade from merged main applies all additive PR-006 migrations in order');
-  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access'],
-    'the organization-scope migration is applied after historical and legal-entity audit rows already exist');
-  assert.equal(upgrade.skipped.length, manifest.length - 1);
-  assert.equal(after.rows[0].count, before.rows[0].count + 1, 'the final upgrade appends migration 038 to its ledger');
+  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract'],
+    'organization-scope and import-operation migrations apply after historical and legal-entity audit rows already exist');
+  assert.equal(upgrade.skipped.length, manifest.length - 2);
+  assert.equal(after.rows[0].count, before.rows[0].count + 2, 'the final upgrade appends migrations 038 and 039 to its ledger');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
-  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -6).map(item => item.id),
+  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -7).map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 6, 'all PR-006 migrations are ledgered');
+  assert.equal(newMigrations.length, 7, 'all PR-006 migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),
@@ -3418,9 +3846,16 @@ await withDisposableDatabase(async (pool) => {
   assert.equal(legacyAudit.rows[0].import_processing_result, null, 'existing audit history must not receive invented import results');
   assert.equal(legacyAudit.rows[0].organization_id, null, 'existing append-only audit history must not receive guessed organization scope');
   assert.equal(legacyAudit.rows[0].legal_entity_id, null, 'existing append-only audit history must not receive guessed legal-entity scope');
-  const legacyImportLog = await pool.query(`select file_name,status,organization_id,legal_entity_id from import_export_logs where file_name='legacy-scope.csv'`);
-  assert.deepEqual(legacyImportLog.rows, [{file_name: 'legacy-scope.csv', status: 'Success', organization_id: null, legal_entity_id: null}],
-    'historical import history must remain unchanged and explicitly unscoped');
+  const legacyImportLog = await pool.query(`select file_name,status,organization_id,legal_entity_id,schema_version,dry_run
+    from import_export_logs where file_name='legacy-scope.csv'`);
+  assert.deepEqual(legacyImportLog.rows, [{
+    file_name: 'legacy-scope.csv',
+    status: 'Success',
+    organization_id: null,
+    legal_entity_id: null,
+    schema_version: null,
+    dry_run: false,
+  }], 'historical import history must remain unchanged and explicitly unscoped after the operation-contract migration');
   const legacyIntegrationLog = await pool.query(`select entity_id,response_payload,organization_id,legal_entity_id from integration_event_logs where id='legacy-scope-event'`);
   assert.deepEqual(legacyIntegrationLog.rows, [{
     entity_id: 'legacy-entity', response_payload: {retained: 'unchanged'}, organization_id: null, legal_entity_id: null,
