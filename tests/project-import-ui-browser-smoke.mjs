@@ -27,13 +27,18 @@ const operationResult = (body, {validRows = 1, errors = []} = {}) => ({
   log: {
     id: `batch-${++operationSequence}`,
     operation: 'Import',
-    channel: body.schemaVersion === 'client-master/1' ? 'Client Master' : 'Project Master',
+    channel: ({
+      'client-master/1': 'Client Master',
+      'project-master/1': 'Project Master',
+      'allocation-control/1': 'Allocation Control',
+      'timesheet-import/1': 'Timesheet Import',
+    })[body.schemaVersion],
     file_name: body.fileName,
     status: body.dryRun ? 'Dry Run' : (validRows === 0 && errors.length ? 'Failed' : (errors.length ? 'Partial' : 'Success')),
     total_rows: body.totalRows,
     valid_rows: validRows,
     error_rows: errors.length,
-    errors,
+    errors: errors.length > 0 ? errors : null,
     user_name: 'Synthetic Admin',
     created_at: '2026-10-15T00:00:00.000Z',
     schema_version: body.schemaVersion,
@@ -48,7 +53,8 @@ await page.route('**/api/**', async route => {
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({database: 'connected'})});
     return;
   }
-  if (path === '/api/v1/imports/projects/apply' || path === '/api/v1/imports/clients/apply') {
+  if (['/api/v1/imports/projects/apply', '/api/v1/imports/clients/apply',
+    '/api/v1/imports/allocations/apply', '/api/v1/imports/timesheets/apply'].includes(path)) {
     const body = request.postDataJSON();
     requests.push({path, body, headers: request.headers()});
     const defaultErrors = body.rows.length === 0 ? body.clientErrors : [];
@@ -75,7 +81,23 @@ await page.route('**/api/**', async route => {
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(syntheticHistory)});
     return;
   }
-  if (['/api/projects', '/api/allocations', '/api/timesheets', '/api/settings', '/api/country-directors'].includes(path)) {
+  if (path === '/api/projects') {
+    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify([{
+      id: 'project-synthetic', project_code: 'PROJECT-SYNTHETIC', name: 'Synthetic Project',
+      client: 'Synthetic Client', manager_id: 'employee-synthetic', manager_name: 'Synthetic Manager',
+      start_date: '2026-01-01', end_date: '2026-12-31', status: 'Active', billable: true,
+    }])});
+    return;
+  }
+  if (path === '/api/allocations') {
+    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify([{
+      id: 'allocation-synthetic', employee_id: 'employee-synthetic', project_id: 'project-synthetic',
+      role_on_project: 'Consultant', percentage: 50, start_date: '2026-01-01', end_date: '2026-12-31',
+      billable: true, status: 'Active',
+    }])});
+    return;
+  }
+  if (['/api/timesheets', '/api/settings', '/api/country-directors'].includes(path)) {
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify([])});
     return;
   }
@@ -92,9 +114,23 @@ const selectProjectCsv = async (fileName, contents) => {
 const selectClientCsv = async (fileName, contents) => {
   await page.locator('input[type="file"]').nth(1).setInputFiles({name: fileName, mimeType: 'text/csv', buffer: Buffer.from(contents)});
 };
+const selectAllocationCsv = async (fileName, contents) => {
+  await page.locator('input[type="file"]').nth(3).setInputFiles({name: fileName, mimeType: 'text/csv', buffer: Buffer.from(contents)});
+};
+const selectTimesheetCsv = async (fileName, contents) => {
+  await page.locator('input[type="file"]').nth(4).setInputFiles({name: fileName, mimeType: 'text/csv', buffer: Buffer.from(contents)});
+};
 const clientCsv = (clientId, name = 'Synthetic Client', status = 'Active') => [
   'id,name,industry,accountOwnerId,countryDirectorIds,status',
   `${clientId},${name},Technology,,,${status}`,
+].join('\n');
+const allocationCsv = (id = '', percentage = 25, status = '') => [
+  'id,employeeId,projectId,roleOnProject,percentage,startDate,endDate,billable,status,comments',
+  `${id},EMP-VALID,PROJECT-SYNTHETIC,Consultant,${percentage},2026-09-01,2026-12-31,true,${status},Synthetic allocation row`,
+].join('\n');
+const timesheetCsv = (status = '') => [
+  'employeeId,weekEnding,workType,projectId,clientName,category,date,hours,remark,billable,status,rejectionReason',
+  `EMP-VALID,2026-09-27,Project Work,PROJECT-SYNTHETIC,,Delivery,2026-09-25,7.5,Synthetic entry,true,${status},`,
 ].join('\n');
 const lastRequest = () => requests.at(-1);
 try {
@@ -119,6 +155,8 @@ try {
   const dryRunRetry = lastRequest();
   assert.equal(dryRunRetry.headers['idempotency-key'], firstPreviewKey, 'validation retry reuses the same key');
   assert.deepEqual(dryRunRetry.body, firstPreview.body, 'validation retry preserves its exact payload');
+  assert.equal(syntheticHistory[0].errors, null,
+    'the synthetic history batch mirrors the server’s null persisted-errors shape when a batch has no row errors');
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), false);
 
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
@@ -216,9 +254,104 @@ try {
     'a newly selected Client Master file starts fresh idempotency keys');
   assert.equal(changedClientPreview.body.schemaVersion, 'client-master/1');
   assert.equal(requests.length, 12);
-  assert.equal(genericLogWrites, 0, 'versioned client/project dry runs and applies do not create duplicate generic history logs');
+
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
+  await selectAllocationCsv('allocations-first.csv', allocationCsv());
+  await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  const firstAllocationPreview = lastRequest();
+  assert.equal(firstAllocationPreview.path, '/api/v1/imports/allocations/apply');
+  assert.equal(firstAllocationPreview.body.schemaVersion, 'allocation-control/1');
+  assert.equal(firstAllocationPreview.body.dryRun, true);
+  assert.equal(firstAllocationPreview.body.rows[0].id, '', 'a blank Allocation Control ID remains eligible for server-generated identity');
+  assert.equal(firstAllocationPreview.body.rows[0].status, '', 'a blank Allocation Control status remains eligible for the server default');
+  const firstAllocationDryRunKey = firstAllocationPreview.headers['idempotency-key'];
+  assert.ok(firstAllocationDryRunKey);
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
+    'Allocation Control apply stays disabled until the server confirms its dry run');
+
+  responsePlans.push({status: 200, body: operationResult(firstAllocationPreview.body)});
+  await page.getByRole('button', {name: 'Retry Validation'}).click();
+  await page.getByText('Server dry run complete for allocations-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  assert.equal(lastRequest().headers['idempotency-key'], firstAllocationDryRunKey,
+    'Allocation Control validation retry keeps the same key');
+  assert.deepEqual(lastRequest().body, firstAllocationPreview.body,
+    'Allocation Control validation retry keeps the exact request body');
+
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText(/The apply result for allocations-first\.csv was not confirmed\./).waitFor();
+  const allocationApply = lastRequest();
+  assert.equal(allocationApply.body.dryRun, false);
+  assert.notEqual(allocationApply.headers['idempotency-key'], firstAllocationDryRunKey,
+    'Allocation Control apply has a separate key from dry run');
+  const allocationApplyKey = allocationApply.headers['idempotency-key'];
+  responsePlans.push({status: 200, body: operationResult(allocationApply.body)});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText('Applied 1 valid allocation control rows from allocations-first.csv.', {exact: true}).waitFor();
+  assert.equal(lastRequest().headers['idempotency-key'], allocationApplyKey,
+    'Allocation Control apply retry reuses its original key');
+  assert.deepEqual(lastRequest().body, allocationApply.body,
+    'Allocation Control apply retry preserves the exact approved rows');
+
+  await selectAllocationCsv('allocations-changed.csv', allocationCsv('allocation-ui-202', 30, 'Active'));
+  await page.getByText('Server dry run complete for allocations-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  assert.notEqual(lastRequest().headers['idempotency-key'], firstAllocationDryRunKey,
+    'a newly selected Allocation Control file starts a fresh operation');
+  await selectAllocationCsv('allocations-rejected.csv', allocationCsv().replace('EMP-VALID', 'MISSING-EMPLOYEE'));
+  await page.getByText('Server dry run complete for allocations-rejected.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  const rejectedAllocationPreview = lastRequest();
+  assert.deepEqual(rejectedAllocationPreview.body.rows, [], 'a fully rejected Allocation Control CSV sends no apply candidate rows');
+  assert.equal(rejectedAllocationPreview.body.dryRun, true);
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
+    'a zero-valid-row Allocation Control dry run cannot be applied');
+
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
+  await selectTimesheetCsv('timesheets-first.csv', timesheetCsv());
+  await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  const firstTimesheetPreview = lastRequest();
+  assert.equal(firstTimesheetPreview.path, '/api/v1/imports/timesheets/apply');
+  assert.equal(firstTimesheetPreview.body.schemaVersion, 'timesheet-import/1');
+  assert.equal(firstTimesheetPreview.body.dryRun, true);
+  assert.equal(firstTimesheetPreview.body.rows[0].status, '', 'a blank timesheet status remains eligible for its existing default');
+  const firstTimesheetDryRunKey = firstTimesheetPreview.headers['idempotency-key'];
+  responsePlans.push({status: 200, body: operationResult(firstTimesheetPreview.body)});
+  await page.getByRole('button', {name: 'Retry Validation'}).click();
+  await page.getByText('Server dry run complete for timesheets-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  assert.equal(lastRequest().headers['idempotency-key'], firstTimesheetDryRunKey,
+    'Timesheet validation retry keeps the same key');
+  assert.deepEqual(lastRequest().body, firstTimesheetPreview.body,
+    'Timesheet validation retry keeps the exact request body');
+
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText(/The apply result for timesheets-first\.csv was not confirmed\./).waitFor();
+  const timesheetApply = lastRequest();
+  assert.notEqual(timesheetApply.headers['idempotency-key'], firstTimesheetDryRunKey,
+    'Timesheet apply has a separate key from dry run');
+  const timesheetApplyKey = timesheetApply.headers['idempotency-key'];
+  responsePlans.push({status: 200, body: operationResult(timesheetApply.body)});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText('Applied 1 valid timesheet import rows from timesheets-first.csv.', {exact: true}).waitFor();
+  assert.equal(lastRequest().headers['idempotency-key'], timesheetApplyKey,
+    'Timesheet apply retry reuses its original key');
+  assert.deepEqual(lastRequest().body, timesheetApply.body,
+    'Timesheet apply retry preserves its exact approved rows');
+
+  await selectTimesheetCsv('timesheets-changed.csv', timesheetCsv('Submitted'));
+  await page.getByText('Server dry run complete for timesheets-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  assert.notEqual(lastRequest().headers['idempotency-key'], firstTimesheetDryRunKey,
+    'a newly selected Timesheet file starts a fresh operation');
+  await selectTimesheetCsv('timesheets-rejected.csv', timesheetCsv().replace('EMP-VALID', 'MISSING-EMPLOYEE'));
+  await page.getByText('Server dry run complete for timesheets-rejected.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  const rejectedTimesheetPreview = lastRequest();
+  assert.deepEqual(rejectedTimesheetPreview.body.rows, [], 'a fully rejected Timesheet CSV sends no apply candidate rows');
+  assert.equal(rejectedTimesheetPreview.body.dryRun, true);
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
+    'a zero-valid-row Timesheet dry run cannot be applied');
+
+  assert.equal(genericLogWrites, 0, 'versioned dry runs and applies do not create duplicate generic history logs');
   assert.deepEqual(pageErrors, []);
-  console.log('Project and client import browser smoke passed: server preview gates, stable retries, fresh keys, saved diagnostics, and invalid-row no-apply cases.');
+  console.log('Project, client, allocation, and timesheet import browser smoke passed: server preview gates, stable retries, fresh keys, saved diagnostics, and invalid-row no-apply cases.');
 } finally {
   await browser.close();
 }

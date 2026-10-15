@@ -15,15 +15,16 @@ const clientImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/allocations/apply'"),
 );
 const projectImportRouter = readFileSync('server/modules/imports/project-import-router.mjs', 'utf8');
+const operationalImportRouter = readFileSync('server/modules/imports/operational-import-router.mjs', 'utf8');
 const importIdempotency = readFileSync('server/modules/imports/idempotency.mjs', 'utf8');
 const importOperationMigration = readFileSync('server/migrations/039_wos03_import_operation_contract.sql', 'utf8');
-const allocationImportRoute = server.slice(
-  server.indexOf("app.post('/api/imports/allocations/apply'"),
-  server.indexOf("app.post('/api/imports/timesheets/apply'"),
+const allocationImportRoute = operationalImportRouter.slice(
+  operationalImportRouter.indexOf("router.post('/imports/allocations/apply'"),
+  operationalImportRouter.indexOf("router.post('/imports/timesheets/apply'"),
 );
-const timesheetImportRoute = server.slice(
-  server.indexOf("app.post('/api/imports/timesheets/apply'"),
-  server.indexOf('registerOrganizationSetupRoutes({'),
+const timesheetImportRoute = operationalImportRouter.slice(
+  operationalImportRouter.indexOf("router.post('/imports/timesheets/apply'"),
+  operationalImportRouter.indexOf('return router;'),
 );
 const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
 const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
@@ -169,6 +170,10 @@ assert.match(clientImportRoute, /const status = dryRun \? 'Dry Run' : saved === 
   'client import must distinguish dry-run validation from success, partial and failed outcomes');
 assert.match(clientImportRoute, /const versionedSchema = legacySchema\.extend[\s\S]*schemaVersion: z\.literal\('client-master\/1'\)[\s\S]*dryRun: z\.boolean\(\)\.default\(false\)/,
   'versioned client imports must bind a stable schema and explicit dry-run flag');
+assert.match(clientImportRoute, /const rowSchema = versioned => z\.object\([\s\S]*id: versioned \? optionalClientImportId : z\.string\(\)\.min\(1\)\.optional\(\)[\s\S]*status: versioned \? optionalClientImportStatus : z\.enum\(\['Active', 'Inactive'\]\)\.optional\(\)/,
+  'only versioned Client Master imports may normalize blank optional identifiers and statuses');
+assert.match(clientImportRoute, /log: versioned \? logResult\.rows\[0\] : legacyClientImportLog\(logResult\.rows\[0\]\)/,
+  'legacy Client Master responses must strip migration-added versioned fields');
 assert.match(clientImportRoute, /if \(dryRun\) \{\s*saved \+= 1;\s*continue;\s*\}[\s\S]*insert into clients/,
   'a valid client dry run must stop before any client or association writes');
 assert.match(clientImportRoute, /hashImportRequest[\s\S]*createScopedIdempotencyLockKey[\s\S]*import_export_idempotency[\s\S]*IDEMPOTENCY_KEY_REUSED/,
@@ -183,6 +188,8 @@ assert.match(projectImportRouter, /projectCode: z\.string\(\)\.min\(1\)/,
   'project import provenance must use the existing required source project code');
 assert.match(projectImportRouter, /const importBatchId = randomUUID\(\)/,
   'project imports must receive a server-generated batch ID after request validation');
+assert.match(projectImportRouter, /const rowSchema = versioned => z\.object\([\s\S]*status: versioned[\s\S]*z\.enum\(\['Proposed', 'Active', 'On Hold', 'Completed'\]\)\.optional\(\)/,
+  'only versioned Project Master imports may normalize blank optional statuses');
 assert.match(projectImportRouter, /source: 'Project Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.projectCode,[\s\S]*importProcessingResult: 'Success'/,
   'successful project row audits must retain source, required source ID, batch and processing result');
 assert.match(projectImportRouter, /on conflict \(organization_id,project_code\) do update set[\s\S]*where projects\.organization_id=excluded\.organization_id and projects\.legal_entity_id=excluded\.legal_entity_id returning \*[\s\S]*if \(result\.rowCount === 0\)[\s\S]*PROJECT_SCOPE_CONFLICT/,
@@ -213,16 +220,18 @@ assert.match(importIdempotency, /normalizeIdempotencyKey[\s\S]*stableJsonStringi
   'idempotency keys and canonical payload hashes must be validated and stable');
 assert.doesNotMatch(projectImportRouter, /csvContents|rawCsv|parsed\.data\.csv/i,
   'project import provenance must not persist raw CSV contents');
-assert.match(server, /app\.post\('\/api\/imports\/allocations\/apply'/, 'allocation import apply route must exist');
+assert.match(operationalImportRouter, /router\.post\('\/imports\/allocations\/apply'/, 'allocation import apply route must exist');
+assert.match(server, /app\.use\('\/api', operationalImportRouter\)[\s\S]*app\.use\('\/api\/v1', operationalImportRouter\)/,
+  'allocation and timesheet import routes must share the legacy and versioned router');
 assert.match(allocationImportRoute, /requirePermission\('imports\.manage'\)/,
   'allocation import must retain its imports.manage authorization gate');
-assert.match(allocationImportRoute, /id: z\.string\(\)\.min\(1\)\.optional\(\)/,
-  'allocation import must preserve its optional source ID semantics');
-assert.match(allocationImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
+assert.match(operationalImportRouter, /id: versioned \? optionalBlankId : z\.string\(\)\.min\(1\)\.optional\(\)/,
+  'versioned allocation accepts blank optional IDs while the legacy schema preserves its existing validation');
+assert.match(allocationImportRoute, /const importBatchId = randomUUID\(\)/,
   'allocation imports must receive a server-generated batch ID after request validation');
 assert.match(allocationImportRoute, /source: 'Allocation Control CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.id \?\? null,[\s\S]*importProcessingResult: 'Success'/,
   'successful allocation row audits must retain source, optional source ID, batch and processing result');
-assert.match(allocationImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Allocation Control'/,
+assert.match(allocationImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run\)[\s\S]*values \(\$1,'Import','Allocation Control'/,
   'allocation batch history must use the same ID as row audits and retain the selected scope');
 assert.match(allocationImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'allocation mutations, row audits and the batch result must commit or roll back together');
@@ -230,31 +239,44 @@ assert.match(allocationImportRoute, /where project_allocations\.organization_id=
   'allocation upserts must remain restricted to the authorized organization and legal entity');
 assert.match(allocationImportRoute, /pg_advisory_xact_lock[\s\S]*Allocation would exceed 100% for overlapping dates/,
   'allocation imports must preserve the existing scoped over-allocation check');
-assert.match(allocationImportRoute, /const status = saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
+assert.match(allocationImportRoute, /const status = dryRun \? 'Dry Run' : saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
   'allocation import success, partial and failed outcomes must retain their existing semantics');
+assert.match(allocationImportRoute, /seenAllocationNaturalKeys[\s\S]*const naturalKey = \[employee\.id, project\.id, row\.startDate, row\.endDate\][\s\S]*allocationKey/,
+  'the versioned allocation contract must detect duplicate keys after resolving employee/project aliases while legacy only checks supplied IDs');
+assert.match(allocationImportRoute, /stagedAllocationChanges[\s\S]*staged\.previous\.employee_id === employee\.id[\s\S]*staged\.employeeId === employee\.id[\s\S]*staged\.next\.percentage/,
+  'the no-write allocation dry run must move cumulative load from a reassigned source employee to its destination');
+assert.match(operationalImportRouter, /if \(dryRun\) await recordDryRunAudit/,
+  'allocation dry runs must write an operation result without row mutations or row audits');
+assert.match(operationalImportRouter, /entityType: 'ImportBatch',[\s\S]*importProcessingResult: 'Dry Run'/,
+  'operational import dry-run auditing must identify the batch and dry-run result');
 assert.doesNotMatch(allocationImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'allocation import provenance must not persist raw CSV contents');
-assert.match(server, /app\.post\('\/api\/imports\/timesheets\/apply'/, 'timesheet import apply route must exist');
+assert.match(operationalImportRouter, /router\.post\('\/imports\/timesheets\/apply'/, 'timesheet import apply route must exist');
 assert.match(timesheetImportRoute, /requirePermission\('imports\.manage'\)/,
   'timesheet import must retain its imports.manage authorization gate');
-const timesheetRowSchema = timesheetImportRoute.slice(
-  timesheetImportRoute.indexOf('const rowSchema = z.object('),
-  timesheetImportRoute.indexOf('const schema = z.object('),
-);
+const timesheetRowSchema = operationalImportRouter.match(/const timesheetRowSchema = versioned => z\.object\(\{([\s\S]*?)\n  \}\);/)?.[1] || '';
 assert.doesNotMatch(timesheetRowSchema, /^\s*id\s*:/m,
   'timesheet provenance must not invent an upstream row ID absent from the import contract');
-assert.match(timesheetImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
+assert.match(timesheetImportRoute, /const importBatchId = randomUUID\(\)/,
   'timesheet imports must receive one server-generated batch ID after request validation');
 assert.match(timesheetImportRoute, /for \(const group of groups\.values\(\)\)[\s\S]*await audit\(client, req,[\s\S]*entityType: 'Timesheet'[\s\S]*source: 'Timesheet Import CSV',[\s\S]*importBatchId,[\s\S]*sourceIdentifier: null,[\s\S]*importProcessingResult: 'Success'/,
   'successful timesheet group audits must retain source, null unavailable source ID, batch and result once per group');
-assert.match(timesheetImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Timesheet Import'/,
+assert.match(timesheetImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run\)[\s\S]*values \(\$1,'Import','Timesheet Import'/,
   'timesheet batch history must use the same ID as group audits and retain the selected scope');
 assert.match(timesheetImportRoute, /await client\.query\('begin'\)[\s\S]*for \(const group of groups\.values\(\)\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'timesheet updates, entries, group audits and import history must commit or roll back together');
 assert.match(timesheetImportRoute, /assertReportingPeriodAllows[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT[\s\S]*on conflict \(organization_id, employee_id, week_ending\) do update set/,
   'timesheet provenance must preserve authoritative period checks and existing scoped group upserts');
-assert.match(timesheetImportRoute, /const status = validEntryRows === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
+assert.match(timesheetImportRoute, /const status = dryRun \? 'Dry Run' : validEntryRows === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
   'timesheet import success, partial and failed counts must retain their existing row semantics');
+assert.match(timesheetImportRoute, /const naturalTarget = row\.workType === 'Project Work' \? project\?\.id : row\.clientName[\s\S]*seenTimesheetEntryKeys/,
+  'versioned Timesheet Import must detect duplicate natural keys after resolving employee/project aliases');
+assert.match(timesheetImportRoute, /versioned && !isWorkDateInsideWeek\(row\.date, row\.weekEnding\)/,
+  'versioned Timesheet Import must preserve the existing seven-day work-date rule');
+assert.match(timesheetImportRoute, /if \(dryRun\) continue;/,
+  'timesheet dry runs must validate grouped period content without mutating the timesheet or entries');
+assert.match(operationalImportRouter, /ALLOCATION_IMPORT_SCHEMA_VERSION = 'allocation-control\/1'[\s\S]*TIMESHEET_IMPORT_SCHEMA_VERSION = 'timesheet-import\/1'/,
+  'the new operational import schemas must be explicit and versioned');
 assert.doesNotMatch(timesheetImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'timesheet import provenance must not persist raw CSV contents');
 assert.match(server, /collectDuplicateImportRows/, 'import apply routes must share duplicate-row detection');

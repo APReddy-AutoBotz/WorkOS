@@ -22,7 +22,12 @@ globalThis.fetch = async (url, init = {}) => {
   }
   const body = JSON.parse(init.body);
   calls.push({url, init, body});
-  const channel = body.schemaVersion === 'client-master/1' ? 'Client Master' : 'Project Master';
+  const channel = ({
+    'client-master/1': 'Client Master',
+    'project-master/1': 'Project Master',
+    'allocation-control/1': 'Allocation Control',
+    'timesheet-import/1': 'Timesheet Import',
+  })[body.schemaVersion];
   return new Response(JSON.stringify({
     status: body.dryRun ? 'Dry Run' : 'Success',
     totalRows: 2,
@@ -54,8 +59,16 @@ const clientPreview = await adminService.runVersionedClientImport({
   fileName: 'clients.csv', rows: [{id: 'CLIENT-101', name: 'Synthetic Client 101'}], clientErrors: [], totalRows: 1,
   dryRun: true, idempotencyKey: 'client-dry-run-key',
 });
+const allocationPreview = await adminService.runVersionedAllocationImport({
+  fileName: 'allocations.csv', rows: [{employeeId: 'EMP-101', projectId: 'PROJ-101', percentage: 25}],
+  clientErrors: [], totalRows: 1, dryRun: true, idempotencyKey: 'allocation-dry-run-key',
+});
+const timesheetPreview = await adminService.runVersionedTimesheetImport({
+  fileName: 'timesheets.csv', rows: [{employeeId: 'EMP-101', weekEnding: '2026-09-27', date: '2026-09-25', workType: 'Client Misc Task', clientName: 'Synthetic Client', hours: 7.5}],
+  clientErrors: [], totalRows: 1, dryRun: true, idempotencyKey: 'timesheet-dry-run-key',
+});
 
-assert.equal(calls.length, 4);
+assert.equal(calls.length, 6);
 const projectCalls = calls.filter(call => call.url === '/api/v1/imports/projects/apply');
 assert.equal(projectCalls.length, 3, 'the project import service must use the versioned API');
 assert.deepEqual(projectCalls.map(call => call.init.headers['Idempotency-Key']), [
@@ -72,12 +85,26 @@ assert.equal(retriedPreview?.dryRun, true);
 assert.equal(applied?.dryRun, false);
 assert.equal(clientPreview?.dryRun, true);
 assert.equal(clientPreview?.schemaVersion, 'client-master/1');
-assert.deepEqual(calls.at(-1).body, {
+const clientCall = calls.find(call => call.url === '/api/v1/imports/clients/apply');
+assert.deepEqual(clientCall.body, {
   schemaVersion: 'client-master/1', dryRun: true, fileName: 'clients.csv',
   rows: [{id: 'CLIENT-101', name: 'Synthetic Client 101'}], totalRows: 1, clientErrors: [],
 }, 'the client import service sends the canonical versioned dry-run payload');
-assert.equal(calls.at(-1).url, '/api/v1/imports/clients/apply');
-assert.equal(calls.at(-1).init.headers['Idempotency-Key'], 'client-dry-run-key');
+assert.equal(clientCall.init.headers['Idempotency-Key'], 'client-dry-run-key');
+const allocationCall = calls.find(call => call.url === '/api/v1/imports/allocations/apply');
+assert.ok(allocationCall, 'Allocation Control uses the versioned API');
+assert.equal(allocationCall.body.schemaVersion, 'allocation-control/1');
+assert.equal(allocationCall.body.dryRun, true);
+assert.equal(allocationCall.init.headers['Idempotency-Key'], 'allocation-dry-run-key');
+assert.equal(allocationPreview?.schemaVersion, 'allocation-control/1');
+assert.equal(allocationPreview?.dryRun, true);
+const timesheetCall = calls.find(call => call.url === '/api/v1/imports/timesheets/apply');
+assert.ok(timesheetCall, 'Timesheet Import uses the versioned API');
+assert.equal(timesheetCall.body.schemaVersion, 'timesheet-import/1');
+assert.equal(timesheetCall.body.dryRun, true);
+assert.equal(timesheetCall.init.headers['Idempotency-Key'], 'timesheet-dry-run-key');
+assert.equal(timesheetPreview?.schemaVersion, 'timesheet-import/1');
+assert.equal(timesheetPreview?.dryRun, true);
 
 const rowThree = {projectCode: 'PROJECT-103', name: 'Synthetic Project 103'};
 assert.deepEqual(filterAcceptedImportRows([rowOne, rowTwo, rowThree], [rowOne, rowThree], [{rowNumber: 4}]), [rowOne],

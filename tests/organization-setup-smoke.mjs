@@ -35,6 +35,15 @@ for (const invalidTerms of [
 assert.deepEqual(normalizePersistedTerminology({employee:'person'}).employee,{singular:'person',plural:'persons',helpText:''});
 const server = readFileSync('server/index.mjs', 'utf8');
 const projectImportRouter = readFileSync('server/modules/imports/project-import-router.mjs', 'utf8');
+const operationalImportRouter = readFileSync('server/modules/imports/operational-import-router.mjs', 'utf8');
+const allocationImportRouter = operationalImportRouter.slice(
+  operationalImportRouter.indexOf("router.post('/imports/allocations/apply'"),
+  operationalImportRouter.indexOf("router.post('/imports/timesheets/apply'"),
+);
+const timesheetImportRouter = operationalImportRouter.slice(
+  operationalImportRouter.indexOf("router.post('/imports/timesheets/apply'"),
+  operationalImportRouter.indexOf('return router;'),
+);
 const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
 const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
@@ -202,10 +211,10 @@ assert.ok(
 );
 assert.match(projectLegalScopePrerequisite, /create unique index if not exists uq_projects_org_legal_id[\s\S]*projects\(organization_id, legal_entity_id, id\)/, 'project legal-scope prerequisite must be replay-safe and match the referenced key');
 assert.match(canonicalScopeMigration, /project_allocations_project_legal_scope_fk[\s\S]*foreign key \(organization_id, legal_entity_id, project_id\)[\s\S]*references projects\(organization_id, legal_entity_id, id\)/, 'allocation project legal-scope FK must reference the prerequisite unique project key');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*from employees[\s\S]*organization_id = \$2 and legal_entity_id = \$3[\s\S]*from projects[\s\S]*organization_id = \$2 and legal_entity_id = \$3/, 'timesheet import references must resolve only within authoritative organization and legal scope');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*select \* from timesheets where organization_id = \$1 and legal_entity_id = \$2 and employee_id = \$3 and week_ending = \$4 for update/, 'timesheet import prior-row lookup must be organization/legal scoped and locked');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*insert into timesheets \(employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id\)[\s\S]*on conflict \(organization_id, employee_id, week_ending\)/, 'timesheet import must persist authoritative ownership and use the scoped arbiter');
-assert.match(server, /delete from timesheet_entries where timesheet_id = \$1/, 'timesheet entries must be replaced only through the authorized scoped timesheet');
+assert.match(timesheetImportRouter, /from employees[\s\S]*organization_id = \$2 and legal_entity_id = \$3[\s\S]*from projects[\s\S]*organization_id = \$2 and legal_entity_id = \$3/, 'timesheet import references must resolve only within authoritative organization and legal scope');
+assert.match(timesheetImportRouter, /select \* from timesheets where organization_id = \$1 and legal_entity_id = \$2 and employee_id = \$3 and week_ending = \$4 for update/, 'timesheet import prior-row lookup must be organization/legal scoped and locked');
+assert.match(timesheetImportRouter, /insert into timesheets \(employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id\)[\s\S]*on conflict \(organization_id, employee_id, week_ending\)/, 'timesheet import must persist authoritative ownership and use the scoped arbiter');
+assert.match(timesheetImportRouter, /delete from timesheet_entries where timesheet_id = \$1/, 'timesheet entries must be replaced only through the authorized scoped timesheet');
 assert.match(canonicalScopeMigration, /project_allocations add column if not exists legal_entity_id[\s\S]*project_allocations_employee_legal_scope_fk[\s\S]*project_allocations_project_legal_scope_fk/, 'allocation persistence must enforce employee and project legal ownership');
 assert.match(canonicalScopeMigration, /timesheets add column if not exists legal_entity_id[\s\S]*timesheets_employee_legal_scope_fk/, 'timesheet persistence must enforce employee legal ownership');
 assert.match(reportingPeriodMigration, /drop constraint if exists reporting_periods_status_check[\s\S]*status='Financially Locked' where status='Locked'/, 'legacy Locked periods must be deterministically reconciled before the new state constraint');
@@ -306,7 +315,7 @@ assert.match(apiClient, /workos:organization-scope-changed/, 'terminology must r
 assert.match(server, /result\.rows\.length === 1 \? result\.rows\[0\] : null/, 'ambiguous local login identifiers must fail closed');
 assert.match(server, /not exists\(select 1 from direct_users\)[\s\S]*u2\.status='Active'[\s\S]*e2\.status<>'Exited'/, 'employee-code login must be used only for active employee-linked users when no unique username or email matched');
 assert.match(server, /insert into project_allocations[\s\S]*organization_id/, 'allocation imports must persist authoritative organization ownership');
-assert.match(server, /api\/imports\/allocations\/apply[\s\S]*organization_id=\$2 and legal_entity_id=\$3[\s\S]*p\.legal_entity_id=\$3 and e\.legal_entity_id=\$3/, 'allocation imports must resolve and update references only in the authorized organization and legal entity');
+assert.match(allocationImportRouter, /organization_id=\$2 and legal_entity_id=\$3[\s\S]*p\.legal_entity_id=\$3 and e\.legal_entity_id=\$3/, 'allocation imports must resolve and update references only in the authorized organization and legal entity');
 assert.match(server, /api\/timesheets[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT[\s\S]*api\/timesheets\/:id\/status[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'canonical save and direct decision paths must use the shared reporting-period guard');
 assert.match(server, /api\/approvals\/:id\/status[\s\S]*approval\.entity_type === 'Timesheet'[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'generic timesheet approval decisions must use the shared reporting-period guard');
 assert.match(server, /api\/approvals\/:id\/status[\s\S]*select \* from approval_records where id = \$1 for update/, 'generic approval decisions must lock the authoritative approval row directly');
@@ -314,7 +323,7 @@ assert.doesNotMatch(server, /approvalSelect} where ar\.id = \$1 for update/, 'ge
 assert.match(server, /select e\.name as subject_employee_name[\s\S]*buildApprovalScopeWhere\(req, scopeParams\)/, 'generic approval scope and display data must be derived separately after locking');
 assert.match(server, /approval\.entity_type === 'Timesheet'[\s\S]*timesheets where id=\$1 and organization_id=\$2 and legal_entity_id=\$3 for update[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'generic timesheet approval must retain linked row scope, locking, and reporting-period authority');
 assert.match(server, /approval\.entity_type === 'LeaveRequest'[\s\S]*leave_requests where id = \$1 for update[\s\S]*decideApprovalRecord/, 'non-timesheet generic approval behavior must remain retained');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT/, 'all timesheet import statuses must use the shared content-mutation guard');
+assert.match(timesheetImportRouter, /REPORTING_PERIOD_OPERATIONS\.CONTENT/, 'all timesheet import statuses must use the shared content-mutation guard');
 
 const periodQuery = status => ({ query: async (_sql, params) => ({ rows: status === null ? [] : (Array.isArray(status) ? status : [{ id:'period-1', code:'P1', status }]).map((period, index) => ({
   id:`period-${index}`,code:'P1',frequency:'Weekly',relevant_date:params[2][0],...period,
@@ -361,7 +370,7 @@ const boundedDates = Array.from({length:101}, (_, index) => new Date(Date.UTC(20
 await assert.doesNotReject(assertReportingPeriodAllows({ query: async (_sql, params) => ({ rows: params[2].map(date => ({ id:`weekly-${date}`,code:'W',frequency:'Weekly',status:'Open',relevant_date:date })) }) }, { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:boundedDates.slice(0,100),operation:REPORTING_PERIOD_OPERATIONS.CONTENT }));
 await assert.rejects(assertReportingPeriodAllows(periodQuery('Open'), { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:boundedDates,operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_DATE_LIMIT');
 assert.match(server, /relevantDates: \[parsed\.data\.week_ending, \.\.\.parsed\.data\.entries\.map\(entry => entry\.work_date\)\]/, 'direct timesheets must validate every unique entry date with the week ending');
-assert.match(server, /relevantDates: \[group\.weekEnding, \.\.\.group\.entries\.map\(entry => entry\.workDate\)\][\s\S]*error instanceof ReportingPeriodError[\s\S]*continue/, 'imports must skip blocked groups while preserving partial processing');
+assert.match(timesheetImportRouter, /relevantDates: \[group\.weekEnding, \.\.\.group\.entries\.map\(entry => entry\.workDate\)\][\s\S]*error instanceof ReportingPeriodError[\s\S]*continue/, 'imports must skip blocked groups while preserving partial processing');
 assert.equal(canTransitionReportingPeriod('Open','Submission Closed'),true);
 assert.equal(canTransitionReportingPeriod('Approval Closed','Open'),false, 'closed approval authority must not silently reopen');
 

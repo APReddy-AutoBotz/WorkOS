@@ -65,6 +65,12 @@ const requiredImportHeaders: Record<ImportChannel, string[]> = {
   allocations: ['id', 'employeeId', 'projectId', 'roleOnProject', 'percentage', 'startDate', 'endDate', 'billable', 'status', 'comments'],
   timesheets: ['employeeId', 'weekEnding', 'workType', 'projectId', 'clientName', 'category', 'date', 'hours', 'remark', 'billable', 'status', 'rejectionReason'],
 };
+const versionedImportSchemas: Partial<Record<ImportChannel, string>> = {
+  projects: 'project-master/1',
+  clients: 'client-master/1',
+  allocations: 'allocation-control/1',
+  timesheets: 'timesheet-import/1',
+};
 
 const orderImportRow = (id: ImportChannel, row: Record<string, unknown>) => {
   return Object.fromEntries(requiredImportHeaders[id].map(header => [header, row[header] ?? '']));
@@ -101,11 +107,16 @@ export const ImportExport = () => {
   const applyLock = useRef(false);
   const refreshHistory = () => setHistoryRevision(value => value + 1);
   const runVersionedImport = (
-    channel: 'projects' | 'clients',
+    channel: 'projects' | 'clients' | 'allocations' | 'timesheets',
     request: {fileName: string; rows: CsvRow[]; clientErrors: ImportErrorRow[]; totalRows: number; dryRun: boolean; idempotencyKey: string},
-  ) => channel === 'projects'
-    ? adminService.runVersionedProjectImport(request)
-    : adminService.runVersionedClientImport(request);
+  ) => {
+    switch (channel) {
+      case 'projects': return adminService.runVersionedProjectImport(request);
+      case 'clients': return adminService.runVersionedClientImport(request);
+      case 'allocations': return adminService.runVersionedAllocationImport(request);
+      case 'timesheets': return adminService.runVersionedTimesheetImport(request);
+    }
+  };
 
   const downloadCsv = (fileName: string, rows: object[], channel = fileName) => {
     void downloadAuditedCsv(fileName, rows, channel).finally(refreshHistory);
@@ -348,7 +359,7 @@ export const ImportExport = () => {
     const validRows = validationResult.validRows;
     const errors = attachPreflightSourceIdentifiers(id, rows, [...structureErrors, ...validationResult.errors]);
     const status: ImportExportLog['status'] = validRows.length === 0 ? 'Failed' : 'Dry Run';
-    const schemaVersion = id === 'projects' ? 'project-master/1' : id === 'clients' ? 'client-master/1' : null;
+    const schemaVersion = versionedImportSchemas[id] || null;
     const basePending: PendingImport = {
       id, title: option?.title || id, fileName: file.name, rows, validRows, errors,
       totalRows: rows.length,
@@ -363,10 +374,10 @@ export const ImportExport = () => {
     };
     setPendingImport(basePending);
 
-    if (schemaVersion && (id === 'projects' || id === 'clients')) {
-      setLastResult(`Checking ${file.name} against the server without applying ${id === 'projects' ? 'project' : 'client'} changes…`);
+    if (schemaVersion) {
+      setLastResult(`Checking ${file.name} against the server without applying ${option?.title || id} changes…`);
       try {
-        const result = await runVersionedImport(id, {
+        const result = await runVersionedImport(id as 'projects' | 'clients' | 'allocations' | 'timesheets', {
           fileName: file.name,
           rows: validRows,
           clientErrors: errors,
@@ -443,7 +454,7 @@ export const ImportExport = () => {
 
   const retryVersionedImportDryRun = async () => {
     if (!pendingImport || !pendingImport.versionedOperation
-        || !['projects', 'clients'].includes(pendingImport.id)
+        || !['projects', 'clients', 'allocations', 'timesheets'].includes(pendingImport.id)
         || pendingImport.versionedOperation.validationState !== 'failed' || pendingImport.versionedOperation.requiresNewImport
         || isPreviewing || applyLock.current) return;
     const requestVersion = importRequestVersion.current;
@@ -451,7 +462,7 @@ export const ImportExport = () => {
     setIsPreviewing(true);
     setLastResult(`Retrying server validation for ${snapshot.fileName} with the same import key…`);
     try {
-      const result = await runVersionedImport(snapshot.id as 'projects' | 'clients', {
+      const result = await runVersionedImport(snapshot.id as 'projects' | 'clients' | 'allocations' | 'timesheets', {
         fileName: snapshot.fileName,
         rows: snapshot.validRows,
         clientErrors: snapshot.errors,
@@ -496,13 +507,13 @@ export const ImportExport = () => {
 
   const applyPendingImport = async () => {
     if (!pendingImport) return;
-    if (pendingImport.versionedOperation && ['projects', 'clients'].includes(pendingImport.id)) {
+    if (pendingImport.versionedOperation && ['projects', 'clients', 'allocations', 'timesheets'].includes(pendingImport.id)) {
       const operation = pendingImport.versionedOperation;
       if (operation.validationState !== 'complete' || operation.requiresNewImport || applyLock.current) return;
       applyLock.current = true;
       setIsApplying(true);
       try {
-        const backendResult = await runVersionedImport(pendingImport.id as 'projects' | 'clients', {
+        const backendResult = await runVersionedImport(pendingImport.id as 'projects' | 'clients' | 'allocations' | 'timesheets', {
           fileName: pendingImport.fileName,
           rows: pendingImport.validRows,
           clientErrors: pendingImport.errors,

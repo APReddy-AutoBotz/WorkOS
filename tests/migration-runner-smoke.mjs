@@ -342,6 +342,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
     values ('employee-scope-beta','EMP-SCOPE-BETA','Synthetic Beta Employee','beta-employee@example.test',
       'Consultant','Engineering','US','cd-import-provenance-test','Active','org-scope-beta','legal-scope-beta')`);
+  await pool.query(`insert into employees
+      (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+    values ('employee-allocation-target','EMP-ALLOCATION-TARGET','Synthetic Allocation Target','allocation-target@example.test',
+      'Consultant','Engineering','US','cd-import-provenance-test','Active','org-default','legal-default')`);
   await pool.query(`insert into audit_logs (user_id,user_name,user_role,active_role,source,module,action,entity_type,entity_id,details)
     values ('legacy-null-scope-actor','Legacy actor','Admin','Admin','Web','Legacy','Legacy Scope Row','Test','legacy-null-audit','historical row without scope')`);
   await pool.query(`insert into import_export_logs (operation,channel,file_name,status,user_name)
@@ -578,6 +582,21 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
+    const applyOperationalImportV1 = (channel, body, idempotencyKey, {
+      legalEntityId = 'legal-default',
+      authToken = token,
+    } = {}) => {
+      const headers = {
+        Authorization: `Bearer ${authToken}`,
+        'Content-Type': 'application/json',
+        'X-Organization-ID': 'org-default',
+        'X-Legal-Entity-ID': legalEntityId,
+      };
+      if (idempotencyKey !== undefined) headers['Idempotency-Key'] = idempotencyKey;
+      return fetch(`${baseUrl}/api/v1/imports/${channel}/apply`, {
+        method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+      });
+    };
 
     const partialResponse = await apply({
       fileName: 'synthetic-partial.csv',
@@ -715,6 +734,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(clientPartialResponse.status, 200);
     const clientPartialBody = await clientPartialResponse.json();
+    assert.equal(Object.hasOwn(clientPartialBody.log, 'schema_version'), false,
+      'the legacy Client Master apply response must preserve its established batch DTO');
+    assert.equal(Object.hasOwn(clientPartialBody.log, 'dry_run'), false,
+      'new import contract fields must not change the legacy Client Master apply response');
     assert.deepEqual({status: clientPartialBody.status, totalRows: clientPartialBody.totalRows,
       validRows: clientPartialBody.validRows, errorRows: clientPartialBody.errorRows},
     {status: 'Partial', totalRows: 3, validRows: 2, errorRows: 1},
@@ -754,6 +777,19 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         details: 'Created client Synthetic Client Without Source ID from synthetic-client-partial.csv',
       },
     ], 'client row audits must retain the input source ID only when supplied and link to the same batch');
+
+    const clientLegacyBlankId = await applyClients({
+      fileName: 'synthetic-client-legacy-blank-id.csv',
+      rows: [{id: '', name: 'Synthetic Client Legacy Blank ID'}],
+    });
+    assert.equal(clientLegacyBlankId.status, 400,
+      'legacy Client Master requests must retain strict blank-ID validation');
+    const clientLegacyBlankStatus = await applyClients({
+      fileName: 'synthetic-client-legacy-blank-status.csv',
+      rows: [{name: 'Synthetic Client Legacy Blank Status', status: ''}],
+    });
+    assert.equal(clientLegacyBlankStatus.status, 400,
+      'legacy Client Master requests must retain strict blank-status validation');
 
     const clientFailedResponse = await applyClients({
       fileName: 'synthetic-client-failed.csv',
@@ -1108,6 +1144,22 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       import_processing_result: 'Success',
       details: 'Created project PROJECT-IMPORT-SOURCE-1 from synthetic-project-partial.csv',
     }], 'project row audits must retain required source code, result and shared batch linkage');
+
+    const projectLegacyBlankStatus = await applyProjects({
+      fileName: 'synthetic-project-legacy-blank-status.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-LEGACY-BLANK-STATUS',
+        name: 'Synthetic Project Legacy Blank Status',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+        status: '',
+      }],
+    });
+    assert.equal(projectLegacyBlankStatus.status, 400,
+      'legacy Project Master requests must retain strict blank-status validation');
 
     const projectUpdateResponse = await applyProjects({
       fileName: 'synthetic-project-update.csv',
@@ -2059,6 +2111,252 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(allocationRollbackRows.rows, [{allocation_rows: 0,audit_rows: 0,batch_rows: 0}],
       'a failed allocation batch-log write must roll back the allocation and audit with no orphan batch reference');
 
+    const v1AllocationBody = {
+      schemaVersion: 'allocation-control/1', dryRun: true, fileName: 'synthetic-allocation-v1-dry-run.csv',
+      totalRows: 1, clientErrors: [], rows: [{
+        id: '', employeeId: 'EMP-IMPORT-SUCCESS', projectId: 'PROJECT-IMPORT-SOURCE-1',
+        percentage: 5, startDate: '2026-02-01', endDate: '2026-03-01', status: '',
+      }],
+    };
+    const missingAllocationKey = await applyOperationalImportV1('allocations', v1AllocationBody, undefined);
+    assert.equal(missingAllocationKey.status, 400);
+    assertVersionedErrorResponse(missingAllocationKey, await missingAllocationKey.json(), {
+      code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'The Idempotency-Key header is required.',
+    });
+    const invalidAllocationKey = await applyOperationalImportV1('allocations', v1AllocationBody, 'bad key');
+    assert.equal(invalidAllocationKey.status, 400);
+    assertVersionedErrorResponse(invalidAllocationKey, await invalidAllocationKey.json(), {
+      code: 'INVALID_IDEMPOTENCY_KEY', message: 'The Idempotency-Key header is invalid.',
+    });
+    const deniedAllocationV1 = await applyOperationalImportV1('allocations', v1AllocationBody, 'allocation-v1-denied-key', {
+      authToken: tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Employee'),
+    });
+    assert.equal(deniedAllocationV1.status, 403);
+    assertVersionedErrorResponse(deniedAllocationV1, await deniedAllocationV1.json(), {
+      code: 'FORBIDDEN', message: 'Insufficient permission privileges',
+    });
+    const missingAllocationSchema = await applyOperationalImportV1('allocations', {
+      ...v1AllocationBody, schemaVersion: undefined,
+    }, 'allocation-v1-missing-schema-key');
+    assert.equal(missingAllocationSchema.status, 400);
+    assertVersionedErrorResponse(missingAllocationSchema, await missingAllocationSchema.json(), {
+      code:'SCHEMA_VERSION_REQUIRED',message:'The Allocation Control import schema version is required.',
+    });
+    const unsupportedAllocationSchema = await applyOperationalImportV1('allocations', {
+      ...v1AllocationBody, schemaVersion: 'allocation-control/99',
+    }, 'allocation-v1-unsupported-schema');
+    assert.equal(unsupportedAllocationSchema.status, 400);
+    assertVersionedErrorResponse(unsupportedAllocationSchema, await unsupportedAllocationSchema.json(), {
+      code: 'UNSUPPORTED_SCHEMA_VERSION', message: 'The Allocation Control import schema version is not supported.',
+    });
+
+    const v1AllocationPreview = await applyOperationalImportV1('allocations', v1AllocationBody, 'allocation-v1-dry-run-key');
+    assert.equal(v1AllocationPreview.status, 200);
+    const v1AllocationPreviewBody = await v1AllocationPreview.json();
+    assert.deepEqual({status: v1AllocationPreviewBody.status, validRows: v1AllocationPreviewBody.validRows,
+      errorRows: v1AllocationPreviewBody.errorRows, schemaVersion: v1AllocationPreviewBody.log.schema_version,
+      dryRun: v1AllocationPreviewBody.log.dry_run},
+    {status: 'Dry Run', validRows: 1, errorRows: 0, schemaVersion: 'allocation-control/1', dryRun: true},
+    'v1 Allocation Control records a versioned dry-run batch and normalizes blank optional ID/status cells');
+    const v1AllocationPreviewRows = await pool.query(`select
+        (select count(*)::int from project_allocations where id='allocation-v1-dry-run') as allocation_rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='Allocation') as row_audits,
+        (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='ImportBatch'
+          and action='Dry Run Allocation Control Import' and import_processing_result='Dry Run') as dry_run_audits,
+        (select count(*)::int from import_export_idempotency where batch_id=$1 and channel='Allocation Control') as key_rows`,
+    [v1AllocationPreviewBody.log.id]);
+    assert.deepEqual(v1AllocationPreviewRows.rows, [{allocation_rows:0,row_audits:0,dry_run_audits:1,key_rows:1}],
+      'Allocation Control dry run writes only batch/audit/idempotency evidence, not the allocation');
+    const emptyAllocationDryRun = await applyOperationalImportV1('allocations', {
+      ...v1AllocationBody, fileName:'synthetic-allocation-v1-empty-dry-run.csv', totalRows:1, rows:[],
+      clientErrors:[{rowNumber:2,field:'header',message:'Synthetic preflight rejected every row.'}],
+    }, 'allocation-v1-empty-dry-run-key');
+    const emptyAllocationDryRunBody = await emptyAllocationDryRun.json();
+    assert.deepEqual({status:emptyAllocationDryRunBody.status,validRows:emptyAllocationDryRunBody.validRows,
+      errorRows:emptyAllocationDryRunBody.errorRows,dryRun:emptyAllocationDryRunBody.log.dry_run},
+    {status:'Dry Run',validRows:0,errorRows:1,dryRun:true},
+    'a zero-valid-row Allocation Control dry run still persists its diagnostic batch');
+    const v1AllocationPreviewRetry = await applyOperationalImportV1('allocations', v1AllocationBody, 'allocation-v1-dry-run-key');
+    const v1AllocationPreviewRetryBody = await v1AllocationPreviewRetry.json();
+    assert.equal(v1AllocationPreviewRetryBody.log.id, v1AllocationPreviewBody.log.id,
+      'an identical Allocation Control dry-run retry replays the original batch');
+    assert.equal((await pool.query(`select count(*)::int as rows from import_export_logs where file_name=$1`, [v1AllocationBody.fileName])).rows[0].rows, 1,
+      'an Allocation Control retry does not create a duplicate batch');
+    const v1AllocationChangedKey = await applyOperationalImportV1('allocations', {
+      ...v1AllocationBody, rows: [{...v1AllocationBody.rows[0], percentage: 6}],
+    }, 'allocation-v1-dry-run-key');
+    assert.equal(v1AllocationChangedKey.status, 409);
+    assertVersionedErrorResponse(v1AllocationChangedKey, await v1AllocationChangedKey.json(), {
+      code: 'IDEMPOTENCY_KEY_REUSED', message: 'This Idempotency-Key was already used with a different request.',
+    });
+
+    const naturalDuplicateAllocationBody = {
+      ...v1AllocationBody,
+      fileName: 'synthetic-allocation-v1-duplicate.csv', totalRows: 2,
+      rows: [
+        {...v1AllocationBody.rows[0], id: 'allocation-v1-duplicate-a'},
+        {...v1AllocationBody.rows[0], id: 'allocation-v1-duplicate-b'},
+      ],
+    };
+    const naturalDuplicateAllocation = await applyOperationalImportV1('allocations', naturalDuplicateAllocationBody, 'allocation-v1-duplicate-key');
+    const naturalDuplicateAllocationResult = await naturalDuplicateAllocation.json();
+    assert.deepEqual({status: naturalDuplicateAllocationResult.status, validRows: naturalDuplicateAllocationResult.validRows,
+      errorRows: naturalDuplicateAllocationResult.errorRows}, {status:'Dry Run',validRows:1,errorRows:1},
+    'v1 server validation enforces the same employee/project/date natural duplicate key used by the UI');
+    assert.equal(naturalDuplicateAllocationResult.errors[0].field, 'allocationKey');
+    assert.equal(naturalDuplicateAllocationResult.errors[0].rowNumber, 3);
+
+    const allocationAliasIds = await pool.query(`select e.id as employee_id,p.id as project_id
+      from employees e cross join projects p
+      where e.employee_id='EMP-IMPORT-SUCCESS' and p.project_code='PROJECT-IMPORT-SOURCE-1'
+        and e.organization_id='org-default' and e.legal_entity_id='legal-default'
+        and p.organization_id='org-default' and p.legal_entity_id='legal-default'`);
+    assert.equal(allocationAliasIds.rowCount, 1, 'canonical allocation duplicate fixtures are available in the selected scope');
+    const aliasDuplicateAllocationResponse = await applyOperationalImportV1('allocations', {
+      ...v1AllocationBody,
+      fileName: 'synthetic-allocation-v1-alias-duplicate.csv',
+      totalRows: 2,
+      rows: [
+        {...v1AllocationBody.rows[0], id: 'allocation-v1-alias-duplicate-a'},
+        {...v1AllocationBody.rows[0], id: 'allocation-v1-alias-duplicate-b',
+          employeeId: allocationAliasIds.rows[0].employee_id, projectId: allocationAliasIds.rows[0].project_id},
+      ],
+    }, 'allocation-v1-alias-duplicate-key');
+    const aliasDuplicateAllocation = await aliasDuplicateAllocationResponse.json();
+    assert.deepEqual({validRows: aliasDuplicateAllocation.validRows, errorRows: aliasDuplicateAllocation.errorRows},
+      {validRows: 1, errorRows: 1},
+      'v1 Allocation Control detects duplicate natural keys when the same employee/project are supplied by different identifiers');
+    assert.deepEqual({field: aliasDuplicateAllocation.errors[0].field, rowNumber: aliasDuplicateAllocation.errors[0].rowNumber},
+      {field: 'allocationKey', rowNumber: 3});
+    assert.equal((await pool.query(`select count(*)::int as rows from project_allocations
+      where id in ('allocation-v1-alias-duplicate-a','allocation-v1-alias-duplicate-b')`)).rows[0].rows, 0,
+    'canonical allocation duplicate dry-run leaves both candidate allocation rows unwritten');
+
+    await pool.query(`update system_settings set value='true'::jsonb,updated_at=now() where key='blockOverAllocation'`);
+    const cumulativeAllocationBody = {
+      schemaVersion: 'allocation-control/1', dryRun: true, fileName: 'synthetic-allocation-v1-cumulative.csv',
+      totalRows: 2, clientErrors: [], rows: [
+        {id:'allocation-v1-cumulative-a',employeeId:'EMP-IMPORT-SUCCESS',projectId:'PROJECT-IMPORT-SOURCE-1',percentage:30,startDate:'2026-02-01',endDate:'2026-03-01',status:'Active'},
+        {id:'allocation-v1-cumulative-b',employeeId:'EMP-IMPORT-SUCCESS',projectId:'PROJECT-IMPORT-SOURCE-1',percentage:30,startDate:'2026-02-01',endDate:'2026-02-28',status:'Active'},
+      ],
+    };
+    const cumulativeAllocationResponse = await applyOperationalImportV1('allocations', cumulativeAllocationBody, 'allocation-v1-cumulative-key');
+    const cumulativeAllocationResult = await cumulativeAllocationResponse.json();
+    assert.deepEqual({status:cumulativeAllocationResult.status,validRows:cumulativeAllocationResult.validRows,errorRows:cumulativeAllocationResult.errorRows},
+      {status:'Dry Run',validRows:1,errorRows:1},
+      'the no-write Allocation Control dry run accounts for earlier accepted rows when validating cumulative over-allocation');
+    assert.match(cumulativeAllocationResult.errors[0].message, /110%/);
+    const cumulativeAllocationWrites = await pool.query(`select
+        (select count(*)::int from project_allocations where id in ('allocation-v1-cumulative-a','allocation-v1-cumulative-b')) as allocation_rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='Allocation') as row_audits`,
+    [cumulativeAllocationResult.log.id]);
+    assert.deepEqual(cumulativeAllocationWrites.rows, [{allocation_rows:0,row_audits:0}],
+      'cumulative dry-run validation keeps both accepted and rejected allocation candidates write-free');
+
+    const allocationReassignmentIds = await pool.query(`select
+        (select id from employees where employee_id='EMP-IMPORT-SUCCESS' and organization_id='org-default' and legal_entity_id='legal-default') as source_employee_id,
+        (select id from employees where employee_id='EMP-ALLOCATION-TARGET' and organization_id='org-default' and legal_entity_id='legal-default') as target_employee_id,
+        (select id from projects where project_code='PROJECT-IMPORT-SOURCE-1' and organization_id='org-default' and legal_entity_id='legal-default') as project_id`);
+    assert.ok(allocationReassignmentIds.rows[0].source_employee_id && allocationReassignmentIds.rows[0].target_employee_id
+      && allocationReassignmentIds.rows[0].project_id, 'reassignment fixtures resolve to the selected organization and legal entity');
+    await pool.query(`insert into project_allocations
+        (id,employee_id,project_id,role_on_project,percentage,start_date,end_date,billable,status,comments,organization_id,legal_entity_id)
+      values
+        ('allocation-v1-reassign-source',$1,$3,'Synthetic Source',50,date '2026-03-01',date '2026-03-31',true,'Active','Synthetic source assignment','org-default','legal-default'),
+        ('allocation-v1-reassign-target',$2,$3,'Synthetic Target',40,date '2026-03-01',date '2026-03-31',true,'Active','Synthetic target load','org-default','legal-default'),
+        ('allocation-v1-reassign-paused',$2,$3,'Synthetic Paused',70,date '2026-03-01',date '2026-03-31',true,'Paused','Synthetic paused assignment','org-default','legal-default')`,
+    [allocationReassignmentIds.rows[0].source_employee_id, allocationReassignmentIds.rows[0].target_employee_id,
+      allocationReassignmentIds.rows[0].project_id]);
+
+    const reassignmentCandidate = {
+      id: 'allocation-v1-reassign-source', employeeId: 'EMP-ALLOCATION-TARGET', projectId: 'PROJECT-IMPORT-SOURCE-1',
+      percentage: 50, startDate: '2026-03-01', endDate: '2026-03-31', status: 'Active',
+    };
+    const reassignmentFromSourceResponse = await applyOperationalImportV1('allocations', {
+      schemaVersion: 'allocation-control/1', dryRun: true, fileName: 'synthetic-allocation-v1-reassign-source.csv',
+      totalRows: 2, clientErrors: [], rows: [
+        reassignmentCandidate,
+        {id: 'allocation-v1-reassign-source-followup', employeeId: 'EMP-IMPORT-SUCCESS',
+          projectId: 'PROJECT-IMPORT-SOURCE-1', percentage: 60, startDate: '2026-03-02', endDate: '2026-03-30', status: 'Active'},
+      ],
+    }, 'allocation-v1-reassign-source-key');
+    const reassignmentFromSource = await reassignmentFromSourceResponse.json();
+    assert.deepEqual({validRows: reassignmentFromSource.validRows, errorRows: reassignmentFromSource.errorRows},
+      {validRows: 2, errorRows: 0},
+      'allocation dry-run removes a reassigned allocation from its source employee before validating later source rows');
+
+    const reassignmentToTargetResponse = await applyOperationalImportV1('allocations', {
+      schemaVersion: 'allocation-control/1', dryRun: true, fileName: 'synthetic-allocation-v1-reassign-target.csv',
+      totalRows: 2, clientErrors: [], rows: [
+        reassignmentCandidate,
+        {id: 'allocation-v1-reassign-target-followup', employeeId: 'EMP-ALLOCATION-TARGET',
+          projectId: 'PROJECT-IMPORT-SOURCE-1', percentage: 20, startDate: '2026-03-02', endDate: '2026-03-30', status: 'Active'},
+      ],
+    }, 'allocation-v1-reassign-target-key');
+    const reassignmentToTarget = await reassignmentToTargetResponse.json();
+    assert.deepEqual({validRows: reassignmentToTarget.validRows, errorRows: reassignmentToTarget.errorRows},
+      {validRows: 1, errorRows: 1},
+      'allocation dry-run adds a reassigned allocation to its destination employee before validating later target rows');
+    assert.match(reassignmentToTarget.errors[0].message, /110%/);
+
+    const blankStatusPausedAllocation = await applyOperationalImportV1('allocations', {
+      schemaVersion: 'allocation-control/1', dryRun: true, fileName: 'synthetic-allocation-v1-paused-blank-status.csv',
+      totalRows: 1, clientErrors: [], rows: [{
+        id: 'allocation-v1-reassign-paused', employeeId: 'EMP-ALLOCATION-TARGET',
+        projectId: 'PROJECT-IMPORT-SOURCE-1', percentage: 70,
+        startDate: '2026-03-01', endDate: '2026-03-31', status: '',
+      }],
+    }, 'allocation-v1-paused-blank-status-key');
+    const blankStatusPausedAllocationResult = await blankStatusPausedAllocation.json();
+    assert.deepEqual({validRows: blankStatusPausedAllocationResult.validRows, errorRows: blankStatusPausedAllocationResult.errorRows},
+      {validRows: 1, errorRows: 0},
+      'over-allocation validation uses the effective preserved Paused status when the imported status cell is blank');
+    assert.equal((await pool.query(`select count(*)::int as rows from project_allocations
+      where id like 'allocation-v1-reassign-%-followup'`)).rows[0].rows, 0,
+    'allocation reassignment dry-runs leave their candidate follow-up allocations unwritten');
+    await pool.query(`update system_settings set value='false'::jsonb,updated_at=now() where key='blockOverAllocation'`);
+
+    const allocationConcurrencyBody = {
+      schemaVersion: 'allocation-control/1', dryRun: false, fileName: 'synthetic-allocation-v1-concurrent.csv',
+      totalRows: 1, clientErrors: [], rows: [{
+        id:'allocation-v1-concurrent',employeeId:'EMP-IMPORT-SUCCESS',projectId:'PROJECT-IMPORT-SOURCE-1',
+        percentage:5,startDate:'2026-02-01',endDate:'2026-03-01',status:'Active',
+      }],
+    };
+    const concurrentAllocationResponses = await Promise.all([
+      applyOperationalImportV1('allocations', allocationConcurrencyBody, 'allocation-v1-concurrent-key'),
+      applyOperationalImportV1('allocations', allocationConcurrencyBody, 'allocation-v1-concurrent-key'),
+    ]);
+    assert.deepEqual(concurrentAllocationResponses.map(response => response.status), [200,200],
+      'concurrent same-key Allocation Control applies both return a result');
+    const concurrentAllocationBodies = await Promise.all(concurrentAllocationResponses.map(response => response.json()));
+    assert.equal(concurrentAllocationBodies[0].log.id, concurrentAllocationBodies[1].log.id,
+      'concurrent same-key Allocation Control requests replay one operation batch');
+    const concurrentAllocationState = await pool.query(`select
+        (select count(*)::int from import_export_logs where id=$1) as batches,
+        (select count(*)::int from project_allocations where id='allocation-v1-concurrent') as allocation_rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='Allocation') as row_audits,
+        (select count(*)::int from import_export_idempotency where batch_id=$1) as key_rows`,
+    [concurrentAllocationBodies[0].log.id]);
+    assert.deepEqual(concurrentAllocationState.rows, [{batches:1,allocation_rows:1,row_audits:1,key_rows:1}],
+      'concurrent same-key Allocation Control apply writes one target row, row audit, batch and key record');
+
+    const multiScopeV1Token = tokenFor(multiScopeActorId, 'synthetic-multi-scope-admin');
+    const allocationScopeBody = {...v1AllocationBody, fileName:'synthetic-allocation-scope-isolation.csv'};
+    const allocationScopeDefault = await applyOperationalImportV1('allocations', allocationScopeBody, 'allocation-v1-scope-key', {
+      authToken: multiScopeV1Token, legalEntityId: 'legal-default',
+    });
+    const allocationScopeDefaultBody = await allocationScopeDefault.json();
+    const allocationScopeOther = await applyOperationalImportV1('allocations', allocationScopeBody, 'allocation-v1-scope-key', {
+      authToken: multiScopeV1Token, legalEntityId: 'legal-default-other',
+    });
+    const allocationScopeOtherBody = await allocationScopeOther.json();
+    assert.notEqual(allocationScopeDefaultBody.log.id, allocationScopeOtherBody.log.id,
+      'the same actor/key/request resolves to an independent batch in a different legal-entity scope');
+    assert.equal(allocationScopeOtherBody.status, 'Dry Run');
+    assert.ok(allocationScopeOtherBody.errorRows > 0,
+      'an entity outside the selected legal scope is treated as unavailable, not replayed from another scope');
+
     const timesheetForgedIdentifierResponse = await applyTimesheets({
       fileName: 'synthetic-timesheet-forged-source-id.csv',
       totalRows: 2,
@@ -2369,6 +2667,174 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         (select count(*)::int from import_export_logs where file_name='synthetic-timesheet-rollback.csv') as batch_rows`);
     assert.deepEqual(timesheetRollbackRows.rows, [{timesheet_rows:0,entry_rows:0,audit_rows:0,batch_rows:0}],
       'a failed timesheet batch-log write must roll back the timesheet, entries and group audit');
+
+    const v1TimesheetBody = {
+      schemaVersion: 'timesheet-import/1', dryRun: true, fileName: 'synthetic-timesheet-v1-dry-run.csv',
+      totalRows: 3,
+      clientErrors: [{rowNumber:2,field:'employeeId',message:'Synthetic client preflight rejection.',sourceIdentifier:'FORGED-TIMESHEET-SOURCE-ID'}],
+      rows: [
+        {employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-27',workType:'Client Misc Task',clientName:'Synthetic Client',date:'2026-02-25',hours:2,status:''},
+        {employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-27',workType:'Client Misc Task',clientName:'Synthetic Client',date:'2026-02-25',hours:2,status:''},
+      ],
+    };
+    const missingTimesheetKey = await applyOperationalImportV1('timesheets', v1TimesheetBody, undefined);
+    assert.equal(missingTimesheetKey.status, 400);
+    assertVersionedErrorResponse(missingTimesheetKey, await missingTimesheetKey.json(), {
+      code:'IDEMPOTENCY_KEY_REQUIRED',message:'The Idempotency-Key header is required.',
+    });
+    const unsupportedTimesheetSchema = await applyOperationalImportV1('timesheets', {
+      ...v1TimesheetBody, schemaVersion:'timesheet-import/99',
+    }, 'timesheet-v1-unsupported-schema-key');
+    assert.equal(unsupportedTimesheetSchema.status, 400);
+    assertVersionedErrorResponse(unsupportedTimesheetSchema, await unsupportedTimesheetSchema.json(), {
+      code:'UNSUPPORTED_SCHEMA_VERSION',message:'The timesheet import schema version is not supported.',
+    });
+
+    const v1TimesheetPreview = await applyOperationalImportV1('timesheets', v1TimesheetBody, 'timesheet-v1-dry-run-key');
+    assert.equal(v1TimesheetPreview.status, 200);
+    const v1TimesheetPreviewBody = await v1TimesheetPreview.json();
+    assert.deepEqual({status:v1TimesheetPreviewBody.status,validRows:v1TimesheetPreviewBody.validRows,
+      errorRows:v1TimesheetPreviewBody.errorRows,schemaVersion:v1TimesheetPreviewBody.log.schema_version,
+      dryRun:v1TimesheetPreviewBody.log.dry_run},
+    {status:'Dry Run',validRows:1,errorRows:2,schemaVersion:'timesheet-import/1',dryRun:true},
+    'v1 Timesheet dry run preserves row-level duplicate/preflight results and records schema metadata');
+    assert.deepEqual(v1TimesheetPreviewBody.errors.map(error => ({rowNumber:error.rowNumber,sourceIdentifier:error.sourceIdentifier})), [
+      {rowNumber:2,sourceIdentifier:null},
+      {rowNumber:4,sourceIdentifier:null},
+    ], 'Timesheet Import continues to emit null source identifiers, including for forged caller-provided IDs');
+    const v1TimesheetPreviewRows = await pool.query(`select
+        (select count(*)::int from timesheets t join employees e on e.id=t.employee_id
+          where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-27') as timesheet_rows,
+        (select count(*)::int from timesheet_entries te join timesheets t on t.id=te.timesheet_id
+          join employees e on e.id=t.employee_id where e.employee_id='EMP-IMPORT-SUCCESS'
+          and t.week_ending=date '2026-02-27') as entry_rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='Timesheet') as row_audits,
+        (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='ImportBatch'
+          and action='Dry Run Timesheet Import' and import_processing_result='Dry Run') as dry_run_audits,
+        (select count(*)::int from import_export_idempotency where batch_id=$1 and channel='Timesheet Import') as key_rows`,
+    [v1TimesheetPreviewBody.log.id]);
+    assert.deepEqual(v1TimesheetPreviewRows.rows, [{timesheet_rows:0,entry_rows:0,row_audits:0,dry_run_audits:1,key_rows:1}],
+      'Timesheet dry run writes only batch/audit/idempotency evidence, not timesheet headers or entries');
+    const emptyTimesheetDryRun = await applyOperationalImportV1('timesheets', {
+      ...v1TimesheetBody, fileName:'synthetic-timesheet-v1-empty-dry-run.csv', totalRows:1, rows:[],
+      clientErrors:[{rowNumber:2,field:'header',message:'Synthetic preflight rejected every row.'}],
+    }, 'timesheet-v1-empty-dry-run-key');
+    const emptyTimesheetDryRunBody = await emptyTimesheetDryRun.json();
+    assert.deepEqual({status:emptyTimesheetDryRunBody.status,validRows:emptyTimesheetDryRunBody.validRows,
+      errorRows:emptyTimesheetDryRunBody.errorRows,dryRun:emptyTimesheetDryRunBody.log.dry_run},
+    {status:'Dry Run',validRows:0,errorRows:1,dryRun:true},
+    'a zero-valid-row Timesheet Import dry run still persists its diagnostic batch');
+    const v1TimesheetPreviewRetry = await applyOperationalImportV1('timesheets', v1TimesheetBody, 'timesheet-v1-dry-run-key');
+    const v1TimesheetPreviewRetryBody = await v1TimesheetPreviewRetry.json();
+    assert.equal(v1TimesheetPreviewRetryBody.log.id, v1TimesheetPreviewBody.log.id,
+      'an identical Timesheet Import dry-run retry replays the original batch');
+    const v1TimesheetChangedKey = await applyOperationalImportV1('timesheets', {
+      ...v1TimesheetBody, rows: [{...v1TimesheetBody.rows[0], hours:3}],
+    }, 'timesheet-v1-dry-run-key');
+    assert.equal(v1TimesheetChangedKey.status, 409);
+    assertVersionedErrorResponse(v1TimesheetChangedKey, await v1TimesheetChangedKey.json(), {
+      code:'IDEMPOTENCY_KEY_REUSED',message:'This Idempotency-Key was already used with a different request.',
+    });
+
+    const aliasDuplicateTimesheetResponse = await applyOperationalImportV1('timesheets', {
+      schemaVersion: 'timesheet-import/1', dryRun: true,
+      fileName: 'synthetic-timesheet-v1-alias-duplicate.csv', totalRows: 4, clientErrors: [],
+      rows: [
+        {employeeId: 'EMP-IMPORT-SUCCESS', weekEnding: '2026-02-27', workType: 'Client Misc Task',
+          clientName: 'Synthetic Alias Task', date: '2026-02-25', hours: 2, status: 'Submitted'},
+        {employeeId: allocationAliasIds.rows[0].employee_id, weekEnding: '2026-02-27', workType: 'Client Misc Task',
+          clientName: 'Synthetic Alias Task', date: '2026-02-25', hours: 2, status: 'Submitted'},
+        {employeeId: 'EMP-IMPORT-SUCCESS', weekEnding: '2026-02-27', workType: 'Project Work',
+          projectId: 'PROJECT-IMPORT-SOURCE-1', date: '2026-02-25', hours: 1, status: 'Submitted'},
+        {employeeId: allocationAliasIds.rows[0].employee_id, weekEnding: '2026-02-27', workType: 'Project Work',
+          projectId: allocationAliasIds.rows[0].project_id, date: '2026-02-25', hours: 1, status: 'Submitted'},
+      ],
+    }, 'timesheet-v1-alias-duplicate-key');
+    const aliasDuplicateTimesheet = await aliasDuplicateTimesheetResponse.json();
+    assert.deepEqual({status: aliasDuplicateTimesheet.status, validRows: aliasDuplicateTimesheet.validRows,
+      errorRows: aliasDuplicateTimesheet.errorRows}, {status: 'Dry Run', validRows: 2, errorRows: 2},
+    'v1 Timesheet Import resolves employee and project aliases before checking natural duplicate keys');
+    assert.deepEqual(aliasDuplicateTimesheet.errors.map(error => ({field: error.field, rowNumber: error.rowNumber})), [
+      {field: 'timesheetEntryKey', rowNumber: 3},
+      {field: 'timesheetEntryKey', rowNumber: 5},
+    ]);
+    assert.deepEqual((await pool.query(`select count(*)::int as rows from timesheets t join employees e on e.id=t.employee_id
+      where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-27'`)).rows, [{rows: 0}],
+    'canonical duplicate Timesheet dry-run remains write-free');
+
+    const outOfWeekTimesheetResponse = await applyOperationalImportV1('timesheets', {
+      schemaVersion: 'timesheet-import/1', dryRun: true,
+      fileName: 'synthetic-timesheet-v1-out-of-week.csv', totalRows: 1, clientErrors: [],
+      rows: [{employeeId: 'EMP-IMPORT-SUCCESS', weekEnding: '2026-02-27',
+        workType: 'Client Misc Task', clientName: 'Synthetic Out of Week Task',
+        date: '2026-02-28', hours: 1, status: 'Submitted'}],
+    }, 'timesheet-v1-out-of-week-key');
+    const outOfWeekTimesheet = await outOfWeekTimesheetResponse.json();
+    assert.deepEqual({validRows: outOfWeekTimesheet.validRows, errorRows: outOfWeekTimesheet.errorRows,
+      field: outOfWeekTimesheet.errors[0]?.field}, {validRows: 0, errorRows: 1, field: 'date'},
+    'versioned Timesheet Import rejects work dates outside the seven-day week ending without changing legacy behavior');
+    assert.match(outOfWeekTimesheet.errors[0].message, /must fall within the seven-day period ending 2026-02-27/);
+
+    const timesheetConcurrencyBody = {
+      schemaVersion:'timesheet-import/1',dryRun:false,fileName:'synthetic-timesheet-v1-concurrent.csv',
+      totalRows:2,clientErrors:[],rows:[
+        {employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-27',workType:'Client Misc Task',clientName:'Synthetic Concurrent Client',date:'2026-02-25',hours:2,status:'Submitted'},
+        {employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-27',workType:'Client Misc Task',clientName:'Synthetic Concurrent Client',date:'2026-02-26',hours:3,status:'Submitted'},
+      ],
+    };
+    const concurrentTimesheetResponses = await Promise.all([
+      applyOperationalImportV1('timesheets',timesheetConcurrencyBody,'timesheet-v1-concurrent-key'),
+      applyOperationalImportV1('timesheets',timesheetConcurrencyBody,'timesheet-v1-concurrent-key'),
+    ]);
+    assert.deepEqual(concurrentTimesheetResponses.map(response => response.status), [200,200],
+      'concurrent same-key Timesheet Import applies both return a result');
+    const concurrentTimesheetBodies = await Promise.all(concurrentTimesheetResponses.map(response => response.json()));
+    assert.equal(concurrentTimesheetBodies[0].log.id,concurrentTimesheetBodies[1].log.id,
+      'concurrent same-key timesheet requests replay one operation batch');
+    const concurrentTimesheetState = await pool.query(`select
+        (select count(*)::int from timesheets t join employees e on e.id=t.employee_id
+          where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-27') as timesheets,
+        (select count(*)::int from timesheet_entries te join timesheets t on t.id=te.timesheet_id
+          join employees e on e.id=t.employee_id where e.employee_id='EMP-IMPORT-SUCCESS'
+          and t.week_ending=date '2026-02-27') as entries,
+        (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='Timesheet') as group_audits,
+        (select count(*)::int from import_export_idempotency where batch_id=$1 and channel='Timesheet Import') as key_rows`,
+    [concurrentTimesheetBodies[0].log.id]);
+    assert.deepEqual(concurrentTimesheetState.rows, [{timesheets:1,entries:2,group_audits:1,key_rows:1}],
+      'a same-key timesheet apply creates one group, its two entries, one group audit and one key record');
+    assert.equal(concurrentTimesheetBodies[0].validRows,2,
+      'Timesheet valid-row counts remain input-entry counts rather than timesheet-group counts');
+
+    const timesheetReplacementBody = {
+      ...timesheetConcurrencyBody, fileName:'synthetic-timesheet-v1-replacement.csv',
+      rows:[{...timesheetConcurrencyBody.rows[0],date:'2026-02-24',hours:4}],
+      totalRows:1,
+    };
+    const timesheetReplacement = await applyOperationalImportV1('timesheets',timesheetReplacementBody,'timesheet-v1-replacement-key');
+    const timesheetReplacementBodyResult = await timesheetReplacement.json();
+    assert.equal(timesheetReplacementBodyResult.status,'Success');
+    const replacedTimesheetEntries = await pool.query(`select t.total_hours,count(te.id)::int as entry_count,
+        min(te.hours)::numeric as hours from timesheets t join employees e on e.id=t.employee_id
+        join timesheet_entries te on te.timesheet_id=t.id
+      where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-27'
+      group by t.id`);
+    assert.deepEqual(replacedTimesheetEntries.rows,[{total_hours:'4.0',entry_count:1,hours:'4.0'}],
+      'a distinct timesheet import key preserves existing per-week replacement semantics rather than appending entries');
+
+    const timesheetScopeBody = {...timesheetConcurrencyBody, fileName:'synthetic-timesheet-scope-isolation.csv',dryRun:true};
+    const timesheetScopeDefault = await applyOperationalImportV1('timesheets',timesheetScopeBody,'timesheet-v1-scope-key',{
+      authToken:multiScopeV1Token,legalEntityId:'legal-default',
+    });
+    const timesheetScopeDefaultBody = await timesheetScopeDefault.json();
+    const timesheetScopeOther = await applyOperationalImportV1('timesheets',timesheetScopeBody,'timesheet-v1-scope-key',{
+      authToken:multiScopeV1Token,legalEntityId:'legal-default-other',
+    });
+    const timesheetScopeOtherBody = await timesheetScopeOther.json();
+    assert.notEqual(timesheetScopeDefaultBody.log.id,timesheetScopeOtherBody.log.id,
+      'Timesheet Import idempotency records are isolated by the server-resolved legal-entity scope');
+    assert.equal(timesheetScopeOtherBody.status,'Dry Run');
+    assert.ok(timesheetScopeOtherBody.errorRows > 0,
+      'out-of-scope timesheet employees are reported as unavailable and are never replayed from another legal entity');
 
     const multiScopeToken = tokenFor(multiScopeActorId, 'synthetic-multi-scope-admin');
     const employeeTokenWithoutAdminPermissions = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Employee');

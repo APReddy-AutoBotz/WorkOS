@@ -56,7 +56,7 @@ export const createProjectImportRouter = ({
     throw new TypeError('Project import routes require the database, authorization guards, and shared import/audit helpers.');
   }
 
-  const rowSchema = z.object({
+  const rowSchema = versioned => z.object({
     projectCode: z.string().min(1),
     name: z.string().min(1),
     clientId: z.string().optional(),
@@ -66,7 +66,9 @@ export const createProjectImportRouter = ({
     endDate: strictIsoDateSchema,
     // CSV templates use empty cells for optional enum values. Normalize only
     // blank cells; nonblank invalid values remain schema errors.
-    status: optionalImportEnum(['Proposed', 'Active', 'On Hold', 'Completed']),
+    status: versioned
+      ? optionalImportEnum(['Proposed', 'Active', 'On Hold', 'Completed'])
+      : z.enum(['Proposed', 'Active', 'On Hold', 'Completed']).optional(),
     billable: z.union([z.boolean(), z.string()]).optional(),
     projectType: z.string().optional(),
     country: z.string().optional(),
@@ -74,7 +76,7 @@ export const createProjectImportRouter = ({
   });
   const legacySchema = z.object({
     fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
+    rows: z.array(rowSchema(false)).min(1),
     totalRows: z.number().int().min(0).optional(),
     clientErrors: z.array(importErrorRowSchema).optional(),
   });
@@ -82,7 +84,7 @@ export const createProjectImportRouter = ({
     // Empty input is useful for a genuine server-side dry run when client
     // preflight has rejected every row. Legacy requests and versioned applies
     // retain the non-empty-row requirement.
-    rows: z.array(rowSchema),
+    rows: z.array(rowSchema(true)),
     schemaVersion: z.literal(PROJECT_IMPORT_SCHEMA_VERSION),
     dryRun: z.boolean().default(false),
   }).superRefine((data, context) => {

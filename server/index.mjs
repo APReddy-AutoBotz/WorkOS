@@ -22,6 +22,7 @@ import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.
 import {attachImportErrorSourceIdentifiers, importErrorRowSchema, resolveImportApplyRowNumbers} from './modules/imports/import-error-provenance.mjs';
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
 import {createProjectImportRouter} from './modules/imports/project-import-router.mjs';
+import {createOperationalImportRouter} from './modules/imports/operational-import-router.mjs';
 import {createProjectCodeLockKey, createScopedIdempotencyLockKey, hashImportRequest, normalizeIdempotencyKey} from './modules/imports/idempotency.mjs';
 import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
@@ -6799,6 +6800,11 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
   }
 });
 
+const legacyClientImportLog = row => {
+  const {schema_version: _schemaVersion, dry_run: _dryRun, ...legacyRow} = row;
+  return legacyRow;
+};
+
 app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
   const versioned = req.apiVersion === 'v1';
   let idempotencyKey = null;
@@ -6838,22 +6844,22 @@ app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requir
     value => typeof value === 'string' && value.trim() === '' ? undefined : value,
     z.enum(['Active', 'Inactive']).optional(),
   );
-  const rowSchema = z.object({
-    id: optionalClientImportId,
+  const rowSchema = versioned => z.object({
+    id: versioned ? optionalClientImportId : z.string().min(1).optional(),
     name: z.string().min(1),
     industry: z.string().optional(),
     accountOwnerId: z.string().optional(),
     countryDirectorIds: z.union([z.string(), z.array(z.string())]).optional(),
-    status: optionalClientImportStatus,
+    status: versioned ? optionalClientImportStatus : z.enum(['Active', 'Inactive']).optional(),
   });
   const legacySchema = z.object({
     fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
+    rows: z.array(rowSchema(false)).min(1),
     totalRows: z.number().int().min(0).optional(),
     clientErrors: z.array(importErrorRowSchema).optional(),
   });
   const versionedSchema = legacySchema.extend({
-    rows: z.array(rowSchema),
+    rows: z.array(rowSchema(true)),
     schemaVersion: z.literal('client-master/1'),
     dryRun: z.boolean().default(false),
   }).superRefine((data, context) => {
@@ -7074,7 +7080,7 @@ app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requir
     await client.query('commit');
     transactionOpen = false;
     res.json({status, totalRows, validRows: saved, errorRows: errors.length,
-      errors: responseErrors, log: logResult.rows[0]});
+      errors: responseErrors, log: versioned ? logResult.rows[0] : legacyClientImportLog(logResult.rows[0])});
   } catch (error) {
     if (client && transactionOpen) {
       try { await client.query('rollback'); } catch { /* Preserve the original failure. */ }
@@ -7090,440 +7096,30 @@ app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requir
   }
 });
 
-app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const rowSchema = z.object({
-    id: z.string().min(1).optional(),
-    employeeId: z.string().min(1),
-    projectId: z.string().min(1),
-    roleOnProject: z.string().optional(),
-    percentage: z.coerce.number().min(0).max(200),
-    startDate: strictIsoDateSchema,
-    endDate: strictIsoDateSchema,
-    billable: z.union([z.boolean(), z.string()]).optional(),
-    status: z.enum(['Active', 'Paused', 'Completed']).optional(),
-    comments: z.string().optional(),
-  });
-  const schema = z.object({
-    fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
-    totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(importErrorRowSchema).optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-
-  const client = await pool.connect();
-  const clientErrors = parsed.data.clientErrors || [];
-  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
-    rows: parsed.data.rows,
-    totalRows: parsed.data.totalRows,
-    clientErrors,
-  });
-  const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
-    { field: 'id', value: row.id, label: 'allocation ID' },
-  ], index => rowNumbers[index]);
-  const errors = [...clientErrors, ...duplicateImportRows.errors];
-  const importBatchId = crypto.randomUUID();
-  let saved = 0;
-  try {
-    await client.query('begin');
-    const blockOverAllocation = await getSetting('blockOverAllocation', false);
-
-    for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = rowNumbers[index];
-      if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
-      const rowErrors = [];
-      if (row.endDate < row.startDate) {
-        rowErrors.push({ rowNumber, field: 'endDate', message: 'End date must be on or after start date.' });
-      }
-
-      const employee = (await client.query(`
-        select *
-        from employees
-        where (id = $1 or employee_id = $1) and status <> 'Exited'
-          and organization_id=$2 and legal_entity_id=$3
-        limit 1
-      `, [row.employeeId,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
-      if (!employee) {
-        rowErrors.push({ rowNumber, field: 'employeeId', message: 'Allocation must reference an active employee.' });
-      }
-
-      const project = (await client.query(`
-        select *
-        from projects
-        where (id = $1 or project_code = $1) and status in ('Active', 'Proposed')
-          and organization_id=$2 and legal_entity_id=$3
-        limit 1
-      `, [row.projectId,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
-      if (!project) {
-        rowErrors.push({ rowNumber, field: 'projectId', message: 'Allocation must reference an active or proposed project.' });
-      } else if (row.startDate < toIsoDate(project.start_date) || row.endDate > toIsoDate(project.end_date)) {
-        rowErrors.push({ rowNumber, field: 'startDate', message: 'Allocation dates must stay within the project timeline.' });
-      }
-
-      if (blockOverAllocation && employee && row.status !== 'Paused' && row.status !== 'Completed') {
-        await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [employee.id]);
-        const loadResult = await client.query(`
-          select coalesce(sum(percentage), 0) as total
-          from project_allocations
-          where employee_id = $1
-            and organization_id = $5 and legal_entity_id = $6
-            and id <> coalesce($2, '')
-            and status = 'Active'
-            and daterange(start_date, end_date, '[]') && daterange($3::date, $4::date, '[]')
-        `, [employee.id, row.id || null, row.startDate, row.endDate, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
-        const total = parsePercent(loadResult.rows[0]?.total) + row.percentage;
-        if (total > 100) {
-          rowErrors.push({ rowNumber, field: 'percentage', message: `Allocation would exceed 100% for overlapping dates (${total}%).` });
-        }
-      }
-
-      if (rowErrors.length > 0) {
-        errors.push(...rowErrors);
-        continue;
-      }
-
-      const previous = row.id
-        ? (await client.query(`select pa.* from project_allocations pa
-          join projects p on p.id=pa.project_id and p.organization_id=pa.organization_id
-          join employees e on e.id=pa.employee_id and e.organization_id=pa.organization_id
-          where pa.id=$1 and pa.organization_id=$2 and pa.legal_entity_id=$3 and p.legal_entity_id=$3 and e.legal_entity_id=$3 limit 1`,
-        [row.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0]
-        : null;
-      if (row.id && !previous && (await client.query('select 1 from project_allocations where id=$1',[row.id])).rowCount) {
-        errors.push({rowNumber,field:'id',message:'Allocation is not available in the authorized organization and legal entity.'});
-        continue;
-      }
-      const result = await client.query(`
-        insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id)
-        values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        on conflict (id) do update set
-          employee_id = excluded.employee_id,
-          project_id = excluded.project_id,
-          role_on_project = excluded.role_on_project,
-          percentage = excluded.percentage,
-          start_date = excluded.start_date,
-          end_date = excluded.end_date,
-          billable = excluded.billable,
-          status = excluded.status,
-          comments = excluded.comments,
-          updated_at = now()
-        where project_allocations.organization_id=excluded.organization_id and project_allocations.legal_entity_id=excluded.legal_entity_id
-        returning *
-      `, [
-        previous?.id || row.id || null,
-        employee.id,
-        project.id,
-        row.roleOnProject || previous?.role_on_project || employee.designation,
-        row.percentage,
-        row.startDate,
-        row.endDate,
-        parseBoolean(row.billable, previous?.billable ?? true),
-        row.status || previous?.status || 'Active',
-        row.comments || previous?.comments || null,
-        req.organizationScope.organizationId,
-        req.organizationScope.legalEntityId,
-      ]);
-      const allocation = result.rows[0];
-      await audit(client, req, {
-        module: 'Import',
-        action: previous ? 'Import Update Allocation' : 'Import Create Allocation',
-        entityType: 'Allocation',
-        entityId: allocation.id,
-        oldValue: previous,
-        newValue: allocation,
-        details: `${previous ? 'Updated' : 'Created'} allocation for ${employee.employee_id} on ${project.project_code} from ${parsed.data.fileName}`,
-        source: 'Allocation Control CSV',
-        importBatchId,
-        sourceIdentifier: row.id ?? null,
-        importProcessingResult: 'Success',
-      });
-      saved += 1;
-    }
-
-    const responseErrors = attachImportErrorSourceIdentifiers({
-      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
-      sourceIdentifierForRow: row => row.id ?? null,
-    });
-    const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
-    const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
-      values ($1,'Import','Allocation Control',$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      returning *
-    `, [
-      importBatchId,
-      parsed.data.fileName,
-      status,
-      parsed.data.totalRows ?? parsed.data.rows.length,
-      saved,
-      errors.length,
-      errors.length ? JSON.stringify(responseErrors) : null,
-      req.user.username,
-      req.organizationScope.organizationId,
-      req.organizationScope.legalEntityId,
-    ]);
-    await client.query('commit');
-    res.json({
-      status,
-      totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-      validRows: saved,
-      errorRows: errors.length,
-      errors: responseErrors,
-      log: logResult.rows[0],
-    });
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Allocation import apply failed' });
-  } finally {
-    client.release();
-  }
+const operationalImportRouter = createOperationalImportRouter({
+  pool,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  audit,
+  importErrorRowSchema,
+  strictIsoDateSchema,
+  parseBoolean,
+  collectDuplicateImportRows,
+  resolveImportApplyRowNumbers,
+  attachImportErrorSourceIdentifiers,
+  isAfterToday,
+  isWorkDateInsideWeek,
+  toIsoDate,
+  round1,
+  getSetting,
+  assertReportingPeriodAllows,
+  REPORTING_PERIOD_OPERATIONS,
+  ReportingPeriodError,
+  sendReportingPeriodError,
 });
-
-app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const rowSchema = z.object({
-    employeeId: z.string().min(1),
-    weekEnding: strictIsoDateSchema,
-    workType: z.enum(['Project Work', 'Client Misc Task']),
-    projectId: z.string().optional(),
-    clientName: z.string().optional(),
-    category: z.string().optional(),
-    date: strictIsoDateSchema,
-    hours: z.coerce.number().min(0).max(24),
-    remark: z.string().optional(),
-    billable: z.union([z.boolean(), z.string()]).optional(),
-    status: z.enum(['Draft', 'Submitted', 'Approved', 'Rejected']).optional(),
-    rejectionReason: z.string().optional(),
-  });
-  const schema = z.object({
-    fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
-    totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(importErrorRowSchema).optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-
-  const clientErrors = parsed.data.clientErrors || [];
-  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
-    rows: parsed.data.rows,
-    totalRows: parsed.data.totalRows,
-    clientErrors,
-  });
-  const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [{
-    field: 'timesheetEntryKey',
-    label: 'Timesheet entry key',
-    value: [row.employeeId, row.weekEnding, row.date, row.workType, row.projectId || row.clientName].join('|'),
-  }], index => rowNumbers[index]);
-  const client = await pool.connect();
-  const errors = [...clientErrors, ...duplicateImportRows.errors];
-  const importBatchId = crypto.randomUUID();
-  const groups = new Map();
-  let validEntryRows = 0;
-  try {
-    await client.query('begin');
-
-    for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = rowNumbers[index];
-      if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
-      const rowErrors = [];
-      if (isAfterToday(row.weekEnding) || isAfterToday(row.date)) {
-        rowErrors.push({ rowNumber, field: 'date', message: 'Future week timesheets and future-dated entries cannot be imported.' });
-      }
-
-      const employee = (await client.query(`
-        select id, employee_id, name, status
-        from employees
-        where (id = $1 or employee_id = $1)
-          and organization_id = $2 and legal_entity_id = $3
-          and status <> 'Exited'
-        limit 1
-      `, [row.employeeId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (!employee) {
-        rowErrors.push({ rowNumber, field: 'employeeId', message: 'Timesheet must reference an active employee.' });
-      }
-
-      let project = null;
-      if (row.workType === 'Project Work') {
-        if (!row.projectId) {
-          rowErrors.push({ rowNumber, field: 'projectId', message: 'Project Work entries require a project.' });
-        } else {
-          project = (await client.query(`
-            select id, name, status
-            from projects
-            where (id = $1 or project_code = $1)
-              and organization_id = $2 and legal_entity_id = $3
-              and status <> 'Completed'
-            limit 1
-          `, [row.projectId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-          if (!project) {
-            rowErrors.push({ rowNumber, field: 'projectId', message: 'Project Work entries must reference active, proposed, or on-hold projects.' });
-          } else if (!(await client.query(`
-            select 1 from project_allocations
-            where employee_id = $1 and project_id = $2
-              and organization_id = $3 and legal_entity_id = $4
-              and status = 'Active' and $5::date between start_date and end_date
-            limit 1
-          `, [employee?.id || '', project.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId, row.date])).rows[0]) {
-            rowErrors.push({ rowNumber, field: 'projectId', message: 'Project work requires an active allocation covering the entry date.' });
-          }
-        }
-      }
-      if (row.workType === 'Client Misc Task' && !row.clientName) {
-        rowErrors.push({ rowNumber, field: 'clientName', message: 'Client Misc Task entries require a client name.' });
-      }
-
-      if (rowErrors.length > 0) {
-        errors.push(...rowErrors);
-        continue;
-      }
-
-      const status = row.status || 'Submitted';
-      const key = `${employee.id}:${row.weekEnding}`;
-      const group = groups.get(key) || {
-        employee,
-        weekEnding: row.weekEnding,
-        status,
-        rejectionReason: row.rejectionReason || null,
-        entries: [],
-      };
-      if (group.status !== status) {
-        errors.push({ rowNumber, field: 'status', message: 'Rows for the same employee/week must use the same timesheet status.' });
-        continue;
-      }
-      group.entries.push({
-        rowNumber,
-        projectId: project?.id || null,
-        workType: row.workType,
-        clientName: row.clientName || null,
-        category: row.category || null,
-        workDate: row.date,
-        hours: round1(row.hours),
-        remark: row.remark || null,
-        billable: parseBoolean(row.billable, row.workType === 'Project Work'),
-      });
-      groups.set(key, group);
-      validEntryRows += 1;
-    }
-
-    for (const group of groups.values()) {
-      try {
-        await assertReportingPeriodAllows(client, {
-          organizationId: req.organizationScope.organizationId,
-          legalEntityId: req.organizationScope.legalEntityId,
-          relevantDates: [group.weekEnding, ...group.entries.map(entry => entry.workDate)],
-          operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
-        });
-      } catch (error) {
-        if (!(error instanceof ReportingPeriodError)) throw error;
-        errors.push(...group.entries.map(entry => ({ rowNumber: entry.rowNumber, field: 'date', message: error.message, code: error.code })));
-        validEntryRows -= group.entries.length;
-        continue;
-      }
-      const totalHours = round1(group.entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
-      const billableHours = round1(group.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
-      const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, group.employee.id, group.weekEnding])).rows[0];
-      const timesheetResult = await client.query(`
-        insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id)
-        values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7,$8)
-        on conflict (organization_id, employee_id, week_ending) do update set
-          status = excluded.status,
-          total_hours = excluded.total_hours,
-          billable_hours = excluded.billable_hours,
-          rejection_reason = excluded.rejection_reason,
-          submitted_at = case when excluded.status = 'Submitted' then coalesce(timesheets.submitted_at, now()) else timesheets.submitted_at end,
-          updated_at = now()
-        returning *
-      `, [
-        group.employee.id,
-        group.weekEnding,
-        group.status,
-        totalHours,
-        billableHours,
-        group.rejectionReason,
-        req.organizationScope.organizationId,
-        req.organizationScope.legalEntityId,
-      ]);
-      const timesheet = timesheetResult.rows[0];
-      await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);
-      for (const entry of group.entries) {
-        await client.query(`
-          insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable)
-          values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        `, [
-          timesheet.id,
-          entry.projectId,
-          entry.workType,
-          entry.clientName,
-          entry.category,
-          entry.workDate,
-          entry.hours,
-          entry.remark,
-          entry.billable,
-        ]);
-      }
-      await audit(client, req, {
-        module: 'Import',
-        action: previous ? 'Import Update Timesheet' : 'Import Create Timesheet',
-        entityType: 'Timesheet',
-        entityId: String(timesheet.id),
-        oldValue: previous,
-        newValue: timesheet,
-        details: `${previous ? 'Updated' : 'Created'} ${group.status} timesheet for ${group.employee.employee_id}, week ending ${group.weekEnding} from ${parsed.data.fileName}`,
-        reason: group.rejectionReason,
-        source: 'Timesheet Import CSV',
-        importBatchId,
-        sourceIdentifier: null,
-        importProcessingResult: 'Success',
-      });
-    }
-
-    const responseErrors = attachImportErrorSourceIdentifiers({
-      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
-      sourceIdentifierForRow: () => null,
-      allowClientSourceIdentifiers: false,
-    });
-    const status = validEntryRows === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
-    const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
-      values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      returning *
-    `, [
-      importBatchId,
-      parsed.data.fileName,
-      status,
-      parsed.data.totalRows ?? parsed.data.rows.length,
-      validEntryRows,
-      errors.length,
-      errors.length ? JSON.stringify(responseErrors) : null,
-      req.user.username,
-      req.organizationScope.organizationId,
-      req.organizationScope.legalEntityId,
-    ]);
-    await client.query('commit');
-    res.json({
-      status,
-      totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-      validRows: validEntryRows,
-      errorRows: errors.length,
-      errors: responseErrors,
-      log: logResult.rows[0],
-    });
-  } catch (error) {
-    await client.query('rollback');
-    if (sendReportingPeriodError(res, error)) return;
-    console.error(error);
-    res.status(500).json({ error: 'Timesheet import apply failed' });
-  } finally {
-    client.release();
-  }
-});
+app.use('/api', operationalImportRouter);
+app.use('/api/v1', operationalImportRouter);
 
 registerOrganizationSetupRoutes({
   app,
