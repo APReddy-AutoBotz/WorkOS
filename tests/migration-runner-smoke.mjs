@@ -350,7 +350,9 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
   await pool.query(`insert into employees
       (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
     values ('employee-scope-beta','EMP-SCOPE-BETA','Synthetic Beta Employee','beta-employee@example.test',
-      'Consultant','Engineering','US','cd-import-provenance-test','Active','org-scope-beta','legal-scope-beta')`);
+      'Consultant','Engineering','US','cd-import-provenance-test','Active','org-scope-beta','legal-scope-beta'),
+      ('employee-cross-legal','EMP-CROSS-LEGAL-SCOPE-TEST','Synthetic Cross-Legal Employee','cross-legal-employee@example.test',
+      'Consultant','Engineering','US','cd-import-provenance-test','Active','org-default','legal-default-other')`);
   await pool.query(`insert into employees
       (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
     values ('employee-allocation-target','EMP-ALLOCATION-TARGET','Synthetic Allocation Target','allocation-target@example.test',
@@ -838,13 +840,17 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       'scope-conflict diagnostics do not disclose the out-of-scope employee identifier');
     assert.equal((await pool.query(`select count(*)::int as rows from employees where employee_id='EMP-IMPORT-V1-MANAGER-SCOPE-TEST'`)).rows[0].rows, 0,
       'a rejected cross-legal-entity manager reference cannot create an employee');
+    const crossLegalEmployeeFixture = await pool.query(`select organization_id,legal_entity_id
+      from employees where employee_id='EMP-CROSS-LEGAL-SCOPE-TEST'`);
+    assert.deepEqual(crossLegalEmployeeFixture.rows, [{organization_id: 'org-default', legal_entity_id: 'legal-default-other'}],
+      'the conflicting Employee identifier belongs to the selected organization but a different legal entity');
     const crossLegalEmployeePreview = await applyEmployeesV1({
       ...employeeDryRunRequest,
       totalRows: 1,
       clientErrors: [],
       rows: [{
         ...employeeDryRunRequest.rows[0],
-        employeeId: 'EMP-SCOPE-BETA',
+        employeeId: 'EMP-CROSS-LEGAL-SCOPE-TEST',
         name: 'Synthetic Colliding Employee Identifier',
         email: 'employee-import-v1-cross-legal@example.test',
         reportingManagerId: undefined,
@@ -855,8 +861,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(crossLegalEmployeeBody.validRows, 0,
       'Employee dry-run detects identifiers owned by another legal entity within the same organization');
     assert.equal(crossLegalEmployeeBody.errors[0].code, 'EMPLOYEE_SCOPE_CONFLICT');
-    assert.equal(JSON.stringify(crossLegalEmployeeBody).includes('EMP-SCOPE-BETA'), false,
-      'scope conflicts use a generic safe preview diagnostic');
+    assert.equal(JSON.stringify(crossLegalEmployeeBody).includes('EMP-CROSS-LEGAL-SCOPE-TEST'), false,
+      'scope conflicts use a generic safe preview diagnostic without exposing the conflicting identifier');
     const changedDryRunPresence = await applyEmployeesV1({
       ...employeeDryRunRequest,
       rows: [{...employeeDryRunRequest.rows[0], initialPasswordPresent: false}],

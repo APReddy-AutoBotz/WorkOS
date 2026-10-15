@@ -120,8 +120,12 @@ const timesheetPreview = await adminService.runVersionedTimesheetImport({
   clientErrors: [], totalRows: 1, dryRun: true, idempotencyKey: 'timesheet-dry-run-key',
 });
 const employeePreviewCredential = 'Synthetic-Preview-Credential-19af';
+const extraPasswordColumn = 'Synthetic-Extra-Password-Column-4d1';
+const extraTokenColumn = 'Synthetic-Extra-Token-Column-8b2';
 const employeePreview = await adminService.runVersionedEmployeeImport({
-  rows: [{employeeId: 'EMP-101', name: 'Synthetic Employee', email: 'employee@example.test', initialPassword: employeePreviewCredential}],
+  rows: [{employeeId: 'EMP-101', name: 'Synthetic Employee', email: 'employee@example.test', designation: 'Consultant',
+    department: 'Engineering', password: extraPasswordColumn, accessToken: extraTokenColumn,
+    initialPassword: employeePreviewCredential}],
   clientErrors: [{rowNumber: 3, field: 'email', message: `Old diagnostic ${employeePreviewCredential}`, sourceIdentifier: employeePreviewCredential}],
   totalRows: 1,
   idempotencyKey: 'employee-dry-run-key',
@@ -174,12 +178,19 @@ const employeePreviewCall = calls.find(call => call.url === '/api/v1/imports/emp
 assert.ok(employeePreviewCall, 'Employee Master dry-run uses the versioned API');
 assert.deepEqual(employeePreviewCall.body, {
   schemaVersion: 'employee-master/1', dryRun: true, fileName: 'Employee Master import.csv',
-  rows: [{employeeId: 'EMP-101', name: 'Synthetic Employee', email: 'employee@example.test', initialPasswordPresent: true}],
+  rows: [{employeeId: 'EMP-101', name: 'Synthetic Employee', email: 'employee@example.test',
+    designation: 'Consultant', department: 'Engineering', initialPasswordPresent: true}],
   totalRows: 1,
   clientErrors: [{rowNumber: 3, field: 'email', message: 'The Employee Master row failed preflight validation.'}],
 }, 'Employee preview sends only nonsecret business rows, a credential-presence indicator and generic diagnostics');
 assert.equal(JSON.stringify(employeePreviewCall.body).includes(employeePreviewCredential), false,
   'the Employee preview request must not transmit the credential or stale diagnostic/source-ID echo');
+for (const [field, value] of [['password', extraPasswordColumn], ['accessToken', extraTokenColumn]]) {
+  assert.equal(Object.hasOwn(employeePreviewCall.body.rows[0], field), false,
+    `unrecognized Employee CSV credential column ${field} is removed before fetch`);
+  assert.equal(JSON.stringify(employeePreviewCall.body).includes(value), false,
+    `unrecognized Employee CSV credential value from ${field} never reaches fetch`);
+}
 assert.equal(employeePreviewCall.init.headers['Idempotency-Key'], 'employee-dry-run-key');
 assert.equal(timesheetPreview?.dryRun, true);
 assert.equal(employeeApply?.validRows, 1);
@@ -224,7 +235,8 @@ assert.match(page, /filterAcceptedImportRows\(rows, validRows, serverErrors\)/, 
 assert.match(page, /client-master\/1/, 'Client Master is bound to its explicit schema version in the UI');
 assert.match(page, /employees: 'employee-master\/1'/, 'Employee Master is included in the versioned server-preview contract');
 assert.match(page, /runVersionedEmployeeImport/, 'Employee preview uses the dedicated credential-safe API method');
-assert.match(apiSource, /initialPasswordPresent: Boolean\(initialPassword\)/, 'Employee preview sends a nonsecret credential-presence indicator only');
+assert.match(apiSource, /initialPasswordPresent: Boolean\(row\.initialPassword\)/, 'Employee preview sends a nonsecret credential-presence indicator only');
+assert.match(apiSource, /employeePreviewRowFields\.reduce/, 'Employee preview builds rows from an explicit canonical allowlist before fetch');
 assert.match(page, /employeeImportOperation:\s*\{[\s\S]*applyKey:\s*crypto\.randomUUID\(\)/,
   'a newly selected Employee Master CSV gets a fresh in-memory apply key');
 assert.match(page, /operation\.applyKey,[\s\S]*pendingImport\.errors,[\s\S]*pendingImport\.rows\.length/,

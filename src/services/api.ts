@@ -37,6 +37,12 @@ const sha256 = async (value: string) => {
 };
 const generateTemporaryPassword = () => `WOS-${crypto.randomUUID().slice(0, 8)}`;
 type CsvImportRow = Record<string, string>;
+const employeePreviewRowFields = [
+  'employeeId', 'name', 'email', 'designation', 'department', 'country', 'region', 'businessUnit',
+  'reportingManagerId', 'primaryCountryDirectorId', 'mappedCountryDirectorIds', 'utilizationEligible',
+  'joiningDate', 'exitDate', 'standardWeeklyHours', 'capacityType', 'contractType', 'entraObjectId',
+  'teamsUserId', 'roles', 'status',
+] as const;
 type ImportApplyError = {
   rowNumber: number;
   field?: string;
@@ -1862,10 +1868,15 @@ export const adminService = {
   }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
     if (!(await checkBackend())) return null;
     assertExpectedImportScope(expectedScope);
-    const rows = request.rows.map(({initialPassword, ...row}) => ({
-      ...row,
-      initialPasswordPresent: Boolean(initialPassword),
-    }));
+    const rows = request.rows.map(row => {
+      // CSVs can contain arbitrary extra headers, including credential columns.
+      // Build the preview payload from the canonical nonsecret schema before fetch.
+      const safeRow = employeePreviewRowFields.reduce<CsvImportRow>((result, field) => {
+        if (Object.prototype.hasOwnProperty.call(row, field)) result[field] = row[field];
+        return result;
+      }, {});
+      return {...safeRow, initialPasswordPresent: Boolean(row.initialPassword)};
+    });
     const clientErrors = (request.clientErrors || []).map(error => ({
       rowNumber: error.rowNumber,
       ...(error.field ? {field: error.field} : {}),
