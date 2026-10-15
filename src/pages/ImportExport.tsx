@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ImportHistoryPanel } from '../components/imports/ImportHistoryPanel';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
@@ -15,6 +15,7 @@ import { allocationService, clientService, employeeService, projectService, time
 import { Employee, Project, Allocation, ImportExportLog, Client, TimesheetSummary, WorkType } from '../types';
 import { downloadAuditedCsv, downloadReportExport, getReportExportOptions } from '../lib/reportExport';
 import { attachPreflightSourceIdentifiers } from '../lib/importErrorProvenance';
+import { filterAcceptedProjectRows } from '../lib/projectImportOperation';
 import { termPluralTitle, termTitle } from '../config/terminology';
 
 type ImportChannel = 'employees' | 'clients' | 'projects' | 'allocations' | 'timesheets';
@@ -32,6 +33,13 @@ type PendingImport = {
   rows: CsvRow[];
   validRows: CsvRow[];
   errors: ImportErrorRow[];
+  totalRows: number;
+  projectOperation?: {
+    dryRunKey: string;
+    applyKey: string;
+    validationState: 'checking' | 'failed' | 'complete';
+    requiresNewImport?: boolean;
+  };
 };
 
 const getImportOptions = (): Array<{ id: ImportChannel; title: string; description: string; icon: typeof FileText }> => [
@@ -85,7 +93,11 @@ export const ImportExport = () => {
   const [activeTab, setActiveTab] = useState<'import' | 'export'>('import');
   const [lastResult, setLastResult] = useState<string>('');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const [historyRevision, setHistoryRevision] = useState(0);
+  const importRequestVersion = useRef(0);
+  const applyLock = useRef(false);
   const refreshHistory = () => setHistoryRevision(value => value + 1);
 
   const downloadCsv = (fileName: string, rows: object[], channel = fileName) => {
@@ -294,38 +306,225 @@ export const ImportExport = () => {
   };
 
   const handleImport = async (id: ImportChannel, file?: File) => {
-    if (!file) return;
-    const { headers, rows } = parseCsv(await file.text());
+    if (!file || applyLock.current) return;
+    const requestVersion = ++importRequestVersion.current;
+    setIsPreviewing(true);
+    setPendingImport(null);
+    setLastResult(`Reading ${file.name}…`);
+    let csvText: string;
+    try {
+      csvText = await file.text();
+    } catch {
+      if (requestVersion === importRequestVersion.current) {
+        setIsPreviewing(false);
+        setLastResult(`Could not read ${file.name}. Choose the file again to retry.`);
+      }
+      return;
+    }
+    if (requestVersion !== importRequestVersion.current) return;
+    const { headers, rows } = parseCsv(csvText);
     const option = importOptions.find(item => item.id === id);
     const structureErrors = validateCsvStructure(id, headers, rows.length);
-    const validationResult = structureErrors.length > 0
-      ? { validRows: [], errors: [] }
-      : await validateRows(id, rows);
+    let validationResult: {validRows: CsvRow[]; errors: ImportErrorRow[]};
+    try {
+      validationResult = structureErrors.length > 0
+        ? {validRows: [], errors: []}
+        : await validateRows(id, rows);
+    } catch {
+      if (requestVersion === importRequestVersion.current) {
+        setIsPreviewing(false);
+        setLastResult(`Could not validate ${file.name}. Check your connection and workspace access, then choose the CSV again.`);
+      }
+      return;
+    }
+    if (requestVersion !== importRequestVersion.current) return;
     const validRows = validationResult.validRows;
     const errors = attachPreflightSourceIdentifiers(id, rows, [...structureErrors, ...validationResult.errors]);
     const status: ImportExportLog['status'] = validRows.length === 0 ? 'Failed' : 'Dry Run';
+    const basePending: PendingImport = {
+      id, title: option?.title || id, fileName: file.name, rows, validRows, errors,
+      totalRows: rows.length,
+      ...(id === 'projects' ? {
+        projectOperation: {
+          dryRunKey: crypto.randomUUID(),
+          applyKey: crypto.randomUUID(),
+          validationState: 'checking' as const,
+        },
+      } : {}),
+    };
+    setPendingImport(basePending);
 
-    setPendingImport({ id, title: option?.title || id, fileName: file.name, rows, validRows, errors });
+    if (id === 'projects') {
+      setLastResult(`Checking ${file.name} against the server without applying project changes…`);
+      try {
+        const result = await adminService.runVersionedProjectImport({
+          fileName: file.name,
+          rows: validRows,
+          clientErrors: errors,
+          totalRows: rows.length,
+          dryRun: true,
+          idempotencyKey: basePending.projectOperation!.dryRunKey,
+        });
+        if (requestVersion !== importRequestVersion.current) return;
+        if (result === null) {
+          // Preserve explicit local/demo mode; production fails closed in checkBackend.
+          setPendingImport({...basePending, projectOperation: undefined});
+          setLastResult(
+            status === 'Failed'
+              ? `${option?.title || id} validation failed for ${file.name}. Download the error report and correct the file.`
+              : `Dry run complete for ${file.name}: ${validRows.length}/${rows.length} rows are valid. Review errors before applying.`
+          );
+          adminService.saveImportExportLog({
+            operation: 'Import', channel: option?.title || id, fileName: file.name, status,
+            totalRows: rows.length, validRows: validRows.length, errorRows: errors.length, errors,
+          });
+          refreshHistory();
+          return;
+        }
+        if (result.schemaVersion !== 'project-master/1' || result.dryRun !== true || result.status !== 'Dry Run') {
+          throw new Error('The server did not confirm the expected versioned dry-run result.');
+        }
+        const serverErrors = result.errors;
+        const serverValidRows = filterAcceptedProjectRows(rows, validRows, serverErrors);
+        if (serverValidRows.length !== result.validRows) {
+          throw new Error('The server validation result did not match the source row mapping.');
+        }
+        setPendingImport({
+          ...basePending,
+          validRows: serverValidRows,
+          errors: serverErrors,
+          projectOperation: {...basePending.projectOperation!, validationState: 'complete'},
+        });
+        setLastResult(`Server dry run complete for ${file.name}: ${serverValidRows.length}/${rows.length} rows are valid. Review saved errors before applying.`);
+        refreshHistory();
+      } catch (error) {
+        if (requestVersion !== importRequestVersion.current) return;
+        const code = typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as {code?: unknown}).code || '')
+          : '';
+        setPendingImport({
+          ...basePending,
+          projectOperation: {
+            ...basePending.projectOperation!,
+            validationState: 'failed',
+            ...(code === 'IDEMPOTENCY_KEY_REUSED' ? {requiresNewImport: true} : {}),
+          },
+        });
+        setLastResult(code === 'IDEMPOTENCY_KEY_REUSED'
+          ? `The validation key for ${file.name} is tied to different data. Choose the CSV again to start a fresh import.`
+          : `Server validation did not finish for ${file.name}. Retry validation with this same import operation; no apply request was sent.`);
+      } finally {
+        if (requestVersion === importRequestVersion.current) setIsPreviewing(false);
+      }
+      return;
+    }
+
     setLastResult(
       status === 'Failed'
         ? `${option?.title || id} validation failed for ${file.name}. Download the error report and correct the file.`
         : `Dry run complete for ${file.name}: ${validRows.length}/${rows.length} rows are valid. Review errors before applying.`
     );
     adminService.saveImportExportLog({
-      operation: 'Import',
-      channel: option?.title || id,
-      fileName: file.name,
-      status,
-      totalRows: rows.length,
-      validRows: validRows.length,
-      errorRows: errors.length,
-      errors,
+      operation: 'Import', channel: option?.title || id, fileName: file.name, status,
+      totalRows: rows.length, validRows: validRows.length, errorRows: errors.length, errors,
     });
     refreshHistory();
+    setIsPreviewing(false);
+  };
+
+  const retryProjectDryRun = async () => {
+    if (!pendingImport || pendingImport.id !== 'projects' || !pendingImport.projectOperation
+        || pendingImport.projectOperation.validationState !== 'failed' || pendingImport.projectOperation.requiresNewImport
+        || isPreviewing || applyLock.current) return;
+    const requestVersion = importRequestVersion.current;
+    const snapshot = pendingImport;
+    setIsPreviewing(true);
+    setLastResult(`Retrying server validation for ${snapshot.fileName} with the same import key…`);
+    try {
+      const result = await adminService.runVersionedProjectImport({
+        fileName: snapshot.fileName,
+        rows: snapshot.validRows,
+        clientErrors: snapshot.errors,
+        totalRows: snapshot.totalRows,
+        dryRun: true,
+        idempotencyKey: snapshot.projectOperation.dryRunKey,
+      });
+      if (requestVersion !== importRequestVersion.current) return;
+      if (!result || result.schemaVersion !== 'project-master/1' || result.dryRun !== true || result.status !== 'Dry Run') {
+        throw new Error('The server did not confirm the expected versioned dry-run result.');
+      }
+      const validRows = filterAcceptedProjectRows(snapshot.rows, snapshot.validRows, result.errors);
+      if (validRows.length !== result.validRows) throw new Error('The server validation result did not match the source row mapping.');
+      setPendingImport({
+        ...snapshot,
+        validRows,
+        errors: result.errors,
+        projectOperation: {...snapshot.projectOperation, validationState: 'complete'},
+      });
+      setLastResult(`Server dry run complete for ${snapshot.fileName}: ${validRows.length}/${snapshot.totalRows} rows are valid. Review saved errors before applying.`);
+      refreshHistory();
+    } catch (error) {
+      if (requestVersion !== importRequestVersion.current) return;
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as {code?: unknown}).code || '')
+        : '';
+      setPendingImport({
+        ...snapshot,
+        projectOperation: {
+          ...snapshot.projectOperation,
+          validationState: 'failed',
+          ...(code === 'IDEMPOTENCY_KEY_REUSED' ? {requiresNewImport: true} : {}),
+        },
+      });
+      setLastResult(code === 'IDEMPOTENCY_KEY_REUSED'
+        ? `The validation key for ${snapshot.fileName} is tied to different data. Choose the CSV again to start a fresh import.`
+        : `Server validation still did not finish for ${snapshot.fileName}. You can retry with the same import key.`);
+    } finally {
+      if (requestVersion === importRequestVersion.current) setIsPreviewing(false);
+    }
   };
 
   const applyPendingImport = async () => {
     if (!pendingImport) return;
+    if (pendingImport.id === 'projects' && pendingImport.projectOperation) {
+      const operation = pendingImport.projectOperation;
+      if (operation.validationState !== 'complete' || operation.requiresNewImport || applyLock.current) return;
+      applyLock.current = true;
+      setIsApplying(true);
+      try {
+        const backendResult = await adminService.runVersionedProjectImport({
+          fileName: pendingImport.fileName,
+          rows: pendingImport.validRows,
+          clientErrors: pendingImport.errors,
+          totalRows: pendingImport.totalRows,
+          dryRun: false,
+          idempotencyKey: operation.applyKey,
+        });
+        if (!backendResult || backendResult.schemaVersion !== 'project-master/1' || backendResult.dryRun !== false) {
+          throw new Error('The server did not confirm the expected project import apply result.');
+        }
+        const resultText = backendResult.status === 'Success'
+          ? `Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`
+          : `${pendingImport.title} apply finished with ${backendResult.validRows} valid rows and ${backendResult.errorRows} errors for ${pendingImport.fileName}. View saved diagnostic details in Import History.`;
+        setLastResult(resultText);
+        setPendingImport(null);
+        refreshHistory();
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as {code?: unknown}).code || '')
+          : '';
+        if (code === 'IDEMPOTENCY_KEY_REUSED') {
+          setPendingImport({...pendingImport, projectOperation: {...operation, requiresNewImport: true}});
+          setLastResult(`The apply key for ${pendingImport.fileName} is tied to different data. Choose the CSV again to start a fresh import.`);
+        } else {
+          setLastResult(`The apply result for ${pendingImport.fileName} was not confirmed. Retry with the same validated rows and apply key.`);
+        }
+      } finally {
+        applyLock.current = false;
+        setIsApplying(false);
+      }
+      return;
+    }
     let saved = 0;
 
     if (pendingImport.id === 'employees') {
@@ -667,6 +866,16 @@ export const ImportExport = () => {
           <span>{lastResult}</span>
           {pendingImport && (
             <div className="flex flex-wrap gap-3">
+              {pendingImport.id === 'projects' && pendingImport.projectOperation?.validationState === 'failed'
+                && !pendingImport.projectOperation.requiresNewImport && (
+                  <button
+                    onClick={retryProjectDryRun}
+                    disabled={isPreviewing || isApplying}
+                    className="px-4 py-2 bg-white border border-primary/20 rounded-xl text-[10px] uppercase tracking-widest text-primary disabled:opacity-40"
+                  >
+                    {isPreviewing ? 'Retrying Validation…' : 'Retry Validation'}
+                  </button>
+                )}
               {pendingImport.errors.length > 0 && (
                 <button
                   onClick={downloadErrorReport}
@@ -677,10 +886,14 @@ export const ImportExport = () => {
               )}
               <button
                 onClick={applyPendingImport}
-                disabled={pendingImport.validRows.length === 0}
+                disabled={isPreviewing || isApplying || pendingImport.validRows.length === 0
+                  || Boolean(pendingImport.projectOperation && (
+                    pendingImport.projectOperation.validationState !== 'complete'
+                    || pendingImport.projectOperation.requiresNewImport
+                  ))}
                 className="btn-primary px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Apply Valid Rows
+                {isApplying ? 'Applying…' : 'Apply Valid Rows'}
               </button>
             </div>
           )}

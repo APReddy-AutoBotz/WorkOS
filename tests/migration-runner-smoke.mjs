@@ -1230,6 +1230,15 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal((await projectV1UnsupportedSchema.json()).error.code, 'UNSUPPORTED_SCHEMA_VERSION',
       'unsupported project schema versions must fail before any data write');
 
+    const emptyVersionedApply = await applyProjectsV1({
+      schemaVersion: 'project-master/1',
+      fileName: 'synthetic-project-empty-apply.csv',
+      rows: [],
+    }, 'synthetic-project-empty-apply-key');
+    assert.equal(emptyVersionedApply.status, 400,
+      'versioned apply must reject an empty row set while preserving empty-row support for dry run');
+    assert.equal((await emptyVersionedApply.json()).error.code, 'INVALID_IMPORT_REQUEST');
+
     const projectV1OtherScopeBody = {
       schemaVersion: 'project-master/1',
       fileName: 'synthetic-project-v1-other-scope.csv',
@@ -1321,6 +1330,38 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(projectDryRunReplay.status, 200);
     assert.deepEqual(await projectDryRunReplay.json(), projectDryRunResult,
       'a repeated dry run must replay the same stored result without duplicate audit or batch records');
+
+    const allRejectedDryRunBody = {
+      schemaVersion: 'project-master/1',
+      dryRun: true,
+      fileName: 'synthetic-project-all-rejected.csv',
+      totalRows: 1,
+      rows: [],
+      clientErrors: [{rowNumber: 2, field: 'projectCode', message: 'Project code is required.', sourceIdentifier: null}],
+    };
+    const allRejectedDryRunKey = 'synthetic-project-all-rejected-dry-run-key';
+    const allRejectedDryRunResponse = await applyProjectsV1(allRejectedDryRunBody, allRejectedDryRunKey);
+    assert.equal(allRejectedDryRunResponse.status, 200,
+      'the versioned dry run must accept an empty valid-row set so fully rejected CSVs retain server evidence');
+    const allRejectedDryRunResult = await allRejectedDryRunResponse.json();
+    assert.deepEqual({
+      status: allRejectedDryRunResult.status,
+      totalRows: allRejectedDryRunResult.totalRows,
+      validRows: allRejectedDryRunResult.validRows,
+      errorRows: allRejectedDryRunResult.errorRows,
+    }, {status: 'Dry Run', totalRows: 1, validRows: 0, errorRows: 1});
+    assert.deepEqual(allRejectedDryRunResult.errors, allRejectedDryRunBody.clientErrors,
+      'an empty server dry run must retain preflight diagnostics without inventing row outcomes');
+    const allRejectedDryRunState = await pool.query(
+      "select (select count(*)::int from projects where project_code='SYNTHETIC-ALL-REJECTED-PROJECT' and organization_id='org-default' and legal_entity_id='legal-default') as project_rows, (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='Project') as project_audits, (select count(*)::int from audit_logs where import_batch_id=$1 and entity_type='ImportBatch' and import_processing_result='Dry Run') as dry_run_audits, (select count(*)::int from import_export_logs where id=$1 and dry_run=true and status='Dry Run') as batch_rows",
+      [allRejectedDryRunResult.log.id],
+    );
+    assert.deepEqual(allRejectedDryRunState.rows, [{project_rows: 0, project_audits: 0, dry_run_audits: 1, batch_rows: 1}],
+      'a zero-valid-row server dry run records only the batch and dry-run evidence, never project data or project-row audits');
+    const allRejectedDryRunReplay = await applyProjectsV1(allRejectedDryRunBody, allRejectedDryRunKey);
+    assert.equal(allRejectedDryRunReplay.status, 200);
+    assert.deepEqual(await allRejectedDryRunReplay.json(), allRejectedDryRunResult,
+      'a repeated empty dry run replays the same batch and diagnostics');
 
     const projectFailedResponse = await applyProjects({
       fileName: 'synthetic-project-failed.csv',

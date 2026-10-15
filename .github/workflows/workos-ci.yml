@@ -73,7 +73,7 @@ jobs:
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
-      - name: Verify import history browser interactions
+      - name: Verify import and history browser interactions
         env:
           WORKOS_BROWSER_BASE_URL: http://127.0.0.1:4177
         run: |
@@ -88,6 +88,7 @@ jobs:
             sleep 1
           done
           npm run test:import-history-browser
+          npm run test:project-import-ui-browser
 
       - name: Prepare disposable schema for production identity tests
         env:

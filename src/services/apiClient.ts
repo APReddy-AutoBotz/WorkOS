@@ -162,10 +162,11 @@ async function apiFetch<T>(
   method: string,
   path: string,
   body?: unknown,
+  additionalHeaders: Record<string, string> = {},
 ): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: getApiHeaders(),
+    headers: {...getApiHeaders(), ...additionalHeaders},
     credentials: 'include',
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
@@ -192,6 +193,7 @@ async function apiFetch<T>(
 export const api = {
   get:    <T>(path: string) => apiFetch<T>('GET', path),
   post:   <T>(path: string, body: unknown) => apiFetch<T>('POST', path, body),
+  postWithHeaders: <T>(path: string, body: unknown, headers: Record<string, string>) => apiFetch<T>('POST', path, body, headers),
   put:    <T>(path: string, body: unknown) => apiFetch<T>('PUT', path, body),
   patch:  <T>(path: string, body: unknown) => apiFetch<T>('PATCH', path, body),
   delete: <T>(path: string, body?: unknown) => apiFetch<T>('DELETE', path, body),

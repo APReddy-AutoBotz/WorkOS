@@ -50,6 +50,10 @@ type ImportApplyResult = {
   errors: ImportApplyError[];
   log?: ImportExportLog;
 };
+type VersionedProjectImportResult = ImportApplyResult & {
+  schemaVersion: string;
+  dryRun: boolean;
+};
 
 const actor = () => {
   const s = authService.getCurrentUser();
@@ -1861,6 +1865,35 @@ export const adminService = {
       errorRows: Number(raw.errorRows ?? 0),
       errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
+    };
+  },
+  runVersionedProjectImport: async (request: {
+    fileName: string;
+    rows: CsvImportRow[];
+    clientErrors?: ImportApplyError[];
+    totalRows: number;
+    dryRun: boolean;
+    idempotencyKey: string;
+  }): Promise<VersionedProjectImportResult | null> => {
+    if (!(await checkBackend())) return null;
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/projects/apply', {
+      schemaVersion: 'project-master/1',
+      dryRun: request.dryRun,
+      fileName: request.fileName,
+      rows: request.rows,
+      totalRows: request.totalRows,
+      clientErrors: request.clientErrors || [],
+    }, {'Idempotency-Key': request.idempotencyKey});
+    const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
+    return {
+      status: raw.status as ImportExportLog['status'],
+      totalRows: Number(raw.totalRows ?? request.totalRows),
+      validRows: Number(raw.validRows ?? 0),
+      errorRows: Number(raw.errorRows ?? 0),
+      errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      log: log ? normalizeImportExportLog(log) : undefined,
+      schemaVersion: typeof log?.schema_version === 'string' ? log.schema_version : '',
+      dryRun: log?.dry_run === true,
     };
   },
   applyAllocationImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {

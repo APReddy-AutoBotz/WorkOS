@@ -72,8 +72,16 @@ export const createProjectImportRouter = ({
     clientErrors: z.array(importErrorRowSchema).optional(),
   });
   const versionedSchema = legacySchema.extend({
+    // Empty input is useful for a genuine server-side dry run when client
+    // preflight has rejected every row. Legacy requests and versioned applies
+    // retain the non-empty-row requirement.
+    rows: z.array(rowSchema),
     schemaVersion: z.literal(PROJECT_IMPORT_SCHEMA_VERSION),
     dryRun: z.boolean().default(false),
+  }).superRefine((data, context) => {
+    if (!data.dryRun && data.rows.length === 0) {
+      context.addIssue({code: z.ZodIssueCode.custom, path: ['rows'], message: 'At least one valid row is required to apply an import.'});
+    }
   });
 
   const router = Router();
