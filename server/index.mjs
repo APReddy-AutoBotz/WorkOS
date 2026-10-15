@@ -22,7 +22,7 @@ import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.
 import {attachImportErrorSourceIdentifiers, importErrorRowSchema, resolveImportApplyRowNumbers} from './modules/imports/import-error-provenance.mjs';
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
 import {createProjectImportRouter} from './modules/imports/project-import-router.mjs';
-import {createProjectCodeLockKey} from './modules/imports/idempotency.mjs';
+import {createProjectCodeLockKey, createScopedIdempotencyLockKey, hashImportRequest, normalizeIdempotencyKey} from './modules/imports/idempotency.mjs';
 import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
@@ -6799,28 +6799,79 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
   }
 });
 
-app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
+app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
+  const versioned = req.apiVersion === 'v1';
+  let idempotencyKey = null;
+  let actorId = null;
+  if (versioned) {
+    const rawKey = req.get?.('Idempotency-Key') ?? req.headers?.['idempotency-key'];
+    if (typeof rawKey !== 'string' || rawKey.length === 0) {
+      res.status(400).json({error: {code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'The Idempotency-Key header is required.'}});
+      return;
+    }
+    idempotencyKey = normalizeIdempotencyKey(rawKey);
+    if (!idempotencyKey) {
+      res.status(400).json({error: {code: 'INVALID_IDEMPOTENCY_KEY', message: 'The Idempotency-Key header is invalid.'}});
+      return;
+    }
+    if (!req.body?.schemaVersion) {
+      res.status(400).json({error: {code: 'SCHEMA_VERSION_REQUIRED', message: 'A client import schema version is required.'}});
+      return;
+    }
+    if (req.body.schemaVersion !== 'client-master/1') {
+      res.status(400).json({error: {code: 'UNSUPPORTED_SCHEMA_VERSION', message: 'The client import schema version is not supported.'}});
+      return;
+    }
+    actorId = typeof req.user?.sub === 'string' || typeof req.user?.sub === 'number'
+      ? String(req.user.sub)
+      : '';
+    if (!actorId) {
+      res.status(401).json({error: {code: 'AUTHENTICATION_REQUIRED', message: 'An authenticated account is required.'}});
+      return;
+    }
+  }
+  const optionalClientImportId = z.preprocess(
+    value => typeof value === 'string' && value.trim() === '' ? undefined : value,
+    z.string().min(1).optional(),
+  );
+  const optionalClientImportStatus = z.preprocess(
+    value => typeof value === 'string' && value.trim() === '' ? undefined : value,
+    z.enum(['Active', 'Inactive']).optional(),
+  );
   const rowSchema = z.object({
-    id: z.string().min(1).optional(),
+    id: optionalClientImportId,
     name: z.string().min(1),
     industry: z.string().optional(),
     accountOwnerId: z.string().optional(),
     countryDirectorIds: z.union([z.string(), z.array(z.string())]).optional(),
-    status: z.enum(['Active', 'Inactive']).optional(),
+    status: optionalClientImportStatus,
   });
-  const schema = z.object({
+  const legacySchema = z.object({
     fileName: z.string().min(1),
     rows: z.array(rowSchema).min(1),
     totalRows: z.number().int().min(0).optional(),
     clientErrors: z.array(importErrorRowSchema).optional(),
   });
-  const parsed = schema.safeParse(req.body);
+  const versionedSchema = legacySchema.extend({
+    rows: z.array(rowSchema),
+    schemaVersion: z.literal('client-master/1'),
+    dryRun: z.boolean().default(false),
+  }).superRefine((data, context) => {
+    if (!data.dryRun && data.rows.length === 0) {
+      context.addIssue({code: z.ZodIssueCode.custom, path: ['rows'], message: 'At least one valid row is required to apply an import.'});
+    }
+  });
+  const parsed = (versioned ? versionedSchema : legacySchema).safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+    if (versioned) {
+      res.status(400).json({error: {code: 'INVALID_IMPORT_REQUEST', message: 'The client import request is invalid.'}});
+    } else {
+      res.status(400).json({ error: parsed.error.flatten() });
+    }
     return;
   }
 
-  const client = await pool.connect();
+  let client;
   const clientErrors = parsed.data.clientErrors || [];
   const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
     rows: parsed.data.rows,
@@ -6833,9 +6884,53 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
   ], index => rowNumbers[index]);
   const errors = [...clientErrors, ...duplicateImportRows.errors];
   const importBatchId = crypto.randomUUID();
+  const dryRun = versioned && parsed.data.dryRun;
+  const scope = req.organizationScope;
+  const canonicalRequest = {
+    ...parsed.data,
+    totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
+    clientErrors,
+  };
+  const requestHash = versioned ? hashImportRequest(canonicalRequest) : null;
   let saved = 0;
+  let transactionOpen = false;
   try {
+    client = await pool.connect();
     await client.query('begin');
+    transactionOpen = true;
+    if (versioned) {
+      const lockKey = createScopedIdempotencyLockKey({
+        organizationId: scope.organizationId,
+        legalEntityId: scope.legalEntityId,
+        actorId,
+        channel: 'Client Master',
+        idempotencyKey,
+      });
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [lockKey]);
+      const existing = await client.query(
+        'select request_hash, batch_id from import_export_idempotency where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and channel=$4 and idempotency_key=$5',
+        [scope.organizationId, scope.legalEntityId, actorId, 'Client Master', idempotencyKey],
+      );
+      if (existing.rowCount > 0) {
+        if (existing.rows[0].request_hash !== requestHash) {
+          await client.query('rollback');
+          transactionOpen = false;
+          res.status(409).json({error: {code: 'IDEMPOTENCY_KEY_REUSED', message: 'This Idempotency-Key was already used with a different request.'}});
+          return;
+        }
+        const previousBatch = await client.query(
+          'select * from import_export_logs where id=$1 and organization_id=$2 and legal_entity_id=$3 and channel=$4 limit 1',
+          [existing.rows[0].batch_id, scope.organizationId, scope.legalEntityId, 'Client Master'],
+        );
+        if (previousBatch.rowCount !== 1) throw new Error('Idempotency record has no matching scoped import batch.');
+        await client.query('commit');
+        transactionOpen = false;
+        const row = previousBatch.rows[0];
+        res.json({status: row.status, totalRows: row.total_rows, validRows: row.valid_rows,
+          errorRows: row.error_rows, errors: Array.isArray(row.errors) ? row.errors : [], log: row});
+        return;
+      }
+    }
     const directorResult = await client.query('select id from country_directors');
     const directorIds = new Set(directorResult.rows.map(row => row.id));
 
@@ -6878,6 +6973,10 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       `, [row.id || null, row.name])).rows[0];
       if (crossScopeClient) {
         errors.push({ rowNumber, field: row.id ? 'id' : 'name', message: 'Client is not available in the authorized organization and legal entity.' });
+        continue;
+      }
+      if (dryRun) {
+        saved += 1;
         continue;
       }
       const result = await client.query(`
@@ -6932,38 +7031,62 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
       sourceIdentifierForRow: row => row.id ?? null,
     });
-    const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
+    const status = dryRun ? 'Dry Run' : saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
+    const totalRows = parsed.data.totalRows ?? parsed.data.rows.length;
+    if (dryRun) {
+      await audit(client, req, {
+        module: 'Import',
+        action: 'Dry Run Client Import',
+        entityType: 'ImportBatch',
+        entityId: importBatchId,
+        oldValue: null,
+        newValue: {schemaVersion: parsed.data.schemaVersion, status, totalRows, validRows: saved, errorRows: errors.length},
+        details: 'Validated client import ' + parsed.data.fileName + ' without applying client rows',
+        source: 'Client Master CSV',
+        importBatchId,
+        importProcessingResult: 'Dry Run',
+      });
+    }
     const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
-      values ($1,'Import','Client Master',$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run)
+      values ($1,'Import','Client Master',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       returning *
     `, [
       importBatchId,
       parsed.data.fileName,
       status,
-      parsed.data.totalRows ?? parsed.data.rows.length,
+      totalRows,
       saved,
       errors.length,
       errors.length ? JSON.stringify(responseErrors) : null,
       req.user.username,
-      req.organizationScope.organizationId,
-      req.organizationScope.legalEntityId,
+      scope.organizationId,
+      scope.legalEntityId,
+      versioned ? parsed.data.schemaVersion : null,
+      dryRun,
     ]);
+    if (versioned) {
+      await client.query(
+        'insert into import_export_idempotency (organization_id, legal_entity_id, actor_id, channel, idempotency_key, request_hash, batch_id) values ($1,$2,$3,\'Client Master\',$4,$5,$6)',
+        [scope.organizationId, scope.legalEntityId, actorId, idempotencyKey, requestHash, importBatchId],
+      );
+    }
     await client.query('commit');
-    res.json({
-      status,
-      totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-      validRows: saved,
-      errorRows: errors.length,
-      errors: responseErrors,
-      log: logResult.rows[0],
-    });
+    transactionOpen = false;
+    res.json({status, totalRows, validRows: saved, errorRows: errors.length,
+      errors: responseErrors, log: logResult.rows[0]});
   } catch (error) {
-    await client.query('rollback');
+    if (client && transactionOpen) {
+      try { await client.query('rollback'); } catch { /* Preserve the original failure. */ }
+    }
     console.error(error);
-    res.status(500).json({ error: 'Client import apply failed' });
+    if (versioned) {
+      res.status(500).json({error: {code: 'CLIENT_IMPORT_FAILED', message: 'The client import could not be completed.'}});
+    } else {
+      res.status(500).json({ error: 'Client import apply failed' });
+    }
   } finally {
-    client.release();
+    client?.release();
   }
 });
 

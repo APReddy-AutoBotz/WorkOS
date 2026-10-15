@@ -27,7 +27,7 @@ const operationResult = (body, {validRows = 1, errors = []} = {}) => ({
   log: {
     id: `batch-${++operationSequence}`,
     operation: 'Import',
-    channel: 'Project Master',
+    channel: body.schemaVersion === 'client-master/1' ? 'Client Master' : 'Project Master',
     file_name: body.fileName,
     status: body.dryRun ? 'Dry Run' : (validRows === 0 && errors.length ? 'Failed' : (errors.length ? 'Partial' : 'Success')),
     total_rows: body.totalRows,
@@ -36,7 +36,7 @@ const operationResult = (body, {validRows = 1, errors = []} = {}) => ({
     errors,
     user_name: 'Synthetic Admin',
     created_at: '2026-10-15T00:00:00.000Z',
-    schema_version: 'project-master/1',
+    schema_version: body.schemaVersion,
     dry_run: body.dryRun,
   },
 });
@@ -48,9 +48,9 @@ await page.route('**/api/**', async route => {
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({database: 'connected'})});
     return;
   }
-  if (path === '/api/v1/imports/projects/apply') {
+  if (path === '/api/v1/imports/projects/apply' || path === '/api/v1/imports/clients/apply') {
     const body = request.postDataJSON();
-    requests.push({body, headers: request.headers()});
+    requests.push({path, body, headers: request.headers()});
     const defaultErrors = body.rows.length === 0 ? body.clientErrors : [];
     const defaultValidRows = body.rows.length === 0 ? 0 : body.rows.length;
     const plan = responsePlans.shift() || {status: 200, body: operationResult(body, {validRows: defaultValidRows, errors: defaultErrors})};
@@ -84,11 +84,18 @@ await page.route('**/api/**', async route => {
 
 const csv = (projectCode, managerId = 'EMP-VALID') => [
   'projectCode,name,clientId,client,managerId,startDate,endDate,status,billable,projectType,country,notes',
-  `${projectCode},Synthetic Project,client-synthetic,Synthetic Client,${managerId},2026-01-01,2026-12-31,Proposed,true,Delivery,GB,Synthetic test row`,
+  `${projectCode},Synthetic Project,client-synthetic,Synthetic Client,${managerId},2026-01-01,2026-12-31,,true,Delivery,GB,Synthetic test row`,
 ].join('\n');
 const selectProjectCsv = async (fileName, contents) => {
   await page.locator('input[type="file"]').nth(2).setInputFiles({name: fileName, mimeType: 'text/csv', buffer: Buffer.from(contents)});
 };
+const selectClientCsv = async (fileName, contents) => {
+  await page.locator('input[type="file"]').nth(1).setInputFiles({name: fileName, mimeType: 'text/csv', buffer: Buffer.from(contents)});
+};
+const clientCsv = (clientId, name = 'Synthetic Client', status = 'Active') => [
+  'id,name,industry,accountOwnerId,countryDirectorIds,status',
+  `${clientId},${name},Technology,,,${status}`,
+].join('\n');
 const lastRequest = () => requests.at(-1);
 try {
   await page.goto(`${baseUrl}/tests/fixtures/project-import-ui.html`);
@@ -100,6 +107,7 @@ try {
   assert.equal(firstPreview.body.dryRun, true);
   assert.equal(firstPreview.body.schemaVersion, 'project-master/1');
   assert.equal(firstPreview.body.rows.length, 1);
+  assert.equal(firstPreview.body.rows[0].status, '', 'blank optional project status cells remain eligible for server defaulting');
   const firstPreviewKey = firstPreview.headers['idempotency-key'];
   assert.ok(firstPreviewKey);
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
@@ -169,9 +177,48 @@ try {
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a malformed-header dry run cannot apply source rows that were not submitted');
   assert.equal(requests.length, 8);
-  assert.equal(genericLogWrites, 0, 'server dry runs and applies do not create a duplicate generic history log');
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
+  await selectClientCsv('clients-first.csv', clientCsv('', 'Synthetic Client', ''));
+  await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  const firstClientPreview = lastRequest();
+  assert.equal(firstClientPreview.path, '/api/v1/imports/clients/apply');
+  assert.equal(firstClientPreview.body.schemaVersion, 'client-master/1');
+  assert.equal(firstClientPreview.body.dryRun, true);
+  assert.equal(firstClientPreview.body.rows[0].id, '', 'blank optional client IDs remain eligible for server-generated IDs');
+  assert.equal(firstClientPreview.body.rows[0].status, '', 'blank optional client statuses remain eligible for server defaults');
+  const firstClientPreviewKey = firstClientPreview.headers['idempotency-key'];
+  assert.ok(firstClientPreviewKey);
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
+    'Client Master apply remains disabled until server-side validation is confirmed');
+
+  responsePlans.push({status: 200, body: operationResult(firstClientPreview.body)});
+  await page.getByRole('button', {name: 'Retry Validation'}).click();
+  await page.getByText('Server dry run complete for clients-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  assert.equal(lastRequest().headers['idempotency-key'], firstClientPreviewKey,
+    'Client Master validation retry reuses the same key');
+  assert.deepEqual(lastRequest().body, firstClientPreview.body,
+    'Client Master validation retry preserves its exact request payload');
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), false);
+
+  responsePlans.push({status: 200, body: operationResult({...lastRequest().body, dryRun: false})});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText('Applied 1 valid client master rows from clients-first.csv.', {exact: true}).waitFor();
+  const clientApply = lastRequest();
+  assert.equal(clientApply.path, '/api/v1/imports/clients/apply');
+  assert.equal(clientApply.body.dryRun, false);
+  assert.notEqual(clientApply.headers['idempotency-key'], firstClientPreviewKey,
+    'Client Master apply uses a separate idempotency key from dry run');
+
+  await selectClientCsv('clients-changed.csv', clientCsv('CLIENT-UI-202', 'Synthetic Client Changed'));
+  await page.getByText('Server dry run complete for clients-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  const changedClientPreview = lastRequest();
+  assert.notEqual(changedClientPreview.headers['idempotency-key'], firstClientPreviewKey,
+    'a newly selected Client Master file starts fresh idempotency keys');
+  assert.equal(changedClientPreview.body.schemaVersion, 'client-master/1');
+  assert.equal(requests.length, 12);
+  assert.equal(genericLogWrites, 0, 'versioned client/project dry runs and applies do not create duplicate generic history logs');
   assert.deepEqual(pageErrors, []);
-  console.log('Project import browser smoke passed: server preview gate, stable retries, fresh keys, saved apply diagnostics, and invalid-row no-apply cases.');
+  console.log('Project and client import browser smoke passed: server preview gates, stable retries, fresh keys, saved diagnostics, and invalid-row no-apply cases.');
 } finally {
   await browser.close();
 }

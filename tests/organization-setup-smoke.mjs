@@ -224,7 +224,7 @@ assert.match(server, /let effectiveExitDate = parsed\.data\.exit_date[\s\S]*prev
 assert.match(server, /api\/imports\/employees\/apply[\s\S]*assertWorkerMayExit[\s\S]*errors\.push\(\{ rowNumber, field: 'status'[\s\S]*active=excluded\.active[\s\S]*synchronizeWorkerExit/, 'employee import exits must retain row-level errors and use the canonical lifecycle synchronization');
 assert.match(server, /let effectiveExitDate = row\.exitDate[\s\S]*previous\.status === 'Exited' \? row\.exitDate[\s\S]*code: error\.code[\s\S]*continue;[\s\S]*effectiveExitDate \|\| previous\?\.exit_date/, 'employee import must preserve same-date or omitted terminal authority and keep different-date conflicts row-local');
 const employeeSaveRoute = routeSource("app.post('/api/employees'", "app.delete('/api/employees/:id'");
-const employeeImportRoute = routeSource("app.post('/api/imports/employees/apply'", "app.post('/api/imports/clients/apply'");
+const employeeImportRoute = routeSource("app.post('/api/imports/employees/apply'", "app.post(['/api/imports/clients/apply'");
 const employeeDeleteRoute = routeSource("app.delete('/api/employees/:id'", "app.get('/api/projects'");
 assert.match(employeeSaveRoute, /previous\?\.status === 'Exited' && employee\.status !== 'Exited'[\s\S]*await synchronizeWorkerReactivation/, 'direct employee reactivation must synchronize canonical history, profile, and login');
 assert.match(employeeImportRoute, /previous\?\.status === 'Exited' && employee\.status !== 'Exited'[\s\S]*await synchronizeWorkerReactivation/, 'employee-import reactivation must synchronize canonical history, profile, and login');

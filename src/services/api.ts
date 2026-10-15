@@ -50,7 +50,7 @@ type ImportApplyResult = {
   errors: ImportApplyError[];
   log?: ImportExportLog;
 };
-type VersionedProjectImportResult = ImportApplyResult & {
+type VersionedImportResult = ImportApplyResult & {
   schemaVersion: string;
   dryRun: boolean;
 };
@@ -1874,10 +1874,39 @@ export const adminService = {
     totalRows: number;
     dryRun: boolean;
     idempotencyKey: string;
-  }): Promise<VersionedProjectImportResult | null> => {
+  }): Promise<VersionedImportResult | null> => {
     if (!(await checkBackend())) return null;
     const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/projects/apply', {
       schemaVersion: 'project-master/1',
+      dryRun: request.dryRun,
+      fileName: request.fileName,
+      rows: request.rows,
+      totalRows: request.totalRows,
+      clientErrors: request.clientErrors || [],
+    }, {'Idempotency-Key': request.idempotencyKey});
+    const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
+    return {
+      status: raw.status as ImportExportLog['status'],
+      totalRows: Number(raw.totalRows ?? request.totalRows),
+      validRows: Number(raw.validRows ?? 0),
+      errorRows: Number(raw.errorRows ?? 0),
+      errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      log: log ? normalizeImportExportLog(log) : undefined,
+      schemaVersion: typeof log?.schema_version === 'string' ? log.schema_version : '',
+      dryRun: log?.dry_run === true,
+    };
+  },
+  runVersionedClientImport: async (request: {
+    fileName: string;
+    rows: CsvImportRow[];
+    clientErrors?: ImportApplyError[];
+    totalRows: number;
+    dryRun: boolean;
+    idempotencyKey: string;
+  }): Promise<VersionedImportResult | null> => {
+    if (!(await checkBackend())) return null;
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/clients/apply', {
+      schemaVersion: 'client-master/1',
       dryRun: request.dryRun,
       fileName: request.fileName,
       rows: request.rows,

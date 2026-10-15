@@ -1,10 +1,10 @@
-export type ProjectImportRowError = {rowNumber: number};
+export type ImportRowError = {rowNumber: number};
 
 /** Keep only client-approved rows not rejected by the server, using original CSV row numbers. */
-export const filterAcceptedProjectRows = <TRow extends object>(
+export const filterAcceptedImportRows = <TRow extends object>(
   sourceRows: TRow[],
   submittedRows: TRow[],
-  errors: ProjectImportRowError[],
+  errors: ImportRowError[],
 ): TRow[] => {
   const sourceRowNumbers = new Map(sourceRows.map((row, index) => [row, index + 2]));
   const rejectedRowNumbers = new Set(errors

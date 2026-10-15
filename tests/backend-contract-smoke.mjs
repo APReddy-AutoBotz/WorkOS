@@ -8,11 +8,11 @@ const projectSaveRoute = server.slice(
 );
 const employeeImportRoute = server.slice(
   server.indexOf("app.post('/api/imports/employees/apply'"),
-  server.indexOf("app.post('/api/imports/clients/apply'"),
+  server.indexOf("app.post(['/api/imports/clients/apply'"),
 );
 const clientImportRoute = server.slice(
-  server.indexOf("app.post('/api/imports/clients/apply'"),
-  server.indexOf("app.post('/api/imports/projects/apply'"),
+  server.indexOf("app.post(['/api/imports/clients/apply'"),
+  server.indexOf("app.post('/api/imports/allocations/apply'"),
 );
 const projectImportRouter = readFileSync('server/modules/imports/project-import-router.mjs', 'utf8');
 const importIdempotency = readFileSync('server/modules/imports/idempotency.mjs', 'utf8');
@@ -152,21 +152,27 @@ assert.match(employeeImportRoute, /const status = saved === 0 \? 'Failed' : erro
   'employee import success, partial and failed outcomes must retain their existing semantics');
 assert.doesNotMatch(employeeImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'employee import provenance must not persist raw CSV contents');
-assert.match(server, /app\.post\('\/api\/imports\/clients\/apply'/, 'client import apply route must exist');
+assert.match(server, /app\.post\(\['\/api\/imports\/clients\/apply', '\/api\/v1\/imports\/clients\/apply'\]/, 'legacy and versioned client import apply routes must share one handler');
 assert.match(clientImportRoute, /requirePermission\('imports\.manage'\)/,
   'client import apply must retain its imports.manage authorization gate');
 assert.match(clientImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
   'client imports must receive a server-generated batch ID after request validation');
 assert.match(clientImportRoute, /source: 'Client Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.id \?\? null,[\s\S]*importProcessingResult: 'Success'/,
   'successful client row audits must retain source, only a supplied source ID, batch and processing result');
-assert.match(clientImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Client Master'/,
-  'client batch history must use the same ID as row audits and retain the selected scope');
+assert.match(clientImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run\)[\s\S]*values \(\$1,'Import','Client Master'/,
+  'client batch history must use the same ID as row audits, retain the selected scope, and persist the versioned operation result');
 assert.match(clientImportRoute, /\[\s*importBatchId,[\s\S]*parsed\.data\.fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
   'the client batch result must preserve aggregate status, counts and existing row errors');
 assert.match(clientImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'client mutations, row audits and the batch result must commit or roll back together');
-assert.match(clientImportRoute, /const status = saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
-  'client import success, partial and failed outcomes must retain their existing semantics');
+assert.match(clientImportRoute, /const status = dryRun \? 'Dry Run' : saved === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
+  'client import must distinguish dry-run validation from success, partial and failed outcomes');
+assert.match(clientImportRoute, /const versionedSchema = legacySchema\.extend[\s\S]*schemaVersion: z\.literal\('client-master\/1'\)[\s\S]*dryRun: z\.boolean\(\)\.default\(false\)/,
+  'versioned client imports must bind a stable schema and explicit dry-run flag');
+assert.match(clientImportRoute, /if \(dryRun\) \{\s*saved \+= 1;\s*continue;\s*\}[\s\S]*insert into clients/,
+  'a valid client dry run must stop before any client or association writes');
+assert.match(clientImportRoute, /hashImportRequest[\s\S]*createScopedIdempotencyLockKey[\s\S]*import_export_idempotency[\s\S]*IDEMPOTENCY_KEY_REUSED/,
+  'versioned client retries must be scoped, replayable and reject changed canonical input');
 assert.doesNotMatch(clientImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,
   'client import provenance must not persist raw CSV contents');
 assert.match(server, /const projectImportRouter = createProjectImportRouter\([\s\S]*app\.use\('\/api', projectImportRouter\)[\s\S]*app\.use\('\/api\/v1', projectImportRouter\)/,

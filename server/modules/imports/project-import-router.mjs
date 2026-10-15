@@ -24,6 +24,11 @@ const responseFromBatch = (row, versioned) => ({
   log: versioned ? row : legacyProjectImportLog(row),
 });
 
+const optionalImportEnum = values => z.preprocess(
+  value => typeof value === 'string' && value.trim() === '' ? undefined : value,
+  z.enum(values).optional(),
+);
+
 export const createProjectImportRouter = ({
   pool,
   requireDatabase,
@@ -59,7 +64,9 @@ export const createProjectImportRouter = ({
     managerId: z.string().min(1),
     startDate: strictIsoDateSchema,
     endDate: strictIsoDateSchema,
-    status: z.enum(['Proposed', 'Active', 'On Hold', 'Completed']).optional(),
+    // CSV templates use empty cells for optional enum values. Normalize only
+    // blank cells; nonblank invalid values remain schema errors.
+    status: optionalImportEnum(['Proposed', 'Active', 'On Hold', 'Completed']),
     billable: z.union([z.boolean(), z.string()]).optional(),
     projectType: z.string().optional(),
     country: z.string().optional(),

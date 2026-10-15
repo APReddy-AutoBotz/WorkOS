@@ -78,6 +78,16 @@ const signTestSession = (payload, secret) => {
   return `${body}.${signature}`;
 };
 
+const assertVersionedErrorResponse = (response, body, expected) => {
+  assert.deepEqual({code: body?.error?.code, message: body?.error?.message}, expected);
+  assert.ok(body.error.correlationId, 'versioned error must carry a correlation ID');
+  assert.ok(body.error.operationId, 'versioned POST error must carry an operation ID');
+  assert.equal(body.error.correlationId, response.headers.get('x-correlation-id'),
+    'versioned error correlation ID must match its response header');
+  assert.equal(body.error.operationId, response.headers.get('x-operation-id'),
+    'versioned error operation ID must match its response header');
+};
+
 const waitForChildExit = child => new Promise(resolveExit => {
   if (child.exitCode !== null || child.signalCode !== null) resolveExit();
   else child.once('exit', resolveExit);
@@ -499,6 +509,21 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
+    const applyClientsV1 = (body, idempotencyKey) => {
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Organization-ID': 'org-default',
+        'X-Legal-Entity-ID': 'legal-default',
+      };
+      if (idempotencyKey !== undefined) headers['Idempotency-Key'] = idempotencyKey;
+      return fetch(`${baseUrl}/api/v1/imports/clients/apply`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5000),
+      });
+    };
     const applyProjects = (body, legalEntityId = 'legal-default') => fetch(`${baseUrl}/api/imports/projects/apply`, {
       method: 'POST',
       headers: {
@@ -749,6 +774,201 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       where l.id=$1 group by l.id`, [clientFailedBody.log.id]);
     assert.deepEqual(clientFailedBatch.rows, [{status: 'Failed', audit_rows: 0}],
       'a client batch with no saved rows must retain its failed result without success audit events');
+
+    const clientV1DryRunKey = 'synthetic-client-v1-dry-run-0001';
+    const clientV1DryRunBody = {
+      schemaVersion: 'client-master/1',
+      dryRun: true,
+      fileName: 'synthetic-client-v1-dry-run.csv',
+      totalRows: 2,
+      rows: [
+        {id: 'client-v1-dry-run-valid', name: 'Synthetic Client Dry Run Valid', countryDirectorIds: 'cd-import-provenance-test'},
+        {id: 'client-v1-dry-run-rejected', name: 'Synthetic Client Dry Run Rejected', accountOwnerId: 'missing-owner'},
+      ],
+    };
+    const clientV1DryRunResponse = await applyClientsV1(clientV1DryRunBody, clientV1DryRunKey);
+    assert.equal(clientV1DryRunResponse.status, 200, 'the versioned client route must accept a schema-tagged dry run');
+    const clientV1DryRunResult = await clientV1DryRunResponse.json();
+    assert.deepEqual({status: clientV1DryRunResult.status, totalRows: clientV1DryRunResult.totalRows,
+      validRows: clientV1DryRunResult.validRows, errorRows: clientV1DryRunResult.errorRows},
+    {status: 'Dry Run', totalRows: 2, validRows: 1, errorRows: 1},
+    'client dry-run results must report valid and rejected rows without applying them');
+    assert.deepEqual(clientV1DryRunResult.errors, [{
+      rowNumber: 3,
+      field: 'accountOwnerId',
+      message: 'Account owner employee record does not exist or is exited.',
+      sourceIdentifier: 'client-v1-dry-run-rejected',
+    }], 'client dry-run validation must preserve row diagnostics and source identifiers');
+    assert.equal(clientV1DryRunResult.log.schema_version, 'client-master/1');
+    assert.equal(clientV1DryRunResult.log.dry_run, true);
+    const clientV1DryRunState = await pool.query(`select
+        (select count(*)::int from clients where id in ('client-v1-dry-run-valid','client-v1-dry-run-rejected')) as client_rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1) as audit_rows,
+        (select count(*)::int from import_export_idempotency where batch_id=$1) as idempotency_rows
+      from import_export_logs where id=$1`, [clientV1DryRunResult.log.id]);
+    assert.deepEqual(clientV1DryRunState.rows, [{client_rows: 0, audit_rows: 1, idempotency_rows: 1}],
+      'client dry run must write only its batch/audit/idempotency evidence, never client rows');
+    const clientV1DryRunReplay = await applyClientsV1(clientV1DryRunBody, clientV1DryRunKey);
+    const clientV1DryRunReplayBody = await clientV1DryRunReplay.json();
+    assert.equal(clientV1DryRunReplay.status, 200);
+    assert.equal(clientV1DryRunReplayBody.log.id, clientV1DryRunResult.log.id,
+      'an identical client dry-run retry must replay the original batch');
+    assert.equal((await pool.query(`select count(*)::int as count from import_export_logs where file_name=$1`,
+      [clientV1DryRunBody.fileName])).rows[0].count, 1,
+    'an identical dry-run replay must not create a second history batch');
+
+    const clientBlankOptionalFieldsBody = {
+      schemaVersion: 'client-master/1',
+      dryRun: true,
+      fileName: 'synthetic-client-v1-blank-optional-fields.csv',
+      totalRows: 1,
+      rows: [{id: '', name: 'Synthetic Client Blank Optional Fields', industry: '', accountOwnerId: '', countryDirectorIds: '', status: ''}],
+    };
+    const clientBlankOptionalFieldsResponse = await applyClientsV1(
+      clientBlankOptionalFieldsBody,
+      'synthetic-client-v1-blank-optional-fields-dry-run',
+    );
+    assert.equal(clientBlankOptionalFieldsResponse.status, 200,
+      'blank optional Client Master ID and status cells must be treated as omitted during server dry run');
+    const clientBlankOptionalFieldsResult = await clientBlankOptionalFieldsResponse.json();
+    assert.deepEqual({status: clientBlankOptionalFieldsResult.status, validRows: clientBlankOptionalFieldsResult.validRows,
+      errorRows: clientBlankOptionalFieldsResult.errorRows}, {status: 'Dry Run', validRows: 1, errorRows: 0});
+    assert.equal((await pool.query(`select count(*)::int as count from clients
+      where name='Synthetic Client Blank Optional Fields' and organization_id='org-default' and legal_entity_id='legal-default'`)).rows[0].count, 0,
+    'a blank optional Client Master dry run must not write its client row');
+    const clientBlankOptionalFieldsReplay = await applyClientsV1({
+      ...clientBlankOptionalFieldsBody,
+      rows: [{name: 'Synthetic Client Blank Optional Fields', industry: '', accountOwnerId: '', countryDirectorIds: ''}],
+    }, 'synthetic-client-v1-blank-optional-fields-dry-run');
+    assert.equal(clientBlankOptionalFieldsReplay.status, 200,
+      'blank optional cells and omitted optional values must canonicalize to the same idempotent dry-run request');
+    assert.equal((await clientBlankOptionalFieldsReplay.json()).log.id, clientBlankOptionalFieldsResult.log.id);
+    const clientBlankOptionalFieldsApplyResponse = await applyClientsV1({
+      ...clientBlankOptionalFieldsBody,
+      dryRun: false,
+    }, 'synthetic-client-v1-blank-optional-fields-apply');
+    assert.equal(clientBlankOptionalFieldsApplyResponse.status, 200,
+      'blank optional Client Master ID and status cells must be accepted on apply');
+    const clientBlankOptionalFieldsApply = await clientBlankOptionalFieldsApplyResponse.json();
+    assert.equal(clientBlankOptionalFieldsApply.status, 'Success');
+    const clientBlankOptionalFieldsStored = await pool.query(`select id,status from clients
+      where name='Synthetic Client Blank Optional Fields' and organization_id='org-default' and legal_entity_id='legal-default'`);
+    assert.equal(clientBlankOptionalFieldsStored.rowCount, 1);
+    assert.match(clientBlankOptionalFieldsStored.rows[0].id, /^client-/,
+      'an omitted Client Master ID must continue to use the server-generated ID path');
+    assert.equal(clientBlankOptionalFieldsStored.rows[0].status, 'Active',
+      'an omitted Client Master status must use the existing default');
+    const clientV1ChangedDryRunResponse = await applyClientsV1({
+      ...clientV1DryRunBody,
+      rows: clientV1DryRunBody.rows.map((row, index) => index === 0 ? {...row, name: 'Changed Client Under Reused Key'} : row),
+    }, clientV1DryRunKey);
+    assert.equal(clientV1ChangedDryRunResponse.status, 409,
+      'changed canonical client input must conflict under a reused idempotency key');
+    assertVersionedErrorResponse(clientV1ChangedDryRunResponse, await clientV1ChangedDryRunResponse.json(), {
+      code: 'IDEMPOTENCY_KEY_REUSED',
+      message: 'This Idempotency-Key was already used with a different request.',
+    });
+
+    const clientV1UpdateDryRunResponse = await applyClientsV1({
+      schemaVersion: 'client-master/1',
+      dryRun: true,
+      fileName: 'synthetic-client-v1-update-dry-run.csv',
+      totalRows: 1,
+      rows: [{id: 'client-import-source-1', name: 'Must Not Replace Existing Client', countryDirectorIds: 'cd-import-provenance-test'}],
+    }, 'synthetic-client-v1-update-dry-run-0001');
+    assert.equal(clientV1UpdateDryRunResponse.status, 200);
+    const clientV1UpdateDryRun = await clientV1UpdateDryRunResponse.json();
+    assert.equal(clientV1UpdateDryRun.status, 'Dry Run');
+    const clientV1UpdateNoWriteState = await pool.query(`select c.name,
+        (select count(*)::int from client_country_director_map where client_id=c.id) as director_links,
+        (select count(*)::int from projects where client_id=c.id) as linked_projects
+      from clients c where c.id='client-import-source-1'`);
+    assert.deepEqual(clientV1UpdateNoWriteState.rows, [{
+      name: 'Synthetic Client With Source ID', director_links: 0, linked_projects: 0,
+    }], 'a dry run against an existing client must not update the client, director links or project associations');
+
+    const clientV1ApplyKey = 'synthetic-client-v1-apply-0001';
+    const clientV1ApplyBody = {
+      ...clientV1DryRunBody,
+      dryRun: false,
+      fileName: 'synthetic-client-v1-apply.csv',
+      rows: [clientV1DryRunBody.rows[0]],
+      totalRows: 1,
+    };
+    const clientV1ApplyResponse = await applyClientsV1(clientV1ApplyBody, clientV1ApplyKey);
+    assert.equal(clientV1ApplyResponse.status, 200);
+    const clientV1ApplyResult = await clientV1ApplyResponse.json();
+    assert.deepEqual({status: clientV1ApplyResult.status, validRows: clientV1ApplyResult.validRows,
+      errorRows: clientV1ApplyResult.errorRows, dryRun: clientV1ApplyResult.log.dry_run,
+      schemaVersion: clientV1ApplyResult.log.schema_version},
+    {status: 'Success', validRows: 1, errorRows: 0, dryRun: false, schemaVersion: 'client-master/1'},
+    'versioned client apply must persist schema and non-dry-run result metadata');
+    assert.deepEqual((await pool.query(`select id,name,organization_id,legal_entity_id from clients where id=$1`,
+      ['client-v1-dry-run-valid'])).rows, [{
+      id: 'client-v1-dry-run-valid',
+      name: 'Synthetic Client Dry Run Valid',
+      organization_id: 'org-default',
+      legal_entity_id: 'legal-default',
+    }], 'the versioned apply path must persist the previously dry-run validated client in its selected scope');
+    const clientV1ApplyReplay = await applyClientsV1(clientV1ApplyBody, clientV1ApplyKey);
+    const clientV1ApplyReplayBody = await clientV1ApplyReplay.json();
+    assert.equal(clientV1ApplyReplay.status, 200);
+    assert.equal(clientV1ApplyReplayBody.log.id, clientV1ApplyResult.log.id,
+      'an identical client apply retry must return the original batch');
+    const clientV1ChangedApplyResponse = await applyClientsV1({
+      ...clientV1ApplyBody,
+      rows: [{...clientV1ApplyBody.rows[0], name: 'Changed Client Under Applied Key'}],
+    }, clientV1ApplyKey);
+    assert.equal(clientV1ChangedApplyResponse.status, 409,
+      'changed client apply input must conflict under the same idempotency key');
+
+    const clientV1ConcurrentBody = {
+      ...clientV1ApplyBody,
+      fileName: 'synthetic-client-v1-concurrent.csv',
+      rows: [{id: 'client-v1-concurrent', name: 'Synthetic Concurrent Client'}],
+    };
+    const clientV1ConcurrentResponses = await Promise.all([
+      applyClientsV1(clientV1ConcurrentBody, 'synthetic-client-v1-concurrent-0001'),
+      applyClientsV1(clientV1ConcurrentBody, 'synthetic-client-v1-concurrent-0001'),
+    ]);
+    assert.deepEqual(clientV1ConcurrentResponses.map(response => response.status), [200, 200],
+      'concurrent identical client requests must both resolve from the idempotent operation');
+    const clientV1ConcurrentResults = await Promise.all(clientV1ConcurrentResponses.map(response => response.json()));
+    assert.equal(clientV1ConcurrentResults[0].log.id, clientV1ConcurrentResults[1].log.id,
+      'concurrent identical client requests must return the same persisted batch');
+    const clientV1ConcurrentState = await pool.query(`select
+        (select count(*)::int from clients where id='client-v1-concurrent') as client_rows,
+        (select count(*)::int from import_export_logs where file_name='synthetic-client-v1-concurrent.csv') as batch_rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1) as audit_rows,
+        (select count(*)::int from import_export_idempotency where batch_id=$1) as idempotency_rows`,
+    [clientV1ConcurrentResults[0].log.id]);
+    assert.deepEqual(clientV1ConcurrentState.rows, [{client_rows: 1, batch_rows: 1, audit_rows: 1, idempotency_rows: 1}],
+      'concurrent client retries must write one client, one audit, one batch and one idempotency record');
+
+    const clientV1MissingKeyResponse = await applyClientsV1({schemaVersion: 'client-master/1', fileName: 'missing-key.csv', rows: []});
+    assert.equal(clientV1MissingKeyResponse.status, 400, 'versioned client apply must require an idempotency key');
+    assertVersionedErrorResponse(clientV1MissingKeyResponse, await clientV1MissingKeyResponse.json(), {
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+      message: 'The Idempotency-Key header is required.',
+    });
+    const clientV1UnsupportedSchemaResponse = await applyClientsV1({
+      schemaVersion: 'client-master/999', dryRun: true, fileName: 'unsupported-schema.csv', rows: [],
+    }, 'synthetic-client-v1-unsupported-schema');
+    assert.equal(clientV1UnsupportedSchemaResponse.status, 400, 'versioned client import must reject unknown schemas before side effects');
+    assertVersionedErrorResponse(clientV1UnsupportedSchemaResponse, await clientV1UnsupportedSchemaResponse.json(), {
+      code: 'UNSUPPORTED_SCHEMA_VERSION',
+      message: 'The client import schema version is not supported.',
+    });
+    const clientV1InvalidNonblankOption = await applyClientsV1({
+      schemaVersion: 'client-master/1', dryRun: true, fileName: 'invalid-nonblank-client-option.csv',
+      rows: [{id: '   ', name: 'Synthetic Client Invalid Option', status: 'Archived'}],
+    }, 'synthetic-client-v1-invalid-nonblank-option');
+    assert.equal(clientV1InvalidNonblankOption.status, 400,
+      'nonblank invalid Client Master status values must still fail schema validation');
+    assertVersionedErrorResponse(clientV1InvalidNonblankOption, await clientV1InvalidNonblankOption.json(), {
+      code: 'INVALID_IMPORT_REQUEST',
+      message: 'The client import request is invalid.',
+    });
 
     await pool.query(`insert into organizations (id,code,name,effective_from)
       values ('org-client-outside','CLIENT-OUTSIDE','Synthetic Client Outside Organization',date '1970-01-01')`);
@@ -1229,6 +1449,24 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(projectV1UnsupportedSchema.status, 400);
     assert.equal((await projectV1UnsupportedSchema.json()).error.code, 'UNSUPPORTED_SCHEMA_VERSION',
       'unsupported project schema versions must fail before any data write');
+    const projectV1InvalidNonblankStatus = await applyProjectsV1({
+      schemaVersion: 'project-master/1',
+      dryRun: true,
+      fileName: 'invalid-nonblank-project-status.csv',
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-V1-INVALID-STATUS',
+        name: 'Synthetic Project Invalid Status',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+        status: 'Archived',
+      }],
+    }, 'synthetic-project-invalid-nonblank-status');
+    assert.equal(projectV1InvalidNonblankStatus.status, 400,
+      'nonblank invalid Project Master status values must still fail schema validation');
+    assert.equal((await projectV1InvalidNonblankStatus.json()).error.code, 'INVALID_IMPORT_REQUEST');
 
     const emptyVersionedApply = await applyProjectsV1({
       schemaVersion: 'project-master/1',
@@ -1326,6 +1564,52 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       dry_run_audits: 1,
       batch_rows: 1,
     }], 'dry-run may retain its batch/audit evidence but must not write project records or row audits');
+    const projectBlankStatusBody = {
+      schemaVersion: 'project-master/1',
+      dryRun: true,
+      fileName: 'synthetic-project-blank-status.csv',
+      totalRows: 1,
+      rows: [{
+        projectCode: 'PROJECT-IMPORT-V1-BLANK-STATUS',
+        name: 'Synthetic Project Blank Status',
+        clientId: 'client-import-source-1',
+        client: 'Synthetic Client With Source ID',
+        managerId: 'EMP-IMPORT-SUCCESS',
+        startDate: '2026-01-01',
+        endDate: '2026-12-31',
+        status: '',
+      }],
+    };
+    const projectBlankStatusDryRunResponse = await applyProjectsV1(
+      projectBlankStatusBody,
+      'synthetic-project-blank-status-dry-run',
+    );
+    assert.equal(projectBlankStatusDryRunResponse.status, 200,
+      'a blank optional Project Master status cell must be treated as omitted during dry run');
+    const projectBlankStatusDryRun = await projectBlankStatusDryRunResponse.json();
+    assert.deepEqual({status: projectBlankStatusDryRun.status, validRows: projectBlankStatusDryRun.validRows,
+      errorRows: projectBlankStatusDryRun.errorRows}, {status: 'Dry Run', validRows: 1, errorRows: 0});
+    assert.equal((await pool.query(`select count(*)::int as count from projects
+      where project_code='PROJECT-IMPORT-V1-BLANK-STATUS' and organization_id='org-default' and legal_entity_id='legal-default'`)).rows[0].count, 0,
+    'a blank Project Master dry run must not write its project row');
+    const projectBlankStatusDryRunReplay = await applyProjectsV1({
+      ...projectBlankStatusBody,
+      rows: [{...projectBlankStatusBody.rows[0], status: undefined}],
+    }, 'synthetic-project-blank-status-dry-run');
+    assert.equal(projectBlankStatusDryRunReplay.status, 200,
+      'blank and omitted Project Master status cells must canonicalize to the same idempotent request');
+    assert.equal((await projectBlankStatusDryRunReplay.json()).log.id, projectBlankStatusDryRun.log.id);
+    const projectBlankStatusApplyResponse = await applyProjectsV1({
+      ...projectBlankStatusBody,
+      dryRun: false,
+    }, 'synthetic-project-blank-status-apply');
+    assert.equal(projectBlankStatusApplyResponse.status, 200,
+      'a blank optional Project Master status cell must be accepted on apply');
+    const projectBlankStatusApply = await projectBlankStatusApplyResponse.json();
+    assert.equal(projectBlankStatusApply.status, 'Success');
+    assert.deepEqual((await pool.query(`select status from projects
+      where project_code='PROJECT-IMPORT-V1-BLANK-STATUS' and organization_id='org-default' and legal_entity_id='legal-default'`)).rows,
+    [{status: 'Proposed'}], 'an omitted Project Master status must preserve the existing Proposed default');
     const projectDryRunReplay = await applyProjectsV1(projectDryRunBody, projectDryRunKey);
     assert.equal(projectDryRunReplay.status, 200);
     assert.deepEqual(await projectDryRunReplay.json(), projectDryRunResult,
