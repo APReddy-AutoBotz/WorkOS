@@ -331,7 +331,7 @@ try {
   const timesheetApplyKey = timesheetApply.headers['idempotency-key'];
   responsePlans.push({status: 200, body: operationResult(timesheetApply.body)});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
-  await page.getByText('Applied 1 valid timesheet import rows from timesheets-first.csv.', {exact: true}).waitFor();
+  await page.getByText('Applied 1 valid worklog import rows from timesheets-first.csv.', {exact: true}).waitFor();
   assert.equal(lastRequest().headers['idempotency-key'], timesheetApplyKey,
     'Timesheet apply retry reuses its original key');
   assert.deepEqual(lastRequest().body, timesheetApply.body,
