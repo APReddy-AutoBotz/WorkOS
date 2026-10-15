@@ -149,7 +149,7 @@ const recordDryRunAudit = async (audit, client, req, {
   source,
 }) => audit(client, req, {
   module: 'Import',
-  action: `Dry Run ${channel} Import`,
+  action: `Dry Run ${channel.endsWith(' Import') ? channel : `${channel} Import`}`,
   entityType: 'ImportBatch',
   entityId: importBatchId,
   oldValue: null,
