@@ -70,6 +70,25 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Install Chromium for synthetic browser checks
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify import history browser interactions
+        env:
+          WORKOS_BROWSER_BASE_URL: http://127.0.0.1:4177
+        run: |
+          set -euo pipefail
+          npm run dev -- --host 127.0.0.1 --port 4177 > /tmp/workos-browser-vite.log 2>&1 &
+          VITE_PID=$!
+          trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:4177/tests/fixtures/import-history-panel.html > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          npm run test:import-history-browser
+
       - name: Prepare disposable schema for production identity tests
         env:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres

@@ -1,17 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { ImportHistoryPanel } from '../components/imports/ImportHistoryPanel';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
 import {
   Upload,
   Download,
   FileText,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
   ShieldCheck,
   Search,
-  Filter,
-  ArrowUpRight
+  Filter
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { allocationService, clientService, employeeService, projectService, timesheetService, adminService } from '../services/api';
@@ -88,13 +85,8 @@ export const ImportExport = () => {
   const [activeTab, setActiveTab] = useState<'import' | 'export'>('import');
   const [lastResult, setLastResult] = useState<string>('');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
-  const [history, setHistory] = useState<ImportExportLog[]>([]);
-
-  const refreshHistory = async () => setHistory(await adminService.getImportExportLogs());
-
-  useEffect(() => {
-    refreshHistory();
-  }, []);
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const refreshHistory = () => setHistoryRevision(value => value + 1);
 
   const downloadCsv = (fileName: string, rows: object[], channel = fileName) => {
     void downloadAuditedCsv(fileName, rows, channel).finally(refreshHistory);
@@ -641,12 +633,6 @@ export const ImportExport = () => {
     downloadCsv(`${id}-template.csv`, templates[id] || [], `${id} Template`);
   };
 
-  const historyIcon = (status: ImportExportLog['status']) => {
-    if (status === 'Success') return { icon: CheckCircle2, color: 'text-success' };
-    if (status === 'Dry Run') return { icon: Clock, color: 'text-primary' };
-    return { icon: AlertCircle, color: 'text-danger' };
-  };
-
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       <PageHeader
@@ -769,42 +755,7 @@ export const ImportExport = () => {
                  <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 blur-[100px] -mr-32 -mt-32 rounded-full" />
               </div>
 
-              <div className="bg-white border border-border-light rounded-3xl p-8 shadow-sm">
-                 <h3 className="text-sm font-bold text-heading uppercase tracking-widest mb-8 flex items-center justify-between">
-                    Import / Export History
-                    <Badge variant="neutral" className="text-[9px]">LIVE</Badge>
-                 </h3>
-                 <div className="space-y-6">
-                    {history.length === 0 && (
-                      <div className="p-4 bg-slate-50 rounded-2xl text-xs text-body/60">
-                        No bulk data operations have been run yet in this workspace.
-                      </div>
-                    )}
-                    {history.slice(0, 8).map(item => {
-                      const { icon: Icon, color } = historyIcon(item.status);
-                      return (
-                        <div key={item.id} className="flex items-start gap-4 p-4 hover:bg-slate-50 rounded-2xl transition-colors group cursor-default border border-transparent hover:border-slate-100">
-                           <div className={cn("mt-0.5", color)}>
-                              <Icon size={16} />
-                           </div>
-                           <div className="flex-1 min-w-0">
-                              <p className="text-xs font-bold text-heading truncate">{item.fileName}</p>
-                              <div className="flex flex-wrap items-center gap-3 mt-1.5">
-                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{item.operation}</span>
-                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">-</span>
-                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{item.status}</span>
-                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{item.validRows}/{item.totalRows} valid</span>
-                              </div>
-                              <p className="text-[10px] text-body/40 mt-1">{new Date(item.timestamp).toLocaleString()} by {item.userName}</p>
-                           </div>
-                           <button className="opacity-0 group-hover:opacity-100 p-2 text-primary hover:bg-orange-50 rounded-lg transition-all" title={item.channel}>
-                              <ArrowUpRight size={16} />
-                           </button>
-                        </div>
-                      );
-                    })}
-                 </div>
-              </div>
+              <ImportHistoryPanel loadHistory={adminService.getImportExportLogs} revision={historyRevision} />
            </div>
         </div>
       ) : (
