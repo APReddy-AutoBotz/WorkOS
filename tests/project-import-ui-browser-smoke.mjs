@@ -10,6 +10,8 @@ const pageErrors = [];
 const requests = [];
 let genericLogWrites = 0;
 const responsePlans = [];
+const syntheticHistory = [];
+let operationSequence = 0;
 page.on('pageerror', error => pageErrors.push(error.message));
 await page.addInitScript(() => {
   sessionStorage.setItem('workos_api_token', 'synthetic-token');
@@ -17,20 +19,21 @@ await page.addInitScript(() => {
 });
 
 const operationResult = (body, {validRows = 1, errors = []} = {}) => ({
-  status: body.dryRun ? 'Dry Run' : (errors.length ? 'Partial' : 'Success'),
+  status: body.dryRun ? 'Dry Run' : (validRows === 0 && errors.length ? 'Failed' : (errors.length ? 'Partial' : 'Success')),
   totalRows: body.totalRows,
   validRows,
   errorRows: errors.length,
   errors,
   log: {
-    id: `batch-${requests.length}`,
+    id: `batch-${++operationSequence}`,
     operation: 'Import',
     channel: 'Project Master',
     file_name: body.fileName,
-    status: body.dryRun ? 'Dry Run' : (errors.length ? 'Partial' : 'Success'),
+    status: body.dryRun ? 'Dry Run' : (validRows === 0 && errors.length ? 'Failed' : (errors.length ? 'Partial' : 'Success')),
     total_rows: body.totalRows,
     valid_rows: validRows,
     error_rows: errors.length,
+    errors,
     user_name: 'Synthetic Admin',
     created_at: '2026-10-15T00:00:00.000Z',
     schema_version: 'project-master/1',
@@ -51,6 +54,7 @@ await page.route('**/api/**', async route => {
     const defaultErrors = body.rows.length === 0 ? body.clientErrors : [];
     const defaultValidRows = body.rows.length === 0 ? 0 : body.rows.length;
     const plan = responsePlans.shift() || {status: 200, body: operationResult(body, {validRows: defaultValidRows, errors: defaultErrors})};
+    if (plan.status === 200 && plan.body?.log) syntheticHistory.unshift(plan.body.log);
     await route.fulfill({status: plan.status, contentType: 'application/json', body: JSON.stringify(plan.body)});
     return;
   }
@@ -68,7 +72,7 @@ await page.route('**/api/**', async route => {
     return;
   }
   if (path === '/api/import-export-logs') {
-    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify([])});
+    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(syntheticHistory)});
     return;
   }
   if (['/api/projects', '/api/allocations', '/api/timesheets', '/api/settings', '/api/country-directors'].includes(path)) {
@@ -124,17 +128,26 @@ try {
   assert.equal(lastRequest().headers['idempotency-key'], firstApplyKey, 'apply retry reuses the same key');
   assert.deepEqual(lastRequest().body, firstApply.body, 'apply retry preserves the exact payload');
 
-  await selectProjectCsv('projects-changed.csv', csv('PROJECT-UI-202'));
-  await page.getByText('Server dry run complete for projects-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  const changedCsv = `${csv('PROJECT-UI-202')}\nPROJECT-UI-203,Synthetic Project 203,client-synthetic,Synthetic Client,EMP-VALID,2026-01-01,2026-12-31,Proposed,true,Delivery,GB,Synthetic test row`;
+  await selectProjectCsv('projects-changed.csv', changedCsv);
+  await page.getByText('Server dry run complete for projects-changed.csv: 2/2 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
   const changedPreview = lastRequest();
   assert.notEqual(changedPreview.headers['idempotency-key'], firstPreviewKey,
     'a changed/reselected file starts a new idempotency operation');
+  assert.equal(changedPreview.body.rows.length, 2);
   assert.equal(changedPreview.body.rows[0].projectCode, 'PROJECT-UI-202');
 
-  const applyDiagnostic = {rowNumber: 2, field: 'managerId', message: 'The manager was removed before apply.'};
-  responsePlans.push({status: 200, body: operationResult(changedPreview.body, {validRows: 0, errors: [applyDiagnostic]})});
+  const applyDiagnostic = {rowNumber: 3, field: 'managerId', sourceIdentifier: 'PROJECT-UI-203', message: 'The manager was removed before apply.'};
+  responsePlans.push({status: 200, body: operationResult({...changedPreview.body, dryRun: false}, {validRows: 1, errors: [applyDiagnostic]})});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
-  await page.getByText(/Project Master apply finished with 0 valid rows and 1 errors for projects-changed\.csv\. View saved diagnostic details in Import History\./).waitFor();
+  await page.getByText(/Project Master apply finished with 1 valid rows and 1 errors for projects-changed\.csv\. View saved diagnostic details in Import History\./).waitFor();
+  const historyPanel = page.getByRole('region', {name: 'Import / Export History'});
+  const partialHistoryItem = historyPanel.getByRole('listitem').filter({hasText: 'projects-changed.csv'}).filter({hasText: 'Partial'});
+  await partialHistoryItem.getByText('Import · Partial · 1/2 valid', {exact: true}).waitFor();
+  await partialHistoryItem.getByText('View details for projects-changed.csv', {exact: true}).click();
+  await partialHistoryItem.getByText('Row 3 · managerId', {exact: true}).waitFor();
+  await partialHistoryItem.getByText('Source identifier: PROJECT-UI-203', {exact: true}).waitFor();
+  await partialHistoryItem.getByText('The manager was removed before apply.', {exact: true}).waitFor();
 
   await selectProjectCsv('projects-rejected.csv', csv('PROJECT-UI-303', 'MISSING-MANAGER'));
   await page.getByText('Server dry run complete for projects-rejected.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
