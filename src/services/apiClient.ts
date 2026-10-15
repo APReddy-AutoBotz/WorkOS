@@ -84,6 +84,9 @@ export const clearOrganizationScope = () => {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event('workos:organization-scope-changed'));
 };
 export const selectOrganizationScope = async (scope: OrganizationScope) => {
+  // Let long-running scoped operations retain a warning before authorization
+  // validation completes and the scope-change event triggers a full-page reload.
+  window.dispatchEvent(new Event('workos:organization-scope-switch-requested'));
   const scopes = await apiFetch<OrganizationScope[]>('GET', '/api/auth/organization-scopes');
   if (!scopes.some(item => item.organizationId === scope.organizationId && item.legalEntityId === scope.legalEntityId)) throw new Error('Organization scope is not authorized');
   sessionStorage.setItem(SCOPE_KEY, JSON.stringify(scope));
@@ -148,9 +151,9 @@ export const parseApiClientError = (
   });
 };
 
-export const getApiHeaders = (): HeadersInit => {
+export const getApiHeaders = (scopeOverride?: OrganizationScope | null): HeadersInit => {
   const token = getToken();
-  const scope = getOrganizationScope();
+  const scope = scopeOverride === undefined ? getOrganizationScope() : scopeOverride;
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -163,10 +166,11 @@ async function apiFetch<T>(
   path: string,
   body?: unknown,
   additionalHeaders: Record<string, string> = {},
+  scopeOverride?: OrganizationScope | null,
 ): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: {...getApiHeaders(), ...additionalHeaders},
+    headers: {...getApiHeaders(scopeOverride), ...additionalHeaders},
     credentials: 'include',
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
@@ -194,6 +198,7 @@ export const api = {
   get:    <T>(path: string) => apiFetch<T>('GET', path),
   post:   <T>(path: string, body: unknown) => apiFetch<T>('POST', path, body),
   postWithHeaders: <T>(path: string, body: unknown, headers: Record<string, string>) => apiFetch<T>('POST', path, body, headers),
+  postWithScope: <T>(path: string, body: unknown, scope: OrganizationScope | null) => apiFetch<T>('POST', path, body, {}, scope),
   put:    <T>(path: string, body: unknown) => apiFetch<T>('PUT', path, body),
   patch:  <T>(path: string, body: unknown) => apiFetch<T>('PATCH', path, body),
   delete: <T>(path: string, body?: unknown) => apiFetch<T>('DELETE', path, body),

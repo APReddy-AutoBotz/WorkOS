@@ -137,8 +137,8 @@ try {
   assert.equal(versionedError.error.code, 'INTERNAL_ERROR');
   assert.equal(versionedError.error.message, 'The request could not be completed.');
   assert.equal(versionedError.error.correlationId, versionedFailure.headers.get('x-correlation-id'));
-  assert.deepEqual(permissionChecks, Array(7).fill('employees.manage'),
-    'both aliases must preserve the existing employees.manage read permission');
+  assert.deepEqual(permissionChecks, Array(7).fill('imports.manage'),
+    'read aliases must use the explicitly approved imports.manage permission');
   failQuery = false;
   const payload = {
     operation: 'Import', channel: 'Free-form legacy channel', fileName: 'synthetic.csv', status: 'Partial',

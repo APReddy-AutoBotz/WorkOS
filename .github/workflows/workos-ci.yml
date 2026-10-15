@@ -76,6 +76,7 @@ jobs:
       - name: Verify import and history browser interactions
         env:
           WORKOS_BROWSER_BASE_URL: http://127.0.0.1:4177
+          VITE_TERM_EMPLOYEE: employee
         run: |
           set -euo pipefail
           npm run dev -- --host 127.0.0.1 --port 4177 > /tmp/workos-browser-vite.log 2>&1 &

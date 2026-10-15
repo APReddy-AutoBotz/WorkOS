@@ -1,25 +1,40 @@
 import { Download, FileText } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { cn } from '../lib/utils';
 import { downloadReportExport, getReportExportOptions } from '../lib/reportExport';
+import { beginTrackedExport, consumeExportScopeSwitchNotice, listenForExportScopeSwitch } from '../lib/exportScopeNotice';
 
 export const ReportsCenter = () => {
   const reportExportOptions = getReportExportOptions();
   const [downloading, setDownloading] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
 
+  useEffect(() => {
+    setNotice(consumeExportScopeSwitchNotice());
+  }, []);
+  useEffect(() => listenForExportScopeSwitch(), []);
+
   const handleDownload = async (id: string) => {
+    const endTrackedExport = beginTrackedExport();
     setDownloading(id);
     setNotice('');
     try {
-      await downloadReportExport(id);
-      setNotice('Report export started and audit history was updated.');
+      const completed = await downloadReportExport(id);
+      if (completed === 'completed') setNotice('Report export started and audit history was updated.');
+      else if (completed === 'completed-original-scope') {
+        setNotice('The report was downloaded and recorded under the original organization/entity scope. Switch back to that scope to confirm its history before retrying.');
+      } else if (completed === 'cancelled') {
+        setNotice('The organization or legal-entity scope changed while the report was loading. No report was downloaded; retry it in the current scope.');
+      } else {
+        setNotice('The report file may have downloaded, but its history or audit could not be confirmed. Check Import History in the original scope before retrying.');
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Report export could not be completed.');
     } finally {
+      endTrackedExport();
       setDownloading(null);
     }
   };

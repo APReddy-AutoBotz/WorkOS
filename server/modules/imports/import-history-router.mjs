@@ -20,7 +20,7 @@ export const createImportHistoryRouter = ({
   }
 
   const router = Router();
-  router.get('/import-export-logs', requireDatabase, requireAuth, requirePermission('employees.manage'), async (req, res) => {
+  router.get('/import-export-logs', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
     try {
       const result = await pool.query(importHistoryQuery, [
         req.organizationScope.organizationId,

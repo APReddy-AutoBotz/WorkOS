@@ -23,8 +23,9 @@ import {attachImportErrorSourceIdentifiers, importErrorRowSchema, resolveImportA
 import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
 import {createProjectImportRouter} from './modules/imports/project-import-router.mjs';
 import {createOperationalImportRouter} from './modules/imports/operational-import-router.mjs';
-import {createProjectCodeLockKey, createScopedIdempotencyLockKey, hashImportRequest, normalizeIdempotencyKey} from './modules/imports/idempotency.mjs';
+import {createProjectCodeLockKey, createScopedIdempotencyLockKey, hashEmployeeImportRequest, hashImportRequest, normalizeEmployeeImportClientErrors, normalizeIdempotencyKey, redactCredentialEchoes} from './modules/imports/idempotency.mjs';
 import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
+import {createNotificationRouter} from './modules/notifications/notification-router.mjs';
 import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
@@ -4278,224 +4279,17 @@ app.get('/api/reports/approval-sla', requireDatabase, requireAuth, requirePermis
   }
 });
 
-app.get('/api/notifications', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
-  const params = [];
-  const where = buildEmployeeScopeWhere(req, params, 'e');
-  await run(res, `
-    select ne.*, e.name as recipient_name
-    from notification_events ne
-    left join employees e on e.id = ne.recipient_employee_id
-    where ${where}
-    order by ne.created_at desc
-    limit 300
-  `, params);
+const notificationRouter = createNotificationRouter({
+  pool,
+  run,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  buildEmployeeScopeWhere,
+  audit,
+  sendNotification,
 });
-
-app.patch('/api/notifications/:id/read', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
-  try {
-    const params = [req.params.id];
-    const where = buildEmployeeScopeWhere(req, params, 'e');
-    const result = await pool.query(`
-      update notification_events ne
-      set read_at = coalesce(read_at, now())
-      from employees e
-      where ne.id = $1 and e.id = ne.recipient_employee_id and ${where}
-      returning ne.*
-    `, params);
-    if (!result.rows[0]) {
-      res.status(404).json({ error: 'Notification not found' });
-      return;
-    }
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Notification read update failed' });
-  }
-});
-
-app.get('/api/notification-templates', requireDatabase, requireAuth, requirePermission('notifications.manage'), (_req, res) => {
-  run(res, 'select * from notification_templates order by event_type, channel');
-});
-
-app.post('/api/notification-templates', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    event_type: z.string().min(1),
-    channel: z.enum(['InApp', 'Email', 'Teams']),
-    subject: z.string().min(1),
-    body: z.string().min(1),
-    active: z.boolean().default(true),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = parsed.data.id ? (await client.query('select * from notification_templates where id = $1', [parsed.data.id])).rows[0] : null;
-    const result = await client.query(`
-      insert into notification_templates (id, event_type, channel, subject, body, active)
-      values (coalesce($1, 'notification-template-' || gen_random_uuid()::text), $2, $3, $4, $5, $6)
-      on conflict (event_type, channel) do update set
-        subject = excluded.subject,
-        body = excluded.body,
-        active = excluded.active,
-        updated_at = now()
-      returning *
-    `, [parsed.data.id || null, parsed.data.event_type, parsed.data.channel, parsed.data.subject, parsed.data.body, parsed.data.active]);
-    await audit(client, req, {
-      module: 'Notifications',
-      action: previous ? 'Update Notification Template' : 'Create Notification Template',
-      entityType: 'NotificationTemplate',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `${previous ? 'Updated' : 'Created'} notification template ${result.rows[0].event_type}`,
-      organizationScope: null,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Notification template save failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/notification-preferences', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
-  const params = [];
-  const where = buildEmployeeScopeWhere(req, params, 'e');
-  await run(res, `
-    select np.*, e.name as employee_name
-    from notification_preferences np
-    join employees e on e.id = np.employee_id
-    where ${where}
-    order by e.name, np.event_type
-  `, params);
-});
-
-app.post('/api/notification-preferences', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    employee_id: z.string().min(1),
-    event_type: z.string().min(1),
-    in_app: z.boolean().default(true),
-    email: z.boolean().default(false),
-    teams: z.boolean().default(false),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  if (req.user.activeRole === 'Employee' && parsed.data.employee_id !== req.user.employeeRecordId && parsed.data.employee_id !== req.user.employeeId) {
-    res.status(403).json({ error: 'Employees can update only their own notification preferences' });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const scopeParams = [parsed.data.employee_id];
-    const scopeWhere = buildEmployeeScopeWhere(req, scopeParams, 'e');
-    const targetEmployee = (await client.query(`
-      select e.*
-      from employees e
-      where (e.id = $1 or e.employee_id = $1) and ${scopeWhere}
-      limit 1
-    `, scopeParams)).rows[0];
-    if (!targetEmployee) {
-      await client.query('rollback');
-      res.status(403).json({ error: 'Notification preference is outside active-role data scope' });
-      return;
-    }
-    const previous = (await client.query('select * from notification_preferences where employee_id = $1 and event_type = $2', [targetEmployee.id, parsed.data.event_type])).rows[0];
-    const result = await client.query(`
-      insert into notification_preferences (id, employee_id, event_type, in_app, email, teams)
-      values (coalesce($1, 'notification-preference-' || gen_random_uuid()::text), $2, $3, $4, $5, $6)
-      on conflict (employee_id, event_type) do update set
-        in_app = excluded.in_app,
-        email = excluded.email,
-        teams = excluded.teams,
-        updated_at = now()
-      returning *
-    `, [parsed.data.id || null, targetEmployee.id, parsed.data.event_type, parsed.data.in_app, parsed.data.email, parsed.data.teams]);
-    await audit(client, req, {
-      module: 'Notifications',
-      action: 'Update Notification Preference',
-      entityType: 'NotificationPreference',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `Updated notification preference ${result.rows[0].event_type}`,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Notification preference save failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/notification-delivery-attempts', requireDatabase, requireAuth, requirePermission('notifications.manage'), (_req, res) => {
-  run(res, 'select * from notification_delivery_attempts order by attempted_at desc limit 300');
-});
-
-app.post('/api/notifications/test-delivery', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {
-  const schema = z.object({
-    employee_id: z.string().min(1),
-    channels: z.array(z.enum(['InApp', 'Email', 'Teams'])).min(1).default(['InApp']),
-    title: z.string().min(1).default('Configured product notification test'),
-    body: z.string().min(1).default('This validates configured notification delivery from Configured product.'),
-  });
-  const parsed = schema.safeParse(req.body || {});
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const scopeParams = [parsed.data.employee_id];
-    const scopeWhere = buildEmployeeScopeWhere(req, scopeParams, 'e');
-    const targetEmployee = (await client.query(`
-      select e.*
-      from employees e
-      where (e.id = $1 or e.employee_id = $1) and ${scopeWhere}
-      limit 1
-    `, scopeParams)).rows[0];
-    if (!targetEmployee) {
-      await client.query('rollback');
-      res.status(403).json({ error: 'Notification test recipient is outside active-role data scope' });
-      return;
-    }
-    const event = await sendNotification(client, req, {
-      recipientEmployeeId: targetEmployee.id,
-      eventType: 'TestDelivery',
-      title: parsed.data.title,
-      body: parsed.data.body,
-      entityType: 'NotificationTest',
-      entityId: targetEmployee.id,
-      severity: 'Info',
-      channels: parsed.data.channels,
-      actionUrl: process.env.APP_URL || null,
-    });
-    await client.query('commit');
-    res.json(event);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Notification test delivery failed' });
-  } finally {
-    client.release();
-  }
-});
+app.use('/api', notificationRouter);
 
 const logIntegrationEvent = async (client, {
   provider,
@@ -6450,7 +6244,39 @@ const projectImportRouter = createProjectImportRouter({
 app.use('/api', projectImportRouter);
 app.use('/api/v1', projectImportRouter);
 
-app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
+app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
+  const versioned = req.apiVersion === 'v1';
+  let idempotencyKey = null;
+  let actorId = null;
+  if (versioned) {
+    const rawKey = req.get?.('Idempotency-Key') ?? req.headers?.['idempotency-key'];
+    if (typeof rawKey !== 'string' || rawKey.length === 0) {
+      res.status(400).json({error: {code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'The Idempotency-Key header is required.'}});
+      return;
+    }
+    idempotencyKey = normalizeIdempotencyKey(rawKey);
+    if (!idempotencyKey) {
+      res.status(400).json({error: {code: 'INVALID_IDEMPOTENCY_KEY', message: 'The Idempotency-Key header is invalid.'}});
+      return;
+    }
+    if (!req.body?.schemaVersion) {
+      res.status(400).json({error: {code: 'SCHEMA_VERSION_REQUIRED', message: 'The Employee Master import schema version is required.'}});
+      return;
+    }
+    if (req.body.schemaVersion !== 'employee-master/1') {
+      res.status(400).json({error: {code: 'UNSUPPORTED_SCHEMA_VERSION', message: 'The Employee Master import schema version is not supported.'}});
+      return;
+    }
+    if (Object.hasOwn(req.body, 'dryRun') && req.body.dryRun !== false) {
+      res.status(400).json({error: {code: 'UNSUPPORTED_DRY_RUN', message: 'Employee Master server dry runs are not supported by this contract.'}});
+      return;
+    }
+    actorId = typeof req.user?.sub === 'string' || typeof req.user?.sub === 'number' ? String(req.user.sub) : '';
+    if (!actorId) {
+      res.status(401).json({error: {code: 'AUTHENTICATION_REQUIRED', message: 'An authenticated account is required.'}});
+      return;
+    }
+  }
   const rowSchema = z.object({
     employeeId: z.string().min(1),
     name: z.string().min(1),
@@ -6483,12 +6309,27 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+    res.status(400).json(versioned
+      ? {error: {code: 'INVALID_IMPORT_REQUEST', message: 'The Employee Master import request is invalid.'}}
+      : {error: parsed.error.flatten()});
     return;
   }
 
+  const credentials = parsed.data.rows.map(row => row.initialPassword).filter(Boolean);
+  const fileName = versioned
+    ? 'Employee Master import.csv'
+    : redactCredentialEchoes(parsed.data.fileName, credentials);
+  const redactedClientErrors = redactCredentialEchoes(parsed.data.clientErrors || [], credentials);
+  const clientErrors = versioned
+    ? normalizeEmployeeImportClientErrors(redactedClientErrors)
+    : redactedClientErrors;
+  const requestHash = versioned ? hashEmployeeImportRequest({
+    schemaVersion: 'employee-master/1',
+    totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
+    clientErrors,
+    rows: parsed.data.rows,
+  }) : null;
   const client = await pool.connect();
-  const clientErrors = parsed.data.clientErrors || [];
   const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
     rows: parsed.data.rows,
     totalRows: parsed.data.totalRows,
@@ -6503,6 +6344,45 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
   let saved = 0;
   try {
     await client.query('begin');
+    if (versioned) {
+      const scope = req.organizationScope;
+      const lockKey = createScopedIdempotencyLockKey({
+        organizationId: scope.organizationId,
+        legalEntityId: scope.legalEntityId,
+        actorId,
+        channel: 'Employee Master',
+        idempotencyKey,
+      });
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [lockKey]);
+      const existing = await client.query(
+        'select request_hash, batch_id from import_export_idempotency where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and channel=$4 and idempotency_key=$5',
+        [scope.organizationId, scope.legalEntityId, actorId, 'Employee Master', idempotencyKey],
+      );
+      if (existing.rowCount > 0) {
+        if (existing.rows[0].request_hash !== requestHash) {
+          await client.query('rollback');
+          res.status(409).json({error: {code: 'IDEMPOTENCY_KEY_REUSED', message: 'This Idempotency-Key was already used with a different request.'}});
+          return;
+        }
+        const previousBatch = await client.query(
+          'select * from import_export_logs where id=$1 and organization_id=$2 and legal_entity_id=$3 and channel=$4 limit 1',
+          [existing.rows[0].batch_id, scope.organizationId, scope.legalEntityId, 'Employee Master'],
+        );
+        if (previousBatch.rowCount !== 1) throw new Error('Idempotency record has no matching scoped Employee Master batch.');
+        await client.query('commit');
+        const batch = previousBatch.rows[0];
+        res.json({
+          status: batch.status,
+          totalRows: batch.total_rows,
+          validRows: batch.valid_rows,
+          errorRows: batch.error_rows,
+          errors: Array.isArray(batch.errors) ? batch.errors : [],
+          replayed: true,
+          log: batch,
+        });
+        return;
+      }
+    }
     const directorResult = await client.query('select id from country_directors');
     const directorIds = new Set(directorResult.rows.map(row => row.id));
     const employeeRole = (await client.query('select id from roles where name = $1', ['Employee'])).rows[0];
@@ -6715,7 +6595,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
             actorId: req.user.sub,
             effectiveFrom: new Date().toISOString().slice(0, 10),
             status: employee.status,
-            reason: `Reactivated through employee import ${parsed.data.fileName}`,
+            reason: `Reactivated through employee import ${fileName}`,
             source: 'Employee import',
           });
           await client.query(`release savepoint ${reactivationSavepoint}`);
@@ -6739,7 +6619,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         await client.query('insert into user_roles (user_id, role_id) values ($1,$2) on conflict do nothing', [userResult.rows[0].id, employeeRole.id]);
       }
       if (previous && previous.status !== 'Exited' && employee.status === 'Exited') {
-        await synchronizeWorkerExit(client, req, employee, row.exitDate || new Date().toISOString().slice(0, 10), `Employee import ${parsed.data.fileName}`);
+        await synchronizeWorkerExit(client, req, employee, row.exitDate || new Date().toISOString().slice(0, 10), `Employee import ${fileName}`);
       }
       await audit(client, req, {
         module: 'Import',
@@ -6761,31 +6641,43 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
       errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
       sourceIdentifierForRow: row => row.employeeId,
     });
+    const safeResponseErrors = redactCredentialEchoes(responseErrors, credentials);
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
-      values ($1,'Import','Employee Master',$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run)
+      values ($1,'Import','Employee Master',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false)
       returning *
     `, [
       importBatchId,
-      parsed.data.fileName,
+      fileName,
       status,
       parsed.data.totalRows ?? parsed.data.rows.length,
       saved,
       errors.length,
-      errors.length ? JSON.stringify(responseErrors) : null,
+      errors.length ? JSON.stringify(safeResponseErrors) : null,
       req.user.username,
       req.organizationScope.organizationId,
       req.organizationScope.legalEntityId,
+      versioned ? 'employee-master/1' : null,
     ]);
+    if (versioned) {
+      await client.query(
+        'insert into import_export_idempotency (organization_id, legal_entity_id, actor_id, channel, idempotency_key, request_hash, batch_id) values ($1,$2,$3,$4,$5,$6,$7)',
+        [req.organizationScope.organizationId, req.organizationScope.legalEntityId, actorId, 'Employee Master', idempotencyKey, requestHash, importBatchId],
+      );
+    }
     await client.query('commit');
+    const resultLog = versioned
+      ? logResult.rows[0]
+      : Object.fromEntries(Object.entries(logResult.rows[0]).filter(([key]) => !['schema_version', 'dry_run'].includes(key)));
     res.json({
       status,
       totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
       validRows: saved,
       errorRows: errors.length,
-      errors: responseErrors,
-      log: logResult.rows[0],
+      errors: safeResponseErrors,
+      ...(versioned ? {replayed: false} : {}),
+      log: resultLog,
     });
   } catch (error) {
     await client.query('rollback');

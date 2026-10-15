@@ -1,21 +1,62 @@
 import assert from 'node:assert/strict';
+import {randomBytes} from 'node:crypto';
 
 const {chromium} = await import(process.env.WORKOS_PLAYWRIGHT_MODULE || 'playwright');
 const baseUrl = process.env.WORKOS_BROWSER_BASE_URL || 'http://127.0.0.1:4177';
 const browser = await chromium.launch({headless: true,
   ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {}),
 });
-const page = await browser.newPage({viewport: {width: 1100, height: 900}});
+const page = await browser.newPage({viewport: {width: 1100, height: 900}, acceptDownloads: true});
 const pageErrors = [];
 const requests = [];
 let genericLogWrites = 0;
+const genericLogBodies = [];
+const submittedEmployeePasswords = [];
 const responsePlans = [];
 const syntheticHistory = [];
+const syntheticHistoryByScope = new Map();
+let deferNextGenericLogWrite = false;
+let resolveGenericLogWriteStarted;
+let releaseGenericLogWrite;
+let genericLogWriteStarted = Promise.resolve();
+let genericLogWriteGate = Promise.resolve();
+let deferNextScopeValidation = false;
+let resolveScopeValidationStarted;
+let releaseScopeValidation;
+let scopeValidationStarted = Promise.resolve();
+let scopeValidationGate = Promise.resolve();
+const prepareDeferredGenericLogWrite = () => {
+  deferNextGenericLogWrite = true;
+  genericLogWriteStarted = new Promise(resolve => { resolveGenericLogWriteStarted = resolve; });
+  genericLogWriteGate = new Promise(resolve => { releaseGenericLogWrite = resolve; });
+};
+const prepareDeferredScopeValidation = () => {
+  deferNextScopeValidation = true;
+  scopeValidationStarted = new Promise(resolve => { resolveScopeValidationStarted = resolve; });
+  scopeValidationGate = new Promise(resolve => { releaseScopeValidation = resolve; });
+};
+const scopeKeyFromHeaders = headers => JSON.stringify([
+  headers['x-organization-id'] || null,
+  headers['x-legal-entity-id'] || null,
+]);
 let operationSequence = 0;
+let delayedScopeRequestResolve;
+const delayedScopeRequestSeen = new Promise(resolve => { delayedScopeRequestResolve = resolve; });
+let delayedApplyRequestResolve;
+const delayedApplyRequestSeen = new Promise(resolve => { delayedApplyRequestResolve = resolve; });
+let delayedErrorApplyRequestResolve;
+const delayedErrorApplyRequestSeen = new Promise(resolve => { delayedErrorApplyRequestResolve = resolve; });
 page.on('pageerror', error => pageErrors.push(error.message));
 await page.addInitScript(() => {
   sessionStorage.setItem('workos_api_token', 'synthetic-token');
-  sessionStorage.setItem('workos_organization_scope', JSON.stringify({organizationId: 'org-synthetic', legalEntityId: 'entity-synthetic'}));
+  if (!sessionStorage.getItem('workos_organization_scope')) {
+    sessionStorage.setItem('workos_organization_scope', JSON.stringify({organizationId: 'org-synthetic', legalEntityId: 'entity-synthetic'}));
+  }
+  const originalText = File.prototype.text;
+  File.prototype.text = function() {
+    if (this.name.startsWith('employees-read-error-')) return Promise.reject(new Error('Synthetic file read failure'));
+    return originalText.call(this);
+  };
 });
 
 const operationResult = (body, {validRows = 1, errors = []} = {}) => ({
@@ -24,6 +65,7 @@ const operationResult = (body, {validRows = 1, errors = []} = {}) => ({
   validRows,
   errorRows: errors.length,
   errors,
+  ...(body.schemaVersion === 'employee-master/1' ? {replayed: false} : {}),
   log: {
     id: `batch-${++operationSequence}`,
     operation: 'Import',
@@ -32,6 +74,7 @@ const operationResult = (body, {validRows = 1, errors = []} = {}) => ({
       'project-master/1': 'Project Master',
       'allocation-control/1': 'Allocation Control',
       'timesheet-import/1': 'Timesheet Import',
+      'employee-master/1': 'Employee Master',
     })[body.schemaVersion],
     file_name: body.fileName,
     status: body.dryRun ? 'Dry Run' : (validRows === 0 && errors.length ? 'Failed' : (errors.length ? 'Partial' : 'Success')),
@@ -53,15 +96,42 @@ await page.route('**/api/**', async route => {
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({database: 'connected'})});
     return;
   }
-  if (['/api/v1/imports/projects/apply', '/api/v1/imports/clients/apply',
+  if (path === '/api/auth/organization-scopes') {
+    if (deferNextScopeValidation) {
+      deferNextScopeValidation = false;
+      resolveScopeValidationStarted();
+      await scopeValidationGate;
+    }
+    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify([
+      {organizationId: 'org-synthetic', legalEntityId: 'entity-synthetic', organizationName: 'Synthetic Organization', legalEntityName: 'Synthetic Entity'},
+      {organizationId: 'org-synthetic-next', legalEntityId: 'entity-synthetic-next', organizationName: 'Synthetic Organization Next', legalEntityName: 'Synthetic Entity Next'},
+    ])});
+    return;
+  }
+  if (['/api/v1/imports/employees/apply', '/api/v1/imports/projects/apply', '/api/v1/imports/clients/apply',
     '/api/v1/imports/allocations/apply', '/api/v1/imports/timesheets/apply'].includes(path)) {
     const body = request.postDataJSON();
     requests.push({path, body, headers: request.headers()});
     const defaultErrors = body.rows.length === 0 ? body.clientErrors : [];
     const defaultValidRows = body.rows.length === 0 ? 0 : body.rows.length;
-    const plan = responsePlans.shift() || {status: 200, body: operationResult(body, {validRows: defaultValidRows, errors: defaultErrors})};
-    if (plan.status === 200 && plan.body?.log) syntheticHistory.unshift(plan.body.log);
-    await route.fulfill({status: plan.status, contentType: 'application/json', body: JSON.stringify(plan.body)});
+    const plan = responsePlans.shift() || {status: 200};
+    const responseBody = plan.body || operationResult(body, {validRows: defaultValidRows, errors: defaultErrors});
+    if (path === '/api/v1/imports/projects/apply' && body.fileName === 'projects-scope-delayed.csv') {
+      delayedScopeRequestResolve({body, headers: request.headers()});
+    }
+    if (path === '/api/v1/imports/projects/apply' && body.fileName === 'projects-scope-apply.csv' && body.dryRun === false) {
+      delayedApplyRequestResolve({body, headers: request.headers()});
+    }
+    if (path === '/api/v1/imports/projects/apply' && body.fileName === 'projects-scope-apply-error.csv' && body.dryRun === false) {
+      delayedErrorApplyRequestResolve({body, headers: request.headers()});
+    }
+    if (plan.delayMs) await new Promise(resolve => setTimeout(resolve, plan.delayMs));
+    if (plan.status === 200 && responseBody.log) {
+      syntheticHistory.unshift(responseBody.log);
+      const scopeKey = scopeKeyFromHeaders(request.headers());
+      syntheticHistoryByScope.set(scopeKey, [responseBody.log, ...(syntheticHistoryByScope.get(scopeKey) || [])]);
+    }
+    await route.fulfill({status: plan.status, contentType: 'application/json', body: JSON.stringify(responseBody)});
     return;
   }
   if (path === '/api/employees') {
@@ -74,11 +144,22 @@ await page.route('**/api/**', async route => {
   }
   if (path === '/api/import-export-logs' && request.method() === 'POST') {
     genericLogWrites += 1;
-    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({id: 'unexpected-log'})});
+    genericLogBodies.push(request.postDataJSON());
+    if (deferNextGenericLogWrite) {
+      deferNextGenericLogWrite = false;
+      resolveGenericLogWriteStarted();
+      await genericLogWriteGate;
+    }
+    try {
+      await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({id: 'unexpected-log'})});
+    } catch {
+      // A full-page scope reload may cancel this synthetic in-flight request.
+    }
     return;
   }
   if (path === '/api/import-export-logs') {
-    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(syntheticHistory)});
+    const scopedHistory = syntheticHistoryByScope.get(scopeKeyFromHeaders(request.headers())) || [];
+    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(scopedHistory)});
     return;
   }
   if (path === '/api/projects') {
@@ -97,7 +178,11 @@ await page.route('**/api/**', async route => {
     }])});
     return;
   }
-  if (['/api/timesheets', '/api/settings', '/api/country-directors'].includes(path)) {
+  if (path === '/api/country-directors') {
+    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify([{id: 'cd-synthetic', name: 'Synthetic Director'}])});
+    return;
+  }
+  if (['/api/timesheets', '/api/settings'].includes(path)) {
     await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify([])});
     return;
   }
@@ -108,6 +193,23 @@ const csv = (projectCode, managerId = 'EMP-VALID') => [
   'projectCode,name,clientId,client,managerId,startDate,endDate,status,billable,projectType,country,notes',
   `${projectCode},Synthetic Project,client-synthetic,Synthetic Client,${managerId},2026-01-01,2026-12-31,,true,Delivery,GB,Synthetic test row`,
 ].join('\n');
+const employeeCsv = (employeeId, name, password, mappedCountryDirectorId = 'cd-synthetic') => {
+  const row = {
+    employeeId, name, email: `${employeeId.toLowerCase()}@example.test`, designation: 'Consultant', department: 'Delivery',
+    country: 'GB', region: '', businessUnit: '', reportingManagerId: '', primaryCountryDirectorId: 'cd-synthetic',
+    mappedCountryDirectorIds: mappedCountryDirectorId, utilizationEligible: '', joiningDate: '', exitDate: '',
+    standardWeeklyHours: '', capacityType: '', contractType: '', entraObjectId: '', teamsUserId: '', roles: '',
+    initialPassword: password, status: 'Active',
+  };
+  const headers = ['employeeId', 'name', 'email', 'designation', 'department', 'country', 'region', 'businessUnit',
+    'reportingManagerId', 'primaryCountryDirectorId', 'mappedCountryDirectorIds', 'utilizationEligible', 'joiningDate',
+    'exitDate', 'standardWeeklyHours', 'capacityType', 'contractType', 'entraObjectId', 'teamsUserId', 'roles',
+    'initialPassword', 'status'];
+  return [headers.join(','), headers.map(header => row[header]).join(',')].join('\n');
+};
+const selectEmployeeCsv = async (fileName, contents) => {
+  await page.locator('input[type="file"]').nth(0).setInputFiles({name: fileName, mimeType: 'text/csv', buffer: Buffer.from(contents)});
+};
 const selectProjectCsv = async (fileName, contents) => {
   await page.locator('input[type="file"]').nth(2).setInputFiles({name: fileName, mimeType: 'text/csv', buffer: Buffer.from(contents)});
 };
@@ -136,6 +238,67 @@ const lastRequest = () => requests.at(-1);
 try {
   await page.goto(`${baseUrl}/tests/fixtures/project-import-ui.html`);
   await page.getByRole('heading', {name: 'Import / Export', exact: true}).waitFor();
+  const unreadableEmployeePassword = randomBytes(30).toString('base64url');
+  submittedEmployeePasswords.push(unreadableEmployeePassword);
+  await selectEmployeeCsv(`employees-read-error-${unreadableEmployeePassword}.csv`, employeeCsv(
+    'EMP-UI-100', 'Synthetic Employee 100', unreadableEmployeePassword,
+  ));
+  await page.getByText('Could not read Employee Master CSV. Choose the file again to retry.', {exact: true}).waitFor();
+  assert.equal((await page.locator('body').innerText()).includes(unreadableEmployeePassword), false,
+    'Employee loading/read-failure UI never reveals an unparsed filename containing a credential');
+
+  const firstEmployeePassword = randomBytes(30).toString('base64url');
+  submittedEmployeePasswords.push(firstEmployeePassword);
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
+  await selectEmployeeCsv('employees-first.csv', employeeCsv('EMP-UI-101', 'Synthetic Employee 101', firstEmployeePassword));
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).waitFor();
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText(/The Employee Master apply result for employees-first\.csv was not confirmed\./).waitFor();
+  const firstEmployeeApply = lastRequest();
+  assert.equal(firstEmployeeApply.path, '/api/v1/imports/employees/apply');
+  assert.equal(firstEmployeeApply.body.schemaVersion, 'employee-master/1');
+  assert.equal(firstEmployeeApply.body.rows[0].initialPassword, firstEmployeePassword);
+  const firstEmployeeKey = firstEmployeeApply.headers['idempotency-key'];
+  assert.ok(firstEmployeeKey);
+  responsePlans.push({status: 200, body: {...operationResult(firstEmployeeApply.body), replayed: true}});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText('Confirmed the saved Employee Master result for employees-first.csv. This retry replayed the first accepted result and did not change credentials.', {exact: true}).waitFor();
+  assert.equal(lastRequest().headers['idempotency-key'], firstEmployeeKey,
+    'Employee Master transport retries reuse the original operation key');
+  assert.deepEqual(lastRequest().body, firstEmployeeApply.body,
+    'Employee Master transport retries preserve the original payload, including the in-memory credential value');
+  assert.equal(JSON.stringify(syntheticHistory).includes(firstEmployeePassword), false,
+    'saved synthetic history never exposes the submitted initial credential');
+
+  const diagnosticEmployeePassword = randomBytes(30).toString('base64url');
+  submittedEmployeePasswords.push(diagnosticEmployeePassword);
+  const employeePreflightLogged = page.waitForResponse(response => (
+    new URL(response.url()).pathname === '/api/import-export-logs' && response.request().method() === 'POST'
+  ));
+  await selectEmployeeCsv(`employees-${diagnosticEmployeePassword}.csv`, employeeCsv(
+    'EMP-UI-103', 'Synthetic Employee 103', diagnosticEmployeePassword, diagnosticEmployeePassword,
+  ));
+  await page.getByText('Employee Master validation failed for employees-.csv. Download the error report and correct the file.', {exact: true}).waitFor();
+  await employeePreflightLogged;
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
+    'an Employee row with a client-side diagnostic is excluded from apply');
+  const diagnosticPreflightLog = genericLogBodies.at(-1);
+  assert.equal(diagnosticPreflightLog.fileName, 'employees-.csv', 'Employee preflight history must redact credentials from filenames');
+  assert.equal(JSON.stringify(diagnosticPreflightLog).includes(diagnosticEmployeePassword), false,
+    'Employee preflight diagnostics and filenames must not retain an echoed credential');
+
+  const changedEmployeePassword = randomBytes(30).toString('base64url');
+  submittedEmployeePasswords.push(changedEmployeePassword);
+  responsePlans.push({status: 409, body: {error: {code: 'IDEMPOTENCY_KEY_REUSED', message: 'This key was already used with different data.'}}});
+  await selectEmployeeCsv('employees-changed.csv', employeeCsv('EMP-UI-102', 'Synthetic Employee 102', changedEmployeePassword));
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText(/The Employee Master key for employees-changed\.csv is tied to different non-credential data\./).waitFor();
+  const conflictedEmployeeApply = lastRequest();
+  assert.notEqual(conflictedEmployeeApply.headers['idempotency-key'], firstEmployeeKey,
+    'a newly selected Employee Master CSV gets a fresh key');
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
+    'a key conflict blocks repeat apply until a new CSV selection creates fresh operation state');
+
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectProjectCsv('projects-first.csv', csv('PROJECT-UI-101'));
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
@@ -203,7 +366,8 @@ try {
   assert.equal(rejectedPreview.body.clientErrors.length, 1);
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a zero-valid-row dry run cannot be applied');
-  assert.equal(requests.length, 7);
+  assert.equal(requests.length, 10,
+    'the first rejected Project preview includes three earlier Employee apply/retry requests');
   const malformedCsv = csv('PROJECT-UI-404').replace('projectCode,name', 'projectCodeMissing,name');
   await selectProjectCsv('projects-malformed-header.csv', malformedCsv);
   await page.getByText('Server dry run complete for projects-malformed-header.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
@@ -214,7 +378,8 @@ try {
   assert.equal(malformedPreview.body.dryRun, true);
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a malformed-header dry run cannot apply source rows that were not submitted');
-  assert.equal(requests.length, 8);
+  assert.equal(requests.length, 11,
+    'the malformed-header Project preview is counted after prior Employee and Project requests');
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectClientCsv('clients-first.csv', clientCsv('', 'Synthetic Client', ''));
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
@@ -253,7 +418,8 @@ try {
   assert.notEqual(changedClientPreview.headers['idempotency-key'], firstClientPreviewKey,
     'a newly selected Client Master file starts fresh idempotency keys');
   assert.equal(changedClientPreview.body.schemaVersion, 'client-master/1');
-  assert.equal(requests.length, 12);
+  assert.equal(requests.length, 15,
+    'Client preview, validation retry and apply requests are included in the v1 request count');
 
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectAllocationCsv('allocations-first.csv', allocationCsv());
@@ -349,9 +515,168 @@ try {
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a zero-valid-row Timesheet dry run cannot be applied');
 
-  assert.equal(genericLogWrites, 0, 'versioned dry runs and applies do not create duplicate generic history logs');
+  responsePlans.push({status: 200, delayMs: 250});
+  await selectProjectCsv('projects-scope-delayed.csv', csv('PROJECT-SCOPE-DELAYED'));
+  const delayedScopeRequest = await Promise.race([
+    delayedScopeRequestSeen,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Delayed scope dry-run request did not start.')), 3000)),
+  ]);
+  assert.equal(delayedScopeRequest.headers['x-organization-id'], 'org-synthetic');
+  assert.equal(delayedScopeRequest.headers['x-legal-entity-id'], 'entity-synthetic');
+  await page.evaluate(() => {
+    sessionStorage.setItem('workos_organization_scope', JSON.stringify({organizationId: 'org-synthetic-next', legalEntityId: 'entity-synthetic-next'}));
+    window.dispatchEvent(new Event('workos:organization-scope-changed'));
+  });
+  await page.getByText('Organization or legal-entity scope changed. Choose the CSV again to validate it for the current scope.', {exact: true}).waitFor();
+  await page.waitForTimeout(350);
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).count(), 0,
+    'a dry-run response started in the previous scope cannot restore a pending import after scope changes');
+  await page.getByText('No bulk data operations have been run yet in this workspace.', {exact: true}).waitFor();
+  assert.equal(await page.getByRole('region', {name: 'Import / Export History'}).getByText('projects-scope-delayed.csv', {exact: true}).count(), 0,
+    'history fetched after a scope switch must not show the prior organization/entity batch');
+
+  await selectProjectCsv('projects-scope-pending.csv', csv('PROJECT-SCOPE-PENDING'));
+  await page.getByText('Server dry run complete for projects-scope-pending.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  const scopedPendingPreview = lastRequest();
+  assert.equal(scopedPendingPreview.headers['x-organization-id'], 'org-synthetic-next');
+  assert.equal(scopedPendingPreview.headers['x-legal-entity-id'], 'entity-synthetic-next');
+  await page.evaluate(() => {
+    sessionStorage.setItem('workos_organization_scope', JSON.stringify({organizationId: 'org-synthetic-final', legalEntityId: 'entity-synthetic-final'}));
+    window.dispatchEvent(new Event('workos:organization-scope-changed'));
+  });
+  await page.getByText('No bulk data operations have been run yet in this workspace.', {exact: true}).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].every(button => button.textContent.trim() !== 'Apply Valid Rows'));
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).count(), 0,
+    'a validated pending batch is discarded on organization or legal-entity scope change');
+
+  await selectProjectCsv('projects-scope-current.csv', csv('PROJECT-SCOPE-CURRENT'));
+  await page.getByText('Server dry run complete for projects-scope-current.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  const currentScopePreview = lastRequest();
+  assert.equal(currentScopePreview.headers['x-organization-id'], 'org-synthetic-final');
+  assert.equal(currentScopePreview.headers['x-legal-entity-id'], 'entity-synthetic-final');
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText('Applied 1 valid project master rows from projects-scope-current.csv.', {exact: true}).waitFor();
+  const currentScopeApply = lastRequest();
+  assert.equal(currentScopeApply.headers['x-organization-id'], 'org-synthetic-final');
+  assert.equal(currentScopeApply.headers['x-legal-entity-id'], 'entity-synthetic-final');
+
+  await selectProjectCsv('projects-scope-apply.csv', csv('PROJECT-SCOPE-APPLY'));
+  await page.getByText('Server dry run complete for projects-scope-apply.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  responsePlans.push({status: 200, delayMs: 250});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  const delayedApplyRequest = await Promise.race([
+    delayedApplyRequestSeen,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Delayed scope apply request did not start.')), 3000)),
+  ]);
+  assert.equal(delayedApplyRequest.headers['x-organization-id'], 'org-synthetic-final');
+  assert.equal(delayedApplyRequest.headers['x-legal-entity-id'], 'entity-synthetic-final');
+  assert.equal(delayedApplyRequest.body.dryRun, false, 'the in-flight request is the original-scope apply');
+  assert.equal(await page.locator('input[type="file"]').nth(2).isDisabled(), true,
+    'file selection stays disabled while the old-scope apply is unresolved');
+  await page.evaluate(() => {
+    sessionStorage.setItem('workos_organization_scope', JSON.stringify({organizationId: 'org-synthetic-next', legalEntityId: 'entity-synthetic-next'}));
+    window.dispatchEvent(new Event('workos:organization-scope-changed'));
+  });
+  await page.getByText('The organization or legal-entity scope changed while an import apply was in progress. The request may still finish under its original scope, but its result will be hidden. Switch back to that scope and check Import History before retrying.', {exact: true}).waitFor();
+  await page.getByText('An import apply response arrived after the scope changed, so its result details are hidden. Switch back to the original scope and check Import History before retrying.', {exact: true}).waitFor();
+  const switchedScopeHistory = page.getByRole('region', {name: 'Import / Export History'});
+  await switchedScopeHistory.getByText('projects-scope-pending.csv', {exact: true}).waitFor();
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).count(), 0,
+    'a stale apply response cannot restore its previous-scope pending import');
+  assert.equal(await page.getByText('Applied 1 valid project master rows from projects-scope-apply.csv.', {exact: true}).count(), 0,
+    'a stale apply response does not expose old-scope result details');
+  assert.equal(await page.getByRole('region', {name: 'Import / Export History'}).getByText('projects-scope-apply.csv', {exact: true}).count(), 0,
+    'history in the new scope does not reveal the old-scope apply batch');
+  assert.equal(await page.locator('input[type="file"]').nth(2).isDisabled(), false,
+    'file selection becomes available after the in-flight request finishes');
+  assert.ok(await page.evaluate(() => sessionStorage.getItem('workos_import_apply_scope_switch_notice')),
+    'an apply-in-flight scope switch persists a short-lived, non-sensitive warning across the header reload');
+  await page.reload();
+  await page.getByText('The previous-scope import apply may have completed. Switch back to the original scope and check Import History before retrying.', {exact: true}).waitFor();
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('workos_import_apply_scope_switch_notice')), null,
+    'the persisted warning is consumed on the reloaded page');
+
+  await selectProjectCsv('projects-scope-apply-error.csv', csv('PROJECT-SCOPE-APPLY-ERROR'));
+  await page.getByText('Server dry run complete for projects-scope-apply-error.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  responsePlans.push({status: 500, delayMs: 250, body: {error: {code: 'SYNTHETIC_STALE_APPLY', message: 'Synthetic private apply error details.'}}});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  const delayedErrorApplyRequest = await Promise.race([
+    delayedErrorApplyRequestSeen,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Delayed scope error-apply request did not start.')), 3000)),
+  ]);
+  assert.equal(delayedErrorApplyRequest.body.dryRun, false);
+  await page.evaluate(() => {
+    sessionStorage.setItem('workos_organization_scope', JSON.stringify({organizationId: 'org-synthetic', legalEntityId: 'entity-synthetic'}));
+    window.dispatchEvent(new Event('workos:organization-scope-changed'));
+  });
+  await page.getByText('An import apply response arrived after the scope changed, so its result details are hidden. Switch back to the original scope and check Import History before retrying.', {exact: true}).waitFor();
+  assert.equal(await page.getByText('Synthetic private apply error details.', {exact: true}).count(), 0,
+    'a stale apply error does not expose server error details in the new scope');
+  assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).count(), 0,
+    'a stale apply error does not restore the old-scope apply control');
+  await page.locator('input[type="file"]').nth(2).waitFor({state: 'visible'});
+  assert.equal(await page.locator('input[type="file"]').nth(2).isDisabled(), false,
+    'file selection becomes available once the stale error response finishes');
+
+  assert.equal(genericLogWrites, 3, 'Employee local preflight retains one legacy marker per selected file, while versioned applies create no duplicate generic history logs');
+  assert(genericLogBodies.every(entry => submittedEmployeePasswords.every(password => !JSON.stringify(entry).includes(password))),
+    'Employee generic preflight logs must never contain any submitted initial credential');
+
+  await page.reload();
+  await page.getByText('The previous-scope import apply may have completed. Switch back to the original scope and check Import History before retrying.', {exact: true}).waitFor();
+  await selectProjectCsv('projects-scope-switch-race.csv', csv('PROJECT-SCOPE-SWITCH-RACE'));
+  await page.getByText('Server dry run complete for projects-scope-switch-race.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  responsePlans.push({status: 200, delayMs: 250});
+  const delayedScopeValidationApplyRequest = page.waitForRequest(request => {
+    const body = request.postDataJSON();
+    return new URL(request.url()).pathname === '/api/v1/imports/projects/apply'
+      && body.fileName === 'projects-scope-switch-race.csv' && body.dryRun === false;
+  });
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await delayedScopeValidationApplyRequest;
+  prepareDeferredScopeValidation();
+  const delayedScopeValidationReload = page.waitForNavigation({waitUntil: 'domcontentloaded', timeout: 5000});
+  const scopeSelection = page.getByLabel('Organization context').selectOption('org-synthetic-next:entity-synthetic-next');
+  await scopeValidationStarted;
+  await page.getByText('Applied 1 valid project master rows from projects-scope-switch-race.csv.', {exact: true}).waitFor();
+  assert.ok(await page.evaluate(() => sessionStorage.getItem('workos_import_apply_scope_switch_notice')),
+    'starting real scope validation persists an apply warning before a delayed selector response can arrive');
+  releaseScopeValidation();
+  await Promise.all([delayedScopeValidationReload, scopeSelection]);
+  await page.getByText('The previous-scope import apply may have completed. Switch back to the original scope and check Import History before retrying.', {exact: true}).waitFor();
+  await page.getByRole('region', {name: 'Import / Export History'}).getByText('projects-scope-pending.csv', {exact: true}).waitFor();
+  await page.getByRole('button', {name: 'Data Exports'}).click();
+  prepareDeferredGenericLogWrite();
+  const exportDownload = page.waitForEvent('download', {timeout: 5000});
+  await page.getByTitle('Download Employee Master Export').click();
+  await genericLogWriteStarted;
+  assert.equal((await exportDownload).suggestedFilename(), 'employees.csv',
+    'the synthetic export starts downloading before the saved-history request resolves');
+  const scopeReload = page.waitForNavigation({waitUntil: 'domcontentloaded', timeout: 5000});
+  await page.getByLabel('Organization context').selectOption('org-synthetic-next:entity-synthetic-next');
+  await scopeReload;
+  releaseGenericLogWrite();
+  await page.getByText('An export was in progress when the organization/entity scope changed. It may have been canceled or downloaded under the original scope; check Import History there before retrying.', {exact: true}).waitFor();
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('workos_import_export_scope_switch_notice')), null,
+    'the export warning survives the real organization selector reload and is consumed');
+
+  await page.goto(`${baseUrl}/tests/fixtures/project-import-ui.html?view=reports`);
+  await page.getByLabel('Organization context').waitFor();
+  prepareDeferredGenericLogWrite();
+  const reportDownload = page.waitForEvent('download', {timeout: 5000});
+  await page.getByRole('button', {name: 'CSV'}).first().click();
+  await genericLogWriteStarted;
+  assert.equal((await reportDownload).suggestedFilename(), 'employees.csv',
+    'the Reports Center export starts downloading before the saved-history request resolves');
+  const reportScopeReload = page.waitForNavigation({waitUntil: 'domcontentloaded', timeout: 5000});
+  await page.getByLabel('Organization context').selectOption('org-synthetic:entity-synthetic');
+  await reportScopeReload;
+  releaseGenericLogWrite();
+  await page.getByText('An export was in progress when the organization/entity scope changed. It may have been canceled or downloaded under the original scope; check Import History there before retrying.', {exact: true}).waitFor();
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('workos_import_export_scope_switch_notice')), null,
+    'the Reports Center export warning survives the real organization selector reload and is consumed');
   assert.deepEqual(pageErrors, []);
-  console.log('Project, client, allocation, and timesheet import browser smoke passed: server preview gates, stable retries, fresh keys, saved diagnostics, and invalid-row no-apply cases.');
+  console.log('Employee, project, client, allocation, and timesheet import browser smoke passed: first-result Employee retries, server preview gates, stable retries, fresh keys, saved diagnostics, and invalid-row no-apply cases.');
 } finally {
   await browser.close();
 }

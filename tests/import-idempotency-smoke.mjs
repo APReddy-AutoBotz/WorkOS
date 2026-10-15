@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import {randomBytes} from 'node:crypto';
 import {
   createScopedEntityLockKey,
   createScopedIdempotencyLockKey,
   createProjectCodeLockKey,
+  hashEmployeeImportRequest,
   hashImportRequest,
+  normalizeEmployeeImportClientErrors,
   normalizeIdempotencyKey,
+  redactCredentialEchoes,
   stableJsonStringify,
 } from '../server/modules/imports/idempotency.mjs';
 
@@ -42,6 +46,51 @@ assert.notEqual(
   hashImportRequest(first),
   'row order and row contents must be part of the idempotency payload identity',
 );
+
+const initialPasswordOne = randomBytes(32).toString('base64url');
+const initialPasswordTwo = randomBytes(32).toString('base64url');
+const employeeImport = {
+  schemaVersion: 'employee-master/1',
+  fileName: `synthetic-employees-${initialPasswordOne}.csv`,
+  totalRows: 1,
+  clientErrors: [{rowNumber: 2, field: 'mappedCountryDirectorIds', message: `Country director ${initialPasswordOne} does not exist.`}],
+  rows: [{employeeId: 'EMP-SYNTHETIC-1', name: 'Synthetic Employee', email: 'synthetic@example.test', initialPassword: initialPasswordOne}],
+};
+const employeeRetryWithChangedPassword = {
+  ...employeeImport,
+  rows: [{...employeeImport.rows[0], initialPassword: initialPasswordTwo}],
+};
+assert.equal(hashEmployeeImportRequest(employeeImport), hashEmployeeImportRequest(employeeRetryWithChangedPassword),
+  'a password-only retry must replay the first result when unchanged filename and diagnostics still echo the first password');
+assert.equal(hashEmployeeImportRequest(employeeImport), hashEmployeeImportRequest({
+  ...employeeImport,
+  fileName: 'renamed-employees.csv',
+  clientErrors: [{rowNumber: 2, field: 'mappedCountryDirectorIds', message: 'Different untrusted browser text.', sourceIdentifier: 'different-id'}],
+  rows: [{...employeeImport.rows[0], initialPassword: initialPasswordTwo}],
+}), 'filename, free-form messages and client source IDs are not authoritative Employee retry identity');
+assert.notEqual(hashEmployeeImportRequest(employeeImport), hashEmployeeImportRequest({
+  ...employeeImport,
+  clientErrors: [{rowNumber: 3, field: 'mappedCountryDirectorIds', message: 'Different untrusted browser text.'}],
+}), 'the original row number remains part of Employee retry identity because it controls source-row mapping');
+assert.notEqual(hashEmployeeImportRequest(employeeImport), hashEmployeeImportRequest({
+  ...employeeImport,
+  clientErrors: [{rowNumber: 2, field: 'name', message: 'Different untrusted browser text.'}],
+}), 'allowlisted structured error fields remain part of Employee retry identity');
+assert.notEqual(hashEmployeeImportRequest(employeeImport), hashEmployeeImportRequest({
+  ...employeeImport,
+  rows: [{...employeeImport.rows[0], name: 'Changed Synthetic Employee'}],
+}), 'other canonical Employee Master fields must remain part of retry identity');
+assert.notEqual(hashEmployeeImportRequest(employeeImport), hashImportRequest(employeeImport),
+  'durable Employee Master request identity must exclude initialPassword rather than hash it');
+assert(!hashEmployeeImportRequest(employeeImport).includes(initialPasswordOne));
+assert(!hashEmployeeImportRequest(employeeRetryWithChangedPassword).includes(initialPasswordTwo));
+assert.deepEqual(normalizeEmployeeImportClientErrors(employeeImport.clientErrors), [{
+  rowNumber: 2,
+  field: 'mappedCountryDirectorIds',
+  message: 'The Employee Master row failed preflight validation.',
+}], 'versioned Employee errors retain safe row/field observations and use a server-controlled message');
+assert.equal(redactCredentialEchoes(employeeImport.clientErrors, [initialPasswordOne])[0].message,
+  'Country director  does not exist.', 'legacy Employee diagnostics must still remove exact submitted credential echoes');
 
 const lockKey = createScopedIdempotencyLockKey({
   organizationId: 'org-a',

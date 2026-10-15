@@ -25,6 +25,59 @@ export const hashImportRequest = value => createHash('sha256')
   .update(stableJsonStringify(value))
   .digest('hex');
 
+export const redactCredentialEchoes = (value, credentials) => {
+  const secrets = [...new Set((credentials || []).filter(secret => typeof secret === 'string' && secret.length > 0))]
+    .sort((left, right) => right.length - left.length);
+  const redact = item => {
+    if (typeof item === 'string') return secrets.reduce((result, secret) => result.split(secret).join(''), item);
+    if (Array.isArray(item)) return item.map(redact);
+    if (item && typeof item === 'object') {
+      return Object.fromEntries(Object.entries(item).map(([key, nested]) => [key, redact(nested)]));
+    }
+    return item;
+  };
+  return redact(value);
+};
+
+const EMPLOYEE_IMPORT_ERROR_FIELDS = new Set([
+  'employeeId', 'name', 'email', 'designation', 'department', 'country', 'region', 'businessUnit',
+  'reportingManagerId', 'primaryCountryDirectorId', 'mappedCountryDirectorIds', 'status',
+  'utilizationEligible', 'joiningDate', 'exitDate', 'standardWeeklyHours', 'capacityType',
+  'contractType', 'entraObjectId', 'teamsUserId', 'roles', 'initialPassword',
+]);
+
+const EMPLOYEE_PREFLIGHT_ERROR_MESSAGE = 'The Employee Master row failed preflight validation.';
+
+/** Keep only bounded structure from untrusted browser diagnostics. */
+export const normalizeEmployeeImportClientErrors = clientErrors => (
+  Array.isArray(clientErrors)
+    ? clientErrors.map(error => ({
+      rowNumber: error?.rowNumber,
+      ...(EMPLOYEE_IMPORT_ERROR_FIELDS.has(error?.field) ? {field: error.field} : {}),
+      message: EMPLOYEE_PREFLIGHT_ERROR_MESSAGE,
+      ...(typeof error?.sourceIdentifier === 'string' ? {sourceIdentifier: error.sourceIdentifier} : {}),
+    }))
+    : []
+);
+
+/** Employee retries exclude credentials from durable request identity by design. */
+export const hashEmployeeImportRequest = value => {
+  const clientErrors = normalizeEmployeeImportClientErrors(value?.clientErrors);
+  return hashImportRequest({
+    schemaVersion: value?.schemaVersion,
+    totalRows: value?.totalRows ?? (Array.isArray(value?.rows) ? value.rows.length : undefined),
+    // These row/field observations affect source-row mapping and are safe
+    // structured metadata. Free-form messages and source IDs are not identity.
+    clientErrors: clientErrors.map(({rowNumber, field}) => ({
+      rowNumber,
+      ...(field ? {field} : {}),
+    })),
+    rows: Array.isArray(value?.rows)
+      ? value.rows.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'initialPassword')))
+      : value?.rows,
+  });
+};
+
 export const createScopedIdempotencyLockKey = ({
   organizationId,
   legalEntityId,

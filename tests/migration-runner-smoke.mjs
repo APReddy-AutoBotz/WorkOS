@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {createServer} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
-import {createProjectCodeLockKey} from '../server/modules/imports/idempotency.mjs';
+import {createProjectCodeLockKey, hashEmployeeImportRequest, hashImportRequest} from '../server/modules/imports/idempotency.mjs';
 import {getMigrationManifest, getMigrationStatus, runMigrations} from '../server/migrate.mjs';
 
 const {Client, Pool} = pg;
@@ -268,6 +268,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
   const actorId = randomUUID();
   const singleScopeActorId = randomUUID();
   const multiScopeActorId = randomUUID();
+  const importHistoryOnlyActorId = randomUUID();
   const auditDeniedActorId = randomUUID();
   const unassignedAuditActorId = randomUUID();
   const disabledOrganizationAuditorId = randomUUID();
@@ -283,6 +284,14 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     values ($1,'imports.manage',$1,'Admin')`, [actorId]);
   await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
     values ($1,'org-default','legal-default',true) on conflict do nothing`, [actorId]);
+  await pool.query(`insert into users (id,username,email,status)
+    values ($1,'synthetic-import-history-only','synthetic-import-history-only@example.test','Active')`, [importHistoryOnlyActorId]);
+  await pool.query(`insert into user_roles (user_id,role_id)
+    select $1,id from roles where name='Employee'`, [importHistoryOnlyActorId]);
+  await pool.query(`insert into user_permission_grants (user_id,permission_key,granted_by,active_role)
+    values ($1,'imports.manage',$2,'Employee')`, [importHistoryOnlyActorId, actorId]);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+    values ($1,'org-default','legal-default',true)`, [importHistoryOnlyActorId]);
   await pool.query(`insert into users (id,username,email,status)
     values ($1,'synthetic-single-scope-admin','synthetic-single-scope-admin@example.test','Active')`, [singleScopeActorId]);
   await pool.query(`insert into user_roles (user_id,role_id)
@@ -502,6 +511,16 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
+    const applyEmployeesV1 = (body, idempotencyKey, legalEntityId = 'legal-default') => {
+      const extraHeaders = {'Content-Type': 'application/json'};
+      if (idempotencyKey !== undefined) extraHeaders['Idempotency-Key'] = idempotencyKey;
+      return fetch(`${baseUrl}/api/v1/imports/employees/apply`, {
+        method: 'POST',
+        headers: scopedHeaders(token, 'org-default', legalEntityId, extraHeaders),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5000),
+      });
+    };
     const applyClients = body => fetch(`${baseUrl}/api/imports/clients/apply`, {
       method: 'POST',
       headers: {
@@ -598,6 +617,147 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       });
     };
 
+    const employeeIdempotencyKey = 'employee-master-v1-idempotency-test';
+    const firstEmployeePassword = randomBytes(32).toString('base64url');
+    const replayEmployeePasswordA = randomBytes(32).toString('base64url');
+    const replayEmployeePasswordB = randomBytes(32).toString('base64url');
+    const employeeV1Request = {
+      schemaVersion: 'employee-master/1',
+      fileName: `synthetic-employee-${firstEmployeePassword}.csv`,
+      totalRows: 2,
+      clientErrors: [{
+        rowNumber: 3,
+        field: 'mappedCountryDirectorIds',
+        message: `Country director ${firstEmployeePassword} does not exist.`,
+      }],
+      rows: [{
+        employeeId: 'EMP-IMPORT-V1-IDEMPOTENT',
+        name: 'Synthetic Idempotent Employee',
+        email: 'employee-import-v1-idempotent@example.test',
+        primaryCountryDirectorId: 'cd-import-provenance-test',
+        initialPassword: firstEmployeePassword,
+      }],
+    };
+    const employeeV1Retry = initialPassword => ({
+      ...employeeV1Request,
+      rows: [{...employeeV1Request.rows[0], initialPassword}],
+    });
+    const employeeMissingKeyResponse = await applyEmployeesV1(employeeV1Request, undefined);
+    assert.equal(employeeMissingKeyResponse.status, 400);
+    assert.equal((await employeeMissingKeyResponse.json()).error.code, 'IDEMPOTENCY_KEY_REQUIRED');
+    const employeeUnsupportedSchemaResponse = await applyEmployeesV1({
+      ...employeeV1Request, schemaVersion: 'employee-master/2',
+    }, 'employee-master-unsupported-schema');
+    assert.equal(employeeUnsupportedSchemaResponse.status, 400);
+    assert.equal((await employeeUnsupportedSchemaResponse.json()).error.code, 'UNSUPPORTED_SCHEMA_VERSION');
+    const employeeDryRunResponse = await applyEmployeesV1({...employeeV1Request, dryRun: true}, 'employee-master-dry-run-unsupported');
+    assert.equal(employeeDryRunResponse.status, 400,
+      'an unimplemented Employee Master server dry run must fail closed instead of applying data');
+    assert.equal((await employeeDryRunResponse.json()).error.code, 'UNSUPPORTED_DRY_RUN');
+    assert.equal((await pool.query(`select count(*)::int as rows from employees where employee_id='EMP-IMPORT-V1-IDEMPOTENT'`)).rows[0].rows, 0,
+      'contract rejects must not write Employee Master rows');
+    const employeeRequestHash = hashEmployeeImportRequest(employeeV1Request);
+    assert.equal(employeeRequestHash, hashEmployeeImportRequest(employeeV1Retry(replayEmployeePasswordA)),
+      'Employee password-only retries retain the first request’s unchanged filename and diagnostic text without fingerprinting either');
+    assert.notEqual(employeeRequestHash, hashImportRequest(employeeV1Request),
+      'Employee Master durable request identity must not include the submitted credential');
+    const employeeV1FirstResponse = await applyEmployeesV1(employeeV1Request, employeeIdempotencyKey);
+    assert.equal(employeeV1FirstResponse.status, 200);
+    const employeeV1FirstBody = await employeeV1FirstResponse.json();
+    assert.equal(employeeV1FirstBody.status, 'Partial');
+    assert.equal(employeeV1FirstBody.replayed, false, 'the initial Employee Master v1 result is explicitly marked as first accepted');
+    assert.equal(JSON.stringify(employeeV1FirstBody.errors).includes(firstEmployeePassword), false,
+      'Employee Master response diagnostics must redact a submitted credential echoed in client errors');
+    assert.equal(employeeV1FirstBody.log.schema_version, 'employee-master/1');
+    assert.equal(employeeV1FirstBody.log.dry_run, false);
+    assert.equal(employeeV1FirstBody.log.file_name, 'Employee Master import.csv',
+      'versioned Employee batches use a server-controlled safe label instead of retaining an arbitrary submitted filename');
+    assert.equal(employeeV1FirstBody.errors[0].message, 'The Employee Master row failed preflight validation.',
+      'versioned Employee batch history uses server-controlled preflight text');
+    assert.equal(JSON.stringify(employeeV1FirstBody).includes(firstEmployeePassword), false,
+      'the versioned Employee Master result must not return the submitted credential');
+    const employeeV1FirstBatchId = employeeV1FirstBody.log.id;
+    const employeeV1InitialState = await pool.query(`select
+        (select u.password_hash from users u join employees e on e.id=u.employee_record_id where e.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as password_hash,
+        (select count(*)::int from employees where employee_id='EMP-IMPORT-V1-IDEMPOTENT') as employee_rows,
+        (select count(*)::int from users where employee_id='EMP-IMPORT-V1-IDEMPOTENT') as user_rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1) as audit_rows,
+        (select count(*)::int from import_export_logs where id=$1) as batch_rows,
+        (select count(*)::int from import_export_idempotency where batch_id=$1) as idempotency_rows`,
+    [employeeV1FirstBatchId]);
+    const initialState = employeeV1InitialState.rows[0];
+    assert.deepEqual({employee_rows: initialState.employee_rows, user_rows: initialState.user_rows,
+      audit_rows: initialState.audit_rows, batch_rows: initialState.batch_rows, idempotency_rows: initialState.idempotency_rows},
+    {employee_rows: 1, user_rows: 1, audit_rows: 1, batch_rows: 1, idempotency_rows: 1},
+    'the first Employee Master v1 result, employee/user writes, audit and idempotency row commit atomically');
+    assert.equal(typeof initialState.password_hash, 'string');
+    const employeeV1Idempotency = await pool.query(`select request_hash from import_export_idempotency where batch_id=$1`,
+      [employeeV1FirstBatchId]);
+    assert.deepEqual(employeeV1Idempotency.rows, [{request_hash: employeeRequestHash}],
+      'the durable retry record stores the canonical password-omitting request hash only');
+    assert.equal(JSON.stringify(employeeV1Idempotency.rows).includes(firstEmployeePassword), false);
+
+    const employeeConcurrentReplayResponses = await Promise.all([
+      applyEmployeesV1(employeeV1Retry(replayEmployeePasswordA), employeeIdempotencyKey),
+      applyEmployeesV1(employeeV1Retry(replayEmployeePasswordB), employeeIdempotencyKey),
+    ]);
+    assert.deepEqual(employeeConcurrentReplayResponses.map(response => response.status), [200, 200],
+      'concurrent password-only retries must both return the first accepted result');
+    const employeeConcurrentReplayBodies = await Promise.all(employeeConcurrentReplayResponses.map(response => response.json()));
+    assert(employeeConcurrentReplayBodies.every(body => body.replayed === true),
+      'same-key Employee Master replay responses identify the saved first result');
+    assert(employeeConcurrentReplayBodies.every(body => body.log.id === employeeV1FirstBatchId),
+      'password-only retries must replay the same persisted import batch');
+    assert(employeeConcurrentReplayBodies.every(body => body.validRows === employeeV1FirstBody.validRows
+      && body.errorRows === employeeV1FirstBody.errorRows && body.status === employeeV1FirstBody.status));
+    const employeeChangedCanonicalResponse = await applyEmployeesV1({
+      ...employeeV1Request,
+      rows: [{...employeeV1Request.rows[0], name: 'Changed Synthetic Idempotent Employee'}],
+    }, employeeIdempotencyKey);
+    assert.equal(employeeChangedCanonicalResponse.status, 409,
+      'changing a non-credential Employee Master field under the same key must conflict');
+    assert.equal((await employeeChangedCanonicalResponse.json()).error.code, 'IDEMPOTENCY_KEY_REUSED');
+    const employeeV1FinalState = await pool.query(`select
+        (select u.password_hash from users u join employees e on e.id=u.employee_record_id where e.employee_id='EMP-IMPORT-V1-IDEMPOTENT') as password_hash,
+        (select count(*)::int from employees where employee_id='EMP-IMPORT-V1-IDEMPOTENT') as employee_rows,
+        (select count(*)::int from users where employee_id='EMP-IMPORT-V1-IDEMPOTENT') as user_rows,
+        (select count(*)::int from audit_logs where import_batch_id=$1) as audit_rows,
+        (select count(*)::int from import_export_logs where id=$1) as batch_rows,
+        (select count(*)::int from import_export_idempotency where batch_id=$1) as idempotency_rows`,
+    [employeeV1FirstBatchId]);
+    assert.deepEqual(employeeV1FinalState.rows[0], initialState,
+      'password-only replay and changed-field conflict must not change credentials or create duplicate domain, audit, batch or idempotency records');
+    const employeeV1SavedEvidence = await pool.query(`select l.file_name,l.errors,a.details,a.new_value
+      from import_export_logs l left join audit_logs a on a.import_batch_id=l.id where l.id=$1`, [employeeV1FirstBatchId]);
+    assert.equal(JSON.stringify(employeeV1SavedEvidence.rows).includes(firstEmployeePassword), false,
+      'the persisted batch and audit evidence must not contain the submitted credential');
+    assert.equal(JSON.stringify(employeeV1SavedEvidence.rows).includes(replayEmployeePasswordA), false);
+    assert.equal(JSON.stringify(employeeV1SavedEvidence.rows).includes(replayEmployeePasswordB), false);
+
+    const legacyEmployeeEchoPassword = randomBytes(32).toString('base64url');
+    const legacyEchoResponse = await apply({
+      fileName: `synthetic-legacy-${legacyEmployeeEchoPassword}.csv`,
+      totalRows: 1,
+      clientErrors: [{rowNumber: 3, field: 'email', message: `Legacy diagnostic echoed ${legacyEmployeeEchoPassword}.`}],
+      rows: [{
+        employeeId: 'EMP-IMPORT-LEGACY-REDACTION',
+        name: 'Synthetic Legacy Redaction Employee',
+        email: 'employee-import-legacy-redaction@example.test',
+        primaryCountryDirectorId: 'cd-import-provenance-test',
+        initialPassword: legacyEmployeeEchoPassword,
+      }],
+    });
+    assert.equal(legacyEchoResponse.status, 200);
+    const legacyEchoBody = await legacyEchoResponse.json();
+    assert.equal(Object.hasOwn(legacyEchoBody, 'replayed'), false,
+      'the legacy Employee Master response shape remains unchanged');
+    assert.equal(JSON.stringify(legacyEchoBody).includes(legacyEmployeeEchoPassword), false,
+      'legacy Employee Master responses must redact credentials echoed in filenames or diagnostics');
+    const legacyEchoSavedEvidence = await pool.query(`select l.file_name,l.errors,a.details,a.new_value
+      from import_export_logs l left join audit_logs a on a.import_batch_id=l.id where l.id=$1`, [legacyEchoBody.log.id]);
+    assert.equal(JSON.stringify(legacyEchoSavedEvidence.rows).includes(legacyEmployeeEchoPassword), false,
+      'legacy Employee Master history and audit must not retain credentials echoed in filenames or diagnostics');
+
     const partialResponse = await apply({
       fileName: 'synthetic-partial.csv',
       totalRows: 3,
@@ -624,6 +784,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(partialResponse.status, 200);
     const partialBody = await partialResponse.json();
+    assert.equal(Object.hasOwn(partialBody.log, 'schema_version'), false,
+      'the legacy Employee Master apply response must preserve its established batch DTO');
+    assert.equal(Object.hasOwn(partialBody.log, 'dry_run'), false,
+      'the legacy Employee Master response must not gain versioned operation fields');
     assert.deepEqual({status: partialBody.status, totalRows: partialBody.totalRows,
       validRows: partialBody.validRows, errorRows: partialBody.errorRows},
     {status: 'Partial', totalRows: 3, validRows: 1, errorRows: 2},
@@ -4265,14 +4429,33 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       [...importRowsB].sort((left, right) => String(left.id).localeCompare(String(right.id))),
       'versioned import history must preserve authorized multi-scope selection and its legacy payload',
     );
+    const importHistoryOnlyToken = tokenFor(importHistoryOnlyActorId, 'synthetic-import-history-only', 'Employee');
+    const importHistoryOnlySessionResponse = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: {Authorization: `Bearer ${importHistoryOnlyToken}`}, signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(importHistoryOnlySessionResponse.status, 200);
+    const importHistoryOnlySession = await importHistoryOnlySessionResponse.json();
+    assert(importHistoryOnlySession.permissions.includes('imports.manage'));
+    assert.equal(importHistoryOnlySession.permissions.includes('employees.manage'), false,
+      'the history reader must have the existing import permission without Employee Master mutation permission');
+    const importHistoryOnlyRead = await getScoped('/api/v1/import-export-logs', importHistoryOnlyToken,
+      'org-default', 'legal-default');
+    assert.equal(importHistoryOnlyRead.status, 200,
+      'a user with imports.manage but without employees.manage may read selected-scope import history');
+    const importHistoryOnlyRows = await importHistoryOnlyRead.json();
+    assert(importHistoryOnlyRows.some(row => row.file_name === 'Employee Master import.csv'),
+      'the authorized imports.manage reader can see the server-controlled Employee batch label within the exact selected scope');
+    assert.equal(JSON.stringify(importHistoryOnlyRows).includes(firstEmployeePassword), false,
+      'scoped history does not disclose imported credentials');
+
     const importDeniedLegacy = await getScoped('/api/import-export-logs', employeeTokenWithoutAdminPermissions,
       'org-default', 'legal-default');
     assert.equal(importDeniedLegacy.status, 403,
-      'an Employee without employees.manage must be denied the legacy import-history route');
+      'an Employee without imports.manage must be denied the legacy import-history route');
     const importDeniedV1 = await getScoped('/api/v1/import-export-logs', employeeTokenWithoutAdminPermissions,
       'org-default', 'legal-default');
     assert.equal(importDeniedV1.status, 403,
-      'the versioned route must preserve employees.manage authorization');
+      'the versioned route must preserve imports.manage authorization');
     assert.equal((await importDeniedV1.json()).error.code, 'FORBIDDEN');
     const ambiguousImportHistoryV1 = await fetch(`${baseUrl}/api/v1/import-export-logs`, {
       headers: {Authorization: `Bearer ${multiScopeToken}`},

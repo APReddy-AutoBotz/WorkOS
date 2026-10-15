@@ -7,7 +7,7 @@ import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportE
 import { DataStorage, STORAGE_KEYS } from './storage';
 import { authService } from './authService';
 import {
-  api, checkBackend,
+  api, checkBackend, getOrganizationScope,
   normalizeEmployee, normalizeProject, normalizeAllocation,
   normalizeClient, normalizeTimesheetSummary, normalizeAuditLog,
   normalizeSettings, normalizeCatalogItem, normalizeRoleDefinition,
@@ -21,6 +21,7 @@ import {
   normalizeTeamsActionToken, normalizeIntegrationEventLog, normalizeIntegrationHealthReport,
   normalizeResourcePlanningReport, normalizeWorkforceCommandCenterReport,
 } from './apiClient';
+import type { OrganizationScope } from './apiClient';
 import { buildResourcePlanningReport, getAllocationLoad, getLatestApprovedActualUtilization, getActiveAllocationsForEmployee, getDefaultUtilizationEligible, getUtilizationEligibleEmployees } from './calculations';
 import { roundMetric } from '../lib/format';
 import { validateDeactivateManager, validateEmployeeHierarchy } from './orgChart';
@@ -48,11 +49,21 @@ type ImportApplyResult = {
   validRows: number;
   errorRows: number;
   errors: ImportApplyError[];
+  replayed?: boolean;
   log?: ImportExportLog;
 };
 type VersionedImportResult = ImportApplyResult & {
   schemaVersion: string;
   dryRun: boolean;
+};
+
+const assertExpectedImportScope = (expectedScope?: OrganizationScope | null) => {
+  if (expectedScope === undefined) return;
+  const currentScope = getOrganizationScope();
+  if (expectedScope?.organizationId !== currentScope?.organizationId
+    || expectedScope?.legalEntityId !== currentScope?.legalEntityId) {
+    throw new Error('Organization or legal-entity scope changed before the import request was sent. Re-validate the CSV for the current scope.');
+  }
 };
 
 const actor = () => {
@@ -1776,9 +1787,11 @@ export const adminService = {
     }
     return DataStorage.get<ImportExportLog[]>(STORAGE_KEYS.IMPORT_EXPORT_LOGS, []);
   },
-  saveImportExportLog: async (log: Omit<ImportExportLog, 'id' | 'timestamp' | 'userName'> & Partial<Pick<ImportExportLog, 'id' | 'timestamp' | 'userName'>>): Promise<ImportExportLog> => {
-    if (await checkBackend()) {
-      const raw = await api.post<Record<string, unknown>>('/api/import-export-logs', {
+  saveImportExportLog: async (log: Omit<ImportExportLog, 'id' | 'timestamp' | 'userName'> & Partial<Pick<ImportExportLog, 'id' | 'timestamp' | 'userName'>>, expectedScope: OrganizationScope | null, requireAuditConfirmation = false): Promise<ImportExportLog> => {
+    const backendAvailable = await checkBackend();
+    assertExpectedImportScope(expectedScope);
+    if (backendAvailable) {
+      const raw = await api.postWithScope<Record<string, unknown>>('/api/import-export-logs', {
         operation: log.operation,
         channel: log.channel,
         fileName: log.fileName,
@@ -1787,8 +1800,10 @@ export const adminService = {
         validRows: log.validRows,
         errorRows: log.errorRows,
         errors: log.errors,
-      });
-      await api.post('/api/audit-events', {
+      }, expectedScope);
+      // Both writes remain bound to the operation's captured organization/entity even
+      // if the UI switches scopes while the first request is in flight.
+      const auditWrite = api.postWithScope('/api/audit-events', {
         action: log.operation,
         module: 'Import / Export',
         details: `${log.operation} ${log.fileName} through ${log.channel} with ${log.totalRows} row${log.totalRows === 1 ? '' : 's'} (${log.status})`,
@@ -1802,9 +1817,12 @@ export const adminService = {
           validRows: log.validRows,
           errorRows: log.errorRows,
         },
-      }).catch(() => {});
+      }, expectedScope);
+      if (requireAuditConfirmation) await auditWrite;
+      else await auditWrite.catch(() => {});
       return normalizeImportExportLog(raw);
     }
+    if (requireAuditConfirmation) throw new Error('Export history and audit require an available backend.');
     const u = actor();
     const nextLog: ImportExportLog = {
       ...log,
@@ -1816,25 +1834,29 @@ export const adminService = {
     DataStorage.set(STORAGE_KEYS.IMPORT_EXPORT_LOGS, [nextLog, ...logs].slice(0, 100));
     return nextLog;
   },
-  applyEmployeeImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  applyEmployeeImport: async (fileName: string, rows: CsvImportRow[], idempotencyKey: string, clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
-    const raw = await api.post<Record<string, unknown>>('/api/imports/employees/apply', {
+    assertExpectedImportScope(expectedScope);
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/employees/apply', {
+      schemaVersion: 'employee-master/1',
       fileName,
       rows,
       totalRows,
       clientErrors,
-    });
+    }, {'Idempotency-Key': idempotencyKey});
     return {
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? rows.length),
       validRows: Number(raw.validRows ?? 0),
       errorRows: Number(raw.errorRows ?? 0),
       errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      replayed: raw.replayed === true,
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
-  applyClientImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  applyClientImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/clients/apply', {
       fileName,
       rows,
@@ -1850,8 +1872,9 @@ export const adminService = {
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
-  applyProjectImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  applyProjectImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/projects/apply', {
       fileName,
       rows,
@@ -1874,8 +1897,9 @@ export const adminService = {
     totalRows: number;
     dryRun: boolean;
     idempotencyKey: string;
-  }): Promise<VersionedImportResult | null> => {
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/projects/apply', {
       schemaVersion: 'project-master/1',
       dryRun: request.dryRun,
@@ -1903,8 +1927,9 @@ export const adminService = {
     totalRows: number;
     dryRun: boolean;
     idempotencyKey: string;
-  }): Promise<VersionedImportResult | null> => {
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/clients/apply', {
       schemaVersion: 'client-master/1',
       dryRun: request.dryRun,
@@ -1932,8 +1957,9 @@ export const adminService = {
     totalRows: number;
     dryRun: boolean;
     idempotencyKey: string;
-  }): Promise<VersionedImportResult | null> => {
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/allocations/apply', {
       schemaVersion: 'allocation-control/1',
       dryRun: request.dryRun,
@@ -1961,8 +1987,9 @@ export const adminService = {
     totalRows: number;
     dryRun: boolean;
     idempotencyKey: string;
-  }): Promise<VersionedImportResult | null> => {
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/timesheets/apply', {
       schemaVersion: 'timesheet-import/1',
       dryRun: request.dryRun,
@@ -1983,8 +2010,9 @@ export const adminService = {
       dryRun: log?.dry_run === true,
     };
   },
-  applyAllocationImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  applyAllocationImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/allocations/apply', {
       fileName,
       rows,
@@ -2000,8 +2028,9 @@ export const adminService = {
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
-  applyTimesheetImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  applyTimesheetImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/timesheets/apply', {
       fileName,
       rows,

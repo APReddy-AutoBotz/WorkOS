@@ -7,7 +7,7 @@ const projectSaveRoute = server.slice(
   server.indexOf("app.patch('/api/projects/:id/status'"),
 );
 const employeeImportRoute = server.slice(
-  server.indexOf("app.post('/api/imports/employees/apply'"),
+  server.indexOf("app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply']"),
   server.indexOf("app.post(['/api/imports/clients/apply'"),
 );
 const clientImportRoute = server.slice(
@@ -16,6 +16,7 @@ const clientImportRoute = server.slice(
 );
 const projectImportRouter = readFileSync('server/modules/imports/project-import-router.mjs', 'utf8');
 const operationalImportRouter = readFileSync('server/modules/imports/operational-import-router.mjs', 'utf8');
+const notificationRouter = readFileSync('server/modules/notifications/notification-router.mjs', 'utf8');
 const importIdempotency = readFileSync('server/modules/imports/idempotency.mjs', 'utf8');
 const importOperationMigration = readFileSync('server/migrations/039_wos03_import_operation_contract.sql', 'utf8');
 const allocationImportRoute = operationalImportRouter.slice(
@@ -122,8 +123,8 @@ assert.match(server, /const importHistoryRouter = createImportHistoryRouter\([\s
   'legacy and versioned import history must mount one shared module router');
 assert.match(importHistoryRouter, /const importHistoryQuery = `select \* from import_export_logs[\s\S]*where organization_id=\$1 and legal_entity_id=\$2[\s\S]*order by created_at desc limit 100/,
   'import history must preserve its exact selected-scope query, limit and ordering');
-assert.match(importHistoryRouter, /router\.get\('\/import-export-logs', requireDatabase, requireAuth, requirePermission\('employees\.manage'\)[\s\S]*res\.json\(result\.rows\)/,
-  'import history must preserve its existing permission and payload');
+assert.match(importHistoryRouter, /router\.get\('\/import-export-logs', requireDatabase, requireAuth, requirePermission\('imports\.manage'\)[\s\S]*res\.json\(result\.rows\)/,
+  'import history must use the existing import permission and preserve its scoped payload');
 assert.equal(packageJson.scripts['test:import-history-router'], 'node tests/import-history-router-smoke.mjs',
   'the import history compatibility route test must run in the standard suite');
 assert.match(importHistoryRouter, /where organization_id=\$1 and legal_entity_id=\$2/,
@@ -138,14 +139,32 @@ assert.equal(packageJson.scripts['test:integration-history-router'], 'node tests
   'the integration history compatibility-route test must run in the standard suite');
 assert.match(server, /e\.organization_id=\$4 and e\.legal_entity_id=\$5[\s\S]*where status = 'Failed' and organization_id=\$4 and legal_entity_id=\$5/,
   'integration health aggregates over scoped workers and events must use the verified selected scope');
-assert.match(server, /app\.post\('\/api\/imports\/employees\/apply'/, 'employee import apply route must exist');
+assert.match(server, /app\.post\(\['\/api\/imports\/employees\/apply', '\/api\/v1\/imports\/employees\/apply'\]/, 'legacy and versioned employee import apply routes must share one handler');
+assert.match(employeeImportRoute, /requirePermission\('imports\.manage'\)/,
+  'Employee Master import apply must retain its existing imports.manage authorization gate');
+assert.match(employeeImportRoute, /hashEmployeeImportRequest\([\s\S]*schemaVersion: 'employee-master\/1'/,
+  'the versioned Employee Master retry identity must use its explicit schema and password-omitting request hash');
+assert.match(importIdempotency, /normalizeEmployeeImportClientErrors[\s\S]*EMPLOYEE_PREFLIGHT_ERROR_MESSAGE[\s\S]*clientErrors\.map\(\(\{rowNumber, field\}\)/,
+  'Employee retry identity must use bounded row/field diagnostics and exclude arbitrary credential-echoing metadata');
+assert.match(employeeImportRoute, /const fileName = versioned\s+\? 'Employee Master import\.csv'[\s\S]*const redactedClientErrors = redactCredentialEchoes\(parsed\.data\.clientErrors \|\| \[\], credentials\)[\s\S]*normalizeEmployeeImportClientErrors\(redactedClientErrors\)/,
+  'versioned Employee batches must use safe server-controlled labels/messages while the legacy alias retains exact echo redaction');
+assert.match(employeeImportRoute, /safeResponseErrors = redactCredentialEchoes\(responseErrors, credentials\)[\s\S]*JSON\.stringify\(safeResponseErrors\)/,
+  'all Employee Master API aliases must sanitize apply-time diagnostics before persisting or returning them');
+assert.match(employeeImportRoute, /IDEMPOTENCY_KEY_REUSED/,
+  'changed non-credential Employee Master request fields must conflict under a reused idempotency key');
+assert.match(employeeImportRoute, /select \* from import_export_logs[\s\S]*existing\.rows\[0\]\.batch_id[\s\S]*await client\.query\('commit'\)[\s\S]*res\.json\(/,
+  'identical Employee Master retries must replay their original scoped batch without reapplying rows');
+assert.match(employeeImportRoute, /replayed: true[\s\S]*log: batch/,
+  'Employee Master v1 replay responses identify when the previously accepted result was returned');
+assert.match(employeeImportRoute, /\.\.\.\(versioned \? \{replayed: false\} : \{\}\)/,
+  'only versioned Employee Master apply responses add the initial-result replay marker');
 assert.match(employeeImportRoute, /const importBatchId = crypto\.randomUUID\(\)/,
   'employee imports must receive a server-generated batch ID after request validation');
 assert.match(employeeImportRoute, /source: 'Employee Master CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: employee\.employee_id,[\s\S]*importProcessingResult: 'Success'/,
   'successful employee row audits must retain source, source identifier, batch and processing result');
-assert.match(employeeImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id\)[\s\S]*values \(\$1,'Import','Employee Master'/,
-  'employee batch history must use the same ID as row audits and retain the selected scope');
-assert.match(employeeImportRoute, /\[\s*importBatchId,[\s\S]*parsed\.data\.fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
+assert.match(employeeImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run\)[\s\S]*values \(\$1,'Import','Employee Master'/,
+  'employee batch history must use the same ID as row audits, retain the selected scope and record the v1 contract metadata');
+assert.match(employeeImportRoute, /\[\s*importBatchId,[\s\S]*fileName,[\s\S]*status,[\s\S]*errors\.length[\s\S]*req\.user\.username/,
   'the employee batch result must preserve aggregate status, counts and existing row errors');
 assert.match(employeeImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'employee mutations, row audits and the batch result must commit or roll back together');
@@ -305,12 +324,13 @@ assert.match(server, /app\.get\('\/api\/approval-delegations'/, 'approval delega
 assert.match(server, /app\.get\('\/api\/reports\/approval-sla'/, 'approval SLA report route must exist');
 assert.match(approvalMigration, /create table if not exists approval_records/, 'approval migration must create approval records');
 assert.match(approvalMigration, /create table if not exists approval_delegations/, 'approval migration must create approval delegations');
-assert.match(server, /app\.get\('\/api\/notifications'/, 'notification inbox route must exist');
-assert.match(server, /app\.patch\('\/api\/notifications\/:id\/read'/, 'notification read route must exist');
-assert.match(server, /app\.get\('\/api\/notification-templates'/, 'notification template route must exist');
-assert.match(server, /app\.get\('\/api\/notification-preferences'/, 'notification preference route must exist');
-assert.match(server, /app\.get\('\/api\/notification-delivery-attempts'/, 'notification delivery monitoring route must exist');
-assert.match(server, /app\.post\('\/api\/notifications\/test-delivery'/, 'notification test delivery route must exist');
+assert.match(server, /createNotificationRouter\(/, 'notification capability router must be mounted');
+assert.match(notificationRouter, /router\.get\('\/notifications'/, 'notification inbox route must exist');
+assert.match(notificationRouter, /router\.patch\('\/notifications\/:id\/read'/, 'notification read route must exist');
+assert.match(notificationRouter, /router\.get\('\/notification-templates'/, 'notification template route must exist');
+assert.match(notificationRouter, /router\.get\('\/notification-preferences'/, 'notification preference route must exist');
+assert.match(notificationRouter, /router\.get\('\/notification-delivery-attempts'/, 'notification delivery monitoring route must exist');
+assert.match(notificationRouter, /router\.post\('\/notifications\/test-delivery'/, 'notification test delivery route must exist');
 assert.match(server, /https:\/\/graph\.microsoft\.com\/\.default/, 'Graph adapters must use Microsoft identity client credentials scope');
 assert.match(server, /\/users\/\$\{encodeURIComponent\(sender\)\}\/sendMail/, 'email adapter must use Microsoft Graph sendMail');
 assert.match(server, /\/teamwork\/sendActivityNotification/, 'Teams adapter must use Microsoft Graph activity notifications');
