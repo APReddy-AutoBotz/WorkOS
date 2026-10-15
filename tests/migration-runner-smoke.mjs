@@ -2818,7 +2818,9 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         join timesheet_entries te on te.timesheet_id=t.id
       where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending=date '2026-02-27'
       group by t.id`);
-    assert.deepEqual(replacedTimesheetEntries.rows,[{total_hours:'4.0',entry_count:1,hours:'4.0'}],
+    assert.deepEqual(replacedTimesheetEntries.rows.map(row => ({
+      total_hours:Number(row.total_hours), entry_count:row.entry_count, hours:Number(row.hours),
+    })),[{total_hours:4,entry_count:1,hours:4}],
       'a distinct timesheet import key preserves existing per-week replacement semantics rather than appending entries');
 
     const timesheetScopeBody = {...timesheetConcurrencyBody, fileName:'synthetic-timesheet-scope-isolation.csv',dryRun:true};
