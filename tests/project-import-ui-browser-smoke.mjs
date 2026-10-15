@@ -103,7 +103,7 @@ try {
 
   responsePlans.push({status: 200, body: operationResult(firstPreview.body)});
   await page.getByRole('button', {name: 'Retry Validation'}).click();
-  await page.getByText('Server dry run complete for projects-first.csv: 1/1 rows are valid.', {exact: true}).waitFor();
+  await page.getByText('Server dry run complete for projects-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
   const dryRunRetry = lastRequest();
   assert.equal(dryRunRetry.headers['idempotency-key'], firstPreviewKey, 'validation retry reuses the same key');
   assert.deepEqual(dryRunRetry.body, firstPreview.body, 'validation retry preserves its exact payload');
@@ -125,7 +125,7 @@ try {
   assert.deepEqual(lastRequest().body, firstApply.body, 'apply retry preserves the exact payload');
 
   await selectProjectCsv('projects-changed.csv', csv('PROJECT-UI-202'));
-  await page.getByText('Server dry run complete for projects-changed.csv: 1/1 rows are valid.', {exact: true}).waitFor();
+  await page.getByText('Server dry run complete for projects-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
   const changedPreview = lastRequest();
   assert.notEqual(changedPreview.headers['idempotency-key'], firstPreviewKey,
     'a changed/reselected file starts a new idempotency operation');
@@ -137,7 +137,7 @@ try {
   await page.getByText(/Project Master apply finished with 0 valid rows and 1 errors for projects-changed\.csv\. View saved diagnostic details in Import History\./).waitFor();
 
   await selectProjectCsv('projects-rejected.csv', csv('PROJECT-UI-303', 'MISSING-MANAGER'));
-  await page.getByText('Server dry run complete for projects-rejected.csv: 0/1 rows are valid.', {exact: true}).waitFor();
+  await page.getByText('Server dry run complete for projects-rejected.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
   const rejectedPreview = lastRequest();
   assert.deepEqual(rejectedPreview.body.rows, [], 'all client-rejected rows are passed only as diagnostics to the server dry run');
   assert.equal(rejectedPreview.body.dryRun, true);
@@ -147,7 +147,7 @@ try {
   assert.equal(requests.length, 7);
   const malformedCsv = csv('PROJECT-UI-404').replace('projectCode,name', 'projectCodeMissing,name');
   await selectProjectCsv('projects-malformed-header.csv', malformedCsv);
-  await page.getByText('Server dry run complete for projects-malformed-header.csv: 0/1 rows are valid.', {exact: true}).waitFor();
+  await page.getByText('Server dry run complete for projects-malformed-header.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
   const malformedPreview = lastRequest();
   assert.deepEqual(malformedPreview.body.rows, [], 'malformed-header input remains excluded from apply candidates');
   assert.ok(malformedPreview.body.clientErrors.some(error => error.rowNumber === 1 && error.field === 'header'),
