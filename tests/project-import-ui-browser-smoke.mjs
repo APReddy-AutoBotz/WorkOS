@@ -88,7 +88,7 @@ const selectProjectCsv = async (fileName, contents) => {
 const lastRequest = () => requests.at(-1);
 try {
   await page.goto(`${baseUrl}/tests/fixtures/project-import-ui.html`);
-  await page.getByRole('heading', {name: 'Import / Export'}).waitFor();
+  await page.getByRole('heading', {name: 'Import / Export', exact: true}).waitFor();
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectProjectCsv('projects-first.csv', csv('PROJECT-UI-101'));
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
