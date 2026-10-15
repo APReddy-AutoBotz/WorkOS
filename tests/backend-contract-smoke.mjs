@@ -95,7 +95,10 @@ assert.match(seedDemo, /insert into user_roles/, 'demo seed must provision user 
 assert.match(seedDemo, /insert into timesheets/, 'demo seed must include timesheets');
 assert.match(schema, /create table if not exists import_export_logs/, 'import/export history table must exist');
 assert.match(server, /app\.post\('\/api\/settings'/, 'settings save route must exist');
-assert.match(server, /app\.post\('\/api\/import-export-logs'/, 'import/export history POST route must exist');
+assert.match(importHistoryRouter, /router\.post\('\/import-export-logs', requireDatabase, requireAuth, requirePermission\('imports\.manage'\)/,
+  'both import/export history POST aliases must retain imports.manage through the shared router');
+assert.doesNotMatch(server, /app\.post\('\/api\/import-export-logs'/,
+  'the application entry point must not retain a duplicate import-history write handler');
 assert.match(server, /app\.post\('\/api\/audit-events'/, 'manual audit event POST route must exist for UI exports');
 assert.match(auditRecord, /organizationScope = req\.organizationScope[\s\S]*organizationScope\?\.organizationId[\s\S]*organizationScope\?\.legalEntityId/,
   'new audit rows must default to server-resolved scope while allowing explicit null scope for deployment-level system events');

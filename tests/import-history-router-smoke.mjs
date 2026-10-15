@@ -29,7 +29,8 @@ const pool = {
     return {rows};
   },
 };
-const requireDatabase = (_req, _res, next) => next();
+const requireDatabase = (req, res, next) => req.get('x-no-database') === 'true'
+  ? res.status(503).json({error: 'DATABASE_URL is not configured'}) : next();
 const requireAuth = (req, res, next) => {
   const authorizedScopes = req.get('authorization') === 'Bearer import-reader'
     ? [{organizationId: 'org-a', legalEntityId: 'legal-a'}]
@@ -53,7 +54,7 @@ const requireAuth = (req, res, next) => {
     res.status(403).json({error: 'Organization scope is not authorized', code: 'ORG_SCOPE_DENIED'});
     return;
   }
-  req.user = {sub: 'import-reader', activeRole: 'Admin'};
+  req.user = {sub: 'import-reader', username: 'server-user', activeRole: 'Admin'};
   req.organizationScope = scope;
   next();
 };
@@ -138,6 +139,76 @@ try {
   assert.equal(versionedError.error.correlationId, versionedFailure.headers.get('x-correlation-id'));
   assert.deepEqual(permissionChecks, Array(7).fill('employees.manage'),
     'both aliases must preserve the existing employees.manage read permission');
+  failQuery = false;
+  const payload = {
+    operation: 'Import', channel: 'Free-form legacy channel', fileName: 'synthetic.csv', status: 'Partial',
+    totalRows: 2, validRows: 1, errorRows: 1,
+    errors: [{rowNumber: 2, field: 'code', message: 'Invalid code', sourceIdentifier: 'ROW-2'}],
+    user_name: 'forged-user', organizationId: 'forged-org', legalEntityId: 'forged-entity',
+  };
+  const post = (prefix, body = payload, extraHeaders = {}) => fetch(`${baseUrl}${prefix}/import-export-logs`, {
+    method: 'POST', headers: {...headers, 'Content-Type': 'application/json', ...extraHeaders},
+    body: JSON.stringify(body),
+  });
+  const writePermissionStart = permissionChecks.length;
+  for (const prefix of ['/api', '/api/v1']) {
+    const response = await post(prefix);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), rows, 'writes preserve the legacy array response');
+    const query = poolQueries.at(-1);
+    assert.match(query.sql, /insert into import_export_logs/);
+    assert.deepEqual(query.params, ['Import', 'Free-form legacy channel', 'synthetic.csv', 'Partial',
+      2, 1, 1, JSON.stringify(payload.errors), 'server-user', 'org-a', 'legal-a'],
+    'only validated diagnostics and server-owned actor/scope enter parameterized SQL');
+    const omittedErrors = {...payload};
+    delete omittedErrors.errors;
+    assert.equal((await post(prefix, omittedErrors)).status, 200);
+    assert.equal(poolQueries.at(-1).params[7], null);
+    assert.equal((await post(prefix, {...payload, errors: []})).status, 200);
+    assert.equal(poolQueries.at(-1).params[7], '[]');
+    for (const invalid of [
+      {...payload, operation: 'Delete'}, {...payload, status: 'Unknown'},
+      {...payload, totalRows: -1}, {...payload, validRows: 1.5}, {...payload, errorRows: '1'},
+      {...payload, fileName: ''}, {...payload, channel: ''},
+      {...payload, errors: [{rowNumber: 0, message: 'bad'}]},
+      {...payload, errors: [{rowNumber: 1, message: 'bad', sourceIdentifier: '  '}]},
+      {...payload, errors: [{rowNumber: 1, message: 'bad', sourceIdentifier: 'x'.repeat(201)}]},
+    ]) {
+      const before = poolQueries.length;
+      const invalidResponse = await post(prefix, invalid);
+      assert.equal(invalidResponse.status, 400);
+      const body = await invalidResponse.json();
+      if (prefix === '/api/v1') {
+        assert.equal(body.error.code, 'BAD_REQUEST');
+        assert.equal(body.error.correlationId, invalidResponse.headers.get('x-correlation-id'));
+        assert.equal(typeof body.error.operationId, 'string');
+      } else assert.equal(typeof body.error.fieldErrors, 'object');
+      assert.equal(poolQueries.length, before, 'invalid data must never reach the database');
+    }
+    for (const [extraHeaders, status] of [
+      [{Authorization: ''}, 401], [{'x-import-permission': 'deny'}, 403],
+      [{'X-Organization-ID': 'org-b', 'X-Legal-Entity-ID': 'legal-b'}, 403],
+      [{Authorization: 'Bearer import-multi-reader', 'X-Organization-ID': '', 'X-Legal-Entity-ID': ''}, 403],
+      [{'x-no-database': 'true'}, 503],
+    ]) {
+      const before = poolQueries.length;
+      const denied = await post(prefix, payload, extraHeaders);
+      assert.equal(denied.status, status);
+      assert.equal(poolQueries.length, before, 'unauthorized or unavailable writes must never query');
+    }
+    failQuery = true;
+    const failed = await post(prefix);
+    assert.equal(failed.status, 500);
+    const failure = await failed.json();
+    if (prefix === '/api/v1') {
+      assert.equal(failure.error.code, 'INTERNAL_ERROR');
+      assert.equal(failure.error.message, 'The request could not be completed.');
+    } else assert.deepEqual(failure, {error: 'Database operation failed'});
+    assert(!JSON.stringify(failure).includes('synthetic database detail'));
+    failQuery = false;
+  }
+  assert(permissionChecks.slice(writePermissionStart).every(permission => permission === 'imports.manage'),
+    'write aliases must use imports.manage, never the history-read permission');
 } finally {
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 }

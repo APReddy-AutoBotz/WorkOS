@@ -2671,6 +2671,52 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(importBResponse.status, 200);
 
+    const versionedImportPayload = {
+      operation: 'Export', channel: 'Generic compatibility check', fileName: 'v1-history-compatibility.csv',
+      status: 'Dry Run', totalRows: 2, validRows: 1, errorRows: 1,
+      errors: [{rowNumber: 2, message: 'Synthetic diagnostic', sourceIdentifier: 'ROW-COMPAT-2'}],
+      user_name: 'forged-actor', organizationId: 'org-scope-beta', legalEntityId: 'legal-scope-beta',
+    };
+    const importWriteResults = [];
+    for (const prefix of ['/api', '/api/v1']) {
+      const response = await postScopedJson(`${prefix}/import-export-logs`, token,
+        'org-default', 'legal-default', versionedImportPayload);
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.length, 1);
+      assert.equal(result[0].organization_id, 'org-default');
+      assert.equal(result[0].legal_entity_id, 'legal-default');
+      assert.notEqual(result[0].user_name, 'forged-actor');
+      assert.deepEqual(result[0].errors, versionedImportPayload.errors);
+      importWriteResults.push(result[0]);
+      const before = (await pool.query('select count(*)::int as count from import_export_logs')).rows[0].count;
+      const invalid = await postScopedJson(`${prefix}/import-export-logs`, token,
+        'org-default', 'legal-default', {...versionedImportPayload, errors: [{rowNumber: 1, message: 'Bad', sourceIdentifier: '  '}]});
+      assert.equal(invalid.status, 400);
+      if (prefix === '/api/v1') {
+        const error = (await invalid.json()).error;
+        assert.equal(error.code, 'BAD_REQUEST');
+        assert.equal(error.correlationId, invalid.headers.get('x-correlation-id'));
+        assert.equal(typeof error.operationId, 'string');
+      }
+      const denied = await postScopedJson(`${prefix}/import-export-logs`, employeeTokenWithoutAdminPermissions,
+        'org-default', 'legal-default', versionedImportPayload);
+      assert.equal(denied.status, 403);
+      const outOfScope = await postScopedJson(`${prefix}/import-export-logs`,
+        tokenFor(singleScopeActorId, 'synthetic-single-scope-admin'),
+        'org-scope-beta', 'legal-scope-beta', versionedImportPayload);
+      assert.equal(outOfScope.status, 403);
+      assert.equal((await pool.query('select count(*)::int as count from import_export_logs')).rows[0].count, before,
+        'invalid, unauthorized, and out-of-scope writes must leave history unchanged');
+    }
+    const stableImportFields = ({id, created_at, ...fields}) => fields;
+    assert.deepEqual(stableImportFields(importWriteResults[0]), stableImportFields(importWriteResults[1]),
+      'both routes must persist and return equivalent data except generated ID/timestamp');
+    const persistedWrites = await pool.query('select * from import_export_logs where id=any($1::uuid[])',
+      [importWriteResults.map(row => row.id)]);
+    assert.equal(persistedWrites.rows.length, 2);
+    assert(persistedWrites.rows.every(row => row.organization_id === 'org-default' && row.legal_entity_id === 'legal-default'));
+
     const employeeA = (await pool.query(`select id from employees where employee_id='EMP-IMPORT-SUCCESS'`)).rows[0];
     assert.ok(employeeA, 'the default-scope identity link fixture exists');
     const identityAResponse = await postScopedJson('/api/integrations/identity-links', token, 'org-default', 'legal-default', {

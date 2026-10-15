@@ -6415,40 +6415,6 @@ app.get('/api/reports/dashboard', requireDatabase, requireAuth, requirePermissio
 const importHistoryRouter = createImportHistoryRouter({pool, requireDatabase, requireAuth, requirePermission});
 app.use('/api', importHistoryRouter);
 app.use('/api/v1', importHistoryRouter);
-app.post('/api/import-export-logs', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const schema = z.object({
-    operation: z.enum(['Import', 'Export']),
-    channel: z.string().min(1),
-    fileName: z.string().min(1),
-    status: z.enum(['Success', 'Partial', 'Failed', 'Dry Run']),
-    totalRows: z.number().int().min(0),
-    validRows: z.number().int().min(0),
-    errorRows: z.number().int().min(0),
-    errors: z.array(importErrorRowSchema).optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  await run(res, `
-    insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-    returning *
-  `, [
-    parsed.data.operation,
-    parsed.data.channel,
-    parsed.data.fileName,
-    parsed.data.status,
-    parsed.data.totalRows,
-    parsed.data.validRows,
-    parsed.data.errorRows,
-    parsed.data.errors ? JSON.stringify(parsed.data.errors) : null,
-    req.user.username,
-    req.organizationScope.organizationId,
-    req.organizationScope.legalEntityId,
-  ]);
-});
 
 app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
   const rowSchema = z.object({
