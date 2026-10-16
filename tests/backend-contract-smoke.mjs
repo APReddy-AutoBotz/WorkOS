@@ -17,6 +17,7 @@ const clientImportRoute = server.slice(
 const projectImportRouter = readFileSync('server/modules/imports/project-import-router.mjs', 'utf8');
 const operationalImportRouter = readFileSync('server/modules/imports/operational-import-router.mjs', 'utf8');
 const notificationRouter = readFileSync('server/modules/notifications/notification-router.mjs', 'utf8');
+const leaveRouter = readFileSync('server/modules/leave/leave-router.mjs', 'utf8');
 const importIdempotency = readFileSync('server/modules/imports/idempotency.mjs', 'utf8');
 const importOperationMigration = readFileSync('server/migrations/039_wos03_import_operation_contract.sql', 'utf8');
 const allocationImportRoute = operationalImportRouter.slice(
@@ -311,10 +312,12 @@ assert.match(server, /json_agg\(json_build_object/, 'timesheet API must include 
 assert.match(server, /app\.get\('\/api\/reports\/planned-utilization'/, 'planned utilization report route must exist');
 assert.match(server, /app\.get\('\/api\/reports\/actual-utilization'/, 'actual utilization report route must exist');
 assert.match(server, /app\.get\('\/api\/reports\/forecast-utilization'/, 'forecast utilization report route must exist');
-assert.match(server, /app\.get\('\/api\/leave\/requests'/, 'leave request list route must exist');
-assert.match(server, /app\.post\('\/api\/leave\/requests'/, 'leave request submit route must exist');
-assert.match(server, /app\.patch\('\/api\/leave\/requests\/:id\/status'/, 'leave approval route must exist');
-assert.match(server, /app\.get\('\/api\/holiday-calendars'/, 'holiday calendar route must exist');
+assert.match(server, /app\.use\('\/api', createLeaveRouter\(/, 'leave capability router must be mounted on the existing legacy API prefix');
+assert.match(leaveRouter, /router\.get\('\/leave\/requests'/, 'leave request list route must exist');
+assert.match(leaveRouter, /router\.post\('\/leave\/requests'/, 'leave request submit route must exist');
+assert.match(leaveRouter, /router\.patch\('\/leave\/requests\/:id\/status'/, 'leave approval route must exist');
+assert.match(leaveRouter, /router\.get\('\/holiday-calendars'/, 'holiday calendar route must exist');
+assert.doesNotMatch(server, /app\.(?:get|post|patch)\('\/api\/(?:leave\/|holiday-calendars)/, 'the entry point must not retain duplicate leave route registrations');
 assert.match(server, /app\.get\('\/api\/reports\/availability'/, 'availability report route must exist');
 assert.match(leaveMigration, /create table if not exists leave_requests/, 'leave migration must create leave requests');
 assert.match(leaveMigration, /create table if not exists leave_balances/, 'leave migration must create leave balances');
