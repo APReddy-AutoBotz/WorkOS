@@ -13,9 +13,11 @@ const STATUS_CODES = new Map([
 ]);
 const STABLE_CODE = /^[A-Z][A-Z0-9_]{1,63}$/;
 
+export const stableStatusCode = (status) => STATUS_CODES.get(status) || 'HTTP_ERROR';
+
 const stableCode = (value, status) => typeof value === 'string' && STABLE_CODE.test(value)
   ? value
-  : STATUS_CODES.get(status) || 'HTTP_ERROR';
+  : stableStatusCode(status);
 
 const safeMessage = (body, status) => {
   if (status >= 500) return 'The request could not be completed.';

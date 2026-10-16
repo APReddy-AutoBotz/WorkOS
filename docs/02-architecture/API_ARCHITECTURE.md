@@ -168,6 +168,8 @@ Every API request receives a correlation ID. A caller-provided `X-Correlation-ID
 
 Failures served under `/api/v1` use `{ "error": { "code", "message", "correlationId", "operationId?" } }`. Codes are stable uppercase identifiers, messages are user-safe, and unexpected 5xx details are not returned. Legacy paths preserve their existing response shapes during the adapter period. The frontend error type retains HTTP status and available trace IDs for support diagnostics.
 
+The initial API failure-log pilot emits one structured record when an `/api` response finishes with status 400 or greater. It records timestamp, level, service, API namespace, method plus the matched route template (or a fixed `<unknown>` marker), status, a stable status-derived code, and validated correlation/operation IDs. It does not log raw paths, payloads, query values, other header values, or thrown error details. This pilot does not complete WOS-NFR-OBS-001–006; job-runner and integration logs, duration and actor context, metrics, alerts and runbooks remain open.
+
 Production mutation code uses the shared audit writer. It records actor identity, active role, source, module/action, entity identity, before/after values, reason/details and request correlation/operation IDs when present. System operations may omit request IDs. New audit fields are nullable and added with additive migrations so historical rows are not assigned fabricated context. The existing append-only database guard remains in force.
 
 The employee master CSV apply path also records each successfully applied row's source identifier, server-generated import batch ID and successful processing result on its audit event. The same batch ID keys the import-history result; row audits and batch history commit or roll back together. The nullable batch reference has no foreign key to the operational log so audit retention can outlive import-history retention; both records are written in one transaction.
@@ -182,7 +184,7 @@ Audit, import/export history, integration-event history and open Teams action-to
 
 WOS-GOV-003 retention and anonymization requirements remain open. This foundation adds no deletion/anonymization behavior; those operations remain disabled until the buyer defines a retention period and approval owners. Existing audit history is not rewritten.
 
-Structured logs record safe route, status, duration, user/role identifiers and denial/error code without exposing credentials or unrestricted personal/financial payloads.
+The target structured-log contract records safe route, status, duration, user/role identifiers and denial/error code without exposing credentials or unrestricted personal/financial payloads. The initial API failure-log pilot above implements only a subset of that target, so it does not close the broader observability requirement.
 
 ## Compatibility and deprecation
 

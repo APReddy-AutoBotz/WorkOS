@@ -6,8 +6,13 @@ import {createIdentityReadRouter} from '../server/modules/identity-access/read-r
 import {parseApiClientError} from '../src/services/apiClient.ts';
 
 let generatedId = 0;
+const apiFailureLogs = [];
 const app = express();
-app.use('/api', createRequestContextMiddleware({idFactory: () => `generated-${++generatedId}`}));
+app.use('/api', createRequestContextMiddleware({
+  idFactory: () => `generated-${++generatedId}`,
+  writeLog: record => apiFailureLogs.push(record),
+  now: () => new Date('2026-10-16T00:00:00.000Z'),
+}));
 app.use('/api/v1', versionedApiResponseContract);
 app.use(express.json({limit: '32b'}));
 
@@ -34,7 +39,8 @@ const identityDependencies = {requireDatabase, requireIdentity, listOrganization
 app.use('/api/auth', createIdentityReadRouter(identityDependencies));
 app.use('/api/v1/auth', createIdentityReadRouter(identityDependencies));
 app.post('/api/v1/commands', (_req, res) => res.status(422).json({error: 'Invalid command', code: 'COMMAND_INVALID'}));
-app.get('/api/v1/throws', (_req, _res, next) => next(Object.assign(new Error('private database detail'), {code: 'DATABASE_FAILURE'})));
+app.get('/api/v1/throws/:recordId', (_req, _res, next) => next(Object.assign(new Error('private database detail'), {code: 'DATABASE_FAILURE'})));
+app.post('/api/v1/resources/:resourceId', (_req, res) => res.status(422).json({error: 'Invalid command', code: 'COMMAND_INVALID'}));
 app.get('/api/legacy-error', (_req, res) => res.status(500).json({error: 'Legacy response remains unchanged'}));
 app.use('/api/v1', versionedApiErrorHandler);
 app.use('/api', (_req, res) => res.status(404).json({error: 'Not found'}));
@@ -60,10 +66,16 @@ try {
     message: 'Authentication required',
     correlationId: 'generated-2',
   });
+  const legacyUnauthorizedLog = apiFailureLogs.find(record => record.correlationId === legacyUnauthorized.headers.get('x-correlation-id'));
+  const versionedUnauthorizedLog = apiFailureLogs.find(record => record.correlationId === versionedUnauthorized.headers.get('x-correlation-id'));
+  assert.equal(legacyUnauthorizedLog.operation, 'legacy GET /me');
+  assert.equal(versionedUnauthorizedLog.operation, 'v1 GET /me');
 
   const versionedMe = await fetch(`${baseUrl}/api/v1/auth/me`, {headers: {Authorization: 'Bearer valid-session'}});
   assert.equal(versionedMe.status, 200);
   assert.deepEqual(await versionedMe.json(), identityPayload, 'versioned success preserves the existing identity payload');
+  assert.equal(apiFailureLogs.some(record => record.correlationId === versionedMe.headers.get('x-correlation-id')), false,
+    'successful requests do not emit failure logs');
 
   const scopeList = await fetch(`${baseUrl}/api/v1/auth/organization-scopes`, {
     headers: {Authorization: 'Bearer valid-session', 'X-Correlation-ID': 'trace-client-007'},
@@ -73,7 +85,7 @@ try {
   assert.equal(scopeList.headers.get('x-correlation-id'), 'trace-client-007', 'valid caller correlation IDs are retained');
 
   const unavailableScopes = await fetch(`${baseUrl}/api/v1/auth/organization-scopes?fail=true`, {
-    headers: {Authorization: 'Bearer valid-session'},
+    headers: {Authorization: 'Bearer valid-session', 'X-Correlation-ID': 'trace-scope-failure-007'},
   });
   assert.equal(unavailableScopes.status, 503);
   const unavailableBody = await unavailableScopes.json();
@@ -81,6 +93,11 @@ try {
   assert.equal(unavailableBody.error.message, 'The request could not be completed.');
   assert.equal(unavailableBody.error.correlationId, unavailableScopes.headers.get('x-correlation-id'));
   assert.equal(JSON.stringify(unavailableBody).includes('Database details'), false, 'server details are not exposed by v1 errors');
+  const unavailableScopeLog = apiFailureLogs.find(record => record.correlationId === 'trace-scope-failure-007');
+  assert.ok(unavailableScopeLog);
+  assert.equal(unavailableScopeLog.operation, 'v1 GET /organization-scopes');
+  assert.equal(unavailableScopeLog.status, 503);
+  assert.equal(unavailableScopeLog.code, 'SERVICE_UNAVAILABLE');
 
   const commandResponse = await fetch(`${baseUrl}/api/v1/commands`, {
     method: 'POST',
@@ -118,14 +135,70 @@ try {
   assert.equal(oversizedBody.error.correlationId, oversizedJson.headers.get('x-correlation-id'));
   assert.equal(oversizedBody.error.operationId, oversizedJson.headers.get('x-operation-id'));
 
-  const thrown = await fetch(`${baseUrl}/api/v1/throws`);
+  const thrown = await fetch(`${baseUrl}/api/v1/throws/private-path-sentinel?api_key=private-query-sentinel`);
   assert.equal(thrown.status, 500);
   const thrownBody = await thrown.json();
   assert.equal(thrownBody.error.code, 'DATABASE_FAILURE');
   assert.equal(thrownBody.error.message, 'The request could not be completed.');
   assert.equal(JSON.stringify(thrownBody).includes('private database detail'), false);
 
+  const privateSentinels = [
+    'private-path-sentinel',
+    'private-query-sentinel',
+    'private-header-sentinel',
+    'private-auth-sentinel',
+    'b-secret',
+    'private database detail',
+  ];
+  const sentinelsInRequest = await fetch(`${baseUrl}/api/v1/resources/private-path-sentinel?api_key=private-query-sentinel`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer private-auth-sentinel',
+      'X-Internal-Secret': 'private-header-sentinel',
+    },
+    body: JSON.stringify({token: 'b-secret'}),
+  });
+  assert.equal(sentinelsInRequest.status, 422);
+
+  const unknownApiRoute = await fetch(`${baseUrl}/api/v1/private-route-sentinel?api_key=private-query-sentinel`);
+  assert.equal(unknownApiRoute.status, 404);
+
+  const thrownLog = apiFailureLogs.find(record => record.correlationId === thrown.headers.get('x-correlation-id'));
+  assert.ok(thrownLog, 'server failures produce a structured API log');
+  assert.equal(thrownLog.timestamp, '2026-10-16T00:00:00.000Z');
+  assert.equal(thrownLog.level, 'error');
+  assert.equal(thrownLog.service, 'api');
+  assert.equal(thrownLog.operation, 'v1 GET /api/v1/throws/:recordId', 'logs distinguish API namespace and use the matched route template, not the raw path');
+  assert.equal(thrownLog.status, 500);
+  assert.equal(thrownLog.code, 'INTERNAL_ERROR', 'log error codes are stable and derived from HTTP status');
+  assert.equal(thrownLog.operationId, undefined, 'read requests do not receive operation IDs');
+
+  const writeFailureLog = apiFailureLogs.find(record => record.correlationId === sentinelsInRequest.headers.get('x-correlation-id'));
+  assert.ok(writeFailureLog);
+  assert.equal(writeFailureLog.operation, 'v1 POST /api/v1/resources/:resourceId');
+  assert.equal(writeFailureLog.status, 422);
+  assert.equal(writeFailureLog.code, 'VALIDATION_FAILED');
+  assert.equal(writeFailureLog.operationId, sentinelsInRequest.headers.get('x-operation-id'));
+
+  const unknownRouteLog = apiFailureLogs.find(record => record.correlationId === unknownApiRoute.headers.get('x-correlation-id'));
+  assert.ok(unknownRouteLog);
+  assert.equal(unknownRouteLog.operation, 'v1 GET <unknown>', 'unmatched routes use a fixed marker');
+  assert.equal(unknownRouteLog.status, 404);
+
+  for (const record of apiFailureLogs) {
+    const serialized = JSON.stringify(record);
+    for (const sentinel of privateSentinels) {
+      assert.equal(serialized.includes(sentinel), false, `structured logs omit ${sentinel}`);
+    }
+    assert.deepEqual(Object.keys(record).sort(), [
+      'code', 'correlationId', 'level', 'operation', 'service', 'status', 'timestamp',
+      ...(record.operationId ? ['operationId'] : []),
+    ].sort(), 'structured failure log has only the approved fields');
+  }
+
   const legacyError = await fetch(`${baseUrl}/api/legacy-error`);
+  assert.equal(legacyError.status, 500);
   assert.deepEqual(await legacyError.json(), {error: 'Legacy response remains unchanged'});
 
   const clientError = parseApiClientError(409, {error: {code: 'CONFLICT', message: 'Conflict', operationId: 'op-server'}},
