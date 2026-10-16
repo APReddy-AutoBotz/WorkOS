@@ -13,6 +13,11 @@ const PRODUCT_CONTINUATION_LANE_LINE = 'WORKOS-CONTINUATION-LANE: product-implem
 const MINUTE = 60 * 1000;
 const WORKFLOW_ACTIVITY_FRESHNESS_MS = 20 * MINUTE;
 const MAX_AUTHORITY_BODY_LENGTH = 256;
+const WORKOS_CI_WORKFLOW_PATH = '.github/workflows/workos-ci.yml';
+const REQUIRED_WORKOS_CI_CHECKS = [
+  'Validate application, migrations, and container',
+  'Scan full history for secrets',
+];
 
 function parseMergeLease(body = '') {
   const match = String(body).match(MERGE_LEASE_PATTERN);
@@ -116,25 +121,53 @@ function isExactCleanReview(body = '', headSha = '') {
 }
 
 
-function checksAreGreen(checkRuns = [], statuses = [], aggregateState = '') {
+function checksAreGreen(checkRuns = [], statuses, aggregateState = '', {
+  sha = '', repository = '', ciRun = null, totalCount,
+} = {}) {
   if (!Array.isArray(checkRuns) || checkRuns.length === 0) {
     return {green: false, reason: 'no check runs exist for the exact head'};
   }
-  const badCheck = checkRuns.find((check) =>
-    check.status !== 'completed' || check.conclusion !== 'success'
+  if (!Array.isArray(statuses) || !Number.isSafeInteger(totalCount) || totalCount !== statuses.length) {
+    return {green: false, reason: 'legacy status data is missing or incomplete'};
+  }
+  if (!/^[0-9a-f]{40}$/.test(sha) || !repository
+    || ciRun?.head_sha !== sha || ciRun?.path !== WORKOS_CI_WORKFLOW_PATH
+    || ciRun?.repository?.full_name !== repository || ciRun?.head_repository?.full_name !== repository
+    || !['pull_request', 'push', 'workflow_dispatch'].includes(ciRun?.event)
+    || !Number.isSafeInteger(ciRun?.check_suite_id) || ciRun.check_suite_id <= 0
+    || ciRun?.status !== 'completed' || ciRun?.conclusion !== 'success') {
+    return {green: false, reason: 'latest exact-head WorkOS CI workflow is missing, untrusted or not successful'};
+  }
+  const badCheckIndex = checkRuns.findIndex((check) =>
+    !check || check.head_sha !== sha || check.status !== 'completed' || check.conclusion !== 'success'
   );
-  if (badCheck) {
+  if (badCheckIndex !== -1) {
+    const badCheck = checkRuns[badCheckIndex];
+    if (!badCheck) return {green: false, reason: 'check-run data is missing'};
     return {
       green: false,
-      reason: `check ${badCheck.name || badCheck.id} is ${badCheck.status}/${badCheck.conclusion || 'none'}`,
+      reason: badCheck.head_sha !== sha ? 'check run does not match the exact head'
+        : `check ${badCheck.name || badCheck.id} is ${badCheck.status}/${badCheck.conclusion || 'none'}`,
     };
   }
-  if (aggregateState !== 'success') {
-    return {green: false, reason: `combined status is ${aggregateState || 'missing'}`};
+  for (const name of REQUIRED_WORKOS_CI_CHECKS) {
+    const required = checkRuns.filter((check) => check.name === name
+      && check.app?.id === 15368 && check.app?.slug === 'github-actions'
+      && check.check_suite?.id === ciRun.check_suite_id);
+    if (required.length !== 1) {
+      return {green: false, reason: `required WorkOS CI check is missing or ambiguous: ${name}`};
+    }
   }
-  const badStatus = (statuses || []).find((status) => status.state !== 'success');
-  if (badStatus) {
+  const badStatusIndex = statuses.findIndex((status) => !status || status.state !== 'success');
+  if (badStatusIndex !== -1) {
+    const badStatus = statuses[badStatusIndex];
+    if (!badStatus) return {green: false, reason: 'legacy status data is missing'};
     return {green: false, reason: `status ${badStatus.context || 'unknown'} is ${badStatus.state}`};
+  }
+  // GitHub reports pending for zero legacy contexts even when Actions checks passed.
+  // This exception requires explicit, complete emptiness plus the trusted required jobs above.
+  if (aggregateState !== 'success' && !(aggregateState === 'pending' && totalCount === 0)) {
+    return {green: false, reason: `combined status is ${aggregateState || 'missing'}`};
   }
   return {green: true, reason: 'all exact-head check runs and statuses succeeded'};
 }
@@ -507,7 +540,41 @@ async function inspectChecks({github, owner, repo, sha}) {
     per_page: 100,
   });
   const combined = await github.rest.repos.getCombinedStatusForRef({owner, repo, ref: sha, per_page: 100});
-  return checksAreGreen(checks, combined.data.statuses || [], combined.data.state);
+  // Do not coerce an unavailable/truncated status response into an empty set.
+  const statuses = combined.data?.statuses;
+  const totalCount = combined.data?.total_count;
+  if (combined.data?.sha !== sha || !Array.isArray(statuses)
+    || !Number.isSafeInteger(totalCount) || totalCount !== statuses.length) {
+    return {green: false, reason: 'exact-head legacy status data is missing or incomplete'};
+  }
+  const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+    owner, repo, head_sha: sha, per_page: 100,
+  });
+  if (!Array.isArray(runs)) return {green: false, reason: 'workflow-run data is missing'};
+  const ciRuns = runs.filter((run) => run?.path === WORKOS_CI_WORKFLOW_PATH);
+  const workflowIds = new Set(ciRuns.map((run) => run.workflow_id));
+  if (ciRuns.length === 0 || workflowIds.size !== 1) {
+    return {green: false, reason: 'required WorkOS CI workflow is missing or ambiguous'};
+  }
+  const [workflowId] = workflowIds;
+  const relatedRuns = runs.filter((run) => run?.workflow_id === workflowId);
+  if (!Number.isSafeInteger(workflowId) || workflowId <= 0 || relatedRuns.some((run) =>
+    run.path !== WORKOS_CI_WORKFLOW_PATH || run.head_sha !== sha
+    || !Number.isSafeInteger(run.run_number) || run.run_number < 1
+    || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1
+    || !Number.isSafeInteger(run.id) || run.id < 1
+  )) {
+    return {green: false, reason: 'required WorkOS CI workflow identity is incomplete'};
+  }
+  relatedRuns.sort((a, b) => b.run_number - a.run_number || b.run_attempt - a.run_attempt);
+  const ciRun = relatedRuns[0];
+  if (relatedRuns.some((run) => run !== ciRun
+    && run.run_number === ciRun.run_number && run.run_attempt === ciRun.run_attempt)) {
+    return {green: false, reason: 'latest WorkOS CI workflow attempt is ambiguous'};
+  }
+  return checksAreGreen(checks, statuses, combined.data.state, {
+    sha, repository: `${owner}/${repo}`, ciRun, totalCount,
+  });
 }
 
 async function classifyWorkflowRunsForHead({github, owner, repo, headSha}) {
@@ -960,6 +1027,7 @@ module.exports = {
   classifyWorkflowRunsForHead,
   classifyLatestWorkflowRuns,
   inspectReviewGate,
+  inspectChecks,
   isExactCleanReview,
   maybeAutopick,
   normalizeAuthorityBody,

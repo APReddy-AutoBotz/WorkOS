@@ -228,3 +228,10 @@ This is a local candidate based on current `main`; no accepted commit or remote 
 | WOS-GOV-005 | PR-005 task authority and traceability documentation linked to Issue #5 | Pending publication and acceptance |
 
 Full backup/restore rehearsal, monitoring ownership, broader structured logging and v1 handover remain with the later operations/recovery packages. WOS-03B modular/API foundation remains PR-006 and is outside this package.
+
+
+## Controller check-status compatibility checkpoint (not product acceptance)
+
+| Requirement | Bounded implementation/evidence | Acceptance boundary |
+|---|---|---|
+| WOS-OPS-007; WOS-NFR-SEC-011; WOS-GOV-005 | `.github/scripts/workos-continuous-controller.cjs` requires the two existing WorkOS CI jobs from the latest exact-head workflow/check suite and correct GitHub Actions/repository source. It recognizes explicit zero legacy contexts without accepting actual pending/failing statuses, incomplete status data, missing required jobs or unsuccessful observed checks. `.github/scripts/test-workos-continuous-controller.cjs` covers these positives/negatives, latest-run ordering, source spoofing, read failures and final mutable-gate revalidation. `docs/tasks/WOS-CONTINUOUS-CONTROLLER.md` records the policy and API evidence. | Proposed controller-only compatibility change; exact-tree independent review and exact-head CI remain required. It does not accept WOS-03B or any other product work package, grant continuation authority, mark a Draft Ready, authorize a merge, or deploy. Formal independent-review and owner exact-head/base merge gates remain unchanged. |
