@@ -32,6 +32,14 @@ Replace the legacy hourly heartbeat with one guarded controller that checks Work
 - Every generated continuation must say to keep the PR Draft unconditionally, not mark Ready, and not merge. A Ready transition requires a separate explicit owner action outside the autonomous controller; merge decisions remain inside the controller's exact-lease gates.
 - Rerun a workflow automatically at most once, and only when the latest attempt is classified as cancelled, timed_out or startup_failure. Ordinary failures remain visible and are never automatically retried as transient.
 
+### Paginated workflow activity reads
+
+Workflow activity is read with Octokit `github.paginate` for the exact requested `head_sha` and `per_page: 100`. Octokit returns the concatenated normalized workflow-run arrays; the controller validates each normalized array instead of looking for the raw `response.data.workflow_runs` envelope. Each page must have HTTP 200 and an explicit nonnegative integer `total_count`, which Octokit preserves on the array. Counts must remain consistent across pages and equal the final concatenated length. Verified empty history requires an explicit zero count. Octokit's bare-array missing-body/HTTP-409 fallbacks, missing/non-array results, incomplete pagination, changed counts and propagated API errors are rejected rather than treated as no-run evidence; malformed run identities remain fail-closed under the existing classifier. Every page participates in the unchanged latest-run/attempt ordering and active/recent/unknown leases, including an active workflow found after the first page.
+
+The regression suite models normalized Octokit page arrays and verifies empty/single/multiple pages, exact-head query parameters, newer attempts, later-page activity, missing/invalid count metadata, truncated/inconsistent pagination and malformed/unavailable reads. Concurrent history changes or endpoint result caps can conservatively refuse a read; they cannot silently omit workflow activity. Invalid/unavailable reads cannot post a continuation, rerun a workflow or merge; full-controller failure probes assert zero writes. Active/unknown workflow reporting remains separate from work-starting actions. This compatibility repair does not create lane authority or enable a currently ineligible Draft.
+
+API implementation reference: [the github-script v7.0.1 bundled Octokit normalization](https://github.com/actions/github-script/blob/v7.0.1/dist/index.js#L6586-L6605), [iterator](https://github.com/actions/github-script/blob/v7.0.1/dist/index.js#L6620-L6625) and [map callback contract](https://github.com/actions/github-script/blob/v7.0.1/dist/index.js#L6664-L6666).
+
 ## Merge policy
 
 The controller never marks a Draft Ready. A body marker is only a candidate hint; it is not merge authorization. A non-Draft PR is merge-eligible only when its body contains the exact current head/base marker:

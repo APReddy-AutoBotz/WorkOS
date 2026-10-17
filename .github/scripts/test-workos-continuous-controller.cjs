@@ -8,6 +8,7 @@ const {
   authorityTimestamp,
   checksAreGreen,
   classifyLatestWorkflowRuns,
+  classifyWorkflowRunsForHead,
   inspectReviewGate,
   inspectChecks,
   isExactCleanReview,
@@ -975,7 +976,7 @@ async function verifyLiveLaneRevalidationBeforeContinuation() {
         events.push(`pull-list-${pullListCalls}`);
         return pullListCalls === 1 ? [eligibleAtStart] : [revokedDuringFreshnessReads, controllerPr];
       }
-      if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: []}});
+      if (endpoint === listWorkflowRuns) return paginateWorkflowPages([[]], mapFunction);
       if (endpoint === listComments && params.issue_number === 3) return [];
       if (endpoint === listComments && params.issue_number === 27) {
         events.push('freshness-comments');
@@ -1349,7 +1350,7 @@ async function verifyContinuationFreshnessAfterFinalChecks() {
           if (endpoint === listWorkflowRuns) {
             events.push('workflow-recheck');
             if (arrivalPoint === 'workflow-recheck') activityVisible = true;
-            return mapFunction({data: {workflow_runs: []}});
+            return paginateWorkflowPages([[]], mapFunction);
           }
           throw new Error('unexpected final-posting-freshness endpoint');
         },
@@ -1410,7 +1411,7 @@ async function verifyWorkflowFreshnessFinalBoundary() {
       if (endpoint === listPulls) return [activePr];
       if (endpoint === listWorkflowRuns) {
         workflowReads += 1;
-        return mapFunction({data: {workflow_runs: workflowReads === 1 ? [] : [activeWorkflow]}});
+        return paginateWorkflowPages([workflowReads === 1 ? [] : [activeWorkflow]], mapFunction);
       }
       if (endpoint === listComments && params.issue_number === 3) return [];
       if (endpoint === listComments && params.issue_number === 27) return [];
@@ -1464,7 +1465,7 @@ async function verifyLaneAuthorityFinalBoundary() {
         pullListCalls += 1;
         return activityBoundaryReached && pullListCalls >= 3 ? [revokedPr] : [eligiblePr];
       }
-      if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: []}});
+      if (endpoint === listWorkflowRuns) return paginateWorkflowPages([[]], mapFunction);
       if (endpoint === listComments && params.issue_number === 3) return [];
       if (endpoint === listComments && params.issue_number === 27) {
         commentReads += 1;
@@ -1624,13 +1625,13 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
       },
       paginate: async (endpoint, params, mapFunction) => {
         if (endpoint === listPulls) return [activePr];
-        if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: [run({
+        if (endpoint === listWorkflowRuns) return paginateWorkflowPages([[run({
           run_number: 99,
           run_attempt: 1,
           status,
           conclusion: null,
           updated_at: new Date().toISOString(),
-        })]}});
+        })]], mapFunction);
         if (endpoint === listComments && params.issue_number === 3) return [];
         if (endpoint === listComments && params.issue_number === 28) return [];
         throw new Error('unexpected controller-run endpoint');
@@ -1656,11 +1657,122 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
   }
 }
 
+// Octokit normalizes each list response to response.data = [...runs] before mapFn.
+// With no mapFn, paginate returns the concatenation of all normalized page arrays.
+function paginateWorkflowPages(pages, mapFunction) {
+  const totalCount = pages.reduce((count, page) => count + page.length, 0);
+  return pages.flatMap((page) => mapFunction
+    ? mapFunction({status: 200, data: Object.assign([...page], {total_count: totalCount})}) : page);
+}
+
+async function verifyNormalizedWorkflowPagination() {
+  async function classify(pages) {
+    const endpoint = () => { throw new Error('direct first-page read is forbidden'); };
+    let calls = 0;
+    const github = {
+      rest: {actions: {listWorkflowRunsForRepo: endpoint}},
+      paginate: async (selected, params, mapFunction) => {
+        calls += 1;
+        assert.equal(selected, endpoint);
+        assert.deepEqual(params, {owner: 'APReddy-AutoBotz', repo: 'WorkOS', head_sha: HEAD, per_page: 100});
+        return paginateWorkflowPages(pages, mapFunction);
+      },
+    };
+    const result = await classifyWorkflowRunsForHead({github, owner: 'APReddy-AutoBotz', repo: 'WorkOS', headSha: HEAD});
+    assert.equal(calls, 1);
+    return result;
+  }
+  assert.deepEqual(await classify([[]]), {classification: 'none', run: null});
+  const completed = run({id: 10, head_sha: HEAD, updated_at: '2000-01-01T00:00:00Z'});
+  assert.equal((await classify([[completed]])).classification, 'none');
+  const pageOne = Array.from({length: 100}, (_, index) => ({...completed, id: index + 1, run_number: 100 - index}));
+  const laterPageActive = {...completed, id: 101, workflow_id: 2, status: 'queued', conclusion: null};
+  assert.equal((await classify([pageOne, [laterPageActive]])).classification, 'active');
+  assert.equal((await classify([[{...completed, run_number: 11}], [{...completed, run_number: 10, conclusion: 'cancelled'}]])).classification,
+    'none', 'latest run identity still overrides an older late-completing transient');
+  assert.equal((await classify([[completed], [{...completed, run_attempt: 2, status: 'in_progress', conclusion: null}]])).classification,
+    'active', 'a newer attempt on a later page retains the activity lease');
+  assert.equal((await classify([[{}]])).classification, 'unknown', 'missing run identity fails closed');
+
+  // Bare arrays are Octokit's missing-body/409 fallback, not verified empty history.
+  for (const response of [
+    {status: 200, data: []},
+    {status: 200, data: Object.assign([], {total_count: undefined})},
+    {status: 200, data: Object.assign([], {total_count: null})},
+    {status: 200, data: Object.assign([], {total_count: '0'})},
+    {status: 200, data: Object.assign([], {total_count: -1})},
+    {status: 500, data: Object.assign([], {total_count: 0})},
+  ]) {
+    const github = {
+      rest: {actions: {listWorkflowRunsForRepo: () => {}}},
+      paginate: async (_endpoint, _params, mapFunction) => mapFunction(response),
+    };
+    await assert.rejects(classifyWorkflowRunsForHead({github, owner: 'APReddy-AutoBotz', repo: 'WorkOS', headSha: HEAD}),
+      /missing verified count metadata/);
+  }
+  for (const counts of [[2], [2, 3]]) {
+    const github = {
+      rest: {actions: {listWorkflowRunsForRepo: () => {}}},
+      paginate: async (_endpoint, _params, mapFunction) => counts.flatMap((total_count) =>
+        mapFunction({status: 200, data: Object.assign([completed], {total_count})})),
+    };
+    await assert.rejects(classifyWorkflowRunsForHead({github, owner: 'APReddy-AutoBotz', repo: 'WorkOS', headSha: HEAD}),
+      /incomplete or unavailable|count changed during pagination/);
+  }
+
+  for (const returned of [undefined, null, {}, 'not an array']) {
+    const github = {rest: {actions: {listWorkflowRunsForRepo: () => {}}}, paginate: async () => returned};
+    await assert.rejects(classifyWorkflowRunsForHead({github, owner: 'APReddy-AutoBotz', repo: 'WorkOS', headSha: HEAD}),
+      /workflow-run pagination did not return an array/);
+  }
+}
+
+async function verifyWorkflowReadFailuresDoNotWrite() {
+  for (const badRead of [undefined, null, {}, [], 'malformed', new Error('workflow API unavailable'),
+    {page: {status: 200, data: []}},
+    {page: {status: 200, data: Object.assign([run({id: 10})], {total_count: 2})}},
+  ]) {
+    const listPulls = () => {};
+    const listComments = () => {};
+    const listWorkflowRuns = () => {};
+    const writes = [];
+    const github = {
+      rest: {
+        pulls: {list: listPulls, merge: async (args) => { writes.push(args); }},
+        repos: {
+          getBranch: async () => ({data: {commit: {sha: MAIN_SHA}}}),
+          getContent: async () => encodedTaskFile(),
+        },
+        actions: {listWorkflowRunsForRepo: listWorkflowRuns, reRunWorkflow: async (args) => { writes.push(args); }},
+        issues: {
+          listComments,
+          createComment: async (args) => { writes.push(args); },
+          updateComment: async (args) => { writes.push(args); },
+        },
+      },
+      paginate: async (endpoint, params, mapFunction) => {
+        if (endpoint === listPulls) return [productDraft()];
+        if (endpoint === listWorkflowRuns) {
+          assert.equal(params.head_sha, HEAD);
+          if (badRead instanceof Error) throw badRead;
+          if (badRead?.page) return mapFunction(badRead.page);
+          return badRead;
+        }
+        if (endpoint === listComments) return [];
+        throw new Error('unexpected workflow-read test endpoint');
+      },
+    };
+    const summary = {addHeading() { return this; }, addRaw() { return this; }, write() { return this; }};
+    await assert.rejects(runController({github, context: {repo: {owner: 'APReddy-AutoBotz', repo: 'WorkOS'}}, core: {summary}}));
+    assert.equal(writes.length, 0, 'unavailable/malformed workflow data must not post, retry or merge');
+  }
+}
+
 async function verifyWorkflowRunPagination() {
   const listPulls = () => {};
   const listComments = () => {};
   const activePr = productDraft({number: 27});
-  const pageOne = Array.from({length: 50}, (_, index) => ({
+  const pageOne = Array.from({length: 100}, (_, index) => ({
     workflow_id: 101,
     run_number: 100 - index,
     run_attempt: 1,
@@ -1703,8 +1815,9 @@ async function verifyWorkflowRunPagination() {
       if (endpoint === listWorkflowRuns) {
         paginationCalls += 1;
         assert.equal(params.per_page, 100);
-        assert.equal(typeof mapFunction, 'function');
-        return [allRuns.slice(0, 50), allRuns.slice(50)].flatMap((page) => mapFunction({data: {workflow_runs: page}}));
+        assert.equal(typeof mapFunction, 'function', 'validate metadata on normalized arrays without raw-envelope access');
+        assert.equal(params.head_sha, HEAD);
+        return paginateWorkflowPages([allRuns.slice(0, 100), allRuns.slice(100)], mapFunction);
       }
       if (endpoint === listComments && params.issue_number === 3) return [];
       throw new Error('unexpected paginated workflow-boundary endpoint');
@@ -1725,9 +1838,12 @@ async function verifyWorkflowRunPagination() {
   assert.equal(directCalls, 0, 'the first-page REST response is not used directly');
   assert.equal(action.classification, 'workflow-active', 'an active workflow on a later page blocks continuation');
   assert.equal(posted.some((comment) => /@codex/i.test(comment.body || '')), false);
+  assert.ok(posted.every((comment) => comment.issue_number === 3), 'active later-page workflows permit reporting only, never product continuation');
 }
 
 async function runAsyncTests() {
+  await verifyNormalizedWorkflowPagination();
+  await verifyWorkflowReadFailuresDoNotWrite();
   await verifyRequiredChecksAndEmptyLegacyStatuses();
   await verifyProductLaneSelector();
   await verifyControllerLanesDoNotStartContinuation();
@@ -1764,6 +1880,10 @@ runAsyncTests().then(() => console.log(JSON.stringify({
   latestWorkflowAttemptSelection: true,
   nonterminalWorkflowNoAutopick: true,
   exactHeadWorkflowRunsFullyPaginated: true,
+  normalizedWorkflowPageContract: true,
+  verifiedWorkflowPageCountRequired: true,
+  incompleteWorkflowPaginationRejected: true,
+  workflowReadFailuresProduceNoWrites: true,
   ownerAuthoredMergeIntentRequired: true,
   continuationFreshnessRecheckedAtPostBoundary: true,
   continuationFreshnessRecheckedAfterFinalLaneAndWorkflow: true,

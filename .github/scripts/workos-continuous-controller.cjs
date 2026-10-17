@@ -578,19 +578,34 @@ async function inspectChecks({github, owner, repo, sha}) {
 }
 
 async function classifyWorkflowRunsForHead({github, owner, repo, headSha}) {
+  let totalCount = null;
   const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
     owner,
     repo,
     head_sha: headSha,
     per_page: 100,
   }, (response) => {
-    const workflowRuns = response.data?.workflow_runs;
-    if (!Array.isArray(workflowRuns)) {
-      throw new Error('GitHub workflow-run response did not contain a workflow_runs array');
+    // Octokit exposes normalized arrays and preserves the raw total_count on them.
+    // Its missing-body/409 fallbacks are bare arrays, not verified empty history.
+    const page = response.data;
+    if (response.status !== 200 || !Array.isArray(page)
+      || !Object.hasOwn(page, 'total_count')
+      || !Number.isSafeInteger(page.total_count) || page.total_count < 0) {
+      throw new Error('GitHub workflow-run page is missing verified count metadata');
     }
-    return workflowRuns;
+    if (totalCount !== null && page.total_count !== totalCount) {
+      throw new Error('GitHub workflow-run count changed during pagination');
+    }
+    totalCount = page.total_count;
+    return page;
   });
-  return classifyLatestWorkflowRuns(runs || []);
+  if (!Array.isArray(runs)) {
+    throw new Error('GitHub workflow-run pagination did not return an array');
+  }
+  if (totalCount === null || runs.length !== totalCount) {
+    throw new Error('GitHub workflow-run pagination is incomplete or unavailable');
+  }
+  return classifyLatestWorkflowRuns(runs);
 }
 
 async function attemptGuardedMerge({github, owner, repo, candidate}) {
