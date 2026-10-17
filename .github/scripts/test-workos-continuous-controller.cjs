@@ -8,7 +8,9 @@ const {
   authorityTimestamp,
   checksAreGreen,
   classifyLatestWorkflowRuns,
+  classifyWorkflowRunsForHead,
   inspectReviewGate,
+  inspectChecks,
   isExactCleanReview,
   isExactReviewRequest,
   latestDecisiveReviews,
@@ -183,19 +185,87 @@ assert.equal(isExactCleanReview(cleanResult.repeat(4), HEAD), false);
 assert.equal(isExactCleanReview(null, HEAD), false);
 assert.equal(isExactCleanReview('x'.repeat(257), HEAD), false);
 
-assert.deepEqual(
-  checksAreGreen([
-    {name: 'build', status: 'completed', conclusion: 'success'},
-    {name: 'acceptance', status: 'completed', conclusion: 'success'},
-  ], [{context: 'legacy', state: 'success'}], 'success'),
-  {green: true, reason: 'all exact-head check runs and statuses succeeded'},
-);
-assert.equal(checksAreGreen([], [], 'success').green, false);
-assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'skipped'}], [], 'success').green, false);
-assert.equal(checksAreGreen([{name: 'build', status: 'in_progress', conclusion: null}], [], 'success').green, false);
-assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'pending'}], 'pending').green, false);
-assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'success'}], 'pending').green, false);
-assert.equal(checksAreGreen([{name: 'build', status: 'completed', conclusion: 'success'}], [{context: 'legacy', state: 'success'}], 'failure').green, false);
+const CI_CHECK_NAMES = [
+  'Validate application, migrations, and container',
+  'Scan full history for secrets',
+];
+function ciWorkflowRun(overrides = {}) {
+  return {
+    id: 101, workflow_id: 7, run_number: 10, run_attempt: 1,
+    path: '.github/workflows/workos-ci.yml', head_sha: HEAD, check_suite_id: 700,
+    status: 'completed', conclusion: 'success', event: 'pull_request',
+    repository: {full_name: REPOSITORY}, head_repository: {full_name: REPOSITORY},
+    ...overrides,
+  };
+}
+function requiredChecks() {
+  return CI_CHECK_NAMES.map((name, index) => ({
+    id: 801 + index, name, head_sha: HEAD, status: 'completed', conclusion: 'success',
+    check_suite: {id: 700}, app: {id: 15368, slug: 'github-actions'},
+  }));
+}
+function checkGate(checks = requiredChecks(), statuses = [], state = 'pending', evidence = {}) {
+  return checksAreGreen(checks, statuses, state, {
+    sha: HEAD, repository: REPOSITORY, ciRun: ciWorkflowRun(), totalCount: statuses?.length,
+    ...evidence,
+  });
+}
+const ciWorkflow = readFileSync(`${__dirname}/../workflows/workos-ci.yml`, 'utf8');
+for (const name of CI_CHECK_NAMES) assert.ok(ciWorkflow.includes('name: ' + name));
+assert.deepEqual(checkGate(), {green: true, reason: 'all exact-head check runs and statuses succeeded'});
+assert.equal(checkGate(requiredChecks(), [], 'success').green, true);
+assert.equal(checkGate(requiredChecks(), [{context: 'legacy', state: 'success'}], 'success').green, true);
+for (const state of ['', 'failure', 'error', 'unknown', null]) {
+  assert.equal(checkGate(requiredChecks(), [], state).green, false, 'empty contexts cannot override ' + state);
+}
+for (const conclusion of ['skipped', 'neutral', 'cancelled', 'failure', 'timed_out', 'action_required', null]) {
+  const checks = requiredChecks(); checks[0].conclusion = conclusion;
+  assert.equal(checkGate(checks).green, false, 'every observed check must succeed: ' + conclusion);
+}
+for (const status of ['queued', 'in_progress', 'pending', 'waiting', 'requested', null]) {
+  const checks = requiredChecks(); checks[0].status = status;
+  assert.equal(checkGate(checks).green, false, 'unfinished checks cannot pass: ' + status);
+}
+for (const state of ['pending', 'failure', 'error', null]) {
+  assert.equal(checkGate(requiredChecks(), [{context: 'legacy', state}], 'success').green, false);
+  assert.equal(checkGate(requiredChecks(), [{context: 'legacy', state}], 'pending').green, false);
+}
+assert.equal(checkGate(requiredChecks(), [{context: 'legacy', state: 'success'}], 'pending').green, false);
+assert.equal(checkGate([], [], 'success').green, false);
+assert.equal(checkGate(requiredChecks().slice(0, 1)).green, false);
+assert.equal(checkGate([{name: 'unrelated', head_sha: HEAD, status: 'completed', conclusion: 'success'}]).green, false);
+assert.equal(checkGate([...requiredChecks(), {name: 'optional', head_sha: HEAD, status: 'completed', conclusion: 'failure'}]).green, false);
+assert.equal(checkGate([...requiredChecks(), null]).green, false);
+assert.equal(checkGate(requiredChecks(), [null], 'success').green, false);
+for (const statuses of [undefined, null, {}, '']) {
+  assert.equal(checksAreGreen(requiredChecks(), statuses, 'pending', {
+    sha: HEAD, repository: REPOSITORY, ciRun: ciWorkflowRun(), totalCount: 0,
+  }).green, false, 'missing legacy statuses are not an empty array');
+}
+for (const totalCount of [undefined, null, -1, 1, '0', NaN]) {
+  assert.equal(checkGate(requiredChecks(), [], 'pending', {totalCount}).green, false);
+}
+for (const change of [
+  {head_sha: OTHER_HEAD}, {app: {id: 1, slug: 'github-actions'}},
+  {app: {id: 15368, slug: 'other-app'}}, {app: null}, {check_suite: {id: 701}},
+]) {
+  const checks = requiredChecks().map((check) => ({...check, ...change}));
+  assert.equal(checkGate(checks).green, false, 'same-named foreign/stale checks cannot satisfy required CI');
+}
+assert.equal(checkGate([...requiredChecks(), requiredChecks()[0]]).green, false);
+for (const change of [
+  {head_sha: OTHER_HEAD}, {path: '.github/workflows/other.yml'},
+  {repository: {full_name: 'other/repository'}}, {head_repository: {full_name: 'other/fork'}},
+  {event: 'pull_request_target'}, {event: 'workflow_run'}, {check_suite_id: null},
+  {status: 'in_progress'}, {conclusion: 'failure'},
+]) {
+  assert.equal(checkGate(requiredChecks(), [], 'pending', {ciRun: ciWorkflowRun(change)}).green, false);
+}
+assert.equal(checkGate(requiredChecks(), [], 'pending', {ciRun: null}).green, false);
+assert.equal(checksAreGreen(requiredChecks(), [], 'success').green, false);
+assert.equal(checksAreGreen(requiredChecks(), [], undefined, {
+  sha: HEAD, repository: REPOSITORY, ciRun: ciWorkflowRun(), totalCount: 0,
+}).green, false);
 
 const now = new Date('2026-08-28T01:00:00Z').getTime();
 const run = (overrides) => ({
@@ -434,6 +504,11 @@ function buildMergeHarness({
   afterGatesChanges = {},
   finalCheckFails = false,
   finalReviewFails = false,
+  checkRuns = requiredChecks(),
+  combinedData = {sha: HEAD, statuses: [], state: 'pending', total_count: 0},
+  workflowRuns = null,
+  finalCombinedData = combinedData,
+  finalWorkflowRuns = workflowRuns,
   requestBody = reviewRequest,
   requestLogin = 'APReddy-AutoBotz',
   requestCreated = '2026-08-28T00:05:00Z',
@@ -468,6 +543,7 @@ function buildMergeHarness({
     mergeable_state: 'clean',
   };
   const listForRef = () => {};
+  const listRequiredWorkflowRuns = () => {};
   const listReviews = () => {};
   const listComments = () => {};
   const comments = [
@@ -509,19 +585,29 @@ function buildMergeHarness({
         },
       },
       checks: {listForRef},
+      actions: {listWorkflowRunsForRepo: listRequiredWorkflowRuns},
       repos: {
-        getCombinedStatusForRef: async () => ({data: {statuses: [], state: 'success'}}),
+        getCombinedStatusForRef: async () => ({data: checkReads > 1 ? finalCombinedData : combinedData}),
         getCommit: async () => ({data: {commit: {committer: {date: commitDate}}}}),
       },
       issues: {listComments},
     },
-    paginate: async (endpoint) => {
+    paginate: async (endpoint, params) => {
       if (endpoint === listForRef) {
         checkReads += 1;
         if (finalCheckFails && checkReads === 2) {
           return [{name: 'final', status: 'completed', conclusion: 'failure'}];
         }
-        return [{name: 'all', status: 'completed', conclusion: 'success'}];
+        return checkRuns;
+      }
+      if (endpoint === listRequiredWorkflowRuns) {
+        assert.equal(params.head_sha, HEAD);
+        assert.equal(params.per_page, 100);
+        const selected = checkReads > 1 ? finalWorkflowRuns : workflowRuns;
+        return selected ?? [ciWorkflowRun({
+          repository: {full_name: `${params.owner}/${params.repo}`},
+          head_repository: {full_name: `${params.owner}/${params.repo}`},
+        })];
       }
       if (endpoint === listReviews) return extraReviews;
       if (endpoint === listComments) {
@@ -553,6 +639,102 @@ function buildMergeHarness({
     get counts() { return {pullReads, checkReads, reviewReads, commentReads}; },
     get mergeArgs() { return mergeArgs; },
   };
+}
+
+async function verifyRequiredChecksAndEmptyLegacyStatuses() {
+  const args = {owner: 'APReddy-AutoBotz', repo: 'WorkOS', sha: HEAD};
+  const good = buildMergeHarness();
+  assert.equal((await inspectChecks({...args, github: good.github})).green, true);
+  const successfulLegacy = {sha: HEAD, statuses: [{context: 'legacy', state: 'success'}], state: 'success', total_count: 1};
+  assert.equal((await inspectChecks({...args, github: buildMergeHarness({combinedData: successfulLegacy}).github})).green, true);
+
+  const failures = [
+    {combinedData: null},
+    {combinedData: {}},
+    {combinedData: {sha: HEAD, state: 'pending', total_count: 0}},
+    {combinedData: {sha: HEAD, statuses: null, state: 'pending', total_count: 0}},
+    {combinedData: {sha: HEAD, statuses: [], state: 'pending'}},
+    {combinedData: {sha: OTHER_HEAD, statuses: [], state: 'pending', total_count: 0}},
+    {combinedData: {sha: HEAD, statuses: [], state: 'pending', total_count: 1}},
+    {combinedData: {sha: HEAD, statuses: [{state: 'success'}], state: 'success', total_count: 101}},
+    {combinedData: {sha: HEAD, statuses: [], state: 'failure', total_count: 0}},
+    {combinedData: {sha: HEAD, statuses: [], total_count: 0}},
+    {combinedData: {sha: HEAD, statuses: [{state: 'pending'}], state: 'pending', total_count: 1}},
+    {combinedData: {sha: HEAD, statuses: [{state: 'failure'}], state: 'success', total_count: 1}},
+    {checkRuns: []},
+    {checkRuns: requiredChecks().slice(0, 1)},
+    {checkRuns: requiredChecks().map((check) => ({...check, app: {id: 1, slug: 'other'}}))},
+    {checkRuns: requiredChecks().map((check) => ({...check, check_suite: {id: 999}}))},
+    {checkRuns: requiredChecks().map((check) => ({...check, head_sha: OTHER_HEAD}))},
+    {workflowRuns: []},
+    {workflowRuns: {}},
+    {workflowRuns: [ciWorkflowRun({path: '.github/workflows/spoof.yml'})]},
+    {workflowRuns: [ciWorkflowRun({head_sha: OTHER_HEAD})]},
+    {workflowRuns: [ciWorkflowRun({workflow_id: null})]},
+    {workflowRuns: [ciWorkflowRun({id: null})]},
+    {workflowRuns: [ciWorkflowRun({run_number: null})]},
+    {workflowRuns: [ciWorkflowRun({run_attempt: null})]},
+    {workflowRuns: [ciWorkflowRun({repository: {full_name: 'other/repo'}})]},
+    {workflowRuns: [ciWorkflowRun({head_repository: {full_name: 'other/fork'}})]},
+    {workflowRuns: [ciWorkflowRun({event: 'pull_request_target'})]},
+    {workflowRuns: [ciWorkflowRun(), ciWorkflowRun({id: 102, workflow_id: 8})]},
+    {workflowRuns: [ciWorkflowRun(), ciWorkflowRun({id: 102})]},
+    {workflowRuns: [ciWorkflowRun(), ciWorkflowRun({id: 102, path: '.github/workflows/other.yml'})]},
+    // A newer run/attempt blocks even if the previous suite still has green checks.
+    {workflowRuns: [ciWorkflowRun(), ciWorkflowRun({id: 102, run_number: 11, status: 'queued', conclusion: null})]},
+    {workflowRuns: [ciWorkflowRun(), ciWorkflowRun({run_attempt: 2, status: 'in_progress', conclusion: null})]},
+    {workflowRuns: [ciWorkflowRun(), ciWorkflowRun({id: 102, run_number: 11, check_suite_id: 701})]},
+  ];
+  for (const options of failures) {
+    const harness = buildMergeHarness(options);
+    assert.equal((await inspectChecks({...args, github: harness.github})).green, false,
+      'missing, partial, failing or untrusted evidence must block: ' + JSON.stringify(options));
+    assert.equal(harness.mergeArgs, null);
+  }
+
+  const paginated = buildMergeHarness();
+  const originalPaginate = paginated.github.paginate;
+  let runPageReads = 0;
+  // Verify the production path uses pagination with the exact SHA (no first-page shortcut).
+  paginated.github.paginate = async (endpoint, params, ...rest) => {
+    if (endpoint === paginated.github.rest.actions.listWorkflowRunsForRepo) {
+      runPageReads += 1;
+      assert.deepEqual(params, {owner: args.owner, repo: args.repo, head_sha: HEAD, per_page: 100});
+      return [ciWorkflowRun({run_number: 9, id: 100}), ciWorkflowRun()];
+    }
+    return originalPaginate(endpoint, params, ...rest);
+  };
+  assert.equal((await inspectChecks({...args, github: paginated.github})).green, true);
+  assert.equal(runPageReads, 1);
+
+  for (const source of ['checks', 'statuses', 'workflow']) {
+    const unavailable = buildMergeHarness();
+    const original = unavailable.github.paginate;
+    if (source === 'statuses') unavailable.github.rest.repos.getCombinedStatusForRef = async () => { throw new Error('status unavailable'); };
+    else unavailable.github.paginate = async (endpoint, ...rest) => {
+      const target = source === 'checks' ? unavailable.github.rest.checks.listForRef
+        : unavailable.github.rest.actions.listWorkflowRunsForRepo;
+      if (endpoint === target) throw new Error(source + ' unavailable');
+      return original(endpoint, ...rest);
+    };
+    await assert.rejects(inspectChecks({...args, github: unavailable.github}), /unavailable/);
+    assert.equal(unavailable.mergeArgs, null);
+  }
+
+  for (const finalChange of [
+    {finalCombinedData: {sha: HEAD, statuses: [{context: 'late', state: 'pending'}], total_count: 1, state: 'pending'}},
+    {finalCombinedData: {sha: HEAD, statuses: [], total_count: 1, state: 'pending'}},
+    {finalWorkflowRuns: [ciWorkflowRun({
+      repository: {full_name: 'APReddy-AutoBotz/repo'}, head_repository: {full_name: 'APReddy-AutoBotz/repo'},
+      run_attempt: 2, status: 'in_progress', conclusion: null,
+    })]},
+  ]) {
+    const harness = buildMergeHarness(finalChange);
+    const result = await attemptGuardedMerge({github: harness.github, owner: args.owner, repo: 'repo', candidate: {number: 27}});
+    assert.equal(result.performed, false, 'new pending/incomplete evidence must block at final revalidation');
+    assert.match(result.detail, /^final /);
+    assert.equal(harness.mergeArgs, null);
+  }
 }
 
 async function verifyProductLaneSelector() {
@@ -794,7 +976,7 @@ async function verifyLiveLaneRevalidationBeforeContinuation() {
         events.push(`pull-list-${pullListCalls}`);
         return pullListCalls === 1 ? [eligibleAtStart] : [revokedDuringFreshnessReads, controllerPr];
       }
-      if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: []}});
+      if (endpoint === listWorkflowRuns) return paginateWorkflowPages([[]], mapFunction);
       if (endpoint === listComments && params.issue_number === 3) return [];
       if (endpoint === listComments && params.issue_number === 27) {
         events.push('freshness-comments');
@@ -1168,7 +1350,7 @@ async function verifyContinuationFreshnessAfterFinalChecks() {
           if (endpoint === listWorkflowRuns) {
             events.push('workflow-recheck');
             if (arrivalPoint === 'workflow-recheck') activityVisible = true;
-            return mapFunction({data: {workflow_runs: []}});
+            return paginateWorkflowPages([[]], mapFunction);
           }
           throw new Error('unexpected final-posting-freshness endpoint');
         },
@@ -1229,7 +1411,7 @@ async function verifyWorkflowFreshnessFinalBoundary() {
       if (endpoint === listPulls) return [activePr];
       if (endpoint === listWorkflowRuns) {
         workflowReads += 1;
-        return mapFunction({data: {workflow_runs: workflowReads === 1 ? [] : [activeWorkflow]}});
+        return paginateWorkflowPages([workflowReads === 1 ? [] : [activeWorkflow]], mapFunction);
       }
       if (endpoint === listComments && params.issue_number === 3) return [];
       if (endpoint === listComments && params.issue_number === 27) return [];
@@ -1283,7 +1465,7 @@ async function verifyLaneAuthorityFinalBoundary() {
         pullListCalls += 1;
         return activityBoundaryReached && pullListCalls >= 3 ? [revokedPr] : [eligiblePr];
       }
-      if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: []}});
+      if (endpoint === listWorkflowRuns) return paginateWorkflowPages([[]], mapFunction);
       if (endpoint === listComments && params.issue_number === 3) return [];
       if (endpoint === listComments && params.issue_number === 27) {
         commentReads += 1;
@@ -1443,13 +1625,13 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
       },
       paginate: async (endpoint, params, mapFunction) => {
         if (endpoint === listPulls) return [activePr];
-        if (endpoint === listWorkflowRuns) return mapFunction({data: {workflow_runs: [run({
+        if (endpoint === listWorkflowRuns) return paginateWorkflowPages([[run({
           run_number: 99,
           run_attempt: 1,
           status,
           conclusion: null,
           updated_at: new Date().toISOString(),
-        })]}});
+        })]], mapFunction);
         if (endpoint === listComments && params.issue_number === 3) return [];
         if (endpoint === listComments && params.issue_number === 28) return [];
         throw new Error('unexpected controller-run endpoint');
@@ -1475,11 +1657,122 @@ async function verifyNonterminalWorkflowDoesNotAutopick() {
   }
 }
 
+// Octokit normalizes each list response to response.data = [...runs] before mapFn.
+// With no mapFn, paginate returns the concatenation of all normalized page arrays.
+function paginateWorkflowPages(pages, mapFunction) {
+  const totalCount = pages.reduce((count, page) => count + page.length, 0);
+  return pages.flatMap((page) => mapFunction
+    ? mapFunction({status: 200, data: Object.assign([...page], {total_count: totalCount})}) : page);
+}
+
+async function verifyNormalizedWorkflowPagination() {
+  async function classify(pages) {
+    const endpoint = () => { throw new Error('direct first-page read is forbidden'); };
+    let calls = 0;
+    const github = {
+      rest: {actions: {listWorkflowRunsForRepo: endpoint}},
+      paginate: async (selected, params, mapFunction) => {
+        calls += 1;
+        assert.equal(selected, endpoint);
+        assert.deepEqual(params, {owner: 'APReddy-AutoBotz', repo: 'WorkOS', head_sha: HEAD, per_page: 100});
+        return paginateWorkflowPages(pages, mapFunction);
+      },
+    };
+    const result = await classifyWorkflowRunsForHead({github, owner: 'APReddy-AutoBotz', repo: 'WorkOS', headSha: HEAD});
+    assert.equal(calls, 1);
+    return result;
+  }
+  assert.deepEqual(await classify([[]]), {classification: 'none', run: null});
+  const completed = run({id: 10, head_sha: HEAD, updated_at: '2000-01-01T00:00:00Z'});
+  assert.equal((await classify([[completed]])).classification, 'none');
+  const pageOne = Array.from({length: 100}, (_, index) => ({...completed, id: index + 1, run_number: 100 - index}));
+  const laterPageActive = {...completed, id: 101, workflow_id: 2, status: 'queued', conclusion: null};
+  assert.equal((await classify([pageOne, [laterPageActive]])).classification, 'active');
+  assert.equal((await classify([[{...completed, run_number: 11}], [{...completed, run_number: 10, conclusion: 'cancelled'}]])).classification,
+    'none', 'latest run identity still overrides an older late-completing transient');
+  assert.equal((await classify([[completed], [{...completed, run_attempt: 2, status: 'in_progress', conclusion: null}]])).classification,
+    'active', 'a newer attempt on a later page retains the activity lease');
+  assert.equal((await classify([[{}]])).classification, 'unknown', 'missing run identity fails closed');
+
+  // Bare arrays are Octokit's missing-body/409 fallback, not verified empty history.
+  for (const response of [
+    {status: 200, data: []},
+    {status: 200, data: Object.assign([], {total_count: undefined})},
+    {status: 200, data: Object.assign([], {total_count: null})},
+    {status: 200, data: Object.assign([], {total_count: '0'})},
+    {status: 200, data: Object.assign([], {total_count: -1})},
+    {status: 500, data: Object.assign([], {total_count: 0})},
+  ]) {
+    const github = {
+      rest: {actions: {listWorkflowRunsForRepo: () => {}}},
+      paginate: async (_endpoint, _params, mapFunction) => mapFunction(response),
+    };
+    await assert.rejects(classifyWorkflowRunsForHead({github, owner: 'APReddy-AutoBotz', repo: 'WorkOS', headSha: HEAD}),
+      /missing verified count metadata/);
+  }
+  for (const counts of [[2], [2, 3]]) {
+    const github = {
+      rest: {actions: {listWorkflowRunsForRepo: () => {}}},
+      paginate: async (_endpoint, _params, mapFunction) => counts.flatMap((total_count) =>
+        mapFunction({status: 200, data: Object.assign([completed], {total_count})})),
+    };
+    await assert.rejects(classifyWorkflowRunsForHead({github, owner: 'APReddy-AutoBotz', repo: 'WorkOS', headSha: HEAD}),
+      /incomplete or unavailable|count changed during pagination/);
+  }
+
+  for (const returned of [undefined, null, {}, 'not an array']) {
+    const github = {rest: {actions: {listWorkflowRunsForRepo: () => {}}}, paginate: async () => returned};
+    await assert.rejects(classifyWorkflowRunsForHead({github, owner: 'APReddy-AutoBotz', repo: 'WorkOS', headSha: HEAD}),
+      /workflow-run pagination did not return an array/);
+  }
+}
+
+async function verifyWorkflowReadFailuresDoNotWrite() {
+  for (const badRead of [undefined, null, {}, [], 'malformed', new Error('workflow API unavailable'),
+    {page: {status: 200, data: []}},
+    {page: {status: 200, data: Object.assign([run({id: 10})], {total_count: 2})}},
+  ]) {
+    const listPulls = () => {};
+    const listComments = () => {};
+    const listWorkflowRuns = () => {};
+    const writes = [];
+    const github = {
+      rest: {
+        pulls: {list: listPulls, merge: async (args) => { writes.push(args); }},
+        repos: {
+          getBranch: async () => ({data: {commit: {sha: MAIN_SHA}}}),
+          getContent: async () => encodedTaskFile(),
+        },
+        actions: {listWorkflowRunsForRepo: listWorkflowRuns, reRunWorkflow: async (args) => { writes.push(args); }},
+        issues: {
+          listComments,
+          createComment: async (args) => { writes.push(args); },
+          updateComment: async (args) => { writes.push(args); },
+        },
+      },
+      paginate: async (endpoint, params, mapFunction) => {
+        if (endpoint === listPulls) return [productDraft()];
+        if (endpoint === listWorkflowRuns) {
+          assert.equal(params.head_sha, HEAD);
+          if (badRead instanceof Error) throw badRead;
+          if (badRead?.page) return mapFunction(badRead.page);
+          return badRead;
+        }
+        if (endpoint === listComments) return [];
+        throw new Error('unexpected workflow-read test endpoint');
+      },
+    };
+    const summary = {addHeading() { return this; }, addRaw() { return this; }, write() { return this; }};
+    await assert.rejects(runController({github, context: {repo: {owner: 'APReddy-AutoBotz', repo: 'WorkOS'}}, core: {summary}}));
+    assert.equal(writes.length, 0, 'unavailable/malformed workflow data must not post, retry or merge');
+  }
+}
+
 async function verifyWorkflowRunPagination() {
   const listPulls = () => {};
   const listComments = () => {};
   const activePr = productDraft({number: 27});
-  const pageOne = Array.from({length: 50}, (_, index) => ({
+  const pageOne = Array.from({length: 100}, (_, index) => ({
     workflow_id: 101,
     run_number: 100 - index,
     run_attempt: 1,
@@ -1522,8 +1815,9 @@ async function verifyWorkflowRunPagination() {
       if (endpoint === listWorkflowRuns) {
         paginationCalls += 1;
         assert.equal(params.per_page, 100);
-        assert.equal(typeof mapFunction, 'function');
-        return [allRuns.slice(0, 50), allRuns.slice(50)].flatMap((page) => mapFunction({data: {workflow_runs: page}}));
+        assert.equal(typeof mapFunction, 'function', 'validate metadata on normalized arrays without raw-envelope access');
+        assert.equal(params.head_sha, HEAD);
+        return paginateWorkflowPages([allRuns.slice(0, 100), allRuns.slice(100)], mapFunction);
       }
       if (endpoint === listComments && params.issue_number === 3) return [];
       throw new Error('unexpected paginated workflow-boundary endpoint');
@@ -1544,9 +1838,13 @@ async function verifyWorkflowRunPagination() {
   assert.equal(directCalls, 0, 'the first-page REST response is not used directly');
   assert.equal(action.classification, 'workflow-active', 'an active workflow on a later page blocks continuation');
   assert.equal(posted.some((comment) => /@codex/i.test(comment.body || '')), false);
+  assert.ok(posted.every((comment) => comment.issue_number === 3), 'active later-page workflows permit reporting only, never product continuation');
 }
 
 async function runAsyncTests() {
+  await verifyNormalizedWorkflowPagination();
+  await verifyWorkflowReadFailuresDoNotWrite();
+  await verifyRequiredChecksAndEmptyLegacyStatuses();
   await verifyProductLaneSelector();
   await verifyControllerLanesDoNotStartContinuation();
   await verifyLiveLaneRevalidationBeforeContinuation();
@@ -1571,6 +1869,9 @@ runAsyncTests().then(() => console.log(JSON.stringify({
   requestStrictlyAfterCommit: true,
   wholeResponseReviewResult: true,
   aggregateCommitStatus: true,
+  explicitEmptyLegacyStatusCompatibility: true,
+  requiredExactHeadWorkflowChecks: true,
+  incompleteStatusDataRejected: true,
   finalMutableGateRevalidation: true,
   postGateMetadataRevalidation: true,
   editedRequestOrdering: true,
@@ -1579,6 +1880,10 @@ runAsyncTests().then(() => console.log(JSON.stringify({
   latestWorkflowAttemptSelection: true,
   nonterminalWorkflowNoAutopick: true,
   exactHeadWorkflowRunsFullyPaginated: true,
+  normalizedWorkflowPageContract: true,
+  verifiedWorkflowPageCountRequired: true,
+  incompleteWorkflowPaginationRejected: true,
+  workflowReadFailuresProduceNoWrites: true,
   ownerAuthoredMergeIntentRequired: true,
   continuationFreshnessRecheckedAtPostBoundary: true,
   continuationFreshnessRecheckedAfterFinalLaneAndWorkflow: true,

@@ -32,6 +32,14 @@ Replace the legacy hourly heartbeat with one guarded controller that checks Work
 - Every generated continuation must say to keep the PR Draft unconditionally, not mark Ready, and not merge. A Ready transition requires a separate explicit owner action outside the autonomous controller; merge decisions remain inside the controller's exact-lease gates.
 - Rerun a workflow automatically at most once, and only when the latest attempt is classified as cancelled, timed_out or startup_failure. Ordinary failures remain visible and are never automatically retried as transient.
 
+### Paginated workflow activity reads
+
+Workflow activity is read with Octokit `github.paginate` for the exact requested `head_sha` and `per_page: 100`. Octokit returns the concatenated normalized workflow-run arrays; the controller validates each normalized array instead of looking for the raw `response.data.workflow_runs` envelope. Each page must have HTTP 200 and an explicit nonnegative integer `total_count`, which Octokit preserves on the array. Counts must remain consistent across pages and equal the final concatenated length. Verified empty history requires an explicit zero count. Octokit's bare-array missing-body/HTTP-409 fallbacks, missing/non-array results, incomplete pagination, changed counts and propagated API errors are rejected rather than treated as no-run evidence; malformed run identities remain fail-closed under the existing classifier. Every page participates in the unchanged latest-run/attempt ordering and active/recent/unknown leases, including an active workflow found after the first page.
+
+The regression suite models normalized Octokit page arrays and verifies empty/single/multiple pages, exact-head query parameters, newer attempts, later-page activity, missing/invalid count metadata, truncated/inconsistent pagination and malformed/unavailable reads. Concurrent history changes or endpoint result caps can conservatively refuse a read; they cannot silently omit workflow activity. Invalid/unavailable reads cannot post a continuation, rerun a workflow or merge; full-controller failure probes assert zero writes. Active/unknown workflow reporting remains separate from work-starting actions. This compatibility repair does not create lane authority or enable a currently ineligible Draft.
+
+API implementation reference: [the github-script v7.0.1 bundled Octokit normalization](https://github.com/actions/github-script/blob/v7.0.1/dist/index.js#L6586-L6605), [iterator](https://github.com/actions/github-script/blob/v7.0.1/dist/index.js#L6620-L6625) and [map callback contract](https://github.com/actions/github-script/blob/v7.0.1/dist/index.js#L6664-L6666).
+
 ## Merge policy
 
 The controller never marks a Draft Ready. A body marker is only a candidate hint; it is not merge authorization. A non-Draft PR is merge-eligible only when its body contains the exact current head/base marker:
@@ -68,7 +76,7 @@ Before squash merge, the controller must prove all of the following against the 
 
 1. the body marker matches the live head and base, and a separate exact owner-authored merge command is present strictly after the head commit;
 2. GitHub reports mergeable=true and mergeable_state=clean;
-3. at least one exact-head check run exists, every check run/status is completed successfully, and GitHub's aggregate commit-status state is exactly success, with no pending, neutral, skipped, cancelled, omitted or unexecuted result accepted;
+3. the latest exact-head execution of `.github/workflows/workos-ci.yml` is successful and contains both required GitHub Actions checks (`Validate application, migrations, and container` and `Scan full history for secrets`) from that execution's check suite; every observed exact-head check run is completed successfully, and every legacy status is successful. The aggregate commit-status state must be `success`, except that GitHub's `pending` state is accepted when the response explicitly reports an empty legacy `statuses` array and `total_count: 0`. No pending, failed, neutral, skipped, cancelled, omitted or unexecuted check/context is accepted;
 4. no unresolved review thread remains;
 5. neither GitHub's aggregate review decision nor any reviewer's latest decisive review is CHANGES_REQUESTED; a later COMMENTED review cannot hide an earlier change request;
 6. an exact whole-body owner-authored independent-review request exists strictly after the head commit;
@@ -76,6 +84,16 @@ Before squash merge, the controller must prove all of the following against the 
 8. a final live re-fetch proves that Draft/state/head/base/body marker and mergeability did not move during check/review revalidation;
 9. immediately before the exact-SHA merge call, the controller re-reads owner merge authorization, all mutable checks, aggregate status, review/thread and PR metadata gates and fails closed if any changed;
 10. the merge API receives the exact expected head SHA.
+
+### Check-source and empty-context compatibility
+
+The required job names are pinned to the existing WorkOS CI workflow, not inferred from whichever checks happen to exist. The controller paginates workflow runs for the exact head, identifies the one `.github/workflows/workos-ci.yml` workflow, and orders its executions by `run_number`, then `run_attempt`. Its latest execution must belong to the same repository and head repository, have the exact head SHA, use a `pull_request`, `push` or `workflow_dispatch` event, and finish successfully. Each required check must match that SHA, the latest execution's check-suite ID and GitHub Actions app identity. Missing/ambiguous workflow identity, a missing required job, a stale suite, a foreign app/repository/head, or a newer unfinished/failed attempt fails closed. Other observed checks must also succeed; this change adds no optional/skipped-check allowance.
+
+GitHub separates Actions check runs from legacy commit-status contexts. Its combined-status endpoint can report `pending` with zero contexts even when the required Actions jobs passed. The compatibility exception covers only that explicit zero-context case. Missing, malformed, wrong-SHA or count-mismatched status data cannot be treated as empty. The bounded combined-status read requests 100 contexts; if `total_count` does not equal the returned array length (including a truncated response above that limit), the controller refuses eligibility. Any actual pending/failing context still blocks, as does a missing, failure or unknown aggregate state. Check/workflow/status read failures abort the gate. Both initial and final merge revalidation repeat the complete source and status checks.
+
+Renaming/removing a required WorkOS CI job or workflow requires a separately reviewed policy/test update; it must not silently weaken this requirement. This compatibility change does not alter continuation-lane authority, independent-review requests/results, Draft handling, owner merge authorization, exact head/base leases or deployment boundaries.
+
+GitHub API references: [combined commit statuses](https://docs.github.com/en/rest/commits/statuses#get-the-combined-status-for-a-specific-reference), [check runs](https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference), and [workflow runs](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository).
 
 Only one eligible PR is merged per controller run so stacked dependencies re-evaluate on the next run.
 
