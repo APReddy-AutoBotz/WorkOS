@@ -18,6 +18,7 @@ const projectImportRouter = readFileSync('server/modules/imports/project-import-
 const operationalImportRouter = readFileSync('server/modules/imports/operational-import-router.mjs', 'utf8');
 const notificationRouter = readFileSync('server/modules/notifications/notification-router.mjs', 'utf8');
 const leaveRouter = readFileSync('server/modules/leave/leave-router.mjs', 'utf8');
+const availabilityReportRouter = readFileSync('server/modules/reports/availability-report-router.mjs', 'utf8');
 const importIdempotency = readFileSync('server/modules/imports/idempotency.mjs', 'utf8');
 const importOperationMigration = readFileSync('server/migrations/039_wos03_import_operation_contract.sql', 'utf8');
 const allocationImportRoute = operationalImportRouter.slice(
@@ -318,7 +319,10 @@ assert.match(leaveRouter, /router\.post\('\/leave\/requests'/, 'leave request su
 assert.match(leaveRouter, /router\.patch\('\/leave\/requests\/:id\/status'/, 'leave approval route must exist');
 assert.match(leaveRouter, /router\.get\('\/holiday-calendars'/, 'holiday calendar route must exist');
 assert.doesNotMatch(server, /app\.(?:get|post|patch)\('\/api\/(?:leave\/|holiday-calendars)/, 'the entry point must not retain duplicate leave route registrations');
-assert.match(server, /app\.get\('\/api\/reports\/availability'/, 'availability report route must exist');
+assert.match(server, /app\.use\('\/api', createAvailabilityReportRouter\(\{[\s\S]*?run,[\s\S]*?requireDatabase,[\s\S]*?requireAuth,[\s\S]*?requirePermission,[\s\S]*?buildEmployeeScopeWhere,[\s\S]*?\}\)\)/, 'availability report must use the shared database, identity, permission and scope dependencies');
+assert.match(availabilityReportRouter, /router\.get\('\/reports\/availability'/, 'availability report route must exist in its module');
+assert.doesNotMatch(server, /app\.get\('\/api\/reports\/availability'/, 'the entry point must not retain a duplicate availability route');
+assert.doesNotMatch(server, /app\.use\('\/api\/v1', createAvailabilityReportRouter/, 'availability remains legacy-only');
 assert.match(leaveMigration, /create table if not exists leave_requests/, 'leave migration must create leave requests');
 assert.match(leaveMigration, /create table if not exists leave_balances/, 'leave migration must create leave balances');
 assert.match(server, /app\.get\('\/api\/approvals'/, 'approval inbox route must exist');

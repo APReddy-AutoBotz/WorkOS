@@ -135,7 +135,8 @@ const withImportApi = async (databaseUrl, actorId, test) => {
   child.stdout.on('data', collectOutput);
   child.stderr.on('data', collectOutput);
   const baseUrl = `http://127.0.0.1:${port}`;
-  const tokenFor = (userId, username = `synthetic-scope-${userId}`, activeRole = 'Admin') => signTestSession({
+  const tokenFor = (userId, username = `synthetic-scope-${userId}`, activeRole = 'Admin', employeeClaims = {}) => signTestSession({
+    ...employeeClaims,
     sub: userId,
     username,
     activeRole,
@@ -3245,6 +3246,80 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       headers: scopedHeaders(authToken, organizationId, legalEntityId),
       signal: AbortSignal.timeout(5000),
     });
+
+    // Exercise the extracted availability seam with the real identity, scope, permission and SQL layers.
+    const availabilityActorId = randomUUID();
+    const availabilityIds = ['availability-self', 'availability-report', 'availability-unrelated', 'availability-exited'];
+    await pool.query(`insert into country_directors (id,name,region)
+      values ('cd-availability-test','Synthetic Availability Director','Synthetic')`);
+    await pool.query(`insert into employees
+        (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+      select id,upper(id),'Synthetic '||id,id||'@example.test','Consultant','Engineering','US',
+        case when id='availability-unrelated' then 'cd-import-provenance-test' else 'cd-availability-test' end,
+        case when id='availability-exited' then 'Exited' else 'Active' end,'org-default','legal-default'
+      from unnest($1::text[]) as fixture(id)`, [availabilityIds]);
+    await pool.query(`update employees set reporting_manager_id='availability-self' where id='availability-report'`);
+    await pool.query(`insert into users (id,username,employee_id,email,status)
+      values ($1,'synthetic-availability-user','AVAILABILITY-SELF','availability-user@example.test','Active')`, [availabilityActorId]);
+    await pool.query(`insert into user_roles (user_id,role_id)
+      select $1,id from roles where name in ('Employee','TeamLead','ProjectManager','CountryDirector')`, [availabilityActorId]);
+    await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
+      values ($1,'org-default','legal-default',true)`, [availabilityActorId]);
+    await pool.query(`insert into projects
+        (id,project_code,name,client,manager_id,manager_name,start_date,end_date,status,organization_id,legal_entity_id)
+      values ('availability-project','AVAILABILITY-PROJECT','Synthetic Availability Project','Synthetic Client',
+        'availability-self','Synthetic Manager',date '2026-01-01',date '2026-12-31','Active','org-default','legal-default')`);
+    await pool.query(`insert into project_allocations
+        (id,employee_id,project_id,percentage,start_date,end_date,status,organization_id,legal_entity_id)
+      values ('availability-allocation','availability-report','availability-project',10,
+        date '2026-01-01',date '2026-12-31','Active','org-default','legal-default')`);
+    try {
+      const auditCountBeforeAvailability = Number((await pool.query('select count(*)::int as count from audit_logs')).rows[0].count);
+      const unauthenticatedAvailability = await fetch(`${baseUrl}/api/reports/availability`, {signal: AbortSignal.timeout(5000)});
+      assert.equal(unauthenticatedAvailability.status, 401);
+      await unauthenticatedAvailability.json();
+      for (const [role, expectedIds] of [
+        ['Employee', ['availability-self']],
+        ['TeamLead', ['availability-self', 'availability-report']],
+        ['ProjectManager', ['availability-self', 'availability-report']],
+        ['CountryDirector', ['availability-self', 'availability-report']],
+      ]) {
+        const availabilityToken = tokenFor(availabilityActorId, 'synthetic-availability-user', role, {
+          employeeRecordId: 'availability-self', employeeId: 'AVAILABILITY-SELF', countryDirectorId: 'cd-availability-test',
+        });
+        const response = await getScoped('/api/reports/availability?year=1900&employee_id=employee-scope-beta',
+          availabilityToken, 'org-default', 'legal-default');
+        assert.equal(response.status, 200, `${role} may read only its existing availability scope`);
+        const body = await response.json();
+        assert.deepEqual(body.map(row => row.employee_id).sort(), expectedIds.sort(),
+          `${role} report excludes unrelated, exited, foreign-organization and foreign-legal-entity workers`);
+        assert.ok(body.every(row => typeof row.availability_hours === 'string'), 'PostgreSQL numeric output stays unchanged');
+        const wrongScope = await getScoped('/api/reports/availability', availabilityToken, 'org-scope-beta', 'legal-scope-beta');
+        assert.equal(wrongScope.status, 403);
+        assert.equal((await wrongScope.json()).code, 'ORG_SCOPE_DENIED');
+      }
+      for (const [organizationId, legalEntityId, expectedId] of [
+        ['org-default', 'legal-default-other', 'employee-cross-legal'],
+        ['org-scope-beta', 'legal-scope-beta', 'employee-scope-beta'],
+      ]) {
+        const response = await getScoped('/api/reports/availability', multiScopeToken, organizationId, legalEntityId);
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        const expected = (await pool.query(`select id from employees
+          where organization_id=$1 and legal_entity_id=$2 and status<>'Exited' order by name`,
+        [organizationId, legalEntityId])).rows.map(row => row.id);
+        assert.deepEqual(body.map(row => row.employee_id), expected, 'Admin reads exactly the server-selected ownership pair');
+        assert.ok(expected.includes(expectedId));
+      }
+      assert.equal(Number((await pool.query('select count(*)::int as count from audit_logs')).rows[0].count),
+        auditCountBeforeAvailability, 'availability reads and refusals must not append mutation audit events');
+    } finally {
+      await pool.query(`delete from project_allocations where id='availability-allocation'`);
+      await pool.query(`delete from projects where id='availability-project'`);
+      await pool.query('delete from users where id=$1', [availabilityActorId]);
+      await pool.query('delete from employees where id=any($1::text[])', [availabilityIds]);
+      await pool.query(`delete from country_directors where id='cd-availability-test'`);
+    }
 
     const crossScopeBalanceId = 'synthetic-cross-scope-leave-balance';
     await pool.query(`insert into leave_balances
