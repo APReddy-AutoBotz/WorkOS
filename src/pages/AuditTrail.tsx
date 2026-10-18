@@ -28,6 +28,7 @@ import { NoticeBanner } from '../components/ui/NoticeBanner';
 import { Link } from 'react-router-dom';
 import {ScopedAuditHistoryStatus, useScopedAuditHistory} from '../components/audit/ScopedAuditHistory';
 import {OrganizationAuditDiscoveryStatus, OrganizationAuditHistoryStatus, useOrganizationAuditHistory} from '../components/audit/OrganizationAuditHistory';
+import {DeploymentAuditStatus, useDeploymentAuditHistory} from '../components/audit/DeploymentAuditHistory';
 
 const renderAuditValue = (value: unknown, fallback: string) => {
   if (value === undefined || value === null || value === '') return fallback;
@@ -82,8 +83,10 @@ export const AuditTrail = () => {
   const scopedAudit = useScopedAuditHistory(canFetchScopedAudit, adminService.getScopedAuditHistory);
   const auditLogs = useMemo(() => scopedAudit.rows.map(formatLog), [scopedAudit.rows]);
   const canExportScopedAudit = canFetchScopedAudit && scopedAudit.status === 'ready';
-  const [deploymentAuditLogs, setDeploymentAuditLogs] = useState<ReturnType<typeof formatLog>[]>([]);
-  const [deploymentIntegrationLogs, setDeploymentIntegrationLogs] = useState<ReturnType<typeof formatLog>[]>([]);
+  const deploymentAudit = useDeploymentAuditHistory(canViewDeploymentAudit,
+    adminService.getDeploymentAuditLogsForHistory, adminService.getDeploymentIntegrationEventsForHistory);
+  const deploymentAuditLogs = useMemo(() => deploymentAudit.audit.rows.map(formatLog), [deploymentAudit.audit.rows]);
+  const deploymentIntegrationLogs = useMemo(() => deploymentAudit.integration.rows.map(formatIntegrationEvent), [deploymentAudit.integration.rows]);
   const organizationAudit = useOrganizationAuditHistory(canViewOrganizationAudit,
     adminService.getOrganizationAuditScopesForHistory, adminService.getOrganizationAuditLogsForHistory);
   const organizationAuditLogs = useMemo(() => organizationAudit.rows.map(formatLog), [organizationAudit.rows]);
@@ -93,10 +96,11 @@ export const AuditTrail = () => {
   const [selectedLogState, setSelectedLogState] = useState<{
     log: ReturnType<typeof formatLog>; key: string; revision: number;
   } | null>(null);
-  const detailKey = auditView === 'organization' ? organizationAudit.detailKey : scopedAudit.key;
-  const detailRevision = auditView === 'organization' ? 0 : scopedAudit.revision;
-  const selectedLog = selectedLogState && (auditView !== 'scope' && auditView !== 'organization'
-    || (selectedLogState.key === detailKey && selectedLogState.revision === detailRevision))
+  const detailKey = auditView === 'scope' ? JSON.stringify([scopedAudit.key, scopedAudit.revision, scopedAudit.status])
+    : auditView === 'organization' ? organizationAudit.detailKey
+      : auditView === 'deployment' ? deploymentAudit.audit.detailKey : deploymentAudit.integration.detailKey;
+  const detailRevision = auditView === 'scope' ? scopedAudit.revision : 0;
+  const selectedLog = selectedLogState && selectedLogState.key === detailKey && selectedLogState.revision === detailRevision
     ? selectedLogState.log : null;
   const setSelectedLog = (log: ReturnType<typeof formatLog> | null) => setSelectedLogState(log
     ? {log, key: detailKey, revision: detailRevision} : null);
@@ -104,16 +108,6 @@ export const AuditTrail = () => {
   const [todayOnly, setTodayOnly] = useState(false);
   const [criticalOnly, setCriticalOnly] = useState(false);
   const [notice, setNotice] = useState('');
-
-  useEffect(() => {
-    if (canViewDeploymentAudit) {
-      adminService.getDeploymentAuditLogs().then(logs => setDeploymentAuditLogs(logs.map(formatLog)));
-      adminService.getDeploymentIntegrationEvents().then(logs => setDeploymentIntegrationLogs(logs.map(formatIntegrationEvent)));
-    } else {
-      setDeploymentAuditLogs([]);
-      setDeploymentIntegrationLogs([]);
-    }
-  }, [canViewDeploymentAudit]);
 
   useEffect(() => {
     if (auditView === 'scope' && scopedAudit.status !== 'ready') {
@@ -270,6 +264,14 @@ export const AuditTrail = () => {
           rowCount={filteredLogs.length} unfilteredCount={auditLogs.length} retry={scopedAudit.reload} />
       </div>}
 
+      {(auditView === 'deployment' || auditView === 'deployment-integration') && <div className="mb-6 text-xs font-medium text-slate-600 break-words">
+        <DeploymentAuditStatus kind={auditView === 'deployment' ? 'audit' : 'integration'}
+          status={auditView === 'deployment' ? deploymentAudit.audit.status : deploymentAudit.integration.status}
+          rowCount={filteredLogs.length}
+          unfilteredCount={auditView === 'deployment' ? deploymentAuditLogs.length : deploymentIntegrationLogs.length}
+          refresh={auditView === 'deployment' ? deploymentAudit.audit.refresh : deploymentAudit.integration.refresh} />
+      </div>}
+
       {/* Filter Section */}
       <div className="bg-white border border-border-light rounded-2xl p-6 mb-8 flex flex-wrap items-center gap-4 shadow-sm">
          <div className="relative flex-1 min-w-[240px]">
@@ -404,8 +406,10 @@ export const AuditTrail = () => {
       </div>
 
       {/* Detail Panel Placeholder (Simplified for prompt context) */}
-      <AnimatePresence key={auditView === 'organization' ? organizationAudit.detailKey : auditView === 'scope' ? `${scopedAudit.key}:${scopedAudit.revision}:${scopedAudit.status}` : auditView}>
-        {selectedLog && (auditView !== 'organization' || organizationAudit.ready) && (auditView !== 'scope' || canExportScopedAudit) && (auditView !== 'deployment-integration' || canViewDeploymentAudit) && (
+      <AnimatePresence key={`${auditView}:${detailKey}`}>
+        {selectedLog && (auditView !== 'organization' || organizationAudit.ready) && (auditView !== 'scope' || canExportScopedAudit)
+          && (auditView !== 'deployment' || canViewDeploymentAudit && deploymentAudit.audit.ready)
+          && (auditView !== 'deployment-integration' || canViewDeploymentAudit && deploymentAudit.integration.ready) && (
           <>
             <motion.div
                initial={{ opacity: 0 }}

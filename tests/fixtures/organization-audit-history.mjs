@@ -20,8 +20,8 @@ const load = (kind, organizationId) => new Promise((resolve, reject) => pending.
 adminService.getOrganizationAuditScopesForHistory = () => load('scopes');
 adminService.getOrganizationAuditLogsForHistory = organizationId => load('history', organizationId);
 adminService.getScopedAuditHistory = async () => { forbiddenReads += 1; return []; };
-adminService.getDeploymentAuditLogs = async () => { forbiddenReads += 1; return []; };
-adminService.getDeploymentIntegrationEvents = async () => { forbiddenReads += 1; return []; };
+adminService.getDeploymentAuditLogsForHistory = async () => { forbiddenReads += 1; return []; };
+adminService.getDeploymentIntegrationEventsForHistory = async () => { forbiddenReads += 1; return []; };
 adminService.logAction = async () => { writes += 1; };
 const render = () => root.render(React.createElement(BrowserRouter, null, React.createElement(AuditTrail)));
 window.organizationAuditHarness = {

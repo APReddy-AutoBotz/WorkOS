@@ -16,8 +16,8 @@ let writes = 0;
 const pending = [];
 authService.getCurrentUser = () => ({id: 'synthetic-reader', employeeId: 'AUDIT-TEST', role: 'HR', permissionRole: 'HR', permissions: allowed ? ['audit.view', ...(deployment ? ['audit.deployment.view'] : [])] : []});
 adminService.getScopedAuditHistory = () => new Promise((resolve, reject) => pending.push({id: ++sequence, resolve, reject}));
-adminService.getDeploymentAuditLogs = async () => [{id: 'deployment-evidence', timestamp: '2026-10-18T00:00:00Z', userId: 'system', userName: 'Synthetic Operator', userRole: 'HR', module: 'System', action: 'Update', entityId: 'deployment-evidence', details: 'Synthetic deployment evidence'}];
-adminService.getDeploymentIntegrationEvents = async () => [];
+adminService.getDeploymentAuditLogsForHistory = async () => [{id: 'deployment-evidence', timestamp: '2026-10-18T00:00:00Z', userId: 'system', userName: 'Synthetic Operator', userRole: 'HR', module: 'System', action: 'Update', entityId: 'deployment-evidence', details: 'Synthetic deployment evidence'}];
+adminService.getDeploymentIntegrationEventsForHistory = async () => [];
 adminService.logAction = async () => { writes += 1; };
 const render = () => root.render(React.createElement(BrowserRouter, null, React.createElement(AuditTrail)));
 window.auditHarness = {

@@ -1755,6 +1755,18 @@ export const adminService = {
     }
     return DataStorage.get<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, []);
   },
+  getDeploymentAuditLogsForHistory: async (): Promise<AuditLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) {
+      throw new ApiClientError('Deployment audit access is required.', {status: 403});
+    }
+    return (await api.get<Record<string, unknown>[]>('/api/deployment-audit-logs')).map(normalizeAuditLog);
+  },
+  getDeploymentIntegrationEventsForHistory: async (): Promise<IntegrationEventLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) {
+      throw new ApiClientError('Deployment audit access is required.', {status: 403});
+    }
+    return (await api.get<Record<string, unknown>[]>('/api/v1/deployment-integration-events')).map(normalizeIntegrationEventLog);
+  },
   getDeploymentAuditLogs: async (): Promise<AuditLog[]> => {
     if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) return [];
     if (!(await checkBackend())) return [];
