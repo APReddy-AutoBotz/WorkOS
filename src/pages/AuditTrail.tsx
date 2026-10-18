@@ -22,11 +22,12 @@ import { authService } from '../services/authService';
 import { hasPermission } from '../services/permissions';
 import { getOrganizationScope, isDemoFallbackAllowed } from '../services/apiClient';
 import { canFetchScopedAuditHistory } from '../services/accessControl';
-import { AuditLog, IntegrationEventLog, OrganizationAuditScope } from '../types';
+import { AuditLog, IntegrationEventLog } from '../types';
 import { downloadCsv } from '../lib/csv';
 import { NoticeBanner } from '../components/ui/NoticeBanner';
 import { Link } from 'react-router-dom';
 import {ScopedAuditHistoryStatus, useScopedAuditHistory} from '../components/audit/ScopedAuditHistory';
+import {OrganizationAuditDiscoveryStatus, OrganizationAuditHistoryStatus, useOrganizationAuditHistory} from '../components/audit/OrganizationAuditHistory';
 
 const renderAuditValue = (value: unknown, fallback: string) => {
   if (value === undefined || value === null || value === '') return fallback;
@@ -83,23 +84,22 @@ export const AuditTrail = () => {
   const canExportScopedAudit = canFetchScopedAudit && scopedAudit.status === 'ready';
   const [deploymentAuditLogs, setDeploymentAuditLogs] = useState<ReturnType<typeof formatLog>[]>([]);
   const [deploymentIntegrationLogs, setDeploymentIntegrationLogs] = useState<ReturnType<typeof formatLog>[]>([]);
-  const [organizationAuditResult, setOrganizationAuditResult] = useState<{
-    organizationId: string;
-    logs: ReturnType<typeof formatLog>[];
-  } | null>(null);
-  const [organizationAuditScopes, setOrganizationAuditScopes] = useState<OrganizationAuditScope[]>([]);
-  const [selectedOrganizationId, setSelectedOrganizationId] = useState('');
+  const organizationAudit = useOrganizationAuditHistory(canViewOrganizationAudit,
+    adminService.getOrganizationAuditScopesForHistory, adminService.getOrganizationAuditLogsForHistory);
+  const organizationAuditLogs = useMemo(() => organizationAudit.rows.map(formatLog), [organizationAudit.rows]);
   const initialView = canFetchScopedAudit ? 'scope' : canViewOrganizationAudit ? 'organization' : canViewDeploymentAudit ? 'deployment' : 'scope';
   const [auditView, setAuditView] = useState<'scope' | 'organization' | 'deployment' | 'deployment-integration'>(initialView);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLogState, setSelectedLogState] = useState<{
     log: ReturnType<typeof formatLog>; key: string; revision: number;
   } | null>(null);
-  const selectedLog = selectedLogState && (auditView !== 'scope'
-    || (selectedLogState.key === scopedAudit.key && selectedLogState.revision === scopedAudit.revision))
+  const detailKey = auditView === 'organization' ? organizationAudit.detailKey : scopedAudit.key;
+  const detailRevision = auditView === 'organization' ? 0 : scopedAudit.revision;
+  const selectedLog = selectedLogState && (auditView !== 'scope' && auditView !== 'organization'
+    || (selectedLogState.key === detailKey && selectedLogState.revision === detailRevision))
     ? selectedLogState.log : null;
   const setSelectedLog = (log: ReturnType<typeof formatLog> | null) => setSelectedLogState(log
-    ? {log, key: scopedAudit.key, revision: scopedAudit.revision} : null);
+    ? {log, key: detailKey, revision: detailRevision} : null);
   const [moduleFilter, setModuleFilter] = useState('All Modules');
   const [todayOnly, setTodayOnly] = useState(false);
   const [criticalOnly, setCriticalOnly] = useState(false);
@@ -122,42 +122,6 @@ export const AuditTrail = () => {
     }
   }, [auditView, scopedAudit.status, scopedAudit.key, scopedAudit.revision]);
 
-  useEffect(() => {
-    if (!canViewOrganizationAudit) {
-      setOrganizationAuditScopes([]);
-      setOrganizationAuditResult(null);
-      setSelectedOrganizationId('');
-      return;
-    }
-    adminService.getOrganizationAuditScopes().then(scopes => {
-      setOrganizationAuditScopes(scopes);
-      setSelectedOrganizationId(current => scopes.some(scope => scope.organizationId === current)
-        ? current
-        : scopes[0]?.organizationId || '');
-    });
-  }, [canViewOrganizationAudit]);
-
-  useEffect(() => {
-    let current = true;
-    setOrganizationAuditResult(null);
-    if (!canViewOrganizationAudit || !selectedOrganizationId) {
-      return () => { current = false; };
-    }
-    adminService.getOrganizationAuditLogs(selectedOrganizationId)
-      .then(logs => {
-        if (current) {
-          setOrganizationAuditResult({organizationId: selectedOrganizationId, logs: logs.map(formatLog)});
-        }
-      })
-      .catch(() => {
-        if (current) setOrganizationAuditResult(null);
-      });
-    return () => { current = false; };
-  }, [canViewOrganizationAudit, selectedOrganizationId]);
-
-  const organizationAuditLogs = organizationAuditResult?.organizationId === selectedOrganizationId
-    ? organizationAuditResult.logs
-    : [];
   const activeLogs = auditView === 'deployment-integration'
     ? canViewDeploymentAudit ? deploymentIntegrationLogs : []
     : auditView === 'deployment'
@@ -277,31 +241,24 @@ export const AuditTrail = () => {
         </div>
       )}
 
-      {auditView === 'organization' && organizationAuditScopes.length > 0 && (
-        <div className="mb-6 flex flex-wrap items-center gap-3">
-          <label htmlFor="organization-audit-scope" className="text-xs font-bold text-slate-600">Designated organization</label>
-          <select
-            id="organization-audit-scope"
-            value={selectedOrganizationId}
-            onChange={event => {
-              setOrganizationAuditResult(null);
-              setSelectedOrganizationId(event.target.value);
-              setSelectedLog(null);
-            }}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold outline-none focus:border-primary"
-          >
-            {organizationAuditScopes.map(scope => (
-              <option key={scope.organizationId} value={scope.organizationId}>
-                {scope.organizationName} ({scope.organizationCode})
-              </option>
-            ))}
+      {auditView === 'organization' && <div className="mb-6 text-xs font-medium text-slate-600 break-words space-y-4">
+        <OrganizationAuditDiscoveryStatus status={organizationAudit.scopesStatus} count={organizationAudit.options.length}
+          refresh={organizationAudit.refreshScopes} />
+        {organizationAudit.options.length > 0 && <div className="flex flex-wrap items-center gap-3">
+          <label htmlFor="organization-audit-scope" className="font-bold">Designated organization</label>
+          <select id="organization-audit-scope" value={organizationAudit.selectedId}
+            disabled={organizationAudit.historyStatus === 'access'}
+            onChange={event => { organizationAudit.select(event.target.value); setSelectedLog(null); }}
+            className="max-w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-bold outline-none focus:border-primary">
+            {organizationAudit.options.map(scope => <option key={scope.organizationId} value={scope.organizationId}>
+              {scope.organizationName} ({scope.organizationCode})
+            </option>)}
           </select>
-        </div>
-      )}
-
-      {auditView === 'organization' && organizationAuditScopes.length === 0 && (
-        <p className="mb-6 text-xs font-medium text-slate-500" role="status">No organization audit designations are currently active for this account.</p>
-      )}
+        </div>}
+        {organizationAudit.scopesStatus === 'ready' && organizationAudit.options.length > 0 &&
+          <OrganizationAuditHistoryStatus status={organizationAudit.historyStatus} rowCount={filteredLogs.length}
+            unfilteredCount={organizationAuditLogs.length} retry={organizationAudit.retryHistory} />}
+      </div>}
       {auditView === 'deployment' && (
         <p className="mb-6 text-xs font-medium text-slate-500">These records have no organization or legal-entity scope. Export is unavailable in this view.</p>
       )}
@@ -447,8 +404,8 @@ export const AuditTrail = () => {
       </div>
 
       {/* Detail Panel Placeholder (Simplified for prompt context) */}
-      <AnimatePresence key={auditView === 'scope' ? `${scopedAudit.key}:${scopedAudit.revision}:${scopedAudit.status}` : auditView}>
-        {selectedLog && (auditView !== 'scope' || canExportScopedAudit) && (auditView !== 'deployment-integration' || canViewDeploymentAudit) && (
+      <AnimatePresence key={auditView === 'organization' ? organizationAudit.detailKey : auditView === 'scope' ? `${scopedAudit.key}:${scopedAudit.revision}:${scopedAudit.status}` : auditView}>
+        {selectedLog && (auditView !== 'organization' || organizationAudit.ready) && (auditView !== 'scope' || canExportScopedAudit) && (auditView !== 'deployment-integration' || canViewDeploymentAudit) && (
           <>
             <motion.div
                initial={{ opacity: 0 }}

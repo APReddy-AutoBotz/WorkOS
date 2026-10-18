@@ -1775,6 +1775,24 @@ export const adminService = {
       return [];
     }
   },
+  getOrganizationAuditScopesForHistory: async (): Promise<OrganizationAuditScope[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) {
+      throw new ApiClientError('Organization audit access is required.', {status: 403});
+    }
+    const rows = await api.get<Record<string, unknown>[]>('/api/organization-audit-scopes');
+    return rows.map(row => ({organizationId: String(row.organization_id), organizationCode: String(row.organization_code),
+      organizationName: String(row.organization_name), status: String(row.status)}));
+  },
+  getOrganizationAuditLogsForHistory: async (organizationId: string): Promise<AuditLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) {
+      throw new ApiClientError('Organization audit access is required.', {status: 403});
+    }
+    if (typeof organizationId !== 'string' || !organizationId.trim()) {
+      throw new ApiClientError('An authorized organization must be selected.', {status: 400});
+    }
+    const rows = await api.get<Record<string, unknown>[]>(`/api/organization-audit-logs?organizationId=${encodeURIComponent(organizationId)}`);
+    return rows.map(normalizeAuditLog);
+  },
   getOrganizationAuditScopes: async (): Promise<OrganizationAuditScope[]> => {
     if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) return [];
     if (!(await checkBackend())) return [];

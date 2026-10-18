@@ -91,6 +91,7 @@ jobs:
           npm run test:import-history-browser
           npm run test:project-import-ui-browser
           npm run test:scoped-audit-browser
+          npm run test:organization-audit-browser
 
       - name: Prepare disposable schema for production identity tests
         env:
