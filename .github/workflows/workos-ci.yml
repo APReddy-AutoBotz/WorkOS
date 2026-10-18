@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, diagnostic/wos03-scoped-audit-role-revocation]
   workflow_dispatch:
 
 permissions:
@@ -146,6 +146,9 @@ jobs:
             echo "Production startup failed without identifying the missing database setting."
             exit 1
           fi
+
+      - name: Verify scoped audit removed-role invalidation (disposable diagnostic)
+        run: npm run test:scoped-audit-role-revocation
 
   secret-scan:
     name: Scan full history for secrets
