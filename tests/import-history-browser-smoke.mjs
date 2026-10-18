@@ -48,13 +48,27 @@ try {
 
   await page.evaluate(() => window.historyHarness.refresh());
   await page.getByText('Loading operation history…').waitFor();
-  await settle(null, true);
+  await page.waitForFunction(() => window.historyHarness.pending.length > 0);
+  await page.evaluate(() => window.historyHarness.rejectNext({correlationId: 'history-reference-one'}));
   await page.getByRole('alert').waitFor();
+  await page.getByText('history-reference-one', {exact: true}).waitFor();
+  assert.equal(await page.getByText('Operation reference', {exact: true}).count(), 0, 'read-only history has no fabricated operation reference');
   assert.equal(await page.getByText('private diagnostic must not render').count(), 0);
   assert.equal(await page.getByText('synthetic-0.csv', {exact: true}).count(), 0);
+  await page.getByRole('button', {name: 'Retry history'}).focus();
+  await page.keyboard.press('Enter');
+  await page.getByText('Loading operation history…').waitFor();
+  assert.equal(await page.getByText('history-reference-one', {exact: true}).count(), 0, 'retry clears the prior attempt reference before completion');
+  await page.waitForFunction(() => window.historyHarness.pending.length > 0);
+  await page.evaluate(() => window.historyHarness.rejectNext({correlationId: 'history-reference-two', operationId: '<script>private</script>'}));
+  await page.getByText('history-reference-two', {exact: true}).waitFor();
+  assert.equal(await page.getByText('Operation reference', {exact: true}).count(), 0);
+  assert.equal((await page.locator('script').allTextContents()).some(text => text.includes('private</script>')), false,
+    'invalid identifiers are never inserted as markup');
   await page.getByRole('button', {name: 'Retry history'}).click();
   await settle([]);
   await page.getByText('No bulk data operations', {exact: false}).waitFor();
+  assert.equal(await page.getByText('history-reference-two', {exact: true}).count(), 0, 'successful refresh removes failed attempt references');
 
   // Older refresh and old-scope replies must not replace the latest request.
   await page.evaluate(() => window.historyHarness.refresh());
@@ -68,6 +82,14 @@ try {
   assert.equal(await page.getByText('synthetic-0.csv', {exact: true}).count(), 0);
   await page.evaluate(() => window.historyHarness.refresh());
   await page.waitForFunction(() => window.historyHarness.pending.length === 1);
+  await page.evaluate(() => window.dispatchEvent(new Event('workos:organization-scope-changed')));
+  await page.waitForFunction(() => window.historyHarness.pending.length === 2);
+  await page.evaluate(() => window.historyHarness.rejectNext({correlationId: 'old-scope-private-reference'}));
+  await settle([rows[9]]);
+  await page.getByText('synthetic-9.csv', {exact: true}).waitFor();
+  assert.equal(await page.getByText('old-scope-private-reference', {exact: true}).count(), 0, 'late old-scope failures cannot reveal their identifiers');
+  await page.evaluate(() => window.historyHarness.refresh());
+  await page.waitForFunction(() => window.historyHarness.pending.length === 1);
   await page.evaluate(() => window.historyHarness.hide());
   await settle(rows);
   await page.evaluate(() => window.historyHarness.show());
@@ -75,6 +97,16 @@ try {
   await page.getByText('View details for synthetic-0.csv', {exact: true}).click();
   await page.setViewportSize({width: 390, height: 844});
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'mobile view must not overflow horizontally');
+  await page.evaluate(() => window.historyHarness.refresh());
+  await page.waitForFunction(() => window.historyHarness.pending.length === 1);
+  await page.evaluate(() => window.historyHarness.rejectNext({correlationId: 'a'.repeat(128), operationId: 'narrow-operation-reference'}));
+  await page.getByText('a'.repeat(128), {exact: true}).waitFor();
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'long support references wrap on narrow screens');
+  await page.evaluate(() => window.historyHarness.hide());
+  await page.locator('section[aria-labelledby="import-history-title"]').waitFor({state: 'detached'});
+  await page.evaluate(() => window.historyHarness.show());
+  await settle([]);
+  assert.equal(await page.getByText('narrow-operation-reference', {exact: true}).count(), 0, 'unmount/remount cannot retain prior identifiers');
   if (process.env.WORKOS_BROWSER_SCREENSHOT) await page.screenshot({path: process.env.WORKOS_BROWSER_SCREENSHOT, fullPage: true});
   assert.deepEqual(errors, []);
   console.log('Import history browser smoke passed: details/keyboard, error paging, history paging, retry, scope race, unmount/remount, narrow viewport.');

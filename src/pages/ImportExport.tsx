@@ -19,6 +19,7 @@ import { filterAcceptedImportRows, redactCredentialEchoes } from '../lib/importO
 import { beginTrackedExport, consumeExportScopeSwitchNotice, EXPORT_SCOPE_SWITCH_NOTICE, listenForExportScopeSwitch } from '../lib/exportScopeNotice';
 import { termPluralTitle, termTitle } from '../config/terminology';
 import { getOrganizationScope, type OrganizationScope } from '../services/apiClient';
+import {ImportFailureReferences, readImportFailureReferences, type ImportFailureReferences as FailureReferences} from '../components/imports/ImportFailureReferences';
 
 type ImportChannel = 'employees' | 'clients' | 'projects' | 'allocations' | 'timesheets';
 type CsvRow = Record<string, string>;
@@ -138,7 +139,16 @@ export const ImportExport = () => {
   const importOptions = getImportOptions();
   const exportOptions = getReportExportOptions().map(option => ({ ...option, filters: [option.category, 'Scope'], formats: ['CSV'] }));
   const [activeTab, setActiveTab] = useState<'import' | 'export'>('import');
-  const [lastResult, setLastResult] = useState<string>('');
+  const [lastResult, setLastResultText] = useState<string>('');
+  const [failureReferences, setFailureReferences] = useState<FailureReferences | null>(null);
+  const setLastResult = (message: string) => {
+    setLastResultText(message);
+    setFailureReferences(null);
+  };
+  const setImportFailure = (message: string, error: unknown) => {
+    setLastResultText(message);
+    setFailureReferences(readImportFailureReferences(error));
+  };
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
@@ -588,9 +598,9 @@ export const ImportExport = () => {
             }}
             : {}),
         });
-        setLastResult(code === 'IDEMPOTENCY_KEY_REUSED'
+        setImportFailure(code === 'IDEMPOTENCY_KEY_REUSED'
           ? `The validation key for ${fileName} is tied to different data. Choose the CSV again to start a fresh import.`
-          : `Server validation did not finish for ${fileName}. Retry validation with this same import operation; no apply request was sent.`);
+          : `Server validation did not finish for ${fileName}. Retry validation with this same import operation; no apply request was sent.`, error);
       } finally {
         if (isCurrentRequest()) setIsPreviewing(false);
       }
@@ -681,9 +691,9 @@ export const ImportExport = () => {
           }}
           : {}),
       });
-      setLastResult(code === 'IDEMPOTENCY_KEY_REUSED'
+      setImportFailure(code === 'IDEMPOTENCY_KEY_REUSED'
         ? `The validation key for ${snapshot.fileName} is tied to different data. Choose the CSV again to start a fresh import.`
-        : `Server validation still did not finish for ${snapshot.fileName}. You can retry with the same import key.`);
+        : `Server validation still did not finish for ${snapshot.fileName}. You can retry with the same import key.`, error);
     } finally {
       if (isCurrentRequest()) setIsPreviewing(false);
     }
@@ -708,6 +718,7 @@ export const ImportExport = () => {
       if (operation.validationState !== 'complete' || operation.requiresNewImport || applyLock.current) return;
       applyLock.current = true;
       setIsApplying(true);
+      setFailureReferences(null);
       try {
         const backendResult = await runVersionedImport(pendingImport.id as 'projects' | 'clients' | 'allocations' | 'timesheets', {
           fileName: pendingImport.fileName,
@@ -740,9 +751,9 @@ export const ImportExport = () => {
           : '';
         if (code === 'IDEMPOTENCY_KEY_REUSED') {
           setPendingImport({...pendingImport, versionedOperation: {...operation, requiresNewImport: true}});
-          setLastResult(`The apply key for ${pendingImport.fileName} is tied to different data. Choose the CSV again to start a fresh import.`);
+          setImportFailure(`The apply key for ${pendingImport.fileName} is tied to different data. Choose the CSV again to start a fresh import.`, error);
         } else {
-          setLastResult(`The apply result for ${pendingImport.fileName} was not confirmed. Retry with the same validated rows and apply key.`);
+          setImportFailure(`The apply result for ${pendingImport.fileName} was not confirmed. Retry with the same validated rows and apply key.`, error);
         }
       } finally {
         applyLock.current = false;
@@ -757,6 +768,7 @@ export const ImportExport = () => {
       if (!operation || operation.validationState !== 'complete' || operation.requiresNewImport || applyLock.current) return;
       applyLock.current = true;
       setIsApplying(true);
+      setFailureReferences(null);
       try {
         const backendResult = await adminService.applyEmployeeImport(
           pendingImport.fileName,
@@ -788,9 +800,9 @@ export const ImportExport = () => {
           : '';
         if (code === 'IDEMPOTENCY_KEY_REUSED') {
           setPendingImport({...pendingImport, employeeImportOperation: {...operation, requiresNewImport: true}});
-          setLastResult(`The Employee Master key for ${pendingImport.fileName} is tied to different non-credential data. Choose the CSV again to start a new import.`);
+          setImportFailure(`The Employee Master key for ${pendingImport.fileName} is tied to different non-credential data. Choose the CSV again to start a new import.`, error);
         } else {
-          setLastResult(`The Employee Master apply result for ${pendingImport.fileName} was not confirmed. Retry with the same import and key; a retry will replay the first accepted result and will not change credentials.`);
+          setImportFailure(`The Employee Master apply result for ${pendingImport.fileName} was not confirmed. Retry with the same import and key; a retry will replay the first accepted result and will not change credentials.`, error);
         }
         return;
       } finally {
@@ -1129,7 +1141,10 @@ export const ImportExport = () => {
 
       {lastResult && (
         <div className="mb-8 bg-orange-50 border border-primary/20 rounded-2xl px-5 py-4 text-xs font-bold text-heading flex flex-wrap items-center justify-between gap-4">
-          <span>{lastResult}</span>
+          <div role="status" className="min-w-0 flex-1">
+            <span>{lastResult}</span>
+            <ImportFailureReferences references={failureReferences} />
+          </div>
           {pendingImport && (
             <div className="flex flex-wrap gap-3">
       {pendingImport.versionedOperation?.validationState === 'failed'

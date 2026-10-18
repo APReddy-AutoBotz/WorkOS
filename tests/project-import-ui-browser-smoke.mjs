@@ -14,6 +14,21 @@ const genericLogBodies = [];
 const submittedEmployeePasswords = [];
 const responsePlans = [];
 const syntheticHistory = [];
+let failureSequence = 0;
+let latestFailureReferences;
+const observedFailureReferences = [];
+const assertFailureReferences = async () => {
+  assert.ok(latestFailureReferences);
+  const {correlationId, operationId, path, dryRun} = latestFailureReferences;
+  await page.getByText(correlationId, {exact: true}).waitFor();
+  await page.getByText(operationId, {exact: true}).waitFor();
+  assert.equal((await page.locator('body').innerText()).includes('Temporary service failure.'), false);
+  observedFailureReferences.push({path, dryRun});
+};
+const assertNoFailureReferences = async () => {
+  assert.equal(await page.locator('dl[aria-label="Request references for support"]').count(), 0,
+    'fresh requests and successful results clear failed attempt references');
+};
 const syntheticHistoryByScope = new Map();
 let deferNextGenericLogWrite = false;
 let resolveGenericLogWriteStarted;
@@ -116,6 +131,16 @@ await page.route('**/api/**', async route => {
     const defaultValidRows = body.rows.length === 0 ? 0 : body.rows.length;
     const plan = responsePlans.shift() || {status: 200};
     const responseBody = plan.body || operationResult(body, {validRows: defaultValidRows, errors: defaultErrors});
+    if (plan.status >= 400 && responseBody.error && typeof responseBody.error === 'object') {
+      latestFailureReferences = {
+        correlationId: `import-correlation-${++failureSequence}`,
+        operationId: `import-operation-${failureSequence}`, path, dryRun: body.dryRun === true,
+      };
+      Object.assign(responseBody.error, {
+        correlationId: latestFailureReferences.correlationId,
+        operationId: latestFailureReferences.operationId,
+      });
+    }
     if (path === '/api/v1/imports/projects/apply' && body.fileName === 'projects-scope-delayed.csv') {
       delayedScopeRequestResolve({body, headers: request.headers()});
     }
@@ -252,6 +277,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectEmployeeCsv('employees-first.csv', employeeCsv('EMP-UI-101', 'Synthetic Employee 101', firstEmployeePassword));
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  await assertFailureReferences();
   const firstEmployeeDryRun = lastRequest();
   assert.equal(firstEmployeeDryRun.body.dryRun, true);
   assert.equal(firstEmployeeDryRun.body.fileName, 'Employee Master import.csv');
@@ -261,9 +287,21 @@ try {
     'Employee server preview must not send the credential or a credential-derived filename/diagnostic');
   const firstEmployeeDryRunKey = firstEmployeeDryRun.headers['idempotency-key'];
   assert.ok(firstEmployeeDryRunKey);
-  responsePlans.push({status: 200, body: operationResult(firstEmployeeDryRun.body)});
+  const firstEmployeeFailureReference = latestFailureReferences.correlationId;
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await page.getByRole('button', {name: 'Retry Validation'}).click();
+  await page.getByText(/Server validation still did not finish for employees-first\.csv/).waitFor();
+  await assertFailureReferences();
+  assert.notEqual(latestFailureReferences.correlationId, firstEmployeeFailureReference,
+    'another HTTP attempt gets a new support reference without changing the retry key');
+  assert.equal(lastRequest().headers['idempotency-key'], firstEmployeeDryRunKey);
+  assert.deepEqual(lastRequest().body, firstEmployeeDryRun.body);
+  responsePlans.push({status: 200, delayMs: 200, body: operationResult(firstEmployeeDryRun.body)});
+  await page.getByRole('button', {name: 'Retry Validation'}).click();
+  await page.getByRole('button', {name: 'Retrying Validation…'}).waitFor();
+  await assertNoFailureReferences();
   await page.getByText('Server dry run complete for employees-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(lastRequest().headers['idempotency-key'], firstEmployeeDryRunKey,
     'Employee server preview retry keeps the same key');
   assert.deepEqual(lastRequest().body, firstEmployeeDryRun.body,
@@ -272,6 +310,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText(/The Employee Master apply result for employees-first\.csv was not confirmed\./).waitFor();
+  await assertFailureReferences();
   const firstEmployeeApply = lastRequest();
   assert.equal(firstEmployeeApply.path, '/api/v1/imports/employees/apply');
   assert.equal(firstEmployeeApply.body.schemaVersion, 'employee-master/1');
@@ -280,9 +319,12 @@ try {
   assert.ok(firstEmployeeKey);
   assert.notEqual(firstEmployeeKey, firstEmployeeDryRunKey,
     'Employee Master apply has a separate operation key from its password-free preview');
-  responsePlans.push({status: 200, body: {...operationResult(firstEmployeeApply.body), replayed: true}});
+  responsePlans.push({status: 200, delayMs: 200, body: {...operationResult(firstEmployeeApply.body), replayed: true}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByRole('button', {name: 'Applying…'}).waitFor();
+  await assertNoFailureReferences();
   await page.getByText('Confirmed the saved Employee Master result for employees-first.csv. This retry replayed the first accepted result and did not change credentials.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(lastRequest().headers['idempotency-key'], firstEmployeeKey,
     'Employee Master transport retries reuse the original operation key');
   assert.deepEqual(lastRequest().body, firstEmployeeApply.body,
@@ -296,6 +338,7 @@ try {
     'EMP-UI-103', 'Synthetic Employee 103', diagnosticEmployeePassword, diagnosticEmployeePassword,
   ));
   await page.getByText('Server dry run complete for employees-.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'an Employee row with a client-side diagnostic is excluded from apply');
   const diagnosticPreview = lastRequest();
@@ -307,12 +350,14 @@ try {
   submittedEmployeePasswords.push(changedEmployeePassword);
   await selectEmployeeCsv('employees-changed.csv', employeeCsv('EMP-UI-102', 'Synthetic Employee 102', changedEmployeePassword));
   await page.getByText('Server dry run complete for employees-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const changedEmployeeDryRun = lastRequest();
   assert.notEqual(changedEmployeeDryRun.headers['idempotency-key'], firstEmployeeDryRunKey,
     'a newly selected Employee file gets a fresh dry-run key');
   responsePlans.push({status: 409, body: {error: {code: 'IDEMPOTENCY_KEY_REUSED', message: 'This key was already used with different data.'}}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText(/The Employee Master key for employees-changed\.csv is tied to different non-credential data\./).waitFor();
+  await assertFailureReferences();
   const conflictedEmployeeApply = lastRequest();
   assert.notEqual(conflictedEmployeeApply.headers['idempotency-key'], firstEmployeeKey,
     'a newly selected Employee Master CSV gets a fresh apply key');
@@ -331,6 +376,7 @@ try {
   }, {validRows: 2})});
   await selectEmployeeCsv('employees-manager-chain.csv', [employeeManagerHeader, employeeManagerRow, employeeReportRow.join(',')].join('\n'));
   await page.getByText('Server dry run complete for employees-manager-chain.csv: 2/2 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const employeeManagerPreview = lastRequest();
   assert.equal(employeeManagerPreview.body.rows.length, 2,
     'Employee preflight allows a later row to reference an earlier valid employee from the same file');
@@ -343,6 +389,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectProjectCsv('projects-first.csv', csv('PROJECT-UI-101'));
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  await assertFailureReferences();
   const firstPreview = lastRequest();
   assert.equal(firstPreview.body.dryRun, true);
   assert.equal(firstPreview.body.schemaVersion, 'project-master/1');
@@ -356,6 +403,7 @@ try {
   responsePlans.push({status: 200, body: operationResult(firstPreview.body)});
   await page.getByRole('button', {name: 'Retry Validation'}).click();
   await page.getByText('Server dry run complete for projects-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const dryRunRetry = lastRequest();
   assert.equal(dryRunRetry.headers['idempotency-key'], firstPreviewKey, 'validation retry reuses the same key');
   assert.deepEqual(dryRunRetry.body, firstPreview.body, 'validation retry preserves its exact payload');
@@ -366,6 +414,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText(/The apply result for projects-first\.csv was not confirmed\./).waitFor();
+  await assertFailureReferences();
   const firstApply = lastRequest();
   assert.equal(firstApply.body.dryRun, false);
   assert.notEqual(firstApply.headers['idempotency-key'], firstPreviewKey,
@@ -375,12 +424,14 @@ try {
   responsePlans.push({status: 200, body: operationResult(firstApply.body)});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText('Applied 1 valid project master rows from projects-first.csv.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(lastRequest().headers['idempotency-key'], firstApplyKey, 'apply retry reuses the same key');
   assert.deepEqual(lastRequest().body, firstApply.body, 'apply retry preserves the exact payload');
 
   const changedCsv = `${csv('PROJECT-UI-202')}\nPROJECT-UI-203,Synthetic Project 203,client-synthetic,Synthetic Client,EMP-VALID,2026-01-01,2026-12-31,Proposed,true,Delivery,GB,Synthetic test row`;
   await selectProjectCsv('projects-changed.csv', changedCsv);
   await page.getByText('Server dry run complete for projects-changed.csv: 2/2 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const changedPreview = lastRequest();
   assert.notEqual(changedPreview.headers['idempotency-key'], firstPreviewKey,
     'a changed/reselected file starts a new idempotency operation');
@@ -401,6 +452,7 @@ try {
 
   await selectProjectCsv('projects-rejected.csv', csv('PROJECT-UI-303', 'MISSING-MANAGER'));
   await page.getByText('Server dry run complete for projects-rejected.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const rejectedPreview = lastRequest();
   assert.deepEqual(rejectedPreview.body.rows, [], 'all client-rejected rows are passed only as diagnostics to the server dry run');
   assert.equal(rejectedPreview.body.dryRun, true);
@@ -412,6 +464,7 @@ try {
   const malformedCsv = csv('PROJECT-UI-404').replace('projectCode,name', 'projectCodeMissing,name');
   await selectProjectCsv('projects-malformed-header.csv', malformedCsv);
   await page.getByText('Server dry run complete for projects-malformed-header.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const malformedPreview = lastRequest();
   assert.deepEqual(malformedPreview.body.rows, [], 'malformed-header input remains excluded from apply candidates');
   assert.ok(malformedPreview.body.clientErrors.some(error => error.rowNumber === 1 && error.field === 'header'),
@@ -424,6 +477,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectClientCsv('clients-first.csv', clientCsv('', 'Synthetic Client', ''));
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  await assertFailureReferences();
   const firstClientPreview = lastRequest();
   assert.equal(firstClientPreview.path, '/api/v1/imports/clients/apply');
   assert.equal(firstClientPreview.body.schemaVersion, 'client-master/1');
@@ -438,15 +492,24 @@ try {
   responsePlans.push({status: 200, body: operationResult(firstClientPreview.body)});
   await page.getByRole('button', {name: 'Retry Validation'}).click();
   await page.getByText('Server dry run complete for clients-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(lastRequest().headers['idempotency-key'], firstClientPreviewKey,
     'Client Master validation retry reuses the same key');
   assert.deepEqual(lastRequest().body, firstClientPreview.body,
     'Client Master validation retry preserves its exact request payload');
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), false);
 
-  responsePlans.push({status: 200, body: operationResult({...lastRequest().body, dryRun: false})});
+  responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
+  await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
+  await page.getByText(/The apply result for clients-first\.csv was not confirmed\./).waitFor();
+  await assertFailureReferences();
+  const failedClientApply = lastRequest();
+  responsePlans.push({status: 200, body: operationResult(failedClientApply.body)});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText('Applied 1 valid client master rows from clients-first.csv.', {exact: true}).waitFor();
+  assert.equal(lastRequest().headers['idempotency-key'], failedClientApply.headers['idempotency-key']);
+  assert.deepEqual(lastRequest().body, failedClientApply.body);
+  await assertNoFailureReferences();
   const clientApply = lastRequest();
   assert.equal(clientApply.path, '/api/v1/imports/clients/apply');
   assert.equal(clientApply.body.dryRun, false);
@@ -455,6 +518,7 @@ try {
 
   await selectClientCsv('clients-changed.csv', clientCsv('CLIENT-UI-202', 'Synthetic Client Changed'));
   await page.getByText('Server dry run complete for clients-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const changedClientPreview = lastRequest();
   assert.notEqual(changedClientPreview.headers['idempotency-key'], firstClientPreviewKey,
     'a newly selected Client Master file starts fresh idempotency keys');
@@ -465,6 +529,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectAllocationCsv('allocations-first.csv', allocationCsv());
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  await assertFailureReferences();
   const firstAllocationPreview = lastRequest();
   assert.equal(firstAllocationPreview.path, '/api/v1/imports/allocations/apply');
   assert.equal(firstAllocationPreview.body.schemaVersion, 'allocation-control/1');
@@ -479,6 +544,7 @@ try {
   responsePlans.push({status: 200, body: operationResult(firstAllocationPreview.body)});
   await page.getByRole('button', {name: 'Retry Validation'}).click();
   await page.getByText('Server dry run complete for allocations-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(lastRequest().headers['idempotency-key'], firstAllocationDryRunKey,
     'Allocation Control validation retry keeps the same key');
   assert.deepEqual(lastRequest().body, firstAllocationPreview.body,
@@ -487,6 +553,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText(/The apply result for allocations-first\.csv was not confirmed\./).waitFor();
+  await assertFailureReferences();
   const allocationApply = lastRequest();
   assert.equal(allocationApply.body.dryRun, false);
   assert.notEqual(allocationApply.headers['idempotency-key'], firstAllocationDryRunKey,
@@ -495,6 +562,7 @@ try {
   responsePlans.push({status: 200, body: operationResult(allocationApply.body)});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText('Applied 1 valid allocation control rows from allocations-first.csv.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(lastRequest().headers['idempotency-key'], allocationApplyKey,
     'Allocation Control apply retry reuses its original key');
   assert.deepEqual(lastRequest().body, allocationApply.body,
@@ -502,10 +570,12 @@ try {
 
   await selectAllocationCsv('allocations-changed.csv', allocationCsv('allocation-ui-202', 30, 'Active'));
   await page.getByText('Server dry run complete for allocations-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.notEqual(lastRequest().headers['idempotency-key'], firstAllocationDryRunKey,
     'a newly selected Allocation Control file starts a fresh operation');
   await selectAllocationCsv('allocations-rejected.csv', allocationCsv().replace('EMP-VALID', 'MISSING-EMPLOYEE'));
   await page.getByText('Server dry run complete for allocations-rejected.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const rejectedAllocationPreview = lastRequest();
   assert.deepEqual(rejectedAllocationPreview.body.rows, [], 'a fully rejected Allocation Control CSV sends no apply candidate rows');
   assert.equal(rejectedAllocationPreview.body.dryRun, true);
@@ -515,6 +585,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectTimesheetCsv('timesheets-first.csv', timesheetCsv());
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
+  await assertFailureReferences();
   const firstTimesheetPreview = lastRequest();
   assert.equal(firstTimesheetPreview.path, '/api/v1/imports/timesheets/apply');
   assert.equal(firstTimesheetPreview.body.schemaVersion, 'timesheet-import/1');
@@ -524,6 +595,7 @@ try {
   responsePlans.push({status: 200, body: operationResult(firstTimesheetPreview.body)});
   await page.getByRole('button', {name: 'Retry Validation'}).click();
   await page.getByText('Server dry run complete for timesheets-first.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(lastRequest().headers['idempotency-key'], firstTimesheetDryRunKey,
     'Timesheet validation retry keeps the same key');
   assert.deepEqual(lastRequest().body, firstTimesheetPreview.body,
@@ -532,6 +604,7 @@ try {
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText(/The apply result for timesheets-first\.csv was not confirmed\./).waitFor();
+  await assertFailureReferences();
   const timesheetApply = lastRequest();
   assert.notEqual(timesheetApply.headers['idempotency-key'], firstTimesheetDryRunKey,
     'Timesheet apply has a separate key from dry run');
@@ -539,6 +612,7 @@ try {
   responsePlans.push({status: 200, body: operationResult(timesheetApply.body)});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText('Applied 1 valid worklog import rows from timesheets-first.csv.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.equal(lastRequest().headers['idempotency-key'], timesheetApplyKey,
     'Timesheet apply retry reuses its original key');
   assert.deepEqual(lastRequest().body, timesheetApply.body,
@@ -546,10 +620,12 @@ try {
 
   await selectTimesheetCsv('timesheets-changed.csv', timesheetCsv('Submitted'));
   await page.getByText('Server dry run complete for timesheets-changed.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.notEqual(lastRequest().headers['idempotency-key'], firstTimesheetDryRunKey,
     'a newly selected Timesheet file starts a fresh operation');
   await selectTimesheetCsv('timesheets-rejected.csv', timesheetCsv().replace('EMP-VALID', 'MISSING-EMPLOYEE'));
   await page.getByText('Server dry run complete for timesheets-rejected.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const rejectedTimesheetPreview = lastRequest();
   assert.deepEqual(rejectedTimesheetPreview.body.rows, [], 'a fully rejected Timesheet CSV sends no apply candidate rows');
   assert.equal(rejectedTimesheetPreview.body.dryRun, true);
@@ -578,6 +654,7 @@ try {
 
   await selectProjectCsv('projects-scope-pending.csv', csv('PROJECT-SCOPE-PENDING'));
   await page.getByText('Server dry run complete for projects-scope-pending.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const scopedPendingPreview = lastRequest();
   assert.equal(scopedPendingPreview.headers['x-organization-id'], 'org-synthetic-next');
   assert.equal(scopedPendingPreview.headers['x-legal-entity-id'], 'entity-synthetic-next');
@@ -592,17 +669,20 @@ try {
 
   await selectProjectCsv('projects-scope-current.csv', csv('PROJECT-SCOPE-CURRENT'));
   await page.getByText('Server dry run complete for projects-scope-current.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const currentScopePreview = lastRequest();
   assert.equal(currentScopePreview.headers['x-organization-id'], 'org-synthetic-final');
   assert.equal(currentScopePreview.headers['x-legal-entity-id'], 'entity-synthetic-final');
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   await page.getByText('Applied 1 valid project master rows from projects-scope-current.csv.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   const currentScopeApply = lastRequest();
   assert.equal(currentScopeApply.headers['x-organization-id'], 'org-synthetic-final');
   assert.equal(currentScopeApply.headers['x-legal-entity-id'], 'entity-synthetic-final');
 
   await selectProjectCsv('projects-scope-apply.csv', csv('PROJECT-SCOPE-APPLY'));
   await page.getByText('Server dry run complete for projects-scope-apply.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   responsePlans.push({status: 200, delayMs: 250});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   const delayedApplyRequest = await Promise.race([
@@ -639,6 +719,7 @@ try {
 
   await selectProjectCsv('projects-scope-apply-error.csv', csv('PROJECT-SCOPE-APPLY-ERROR'));
   await page.getByText('Server dry run complete for projects-scope-apply-error.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   responsePlans.push({status: 500, delayMs: 250, body: {error: {code: 'SYNTHETIC_STALE_APPLY', message: 'Synthetic private apply error details.'}}});
   await page.getByRole('button', {name: 'Apply Valid Rows'}).click();
   const delayedErrorApplyRequest = await Promise.race([
@@ -659,6 +740,15 @@ try {
   assert.equal(await page.locator('input[type="file"]').nth(2).isDisabled(), false,
     'file selection becomes available once the stale error response finishes');
 
+  await assertNoFailureReferences();
+  assert.equal(await page.getByText(latestFailureReferences.correlationId, {exact: true}).count(), 0,
+    'late old-scope error references remain hidden after the switch');
+  for (const channel of ['employees', 'projects', 'clients', 'allocations', 'timesheets']) {
+    for (const dryRun of [true, false]) {
+      assert.ok(observedFailureReferences.some(record => record.path === `/api/v1/imports/${channel}/apply` && record.dryRun === dryRun),
+        `${channel} ${dryRun ? 'preview' : 'apply'} failures expose only safe support references`);
+    }
+  }
   assert.equal(genericLogWrites, 0, 'backend Employee previews and applies record only their server-owned operation batches, with no duplicate generic history writes');
   assert(genericLogBodies.every(entry => submittedEmployeePasswords.every(password => !JSON.stringify(entry).includes(password))),
     'Employee generic preflight logs must never contain any submitted initial credential');
@@ -667,6 +757,7 @@ try {
   await page.getByText('The previous-scope import apply may have completed. Switch back to the original scope and check Import History before retrying.', {exact: true}).waitFor();
   await selectProjectCsv('projects-scope-switch-race.csv', csv('PROJECT-SCOPE-SWITCH-RACE'));
   await page.getByText('Server dry run complete for projects-scope-switch-race.csv: 1/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   responsePlans.push({status: 200, delayMs: 250});
   const delayedScopeValidationApplyRequest = page.waitForRequest(request => {
     const body = request.postDataJSON();
@@ -680,6 +771,7 @@ try {
   const scopeSelection = page.getByLabel('Organization context').selectOption('org-synthetic-next:entity-synthetic-next');
   await scopeValidationStarted;
   await page.getByText('Applied 1 valid project master rows from projects-scope-switch-race.csv.', {exact: true}).waitFor();
+  await assertNoFailureReferences();
   assert.ok(await page.evaluate(() => sessionStorage.getItem('workos_import_apply_scope_switch_notice')),
     'starting real scope validation persists an apply warning before a delayed selector response can arrive');
   releaseScopeValidation();

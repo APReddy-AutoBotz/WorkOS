@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import type {ImportExportLog} from '../../types';
+import {ImportFailureReferences, readImportFailureReferences, type ImportFailureReferences as FailureReferences} from './ImportFailureReferences';
 
 const PAGE_SIZE = 8;
 const ERROR_PAGE_SIZE = 20;
@@ -48,6 +49,7 @@ export const ImportHistoryPanel = ({
 }) => {
   const [history, setHistory] = useState<ImportExportLog[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [failureReferences, setFailureReferences] = useState<FailureReferences | null>(null);
   const [page, setPage] = useState(0);
   const [retry, setRetry] = useState(0);
   const [scopeVersion, setScopeVersion] = useState(0);
@@ -57,6 +59,7 @@ export const ImportHistoryPanel = ({
     const clearForScopeChange = () => {
       requestVersion.current += 1;
       setHistory([]);
+      setFailureReferences(null);
       setStatus('loading');
       setPage(0);
       setScopeVersion(value => value + 1);
@@ -69,15 +72,17 @@ export const ImportHistoryPanel = ({
     let active = true;
     const request = ++requestVersion.current;
     setHistory([]);
+    setFailureReferences(null);
     setStatus('loading');
     setPage(0);
     void Promise.resolve().then(loadHistory).then(rows => {
       if (!active || request !== requestVersion.current) return;
       setHistory(rows.slice(0, 100));
       setStatus('ready');
-    }).catch(() => {
+    }).catch(error => {
       if (!active || request !== requestVersion.current) return;
       setHistory([]);
+      setFailureReferences(readImportFailureReferences(error));
       setStatus('error');
     });
     return () => { active = false; };
@@ -90,6 +95,7 @@ export const ImportHistoryPanel = ({
       {status === 'loading' && <p role="status" className="text-xs text-body/70">Loading operation history…</p>}
       {status === 'error' && <div role="alert" className="text-xs text-danger">
         <p>Operation history could not be loaded. Check your connection and workspace access, then try again.</p>
+        <ImportFailureReferences references={failureReferences} />
         <button type="button" className="mt-3 font-bold underline" onClick={() => setRetry(value => value + 1)}>Retry history</button>
       </div>}
       {status === 'ready' && history.length === 0 && <p className="p-4 bg-slate-50 rounded-2xl text-xs text-body/60">No bulk data operations have been run yet in this workspace.</p>}

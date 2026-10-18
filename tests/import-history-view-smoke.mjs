@@ -3,7 +3,8 @@ import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {ImportHistoryDetails, ImportHistoryPanel} from '../src/components/imports/ImportHistoryPanel.tsx';
-import {normalizeImportExportLog} from '../src/services/apiClient.ts';
+import {ApiClientError, normalizeImportExportLog, parseApiClientError} from '../src/services/apiClient.ts';
+import {ImportFailureReferences, readImportFailureReferences} from '../src/components/imports/ImportFailureReferences.tsx';
 
 const item = {
   id: 'synthetic-batch', operation: 'Import', channel: 'Employee CSV', fileName: 'synthetic.csv',
@@ -44,4 +45,30 @@ assert(!loading.includes('No bulk data operations'));
 const page = readFileSync('src/pages/ImportExport.tsx', 'utf8');
 assert.match(page, /<ImportHistoryPanel loadHistory=\{adminService\.getImportExportLogs\} revision=\{historyRevision\}/);
 assert(!page.includes('history.slice(0, 8)'));
+const privateFailure = 'private-message-password-accessToken-idempotency-key';
+const tracedError = new ApiClientError(privateFailure, {
+  status: 503, code: 'TEMPORARY_UNAVAILABLE', correlationId: 'trace-safe_1:part', operationId: 'operation-safe.2',
+});
+const references = readImportFailureReferences(tracedError);
+assert.deepEqual(references, {correlationId: 'trace-safe_1:part', operationId: 'operation-safe.2'});
+const failureHtml = renderToStaticMarkup(createElement(ImportFailureReferences, {references}));
+assert(failureHtml.includes('Correlation reference') && failureHtml.includes('trace-safe_1:part'));
+assert(failureHtml.includes('Operation reference') && failureHtml.includes('operation-safe.2'));
+assert(failureHtml.includes('A retry may have different references'));
+assert(failureHtml.includes('break-all') && failureHtml.includes('select-text'));
+assert(!failureHtml.includes(privateFailure) && !failureHtml.includes('TEMPORARY_UNAVAILABLE'));
+assert.equal(renderToStaticMarkup(createElement(ImportFailureReferences, {references: null})), '');
+const headerError = parseApiClientError(503, {error: privateFailure}, new Headers({'X-Correlation-ID': 'legacy-history-reference'}));
+assert.deepEqual(readImportFailureReferences(headerError), {correlationId: 'legacy-history-reference', operationId: undefined});
+for (const invalid of [undefined, null, 123, {}, ['trace'], '', 'a'.repeat(129), ' leading', 'trailing ', 'trace\n', 'trace\r\n', '<script>private()</script>', 'Bearer token', 'trace/secret', 'trace\u0000', 'référence']) {
+  assert.equal(readImportFailureReferences(new ApiClientError(privateFailure, {
+    status: 500, correlationId: invalid, operationId: invalid,
+  })), null, 'malformed references must not be coerced or presented');
+}
+assert.deepEqual(readImportFailureReferences(new ApiClientError(privateFailure, {
+  status: 500, correlationId: 'a'.repeat(128), operationId: '<img src=x>',
+})), {correlationId: 'a'.repeat(128), operationId: undefined});
+for (const error of [null, undefined, new Error(privateFailure), {correlationId: 'invented-reference', operationId: 'invented-operation'}]) {
+  assert.equal(readImportFailureReferences(error), null, 'network/local/plain errors must not fabricate server references');
+}
 console.log('Import history presentation smoke tests passed.');
