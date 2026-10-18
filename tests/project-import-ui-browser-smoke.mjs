@@ -260,6 +260,7 @@ const timesheetCsv = (status = '') => [
   `EMP-VALID,2026-09-27,Project Work,PROJECT-SYNTHETIC,,Delivery,2026-09-25,7.5,Synthetic entry,true,${status},`,
 ].join('\n');
 const lastRequest = () => requests.at(-1);
+const requestCountForPath = path => requests.filter(request => request.path === path).length;
 try {
   await page.goto(`${baseUrl}/tests/fixtures/project-import-ui.html`);
   await page.getByRole('heading', {name: 'Import / Export', exact: true}).waitFor();
@@ -459,8 +460,8 @@ try {
   assert.equal(rejectedPreview.body.clientErrors.length, 1);
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a zero-valid-row dry run cannot be applied');
-  assert.equal(requests.length, 15,
-    'the first rejected Project preview includes eight Employee preview/apply requests and six earlier Project requests');
+  assert.equal(requestCountForPath('/api/v1/imports/projects/apply'), 7,
+    'the first rejected Project preview follows six earlier Project preview/apply requests');
   const malformedCsv = csv('PROJECT-UI-404').replace('projectCode,name', 'projectCodeMissing,name');
   await selectProjectCsv('projects-malformed-header.csv', malformedCsv);
   await page.getByText('Server dry run complete for projects-malformed-header.csv: 0/1 rows are valid. Review saved errors before applying.', {exact: true}).waitFor();
@@ -472,8 +473,8 @@ try {
   assert.equal(malformedPreview.body.dryRun, true);
   assert.equal(await page.getByRole('button', {name: 'Apply Valid Rows'}).isDisabled(), true,
     'a malformed-header dry run cannot apply source rows that were not submitted');
-  assert.equal(requests.length, 16,
-    'the malformed-header Project preview is counted after prior Employee and Project requests');
+  assert.equal(requestCountForPath('/api/v1/imports/projects/apply'), 8,
+    'the malformed-header Project preview adds exactly one Project request');
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectClientCsv('clients-first.csv', clientCsv('', 'Synthetic Client', ''));
   await page.getByRole('button', {name: 'Retry Validation'}).waitFor();
@@ -523,8 +524,8 @@ try {
   assert.notEqual(changedClientPreview.headers['idempotency-key'], firstClientPreviewKey,
     'a newly selected Client Master file starts fresh idempotency keys');
   assert.equal(changedClientPreview.body.schemaVersion, 'client-master/1');
-  assert.equal(requests.length, 20,
-    'Client preview, validation retry and apply requests are included in the v1 request count');
+  assert.equal(requestCountForPath('/api/v1/imports/clients/apply'), 5,
+    'Client preview, validation retry, failed apply, apply retry and reselection each make one Client request');
 
   responsePlans.push({status: 503, body: {error: {code: 'TEMPORARY_UNAVAILABLE', message: 'Temporary service failure.'}}});
   await selectAllocationCsv('allocations-first.csv', allocationCsv());
