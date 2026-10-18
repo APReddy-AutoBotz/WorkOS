@@ -7,7 +7,7 @@ import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportE
 import { DataStorage, STORAGE_KEYS } from './storage';
 import { authService } from './authService';
 import {
-  api, checkBackend, getOrganizationScope,
+  api, checkBackend, getOrganizationScope, ApiClientError, isDemoFallbackAllowed,
   normalizeEmployee, normalizeProject, normalizeAllocation,
   normalizeClient, normalizeTimesheetSummary, normalizeAuditLog,
   normalizeSettings, normalizeCatalogItem, normalizeRoleDefinition,
@@ -22,6 +22,7 @@ import {
   normalizeResourcePlanningReport, normalizeWorkforceCommandCenterReport,
 } from './apiClient';
 import type { OrganizationScope } from './apiClient';
+import {canFetchScopedAuditHistory} from './accessControl';
 import { buildResourcePlanningReport, getAllocationLoad, getLatestApprovedActualUtilization, getActiveAllocationsForEmployee, getDefaultUtilizationEligible, getUtilizationEligibleEmployees } from './calculations';
 import { roundMetric } from '../lib/format';
 import { validateDeactivateManager, validateEmployeeHierarchy } from './orgChart';
@@ -1726,6 +1727,19 @@ export const adminService = {
   getOrganizationSetupReadiness: async (): Promise<OrganizationSetupReadiness | null> => {
     if (!(await checkBackend())) return null;
     return api.get<OrganizationSetupReadiness>('/api/organization-setup/readiness');
+  },
+  // Strict presentation reader: keep legacy Dashboard/report-export fallback semantics separate.
+  getScopedAuditHistory: async (): Promise<AuditLog[]> => {
+    if (!canFetchScopedAuditHistory(authService.getCurrentUser(), Boolean(getOrganizationScope()), isDemoFallbackAllowed())) {
+      throw new ApiClientError('Selected-scope audit access is required.', {status: 403});
+    }
+    // Production reads always reach the authoritative API; retry is not trapped by a cached health failure.
+    if (!isDemoFallbackAllowed() || await checkBackend()) {
+      const raw = await api.get<Record<string, unknown>[]>('/api/audit-logs');
+      return raw.map(normalizeAuditLog);
+    }
+    // Local evidence is permitted only in explicitly configured test/demo mode.
+    return DataStorage.get<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, []);
   },
   getAuditLogs: async (): Promise<AuditLog[]> => {
     if (!hasPermission(authService.getCurrentUser(), 'audit.view')) {

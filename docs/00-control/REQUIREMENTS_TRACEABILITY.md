@@ -54,6 +54,8 @@ A requirement cannot be marked accepted from a PR description or implementation-
 | WOS-NFR-CMP-001–004 | PR-003, 004, 006, 008, 013, 014, 016 | Browser/API/version compatibility and provider-neutral contracts | Partial; initial v1 compatibility path is in progress; wider browser/provider evidence remains open |
 | WOS-NFR-RELSE-001–005 | PR-002 through PR-016 | Version, changelog, migration/rollback, artifact and release evidence | Blueprint |
 
+The PR-006 selected-scope Audit Trail loading/retry increment addresses a bounded part of WOS-NFR-UX-001/005 and OBS-005 in support of WOS-GOV-002/CORE-005 and the named Auditor read-only evidence journey. Its strict presentation reader preserves API failures rather than reporting empty evidence, retains existing permission/no-scope denial, suppresses late-scope/unmounted responses, clears current details on reload and guards exports until current evidence loads. `test:scoped-audit-history` covers real service error/empty/permission/no-scope behavior, default Dashboard/report-export fallback compatibility and production retry after cached health failure; `test:scoped-audit-browser` covers safe states, keyboard retry, export guards, scope races, unmount and narrow presentation and is added to the existing full CI browser step without removing other gates. These are bounded implementation/test contracts, not full Audit/GOV/UX/WOS-03B/product acceptance. Organization-wide/deployment/integration presentation and designation errors remain deferred; grants, retained audit data, policy and schema are unchanged.
+
 ## 3. Work-package traceability
 
 PR identifiers after PR #1 are planned sequence identifiers until opened.
