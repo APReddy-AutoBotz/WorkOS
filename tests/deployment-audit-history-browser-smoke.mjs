@@ -11,7 +11,7 @@ let downloads = 0;
 page.on('pageerror', error => errors.push(error.message));
 page.on('download', () => { downloads += 1; });
 await page.route('**/api/**', route => { unexpectedApi.push(route.request().url()); return route.abort(); });
-const auditRow = id => ({id, timestamp: '2026-10-18T00:00:00Z', userId: 'reader', userName: 'Synthetic Reader', userRole: 'HR', module: 'System', action: 'Update', entityId: id, details: `Synthetic evidence ${id}`});
+const auditRow = id => ({id, source: 'Import', activeRole: 'HR', correlationId: `saved-correlation:${id}`, operationId: `saved-operation:${id}`, importBatchId: `saved-batch:${id}`, sourceIdentifier: `source:${id}`, importProcessingResult: 'Dry Run', timestamp: '2026-10-18T00:00:00Z', userId: 'reader', userName: 'Synthetic Reader', userRole: 'HR', module: 'System', action: 'Update', entityId: id, details: `Synthetic evidence ${id}`});
 const eventRow = id => ({id, createdAt: '2026-10-18T00:00:00Z', provider: 'synthetic', eventType: 'SyntheticDelivered', entityId: id, status: 'Success', responsePayload: {deliveryStatus: 'Delivered'}});
 const pending = async (kind, after = 0) => {
   await page.waitForFunction(({kind, after}) => window.deploymentAuditHarness.pending.some(request => request.kind === kind && request.id > after), {kind, after});
@@ -32,6 +32,15 @@ const noExports = async () => {
   assert.equal(await page.getByRole('button', {name: 'Report', exact: true}).count(), 0);
   assert.equal(downloads, 0);
 };
+const provenance = () => page.getByRole('region', {name: 'Recorded audit provenance', exact: true});
+const assertProvenance = async id => {
+  await provenance().getByText(`saved-operation:${id}`, {exact: true}).waitFor();
+  assert.equal(await provenance().getByText(`saved-correlation:${id}`, {exact: true}).count(), 1);
+  assert.equal(await provenance().getByText(`saved-batch:${id}`, {exact: true}).count(), 1);
+  assert.equal(await provenance().getByText(`source:${id}`, {exact: true}).count(), 1);
+  assert.equal(await provenance().getByText('Dry Run', {exact: true}).count(), 1);
+  assert.equal(await provenance().locator('a,button,input').count(), 0, 'inspection adds no action or navigation');
+};
 try {
   await page.goto(`${baseUrl}/tests/fixtures/deployment-audit-history.html`);
   await page.getByText('Loading deployment audit history…', {exact: true}).waitFor();
@@ -42,6 +51,7 @@ try {
   await entry('initial-integration').focus();
   await page.keyboard.press('Enter');
   await page.getByRole('heading', {name: 'Governance Review', exact: true}).waitFor();
+  assert.equal(await provenance().count(), 0, 'integration-event payloads are not reinterpreted as audit provenance');
   await settle(initialAudit, [], 503);
   await flush();
   assert.equal(await selected('initial-integration'), true, 'audit failure must preserve current integration selection');
@@ -70,8 +80,10 @@ try {
   await tab('Deployment-wide');
   await entry('current-audit').click();
   await page.getByRole('heading', {name: 'Governance Review', exact: true}).waitFor();
+  await assertProvenance('current-audit');
   await settle(failingIntegration, [], 503);
   await flush();
+  await assertProvenance('current-audit');
   assert.equal(await selected('current-audit'), true, 'integration failure must preserve current audit selection');
   assert.equal(await page.getByRole('alert').count(), 0);
   await noExports();

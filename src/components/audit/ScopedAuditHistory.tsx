@@ -1,10 +1,15 @@
 import {useEffect, useRef, useState} from 'react';
 import {ApiClientError, getOrganizationScope} from '../../services/apiClient';
 import type {AuditLog} from '../../types';
+import {authService} from '../../services/authService';
+import {hasPermission} from '../../services/permissions';
 
 const scopeKey = () => {
   const scope = getOrganizationScope();
-  return JSON.stringify([scope?.organizationId ?? null, scope?.legalEntityId ?? null]);
+  const actor = authService.getCurrentUser();
+  return JSON.stringify([scope?.organizationId ?? null, scope?.legalEntityId ?? null,
+    actor?.id ?? null, actor?.employeeId ?? null, actor?.role ?? null, actor?.permissionRole ?? null,
+    hasPermission(actor, 'audit.view')]);
 };
 type AuditHistoryStatus = 'blocked' | 'loading' | 'ready' | 'denied' | 'error';
 

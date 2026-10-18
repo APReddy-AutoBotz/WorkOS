@@ -29,6 +29,8 @@ import { Link } from 'react-router-dom';
 import {ScopedAuditHistoryStatus, useScopedAuditHistory} from '../components/audit/ScopedAuditHistory';
 import {OrganizationAuditDiscoveryStatus, OrganizationAuditHistoryStatus, useOrganizationAuditHistory} from '../components/audit/OrganizationAuditHistory';
 import {DeploymentAuditStatus, useDeploymentAuditHistory} from '../components/audit/DeploymentAuditHistory';
+import {AuditProvenanceDetails, readAuditProvenance} from '../components/audit/AuditProvenanceDetails';
+import type {AuditProvenance} from '../components/audit/AuditProvenanceDetails';
 
 const renderAuditValue = (value: unknown, fallback: string) => {
   if (value === undefined || value === null || value === '') return fallback;
@@ -52,6 +54,7 @@ const formatLog = (log: AuditLog) => ({
   oldVal: renderAuditValue(log.oldValue, 'N/A'),
   newVal: renderAuditValue(log.newValue, log.action),
   status: 'Success',
+  provenance: readAuditProvenance(log) as AuditProvenance | undefined,
   details: log.reason || log.details
 });
 
@@ -67,6 +70,7 @@ const formatIntegrationEvent = (event: IntegrationEventLog): ReturnType<typeof f
   oldVal: renderAuditValue(event.requestPayload, 'No request payload'),
   newVal: renderAuditValue(event.responsePayload, event.status),
   status: event.status,
+  provenance: undefined,
   details: `${event.provider} integration event${event.entityType ? ` for ${event.entityType}` : ''}`,
 });
 
@@ -423,7 +427,7 @@ export const AuditTrail = () => {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed top-0 right-0 h-full w-[400px] bg-white shadow-2xl z-40 border-l border-border-light flex flex-col"
+              className="fixed top-0 right-0 h-full w-[400px] max-w-full bg-white shadow-2xl z-40 border-l border-border-light flex flex-col"
             >
                <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-dark text-white">
                   <div>
@@ -439,6 +443,8 @@ export const AuditTrail = () => {
                </div>
 
                <div className="flex-1 overflow-y-auto p-8 space-y-8">
+                  {auditView !== 'deployment-integration' && selectedLog.provenance &&
+                    <AuditProvenanceDetails provenance={selectedLog.provenance} />}
                   <section>
                      <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Origin & Identity</h4>
                      <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-4">

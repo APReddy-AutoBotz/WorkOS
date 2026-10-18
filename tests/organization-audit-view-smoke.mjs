@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
+import {readAuditProvenance} from '../src/components/audit/AuditProvenanceDetails.tsx';
 import {adminService} from '../src/services/api.ts';
 import {authService} from '../src/services/authService.ts';
 import {ApiClientError, checkBackend, resetBackendCheck} from '../src/services/apiClient.ts';
@@ -19,7 +20,7 @@ let empty = false;
 const calls = [];
 const privateMessage = '<script>private-password-token</script>';
 const scope = {organization_id: 'org-synthetic', organization_code: 'SYN', organization_name: 'Synthetic organization', status: 'Active'};
-const log = {id: 'organization-evidence', user_id: 'reader', user_name: 'Synthetic Reader', user_role: 'HR', action: 'Update', module: 'Organization', details: 'Synthetic evidence', created_at: '2026-10-18T00:00:00Z'};
+const log = {source: 'Import', active_role: 'HR', operation_id: 'saved-api-operation', correlation_id: 'saved-api-correlation', import_batch_id: 'saved-api-batch', source_identifier: 'source-synthetic', import_processing_result: 'Dry Run', id: 'organization-evidence', user_id: 'reader', user_name: 'Synthetic Reader', user_role: 'HR', action: 'Update', module: 'Organization', details: 'Synthetic evidence', created_at: '2026-10-18T00:00:00Z'};
 globalThis.fetch = async (url, init = {}) => {
   calls.push({url, init});
   if (url === '/api/health') return new Response(JSON.stringify({database: health}), {status: 200});
@@ -48,6 +49,8 @@ for (const reader of readers) {
 const scopes = await adminService.getOrganizationAuditScopesForHistory();
 assert.deepEqual(scopes, [{organizationId: 'org-synthetic', organizationCode: 'SYN', organizationName: 'Synthetic organization', status: 'Active'}]);
 assert.equal((await adminService.getOrganizationAuditLogsForHistory('org-synthetic'))[0].id, log.id);
+assert.equal(readAuditProvenance((await adminService.getOrganizationAuditLogsForHistory('org-synthetic'))[0]).operationId, 'saved-api-operation');
+assert.equal(readAuditProvenance((await adminService.getOrganizationAuditLogsForHistory('org-synthetic'))[0]).sourceIdentifier, 'source-synthetic');
 await adminService.getOrganizationAuditLogsForHistory('synthetic/id?part=a&b');
 assert(calls.at(-1).url.endsWith('organizationId=synthetic%2Fid%3Fpart%3Da%26b'), 'selected IDs remain safely URL encoded');
 let before = calls.length;

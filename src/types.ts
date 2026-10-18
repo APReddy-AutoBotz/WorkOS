@@ -117,6 +117,11 @@ export interface AuditLog {
   userRole: string;
   activeRole?: string;
   source?: 'Web' | 'Teams' | 'Email' | 'Import' | 'System' | string;
+  correlationId?: string;
+  operationId?: string;
+  importBatchId?: string;
+  sourceIdentifier?: string;
+  importProcessingResult?: string;
   action: string;
   module: string;
   details: string;

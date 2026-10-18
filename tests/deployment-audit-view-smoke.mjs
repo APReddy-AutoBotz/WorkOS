@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
+import {readAuditProvenance} from '../src/components/audit/AuditProvenanceDetails.tsx';
 import {adminService} from '../src/services/api.ts';
 import {authService} from '../src/services/authService.ts';
 import {ApiClientError, checkBackend, resetBackendCheck} from '../src/services/apiClient.ts';
@@ -18,7 +19,7 @@ let malformed = false;
 let health = 'connected';
 const calls = [];
 const privateMessage = '<script>private-password-token</script>';
-const audit = {id: 'deployment-audit', user_id: 'reader', user_name: 'Synthetic Reader', user_role: 'HR', action: 'Update', module: 'System', details: 'Synthetic evidence', created_at: '2026-10-18T00:00:00Z'};
+const audit = {source: 'Import', active_role: 'HR', operation_id: 'saved-api-operation', correlation_id: 'saved-api-correlation', import_batch_id: 'saved-api-batch', source_identifier: 'source-synthetic', import_processing_result: 'Dry Run', id: 'deployment-audit', user_id: 'reader', user_name: 'Synthetic Reader', user_role: 'HR', action: 'Update', module: 'System', details: 'Synthetic evidence', created_at: '2026-10-18T00:00:00Z'};
 const event = {id: 'deployment-event', provider: 'synthetic', event_type: 'SyntheticDelivered', status: 'Success', response_payload: {deliveryStatus: 'Delivered'}, created_at: '2026-10-18T00:00:00Z'};
 globalThis.fetch = async (url, init = {}) => {
   calls.push({url, init});
@@ -48,6 +49,8 @@ for (const reader of readers) {
   empty = false;
 }
 assert.equal((await readers[0]())[0].userName, 'Synthetic Reader');
+assert.equal(readAuditProvenance((await readers[0]())[0]).operationId, 'saved-api-operation');
+assert.equal(readAuditProvenance((await readers[0]())[0]).sourceIdentifier, 'source-synthetic');
 assert.equal((await readers[1]())[0].eventType, 'SyntheticDelivered');
 assert.deepEqual((await readers[1]())[0].responsePayload, {deliveryStatus: 'Delivered'});
 status = 503;

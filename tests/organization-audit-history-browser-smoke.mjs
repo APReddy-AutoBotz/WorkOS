@@ -12,7 +12,7 @@ page.on('pageerror', error => errors.push(error.message));
 page.on('download', () => { downloads += 1; });
 await page.route('**/api/**', route => { unexpectedApi.push(route.request().url()); return route.abort(); });
 const scope = id => ({organizationId: id, organizationCode: id.toUpperCase(), organizationName: `Synthetic ${id}`, status: 'Active'});
-const row = id => ({id, timestamp: '2026-10-18T00:00:00Z', userId: 'reader', userName: 'Synthetic Reader', userRole: 'HR', module: 'Organization', action: 'Update', entityId: id, details: `Synthetic evidence ${id}`});
+const row = id => ({id, source: 'Import', activeRole: 'HR', correlationId: `saved-correlation:${id}`, operationId: `saved-operation:${id}`, importBatchId: `saved-batch:${id}`, sourceIdentifier: `source:${id}`, importProcessingResult: 'Dry Run', timestamp: '2026-10-18T00:00:00Z', userId: 'reader', userName: 'Synthetic Reader', userRole: 'HR', module: 'Organization', action: 'Update', entityId: id, details: `Synthetic evidence ${id}`});
 const pending = async (kind, after = 0) => {
   await page.waitForFunction(({kind, after}) => window.organizationAuditHarness.pending.some(request => request.kind === kind && request.id > after), {kind, after});
   return page.evaluate(({kind, after}) => {
@@ -29,6 +29,15 @@ const noExports = async () => {
 };
 const refresh = () => page.getByRole('button', {name: 'Refresh audit designations', exact: true}).first().evaluate(button => button.click());
 const select = id => page.getByLabel('Designated organization', {exact: true}).selectOption(id);
+const provenance = () => page.getByRole('region', {name: 'Recorded audit provenance', exact: true});
+const assertProvenance = async id => {
+  await provenance().getByText(`saved-operation:${id}`, {exact: true}).waitFor();
+  assert.equal(await provenance().getByText(`saved-correlation:${id}`, {exact: true}).count(), 1);
+  assert.equal(await provenance().getByText(`saved-batch:${id}`, {exact: true}).count(), 1);
+  assert.equal(await provenance().getByText(`source:${id}`, {exact: true}).count(), 1);
+  assert.equal(await provenance().getByText('Dry Run', {exact: true}).count(), 1);
+  assert.equal(await provenance().locator('a,button,input').count(), 0, 'inspection adds no action or navigation');
+};
 try {
   await page.goto(`${baseUrl}/tests/fixtures/organization-audit-history.html`);
   await page.getByText('Loading organization audit designations…', {exact: true}).waitFor();
@@ -63,10 +72,12 @@ try {
   await page.getByRole('button', {name: 'View audit entry org-b-evidence', exact: true}).focus();
   await page.keyboard.press('Enter');
   await page.getByRole('heading', {name: 'Governance Review', exact: true}).waitFor();
+  await assertProvenance('org-b-evidence');
   await noExports();
   await refresh();
   await page.getByText('Loading organization audit designations…', {exact: true}).waitFor();
   assert.equal(await page.getByRole('heading', {name: 'Governance Review', exact: true}).count(), 0);
+  assert.equal(await provenance().count(), 0, 'designation refresh clears saved provenance');
   assert.equal(await page.getByLabel('Designated organization', {exact: true}).count(), 0);
   await settle(await pending('scopes'), [], 503);
   await page.getByRole('alert').waitFor();

@@ -381,13 +381,20 @@ export const normalizeTimesheetSummary = (
   };
 };
 
+const auditContextText = (value: unknown) => typeof value === 'string' && value.trim() ? value : undefined;
+
 export const normalizeAuditLog = (r: Record<string, unknown>): AuditLog => ({
   id: String(r.id),
   userId: String(r.user_id),
   userName: String(r.user_name),
   userRole: String(r.user_role),
-  activeRole: r.active_role ? String(r.active_role) : undefined,
-  source: r.source ? String(r.source) : undefined,
+  activeRole: auditContextText(r.active_role),
+  source: auditContextText(r.source),
+  correlationId: auditContextText(r.correlation_id),
+  operationId: auditContextText(r.operation_id),
+  importBatchId: auditContextText(r.import_batch_id),
+  sourceIdentifier: auditContextText(r.source_identifier),
+  importProcessingResult: auditContextText(r.import_processing_result),
   action: String(r.action),
   module: String(r.module),
   details: String(r.details),

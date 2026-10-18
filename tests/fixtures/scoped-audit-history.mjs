@@ -10,11 +10,13 @@ import '../../src/index.css';
 
 const root = createRoot(document.getElementById('root'));
 let allowed = true;
+let actor = 'synthetic-reader';
+let role = 'HR';
 const deployment = new URLSearchParams(window.location.search).has('deployment');
 let sequence = 0;
 let writes = 0;
 const pending = [];
-authService.getCurrentUser = () => ({id: 'synthetic-reader', employeeId: 'AUDIT-TEST', role: 'HR', permissionRole: 'HR', permissions: allowed ? ['audit.view', ...(deployment ? ['audit.deployment.view'] : [])] : []});
+authService.getCurrentUser = () => ({id: actor, employeeId: 'AUDIT-TEST', role, permissionRole: role, permissions: allowed ? ['audit.view', ...(deployment ? ['audit.deployment.view'] : [])] : []});
 adminService.getScopedAuditHistory = () => new Promise((resolve, reject) => pending.push({id: ++sequence, resolve, reject}));
 adminService.getDeploymentAuditLogsForHistory = async () => [{id: 'deployment-evidence', timestamp: '2026-10-18T00:00:00Z', userId: 'system', userName: 'Synthetic Operator', userRole: 'HR', module: 'System', action: 'Update', entityId: 'deployment-evidence', details: 'Synthetic deployment evidence'}];
 adminService.getDeploymentIntegrationEventsForHistory = async () => [];
@@ -37,6 +39,8 @@ window.auditHarness = {
     window.dispatchEvent(new Event('workos:organization-scope-changed'));
   },
   permission(value) { allowed = value; render(); },
+  actor(value) { actor = value; render(); },
+  role(value) { role = value; render(); },
   hide() { root.render(null); },
   show: render,
 };
