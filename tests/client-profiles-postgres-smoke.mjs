@@ -5,7 +5,6 @@ import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {runMigrations} from '../server/migrate.mjs';
 import {createContract, createEngagement} from '../server/modules/commercial-drafting/service.mjs';
-import {transitionLifecycle, createGovernedProject} from '../server/modules/commercial-drafting/lifecycle-service.mjs';
 import {localDatabaseUrl} from './support/import-audit-journey.mjs';
 import {seedCommercialReferences, seedCommercialLegacyWork, seedCommercialIdentities} from './support/commercial-drafting-test.mjs';
 import {
@@ -60,10 +59,40 @@ const seedGovernedHistory = async (pool, identities, today) => {
     const engagement = await createEngagement(client, req, {...common, code: 'SYN-PRESERVED-ENGAGEMENT', name: 'Synthetic immutable delivery', model: 'fixed_fee',
       ownerId: f.ownerId, currency: 'USD', budget: '10000.0001', clientId: f.clientId, contractId: contract.id, contractVersionId: pin,
       attributionId: null, reason: 'Synthetic preserved engagement'}, async () => {});
-    for (const [type, id] of [['Contract', contract.id], ['Engagement', engagement.id]]) await transitionLifecycle(client, req, type, id,
-      {expectedSequence: 0, state: 'Active', contractVersionId: pin, reason: 'Synthetic preserved activation', approvalReference: null}, async () => {});
-    const project = await createGovernedProject(client, req, {...common, engagementId: engagement.id, projectId: null, code: 'SYN-PRESERVED-PROJECT',
-      name: 'Synthetic governed project', managerId: f.ownerId, billable: true, budgetAllocation: '100.0001', reason: 'Synthetic preserved project'}, async () => {});
+    // Seed the intentionally retained 041 schema with real, schema-compatible
+    // SQL rather than running today's 043-aware lifecycle binary on old tables.
+    // All 041 scoped-root, chronology, immutable-pin and project-projection
+    // triggers remain enabled. The upgrade and preservation snapshot stay below.
+    const activate = async (type, id, source) => {
+      await client.query(`insert into commercial_lifecycle_events
+        (id,organization_id,legal_entity_id,entity_type,entity_id,sequence,state,contract_id,contract_version_id,
+         before_value,after_value,reason,approval_reference,actor_id,active_role,correlation_id,operation_id)
+        values($1,$2,$3,$4,$5,1,'Active',$6,$7,null,$8::jsonb,'Synthetic preserved activation',null,$9,'Admin',$10,$11)`,
+      [`lifecycle-${randomUUID()}`,scope.organizationId,scope.legalEntityId,type,id,contract.id,pin,
+        JSON.stringify({lifecycle:{entityId:id,state:'Active',sequence:1,effectiveOn:today,contractVersionId:pin},snapshot:source}),
+        identities.manager.id,req.correlationId,req.operationId]);
+    };
+    await activate('Contract', contract.id, contract);
+    await activate('Engagement', engagement.id, engagement);
+    const project = (await client.query(`insert into projects
+      (id,organization_id,legal_entity_id,project_code,name,client_id,client,manager_id,manager_name,project_type,billable,start_date,end_date,status)
+      select $1,$2,$3,'SYN-PRESERVED-PROJECT','Synthetic governed project',c.id,c.name,e.id,e.name,'fixed_fee',true,$6,$7,'Proposed'
+      from clients c join employees e on e.id=$5 and e.organization_id=$2 and e.legal_entity_id=$3
+      where c.id=$4 and c.organization_id=$2 and c.legal_entity_id=$3
+      returning *,start_date::text,end_date::text`,
+    [`p-${randomUUID()}`,scope.organizationId,scope.legalEntityId,f.clientId,f.ownerId,common.startsOn,common.endsOn])).rows[0];
+    assert.ok(project, '041 fixture requires the real scoped client and manager');
+    const binding = (await client.query(`insert into commercial_project_bindings
+      (organization_id,legal_entity_id,project_id,engagement_id,contract_id,contract_version_id,code,name,manager_id,
+       starts_on,ends_on,model,currency,budget_allocation,billable,attribution_id,origin,source_snapshot,reason,created_by)
+      values($1,$2,$3,$4,$5,$6,'SYN-PRESERVED-PROJECT','Synthetic governed project',$7,$8,$9,'fixed_fee','USD',
+        '100.0001',true,null,'manual',$10::jsonb,'Synthetic preserved project',$11)
+      returning *,starts_on::text,ends_on::text,budget_allocation::text`,
+    [scope.organizationId,scope.legalEntityId,project.id,engagement.id,contract.id,pin,f.ownerId,common.startsOn,common.endsOn,
+      JSON.stringify(project),identities.manager.id])).rows[0];
+    await activate('Project', project.id, binding);
+    assert.equal((await client.query('select status from projects where id=$1',[project.id])).rows[0].status, 'Active',
+      '041 lifecycle trigger, not a fixture UPDATE, projects the governed operational state');
     await client.query('commit');return {contract, engagement, project, pin};
   } catch (failure) {await client.query('rollback');throw failure;} finally {client.release();}
 };
