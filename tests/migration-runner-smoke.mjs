@@ -1773,6 +1773,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const crossRouteProjectCode = 'PROJECT-IMPORT-V1-CROSS-ROUTE-LOCK';
     const crossRouteBarrierKey = 'synthetic-cross-route-trigger-barrier';
     const crossRouteLockKey = createProjectCodeLockKey({organizationId: 'org-default', projectCode: crossRouteProjectCode});
+    const crossRouteLifecycleLockKey = 'commercial-lifecycle:org-default:legal-default';
     await pool.query('create sequence synthetic_project_cross_route_barrier start with 1');
     await pool.query(`create or replace function pause_synthetic_project_cross_route_insert()
       returns trigger language plpgsql as $$ begin
@@ -1814,16 +1815,18 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       }
       assert.equal(directInsertStarted, true, 'the direct projects writer must reach its controlled insert barrier');
 
-      const readProjectCodeLockCounts = async granted => (await pool.query(`
+      const readAdvisoryLockCounts = async (lockKey,granted) => (await pool.query(`
         select count(*)::int as count
         from pg_locks l
         cross join (select hashtextextended($1, 0) as lock_key) expected
         where l.locktype='advisory' and l.granted=$2 and l.objsubid=1
           and l.classid::bigint=((expected.lock_key >> 32) & 4294967295)
           and l.objid::bigint=(expected.lock_key & 4294967295)
-      `, [crossRouteLockKey, granted])).rows[0].count;
-      assert.equal(await readProjectCodeLockCounts(true), 1,
+      `, [lockKey, granted])).rows[0].count;
+      assert.equal(await readAdvisoryLockCounts(crossRouteLockKey,true), 1,
         'the direct project writer must hold the shared project-code lock before its insert proceeds');
+      assert.equal(await readAdvisoryLockCounts(crossRouteLifecycleLockKey,true),1,
+        'the direct writer must hold the common scope lifecycle lock before the project-code/insert barrier');
 
       concurrentProjectImport = applyProjectsV1({
         schemaVersion: 'project-master/1',
@@ -1839,16 +1842,18 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
           status: 'Active',
         }],
       }, 'synthetic-project-cross-route-key');
-      let importWaitingForProjectCodeLock = false;
+      let importWaitingForLifecycleLock = false;
       for (let attempt = 0; attempt < 200; attempt += 1) {
-        if (await readProjectCodeLockCounts(false) > 0) {
-          importWaitingForProjectCodeLock = true;
+        if (await readAdvisoryLockCounts(crossRouteLifecycleLockKey,false) > 0) {
+          importWaitingForLifecycleLock = true;
           break;
         }
         await delay(10);
       }
-      assert.equal(importWaitingForProjectCodeLock, true,
-        'the import request must reach and wait on the held project-code lock before the direct insert is released');
+      assert.equal(importWaitingForLifecycleLock, true,
+        'the import must wait on the earlier common lifecycle lock while the direct writer holds both lifecycle and project-code locks');
+      assert.equal(await readAdvisoryLockCounts(crossRouteLifecycleLockKey,false),1,
+        'exactly the concurrent import must wait on the scoped lifecycle key before the direct insert is released');
     } finally {
       await crossRouteBarrierClient.query('select pg_advisory_unlock(hashtextextended($1, 0))', [crossRouteBarrierKey]);
       await crossRouteBarrierClient.end();
