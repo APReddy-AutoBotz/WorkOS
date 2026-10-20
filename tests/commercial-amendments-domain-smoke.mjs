@@ -163,3 +163,6 @@ assert(capacityQuery);assert.match(capacityQuery.sql,/max\(a\.budget\)/,'new chi
 assert.deepEqual(capacityQuery.values,['org-synthetic','legal-synthetic',ids.Engagement,'0.0001','8000.0003']);
 
 console.log('Commercial amendment production domain validation, exact decimal boundaries, separate parent adoption, immutable starts, date/pending/identity/dependency guards, bound stale previews, opaque audit and historical term resolution passed without sockets.');
+
+const internalBaseline={contractVersionId:null,startsOn:'2020-01-01',endsOn:'2099-12-31',budget:'0.0000'};
+assert.equal(await resolveAmendedTerms({query:async()=>assert.fail('Non-contract terms must never enter amendment lookup')},req,'Engagement','synthetic-internal',internalBaseline),internalBaseline);

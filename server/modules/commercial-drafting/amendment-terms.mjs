@@ -3,6 +3,9 @@
 const scope=req=>[req.organizationScope.organizationId,req.organizationScope.legalEntityId];
 export const amendmentTerms=row=>({contractVersionId:row.contract_version_id,startsOn:row.starts_on,endsOn:row.ends_on,budget:row.budget});
 export const resolveAmendedTerms=async(client,req,type,id,baseline,asOf)=>{
+  // Internal/neutral records have no contract and are deliberately outside
+  // amendment authority. Preserve their explicit null pin without a lookup.
+  if(!baseline.contractVersionId)return baseline;
   const row=(await client.query(`select contract_version_id,starts_on::text,ends_on::text,budget::text from commercial_amendments
     where organization_id=$1 and legal_entity_id=$2 and entity_type=$3 and entity_id=$4 and effective_on<=coalesce($5::date,(now() at time zone 'UTC')::date)
     order by sequence desc limit 1`,[...scope(req),type,id,asOf||null])).rows[0];
