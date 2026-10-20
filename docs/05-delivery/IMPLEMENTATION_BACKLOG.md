@@ -291,3 +291,5 @@ These assignments are retained while `main@880b3dc244bf516c4e535fb68e455e6153aec
 ## Recorded bounded non-overlap exceptions
 
 On 2026-10-20, the implementation controller recorded the [Utilization overview read-recovery exception](../tasks/UTILIZATION-OVERVIEW-READ-RECOVERY.md). This UI-only UX-001/005 and OBS-005 remediation is a separate dependent Draft stacked on unchanged PR41. It does not resume blocked security work, change backend/authorization/calculation/export/schema, complete PR-013 or earn programme credit. Dependency, exact-head review/CI and owner/release gates remain unchanged.
+
+On 2026-10-20, the controller additionally recorded the [Planned Utilization detail read-recovery exception](../tasks/PLANNED-UTILIZATION-READ-RECOVERY.md), dependent on unchanged PR43. It repairs only existing read-state presentation, retry/generation handling and page-level current-evidence export availability, preserving successful export format/helper/audit behavior. Actual/Forecast, backend, authorization, calculations, schema, dependencies and blocked security work remain excluded; no programme, prerequisite or review/merge/release gate is bypassed.
