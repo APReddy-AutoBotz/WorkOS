@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { KPIStrip } from '../components/ui/KPIStrip';
 import { Badge } from '../components/ui/Badge';
 import { employeeService, projectService, allocationService, adminService, utilizationReportService } from '../services/api';
-import { Allocation, Employee, Project, KPIData } from '../types';
+import type { Allocation, Employee, Project, KPIData, SystemSettings } from '../types';
+import { ApiClientError, resetBackendCheck } from '../services/apiClient';
 import {
   XAxis,
   YAxis,
@@ -27,7 +28,8 @@ import {
   Target,
   Loader2,
   Calendar,
-  Info
+  Info,
+  RefreshCw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Link } from 'react-router-dom';
@@ -36,6 +38,60 @@ import { formatPercent, roundMetric } from '../lib/format';
 import { downloadAuditedCsv } from '../lib/reportExport';
 
 import { productConfig } from '../config/productConfig';
+type ForecastStatus = 'loading' | 'ready' | 'access' | 'unavailable' | 'error';
+type ForecastSnapshot = {
+  employees: Employee[];
+  projects: Project[];
+  allocations: Allocation[];
+  settings: SystemSettings;
+  forecastReportEmployees: Employee[];
+};
+type ForecastResult = {
+  generation: number;
+  horizon: string;
+} & ({ status: 'ready'; snapshot: ForecastSnapshot } | { status: Exclude<ForecastStatus, 'ready'>; snapshot: null });
+
+// Preserve all five existing readers, including their nested and duplicate requests.
+export const readForecastUtilization = async (horizonMonths: number): Promise<ForecastSnapshot> => {
+  resetBackendCheck();
+  const [employees, projects, allocations, settings, report] = await Promise.all([
+    employeeService.getAll(),
+    projectService.getAll(),
+    allocationService.getAll(),
+    adminService.getSettings(),
+    utilizationReportService.getForecast(horizonMonths),
+  ]);
+  if (!Array.isArray(employees) || !Array.isArray(projects) || !Array.isArray(allocations)
+    || !settings || !report || !Array.isArray(report.rows)) {
+    throw new TypeError('Report response unavailable');
+  }
+  return { employees, projects, allocations, settings, forecastReportEmployees: report.rows };
+};
+
+export const ForecastUtilizationStatus = ({ status, retry }: { status: ForecastStatus; retry: () => void }) => {
+  if (status === 'ready') return null;
+  if (status === 'loading') return (
+    <div role="status" className="flex items-center justify-center gap-3 rounded-2xl border border-border-light bg-white p-8">
+      <Loader2 aria-hidden="true" className="animate-spin text-primary" size={24} />
+      <p className="text-sm font-bold text-heading">Loading forecast utilization…</p>
+    </div>
+  );
+  const message = status === 'access' ? 'Access to forecast utilization could not be confirmed.'
+    : status === 'unavailable' ? 'Forecast utilization is unavailable.'
+    : 'Forecast utilization could not be loaded.';
+  return (
+    <div role="alert" className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50 p-5 text-heading">
+      <p className="text-sm font-bold">{message}</p>
+      <p className="text-sm">{status === 'access'
+        ? 'Check your sign-in and report access, then retry.'
+        : 'Check your connection and retry. If the problem continues, contact your administrator.'}</p>
+      <button type="button" onClick={retry} className="btn-secondary px-4 py-2 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+        Retry forecast utilization
+      </button>
+    </div>
+  );
+};
+
 const toIsoDate = (date: Date) => date.toISOString().split('T')[0];
 
 const addMonths = (date: Date, months: number) => {
@@ -45,13 +101,44 @@ const addMonths = (date: Date, months: number) => {
 };
 
 export const ForecastUtilization = () => {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [allocations, setAllocations] = useState<Allocation[]>([]);
-  const [forecastReportEmployees, setForecastReportEmployees] = useState<Employee[]>([]);
-  const [settings, setSettings] = useState<any>({ utilizationThresholdHigh: 100, utilizationThresholdLow: 70 });
-  const [loading, setLoading] = useState(true);
   const [horizon, setHorizon] = useState('3 Months');
+  const [result, setResult] = useState<ForecastResult>({ status: 'loading', generation: 0, horizon: '3 Months', snapshot: null });
+  const requestVersion = useRef(0);
+  const selectedHorizon = useRef('3 Months');
+  const mounted = useRef(false);
+  const loadReport = useCallback((nextHorizon = selectedHorizon.current) => {
+    if (!mounted.current) return;
+    // Invalidate synchronously, before rerender, including previously captured exports.
+    const generation = ++requestVersion.current;
+    selectedHorizon.current = nextHorizon;
+    setResult({ status: 'loading', generation, horizon: nextHorizon, snapshot: null });
+    const current = () => mounted.current && generation === requestVersion.current && nextHorizon === selectedHorizon.current;
+    void Promise.resolve().then(() => current() ? readForecastUtilization(Number(nextHorizon.split(' ')[0])) : null).then(snapshot => {
+      if (current() && snapshot) setResult({ status: 'ready', generation, horizon: nextHorizon, snapshot });
+    }).catch(error => {
+      if (!current()) return;
+      const status = error instanceof ApiClientError
+        ? [401, 403].includes(error.status) ? 'access'
+          : [404, 502, 503, 504].includes(error.status) ? 'unavailable' : 'error'
+        : 'error';
+      setResult({ status, generation, horizon: nextHorizon, snapshot: null });
+    });
+  }, []);
+  const selectHorizon = (nextHorizon: string) => {
+    if (!mounted.current || nextHorizon === selectedHorizon.current) return;
+    loadReport(nextHorizon);
+    setHorizon(nextHorizon);
+  };
+  const canExport = result.status === 'ready' && mounted.current && result.generation === requestVersion.current
+    && result.horizon === horizon && result.horizon === selectedHorizon.current;
+  const status = result.status === 'ready' && !canExport ? 'loading' : result.status;
+  const snapshot = result.status === 'ready' && canExport ? result.snapshot : null;
+  const employees = snapshot?.employees || [];
+  const projects = snapshot?.projects || [];
+  const allocations = snapshot?.allocations || [];
+  const forecastReportEmployees = snapshot?.forecastReportEmployees || [];
+  const settings = snapshot?.settings || { utilizationThresholdHigh: 100, utilizationThresholdLow: 70 };
+  const hasData = status === 'ready' && (employees.length > 0 || projects.length > 0 || allocations.length > 0 || forecastReportEmployees.length > 0);
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState('All Departments');
 
@@ -82,39 +169,10 @@ export const ForecastUtilization = () => {
   };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [empData, projData, alcData, setts] = await Promise.all([
-          employeeService.getAll(),
-          projectService.getAll(),
-          allocationService.getAll(),
-          adminService.getSettings(),
-        ]);
-        setEmployees(empData);
-        setProjects(projData);
-        setAllocations(alcData);
-        setSettings(setts);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
-
-  useEffect(() => {
-    const fetchForecastReport = async () => {
-      try {
-        const report = await utilizationReportService.getForecast(horizonMonths);
-        setForecastReportEmployees(report.rows);
-      } catch (error) {
-        console.error(error);
-        setForecastReportEmployees([]);
-      }
-    };
-    fetchForecastReport();
-  }, [horizonMonths]);
+    mounted.current = true;
+    loadReport();
+    return () => { mounted.current = false; requestVersion.current += 1; };
+  }, [loadReport]);
 
   const forecastReportByEmployeeId = useMemo(() => {
     return new Map(forecastReportEmployees.map(employee => [employee.id, employee]));
@@ -267,6 +325,8 @@ export const ForecastUtilization = () => {
   }, [supplyDemandData]);
 
   const handleExport = () => {
+    if (!canExport || !mounted.current || result.generation !== requestVersion.current
+      || result.horizon !== selectedHorizon.current || horizon !== selectedHorizon.current) return;
     void downloadAuditedCsv('forecast-utilization-export.csv', filteredFuture.map(row => ({
       employeeId: row.employee.employeeId,
       name: row.employee.name,
@@ -282,13 +342,6 @@ export const ForecastUtilization = () => {
     })), 'Forecast Utilization');
   };
 
-  if (loading) {
-    return (
-      <div className="h-[60vh] flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={32} />
-      </div>
-    );
-  }
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
@@ -297,7 +350,10 @@ export const ForecastUtilization = () => {
         subtitle="Forward-looking capacity models analyzing potential demand and resource roll-off dynamics."
         breadcrumb={['Reports', 'Utilization']}
         actions={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+             <button type="button" onClick={() => loadReport()} aria-label="Refresh forecast utilization" className="btn-secondary py-2.5 px-4 flex items-center gap-2 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                <RefreshCw aria-hidden="true" size={14} /> Refresh
+             </button>
              <div className="group relative pr-4 border-r border-slate-200">
                 <Info size={16} className="text-slate-300 cursor-help" />
                 <div className="absolute right-0 bottom-full mb-2 w-64 p-2 bg-slate-800 text-white text-[10px] rounded shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20 font-medium normal-case tracking-normal">{`
@@ -308,9 +364,11 @@ export const ForecastUtilization = () => {
                 {['1 Month', '2 Months', '3 Months'].map(h => (
                   <button
                     key={h}
-                    onClick={() => setHorizon(h)}
+                    type="button"
+                    aria-pressed={horizon === h}
+                    onClick={() => selectHorizon(h)}
                     className={cn(
-                      "px-4 py-2 transition-all",
+                      "px-4 py-2 transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       horizon === h ? "bg-primary text-white" : "hover:bg-slate-50"
                     )}
                   >
@@ -318,13 +376,20 @@ export const ForecastUtilization = () => {
                   </button>
                 ))}
              </div>
-             <button onClick={handleExport} className="btn-secondary py-2.5 px-5 flex items-center gap-2 shadow-sm font-bold text-xs uppercase tracking-wider">
+             <button type="button" onClick={handleExport} disabled={!canExport} className="btn-secondary py-2.5 px-5 flex items-center gap-2 shadow-sm font-bold text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                 <Download size={14} /> Forecast Report
              </button>
           </div>
         }
       />
 
+      <ForecastUtilizationStatus status={status} retry={() => loadReport()} />
+      {status === 'ready' && !hasData && (
+        <div className="rounded-2xl border border-border-light bg-white p-8 text-center text-sm font-bold text-slate-600">
+          <p role="status">No forecast utilization data was returned.</p>
+        </div>
+      )}
+      {status === 'ready' && hasData && <>
       <KPIStrip kpis={kpis} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -348,7 +413,7 @@ export const ForecastUtilization = () => {
           </div>
 
           <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+            {supplyDemandData.length > 0 ? <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <BarChart data={supplyDemandData} margin={{ top: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
                 <XAxis
@@ -369,7 +434,11 @@ export const ForecastUtilization = () => {
                 <Bar name="System Capacity" dataKey="capacity" fill="#1E293B" radius={[4, 4, 0, 0]} barSize={40} />
                 <Bar name="Resource demand" dataKey="demand" fill="#EF7D00" radius={[4, 4, 0, 0]} opacity={0.6} barSize={40} />
               </BarChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer> : (
+              <div role="status" className="h-full flex items-center justify-center text-center text-xs font-bold text-slate-400">
+                No capacity and demand checkpoints were returned for this horizon.
+              </div>
+            )}
           </div>
         </div>
 
@@ -412,7 +481,7 @@ export const ForecastUtilization = () => {
                     ))}
                     {rollOffs.length === 0 && (
                       <div className="p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">No roll-offs inside this horizon</p>
+                        <p role="status" className="text-[10px] font-bold uppercase tracking-widest text-slate-400">No roll-offs inside this horizon</p>
                       </div>
                     )}
                  </div>
@@ -436,7 +505,7 @@ export const ForecastUtilization = () => {
                     ))}
                     {futureBenchRows.length === 0 && (
                       <div className="p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">No future bench cases in this horizon</p>
+                        <p role="status" className="text-[10px] font-bold uppercase tracking-widest text-slate-400">No future bench cases in this horizon</p>
                       </div>
                     )}
                  </div>
@@ -484,38 +553,42 @@ export const ForecastUtilization = () => {
          </div>
       </div>
 
-      {/* Drill Down Table */}
-      <div className="bg-white border border-border-light rounded-3xl overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-gray-50 flex items-center justify-between bg-slate-50/50">
-           <div className="flex items-center gap-4">
+      </>}
+
+      {/* Keep both export destinations mounted; normal ledger evidence requires a complete snapshot. */}
+      <div className={status === 'ready' && hasData ? "bg-white border border-border-light rounded-3xl overflow-hidden shadow-sm" : "mt-4 flex justify-end"}>
+        <div className={status === 'ready' && hasData ? "p-6 border-b border-gray-50 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50" : "flex items-center"}>
+           {status === 'ready' && hasData && <div className="flex flex-wrap items-center gap-4">
               <h3 className="text-sm font-bold text-heading">Resource Forecast Ledger</h3>
               <div className="relative">
                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
                  <input
                    type="text"
                    placeholder="Search forecast..."
+                   aria-label="Search forecast resources"
                    value={searchQuery}
                    onChange={(e) => setSearchQuery(e.target.value)}
                    className="bg-white border border-border-light rounded-lg py-1.5 pl-8 pr-3 text-[10px] outline-none focus:border-primary w-48 font-bold"
                  />
               </div>
-           </div>
+           </div>}
            <div className="flex items-center gap-3">
-              <select
+              {status === 'ready' && hasData && <select
                 value={deptFilter}
+                aria-label="Filter forecast department"
                 onChange={(e) => setDeptFilter(e.target.value)}
                 className="bg-white border border-border-light rounded-lg px-2 py-1.5 text-[10px] font-bold outline-none cursor-pointer"
               >
                 <option>All Departments</option>
                 {Array.from(new Set(employees.map(e => e.department))).map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-              <button onClick={handleExport} className="btn-secondary py-1.5 px-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider font-bold">
+              </select>}
+              <button type="button" onClick={handleExport} disabled={!canExport} className="btn-secondary py-1.5 px-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                  <Download size={12} /> Forecast
               </button>
            </div>
         </div>
 
-        <div className="table-container shadow-none border-none">
+        {status === 'ready' && hasData && <div className="table-container shadow-none border-none">
           <table className="w-full text-left">
             <thead className="bg-white/50 border-b border-border-light">
               <tr>
@@ -574,12 +647,12 @@ export const ForecastUtilization = () => {
               })}
               {filteredFuture.length === 0 && (
                 <tr>
-                   <td colSpan={forecastPoints.length + 4} className="py-12 text-center text-gray-400 font-bold uppercase tracking-widest text-xs">No forecast data available for criteria</td>
+                   <td colSpan={forecastPoints.length + 4} className="py-12 text-center text-gray-400 font-bold uppercase tracking-widest text-xs"><span role="status">{forecastRows.length === 0 ? 'No resource forecasts were returned for this horizon.' : 'No resource forecasts match the selected filters.'}</span></td>
                 </tr>
               )}
             </tbody>
           </table>
-        </div>
+        </div>}
       </div>
     </div>
   );
