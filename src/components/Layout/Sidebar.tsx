@@ -69,6 +69,7 @@ export const Sidebar = () => {
       items: [
         { name: `${termTitle('project')} Master`, path: '/projects', icon: Briefcase, roles: ROUTE_ROLES.projects },
         { name: 'Client Portfolio', path: '/clients', icon: Building2, roles: ROUTE_ROLES.clients },
+        { name: 'Client profiles', path: '/client-profiles', icon: Building2, roles: ROUTE_ROLES.clientProfiles },
         { name: 'Commercial Drafting', path: '/commercial-drafting', icon: Briefcase, roles: ROUTE_ROLES.commercialDrafting },
       ]
     },

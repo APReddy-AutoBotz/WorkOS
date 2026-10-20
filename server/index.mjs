@@ -31,6 +31,7 @@ import {createNotificationRouter} from './modules/notifications/notification-rou
 import {createLeaveRouter} from './modules/leave/leave-router.mjs';
 import {createAvailabilityReportRouter} from './modules/reports/availability-report-router.mjs';
 import {createCommercialDraftingRouter} from './modules/commercial-drafting/router.mjs';
+import {createClientProfilesRouter} from './modules/client-profiles/router.mjs';
 import { assertWorkerMayReactivate, disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
@@ -6434,6 +6435,7 @@ registerOrganizationSetupRoutes({
 });
 
 app.use('/api/v1/commercial-drafting', createCommercialDraftingRouter({pool,requireDatabase,requireAuth,audit}));
+app.use('/api/v1/client-profiles', createClientProfilesRouter({pool,requireDatabase,requireAuth,audit}));
 
 app.use('/api/v1', versionedApiErrorHandler);
 
