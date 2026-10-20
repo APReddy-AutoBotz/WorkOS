@@ -11,6 +11,7 @@ page.setDefaultTimeout(10000);
 await page.clock.setFixedTime(new Date('2026-01-31T12:34:56.000Z'));
 const pageErrors = [], unexpectedApi = [], unexpectedRemote = [], downloads = [];
 let deliberateExports = 0;
+let measurementProbeReported = false;
 page.on('pageerror', error => pageErrors.push(error.message));
 page.on('download', download => downloads.push(download));
 page.on('request', request => {
@@ -163,8 +164,68 @@ const expectNoMeasurements = async () => {
   for (const text of [sectionEmptyText, filteredEmptyText, 'No demand', 'No roll-offs inside this horizon',
     'No future bench cases in this horizon', 'No immediate hiring trigger detected from committed allocation dates.',
     'Committed demand remains within active capacity for the selected horizon.', '0', '0%']) {
-    assert.equal(await page.getByText(text, {exact: true}).count(), 0, 'pending/failure cannot look like a successful no-demand/bench/roll-off result');
+    const {matches, probes} = await page.getByText(text, {exact: true}).evaluateAll((elements, numeric) => {
+      const matches = [], probes = [];
+      for (const element of elements) {
+        // Recharts retains its last measured axis label in a body-level span even
+        // after the chart unmounts. Exempt only that offscreen, aria-hidden numeric
+        // probe, never app content, other hidden nodes or a visible lookalike.
+        const probe = numeric && element.tagName === 'SPAN' && element.id === 'recharts_measurement_span'
+          && element.parentElement === document.body && element.getAttribute('aria-hidden') === 'true'
+          && element.getBoundingClientRect().bottom < 0;
+        (probe ? probes : matches).push(element.outerHTML);
+      }
+      return {matches, probes};
+    }, text === '0' || text === '0%');
+    if (probes.length && !measurementProbeReported) {
+      console.log('Ignored retained Recharts offscreen numeric measurement probe:', probes);
+      measurementProbeReported = true;
+    }
+    assert.deepEqual(matches, [], `pending/failure cannot look like a successful no-demand/bench/roll-off result: ${text}`);
   }
+};
+const verifyNoMeasurementsGuard = async () => {
+  // Prove the narrow probe exception does not weaken numeric/conclusion checks,
+  // including hidden app content and unrelated offscreen body instrumentation.
+  for (const [text, parent, hidden, id] of [['0', 'root', false], ['0%', 'root', false], ['0', 'root', true],
+    ['No demand', 'root', false], ['0', 'body', true], ['0', 'root', true, 'recharts_measurement_span'],
+    ['0', 'body', false, 'recharts_measurement_span']]) {
+    await page.evaluate(({text, parent, hidden, id}) => {
+      const sentinel = document.createElement('span');
+      sentinel.id = id || 'synthetic-measurement-guard';
+      sentinel.dataset.measurementGuard = 'true';
+      sentinel.textContent = text;
+      if (hidden) {
+        sentinel.setAttribute('aria-hidden', 'true');
+        sentinel.style.cssText = 'position:absolute;top:-20000px';
+      }
+      (parent === 'root' ? document.getElementById('root') : document.body).appendChild(sentinel);
+    }, {text, parent, hidden, id});
+    try {
+      await assert.rejects(expectNoMeasurements, error => error.code === 'ERR_ASSERTION'
+        && error.message.includes('pending/failure cannot look like a successful no-demand/bench/roll-off result'),
+      'real numeric/conclusion leakage is rejected rather than hidden by the Recharts probe exception');
+    } finally {
+      await page.locator('[data-measurement-guard]').evaluate(element => element.remove());
+    }
+  }
+  const sizing = page.locator('body > span#recharts_measurement_span');
+  assert.equal(await sizing.count(), 1, 'the real Recharts measurement probe survives chart unmount');
+  const original = await sizing.evaluate(element => ({text: element.textContent, ariaHidden: element.getAttribute('aria-hidden')}));
+  try {
+    await sizing.evaluate(element => { element.textContent = '0'; });
+    await expectNoMeasurements();
+    await sizing.evaluate(element => element.removeAttribute('aria-hidden'));
+    await assert.rejects(expectNoMeasurements, /pending\/failure cannot look like a successful/,
+      'the real measurement probe is not exempt when it loses its accessibility-safety attribute');
+  } finally {
+    await sizing.evaluate((element, original) => {
+      element.textContent = original.text;
+      if (original.ariaHidden === null) element.removeAttribute('aria-hidden');
+      else element.setAttribute('aria-hidden', original.ariaHidden);
+    }, original);
+  }
+  await expectNoMeasurements();
 };
 const expectBlockedExports = async () => {
   assert.equal(await reportButton().isDisabled(), true);
@@ -388,6 +449,7 @@ try {
 
   // Invalidate in the same JS turn as selection, before React rerender/effects.
   const oneMonth = await invalidateAndInvoke(lastId(recovered), ['baseline-report', 'baseline-csv'], 3, 1);
+  await verifyNoMeasurementsGuard();
   await settle(oneMonth, bundle('one-month', 1));
   await expectSuccess('one-month', 1);
   await expectKpis(1);
