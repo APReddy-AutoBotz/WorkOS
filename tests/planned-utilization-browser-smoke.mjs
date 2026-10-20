@@ -239,14 +239,22 @@ try {
   const expectedDepartments = ['Synthetic Delivery', 'Synthetic Engineering', 'Synthetic Support'];
   const departmentChartRoot = await departmentChart.elementHandle();
   try {
-    await page.waitForFunction(({root, selector, labels}) =>
-      JSON.stringify([...root.querySelectorAll(selector)].map(tick => tick.textContent)) === JSON.stringify(labels),
+    // SVG textContent concatenates wrapped tspans without their visual line break.
+    await page.waitForFunction(({root, selector, labels}) => {
+      const actual = [...root.querySelectorAll(selector)].map(tick => {
+        const lines = [...tick.querySelectorAll('tspan')];
+        return lines.length ? lines.map(line => line.textContent).join(' ') : tick.textContent;
+      });
+      return JSON.stringify(actual) === JSON.stringify(labels);
+    },
     {root: departmentChartRoot, selector: departmentTickSelector, labels: expectedDepartments});
-    assert.deepEqual(await departmentChart.locator(departmentTickSelector).allTextContents(),
-      expectedDepartments, 'department chart preserves descending planned-load order');
+    assert.deepEqual(await departmentChart.locator(departmentTickSelector).evaluateAll(ticks => ticks.map(tick => {
+      const lines = [...tick.querySelectorAll('tspan')];
+      return lines.length ? lines.map(line => line.textContent).join(' ') : tick.textContent;
+    })), expectedDepartments, 'department chart preserves descending planned-load order');
   } catch (error) {
     // On an assertion failure, expose only bounded synthetic chart DOM evidence.
-    // Keep the failing condition intact so hosted CI remains the acceptance gate.
+    // Keep exact expected labels, order and count as the hosted acceptance gate.
     const observation = await departmentChart.evaluate((root, selector) => {
       const describeTick = tick => ({
         tag: tick.tagName,
