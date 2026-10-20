@@ -60,7 +60,7 @@ export const assertReportingPeriodAllows = async (database, {
   if (dates.length > MAX_REPORTING_PERIOD_DATES) {
     throw new ReportingPeriodError(`Reporting-period checks are limited to ${MAX_REPORTING_PERIOD_DATES} unique dates`, 'REPORTING_PERIOD_DATE_LIMIT');
   }
-  const result = await database.query(`select requested.relevant_date,id,code,name,starts_on,ends_on,status,frequency
+  const result = await database.query(`select requested.relevant_date::text relevant_date,id,code,name,starts_on::text,ends_on::text,status,frequency
     from unnest($3::date[]) requested(relevant_date)
     join reporting_periods p on p.organization_id=$1 and p.legal_entity_id=$2
       and requested.relevant_date between p.starts_on and p.ends_on

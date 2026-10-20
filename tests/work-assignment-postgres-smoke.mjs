@@ -142,6 +142,17 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const header=(await pool.query('select id from timesheets where employee_id=$1',[worker])).rows[0];const approval=(await pool.query("select id from approval_records where entity_type='Timesheet' and entity_id=$1",[header.id])).rows[0];
     const generic=await request(`/api/approvals/${approval.id}/status`,{method:'PATCH',body:{status:'Approved'}});assert.equal(generic.status,200,JSON.stringify(generic.body));
     const evidence=(await pool.query('select period_references from work_submission_evidence')).rows;assert.equal(evidence.length,2);assert(evidence.every(row=>row.period_references.every(p=>p.id==='period-work-current')));
+    // An open period end cannot bypass a locked earlier constituent work date.
+    const legacyProject='project-constituent-date';await pool.query(`insert into projects(id,project_code,name,client_id,client,manager_id,manager_name,project_type,billable,start_date,end_date,status,country,organization_id,legal_entity_id) values($1,'SYN-CONSTITUENT-DATE','Synthetic constituent-date project',$2,'Synthetic client',$3,'Synthetic owner','Synthetic legacy',false,'2020-01-01','2098-12-31','Active','US',$4,$5)`,[legacyProject,f.clientId,f.ownerId,f.organizationId,f.legalEntityId]);
+    const earlier=addUtcDays(today,-2);await workPost(request,'/api/allocations',workAllocation(legacyProject,earlier,{employee_id:worker,billable:false,end_date:today}));
+    const otherWorker='worker-constituent-date';await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values($1,'SYN-CONSTITUENT-DATE','Synthetic constituent-date worker','constituent-date@example.test','Analyst','Delivery','US','director-commercial','Active',$2,$3)`,[otherWorker,f.organizationId,f.legalEntityId]);
+    await workPost(request,'/api/allocations',workAllocation(legacyProject,earlier,{employee_id:otherWorker,billable:false,end_date:today}));
+    const earlierWork=await workPost(request,'/api/timesheets',workInput(legacyProject,today,{employee_id:otherWorker,entries:[{...workInput(legacyProject,today).entries[0],work_date:earlier,billable:false}]}));
+    await pool.query("insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency) values('period-work-constituent-lock',$1,$2,'SYN-WORK-CONSTITUENT-LOCK','Synthetic constituent-date lock',$3,$3,'Financially Locked','Monthly')",[f.organizationId,f.legalEntityId,earlier]);
+    for(const path of [`/api/timesheets/${earlierWork.id}/status`,`/api/approvals/${(await pool.query("select id from approval_records where entity_type='Timesheet' and entity_id=$1",[earlierWork.id])).rows[0].id}/status`]){
+      const blocked=await request(path,{method:'PATCH',body:{status:'Approved'}});assert.equal(blocked.status,409,JSON.stringify(blocked.body));assert.equal(blocked.body.code,'REPORTING_PERIOD_CLOSED');
+    }
+
   });
 });
 async function permissionSnapshot(pool){return (await pool.query("select jsonb_build_object('definitions',(select jsonb_agg(to_jsonb(t) order by permission_key) from permission_definitions t),'roles',(select jsonb_agg(to_jsonb(t) order by role_name,permission_key) from role_permissions t),'users',(select jsonb_agg(to_jsonb(t) order by user_id,permission_key) from user_permission_grants t)) value")).rows;}

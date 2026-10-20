@@ -63,6 +63,7 @@ f.assignments=[];await assert.rejects(validateWorkEntries(f.client,req,'worker-s
 f=fixture();entries=await validateWorkEntries(f.client,req,'worker-synthetic',[{work_type:'Client Misc Task',client_name:'Synthetic ordinary client',work_date:at,hours:2,billable:false}]);
 assert.equal(entries[0].policy.kind,'legacy-neutral','ordinary permitted non-project work keeps explicit unpinned evidence');
 await assert.rejects(validateWorkEntries(f.client,{...req,user:{...req.user,activeRole:'ProjectManager'}},'worker-unrelated',[{work_type:'Client Misc Task',client_name:'Synthetic',work_date:at,hours:1,billable:false}]),{code:'WORK_SCOPE_DENIED'});
+f.worker.status='Exited';await assert.rejects(validateWorkEntries(f.client,{...req,user:{...req.user,activeRole:'ProjectManager'}},'worker-unrelated',[{work_type:'Client Misc Task',client_name:'Synthetic',work_date:at,hours:1,billable:false}]),{code:'WORK_SCOPE_DENIED'},'scope denial must not reveal an unrelated worker lifecycle');f.worker.status='Active';
 const summary=await retainWorkSubmission(f.client,req,{id:'period-synthetic',week_ending:at},[{...entries[0],id:'entry-synthetic',hours:'2.00',remark:'Synthetic submitted note',category:'Synthetic category'}],'Synthetic test');
 assert.equal(summary.policyVersion,WORK_POLICY_VERSION);assert.equal(summary.governedEntryCount,0);assert.equal(summary.entryCount,1);
 const material=JSON.parse(f.inserts[0][6]);assert.equal(material[0].remark,'Synthetic submitted note');assert.equal(material[0].category,'Synthetic category');assert.equal(material[0].clientName,'Synthetic ordinary client');
@@ -71,6 +72,7 @@ f.entries=[{id:'entry-synthetic',project_id:null,work_type:'Client Misc Task',cl
 await assertWorkDecisionAllowed(f.client,req,{id:'period-synthetic',employee_id:'worker-synthetic',week_ending:at,organization_id:'org-synthetic',legal_entity_id:'legal-synthetic'});
 f.entries[0].remark='Changed submitted note';await assert.rejects(assertWorkDecisionAllowed(f.client,req,{id:'period-synthetic',employee_id:'worker-synthetic',week_ending:at}),{code:'WORK_SUBMISSION_CHANGED'});
 f.periodState='Financially Locked';await assert.rejects(assertWorkDecisionAllowed(f.client,req,{id:'period-synthetic',employee_id:'worker-synthetic',week_ending:at}),{code:'REPORTING_PERIOD_CLOSED'});
+assert.match(await readFile(new URL('../server/reporting-periods.mjs',import.meta.url),'utf8'),/requested\.relevant_date::text relevant_date/,'period lookup keys must not pass through server-local PostgreSQL DATE objects');
 const server=await readFile(new URL('../server/index.mjs',import.meta.url),'utf8');
 assert.equal((server.match(/await assertWorkDecisionAllowed\(client,req,previous\)/g)||[]).length,2,'both source decision routes validate retained work and all work dates');
 assert.match(server,/req\.user\.permissions\.includes\('timesheets\.approve'\)/,'generic approval requires source-specific permission');

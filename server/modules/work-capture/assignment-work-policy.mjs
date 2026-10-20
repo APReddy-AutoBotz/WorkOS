@@ -111,10 +111,11 @@ export const validateAssignmentPolicy=async(client,req,input)=>{
 };
 export const validateWorkEntries=async(client,req,employeeId,entries)=>{
   await lockWorkPolicy(client,req,[employeeId]);
+  await assertWorkActorScope(client,req,employeeId);
   const worker=await loadWorker(client,req,employeeId),projects=new Map(),output=[];
   for(const entry of entries){
-    const at=date(entry.work_date);assertWorkerDate(worker,at);
     await assertWorkActorScope(client,req,employeeId,entry.project_id||null);
+    const at=date(entry.work_date);assertWorkerDate(worker,at);
     if(!entry.project_id){
       if(entry.work_type!=='Client Misc Task'||!entry.client_name)fail('WORK_PROJECT_REQUIRED','Project work requires an authorized project.');
       output.push({...entry,policy:{kind:'legacy-neutral',projectId:null,billable:Boolean(entry.billable),references:[]}});continue;
