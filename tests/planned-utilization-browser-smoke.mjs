@@ -233,9 +233,19 @@ try {
   const directorChart = chart('Mix by Practice Lead');
   await departmentChart.locator('.recharts-surface').waitFor();
   await directorChart.locator('.recharts-surface').waitFor();
-  assert.deepEqual(await departmentChart.locator('.recharts-yAxis .recharts-cartesian-axis-tick-value').allTextContents(),
-    ['Synthetic Delivery', 'Synthetic Engineering', 'Synthetic Support'], 'department chart preserves descending planned-load order');
+  // Recharts 3.8 portals axis labels into a separate SVG z-index layer. Their
+  // axis-specific label group survives that portal; the axis ancestor does not.
+  const departmentTickSelector = '.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value';
+  const expectedDepartments = ['Synthetic Delivery', 'Synthetic Engineering', 'Synthetic Support'];
+  const departmentChartRoot = await departmentChart.elementHandle();
+  await page.waitForFunction(({root, selector, labels}) =>
+    JSON.stringify([...root.querySelectorAll(selector)].map(tick => tick.textContent)) === JSON.stringify(labels),
+  {root: departmentChartRoot, selector: departmentTickSelector, labels: expectedDepartments});
+  await departmentChartRoot.dispose();
+  assert.deepEqual(await departmentChart.locator(departmentTickSelector).allTextContents(),
+    expectedDepartments, 'department chart preserves descending planned-load order');
   for (const value of ['Synthetic Lead A', 'Synthetic Lead B', '73% Avg.', '135% Avg.']) {
+    await directorChart.getByText(value, {exact: true}).waitFor();
     assert.equal(await directorChart.getByText(value, {exact: true}).count(), 1, 'director chart preserves primary and mapped membership averages');
   }
   const overload = page.locator('div.bg-orange-50').filter({has: page.getByRole('heading', {name: 'Over-Allocated', exact: true})});
