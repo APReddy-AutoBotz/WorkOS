@@ -16,6 +16,13 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const baselineLegacy=(await pool.query('select to_jsonb(t) value from timesheet_entries t where id=$1',[f.workId])).rows;
   await withCommercialApi({databaseUrl,identities,timeZone:'America/Los_Angeles'},async({baseUrl:apiUrl,request,tokenFor})=>{
     const roots=await createAmendmentHierarchy(request,'SYN-WORK-BROWSER');
+    // Fail at the actual dependency, rather than timing out on an empty select.
+    // These are real scoped HTTP reads, not browser interception or mocks.
+    for(const path of ['/api/employees','/api/projects','/api/allocations','/api/timesheets','/api/settings','/api/role-definitions','/api/country-directors']){
+      const result=await request(path);assert.equal(result.status,200,`${path}: ${JSON.stringify(result.body)}`);assert(Array.isArray(result.body),`${path} must return its real list`);
+      if(path==='/api/employees')assert(result.body.some(x=>x.id===f.ownerId&&x.status==='Active'));
+      if(path==='/api/projects')assert(result.body.some(x=>x.id===roots.project.id&&x.status==='Active'));
+    }
     const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});
     let browser;
     try{

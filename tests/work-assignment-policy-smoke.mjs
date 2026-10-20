@@ -16,6 +16,8 @@ assert.equal(resolveProjectDate(record,'2026-10-19').references[2].contractVersi
 record.entities[1].lifecycle.push(life('Engagement','On Hold','2026-02-15',2),life('Engagement','Active','2026-02-17',3));
 assert.equal(resolveProjectDate(record,'2026-02-14').kind,'governed');fails(()=>resolveProjectDate(record,'2026-02-16'),'WORK_LIFECYCLE_INACTIVE');
 const segments=policySegmentDates('2026-02-01','2026-03-01',record);assert(segments.includes('2026-02-15'));assert(segments.includes('2026-02-16'));assert(segments.includes('2026-02-17'));
+assert.deepEqual(policySegmentDates('9999-01-01','9999-12-31',{entities:[]},[{effective_from:'2020-01-01',effective_to:'9999-12-31'}]),['9999-01-01','9999-12-31'],'valid final ISO year must not overflow a next-day sentinel');
+assert.deepEqual(policySegmentDates(at,at,{entities:[]}),[at,at],'single-day assignment interval remains closed and inclusive');
 assert.throws(()=>segments.forEach(d=>resolveProjectDate(record,d)),WorkPolicyError,'endpoint-valid interval still rejects interior hold');
 record=loaded();record.entities[0].root.ends_on='2026-10-19';fails(()=>resolveProjectDate(record,at),'WORK_TERMS_DATES');
 record=loaded();record.entities[0].lifecycle=[life('Project','Active','2026-10-21')];fails(()=>resolveProjectDate(record,at),'WORK_LIFECYCLE_INACTIVE');

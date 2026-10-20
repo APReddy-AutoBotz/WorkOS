@@ -2518,7 +2518,7 @@ app.get('/api/allocations', requireDatabase, requireAuth, requirePermission('tim
   }
   params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
   where = `where organization_id = $${params.length - 1} and legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
-  await run(res, `select *,start_date::text,end_date::text from project_allocations ${where} order by start_date desc`, params);
+  await run(res, `select *,start_date::text,end_date::text from project_allocations ${where} order by project_allocations.start_date desc`, params);
 });
 app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('allocations.manage'), async (req, res) => {
   const schema = z.object({

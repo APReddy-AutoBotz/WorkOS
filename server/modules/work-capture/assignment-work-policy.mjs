@@ -92,13 +92,13 @@ export const resolveProjectDate=(loaded,at,{assignment=false}={})=>{
   return {kind:'governed',projectId:project.id,bindingId:binding.id,billable:Boolean(binding.billable),references};
 };
 export const policySegmentDates=(startsOn,endsOn,loaded,workerHistory=[])=>{
-  const cuts=new Set([startsOn,shift(endsOn,1)]);
+  const cuts=new Set([startsOn]);
   for(const row of [...loaded.entities.flatMap(x=>[...x.lifecycle,...x.amendments]),...workerHistory]){
     const d=row.effective_on||row.effective_from;
     if(d>startsOn&&d<=endsOn)cuts.add(d);
-    if(row.effective_to){const after=shift(row.effective_to,1);if(after>startsOn&&after<=endsOn)cuts.add(after);}
+    if(row.effective_to&&row.effective_to>=startsOn&&row.effective_to<endsOn)cuts.add(shift(row.effective_to,1));
   }
-  const sorted=[...cuts].sort();return sorted.slice(0,-1).flatMap((start,i)=>[start,shift(sorted[i+1],-1)]);
+  const sorted=[...cuts].sort();return sorted.flatMap((start,i)=>[start,i+1<sorted.length?shift(sorted[i+1],-1):endsOn]);
 };
 export const validateAssignmentPolicy=async(client,req,input)=>{
   await lockWorkPolicy(client,req,[input.employee_id]);

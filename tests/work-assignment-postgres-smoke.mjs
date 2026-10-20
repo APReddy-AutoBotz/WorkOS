@@ -31,6 +31,8 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const roots=await createAmendmentHierarchy(request,'SYN-WORK-POLICY');
     // Scoped aliases, exact date, parent activation and date policy are real API paths.
     const allocation=await workPost(request,'/api/allocations',workAllocation(roots.project.id,today));
+    const listedAllocations=await request('/api/allocations');assert.equal(listedAllocations.status,200,JSON.stringify(listedAllocations.body));
+    assert.deepEqual(listedAllocations.body.find(x=>x.id===allocation.id),allocation,'canonical allocation list preserves the saved date-only payload');
     const denied=await request('/api/allocations',{method:'POST',identity:identities.reader,body:workAllocation(roots.project.id,today)});assert.equal(denied.status,403);
     const cross=await request('/api/allocations',{method:'POST',body:workAllocation(roots.project.id,today,{employee_id:f.otherOwnerId})});assert.equal(cross.status,422);
     const beforeForeign=await workSnapshot(pool);assert.equal((await request('/api/timesheets',{method:'POST',body:workInput(roots.project.id,today,{employee_id:f.otherOwnerId})})).status,422);assert.deepEqual(await workSnapshot(pool),beforeForeign);
@@ -133,6 +135,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   await withCommercialApi({databaseUrl,identities,timeZone:'Asia/Kolkata'},async({request})=>{
     const roots=await createAmendmentHierarchy(request,'SYN-WORK-POSITIVE-OFFSET');
     const allocation=await workPost(request,'/api/allocations',workAllocation(roots.project.id,today));assert.equal(allocation.start_date,today);assert.equal(allocation.end_date,today);
+    const listedAllocations=await request('/api/allocations');assert.equal(listedAllocations.status,200,JSON.stringify(listedAllocations.body));assert.equal(listedAllocations.body.find(x=>x.id===allocation.id).start_date,today);assert.equal(listedAllocations.body.find(x=>x.id===allocation.id).end_date,today);
     const submitted=await workPost(request,'/api/timesheets',workInput(roots.project.id,today));assert.equal(submitted.week_ending,today);
     const listed=await request('/api/timesheets');assert.equal(listed.status,200);assert.equal(listed.body.find(x=>x.id===submitted.id).week_ending,today);
     const direct=await request(`/api/timesheets/${submitted.id}/status`,{method:'PATCH',body:{status:'Approved'}});assert.equal(direct.status,200,JSON.stringify(direct.body));
