@@ -1,3 +1,4 @@
+import {assertLegacyProjectMutationAllowed} from './modules/commercial-drafting/project-mutation.mjs';
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import pg from 'pg';
@@ -86,6 +87,7 @@ const seed = async () => {
   try {
     await client.query('begin');
     await assertDemoAuthority(client, dataset);
+    await assertLegacyProjectMutationAllowed(client,{organizationId:DEMO_ORGANIZATION_ID,legalEntityId:DEMO_LEGAL_ENTITY_ID},dataset.projects.map(item=>item.id));
 
     if (reset) {
       const employeeIds = dataset.employees.map(item => item.id);

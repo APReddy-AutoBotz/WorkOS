@@ -96,7 +96,7 @@ const contractTerms = async (client,req,data) => {
   if(applicable?.id!==row.id)fail(409,'COMMERCIAL_TERMS_SUPERSEDED','Select the contract version effective on the draft start date.');
   return row;
 };
-export const createEngagement = async (client,req,data,audit) => {
+export const validateEngagementReferences = async (client,req,data) => {
   const internal=['internal','pre_sales'].includes(data.model);
   const owner=(await client.query(`select id from employees where ${scopeWhere} and id=$3 and status='Active' and (joining_date is null or joining_date<=$4) and (exit_date is null or exit_date>=$5) for share`,[...scopeValues(req),data.ownerId,data.startsOn,data.endsOn])).rows[0];
   if(!owner)fail(404,'COMMERCIAL_REFERENCE_NOT_FOUND','An active owner in the selected scope and dates is required.');
@@ -117,6 +117,10 @@ export const createEngagement = async (client,req,data,audit) => {
     if(contract.clientId!==data.clientId || term.model!==data.model)
       fail(422,'COMMERCIAL_TERMS_MISMATCH','Engagement client and model must match the pinned contract.');
   }
+};
+export const createEngagement = async (client,req,data,audit) => {
+  await validateEngagementReferences(client,req,data);
+  const internal=['internal','pre_sales'].includes(data.model);
   const row=(await client.query(`insert into commercial_engagements
     (organization_id,legal_entity_id,code,name,model,client_id,contract_id,contract_version_id,owner_id,attribution_id,starts_on,ends_on,currency,budget,billable,reason,created_by)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning ${engagementProjection}`,

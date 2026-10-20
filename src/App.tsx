@@ -20,6 +20,7 @@ const PlanningWorkspace = lazy(() => import('./pages/PlanningWorkspace').then(mo
 const ActionCenterHub = lazy(() => import('./pages/ActionCenterHub').then(module => ({ default: module.ActionCenterHub })));
 const ClientPortfolio = lazy(() => import('./pages/ClientPortfolio').then(module => ({ default: module.ClientPortfolio })));
 const CommercialDraftingWorkspace = lazy(() => import('./pages/CommercialDraftingWorkspace').then(module => ({ default: module.CommercialDraftingWorkspace })));
+const CommercialLifecycleWorkspace = lazy(() => import('./components/CommercialLifecycleWorkspace').then(module => ({default:module.CommercialLifecycleWorkspace})));
 const MyTimesheet = lazy(() => import('./pages/MyTimesheet').then(module => ({ default: module.MyTimesheet })));
 const TimesheetApproval = lazy(() => import('./pages/TimesheetApproval').then(module => ({ default: module.TimesheetApproval })));
 const PlannedUtilization = lazy(() => import('./pages/PlannedUtilization').then(module => ({ default: module.PlannedUtilization })));
@@ -195,7 +196,7 @@ export default function App() {
                 } />
                 <Route path="/commercial-drafting" element={
                   <RoleRoute roles={ROUTE_ROLES.commercialDrafting}>
-                    <CommercialDraftingWorkspace />
+                    <><CommercialDraftingWorkspace /><CommercialLifecycleWorkspace /></>
                   </RoleRoute>
                 } />
 

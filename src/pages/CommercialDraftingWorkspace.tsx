@@ -246,7 +246,7 @@ export const CommercialDraftingWorkspace = () => {
     {workspace && <>
       <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
         <p>Server snapshot: {workspace.asOf}. {canManage ? 'Commercial drafting access enabled.' : 'Read-only commercial access. A separate manage permission is required to create drafts.'}</p>
-        <p className="mt-1">Legacy {termPluralTitle('project').toLowerCase()} mapped: {workspace.legacyMappings.mappedProjects} of {workspace.legacyMappings.totalProjects}. Mapping does not establish invoice eligibility.</p>
+        <p className="mt-1">Legacy {termPluralTitle('project').toLowerCase()} mapped: {workspace.legacyMappings.mappedProjects} of {workspace.legacyMappings.totalProjects}. Neutral migration snapshot coverage only; governed bindings appear separately below. Mapping does not establish invoice eligibility.</p>
         {Object.values(workspace.limits.truncated).some(Boolean) && <p role="status" className="mt-2 font-semibold">Some records or choices were truncated at {workspace.limits.pageSize}. These are bounded results, not an exhaustive absence claim.</p>}
       </div>
       {canManage && <div className="mb-6 flex flex-wrap gap-2" aria-label="Create commercial drafts">

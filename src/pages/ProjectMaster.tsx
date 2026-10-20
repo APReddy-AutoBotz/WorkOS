@@ -1,3 +1,4 @@
+import {ApiClientError} from '../services/apiClient';
 import { useState, useEffect, useMemo } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
@@ -51,6 +52,7 @@ export const ProjectMaster = () => {
   const [clients, setClients] = useState<Client[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [mutationError,setMutationError]=useState('');
   const [projectToClose, setProjectToClose] = useState<Project | null>(null);
 
   // Filter states
@@ -251,9 +253,14 @@ export const ProjectMaster = () => {
 
   const confirmCloseProject = async () => {
     if (!projectToClose) return;
-    await projectService.close(projectToClose.id);
-    setProjectToClose(null);
-    fetchData();
+    try {
+      await projectService.close(projectToClose.id);
+      setProjectToClose(null);setMutationError('');
+      fetchData();
+    }catch(error){
+      setProjectToClose(null);
+      setMutationError(error instanceof ApiClientError && error.status===409 ? 'This project is governed. Terminal closure is unavailable; inspect the commercial lifecycle workspace for dependencies.' : 'Closure was not confirmed. Reload before trying again.');
+    }
   };
 
   const handleExport = () => {
@@ -449,6 +456,7 @@ export const ProjectMaster = () => {
         </div>
       )}
 
+      {mutationError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3">{mutationError}</p>}
       <ConfirmDialog
         open={!!projectToClose}
         title="Close Project"
