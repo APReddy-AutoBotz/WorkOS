@@ -75,7 +75,7 @@ const pool = {
         if (sql.includes('select * from organizations where id=$1 for update')) {
           return {rows: [organization]};
         }
-        if (sql.includes('select * from organization_profile_versions where organization_id=$1')) {
+        if (sql.includes('from organization_profile_versions where organization_id=$1')) {
           return {rows: [latestProfile]};
         }
         if (sql.includes('insert into organization_profile_versions')) {

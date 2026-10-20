@@ -41,6 +41,7 @@ const TeamsActionLanding = lazy(() => import('./pages/TeamsActionLanding').then(
 const EntraLoginComplete = lazy(() => import('./pages/EntraLoginComplete').then(module => ({ default: module.EntraLoginComplete })));
 const ImportExport = lazy(() => import('./pages/ImportExport').then(module => ({ default: module.ImportExport })));
 const AuditTrail = lazy(() => import('./pages/AuditTrail').then(module => ({ default: module.AuditTrail })));
+const OrganizationProfileEditor = lazy(() => import('./pages/OrganizationProfileEditor').then(module => ({ default: module.OrganizationProfileEditor })));
 const AdminSettings = lazy(() => import('./pages/AdminSettings').then(module => ({ default: module.AdminSettings })));
 const Login = lazy(() => import('./pages/Login').then(module => ({ default: module.Login })));
 
@@ -330,6 +331,11 @@ export default function App() {
                 <Route path="/admin" element={
                   <RoleRoute roles={ROUTE_ROLES.adminSettings}>
                     <AdminSettings />
+                  </RoleRoute>
+                } />
+                <Route path="/admin/organization-profile" element={
+                  <RoleRoute roles={ROUTE_ROLES.adminSettings}>
+                    <OrganizationProfileEditor />
                   </RoleRoute>
                 } />
                 <Route path="/admin/settings" element={

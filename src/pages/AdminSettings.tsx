@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import {Link} from 'react-router-dom';
+import {hasPermission} from '../services/permissions';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
 import {
@@ -269,7 +271,8 @@ export const AdminSettings = () => {
     setNotice({ type: 'success', message: 'Utilization settings were saved and demo calculations were refreshed.' });
   };
 
-  if (loading || !settings) return null;
+  const profileLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/organization-profile">Edit organization profile</Link>;
+  if (loading || !settings) return <div>{profileLink}<p role="status" className="mt-4">Loading governance settings…</p></div>;
 
   const [directorMappingCounts, directorClientCounts, departmentUsage, countryUsage, industryUsage] = [
     countryDirectors.reduce<Record<string, number>>((counts, director) => {
@@ -304,6 +307,8 @@ export const AdminSettings = () => {
         breadcrumb={['System', 'Governance']}
       />
 
+      {profileLink}
+
       {notice && (
         <NoticeBanner
           type={notice.type}
@@ -331,6 +336,7 @@ export const AdminSettings = () => {
           <div className="flex items-center justify-between gap-4 mb-4">
             <div>
               <h2 id="setup-readiness-title" className="text-lg font-bold text-heading">Organization setup readiness</h2>
+              {profileLink}
               <p className="text-xs text-body opacity-70">Calculated from persisted server configuration for {setupReadiness.organizationId} / {setupReadiness.legalEntityId}.</p>
             </div>
             <Badge variant={setupReadiness.ready ? 'success' : 'warning'}>{setupReadiness.ready ? 'Ready' : 'Action required'}</Badge>

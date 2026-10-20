@@ -110,7 +110,7 @@ export const validateOrganizationProfile = input => organizationProfileSchema.sa
 export const validateLegalEntity = input => legalEntitySchema.safeParse(input);
 const profileSelect = `select o.id organization_id,o.code organization_code,p.name organization_name,
   p.legal_name,p.product_display_name,p.support_contact,p.default_locale,p.default_time_zone,p.base_currency,
-  p.fiscal_year_start,p.default_week_start,p.effective_from profile_effective_from,p.effective_to profile_effective_to
+  p.fiscal_year_start,p.default_week_start,p.effective_from::text profile_effective_from,p.effective_to::text profile_effective_to
   from organizations o join organization_profile_versions p on p.organization_id=o.id`;
 const legalSelect = `select le.id,le.organization_id,le.code,p.legal_name name,p.country_code,p.status,le.effective_from,p.authority_effective_to effective_to,
   p.legal_name,p.registration_identifier,p.tax_identifier,p.reporting_currency,p.address,
@@ -168,7 +168,7 @@ export const registerOrganizationSetupRoutes = ({
     const client=await pool.connect();try{
       await client.query('begin');await client.query('select pg_advisory_xact_lock(hashtext($1))',[`organization-profile:${req.organizationScope.organizationId}`]);
       const organization=(await client.query('select * from organizations where id=$1 for update',[req.organizationScope.organizationId])).rows[0];
-      const latest=(await client.query('select * from organization_profile_versions where organization_id=$1 order by effective_from desc limit 1 for update',[req.organizationScope.organizationId])).rows[0];
+      const latest=(await client.query('select *,effective_from::text effective_from,effective_to::text effective_to from organization_profile_versions where organization_id=$1 order by organization_profile_versions.effective_from desc limit 1 for update',[req.organizationScope.organizationId])).rows[0];
       if(latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Organization profile version is stale',code:'ORGANIZATION_PROFILE_VERSION_CONFLICT'});}
       if(latest&&parsed.data.effectiveFrom>dateOnly(latest.effective_from)&&latest.effective_to==null)
         await client.query('update organization_profile_versions set effective_to=$2::date-1 where id=$1',[latest.id,parsed.data.effectiveFrom]);
