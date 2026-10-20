@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import express from 'express';
 import {clientProfileSchema,billingUnitSchema,billingUnitVersionSchema,profileQuerySchema} from '../server/modules/client-profiles/contracts.mjs';
 import {createClientProfilesRouter} from '../server/modules/client-profiles/router.mjs';
+import {seedClientProfileClient} from './support/client-profiles-test.mjs';
 
 const fields={effectiveFrom:'2026-10-20',legalName:null,displayName:null,defaultCurrency:null,billingContacts:[],reason:'Synthetic profile'};
 const profile={...fields,code:'SYN-CLIENT',expectedVersion:0,parentClientId:null};
@@ -27,6 +28,12 @@ for(const kind of ['legal_entity','parent','tax_entity',''])assert.equal(billing
 assert.equal(billingUnitVersionSchema.safeParse({...revision,expectedVersion:0}).success,false);
 assert(profileQuerySchema.safeParse({asOf:'2026-10-20'}).success);assert(profileQuerySchema.safeParse({}).success);
 for(const value of [{asOf:'2026-02-30'},{organizationId:'forged'},{limit:'10000'},{includeContacts:true}])assert.equal(profileQuerySchema.safeParse(value).success,false);
+// Synthetic defaults must respect the retained organization-wide client-name
+// uniqueness constraint without weakening it or changing explicit fixture names.
+const seeded=[];const seedPool={query:async(sql,values)=>{seeded.push({sql,values});return {rows:[],rowCount:1};}};
+await seedClientProfileClient(seedPool);await seedClientProfileClient(seedPool);
+assert.notEqual(seeded[0].values[0],seeded[1].values[0]);assert.notEqual(seeded[0].values[1],seeded[1].values[1]);
+await seedClientProfileClient(seedPool,{id:'synthetic-explicit-id',name:'Synthetic explicit name'});assert.equal(seeded[2].values[1],'Synthetic explicit name');
 assert.throws(()=>createClientProfilesRouter({}));
 const scope={organizationId:'org-synthetic',legalEntityId:'legal-synthetic'};
 let calls=[],permissions=[],deny=null,failure=null,released=0;

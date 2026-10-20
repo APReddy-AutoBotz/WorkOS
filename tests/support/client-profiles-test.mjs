@@ -76,7 +76,7 @@ export const createClientUnit = async (request, id, input, options = {}) => {
   const result = await request(`/clients/${id}/billing-units`, {method: 'POST', body: input, ...options});
   assert.equal(result.status, 201, `real billing-unit command: ${JSON.stringify(result.body)}`);assert.equal(result.body.id, id);return result.body;
 };
-export const seedClientProfileClient = async (pool, {id = `synthetic-client-${randomUUID()}`, name = 'Synthetic additional operational client',
+export const seedClientProfileClient = async (pool, {id = `synthetic-client-${randomUUID()}`, name = `Synthetic additional operational client ${id}`,
   scope = clientProfileScope, ownerId = commercialFixture.ownerId, status = 'Active', industry = 'Synthetic operational industry'} = {}) => {
   await pool.query(`insert into clients(id,name,industry,account_owner_id,status,organization_id,legal_entity_id) values($1,$2,$3,$4,$5,$6,$7)`,
     [id, name, industry, ownerId, status, scope.organizationId, scope.legalEntityId]);return id;
