@@ -33,3 +33,9 @@ The additive date suite requires actual PostgreSQL route GET/PUT/current/future/
 - Hosted full CI additionally runs all ten additive synthetic browser suites, actual disposable PostgreSQL tests, production identity/fail-closed startup, fresh/upgrade/concurrent migrations, dependency audit, Compose/container checks and full-history secret scan. No skipped or unexecuted stage counts as a pass.
 
 The dependent Draft body records the final exact head/tree, independent engineering review and hosted receipts, including any failed attempts. Formal GitHub approval remains separate. Local authoring has no disposable database for the three-timezone route checks and no accepted local browser execution; those gates require hosted evidence.
+
+## First hosted receipt and accessible-label correction
+
+Retain failed [CI39361511572](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/39361511572) for original head `a6c88f39b64cf1128169a209511ad691e2f223ca`, tree `1cb72a6034b982119d74c18faf301e7b44b846d2`. All 49 unit/API commands passed, including actual PostgreSQL profile-date route cases in all three timezones. All nine retained browser suites passed. The new profile suite stopped at its first complete-field assertion because the implicit select label included option text; Week start day did not have the required exact accessible name. Later identity/migration/audit/container gates were skipped and are not accepted evidence.
+
+The bounded correction makes the existing label/control relationship explicit with `htmlFor` and `id`, leaving the exact-label browser assertion and every downstream gate intact. A new independent exact-tree engineering review and full exact-head CI receipt are required; no local browser pass is claimed.

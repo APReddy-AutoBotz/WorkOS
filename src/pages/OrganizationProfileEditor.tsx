@@ -172,9 +172,9 @@ export const OrganizationProfileEditor = () => {
           {field('defaultTimeZone', 'Default timezone', {maxLength: 80})}
           {field('baseCurrency', 'Base currency', {maxLength: 3, pattern: '[A-Z]{3}'})}
           {field('fiscalYearStart', 'Fiscal year start', {pattern: '[0-9]{2}-[0-9]{2}'})}
-          <label className="block min-w-0 text-sm font-semibold">Week start day<select name="defaultWeekStart" className={inputClass} value={visibleDraft.defaultWeekStart} onChange={event => edit('defaultWeekStart', Number(event.target.value))}>
+          <div className="min-w-0 text-sm font-semibold"><label htmlFor="profile-week-start">Week start day</label><select id="profile-week-start" name="defaultWeekStart" className={inputClass} value={visibleDraft.defaultWeekStart} onChange={event => edit('defaultWeekStart', Number(event.target.value))}>
             {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => <option key={day} value={index}>{day}</option>)}
-          </select></label>
+          </select></div>
           {field('effectiveFrom', 'Effective from', {type: 'date'})}
         </div>
         <p className="mt-5 text-sm text-slate-600">Use an effective date on or after the latest saved version. Saving on the same date updates that version; earlier dates can conflict. Reload returns the currently effective profile, not a future scheduled version.</p>
