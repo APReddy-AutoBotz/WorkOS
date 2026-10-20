@@ -238,12 +238,49 @@ try {
   const departmentTickSelector = '.recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value';
   const expectedDepartments = ['Synthetic Delivery', 'Synthetic Engineering', 'Synthetic Support'];
   const departmentChartRoot = await departmentChart.elementHandle();
-  await page.waitForFunction(({root, selector, labels}) =>
-    JSON.stringify([...root.querySelectorAll(selector)].map(tick => tick.textContent)) === JSON.stringify(labels),
-  {root: departmentChartRoot, selector: departmentTickSelector, labels: expectedDepartments});
-  await departmentChartRoot.dispose();
-  assert.deepEqual(await departmentChart.locator(departmentTickSelector).allTextContents(),
-    expectedDepartments, 'department chart preserves descending planned-load order');
+  try {
+    await page.waitForFunction(({root, selector, labels}) =>
+      JSON.stringify([...root.querySelectorAll(selector)].map(tick => tick.textContent)) === JSON.stringify(labels),
+    {root: departmentChartRoot, selector: departmentTickSelector, labels: expectedDepartments});
+    assert.deepEqual(await departmentChart.locator(departmentTickSelector).allTextContents(),
+      expectedDepartments, 'department chart preserves descending planned-load order');
+  } catch (error) {
+    // On an assertion failure, expose only bounded synthetic chart DOM evidence.
+    // Keep the failing condition intact so hosted CI remains the acceptance gate.
+    const observation = await departmentChart.evaluate((root, selector) => {
+      const describeTick = tick => ({
+        tag: tick.tagName,
+        classes: tick.getAttribute('class'),
+        textContent: tick.textContent,
+        tspans: [...tick.querySelectorAll('tspan')].slice(0, 8).map(line => line.textContent),
+        fontSize: getComputedStyle(tick).fontSize,
+        width: tick.getAttribute('width'),
+        withinDepartmentChart: root.contains(tick),
+        parentClasses: tick.parentElement?.getAttribute('class'),
+        outerHTML: tick.outerHTML.slice(0, 1200),
+      });
+      const scopedLabels = [...root.querySelectorAll(selector)];
+      const scopedTickValues = [...root.querySelectorAll('.recharts-cartesian-axis-tick-value')];
+      const globalTickValues = [...document.querySelectorAll('.recharts-cartesian-axis-tick-value')];
+      return {
+        selector,
+        chartConnected: root.isConnected,
+        chartClasses: root.getAttribute('class'),
+        scopedLabelCount: scopedLabels.length,
+        scopedLabels: scopedLabels.slice(0, 6).map(describeTick),
+        scopedTickValueCount: scopedTickValues.length,
+        scopedTickValues: scopedTickValues.slice(0, 6).map(describeTick),
+        globalTickValueCount: globalTickValues.length,
+        globalTickValues: globalTickValues.slice(0, 12).map(describeTick),
+        tickLabelGroups: [...root.querySelectorAll('g[class*="tick-label"]')].slice(0, 12).map(group => group.getAttribute('class')),
+        surfaces: [...root.querySelectorAll('svg.recharts-surface')].slice(0, 2).map(svg => ({width: svg.getAttribute('width'), height: svg.getAttribute('height'), viewBox: svg.getAttribute('viewBox')})),
+      };
+    }, departmentTickSelector).catch(observationError => ({observationError: observationError.message}));
+    console.error('Synthetic planned department chart assertion evidence:', JSON.stringify(observation));
+    throw error;
+  } finally {
+    await departmentChartRoot.dispose();
+  }
   for (const value of ['Synthetic Lead A', 'Synthetic Lead B', '73% Avg.', '135% Avg.']) {
     await directorChart.getByText(value, {exact: true}).waitFor();
     assert.equal(await directorChart.getByText(value, {exact: true}).count(), 1, 'director chart preserves primary and mapped membership averages');
