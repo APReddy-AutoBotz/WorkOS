@@ -1,3 +1,4 @@
+import {lockWorkPolicy,validateAssignmentPolicy,validateWorkEntries,assertWorkActorScope,assertTimesheetEditable,retainWorkSubmission,retainWorkDecision,assertWorkDecisionAllowed,workPolicyError} from './modules/work-capture/assignment-work-policy.mjs';
 import {assertLegacyProjectMutationAllowed,lockCommercialLifecycle,sendGovernedProjectConflict} from './modules/commercial-drafting/project-mutation.mjs';
 import 'dotenv/config';
 import crypto from 'node:crypto';
@@ -2277,7 +2278,7 @@ app.patch('/api/projects/:id/status', requireDatabase, requireAuth, requirePermi
       await client.query(`
         update project_allocations
         set status = 'Completed',
-          end_date = case when end_date > current_date then current_date else end_date end,
+          end_date = greatest(start_date,least(end_date,(now() at time zone 'UTC')::date)),
           updated_at = now()
         where project_id = $1 and organization_id = $2 and legal_entity_id = $3 and status = 'Active'
       `, [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
@@ -2517,7 +2518,7 @@ app.get('/api/allocations', requireDatabase, requireAuth, requirePermission('tim
   }
   params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
   where = `where organization_id = $${params.length - 1} and legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
-  await run(res, `select * from project_allocations ${where} order by start_date desc`, params);
+  await run(res, `select *,start_date::text,end_date::text from project_allocations ${where} order by start_date desc`, params);
 });
 app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('allocations.manage'), async (req, res) => {
   const schema = z.object({
@@ -2545,23 +2546,20 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await lockWorkPolicy(client,req);
     const employee = (await client.query('select * from employees where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-    if (!employee || employee.status === 'Exited') {
+    if (!employee) {
       await client.query('rollback');
       res.status(422).json({ error: 'Allocation must reference an active employee' });
       return;
     }
     const project = (await client.query('select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.project_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-    if (!project || !['Active', 'Proposed'].includes(project.status)) {
+    if (!project) {
       await client.query('rollback');
       res.status(422).json({ error: 'Allocation must reference an active or proposed project' });
       return;
     }
-    if (parsed.data.start_date < toIsoDate(project.start_date) || parsed.data.end_date > toIsoDate(project.end_date)) {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Allocation dates must stay within the project timeline' });
-      return;
-    }
+    await validateAssignmentPolicy(client,req,parsed.data);
     if (req.user.activeRole === 'ProjectManager' && project.manager_id !== req.user.employeeRecordId && project.manager_id !== req.user.employeeId) {
       await client.query('rollback');
       res.status(403).json({ error: 'Project managers can allocate only on their own projects' });
@@ -2608,6 +2606,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
     const previous = parsed.data.id
       ? (await client.query('select * from project_allocations where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0]
       : null;
+    if(previous) await assertWorkActorScope(client,req,previous.employee_id,previous.project_id,{assignment:true});
     const allocationIdExistsOutsideScope = parsed.data.id && !previous
       ? (await client.query('select 1 from project_allocations where id = $1', [parsed.data.id])).rowCount > 0
       : false;
@@ -2632,7 +2631,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
         updated_at = now()
       where project_allocations.organization_id = excluded.organization_id
         and project_allocations.legal_entity_id = excluded.legal_entity_id
-      returning *
+      returning *,start_date::text,end_date::text
     `, [
       parsed.data.id || null,
       parsed.data.employee_id,
@@ -2671,6 +2670,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('rollback');
+    if (workPolicyError(res,error)) return;
     console.error(error);
     res.status(500).json({ error: 'Allocation save failed' });
   } finally {
@@ -2682,6 +2682,7 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await lockWorkPolicy(client,req);
     const previous = (await client.query('select * from project_allocations where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     if (!previous) {
       await client.query('rollback');
@@ -2711,13 +2712,15 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
         return;
       }
     }
+    await lockWorkPolicy(client,req,[previous.employee_id]);
+    await assertWorkActorScope(client,req,previous.employee_id,previous.project_id,{assignment:true});
     const result = await client.query(`
       update project_allocations
       set status = 'Completed',
-        end_date = case when end_date > current_date then current_date else end_date end,
+        end_date = greatest(start_date,least(end_date,(now() at time zone 'UTC')::date)),
         updated_at = now()
       where id = $1 and organization_id = $2 and legal_entity_id = $3
-      returning *
+      returning *,start_date::text,end_date::text
     `, [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     await audit(client, req, {
       module: 'Allocations',
@@ -2741,6 +2744,7 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('rollback');
+    if (workPolicyError(res,error)) return;
     console.error(error);
     res.status(500).json({ error: 'Allocation end failed' });
   } finally {
@@ -2778,7 +2782,8 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
   where = `where t.organization_id = $${params.length-1} and t.legal_entity_id = $${params.length} and e.legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `
     select
-      t.*,
+      t.*,t.week_ending::text,
+      (select json_build_object('id',w.id,'sequence',w.sequence,'policyVersion',w.policy_version,'entryCount',jsonb_array_length(w.entries),'governedEntryCount',(select count(*) from jsonb_array_elements(w.entries) x where x->>'kind'='governed')) from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id order by w.sequence desc limit 1) work_assurance,
       coalesce(json_agg(json_build_object(
         'id', te.id,
         'employee_id', t.employee_id,
@@ -2852,6 +2857,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await lockWorkPolicy(client,req);
     await assertReportingPeriodAllows(client, {
       organizationId: req.organizationScope.organizationId,
       legalEntityId: req.organizationScope.legalEntityId,
@@ -2859,7 +2865,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
     });
     const employee = (await client.query('select * from employees where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-    if (!employee || employee.status === 'Exited') {
+    if (!employee) {
       await client.query('rollback');
       res.status(422).json({ error: 'Timesheet must reference an active employee' });
       return;
@@ -2874,45 +2880,15 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       return;
     }
 
-    const projectIds = [...new Set(parsed.data.entries.map(entry => entry.project_id).filter(Boolean))];
-    if (projectIds.length > 0) {
-      const projectResult = await client.query('select id, status from projects where id = any($1::text[]) and organization_id = $2 and legal_entity_id = $3', [projectIds, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
-      const activeProjectIds = new Set(projectResult.rows.filter(project => project.status !== 'Completed').map(project => project.id));
-      const missingOrClosed = projectIds.find(projectId => !activeProjectIds.has(projectId));
-      if (missingOrClosed) {
-        await client.query('rollback');
-        res.status(422).json({ error: 'Timesheet project entries must reference active, proposed, or on-hold projects' });
-        return;
-      }
-      const unassignedEntry = (await client.query(`
-        select input.project_id, input.work_date
-        from jsonb_to_recordset($1::jsonb) as input(project_id text, work_date date)
-        where input.project_id is not null and not exists (
-          select 1 from project_allocations pa
-          where pa.employee_id = $2 and pa.project_id = input.project_id
-            and pa.organization_id = $3 and pa.legal_entity_id = $4
-            and pa.status = 'Active' and input.work_date between pa.start_date and pa.end_date
-        )
-        limit 1
-      `, [JSON.stringify(parsed.data.entries), employee.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (unassignedEntry) {
-        await client.query('rollback');
-        res.status(422).json({ error: 'Project work requires an active allocation covering the entry date' });
-        return;
-      }
-    }
-
+    const policyEntries=await validateWorkEntries(client,req,employee.id,parsed.data.entries);
+    parsed.data.entries=policyEntries;
     const totalHours = round1(parsed.data.entries.reduce((sum, entry) => sum + entry.hours, 0));
     const billableHours = round1(parsed.data.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + entry.hours, 0));
     const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, parsed.data.employee_id, parsed.data.week_ending])).rows[0];
-    if (previous && !['Draft', 'Rejected'].includes(previous.status)) {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Only draft or rejected timesheets can be edited or submitted' });
-      return;
-    }
+    assertTimesheetEditable(previous);
     const timesheetResult = await client.query(`
       insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id)
-      values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7,$8)
+      values ($1,$2,case when $3::text in ('Draft','Submitted') then 'Draft' end,$4,$5,$6, null,$7,$8)
       on conflict (organization_id, employee_id, week_ending) do update set
         status = excluded.status,
         total_hours = excluded.total_hours,
@@ -2920,7 +2896,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
         rejection_reason = excluded.rejection_reason,
         submitted_at = case when excluded.status = 'Submitted' then coalesce(timesheets.submitted_at, now()) else timesheets.submitted_at end,
         updated_at = now()
-      returning *
+      returning *,week_ending::text
     `, [
       parsed.data.employee_id,
       parsed.data.week_ending,
@@ -2930,12 +2906,13 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       parsed.data.rejection_reason || null,
       req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
-    const timesheet = timesheetResult.rows[0];
+    let timesheet = timesheetResult.rows[0];
     await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);
+    const savedEntries=[];
     for (const entry of parsed.data.entries) {
-      await client.query(`
+      const inserted=await client.query(`
         insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *,work_date::text
       `, [
         timesheet.id,
         entry.project_id || null,
@@ -2947,6 +2924,12 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
         entry.remark || null,
         entry.billable,
       ]);
+      savedEntries.push({...inserted.rows[0],policy:entry.policy});
+    }
+    let workAssurance=null;
+    if(parsed.data.status==='Submitted'){
+      timesheet=(await client.query("update timesheets set status='Submitted',submitted_at=now(),updated_at=now() where id=$1 returning *,week_ending::text",[timesheet.id])).rows[0];
+      workAssurance=await retainWorkSubmission(client,req,timesheet,savedEntries,'Web');
     }
     if (parsed.data.status === 'Submitted') {
       await upsertApprovalRecord(client, req, {
@@ -2971,10 +2954,11 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       reason: parsed.data.rejection_reason || null,
     });
     await client.query('commit');
-    res.json({ ...timesheet, entries: parsed.data.entries });
+    res.json({ ...timesheet, work_assurance:workAssurance, entries:parsed.data.entries.map(({policy,...entry})=>entry) });
   } catch (error) {
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;
+    if (workPolicyError(res,error)) return;
     console.error(error);
     res.status(500).json({ error: 'Timesheet save failed' });
   } finally {
@@ -3000,7 +2984,8 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select t.* from timesheets t join employees e on e.id=t.employee_id where t.id=$1 and t.organization_id=$2 and t.legal_entity_id=$3 and e.legal_entity_id=$3 for update', [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
+    await lockWorkPolicy(client,req);
+    const previous = (await client.query('select t.*,t.week_ending::text from timesheets t join employees e on e.id=t.employee_id where t.id=$1 and t.organization_id=$2 and t.legal_entity_id=$3 and e.legal_entity_id=$3 for update', [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
     if (!previous) {
       await client.query('rollback');
       res.status(404).json({ error: 'Timesheet not found' });
@@ -3063,6 +3048,7 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
       }
     }
 
+    await assertWorkDecisionAllowed(client,req,previous);
     const approved = parsed.data.status === 'Approved';
     const result = await client.query(`
       update timesheets
@@ -3074,8 +3060,9 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
         rejected_by = case when $2 = 'Rejected' then $4 else rejected_by end,
         updated_at = now()
       where id = $1
-      returning *
+      returning *,week_ending::text
     `, [req.params.id, parsed.data.status, parsed.data.reason || null, req.user.username]);
+    await retainWorkDecision(client,req,previous,parsed.data.status,parsed.data.reason,'Web');
     await audit(client, req, {
       module: 'Timesheets',
       action: approved ? 'Approve Timesheet' : 'Reject Timesheet',
@@ -3097,6 +3084,7 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
   } catch (error) {
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;
+    if (workPolicyError(res,error)) return;
     console.error(error);
     res.status(500).json({ error: 'Timesheet status update failed' });
   } finally {
@@ -3340,6 +3328,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await lockWorkPolicy(client,req);
     const approval = (await client.query('select * from approval_records where id = $1 for update', [req.params.id])).rows[0];
     if (!approval) {
       await client.query('rollback');
@@ -3376,7 +3365,8 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     }
 
     if (approval.entity_type === 'Timesheet') {
-      const previous = (await client.query('select * from timesheets where id=$1 and organization_id=$2 and legal_entity_id=$3 for update', [approval.entity_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
+      if(!req.user.permissions.includes('timesheets.approve')){await client.query('rollback');res.status(403).json({error:'Insufficient permission privileges'});return;}
+      const previous = (await client.query('select *,week_ending::text from timesheets where id=$1 and organization_id=$2 and legal_entity_id=$3 for update', [approval.entity_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
       if (!previous || previous.status !== 'Submitted') {
         await client.query('rollback');
         res.status(422).json({ error: 'Linked timesheet is not submitted' });
@@ -3388,6 +3378,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
         relevantDate: previous.week_ending,
         operation: REPORTING_PERIOD_OPERATIONS.DECISION,
       });
+      await assertWorkDecisionAllowed(client,req,previous);
       const nextStatus = parsed.data.status === 'Approved' ? 'Approved' : 'Rejected';
       await client.query(`
         update timesheets
@@ -3400,6 +3391,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
           updated_at = now()
         where id = $1
       `, [approval.entity_id, nextStatus, parsed.data.comments || null, req.user.username]);
+      await retainWorkDecision(client,req,previous,parsed.data.status,parsed.data.comments,'Approval workspace');
     }
 
     if (approval.entity_type === 'LeaveRequest') {
@@ -3443,6 +3435,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
   } catch (error) {
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;
+    if (workPolicyError(res,error)) return;
     console.error(error);
     res.status(500).json({ error: 'Approval status update failed' });
   } finally {
@@ -4036,6 +4029,10 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
         await client.query('rollback');
         res.status(404).json({ error: 'Approval record not found' });
         return;
+      }
+      if(approval.rows[0].entity_type==='Timesheet'){
+        await client.query('rollback');
+        res.status(409).json({error:'Decide submitted work in the scoped work approval workspace.',code:'WORK_SOURCE_DECISION_REQUIRED'});return;
       }
       await decideApprovalRecord(client, req, {
         entityType: approval.rows[0].entity_type,
@@ -6420,6 +6417,7 @@ const operationalImportRouter = createOperationalImportRouter({
   REPORTING_PERIOD_OPERATIONS,
   ReportingPeriodError,
   sendReportingPeriodError,
+  upsertWorkApproval:upsertApprovalRecord,
 });
 app.use('/api', operationalImportRouter);
 app.use('/api/v1', operationalImportRouter);

@@ -689,11 +689,20 @@ export interface TimesheetEntry {
   hours: number;
   remark?: string;
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
-  billable: true; // All client work is billable/client effort
+  billable: boolean; // Server-owned project/assignment policy may make work non-billable
   weekEnding: string;
 }
 
+export interface WorkSubmissionAssurance {
+  id: string;
+  sequence: number;
+  policyVersion: string;
+  entryCount: number;
+  governedEntryCount: number;
+}
+
 export interface TimesheetSummary {
+  workAssurance?: WorkSubmissionAssurance;
   id?: string;
   employeeId: string;
   employeeName: string;

@@ -70,6 +70,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Verify work assignment PostgreSQL migration and API acceptance
+        run: npm run test:work-assignment-postgres
+
       - name: Verify governed amendments PostgreSQL migration and API acceptance
         run: npm run test:commercial-amendments-postgres
 
@@ -78,6 +81,9 @@ jobs:
 
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
+
+      - name: Verify real work assignment PostgreSQL browser journey
+        run: npm run test:work-assignment-journey
 
       - name: Verify real governed amendments PostgreSQL browser journey
         run: npm run test:commercial-amendments-journey

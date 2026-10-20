@@ -146,7 +146,7 @@ export const AllocationForm = ({ onClose, allocation }: AllocationFormProps) => 
       );
       onClose();
     } catch (error) {
-      console.error("Failed to save allocation", error);
+      setFormError(error instanceof Error ? error.message : "Allocation could not be saved. Reload and check the authoritative worker/project dates.");
     } finally {
       setLoading(false);
     }

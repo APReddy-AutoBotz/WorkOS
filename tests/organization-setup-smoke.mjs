@@ -280,7 +280,8 @@ assert.match(server, /const allocationIdExistsOutsideScope = parsed\.data\.id &&
 assert.match(server, /on conflict \(id\) do update set[\s\S]*where project_allocations\.organization_id = excluded\.organization_id[\s\S]*project_allocations\.legal_entity_id = excluded\.legal_entity_id[\s\S]*returning \*/, 'same-scope allocation IDs must update without permitting a cross-scope conflict mutation');
 assert.match(server, /values \(coalesce\(\$1, 'a-' \|\| gen_random_uuid\(\)::text\)/, 'allocation save must retain generated IDs when the request omits an ID');
 assert.match(server, /if \(result\.rowCount === 0\)[\s\S]*Allocation not found in the authorized organization and legal entity/, 'a racing cross-scope allocation ID collision must fail closed without mutation');
-assert.match(server, /api\/timesheets[\s\S]*from employees where id = \$1 and organization_id = \$2 and legal_entity_id = \$3[\s\S]*pa\.organization_id = \$3 and pa\.legal_entity_id = \$4/, 'timesheet save must scope employees and covering allocations by legal entity');
+assert.match(server, /api\/timesheets[\s\S]*from employees where id = \$1 and organization_id = \$2 and legal_entity_id = \$3[\s\S]*validateWorkEntries/, 'timesheet save resolves a scoped worker and invokes the shared dated assignment policy');
+assert.match(readFileSync('server/modules/work-capture/assignment-work-policy.mjs','utf8'), /project_allocations where employee_id=\$1 and project_id=\$2 and organization_id=\$3 and legal_entity_id=\$4/, 'covering assignments retain exact organization/legal-entity ownership');
 
 assert.match(service, /user_organization_scopes/, 'scope must be resolved from persisted assignments');
 assert.match(service, /ORG_SCOPE_DENIED/, 'unauthorized caller scope must fail closed');

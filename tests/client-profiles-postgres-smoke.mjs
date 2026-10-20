@@ -106,7 +106,7 @@ await withClientProfileDatabase(async ({pool, databaseUrl}) => {
     const governed = await seedGovernedHistory(pool, identities, today);
     const before = await snapshot(pool, [...preservedClientTables, 'audit_logs']);
     assert.equal(before.project_engagement_mappings.length, 1);assert.ok(before.commercial_draft_events.length >= 3);assert.equal(before.commercial_lifecycle_events.length, 3);
-    const upgraded = await migrateClientProfiles(pool);assert.deepEqual(upgraded.applied, [clientProfileMigration, '043_wos04_governed_amendments']);assert.equal(upgraded.status.isCurrent, true);
+    const upgraded = await migrateClientProfiles(pool);assert.deepEqual(upgraded.applied, [clientProfileMigration, '043_wos04_governed_amendments', '044_wos04_work_submission_evidence']);assert.equal(upgraded.status.isCurrent, true);
     assert.deepEqual(await snapshot(pool, [...preservedClientTables, 'audit_logs']), before, '042 never rewrites operational, neutral, commercial, lifecycle or work history');
     await defaults(pool);
     for (const table of clientProfileTables) assert.deepEqual((await snapshot(pool, [table]))[table], []);
@@ -395,7 +395,7 @@ await withClientProfileDatabase(async ({pool, databaseUrl}) => {
     env: {PATH: process.env.PATH, NODE_ENV: 'test', APP_MODE: 'test', TZ: 'UTC', DATABASE_URL: databaseUrl, PGSSLMODE: 'disable',
       DEMO_SEED_PASSWORD: randomBytes(32).toString('base64url'), AUTO_SEED_DEMO: 'false', RESET_DEMO_DATA: 'false'},
   });
-  await runSeed([]);await runSeed(['--reset']);await defaults(pool);
+  await runSeed([]);await assert.rejects(runSeed(['--reset']),/submitted or approved work history/);await defaults(pool);
   for (const table of clientProfileTables) assert.deepEqual((await snapshot(pool, [table]))[table], [], 'ordinary seed/reset must not guess commercial profile values');
   const seeded = (await pool.query("select id from clients where status='Active' and organization_id=$1 and legal_entity_id=$2 order by id limit 1", [scope.organizationId, scope.legalEntityId])).rows[0];assert.ok(seeded);
   const identities = await seedCommercialIdentities(pool);await grant(pool);
@@ -404,7 +404,7 @@ await withClientProfileDatabase(async ({pool, databaseUrl}) => {
   assert.deepEqual(await snapshot(pool, clientProfileTables), privateBefore, 'ordinary reseeding never overwrites protected client profiles or contacts');
   const protectedReset = await snapshot(pool, [...preservedClientTables, ...clientProfileTables, 'audit_logs']);
   const protectedCounts = await counts(pool);
-  await assert.rejects(runSeed(['--reset']), failure => {assert.equal(failure.code, 1);assert.match(failure.stderr, /foreign key|23503/i);return true;},
+  await assert.rejects(runSeed(['--reset']), failure => {assert.equal(failure.code, 1);assert.match(failure.stderr, /foreign key|23503|submitted or approved work history/i);return true;},
     'reset cannot remove a client owning immutable commercial profile evidence');
   assert.deepEqual(await snapshot(pool, [...preservedClientTables, ...clientProfileTables, 'audit_logs']), protectedReset,
     'failed reset transaction restores every preceding client, employee, project, assignment, work and audit change');

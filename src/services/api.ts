@@ -9,7 +9,7 @@ import { authService } from './authService';
 import {
   api, checkBackend, getOrganizationScope, ApiClientError, isDemoFallbackAllowed,
   normalizeEmployee, normalizeProject, normalizeAllocation,
-  normalizeClient, normalizeTimesheetSummary, normalizeAuditLog,
+  normalizeClient, normalizeTimesheetSummary, normalizeWorkAssurance, normalizeAuditLog,
   normalizeSettings, normalizeCatalogItem, normalizeRoleDefinition,
   normalizeCountryDirector, normalizeImportExportLog, normalizeUtilizationReport,
   normalizeDataQualityReport, normalizeDashboardReport, normalizeLeaveType,
@@ -590,12 +590,12 @@ export const timesheetService = {
     }
     return DataStorage.get<TimesheetSummary[]>(STORAGE_KEYS.TIMESHEETS, []);
   },
-  save: async (ts: TimesheetSummary): Promise<void> => {
+  save: async (ts: TimesheetSummary): Promise<TimesheetSummary['workAssurance']> => {
     const roundedEntries = ts.entries.map(e => ({ ...e, hours: roundMetric(e.hours) }));
     const totalHours = roundMetric(roundedEntries.reduce((sum, entry) => sum + entry.hours, 0));
     const billableHours = roundMetric(roundedEntries.filter(entry => entry.billable).reduce((sum, entry) => sum + entry.hours, 0));
     if (await checkBackend()) {
-      await api.post('/api/timesheets', {
+      const saved = await api.post<Record<string, unknown>>('/api/timesheets', {
         employee_id: ts.employeeId,
         week_ending: ts.weekEnding,
         status: ts.status,
@@ -612,7 +612,7 @@ export const timesheetService = {
           billable: e.billable,
         })),
       });
-      return;
+      return normalizeWorkAssurance(saved.work_assurance);
     }
     // localStorage save with future-week guard
     const today = new Date(); today.setHours(0, 0, 0, 0);

@@ -23,7 +23,8 @@ import {
   XCircle,
   ShieldCheck
 } from 'lucide-react';
-import { WorkType } from '../types';
+import { WorkType, WorkSubmissionAssurance as Assurance } from '../types';
+import { WorkSubmissionAssurance } from '../components/WorkSubmissionAssurance';
 import { isProjectAvailableForPlanning, overlapsDateRange } from '../services/calculations';
 
 import { productConfig } from '../config/productConfig';
@@ -61,6 +62,7 @@ export const MyTimesheet = () => {
   const isFutureWeek = currentWeek > currentSystemWeek;
   const [status, setStatus] = useState<'Draft' | 'Submitted' | 'Approved' | 'Rejected'>('Draft');
 
+  const [workAssurance, setWorkAssurance] = useState<Assurance | undefined>();
   const [rows, setRows] = useState<any[]>([]);
   const [assignedProjects, setAssignedProjects] = useState<any[]>([]);
   const [notice, setNotice] = useState<{ type: 'success' | 'warning' | 'danger'; message: string } | null>(null);
@@ -122,6 +124,7 @@ export const MyTimesheet = () => {
         });
         setRows(Object.values(rowMap));
         setStatus(existing.status);
+        setWorkAssurance(existing.workAssurance);
         setRejectionNote(existing.rejectionNote || existing.rejectionReason);
       } else {
         const firstProject = assigned[0];
@@ -140,6 +143,7 @@ export const MyTimesheet = () => {
           }
         ] : []);
         setStatus('Draft');
+        setWorkAssurance(undefined);
         setRejectionNote(undefined);
       }
     });
@@ -216,7 +220,7 @@ export const MyTimesheet = () => {
     });
 
     try {
-      await timesheetService.save({
+      const assurance = await timesheetService.save({
         employeeId: user.id,
         employeeName: user.name,
         weekEnding,
@@ -227,6 +231,7 @@ export const MyTimesheet = () => {
         entries
       });
       setStatus(nextStatus);
+      setWorkAssurance(assurance);
       setRejectionNote(undefined);
       setNotice({
         type: 'success',
@@ -317,6 +322,7 @@ export const MyTimesheet = () => {
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
+      <WorkSubmissionAssurance assurance={workAssurance} status={status} />
       <PageHeader
         title={user?.role === 'Admin' ? 'Admin Self-Log Test' : 'My Timesheet'}
         subtitle={headerSubtitle}

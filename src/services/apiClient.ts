@@ -370,12 +370,25 @@ export const normalizeClient = (r: Record<string, unknown>): Client => ({
   updatedAt: String(r.updated_at),
 });
 
+export const normalizeWorkAssurance = (value: unknown): TimesheetSummary['workAssurance'] => {
+  if (!value || typeof value !== 'object') return undefined;
+  const r = value as Record<string, unknown>;
+  if (typeof r.id !== 'string' || r.policyVersion !== 'assignment-work-date/1'
+    || !Number.isInteger(r.sequence) || Number(r.sequence) < 1
+    || !Number.isInteger(r.entryCount) || Number(r.entryCount) < 1
+    || !Number.isInteger(r.governedEntryCount) || Number(r.governedEntryCount) < 0
+    || Number(r.governedEntryCount) > Number(r.entryCount)) return undefined;
+  return {id: r.id, sequence: Number(r.sequence), policyVersion: r.policyVersion,
+    entryCount: Number(r.entryCount), governedEntryCount: Number(r.governedEntryCount)};
+};
+
 export const normalizeTimesheetSummary = (
   r: Record<string, unknown>,
   employeeMap: Map<string, Employee>,
 ): TimesheetSummary => {
   const entries = Array.isArray(r.entries) ? (r.entries as Record<string, unknown>[]) : [];
   return {
+    workAssurance: normalizeWorkAssurance(r.work_assurance),
     id: r.id ? String(r.id) : undefined,
     employeeId: String(r.employee_id),
     employeeName: employeeMap.get(String(r.employee_id))?.name ?? String(r.employee_id),
@@ -402,7 +415,7 @@ export const normalizeTimesheetSummary = (
       hours: roundMetric(Number(entry.hours)),
       remark: entry.remark ? String(entry.remark) : undefined,
       status: (entry.status || r.status) as TimesheetEntry['status'],
-      billable: Boolean(entry.billable) as true,
+      billable: Boolean(entry.billable),
       weekEnding: String(entry.week_ending ?? r.week_ending).slice(0, 10),
     })),
   };

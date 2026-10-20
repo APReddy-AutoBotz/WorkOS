@@ -89,7 +89,12 @@ const seed = async () => {
     await assertDemoAuthority(client, dataset);
     await assertLegacyProjectMutationAllowed(client,{organizationId:DEMO_ORGANIZATION_ID,legalEntityId:DEMO_LEGAL_ENTITY_ID},dataset.projects.map(item=>item.id));
 
+    const protectedWork=await query(client,`select 1 from timesheets t where t.organization_id=$1 and t.legal_entity_id=$2 and t.employee_id=any($3::text[]) and (exists(select 1 from work_submission_evidence w where w.timesheet_id=t.id) or exists(select 1 from timesheet_entries e join commercial_project_bindings b on b.project_id=e.project_id where e.timesheet_id=t.id)) limit 1`,[DEMO_ORGANIZATION_ID,DEMO_LEGAL_ENTITY_ID,dataset.employees.map(item=>item.id)]);
+    if(protectedWork.rowCount)throw new Error('Demo seed cannot replace governed or retained submitted work.');
+
     if (reset) {
+      const accepted=await query(client,"select 1 from timesheets where organization_id=$1 and legal_entity_id=$2 and employee_id=any($3::text[]) and status in ('Submitted','Approved') limit 1",[DEMO_ORGANIZATION_ID,DEMO_LEGAL_ENTITY_ID,dataset.employees.map(item=>item.id)]);
+      if(accepted.rowCount)throw new Error('Demo reset cannot delete submitted or approved work history.');
       const employeeIds = dataset.employees.map(item => item.id);
       const userIds = (await query(client, 'select id from users where employee_record_id=any($1::text[])', [employeeIds])).rows.map(row => row.id);
       await query(client, 'delete from timesheet_entries where timesheet_id in (select id from timesheets where organization_id=$1 and legal_entity_id=$2 and employee_id=any($3::text[]))', [DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID, employeeIds]);
@@ -349,6 +354,8 @@ const seed = async () => {
     }
 
     for (const timesheet of dataset.timesheets) {
+      const accepted=await query(client,"select 1 from timesheets where organization_id=$1 and legal_entity_id=$2 and employee_id=$3 and week_ending=$4 and status in ('Submitted','Approved')",[DEMO_ORGANIZATION_ID,DEMO_LEGAL_ENTITY_ID,timesheet.employeeId,timesheet.weekEnding]);
+      if(accepted.rowCount)continue; // Do not rewrite accepted neutral legacy IDs or evidence.
       const result = await query(client, `
         insert into timesheets (
           employee_id, week_ending, status, total_hours, billable_hours,
