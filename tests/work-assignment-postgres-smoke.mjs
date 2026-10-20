@@ -90,7 +90,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     // alters any retained work/terms; it does not grant a policy exception.
     const ended=await request(`/api/allocations/${extended.id}`,{method:'DELETE'});assert.equal(ended.status,200);assert.equal(String(ended.body.end_date).slice(0,10),'2099-01-01');
     await amendmentTransition(request,'Project',roots.project.id,2,roots.pin,'Active');
-    const worker='worker-synthetic-work-import';await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,status,organization_id,legal_entity_id) values($1,'SYN-WORK-IMPORT','Synthetic imported worker','work-import@example.test','Analyst','Delivery','US','Active',$2,$3)`,[worker,f.organizationId,f.legalEntityId]);
+    const worker='worker-synthetic-work-import';await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values($1,'SYN-WORK-IMPORT','Synthetic imported worker','work-import@example.test','Analyst','Delivery','US','director-commercial','Active',$2,$3)`,[worker,f.organizationId,f.legalEntityId]);
     await workPost(request,'/api/allocations',workAllocation(roots.project.id,today,{employee_id:worker}));
     // Same-key import concurrency replays exactly one immutable evidence record.
     const row=workImportRow(roots.project.id,today,{employeeId:worker});const key=randomUUID();
@@ -110,7 +110,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const project=await workPost(request,'/lifecycle/projects',{engagementId:internal.id,projectId:null,code:'SYN-WORK-INTERNAL-P',name:'Synthetic internal project',managerId:f.ownerId,startsOn:'2020-01-01',endsOn:'2098-12-31',billable:false,budgetAllocation:'0',reason:'Synthetic internal project'},201);
     const badInternal=await request('/api/allocations',{method:'POST',body:workAllocation(project.id,today)});assert.equal(badInternal.status,422);assert.equal(badInternal.body.code,'WORK_BILLABILITY_POLICY');
     await workPost(request,'/api/allocations',workAllocation(project.id,today,{billable:false}));
-    const internalWorker='worker-synthetic-internal';await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,status,organization_id,legal_entity_id) values($1,'SYN-WORK-INTERNAL','Synthetic internal worker','work-internal@example.test','Analyst','Delivery','US','Active',$2,$3)`,[internalWorker,f.organizationId,f.legalEntityId]);
+    const internalWorker='worker-synthetic-internal';await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values($1,'SYN-WORK-INTERNAL','Synthetic internal worker','work-internal@example.test','Analyst','Delivery','US','director-commercial','Active',$2,$3)`,[internalWorker,f.organizationId,f.legalEntityId]);
     await workPost(request,'/api/allocations',workAllocation(project.id,today,{employee_id:internalWorker,billable:false}));
     const internalSubmitted=await workPost(request,'/api/timesheets',workInput(project.id,today,{employee_id:internalWorker}));
     assert.equal(Number(internalSubmitted.billable_hours),0);assert.equal(internalSubmitted.entries[0].billable,false);
@@ -136,7 +136,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const submitted=await workPost(request,'/api/timesheets',workInput(roots.project.id,today));assert.equal(submitted.week_ending,today);
     const listed=await request('/api/timesheets');assert.equal(listed.status,200);assert.equal(listed.body.find(x=>x.id===submitted.id).week_ending,today);
     const direct=await request(`/api/timesheets/${submitted.id}/status`,{method:'PATCH',body:{status:'Approved'}});assert.equal(direct.status,200,JSON.stringify(direct.body));
-    const worker='worker-positive-offset-import';await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,status,organization_id,legal_entity_id) values($1,'SYN-POSITIVE-WORK','Synthetic positive-offset worker','positive-offset@example.test','Analyst','Delivery','US','Active',$2,$3)`,[worker,f.organizationId,f.legalEntityId]);
+    const worker='worker-positive-offset-import';await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values($1,'SYN-POSITIVE-WORK','Synthetic positive-offset worker','positive-offset@example.test','Analyst','Delivery','US','director-commercial','Active',$2,$3)`,[worker,f.organizationId,f.legalEntityId]);
     await workPost(request,'/api/allocations',workAllocation(roots.project.id,today,{employee_id:worker}));
     const imported=await request('/api/v1/imports/timesheets/apply',{method:'POST',headers:{'Idempotency-Key':randomUUID()},body:workImport(workImportRow(roots.project.id,today,{employeeId:worker}))});assert.equal(imported.status,200);assert.equal(imported.body.status,'Success',JSON.stringify(imported.body));
     const header=(await pool.query('select id from timesheets where employee_id=$1',[worker])).rows[0];const approval=(await pool.query("select id from approval_records where entity_type='Timesheet' and entity_id=$1",[header.id])).rows[0];
