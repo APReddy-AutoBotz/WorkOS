@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/wos-03-modular-api-foundation]
   push:
     branches: [main]
   workflow_dispatch:
@@ -93,6 +93,7 @@ jobs:
           npm run test:scoped-audit-browser
           npm run test:organization-audit-browser
           npm run test:deployment-audit-browser
+          npm run test:utilization-overview-browser
 
       - name: Prepare disposable schema for production identity tests
         env:

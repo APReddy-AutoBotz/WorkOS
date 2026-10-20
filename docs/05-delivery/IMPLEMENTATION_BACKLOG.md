@@ -287,3 +287,7 @@ A package is done only when code/schema, applicable tests, authorization, migrat
 - **PR-013:** implement bounded server-side source-owner resolution, scope validation, deduplication/reasons, fail-closed protected delivery, idempotency and same-decision event exclusivity.
 
 These assignments are retained while `main@880b3dc244bf516c4e535fb68e455e6153aec395` is under WOS-00F corrective hold. WOS-01A PR #12 is not ready to resume until PR #14 is published, clean-reviewed and merged, the corrected exact `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases PR #12 from that corrected baseline.
+
+## Recorded bounded non-overlap exceptions
+
+On 2026-10-20, the implementation controller recorded the [Utilization overview read-recovery exception](../tasks/UTILIZATION-OVERVIEW-READ-RECOVERY.md). This UI-only UX-001/005 and OBS-005 remediation is a separate dependent Draft stacked on unchanged PR41. It does not resume blocked security work, change backend/authorization/calculation/export/schema, complete PR-013 or earn programme credit. Dependency, exact-head review/CI and owner/release gates remain unchanged.
