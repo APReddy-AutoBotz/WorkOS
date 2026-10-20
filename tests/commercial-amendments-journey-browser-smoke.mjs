@@ -88,7 +88,13 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       const apply=async(type,id)=>{
         const result=await post(type,id,()=>button('Confirm and apply amendment').click());
         await page.getByRole('status').getByText('Amendment saved.',{exact:false}).waitFor();
-        await page.getByRole('region',{name:'Protected amendment history',exact:true}).getByText(`Reason: ${reason}`,{exact:true}).waitFor();return result;
+        const event=result.result;
+        const savedEvent=page.getByRole('region',{name:'Protected amendment history',exact:true}).getByRole('listitem')
+          .filter({hasText:`Event: ${event.id} ·`});
+        await savedEvent.waitFor();assert.equal(await savedEvent.count(),1,'history identifies the exact event returned by this command');
+        await savedEvent.getByText(`Reason: ${reason}`,{exact:true}).waitFor();
+        await savedEvent.getByText(`Sequence ${event.sequence} · effective ${event.effectiveOn} UTC · ${event.effectiveOn>today?'Pending':'Effective'}`,{exact:true}).waitFor();
+        await savedEvent.getByText(`Contract version: ${event.contractVersionId}`,{exact:true}).waitFor();return result;
       };
       await open();assert.equal(writes.length,0);
       await prepare('Contract',roots.contract.id,v2);const initial=await preview('Contract',roots.contract.id);
