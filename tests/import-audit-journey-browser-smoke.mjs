@@ -84,10 +84,10 @@ await withImportAuditJourney(async ({pool, browserUrl, producerId, reviewerId, p
       [f.projectCode, f.projectName, f.clientId, f.clientName, f.managerEmployeeId,
         '2026-01-01', '2026-12-31', 'Active', 'true', 'Delivery', 'US', 'Synthetic end-to-end provenance'].join(','),
     ].join('\n');
-    const channel = producerPage.locator('div.bg-white').filter({has: producerPage.getByRole('heading', {name: 'Project Master', exact: true})});
-    const dryRunResponsePromise = operationResponse(producerPage);
-    await channel.locator('input[type="file"]').setInputFiles({name: f.fileName, mimeType: 'text/csv', buffer: Buffer.from(csv)});
-    const dryRunResponse = await dryRunResponsePromise;
+    const channel = producerPage.locator('div.bg-white.border.rounded-2xl').filter({has: producerPage.getByRole('heading', {name: 'Project Master', exact: true})});
+    assert.equal(await channel.count(), 1, 'select only the Project Master channel, not the outer real AppLayout');
+    const [dryRunResponse] = await Promise.all([operationResponse(producerPage),
+      channel.locator('input[type="file"]').setInputFiles({name: f.fileName, mimeType: 'text/csv', buffer: Buffer.from(csv)})]);
     assert.equal(dryRunResponse.status(), 200);
     const dryRun = await dryRunResponse.json();
     assert.deepEqual({status: dryRun.status, validRows: dryRun.validRows, errorRows: dryRun.errorRows},
@@ -108,9 +108,7 @@ await withImportAuditJourney(async ({pool, browserUrl, producerId, reviewerId, p
     assert.equal(dryState.audits[0].operation_id, dryRunReferences.operationId);
     const applyButton = producerPage.getByRole('button', {name: 'Apply Valid Rows', exact: true});
     await applyButton.waitFor();
-    const applyResponsePromise = operationResponse(producerPage);
-    await applyButton.click();
-    const applyResponse = await applyResponsePromise;
+    const [applyResponse] = await Promise.all([operationResponse(producerPage), applyButton.click()]);
     assert.equal(applyResponse.status(), 200);
     const applied = await applyResponse.json();
     assert.deepEqual({status: applied.status, validRows: applied.validRows, errorRows: applied.errorRows},
@@ -181,11 +179,10 @@ await withImportAuditJourney(async ({pool, browserUrl, producerId, reviewerId, p
     ]);
     const requestCountBeforeReview = requests.length;
     const reviewerPage = await makeContext(reviewer);
-    const auditReadPromise = reviewerPage.waitForResponse(response =>
-      new URL(response.url()).pathname === '/api/audit-logs' && response.status() === 200);
-    await reviewerPage.goto(`${browserUrl}/audit-trail`);
+    const [auditRead] = await Promise.all([reviewerPage.waitForResponse(response =>
+      new URL(response.url()).pathname === '/api/audit-logs' && response.status() === 200),
+      reviewerPage.goto(`${browserUrl}/audit-trail`)]);
     await reviewerPage.getByRole('heading', {name: 'Audit Trail', exact: true}).waitFor();
-    const auditRead = await auditReadPromise;
     await reviewerPage.waitForLoadState('networkidle');
     const auditRows = await auditRead.json();
     assert.equal(auditRows.length, 2);
