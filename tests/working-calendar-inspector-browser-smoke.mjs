@@ -45,7 +45,7 @@ try {
   assert((await list().innerText()).includes('Country: IN'));assert((await list().innerText()).includes('Worker-group version-row ID: saved-version-row-17'));
   let request=await select();await settle(request,[holiday()]);await detail().getByText('2026-12-25: Synthetic holiday <script>not executable</script>',{exact:true}).waitFor();
   for(const text of ['Asia/Kolkata','Monday, Tuesday, Wednesday, Thursday, Friday','7.5','2020-01-01 to no saved end date','Public. Status: Inactive.','Effective bounds (inclusive): 2020-01-01 to 2030-10-20.']) assert((await detail().innerText()).includes(text));
-  assert.equal(await page.locator('script:not([src])').count(),0,'server label remains inert text');
+  assert.equal(await detail().locator('script').count(),0,'server label remains inert text, independent of Vite refresh preamble');
   request=await select('B_COUNTRY','calendar-b');await settle(request,[]);await detail().getByText('No holidays returned for this calendar and snapshot. This is not an exhaustive absence claim.',{exact:true}).waitFor();
   assert((await detail().innerText()).includes('legal-c'));assert((await detail().innerText()).includes('Inactive'));
   request=await select('C_GROUP','calendar-c');await settle(request,[holiday('calendar-c')]);await detail().getByText('Sunday, Tuesday, Thursday',{exact:true}).waitFor();
