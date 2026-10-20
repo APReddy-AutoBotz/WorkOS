@@ -118,7 +118,7 @@ await withClientProfileDatabase(async ({pool, databaseUrl}) => {
     const workspace = await request('/workspace', {identity: identities.reader});assert.equal(workspace.status, 200);assert.equal(workspace.body.asOf, today);
     assert.equal(workspace.body.limit, 200);assert.equal(workspace.body.truncated, false);
     const original = workspace.body.clients.find(row => row.id === f.clientId);assert.ok(original);
-    assert.equal(original.operationalName, 'Synthetic commercial local client');assert.equal(original.industry, null);assert.equal(original.status, 'Active');assert.equal(original.accountOwnerId, f.ownerId);
+    assert.equal(original.operationalName, 'Synthetic commercial local client');assert.equal(original.industry, 'Unclassified', 'preserve the existing operational schema default; do not invent profile identity');assert.equal(original.status, 'Active');assert.equal(original.accountOwnerId, f.ownerId);
     assert.equal(original.code, null);assert.equal(original.latestVersion, 0);assert.equal(original.currentProfile, null);assert.equal(original.latestProfile, null);
     assert.equal(workspace.body.clients.some(row => [f.otherClientId, f.foreignClientId].includes(row.id)), false);
     for (const path of ['/workspace?organizationId=forged', '/workspace?legalEntityId=forged', '/workspace?limit=999', '/workspace?asOf=2025-02-29', '/workspace?asOf=2026-1-1', '/workspace?asOf=2026-01-01&asOf=2026-01-02', `/clients/${f.clientId}?unknown=forged`]) error(await request(path), 400);
