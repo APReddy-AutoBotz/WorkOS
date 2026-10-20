@@ -31,8 +31,8 @@ A requirement cannot be marked accepted from a PR description or implementation-
 | WOS-WKF-001–002, 006 | PR-004 | Worker migration, relationship/lifecycle dependencies and scoped administration | Not started |
 | WOS-WKF-003–005, 007–008 | PR-008 | Capacity, skills, single-count leave, self-service and scoped workforce views | Not started |
 | WOS-CLI-001–002 | PR-007 | Client hierarchy, scope and lifecycle | Not started |
-| WOS-CTR-001–003 | PR-007, 010 | Contract/PO effective-date and lifecycle | Not started |
-| WOS-ENG-001–005 | PR-007 | Engagement validation, migration and browser evidence | Not started |
+| WOS-CTR-001–003 | PR-007, 010 | Contract/PO effective-date and lifecycle; PR-007A drafting subset below | Draft development; not accepted |
+| WOS-ENG-001–005 | PR-007 | Engagement validation, migration and browser evidence; PR-007A drafting subset below | Draft development; lifecycle/project remainder open |
 | WOS-RES-001–009 | PR-004, 008, 009 | Assignment, capacity, over-allocation, approval and history | Not started |
 | WOS-TIM-001–012 | PR-008, 009 | Daily/weekly capture, policy, correction, duplicate and lock evidence | Not started |
 | WOS-APR-001–008 | PR-009 | State machine, delegation, SLA, bulk decisions, locks, shared approval notification events and one-action-event-per-transition evidence | Not started |
@@ -285,3 +285,9 @@ The read-only calendar portion of WOS-ORG-008 and only the calendar entry point 
 ## Integrated import-to-audit acceptance increment
 
 The [tests-only integrated journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md), dependent on unchanged Draft PR49, adds coherent evidence for WOS-CORE-003/005 and WOS-GOV-002/004: actual React Import / Export, versioned API, disposable migrated PostgreSQL, retained history after reload and a second named account's actual Audit Trail provenance. It distinguishes saved dry-run/success event context from later GET traces, checks another legal entity and denied unassigned scope, and asserts no inspection mutation. No production behavior/schema/permission/grant/dependency change or whole-requirement acceptance is implied. All twelve existing browser suites and formal dependency/review/UAT/release gates remain retained.
+
+## PR-007A commercial drafting evidence (development-only exception)
+
+The [bounded task](../tasks/WOS-04-COMMERCIAL-DRAFTING-FOUNDATION.md) traces WOS-CORE-003–005, WOS-CTR-001–003 and WOS-ENG-001–002/005 to additive migration040, the commercial-drafting schema/service/router, captured-context frontend service and real drafting workspace. Coverage is create-only contracts, seven-model engagement drafts, PO/milestone drafts, immutable future contract terms and neutral legacy project mappings. `test:commercial-drafting-contract` covers strict schemas, dates/decimal strings, opt-in denial and transaction/error boundaries; `test:commercial-drafting-service` covers actual production service mapping, dispatch and context ownership; `test:commercial-drafting-postgres` covers fresh/upgrade, constraints, real API positives/negatives, concurrency and protected audit lineage; browser and real PostgreSQL browser journeys cover the actual React workflow. All prior suites remain mandatory. Exact executed results/head belong in the Draft PR, not assumed from this mapping.
+
+Full material audit evidence is confidential in append-only commercial events; general Audit Trail receives opaque snapshot references only. There is no new default grant, audit-route change, billing eligibility, acceptance, closure or calculation. Client hierarchy, manual projects/workstreams, lifecycle/version convergence, work-date integration, PO consumption and commercial balances remain open. This is not whole PR-007/WOS-04 acceptance, prerequisite completion, merge or production authority.

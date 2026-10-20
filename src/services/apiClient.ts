@@ -73,6 +73,7 @@ export const resetBackendCheck = () => {
 const TOKEN_KEY = 'workos_api_token';
 const SCOPE_KEY = 'workos_organization_scope';
 export type OrganizationScope = { organizationId: string; legalEntityId: string; organizationName?: string; legalEntityName?: string };
+export type ApiRequestContext = Readonly<{scope: OrganizationScope; token: string | null}>;
 export const storeToken = (token: string) => sessionStorage.setItem(TOKEN_KEY, token);
 export const clearToken = () => { sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(SCOPE_KEY); };
 export const getToken = () => sessionStorage.getItem(TOKEN_KEY);
@@ -199,6 +200,24 @@ async function apiFetch<T>(
 }
 
 export const api = {
+  // Owned commercial requests retain the scope and token captured before any
+  // await. A late 401 must not clear a replacement session or redirect it.
+  requestWithContext: async <T>(method: string, path: string, body: unknown, context: ApiRequestContext): Promise<T> => {
+    const res = await fetch(path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(context.token ? {Authorization: `Bearer ${context.token}`} : {}),
+        'X-Organization-Id': context.scope.organizationId,
+        'X-Legal-Entity-Id': context.scope.legalEntityId,
+      },
+      credentials: 'include',
+      ...(body !== undefined ? {body: JSON.stringify(body)} : {}),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw parseApiClientError(res.status, json, res.headers);
+    return json as T;
+  },
   get:    <T>(path: string) => apiFetch<T>('GET', path),
   getWithScope: <T>(path: string, scope: OrganizationScope) => apiFetch<T>('GET', path, undefined, {}, scope, false),
   // This owned flow publishes its one-use result before the existing runtime event.

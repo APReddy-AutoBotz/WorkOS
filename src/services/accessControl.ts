@@ -11,6 +11,7 @@ export const ROUTE_ROLES = {
   employees: ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead', 'Employee'],
   projects: ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead', 'Employee'],
   clients: ['Admin', 'HR', 'CountryDirector'],
+  commercialDrafting: ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead', 'Employee'],
   allocations: ['Admin', 'ProjectManager', 'CountryDirector', 'HR'],
   timesheets: ['Admin', 'Employee', 'ProjectManager', 'TeamLead', 'HR', 'CountryDirector'],
   timesheetApproval: ['Admin', 'CountryDirector', 'ProjectManager', 'TeamLead'],

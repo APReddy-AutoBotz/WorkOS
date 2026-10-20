@@ -4967,7 +4967,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
 const preOrganizationAuditMigrationRoot = await mkdtemp(join(tmpdir(), 'workos-pr006-before-organization-audit-'));
 await mkdir(join(preOrganizationAuditMigrationRoot, 'migrations'));
 await writeFile(join(preOrganizationAuditMigrationRoot, 'schema.sql'), await readFile(join(serverDir, 'schema.sql'), 'utf8'));
-for (const migration of manifest.slice(1, -2)) {
+for (const migration of manifest.slice(1).filter(item => item.id < '038_')) {
   await writeFile(join(preOrganizationAuditMigrationRoot, 'migrations', migration.file),
     await readFile(join(serverDir, 'migrations', migration.file), 'utf8'));
 }
@@ -5020,7 +5020,7 @@ await withDisposableDatabase(async (pool) => {
     const baselineSql = await readFile(join(serverDir, 'schema.sql'), 'utf8');
     await client.query(baselineSql);
     await client.query('insert into schema_migrations (id) values ($1)', [manifest[0].id]);
-    for (const migration of manifest.slice(1, -7)) {
+    for (const migration of manifest.slice(1).filter(item => item.id < '033_')) {
       const sql = await readFile(join(serverDir, 'migrations', migration.file), 'utf8');
       await client.query(sql);
       await client.query('insert into schema_migrations (id) values ($1)', [migration.id]);
@@ -5054,7 +5054,7 @@ await withDisposableDatabase(async (pool) => {
     rootDir: preOrganizationAuditMigrationRoot,
     logger: quietLogger,
   });
-  const preOrganizationAuditMigrations = manifest.slice(-7, -2);
+  const preOrganizationAuditMigrations = manifest.filter(item => item.id >= '033_' && item.id < '038_');
   assert.deepEqual(preOrganizationAuditUpgrade.applied, preOrganizationAuditMigrations.map(item => item.id),
     'the upgrade through migration 037 must complete before exercising the organization-scope migration boundary');
   const preExistingAuditScopes = await pool.query(`insert into audit_logs
@@ -5071,7 +5071,7 @@ await withDisposableDatabase(async (pool) => {
   const before = await pool.query('select count(*)::int as count from schema_migrations');
   const upgrade = await runMigrations({pool, rootDir: serverDir, logger: quietLogger});
   const after = await pool.query('select count(*)::int as count from schema_migrations');
-  const candidateMigrations = manifest.slice(-7);
+  const candidateMigrations = manifest.filter(item => item.id >= '033_');
   assert.deepEqual(candidateMigrations.map(item => item.id), [
     '033_wos03_audit_operation_context',
     '034_wos03_employee_import_provenance',
@@ -5080,20 +5080,21 @@ await withDisposableDatabase(async (pool) => {
     '037_wos03_deployment_audit_permission',
     '038_wos03_organization_audit_access',
     '039_wos03_import_operation_contract',
-  ], 'PR-006 adds ordered request, provenance, scoped history, protected audit access, and import-operation contract migrations');
+    '040_wos04_commercial_drafting_foundation',
+  ], 'PR-006 and PR-007A add request/provenance/history/import contracts and additive commercial drafting in order');
   assert.deepEqual([...preOrganizationAuditUpgrade.applied, ...upgrade.applied], candidateMigrations.map(item => item.id),
-    'upgrade from merged main applies all additive PR-006 migrations in order');
-  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract'],
+    'upgrade from merged main applies all additive PR-006/PR-007A migrations in order');
+  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation'],
     'organization-scope and import-operation migrations apply after historical and legal-entity audit rows already exist');
-  assert.equal(upgrade.skipped.length, manifest.length - 2);
-  assert.equal(after.rows[0].count, before.rows[0].count + 2, 'the final upgrade appends migrations 038 and 039 to its ledger');
+  assert.equal(upgrade.skipped.length, manifest.length - 3);
+  assert.equal(after.rows[0].count, before.rows[0].count + 3, 'the final upgrade appends migrations 038, 039 and 040 to its ledger');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
-  assert.deepEqual(status.legacyUnverifiedIds, manifest.slice(0, -7).map(item => item.id),
+  assert.deepEqual(status.legacyUnverifiedIds, manifest.filter(item => item.id < '033_').map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 7, 'all PR-006 migrations are ledgered');
+  assert.equal(newMigrations.length, 8, 'all PR-006/PR-007A migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),

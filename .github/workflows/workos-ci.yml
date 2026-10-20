@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation]
   push:
     branches: [main]
   workflow_dispatch:
@@ -100,9 +100,16 @@ jobs:
           npm run test:organization-profile-browser
           npm run test:terminology-configuration-browser
           npm run test:working-calendar-browser
+          npm run test:commercial-drafting-browser
 
       - name: Verify real import-to-audit PostgreSQL browser acceptance
         run: npm run test:import-audit-journey
+
+      - name: Verify commercial drafting PostgreSQL migration and API acceptance
+        run: npm run test:commercial-drafting-postgres
+
+      - name: Verify real commercial drafting PostgreSQL browser journey
+        run: npm run test:commercial-drafting-journey
 
       - name: Prepare disposable schema for production identity tests
         env:
