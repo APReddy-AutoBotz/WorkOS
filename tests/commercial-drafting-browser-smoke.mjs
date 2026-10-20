@@ -42,6 +42,7 @@ const create = async (kind, result, updated) => {const after = await lastId();aw
 try {
   await boot();await page.getByText('Legacy projects mapped: 1 of 1.', {exact: false}).waitFor();
   let after = await lastId();await button(`Inspect ${detail.number}`).focus();await page.keyboard.press('Enter');let request = await pending('contract', after);await settle(request, detail);
+  await history().getByText(`Billing terms: ${terms.billingTerms}`, {exact: true}).waitFor();
   assert((await history().innerText()).includes(terms.billingTerms));assert.equal(await history().locator('script,img').count(), 0, 'terms and document labels render as inert text');
   const link = history().getByRole('link', {name: terms.documents[0].name, exact: true});assert.equal(await link.getAttribute('href'), terms.documents[0].url);assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
   assert.equal(await page.evaluate(() => window.syntheticCommercialExecuted), undefined);
@@ -52,6 +53,7 @@ try {
   assert.deepEqual(Object.keys(request.body).sort(), ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','expectedVersion','reason'].sort());
   const revisedTerms = {...terms, id: 'term-a-2', version: 2, effectiveFrom: future, name: 'Synthetic revised terms', value: '11000.2500'};
   const revised = {...detail, latestVersion: 2, versions: [revisedTerms, terms]};await settle(request, revised);let refresh = await pending('workspace', request.id);await settle(refresh, workspace({contracts: [{...summary, latestVersion: 2, terms: revisedTerms}]}));await ready();
+  await history().getByRole('heading', {name: /^Version 2 · Synthetic revised terms$/}).waitFor();
   assert((await history().innerText()).includes('Version 2'));assert((await history().innerText()).includes('Version 1'));assert((await history().innerText()).includes(terms.billingTerms));
   assert((await page.getByRole('region', {name: 'Contracts and SOWs'}).innerText()).includes('Currently effective version 1: GBP 10000.2500.'));
 
