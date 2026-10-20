@@ -168,6 +168,7 @@ async function apiFetch<T>(
   additionalHeaders: Record<string, string> = {},
   scopeOverride?: OrganizationScope | null,
   redirectOnUnauthorized = true,
+  refreshTerminology = true,
 ): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -191,7 +192,7 @@ async function apiFetch<T>(
   if (!res.ok) {
     throw parseApiClientError(res.status, json, res.headers);
   }
-  if (method !== 'GET' && path === '/api/organization-setup/terminology') {
+  if (refreshTerminology && method !== 'GET' && path === '/api/organization-setup/terminology') {
     window.dispatchEvent(new Event('workos:organization-scope-changed'));
   }
   return json as T;
@@ -200,6 +201,8 @@ async function apiFetch<T>(
 export const api = {
   get:    <T>(path: string) => apiFetch<T>('GET', path),
   getWithScope: <T>(path: string, scope: OrganizationScope) => apiFetch<T>('GET', path, undefined, {}, scope, false),
+  // This owned flow publishes its one-use result before the existing runtime event.
+  postTerminologyWithScope: <T>(body: unknown, scope: OrganizationScope) => apiFetch<T>('POST', '/api/organization-setup/terminology', body, {}, scope, false, false),
   post:   <T>(path: string, body: unknown) => apiFetch<T>('POST', path, body),
   postWithHeaders: <T>(path: string, body: unknown, headers: Record<string, string>) => apiFetch<T>('POST', path, body, headers),
   postWithScope: <T>(path: string, body: unknown, scope: OrganizationScope | null) => apiFetch<T>('POST', path, body, {}, scope),

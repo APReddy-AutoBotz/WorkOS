@@ -487,18 +487,18 @@ export const registerOrganizationSetupRoutes = ({
   });
   router.get('/terminology', async (req,res) => {
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
-    const result=await pool.query(`select terms,effective_from,effective_to from terminology_versions t where t.organization_id=$1 and ${asOfPredicate('t','$2')} order by effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
+    const result=await pool.query(`select terms,effective_from::text effective_from,effective_to::text effective_to from terminology_versions t where t.organization_id=$1 and ${asOfPredicate('t','$2')} order by t.effective_from desc limit 1`,[req.organizationScope.organizationId,asOf]);
     const row=result.rows[0];res.json(row?{...row,terms:normalizeTerminologyTerms(row.terms)}:{terms:{}});
   });
   router.post('/terminology',requirePermission('settings.manage'),async(req,res)=>{
     const parsed=validateTerminology(req.body);if(!parsed.success)return res.status(400).json({error:parsed.error.flatten(),code:'TERMINOLOGY_INVALID'});
     const client=await pool.connect();try{
       await client.query('begin');await client.query('select pg_advisory_xact_lock(hashtext($1))',[`terminology:${req.organizationScope.organizationId}`]);
-      const versions=(await client.query('select * from terminology_versions where organization_id=$1 order by effective_from desc for update',[req.organizationScope.organizationId])).rows;
+      const versions=(await client.query('select *,effective_from::text effective_from,effective_to::text effective_to from terminology_versions where organization_id=$1 order by terminology_versions.effective_from desc for update',[req.organizationScope.organizationId])).rows;
       const exact=versions.find(row=>dateOnly(row.effective_from)===parsed.data.effectiveFrom);const latest=versions[0];
       if(!exact&&latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Terminology version is stale',code:'TERMINOLOGY_VERSION_CONFLICT'});}
-      let result;if(exact) result=await client.query('update terminology_versions set terms=$3,created_by=$4 where organization_id=$1 and effective_from=$2 returning *',[req.organizationScope.organizationId,parsed.data.effectiveFrom,JSON.stringify(parsed.data.terms),req.user.sub]);
-      else {if(latest)await client.query("update terminology_versions set effective_to=($2::date-interval '1 day')::date where organization_id=$1 and effective_to is null",[req.organizationScope.organizationId,parsed.data.effectiveFrom]);result=await client.query('insert into terminology_versions(organization_id,terms,effective_from,created_by) values($1,$2,$3,$4) returning *',[req.organizationScope.organizationId,JSON.stringify(parsed.data.terms),parsed.data.effectiveFrom,req.user.sub]);}
+      let result;if(exact) result=await client.query('update terminology_versions set terms=$3,created_by=$4 where organization_id=$1 and effective_from=$2 returning *,effective_from::text effective_from,effective_to::text effective_to',[req.organizationScope.organizationId,parsed.data.effectiveFrom,JSON.stringify(parsed.data.terms),req.user.sub]);
+      else {if(latest)await client.query("update terminology_versions set effective_to=($2::date-interval '1 day')::date where organization_id=$1 and effective_to is null",[req.organizationScope.organizationId,parsed.data.effectiveFrom]);result=await client.query('insert into terminology_versions(organization_id,terms,effective_from,created_by) values($1,$2,$3,$4) returning *,effective_from::text effective_from,effective_to::text effective_to',[req.organizationScope.organizationId,JSON.stringify(parsed.data.terms),parsed.data.effectiveFrom,req.user.sub]);}
       await audit(client,req,{module:'Organization Setup',action:exact?'Update Terminology':'Version Terminology',entityType:'Terminology',entityId:`${req.organizationScope.organizationId}:${parsed.data.effectiveFrom}`,oldValue:exact||null,newValue:result.rows[0],details:'Updated effective-dated terminology labels and help text',
         organizationScope:{organizationId:req.organizationScope.organizationId,legalEntityId:null}});
       await client.query('commit');res.status(exact?200:201).json(result.rows[0]);

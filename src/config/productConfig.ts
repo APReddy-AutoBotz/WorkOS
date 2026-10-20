@@ -62,6 +62,7 @@ export const applyPersistedTerminology = (terms: Record<string, unknown>) => {
   })) as Partial<Record<TerminologyKey, TerminologyValue>>;
 };
 
+export const getConfiguredTerminologyValue = (key: TerminologyKey): TerminologyValue => defaultTerminology[key];
 export const getTerminologyValue = (key: TerminologyKey): TerminologyValue => persistedTerminology[key] || defaultTerminology[key];
 const terminology = new Proxy(defaultTerminology, { get: (_defaults, key: TerminologyKey) => getTerminologyValue(key).singular }) as unknown as Terminology;
 
