@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor]
   push:
     branches: [main]
   workflow_dispatch:
@@ -99,6 +99,7 @@ jobs:
           npm run test:forecast-utilization-browser
           npm run test:organization-profile-browser
           npm run test:terminology-configuration-browser
+          npm run test:working-calendar-browser
 
       - name: Prepare disposable schema for production identity tests
         env:

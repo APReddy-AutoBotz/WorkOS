@@ -41,6 +41,7 @@ const TeamsActionLanding = lazy(() => import('./pages/TeamsActionLanding').then(
 const EntraLoginComplete = lazy(() => import('./pages/EntraLoginComplete').then(module => ({ default: module.EntraLoginComplete })));
 const ImportExport = lazy(() => import('./pages/ImportExport').then(module => ({ default: module.ImportExport })));
 const AuditTrail = lazy(() => import('./pages/AuditTrail').then(module => ({ default: module.AuditTrail })));
+const WorkingCalendarInspector = lazy(() => import('./pages/WorkingCalendarInspector').then(module => ({ default: module.WorkingCalendarInspector })));
 const TerminologyConfigurationEditor = lazy(() => import('./pages/TerminologyConfigurationEditor').then(module => ({ default: module.TerminologyConfigurationEditor })));
 const OrganizationProfileEditor = lazy(() => import('./pages/OrganizationProfileEditor').then(module => ({ default: module.OrganizationProfileEditor })));
 const AdminSettings = lazy(() => import('./pages/AdminSettings').then(module => ({ default: module.AdminSettings })));
@@ -337,6 +338,11 @@ export default function App() {
                 <Route path="/admin/organization-profile" element={
                   <RoleRoute roles={ROUTE_ROLES.adminSettings}>
                     <OrganizationProfileEditor />
+                  </RoleRoute>
+                } />
+                <Route path="/admin/working-calendars" element={
+                  <RoleRoute roles={ROUTE_ROLES.adminSettings}>
+                    <WorkingCalendarInspector />
                   </RoleRoute>
                 } />
                 <Route path="/admin/terminology" element={
