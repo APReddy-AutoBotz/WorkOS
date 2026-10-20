@@ -1,0 +1,19 @@
+# PR-007D — Governed material amendments and term rollover
+
+## Baseline and bounded continuation
+
+Continue the owner's 2026-10-20 implementation direction without a formal-review development hold. This isolated slice starts from unchanged Draft PR53 head `f609a8e261c3a450487ed4ccfd4fb26c760d59e9`, tree `84a001697739718d8a95d7b11f0df25cc5d9ac98`. PR53 remained Draft/unmerged, main remained `b9a57f8a462d8585bb3f73129080d6fae5173343`, all five active Actions queues were empty, and the latest controller run39386666444 succeeded before writes. One WorkOS writer owns this slice with disjoint UI/test helpers. Development sequencing is not release, merge, prerequisite or production acceptance.
+
+## Outcome and constraints
+
+WOS-CTR-003, with related WOS-ENG-001–005: explicitly adopt a newer immutable version of the same scoped contract for one already-governed Contract, Engagement or Project at a time. Additive migration043 stores append-only effective-dated amendments, material before/after evidence, reason, approval reference, actor, active role and operation/correlation identity. The contract version, current lifecycle sequence and amendment sequence must match. A server-authoritative preview is bound to the exact actor, scope, input and dependency evidence and must be revalidated by the command. Unknown outcomes require reading history before any resubmission.
+
+Contract adoption uses the exact selected version dates/value. Child amendments preserve client, model, currency, contract and historical start; only the remaining dated term and allocation budget change. The parent must explicitly adopt the selected version and cover remaining dates. Existing child terms do not cascade when a parent changes. Current/future UTC dates are explicit, chronology is append-only and only one pending amendment per entity is permitted. Pending parent amendments freeze new governed dependencies. Dependency dates, decimal allocations, ownership and existing future assignment/work evidence must remain consistent; absent PO consumption/balance data never becomes zero.
+
+## Compatibility, confidentiality and evidence
+
+Original drafts, contract versions, activation events/pins, project bindings, neutral mappings and accepted work remain immutable. Effective term resolution is separate and read-only; lifecycle resumption and new governed project commands use adopted terms without rewriting history or recalculating valuation/billing. Existing common legacy project/client CRUD/import/seed safeguards remain authoritative. No new default or live grants are added. Commercial view plus separate amendment and lifecycle manage permissions are required for preview/commands. Material evidence remains protected; shared audit receives opaque pointers only.
+
+Required evidence includes strict transport/context/permission boundaries, fresh/042-upgrade/replay preservation, concurrency and stale previews, UTC dates, exact parent adoption, child date/budget limits, future dependency protection, confidential audit isolation, transactional rollback and actual React/API/PostgreSQL acceptance. Retain all fourteen existing fixture suites and real import, drafting, lifecycle and customer-profile journeys plus all aggregate gates. Local browser/socket restrictions remain unchanged; hosted exact-head CI provides browser/HTTP proof. Exact executed results belong in the dependent Draft PR receipt.
+
+No work-date/assignment-policy convergence, retrospective repricing, billing eligibility, PO consumption/balances, automatic renewal, corporate consolidation, terminal closure, real credentials/customer data, production grants, excluded repository/PR writes, Ready, merge or deployment is included. Rollback retains the append-only ledger and disables this additive UI/routes only through a forward-compatible binary. The operations runbook is unchanged; this bounded task, backlog and traceability describe this slice only.

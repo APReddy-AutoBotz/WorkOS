@@ -1,3 +1,4 @@
+import {applyAmendedSnapshot} from './amendment-terms.mjs';
 import {randomUUID} from 'node:crypto';
 import {resolveOrganizationScope} from '../../organization-setup.mjs';
 import {COMMERCIAL_PAGE_SIZE,fail} from './contracts.mjs';
@@ -86,17 +87,17 @@ export const appendContractVersion = async (client,req,id,data,audit) => {
   await auditCommand(audit,client,req,'Contract',id,before,result,data.reason);
   return result;
 };
-const contractTerms = async (client,req,data) => {
+const contractTerms = async (client,req,data,{requireApplicable=true}={}) => {
   const row=(await client.query(`select ${termsProjection} from commercial_contract_versions where ${scopeWhere} and contract_id=$3 and id=$4`,[...scopeValues(req),data.contractId,data.contractVersionId])).rows[0];
   if(!row)fail(404,'COMMERCIAL_REFERENCE_NOT_FOUND','A contract term version in the selected scope is required.');
   if(row.currency!==data.currency || data.startsOn<row.starts_on || data.endsOn>row.ends_on || data.startsOn<row.effective_from)
     fail(422,'COMMERCIAL_TERMS_MISMATCH','Dates and currency must fit the pinned contract term version.');
   // Resolve the term version at the new draft's start, not merely any historical ID.
   const applicable=(await client.query(`select id from commercial_contract_versions where ${scopeWhere} and contract_id=$3 and effective_from<=$4 order by effective_from desc limit 1`,[...scopeValues(req),data.contractId,data.startsOn])).rows[0];
-  if(applicable?.id!==row.id)fail(409,'COMMERCIAL_TERMS_SUPERSEDED','Select the contract version effective on the draft start date.');
+  if(requireApplicable && applicable?.id!==row.id)fail(409,'COMMERCIAL_TERMS_SUPERSEDED','Select the contract version effective on the draft start date.');
   return row;
 };
-export const validateEngagementReferences = async (client,req,data) => {
+export const validateEngagementReferences = async (client,req,data,options) => {
   const internal=['internal','pre_sales'].includes(data.model);
   const owner=(await client.query(`select id from employees where ${scopeWhere} and id=$3 and status='Active' and (joining_date is null or joining_date<=$4) and (exit_date is null or exit_date>=$5) for share`,[...scopeValues(req),data.ownerId,data.startsOn,data.endsOn])).rows[0];
   if(!owner)fail(404,'COMMERCIAL_REFERENCE_NOT_FOUND','An active owner in the selected scope and dates is required.');
@@ -112,7 +113,7 @@ export const validateEngagementReferences = async (client,req,data) => {
     if(!data.clientId || !data.contractId || !data.contractVersionId || data.attributionId!==null)
       fail(422,'COMMERCIAL_CONTRACT_REQUIRED','Commercial engagement drafts require a client and a pinned contract, without internal attribution.');
     await scopedClient(client,req,data.clientId);
-    const term=await contractTerms(client,req,data);
+    const term=await contractTerms(client,req,data,options);
     const contract=await getContract(client,req,data.contractId);
     if(contract.clientId!==data.clientId || term.model!==data.model)
       fail(422,'COMMERCIAL_TERMS_MISMATCH','Engagement client and model must match the pinned contract.');
@@ -138,8 +139,11 @@ export const createPurchaseOrder = async (client,req,data,audit) => {
 export const createMilestone = async (client,req,data,audit) => {
   const engagement=(await client.query(`select ${engagementProjection} from commercial_engagements where ${scopeWhere} and id=$3 and origin='manual'`,[...scopeValues(req),data.engagementId])).rows[0];
   if(!engagement)fail(404,'COMMERCIAL_REFERENCE_NOT_FOUND','A manual engagement draft in the selected scope is required.');
-  if(data.currency!==engagement.currency || data.dueOn<engagement.starts_on || data.dueOn>engagement.ends_on)
-    fail(422,'COMMERCIAL_TERMS_MISMATCH','Milestone date and currency must fit the engagement.');
+  const governed=await applyAmendedSnapshot(client,req,'Engagement',engagement.id,engagement,data.dueOn);
+  if((await client.query(`select 1 from commercial_amendments where ${scopeWhere} and entity_type='Engagement' and entity_id=$3 and effective_on>$4 limit 1`,[...scopeValues(req),engagement.id,data.dueOn])).rowCount)
+    fail(409,'COMMERCIAL_AMENDMENT_PENDING','A later pending parent amendment must take effect before adding this milestone.');
+  if(data.currency!==governed.currency || data.dueOn<governed.starts_on || data.dueOn>governed.ends_on)
+    fail(422,'COMMERCIAL_TERMS_MISMATCH','Milestone date and currency must fit the explicitly adopted engagement terms.');
   if(!engagement.billable && !/^0(?:\.0{1,4})?$/.test(data.amount))
     fail(422,'COMMERCIAL_INTERNAL_POLICY','Non-billable milestones cannot carry a commercial amount.');
   const row=(await client.query(`insert into commercial_milestones(organization_id,legal_entity_id,engagement_id,code,name,due_on,amount,currency,reason,created_by)

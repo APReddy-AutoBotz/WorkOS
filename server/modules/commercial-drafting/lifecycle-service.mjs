@@ -1,3 +1,4 @@
+import {resolveAmendedTerms,applyAmendedSnapshot} from './amendment-terms.mjs';
 import {randomUUID} from 'node:crypto';
 import {fail,COMMERCIAL_PAGE_SIZE} from './contracts.mjs';
 import {getContract,validateEngagementReferences} from './service.mjs';
@@ -21,14 +22,33 @@ const assertOwner=async(client,req,id,starts,ends)=>{
   const row=(await client.query(`select id,name from employees where ${where} and id=$3 and status='Active' and (joining_date is null or joining_date<=$4) and (exit_date is null or exit_date>=$5) for share`,[...scope(req),id,starts,ends])).rows[0];
   if(!row)fail(422,'COMMERCIAL_OWNER_UNAVAILABLE','An active scoped owner covering the dates is required.');return row;
 };
-const assertActive=async(client,req,type,id,versionId)=>{
+const assertActive=async(client,req,type,id,versionId,{allowRetainedPin=false}={})=>{
   const state=await getLifecycle(client,req,type,id);
-  if(state?.state!=='Active' || state.contractVersionId!==versionId)fail(409,'COMMERCIAL_PARENT_NOT_ACTIVE','The parent must be active on the exact pinned immutable contract version.');
+  const adopted=state?await resolveAmendedTerms(client,req,type,id,{contractVersionId:state.contractVersionId}):null;
+  const retained=allowRetainedPin && state && (state.contractVersionId===versionId || (await client.query(`select 1 from commercial_amendments where ${where} and entity_type=$3 and entity_id=$4 and contract_version_id=$5 and effective_on<=(now() at time zone 'UTC')::date limit 1`,[...scope(req),type,id,versionId])).rowCount>0);
+  if(state?.state!=='Active' || (adopted.contractVersionId!==versionId && !retained))fail(409,'COMMERCIAL_PARENT_NOT_ACTIVE','The parent must be active on the exact pinned immutable contract version.');
 };
-const validateEngagementSnapshot=async(client,req,root)=>{
-  await validateEngagementReferences(client,req,{model:root.model,ownerId:root.owner_id,startsOn:root.starts_on,endsOn:root.ends_on,
-    currency:root.currency,clientId:root.client_id,contractId:root.contract_id,contractVersionId:root.contract_version_id,attributionId:root.attribution_id});
-  if(root.contract_id)await assertActive(client,req,'Contract',root.contract_id,root.contract_version_id);
+const validateEngagementSnapshot=async(client,req,root,options={})=>{
+  const date=await today(client);
+  const remainingStart=root.starts_on>date?root.starts_on:date;
+  await validateEngagementReferences(client,req,{model:root.model,ownerId:root.owner_id,startsOn:remainingStart,endsOn:root.ends_on,
+    currency:root.currency,clientId:root.client_id,contractId:root.contract_id,contractVersionId:root.contract_version_id,attributionId:root.attribution_id},{requireApplicable:false});
+  if(root.contract_id)await assertActive(client,req,'Contract',root.contract_id,root.contract_version_id,options);
+};
+const assertNoPendingAmendment=async(client,req,entities)=>{
+ for(const [type,id] of entities)if((await client.query(`select 1 from commercial_amendments where ${where} and entity_type=$3 and entity_id=$4 and effective_on>(now() at time zone 'UTC')::date limit 1`,[...scope(req),type,id])).rowCount)
+  fail(409,'COMMERCIAL_AMENDMENT_PENDING','A pending parent amendment freezes new governed dependencies. Wait for its effective date; existing state and work are not rewritten.');
+};
+const assertNewEngagementCapacity=async(client,req,root)=>{
+ // Preserve the pre-amendment draft baseline, but never let a new activation
+ // overbook a contract after its allocation envelope has been explicitly adopted.
+ const governed=(await client.query(`select 1 from commercial_amendments where ${where} and entity_type='Contract' and entity_id=$3 limit 1`,[...scope(req),root.contract_id])).rowCount;
+ if(!governed)return;
+ const contract=await getContract(client,req,root.contract_id);const state=await getLifecycle(client,req,'Contract',root.contract_id);
+ const term=contract.versions.find(x=>x.id===state.contractVersionId);
+ const parent=await resolveAmendedTerms(client,req,'Contract',root.contract_id,{contractVersionId:term.id,startsOn:term.startsOn,endsOn:term.endsOn,budget:term.value});
+ const total=(await client.query(`select coalesce(sum(greatest(coalesce((select a.budget from commercial_amendments a where a.organization_id=e.organization_id and a.legal_entity_id=e.legal_entity_id and a.entity_type='Engagement' and a.entity_id=e.id and a.effective_on<=(now() at time zone 'UTC')::date order by a.sequence desc limit 1),e.budget),coalesce((select max(a.budget) from commercial_amendments a where a.organization_id=e.organization_id and a.legal_entity_id=e.legal_entity_id and a.entity_type='Engagement' and a.entity_id=e.id and a.effective_on>(now() at time zone 'UTC')::date),0))),0)+$4::numeric <= $5::numeric allowed from commercial_engagements e where e.organization_id=$1 and e.legal_entity_id=$2 and e.contract_id=$3 and e.id<>$6 and exists(select 1 from commercial_lifecycle_events l where l.entity_type='Engagement' and l.entity_id=e.id)`,[...scope(req),root.contract_id,root.budget,parent.budget,root.id])).rows[0];
+ if(root.ends_on>parent.endsOn || !total.allowed)fail(422,'COMMERCIAL_AMENDMENT_BUDGET_EXCEEDED','New activation must fit the adopted contract dates and current/pending allocation envelope.');
 };
 const assertNoActiveChildren=async(client,req,type,id)=>{
   const sql=type==='Contract'?`select e.id from commercial_engagements e where e.organization_id=$1 and e.legal_entity_id=$2 and e.contract_id=$3 and
@@ -51,7 +71,8 @@ const append=async(client,req,type,id,root,input,before,audit)=>{
 };
 export const transitionLifecycle=async(client,req,type,id,input,audit)=>{
   await lockCommercialLifecycle(client,req.organizationScope);
-  const root=await scopedEntity(client,req,type,id);
+  const activationRoot=await scopedEntity(client,req,type,id);
+  const root=type==='Contract'?activationRoot:await applyAmendedSnapshot(client,req,type,id,activationRoot);
   const before=await getLifecycle(client,req,type,id);
   if(input.expectedSequence!==(before?.sequence||0))fail(409,'COMMERCIAL_LIFECYCLE_CONFLICT','Lifecycle changed. Reload before acting.');
   if(before?.state===input.state || (!before && input.state!=='Active'))fail(409,'COMMERCIAL_INVALID_TRANSITION','First activate the draft; subsequent transitions alternate Active and On Hold.');
@@ -59,7 +80,8 @@ export const transitionLifecycle=async(client,req,type,id,input,audit)=>{
   const date=await today(client);
   if(type==='Contract'){
     const contract=await getContract(client,req,id);
-    const term=contract.versions.find(x=>x.id===input.contractVersionId);
+    const adopted=await resolveAmendedTerms(client,req,'Contract',id,{contractVersionId:input.contractVersionId});
+    const term=contract.versions.find(x=>x.id===adopted.contractVersionId);
     if(!term)fail(422,'COMMERCIAL_PIN_CONFLICT','Choose an immutable version belonging to this scoped contract.');
     if(input.state==='Active'){
       const applicable=contract.versions.find(x=>x.effectiveFrom<=date);
@@ -69,15 +91,17 @@ export const transitionLifecycle=async(client,req,type,id,input,audit)=>{
       if(!activeClient)fail(422,'COMMERCIAL_REFERENCE_NOT_FOUND','An active scoped client is required.');
     }
   }else{
-    if(input.contractVersionId!==root.contract_version_id)fail(409,'COMMERCIAL_PIN_CONFLICT','The command must name the snapshot\'s exact contract version, or null for internal work.');
+    if(input.contractVersionId!==activationRoot.contract_version_id)fail(409,'COMMERCIAL_PIN_CONFLICT','The command must name the snapshot\'s exact contract version, or null for internal work.');
     if(input.state==='Active'){
+      if(!before)await assertNoPendingAmendment(client,req,type==='Engagement'&&root.contract_id?[['Contract',root.contract_id]]:[]);
       if(date<root.starts_on || date>root.ends_on)fail(409,'COMMERCIAL_INACTIVE_DATES','The immutable dates do not cover the current UTC date.');
       if(type==='Engagement'){
-        await validateEngagementSnapshot(client,req,root);
+        await validateEngagementSnapshot(client,req,root,{allowRetainedPin:Boolean(before)});
+        if(!before && root.contract_id)await assertNewEngagementCapacity(client,req,root);
       }else{
         await assertOwner(client,req,root.manager_id,root.starts_on,root.ends_on);
-        await assertActive(client,req,'Engagement',root.engagement_id,root.contract_version_id);
-        await validateEngagementSnapshot(client,req,await scopedEntity(client,req,'Engagement',root.engagement_id));
+        await assertActive(client,req,'Engagement',root.engagement_id,root.contract_version_id,{allowRetainedPin:Boolean(before)});
+        await validateEngagementSnapshot(client,req,await applyAmendedSnapshot(client,req,'Engagement',root.engagement_id,await scopedEntity(client,req,'Engagement',root.engagement_id)),{allowRetainedPin:Boolean(before)});
       }
     }
   }
@@ -89,7 +113,8 @@ const projectDto=row=>({id:row.project_id,bindingId:row.id,engagementId:row.enga
   billable:row.billable,contractVersionId:row.contract_version_id,attributionId:row.attribution_id,origin:row.origin});
 export const createGovernedProject=async(client,req,input,audit)=>{
   await lockCommercialLifecycle(client,req.organizationScope);
-  const engagement=await scopedEntity(client,req,'Engagement',input.engagementId);
+  const engagement=await applyAmendedSnapshot(client,req,'Engagement',input.engagementId,await scopedEntity(client,req,'Engagement',input.engagementId));
+  await assertNoPendingAmendment(client,req,[['Engagement',engagement.id],['Contract',engagement.contract_id]].filter(x=>x[1]));
   await assertActive(client,req,'Engagement',engagement.id,engagement.contract_version_id);
   await validateEngagementSnapshot(client,req,engagement);
   if(input.startsOn<engagement.starts_on || input.endsOn>engagement.ends_on)fail(422,'COMMERCIAL_TERMS_MISMATCH','Project dates must fit the immutable engagement.');
@@ -97,7 +122,7 @@ export const createGovernedProject=async(client,req,input,audit)=>{
   if(!engagement.billable && !/^0(?:\.0{1,4})?$/.test(input.budgetAllocation))fail(422,'COMMERCIAL_INTERNAL_POLICY','Non-billable project commercial budget allocation must be zero.');
   const manager=await assertOwner(client,req,input.managerId,input.startsOn,input.endsOn);
   const date=await today(client);if(date<input.startsOn || date>input.endsOn)fail(409,'COMMERCIAL_INACTIVE_DATES','New governed projects activate now; dates must cover the current UTC date.');
-  const total=(await client.query(`select coalesce(sum(budget_allocation),0)+$4::numeric <= $5::numeric allowed from commercial_project_bindings where ${where} and engagement_id=$3`,[...scope(req),engagement.id,input.budgetAllocation,engagement.budget])).rows[0];
+  const total=(await client.query(`select coalesce(sum(greatest(coalesce((select a.budget from commercial_amendments a where a.organization_id=b.organization_id and a.legal_entity_id=b.legal_entity_id and a.entity_type='Project' and a.entity_id=b.project_id and a.effective_on<=(now() at time zone 'UTC')::date order by a.sequence desc limit 1),b.budget_allocation),coalesce((select max(a.budget) from commercial_amendments a where a.organization_id=b.organization_id and a.legal_entity_id=b.legal_entity_id and a.entity_type='Project' and a.entity_id=b.project_id and a.effective_on>(now() at time zone 'UTC')::date),0))),0)+$4::numeric <= $5::numeric allowed from commercial_project_bindings b where b.organization_id=$1 and b.legal_entity_id=$2 and b.engagement_id=$3`,[...scope(req),engagement.id,input.budgetAllocation,engagement.budget])).rows[0];
   if(!total.allowed)fail(422,'COMMERCIAL_PROJECT_BUDGET_EXCEEDED','Project allocations cannot exceed the engagement budget. This is not consumption or billing.');
   let project;let origin='manual';
   if(input.projectId){

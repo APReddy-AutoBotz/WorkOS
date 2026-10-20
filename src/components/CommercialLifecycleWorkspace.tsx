@@ -1,6 +1,7 @@
 import {cloneElement, isValidElement, useEffect, useId, useRef, useState, type FormEvent, type ReactNode} from 'react';
 import {termPluralTitle, termTitle} from '../config/terminology';
 import {ApiClientError} from '../services/apiClient';
+import {CommercialAmendmentWorkspace} from './CommercialAmendmentWorkspace';
 import {
   captureCommercialLifecycleContext, commercialLifecycleService, isCommercialLifecycleContextCurrent,
   type CommercialLifecycleContext, type LifecycleWorkspace, type LifecycleEntityType, type LifecycleState,
@@ -324,6 +325,7 @@ export const CommercialLifecycleWorkspace = () => {
         {workspace.engagements.length ? <ul className="grid gap-4 lg:grid-cols-2">{workspace.engagements.map(row => recordCard('Engagement', row))}</ul> : <p className="text-sm">No manually drafted {engagementPlural.toLowerCase()} were returned for this scope. Neutral legacy mappings are not lifecycle authority.</p>}</section>
       <section className={panelClass} aria-label={`${projectTitle} live lifecycle`}><h3 className="mb-4 text-lg font-bold">Governed {projectPlural.toLowerCase()}</h3>
         {workspace.projects.length ? <ul className="grid gap-4 lg:grid-cols-2">{workspace.projects.map(row => recordCard('Project', row))}</ul> : <p className="text-sm">No governed {projectPlural.toLowerCase()} were returned. Creating an explicit binding is separate from existing neutral mappings.</p>}</section>
+      <CommercialAmendmentWorkspace selectionWorkspace={workspace} />
     </>}
   </section>;
 };

@@ -1,0 +1,15 @@
+// Effective term resolution is deliberately separate from immutable activation
+// pins and work/valuation evidence. It never writes or recalculates economics.
+const scope=req=>[req.organizationScope.organizationId,req.organizationScope.legalEntityId];
+export const amendmentTerms=row=>({contractVersionId:row.contract_version_id,startsOn:row.starts_on,endsOn:row.ends_on,budget:row.budget});
+export const resolveAmendedTerms=async(client,req,type,id,baseline,asOf)=>{
+  const row=(await client.query(`select contract_version_id,starts_on::text,ends_on::text,budget::text from commercial_amendments
+    where organization_id=$1 and legal_entity_id=$2 and entity_type=$3 and entity_id=$4 and effective_on<=coalesce($5::date,(now() at time zone 'UTC')::date)
+    order by sequence desc limit 1`,[...scope(req),type,id,asOf||null])).rows[0];
+  return row?amendmentTerms(row):baseline;
+};
+export const applyAmendedSnapshot=async(client,req,type,id,root,asOf)=>{
+  const terms=await resolveAmendedTerms(client,req,type,id,{contractVersionId:root.contract_version_id,startsOn:root.starts_on,endsOn:root.ends_on,budget:type==='Project'?root.budget_allocation:root.budget},asOf);
+  return {...root,contract_version_id:terms.contractVersionId,starts_on:terms.startsOn,ends_on:terms.endsOn,
+    ...(type==='Project'?{budget_allocation:terms.budget}:{budget:terms.budget})};
+};
