@@ -5,6 +5,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY index.html vite.config.ts tsconfig.json ./
 COPY src ./src
+COPY shared ./shared
 COPY public ./public
 
 ARG VITE_APP_MODE=production
@@ -24,6 +25,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY server ./server
+COPY shared ./shared
 COPY --from=build /app/dist ./dist
 
 ARG BUILD_SHA=unknown
