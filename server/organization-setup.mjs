@@ -1,3 +1,4 @@
+import {lockCommercialLifecycle} from './modules/commercial-drafting/project-mutation.mjs';
 import { Router } from 'express';
 import { z } from 'zod';
 import { disableLinkedWorkerIdentity, restoreLinkedWorkerIdentity } from './worker-lifecycle.mjs';
@@ -457,6 +458,7 @@ export const registerOrganizationSetupRoutes = ({
     const client=await pool.connect();
     try {
       await client.query('begin');
+      await lockCommercialLifecycle(client,req.organizationScope);
       await client.query('select pg_advisory_xact_lock(hashtext($1))',[`reporting-period:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${parsed.data.frequency}`]);
       const previous=(await client.query(`select * from reporting_periods where organization_id=$1 and legal_entity_id=$2 and frequency=$3 and code=$4 for update`,
         [req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.frequency,parsed.data.code])).rows[0];

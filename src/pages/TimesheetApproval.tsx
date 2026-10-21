@@ -24,7 +24,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { formatHours } from '../lib/format';
+import {canonicalHours} from '../../shared/work-hours.mjs';
+const formatHours=(value:number)=>`${canonicalHours(value)}h`;
 
 import { productConfig } from '../config/productConfig';
 export const TimesheetApproval = () => {

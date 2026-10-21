@@ -12,6 +12,8 @@ const date=value=>value instanceof Date?value.toISOString().slice(0,10):String(v
 const shift=(value,days)=>{const d=new Date(`${value}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
 export const workPolicyError=(res,error)=>{
   if(error?.code==='WWP01'){res.status(409).json({error:'Retained submitted work cannot be rewritten.',code:'WORK_HISTORY_IMMUTABLE'});return true;}
+  if(error?.code==='WCR05'){res.status(409).json({error:'Capture policy requires open authoritative reporting periods.',code:'WORK_CAPTURE_PERIOD_AUTHORITY'});return true;}
+  if(['WCR03','WCR04'].includes(error?.code)){res.status(422).json({error:'Work violates the effective capture increment, comment or aggregate limit.',code:'WORK_CAPTURE_POLICY_VIOLATION'});return true;}
   if(!(error instanceof WorkPolicyError))return false;
   res.status(error.statusCode).json({error:error.message,code:error.code});return true;
 };
@@ -143,8 +145,8 @@ export const retainWorkSubmission=async(client,req,timesheet,entries,source)=>{
   const periodReferences=[...new Map(periods.map(p=>[p.id,{id:p.id,frequency:p.frequency,status:p.status}])).values()];
   const evidence=entries.map(entry=>({entryId:entry.id,projectId:entry.project_id||null,workType:entry.work_type,workDate:date(entry.work_date),hours:String(entry.hours),billable:entry.billable,
     clientName:entry.client_name||null,category:entry.category||null,remark:entry.remark||null,kind:entry.policy.kind,bindingId:entry.policy.bindingId||null,assignmentIds:entry.policy.assignmentIds||[],assignmentSnapshots:entry.policy.assignmentSnapshots||[],references:entry.policy.references}));
-  await client.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id)
-    values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)`,[id,...scope(req),timesheet.id,sequence,WORK_POLICY_VERSION,JSON.stringify(evidence),JSON.stringify(periodReferences),req.user.sub,req.user.activeRole,source,req.correlationId,req.operationId]);
+  await client.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id,capture_policy_references)
+    values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb)`,[id,...scope(req),timesheet.id,sequence,WORK_POLICY_VERSION,JSON.stringify(evidence),JSON.stringify(periodReferences),req.user.sub,req.user.activeRole,source,req.correlationId,req.operationId,JSON.stringify(entries.map(entry=>({entryId:entry.id,reference:entry.capturePolicyReference||null})))]);
   return {id,sequence,policyVersion:WORK_POLICY_VERSION,entryCount:evidence.length,governedEntryCount:evidence.filter(x=>x.kind==='governed').length};
 };
 // Decision-time period checks cover every stored work date, not just week end.
