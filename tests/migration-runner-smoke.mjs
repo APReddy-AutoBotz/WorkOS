@@ -2821,7 +2821,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
           hours: 8,
           remark: 'Synthetic project delivery',
           billable: true,
-          status: 'Submitted',
+          status: 'Draft',
         },
         {
           employeeId: 'EMP-IMPORT-SUCCESS',
@@ -2833,7 +2833,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
           hours: 4,
           remark: 'Synthetic client workshop',
           billable: false,
-          status: 'Submitted',
+          status: 'Draft',
         },
         {
           employeeId: 'EMP-IMPORT-SUCCESS',
@@ -2901,7 +2901,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         source_identifier: null,
         import_batch_id: timesheetPartialBody.log.id,
         import_processing_result: 'Success',
-        details: 'Created Submitted timesheet for EMP-IMPORT-SUCCESS, week ending 2026-02-06 from synthetic-timesheet-partial.csv',
+        details: 'Created Draft timesheet for EMP-IMPORT-SUCCESS, week ending 2026-02-06 from synthetic-timesheet-partial.csv',
       },
       {
         action: 'Import Create Timesheet',
@@ -2922,7 +2922,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending in (date '2026-02-06',date '2026-02-13')
       group by t.id,e.employee_id order by t.week_ending`);
     assert.deepEqual(timesheetPartialState.rows.map(({id, ...row}) => row), [
-      {employee_id:'EMP-IMPORT-SUCCESS',week_ending:'2026-02-06',status:'Submitted',total_hours:'12',billable_hours:'8',entries:2},
+      {employee_id:'EMP-IMPORT-SUCCESS',week_ending:'2026-02-06',status:'Draft',total_hours:'12',billable_hours:'8',entries:2},
       {employee_id:'EMP-IMPORT-SUCCESS',week_ending:'2026-02-13',status:'Submitted',total_hours:'3',billable_hours:'0',entries:1},
     ], 'timesheet provenance must preserve one grouped timesheet per employee/week and its input entries');
     const rejectedScopeTimesheet = await pool.query(`select
@@ -2950,7 +2950,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(timesheetUpdateResponse.status, 200);
     const timesheetUpdateBody = await timesheetUpdateResponse.json();
-    assert.equal(timesheetUpdateBody.status, 'Success', 'same-scope timesheet imports must retain their group upsert behavior');
+    assert.equal(timesheetUpdateBody.status, 'Success', 'same-scope editable Draft imports retain group upsert behavior and may submit the replacement');
     assert.equal(timesheetUpdateBody.validRows, 1);
     assert.equal(timesheetUpdateBody.errorRows, 0);
     const timesheetUpdateState = await pool.query(`select t.id::text as id,t.status,t.total_hours::text as total_hours,
@@ -2965,7 +2965,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       total_hours: '6',
       billable_hours: '0',
       entries: 1,
-    }], 'same-scope timesheet upserts must preserve the group ID while replacing its entries');
+    }], 'editable Draft-to-Submitted upsert preserves the group ID while replacing its entries');
     const timesheetUpdateAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result
       from audit_logs where import_batch_id=$1`, [timesheetUpdateBody.log.id]);
     assert.deepEqual(timesheetUpdateAudit.rows, [{
@@ -2975,6 +2975,29 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       import_batch_id: timesheetUpdateBody.log.id,
       import_processing_result: 'Success',
     }], 'same-scope timesheet group updates must preserve provenance and update audit behavior');
+
+    const retainedTimesheetSnapshot = async () => (await pool.query(`select jsonb_build_object(
+        'header',to_jsonb(t),
+        'entries',(select jsonb_agg(to_jsonb(e) order by e.id) from timesheet_entries e where e.timesheet_id=t.id),
+        'submissions',(select jsonb_agg(to_jsonb(w) order by w.sequence) from work_submission_evidence w where w.timesheet_id=t.id),
+        'decisions',(select jsonb_agg(to_jsonb(d) order by d.id) from work_submission_decisions d join work_submission_evidence w on w.id=d.submission_id where w.timesheet_id=t.id),
+        'approvals',(select jsonb_agg(to_jsonb(a) order by a.id) from approval_records a where a.entity_type='Timesheet' and a.entity_id=t.id::text)
+      ) value from timesheets t where t.id=$1`, [timesheetUpdateState.rows[0].id])).rows;
+    const retainedSubmitted = await retainedTimesheetSnapshot();
+    const protectedTimesheetResponse = await applyTimesheets({
+      fileName:'synthetic-timesheet-protected-replacement.csv', rows:[{
+        employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-06',workType:'Client Misc Task',
+        clientName:'Synthetic forbidden replacement',date:'2026-02-04',hours:1,status:'Draft',
+      }],
+    });
+    assert.equal(protectedTimesheetResponse.status,200);
+    const protectedTimesheetBody = await protectedTimesheetResponse.json();
+    assert.equal(protectedTimesheetBody.status,'Failed');assert.equal(protectedTimesheetBody.validRows,0);
+    assert.equal(protectedTimesheetBody.errors[0]?.code,'WORK_HISTORY_IMMUTABLE');
+    assert.deepEqual(await retainedTimesheetSnapshot(),retainedSubmitted,
+      'Submitted replacement denial preserves the complete header, entries, immutable submissions, decisions and source approvals');
+    assert.equal((await pool.query('select count(*)::int n from audit_logs where import_batch_id=$1 and entity_type=\'Timesheet\'', [protectedTimesheetBody.log.id])).rows[0].n,0,
+      'denied Submitted replacement has no successful group audit');
 
     const timesheetFutureResponse = await applyTimesheets({
       fileName: 'synthetic-timesheet-future.csv',
