@@ -1,0 +1,8 @@
+import {WorkPolicyError} from './assignment-work-policy.mjs';
+import {z} from 'zod';
+import {validCategoryCode} from '../../../shared/work-category.mjs';
+export const categoryCodeInput=z.union([z.string(),z.null()]).refine(v=>v===null||v===''||validCategoryCode(v),'Use an exact configured category code or explicit null.').transform(v=>v===''?null:v).optional();
+export const applyWorkCategories=async(c,req,worker,entries)=>{
+ await c.query('savepoint work_category_resolution');try{const output=[];for(const entry of entries){const r=(await c.query('select resolve_work_category($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10) result',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,worker,entry.work_date,entry.category_code??null,entry.work_type,entry.project_id??null,entry.client_name??null,entry.billable,entry.category??null])).rows[0].result;output.push({...entry,category_code:r.code,category_reference:r.reference,category:r.category,billable:r.billable,policy:{...entry.policy,billable:r.billable}});}await c.query('release savepoint work_category_resolution');return output;}catch(error){await c.query('rollback to savepoint work_category_resolution');await c.query('release savepoint work_category_resolution');if(['WCC02','WCC03'].includes(error.code))throw new WorkPolicyError(error.code==='WCC02'?'WORK_CATEGORY_REQUIRED':'WORK_CATEGORY_CONTEXT',error.code==='WCC02'?'Choose an active category under the adopted catalog for this work date.':'The category context or authorized billability is invalid.');throw error;}
+};
+export const categoryEntryProjection=entry=>{if(entry.category_reference)return entry;const{category_code:_code,category_reference:_reference,...legacy}=entry;return legacy;};

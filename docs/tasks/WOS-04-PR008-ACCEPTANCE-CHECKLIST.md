@@ -152,3 +152,23 @@ Finite remainder: R1 category/context adoption; R3 canonical notification/integr
 | E2 / E3 | Composite historical/integrated acceptance and deferred independent/formal reviews, protection/dependency/integration/owner-UAT/release gates remain required. Engineering green does not close them. |
 
 R7/RES003 physical-capacity integration and the full milestone are not accepted by native-unit gates alone. Prior heads/main/integration remain fixed; PR30 never-merge; no denied review/repair retry, manual scan, monitoring/protection/access/spending change, merge or deployment. No new follow-on scope is created.
+
+
+## Post-PR72 R1 category/context implementation boundary
+
+[PR-008S](WOS-04-WORK-CATEGORY-CONTEXT.md) implements the R1 controlled catalog/context path from WOS-TIM-002/003 and D1: explicit buyer configuration/adoption → actual manual/daily/weekly and both import aliases → canonical category/billability bounds → read/approval/correction/immutable history. Supported seven kinds do not force a buyer to install seven definitions. New Non-client Work is classified work with no client/project, never an absence or a grant of financial authority. Client descriptions remain descriptive, not canonical financial client bindings. Existing source, assignment, date, concurrency and immutable history controls remain prerequisites.
+
+| Finite outcome | Implementation, configuration or unresolved authority after this slice |
+|---|---|
+| R1 / TIM002 and category/context component of TIM003 | Bounded end-to-end implementation provided, subject to this exact source's engineering gates and deferred integration/owner acceptance. No historical text mapping, catalog/default values, grants or automatic adoption. Buyer codes/labels/kinds/contexts/active state/billability/inclusion and clean prospective Weekly adoption are explicit configuration data, not missing product code. |
+| R2 / R5 | Prior bounded overtime configuration and self-asserted source identity remain delivered. No payroll, provider verification or changed-source amendment authority is inferred. |
+| R3 | Explicit UTC deadline mechanics remain delivered; canonical notifications/integration and broader supported timezone semantics remain open. |
+| R4 | Protected state/reopen/exception behavior remains missing integration/authority; approved historical work stays immutable. |
+| R6 | Explicit effective capacity and exact single-count known calendar/absence paths exist. Ambiguous legacy partial-day allocation, unknown calendar references, implicit conversions, report parity and composite evidence remain partial/unavailable. |
+| R7 | Native percentage version/timeline, overlap configuration/enforcement/history exist. Range-hours distribution and percentage-to-hours basis remain genuinely unspecified if required; configured financial treatment and selected material-change approval/PR009 remain outstanding implementation/dependencies. No invented conversion/default. |
+| R8 | Capability and bounded demand/source references exist. Quantitative staffing/demand/capacity/approval/report reconciliation remains missing integration. |
+| R9 | This slice records explicit category inclusion as input only. Approved included numerator, effective available denominator, governed forecast/bench/demand-gap calculations and read parity remain missing integration. Legacy utilization paths are compatibility, not authoritative acceptance. |
+| R10 | Own-period read and capture/history handoff exist; planner/hierarchy, unified governed results/actions and downstream reconciliation remain partial. |
+| E2 / E3 | Composite historical/integrated acceptance, optional independent/formal reviews, actual protection/dependency/integration gates, owner role UAT and release acceptance remain outstanding. No full PR008 acceptance, merge or deployment. |
+
+This is the finite existing remainder, not authorization for new follow-on scope. Buyer choices are not activated. Optional reviews are deferred, not passed; denied cumulative review and separately denied repairs remain stopped. PR30 never-merge; prior Draft heads/main/integration and monitoring remain fixed.

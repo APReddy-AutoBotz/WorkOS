@@ -616,7 +616,7 @@ export const timesheetService = {
           project_id: e.projectId || null,
           work_type: e.workType,
           client_name: e.clientName || null,
-          category: e.category || null,
+          category_code:e.categoryCode,category: e.category || null,
           work_date: e.date,
           hours: e.hours,
           remark: e.remark || null,

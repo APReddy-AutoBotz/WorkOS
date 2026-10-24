@@ -1,3 +1,4 @@
+import {categoryCodeInput,applyWorkCategories} from '../work-capture/work-category.mjs';
 import {overlapAssessment} from '../planning/assignment-overlap-policy.mjs';
 import {setAssignmentVersionContext} from '../planning/assignment-version-context.mjs';
 import {resolveWorkSourceIdentityAliases} from '../../../shared/work-source-identity.mjs';
@@ -226,10 +227,11 @@ export const createOperationalImportRouter = ({
   const timesheetRowSchema = versioned => z.object({
     employeeId: z.string().min(1),
     weekEnding: strictIsoDateSchema,
-    workType: z.enum(['Project Work', 'Client Misc Task']),
+    workType: z.enum(['Project Work', 'Client Misc Task', 'Non-client Work']),
     projectId: z.string().optional(),
     clientName: z.string().optional(),
     category: z.string().optional(),
+    categoryCode:categoryCodeInput,
     date: strictIsoDateSchema,
     hours: captureHoursInput,
     remark: z.string().optional(),
@@ -578,7 +580,7 @@ export const createOperationalImportRouter = ({
           projectId: project?.id || null,
           workType: row.workType,
           clientName: row.clientName || null,
-          category: row.category || null,
+          category: row.category || null,categoryCode:row.categoryCode,
           workDate: row.date,
           hours: canonicalHours(row.hours),
           remark: row.remark || null,
@@ -602,13 +604,13 @@ export const createOperationalImportRouter = ({
           previousEvidence=await readWorkEvidenceAudit(client,previous?.id);
           previousDuplicateCheck=await readDuplicateEntryCheck(client,previous?.id);
           await assertCaptureReplacementPeriods(client,req,previous?.id);
-          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,remark:entry.remark,evidence_url:entry.evidenceUrl,work_reference:entry.workReference,source_identity:entry.sourceIdentity,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
-          policyEntries=await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries);
+          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,category_code:entry.categoryCode,remark:entry.remark,evidence_url:entry.evidenceUrl,work_reference:entry.workReference,source_identity:entry.sourceIdentity,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
+          policyEntries=await applyWorkCategories(client,req,group.employee.id,await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries));
           policyEntries=await validateCapturePolicy(client,req,group.employee.id,policyEntries,{replacementTimesheetId:previous?.id,stagedReplacements:dryRun?stagedCaptureReplacements:[]});
           sourceKeys=await validateWorkSourceReplacement(client,req,group.employee.id,group.weekEnding,policyEntries,previous?.id||null,stagedSourceKeys);
           submissionTiming=await readSubmissionTiming(client,req,[group.weekEnding,...policyEntries.map(entry=>entry.work_date)]);
           if(group.status==='Submitted')assertSubmissionTiming(submissionTiming);
-          group.entries=group.entries.map((entry,index)=>({...entry,hours:policyEntries[index].hours,billable:policyEntries[index].billable,evidenceUrl:policyEntries[index].evidence_url,workReference:policyEntries[index].work_reference,sourceIdentity:policyEntries[index].source_identity}));
+          group.entries=group.entries.map((entry,index)=>({...entry,hours:policyEntries[index].hours,billable:policyEntries[index].billable,evidenceUrl:policyEntries[index].evidence_url,workReference:policyEntries[index].work_reference,sourceIdentity:policyEntries[index].source_identity,category:policyEntries[index].category,categoryCode:policyEntries[index].category_code,categoryReference:policyEntries[index].category_reference}));
           await assertReportingPeriodAllows(client, {
             organizationId: scope.organizationId,
             legalEntityId: scope.legalEntityId,
@@ -617,7 +619,7 @@ export const createOperationalImportRouter = ({
           });
         } catch (error) {
           if (!(error instanceof ReportingPeriodError)&&!(error instanceof WorkPolicyError)&&!['WDL01','WDL02'].includes(error?.code)) throw error;
-          errors.push(...group.entries.map(entry => ({rowNumber: entry.rowNumber, field:error.code?.startsWith('WORK_SOURCE_')?'sourceIdentity':'date',message:error.message,code:error.code==='WDL01'?'WORK_SUBMISSION_DEADLINE_BLOCKED':error.code==='WDL02'?'WORK_SUBMISSION_DEADLINE_AUTHORITY':error.code})));
+          errors.push(...group.entries.map(entry => ({rowNumber: entry.rowNumber, field:error.code?.startsWith('WORK_CATEGORY_')?'categoryCode':error.code?.startsWith('WORK_SOURCE_')?'sourceIdentity':'date',message:error.message,code:error.code==='WDL01'?'WORK_SUBMISSION_DEADLINE_BLOCKED':error.code==='WDL02'?'WORK_SUBMISSION_DEADLINE_AUTHORITY':error.code})));
           validEntryRows -= group.entries.length;
           continue;
         }
@@ -649,9 +651,9 @@ export const createOperationalImportRouter = ({
         const savedEntries=[];
         for (const [index,entry] of group.entries.entries()) {
           const inserted=await client.query(`
-            insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference, source_identity)
-            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) returning *,work_date::text
-          `, [timesheet.id, entry.projectId, entry.workType, entry.clientName, entry.category, entry.workDate, entry.hours, entry.remark, entry.billable, entry.evidenceUrl, entry.workReference,entry.sourceIdentity?JSON.stringify(entry.sourceIdentity):null]);
+            insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference, source_identity,category_code,category_reference)
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb) returning *,work_date::text
+          `, [timesheet.id, entry.projectId, entry.workType, entry.clientName, entry.category, entry.workDate, entry.hours, entry.remark, entry.billable, entry.evidenceUrl, entry.workReference,entry.sourceIdentity?JSON.stringify(entry.sourceIdentity):null,entry.categoryCode,entry.categoryReference?JSON.stringify(entry.categoryReference):null]);
           savedEntries.push({...inserted.rows[0],policy:policyEntries[index].policy,capturePolicyReference:policyEntries[index].capturePolicyReference});
         }
         if(group.status==='Submitted'){
@@ -666,7 +668,7 @@ export const createOperationalImportRouter = ({
           entityType: 'Timesheet',
           entityId: String(timesheet.id),
           oldValue: previous?{...previous,entryEvidence:previousEvidence,duplicateEntryCheck:previousDuplicateCheck}:null,
-          newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference,source_identity:entry.source_identity})),duplicateEntryCheck:checkDuplicateEntries(savedEntries)},
+          newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference,source_identity:entry.source_identity,...(entry.category_reference?{category_code:entry.category_code,category_reference:entry.category_reference}:{})})),duplicateEntryCheck:checkDuplicateEntries(savedEntries)},
           details: `${previous ? 'Updated' : 'Created'} ${group.status} timesheet for ${group.employee.employee_id}, week ending ${group.weekEnding} from ${parsed.data.fileName}`,
           reason: group.rejectionReason,
           source: 'Timesheet Import CSV',

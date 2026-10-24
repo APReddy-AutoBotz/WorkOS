@@ -1,6 +1,6 @@
 # PR-008S: Governed category and work-context adoption
 
-**Status:** Pre-implementation lineage/acceptance plan on fixed Draft PR72 `7548fabd6a435d2a93514375537707118b9fbcd1`, tree `e3c3a0e68e5b9d8f068ab57846992c70bffea6dd`. Development-only dependency. Optional independent/formal reviews remain deferred/outstanding. No full PR008/integration/UAT/release acceptance.
+**Status:** Implemented bounded candidate; exact-source gates/publication receipt required below. Lineage/acceptance plan committed before implementation on fixed Draft PR72 `7548fabd6a435d2a93514375537707118b9fbcd1`, tree `e3c3a0e68e5b9d8f068ab57846992c70bffea6dd`. Development-only dependency. Optional independent/formal reviews remain deferred/outstanding. No full PR008/integration/UAT/release acceptance.
 
 ## Requirement and complete boundary
 
@@ -36,3 +36,14 @@ The explicit utilization-inclusion choice is retained as governed input; effecti
 5. Freeze exact source; locked install, type/lint/aggregate plus applicable retained PostgreSQL/migration/browser/production gates. Reconcile sole writer/controller/protected runs/expected heads/absent branch/PR, publish original authorized dependent Draft on fixed PR72, observe exact-head hosted gates to terminal and record truthful source/test/remaining receipts. Optional reviews remain outstanding. No merge/deploy.
 
 Rollback retains additive migration059/catalogs/source references/claims/evidence/guards and requires a compatible binary before resuming classified writes. No destructive down migration, history clearing, guard removal or deployment is supplied.
+
+Clock-honest role evidence: governed current-work Drafts execute the real named Employee daily/weekly UI. Governed submission/rejection/correction/approval and retained inspection use the real API and approver UI with a valid short initial Weekly period/header ending today, without fake time or future denial bypass. The retained past-period named Employee UI full cycle remains separate; API transitions are never renamed as UI submissions.
+
+
+## Delivered implementation and evidence contract
+
+Migration059 adds empty immutable catalog versions and nullable entry classification, canonical SQL category resolution, boundary protection and conditional source-content metadata. The API exposes `GET/POST /api/v1/work-categories/catalogs` (settings.manage) and date-specific `GET /api/v1/work-categories/options` (timesheets.submit); all use current organization/legal-entity scope. Commands allow only expectedLatestId, effectiveFrom, full definition and reason. The two import aliases accept optional categoryCode, preserving omission separately from explicit null/blank. Enabled dates reject a clear/missing/inactive/incompatible code; removing classification cannot turn mandatory governed work into legacy work. SQL validation errors are isolated by a read-resolution savepoint so a rejected import group cannot abort subsequent groups. No new product permissions are granted.
+
+The existing policy settings page embeds an explicit category editor with no initial catalog/action/value selection. Daily/weekly cells retain independent code/reference/label/billability arrays. Saved zero/off-grid entries remain retained intact. Worker, approver and retained-history views distinguish governed references, pending explicit choices and legacy/unmapped work. Retained utilization flags are inputs only. Clock-honest API versus UI transition evidence is described above.
+
+New gates: `test:work-category`, `test:work-category-service` (aggregate); `test:work-category-postgres`; `test:work-category-journey` (CI). The PostgreSQL gate exercises a real nonempty pre059 claim through upgrade/replay and compares its payload bytes, canonical resolution, all seven kinds, omission/clear/context/billability/source/concurrency controls and retained decisions. The browser gate uses production components/transport over real API/PostgreSQL, synthetic identities/navigation only, no provider mocks, URL fetching or fake clock. Applicable retained source gates must be rerun after the candidate is committed; preliminary working-tree results are not exact-head acceptance. Optional independent/formal reviews remain outstanding.

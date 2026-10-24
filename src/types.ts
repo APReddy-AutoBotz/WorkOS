@@ -675,10 +675,14 @@ export interface Allocation {
   status: 'Active' | 'Paused' | 'Completed';
 }
 
-export type WorkType = 'Project Work' | 'Client Misc Task';
+export type WorkType = 'Project Work' | 'Client Misc Task' | 'Non-client Work';
+export type WorkCategoryDefinition={code:string;label:string;kind:'billable_client'|'non_billable_client'|'internal_delivery'|'pre_sales'|'training'|'administration'|'buyer_defined';active:boolean;contexts:Array<'project'|'client_description'|'none'>;billability:'project_bound'|'non_billable';includeInUtilization:boolean};
+export type WorkCategoryReference=WorkCategoryDefinition&{contractVersion:'work-category/1';catalogId:string;sequence:number;effectiveFrom:string;context:'project'|'client_description'|'none'};
 
 export type WorkSourceIdentity={namespace:string;externalId:string};
 export interface TimesheetEntry {
+  categoryCode?:string|null;
+  categoryReference?:WorkCategoryReference|null;
   sourceIdentity?:WorkSourceIdentity|null;
   id: string;
   employeeId: string;

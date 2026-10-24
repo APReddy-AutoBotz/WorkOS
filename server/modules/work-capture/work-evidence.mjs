@@ -12,6 +12,7 @@ const key = entry => JSON.stringify([String(entry.work_date).slice(0,10),entry.w
 // Preserve each optional metadata dimension independently under existing locks.
 // A caller that only understands evidence URLs cannot erase later references.
 const metadataFields=[
+  {field:'category_code',code:'WORK_CATEGORY_REPLACEMENT_CONFLICT',label:'governed categories'},
   {field:'source_identity',code:'WORK_SOURCE_REPLACEMENT_CONFLICT',label:'source identities'},
   {field:'evidence_url',code:'WORK_EVIDENCE_REPLACEMENT_CONFLICT',label:'evidence URLs'},
   {field:'work_reference',code:'WORK_REFERENCE_REPLACEMENT_CONFLICT',label:'work references'},
@@ -37,5 +38,5 @@ export const resolveWorkEntryMetadataReplacement = async (client, timesheetId, e
 export const resolveWorkEvidenceReplacement=resolveWorkEntryMetadataReplacement;
 
 export const readWorkEvidenceAudit = async (client,timesheetId) => timesheetId
-  ? (await client.query('select id,evidence_url,work_reference,source_identity from timesheet_entries where timesheet_id=$1 order by id',[timesheetId])).rows
+  ? (await client.query('select id,evidence_url,work_reference,source_identity,category_code,category_reference from timesheet_entries where timesheet_id=$1 order by id',[timesheetId])).rows.map(entry=>{if(entry.category_reference)return entry;const{category_code:_code,category_reference:_ref,...legacy}=entry;return legacy;})
   : [];

@@ -72,7 +72,7 @@ const projectStatuses: Project['status'][] = ['Proposed', 'Active', 'On Hold', '
 const allocationStatuses: Allocation['status'][] = ['Active', 'Paused', 'Completed'];
 const clientStatuses: Client['status'][] = ['Active', 'Inactive'];
 const timesheetStatuses: TimesheetSummary['status'][] = ['Draft', 'Submitted', 'Approved', 'Rejected'];
-const workTypes: WorkType[] = ['Project Work', 'Client Misc Task'];
+const workTypes: WorkType[] = ['Project Work', 'Client Misc Task', 'Non-client Work'];
 
 const requiredImportHeaders: Record<ImportChannel, string[]> = {
   employees: ['employeeId', 'name', 'email', 'designation', 'department', 'country', 'region', 'businessUnit', 'reportingManagerId', 'primaryCountryDirectorId', 'mappedCountryDirectorIds', 'utilizationEligible', 'joiningDate', 'exitDate', 'standardWeeklyHours', 'capacityType', 'contractType', 'entraObjectId', 'teamsUserId', 'roles', 'initialPassword', 'status'],
@@ -90,7 +90,7 @@ const versionedImportSchemas: Partial<Record<ImportChannel, string>> = {
 };
 
 const orderImportRow = (id: ImportChannel, row: Record<string, unknown>) => {
-  return Object.fromEntries([...requiredImportHeaders[id],...(id==='timesheets'?['sourceNamespace','externalWorklogId']:[])].map(header => [header, row[header] ?? '']));
+  return Object.fromEntries([...requiredImportHeaders[id],...(id==='timesheets'?['categoryCode','sourceNamespace','externalWorklogId']:[])].map(header => [header, row[header] ?? '']));
 };
 
 const parseStrictIsoDate = (value: string) => {
@@ -253,7 +253,7 @@ export const ImportExport = () => {
     const rows = lines.filter(Boolean).map(line => {
       const values = splitCsvLine(line),exactValues=splitCsvLine(line,true);
       return headers.reduce<CsvRow>((row, header, index) => {
-        row[header] = ['sourceNamespace','externalWorklogId'].includes(header)?exactValues[index]??'':values[index]||'';
+        row[header] = ['categoryCode','sourceNamespace','externalWorklogId'].includes(header)?exactValues[index]??'':values[index]||'';
         return row;
       }, {});
     });
@@ -996,6 +996,7 @@ export const ImportExport = () => {
           workType: row.workType as WorkType,
           clientName: row.clientName,
           category: row.category,
+          ...(Object.hasOwn(row,'categoryCode')?{categoryCode:row.categoryCode||null}:{}),
           date: row.date,
           hours,
           remark: row.remark,
