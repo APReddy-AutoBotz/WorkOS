@@ -1,5 +1,6 @@
 import {WORKER_CAPACITY_VERSION,validCapacityProfile,validCapacityRange,capacityDateCount,shiftCapacityDate,multiplyCapacity} from '../../../shared/worker-capacity.mjs';
 import {exactCapacityQuantity} from '../../../shared/worker-capacity.mjs';
+import {calendarLeaveFraction} from '../../../shared/calendar-leave.mjs';
 import {canonicalHours,compareHours,sumHours} from '../../../shared/work-hours.mjs';
 const inRange=(d,r)=>r.effectiveFrom<=d&&(!r.effectiveTo||d<=r.effectiveTo);
 const active=(d,r)=>r.active&&inRange(d,r);
@@ -46,7 +47,7 @@ export const calculateWorkerCapacity=(sources,startsOn,endsOn)=>{
   if((!c.workingDays.includes(weekday)&&compareHours(scheduled,'0')>0)||compareHours(scheduled,c.hoursPerDayExact)>0){days.push(emptyDay(date,profile,'CALENDAR_SCHEDULE_CONFLICT',refs));continue;}
   const holidays=sources.holidays.filter(h=>h.calendarId===c.id&&h.holidayDate===date&&active(date,h)),leaves=sources.approvedAbsences.filter(l=>l.startsOn<=date&&l.endsOn>=date);refs.holidaySourceCount=holidays.length;refs.approvedAbsenceSourceCount=leaves.length;
   if(holidays.length||scheduled==='0'){days.push(knownDay(date,profile,scheduled,holidays.length?scheduled:'0','0','0',refs,picked.tier,holidays.length?['HOLIDAY']:[]));continue;}
-  const fractions=leaves.map(absenceFraction);if(fractions.includes('1')){days.push(knownDay(date,profile,scheduled,'0',scheduled,'0',refs,picked.tier,['APPROVED_FULL_ABSENCE']));continue;}
+  const fractions=leaves.map(leave=>{const exact=calendarLeaveFraction(leave,date);return exact===undefined?absenceFraction(leave):exact;});if(fractions.includes('1')){days.push(knownDay(date,profile,scheduled,'0',scheduled,'0',refs,picked.tier,['APPROVED_FULL_ABSENCE']));continue;}
   const partial=fractions.filter(f=>f!==null&&f!=='0');
   if(fractions.includes(null)||partial.length>1){const d=emptyDay(date,profile,fractions.includes(null)?'LEGACY_ABSENCE_ALLOCATION_UNAVAILABLE':'PARTIAL_ABSENCE_OVERLAP_UNAVAILABLE',refs);d.scheduledHoursExact=scheduled;d.holidayReductionHoursExact='0';d.calendarTier=picked.tier;days.push(d);continue;}
   const reduction=partial.length?multiplyCapacity(scheduled,partial[0]):'0';days.push(knownDay(date,profile,scheduled,'0',reduction,subtract(scheduled,reduction),refs,picked.tier,partial.length?['APPROVED_PARTIAL_ABSENCE']:[]));
