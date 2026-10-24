@@ -14,6 +14,7 @@ const scope=req=>[req.organizationScope.organizationId,req.organizationScope.leg
 const date=value=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
 const shift=(value,days)=>{const d=new Date(`${value}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
 export const workPolicyError=(res,error)=>{
+  if(['ALP01','ALP02'].includes(error?.code)){res.status(422).json({error:error.code==='ALP01'?'Declared simultaneous assignment percentages exceed an adopted blocking threshold.':'Native assignment policy authority is unavailable.',code:error.code==='ALP01'?'ASSIGNMENT_OVERLAP_BLOCKED':'ASSIGNMENT_OVERLAP_AUTHORITY'});return true;}
   if(error?.code==='WDL01'){res.status(422).json({error:'The configured submission deadline and grace period have elapsed. Save a Draft or follow the authorized policy process.',code:'WORK_SUBMISSION_DEADLINE_BLOCKED'});return true;}
   if(error?.code==='WDL02'){res.status(409).json({error:'Submission timing requires unambiguous Weekly period authority.',code:'WORK_SUBMISSION_DEADLINE_AUTHORITY'});return true;}
   if(['WSI01','WSI02'].includes(error?.code)){res.status(409).json({error:'Source-linked work is already captured or its content differs. This create/conflict command cannot change, clear or rebind it.',code:error.code==='WSI01'?'WORK_SOURCE_IDENTITY_CONFLICT':'WORK_SOURCE_IDENTITY_IMMUTABLE'});return true;}
