@@ -11,7 +11,7 @@ export const projectHistorySubmission=row=>({
  id:row.id,sequence:row.sequence,createdAt:row.createdAt,activeRole:row.activeRole,source:row.source,
  entries:row.entries.map(entry=>({entryId:entry.entryId,projectId:entry.projectId,workType:entry.workType,workDate:entry.workDate,
   hoursExact:canonicalHours(entry.hours),billable:entry.billable,clientName:entry.clientName,category:entry.category,remark:entry.remark,
-  ...(Object.hasOwn(entry,'evidenceUrl')?{evidenceUrl:entry.evidenceUrl}:{}),...(Object.hasOwn(entry,'workReference')?{workReference:entry.workReference}:{}),...(Object.hasOwn(entry,'sourceIdentity')?{sourceIdentity:entry.sourceIdentity}:{})})),
+  ...(Object.hasOwn(entry,'categoryReference')?{categoryCode:entry.categoryCode,categoryReference:entry.categoryReference}:{}),...(Object.hasOwn(entry,'evidenceUrl')?{evidenceUrl:entry.evidenceUrl}:{}),...(Object.hasOwn(entry,'workReference')?{workReference:entry.workReference}:{}),...(Object.hasOwn(entry,'sourceIdentity')?{sourceIdentity:entry.sourceIdentity}:{})})),
  decision:row.decision,...(row.submissionTiming!=null?{submissionTiming:row.submissionTiming}:{}),
 });
 export const createWorkHistoryRouter=({pool,requireDatabase,requireAuth,requirePermission,

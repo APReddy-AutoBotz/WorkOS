@@ -1,3 +1,4 @@
+import {WorkCategoryEditor} from '../components/WorkCategoryEditor';
 import {useEffect, useRef, useState, type FormEvent} from 'react';
 import {Link} from 'react-router-dom';
 import {PageHeader} from '../components/ui/PageHeader';
@@ -89,7 +90,8 @@ export const WorkCapturePolicyEditor = () => {
     <PageHeader title="Work capture policy" subtitle="Append effective-dated increments, aggregate limits, standard-hour thresholds, required comments and evidence URLs for the selected legal entity." breadcrumb={['Admin', 'Work capture policy']} />
     <Link to="/admin" className="underline">Back to governance settings</Link>
     <p>Policies activate only at an authoritative Weekly reporting-period start. All recorded worker work counts across headers and states. Blank maximums add no capture cap. Existing worker, assignment, date, period-lock and approval controls still apply.</p>
-    <p>No policy is installed by default. This editor does not configure categories, overtime approval exceptions, protected reopening or capture modes. Evidence requirements apply to every positive entry under the effective policy; zero entries are exempt.</p>
+    <p>No policy is installed by default. This increment editor does not configure overtime approval exceptions, protected reopening or capture modes. Evidence requirements apply to every positive entry under the effective policy; zero entries are exempt.</p>
+    <WorkCategoryEditor/>
     <p>Standard-hour thresholds are optional buyer rules. Select warning or blocking and enter daily and/or Weekly values explicitly. Existing hard maxima still apply; this does not calculate payroll, premium rates or financial value. Daily and Weekly conditions are separate, not additive payable hours.</p>
     <div aria-live="polite" role="status">{state.message || (state.status === 'loading' ? 'Loading capture policy…' : state.status === 'saving' ? 'Appending policy version…' : '')}</div>
     <button className={button} disabled={state.status === 'saving' || state.status === 'loading'} onClick={reload}>Reload capture policy</button>

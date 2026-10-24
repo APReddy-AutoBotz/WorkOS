@@ -35,6 +35,7 @@ export const hydrateWorkCaptureGrid = (entries: TimesheetEntry[], startsOn: stri
     hours[day] = Number(quantity);exactHours[day]=quantity; remarks[day] = entry.remark || '';evidenceUrls[day]=entry.evidenceUrl??null;workReferences[day]=entry.workReference??null;sourceIdentities[day]=entry.sourceIdentity??null;sourceIdentityRecorded[day]=Boolean(entry.sourceIdentity);
     rows.push({id: `retained-${entry.id}`, workType: entry.workType, projectId: entry.projectId,
       projectName: entry.projectName, clientName: entry.clientName, category: entry.category,
+      categoryCodes:Array.from({length:dayCount},(_,i)=>i===day?entry.categoryCode??null:null),categoryReferences:Array.from({length:dayCount},(_,i)=>i===day?entry.categoryReference??null:null),categoryLabels:Array.from({length:dayCount},(_,i)=>i===day?entry.category??null:null),billables:Array.from({length:dayCount},(_,i)=>i===day?entry.billable:null),
       hours, exactHours, remarks, evidenceUrls, workReferences, sourceIdentities,sourceIdentityRecorded,rowRemark: '', billable: entry.billable});
   }
   return {rows, preservedEntries};
@@ -57,9 +58,10 @@ export const setCaptureRowHours=(row:any,index:number,value:string)=>{
 };
 export const captureCellPresent=(row:any,index:number,drafts:Record<string,string>)=>{
   const raw=drafts[`${row.id}:${index}`];
-  return (raw!==undefined&&raw!=='')||compareHours(captureCellHours(row,index,drafts),'0')>0||Boolean(row.remarks[index])||Boolean(row.evidenceUrls?.[index])||Boolean(row.workReferences?.[index])||Boolean(row.sourceIdentities?.[index]);
+  return (raw!==undefined&&raw!=='')||compareHours(captureCellHours(row,index,drafts),'0')>0||Boolean(row.remarks[index])||Boolean(row.evidenceUrls?.[index])||Boolean(row.workReferences?.[index])||Boolean(row.sourceIdentities?.[index])||Boolean(row.categoryCodes?.[index])||Boolean(row.categoryReferences?.[index]);
 };
 const clearCells=(row:any,indices:number[])=>({...row,
+  ...Object.fromEntries(['categoryCodes','categoryReferences','categoryLabels','billables'].map(key=>[key,row.hours.map((_:number,index:number)=>indices.includes(index)?null:row[key]?.[index]??null)])),
   sourceIdentities:row.hours.map((_:number,index:number)=>indices.includes(index)?null:row.sourceIdentities?.[index]??null),
   sourceIdentityRecorded:row.hours.map((_:number,index:number)=>indices.includes(index)?false:row.sourceIdentityRecorded?.[index]??false),
   hours:row.hours.map((value:number,index:number)=>indices.includes(index)?0:value),
