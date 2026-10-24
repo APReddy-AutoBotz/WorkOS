@@ -138,11 +138,11 @@ export const validateWorkEntries=async(client,req,employeeId,entries)=>{
     }
     if(!projects.has(entry.project_id))projects.set(entry.project_id,await loadProject(client,req,entry.project_id));
     const policy=resolveProjectDate(projects.get(entry.project_id),at);
-    const assignments=(await client.query(`select id,billable,start_date::text,end_date::text,status,percentage::text,role_on_project from project_allocations where employee_id=$1 and project_id=$2 and organization_id=$3 and legal_entity_id=$4
+    const assignments=(await client.query(`select id,billable,start_date::text,end_date::text,status,percentage::text,role_on_project,(select v.id from assignment_versions v where v.assignment_id=project_allocations.id and v.organization_id=project_allocations.organization_id and v.legal_entity_id=project_allocations.legal_entity_id order by sequence desc limit 1) assignment_version_id from project_allocations where employee_id=$1 and project_id=$2 and organization_id=$3 and legal_entity_id=$4
       and status='Active' and $5::date between start_date and end_date order by id for share`,[employeeId,entry.project_id,...scope(req),at])).rows;
     if(!assignments.length)fail('WORK_ASSIGNMENT_REQUIRED','Project work requires an active assignment covering the work date.');
     const billable=Boolean(entry.billable)&&policy.billable&&assignments.some(x=>x.billable);
-    output.push({...entry,billable,policy:{...policy,billable,assignmentIds:assignments.map(x=>x.id),assignmentSnapshots:assignments.map(x=>({id:x.id,workerId:employeeId,projectId:entry.project_id,startsOn:x.start_date,endsOn:x.end_date,status:x.status,billable:x.billable,percentage:x.percentage,roleOnProject:x.role_on_project||null}))}});
+    output.push({...entry,billable,policy:{...policy,billable,assignmentIds:assignments.map(x=>x.id),assignmentSnapshots:assignments.map(x=>({id:x.id,...(x.assignment_version_id?{assignmentVersionId:x.assignment_version_id}:{}),workerId:employeeId,projectId:entry.project_id,startsOn:x.start_date,endsOn:x.end_date,status:x.status,billable:x.billable,percentage:x.percentage,roleOnProject:x.role_on_project||null}))}});
   }
   return output;
 };

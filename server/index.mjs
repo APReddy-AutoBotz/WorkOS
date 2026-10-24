@@ -1,3 +1,5 @@
+import {createAssignmentVersionRouter} from './modules/planning/assignment-version-router.mjs';
+import {setAssignmentVersionContext} from './modules/planning/assignment-version-context.mjs';
 import {createWorkerCapacityRouter} from './modules/planning/worker-capacity-router.mjs';
 import {createResourceDemandRouter} from './modules/planning/resource-demand-router.mjs';
 import {createWorkforceCapabilitiesRouter} from './modules/workforce/capabilities-router.mjs';
@@ -2630,6 +2632,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       res.status(404).json({ error: 'Allocation not found in the authorized organization and legal entity' });
       return;
     }
+    await setAssignmentVersionContext(client,req,{employeeId:employee.id,projectId:project.id});
     const result = await client.query(`
       insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id)
       values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
@@ -2729,6 +2732,7 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
     }
     await lockWorkPolicy(client,req,[previous.employee_id]);
     await assertWorkActorScope(client,req,previous.employee_id,previous.project_id,{assignment:true});
+    await setAssignmentVersionContext(client,req,{employeeId:previous.employee_id,projectId:previous.project_id,operation:'End'});
     const result = await client.query(`
       update project_allocations
       set status = 'Completed',
@@ -6445,6 +6449,7 @@ const workHistoryRouter=createWorkHistoryRouter({pool,requireDatabase,requireAut
 app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
 app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
+app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,getSetting,audit,recordAllocationChangeApproval}));
 app.use('/api/v1/resource-demand',createResourceDemandRouter({pool,requireDatabase,requireAuth,requirePermission,buildProjectScopeWhere,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/workforce-capabilities',createWorkforceCapabilitiesRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/work-capture-modes',createCaptureModesRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));

@@ -1,3 +1,4 @@
+import {setAssignmentVersionContext} from '../planning/assignment-version-context.mjs';
 import {resolveWorkSourceIdentityAliases} from '../../../shared/work-source-identity.mjs';
 import {workSourceIdentityInput,validateWorkSourceReplacement} from '../work-capture/work-source-identity.mjs';
 import {readSubmissionTiming,assertSubmissionTiming} from '../work-capture/submission-deadline.mjs';
@@ -376,6 +377,7 @@ export const createOperationalImportRouter = ({
           continue;
         }
 
+        await setAssignmentVersionContext(client,req,{employeeId:employee.id,projectId:project.id,source:'Allocation Control CSV',importBatchId,sourceIdentifier:row.id??null});
         const result = await client.query(`
           insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id)
           values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)

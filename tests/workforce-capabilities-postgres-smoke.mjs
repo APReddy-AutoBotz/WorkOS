@@ -22,7 +22,7 @@ await withCommercialDatabase(async({pool})=>{
   for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-3])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));
   await runMigrations({pool,rootDir,logger:{log(){}}});await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);
   const tables=['employees','project_allocations','timesheets','timesheet_entries','work_entry_source_claims','role_permissions','work_submission_evidence','import_export_logs','commercial_contract_versions'];const before=Object.fromEntries(await Promise.all(tables.map(async t=>[t,await table(pool,t)])));
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'055_wos04_resource_demand','056_wos04_effective_worker_capacity']);for(const t of tables)assert.deepEqual(await table(pool,t),before[t],t+' is unchanged by upgrade');assert.deepEqual(await table(pool,'workforce_capability_versions'),[]);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'055_wos04_resource_demand','056_wos04_effective_worker_capacity','057_wos04_assignment_versions']);for(const t of tables)assert.deepEqual(await table(pool,t),before[t],t+' is unchanged by upgrade');assert.deepEqual(await table(pool,'workforce_capability_versions'),[]);
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of tables)assert.deepEqual(await table(pool,t),before[t]);
  });
 });
