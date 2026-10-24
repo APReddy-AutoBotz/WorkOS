@@ -34,6 +34,8 @@ This is a fresh PR56-based implementation. The unpublished earlier local candida
 
 The recovered source-only archive was verified as 460 files with tree `6e5a391d95b5942bd388091cbbb0b3124865217c` and SHA-256 `89817847a836e9c9074ce330b20024c645b35dff9ab5ca48cbb451dc3639e1c9`. The retained client-profile browser fixture now expects additive migration046; its preservation assertions remain unchanged.
 
+Required PostgreSQL/browser reruns exposed a disposable-fixture teardown race: pg-pool can resolve `end()` while client sockets are still closing, allowing immediate database cleanup to terminate an idle client. The test harness now waits for tracked public client-end events before database cleanup. Application database behavior and assertions are unchanged.
+
 Owner-authorized standard dependency maintenance updates only locked body-parser 1.20.8 to 1.20.9 (`GHSA-27r3-jxmh-p828`) and Zod 4.3.6 to 4.6.7 (`GHSA-mrhx-c7xc-m3w5`), within existing manifest ranges. Express stays at 4.22.1. The focused `test:dependency-input-safety` gate covers isolated compressed-parser survival and legitimate JSON/size-limit behavior, plus early rejection through existing bounded profile/calendar schemas. This supports WOS-NFR-SEC-008/011 and WOS-NFR-RELSE-001; it does not impose new limits on unbounded collection contracts. No middleware, authentication, grants or unrelated security repair changes are included. Full exact-head validation, hosted scans, formal review, prerequisite integration and protection gates remain required; Draft publication is not acceptance.
 
 ## Rollback and deliberate exclusions

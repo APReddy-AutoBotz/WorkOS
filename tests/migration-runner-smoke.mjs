@@ -8,10 +8,11 @@ import {tmpdir} from 'node:os';
 import {createServer} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
+import {createDisposablePool,closeDisposablePool} from './support/disposable-postgres.mjs';
 import {createProjectCodeLockKey, hashEmployeeImportRequest, hashImportRequest} from '../server/modules/imports/idempotency.mjs';
 import {getMigrationManifest, getMigrationStatus, runMigrations} from '../server/migrate.mjs';
 
-const {Client, Pool} = pg;
+const {Client} = pg;
 const serverDir = resolve(fileURLToPath(new URL('../server/', import.meta.url)));
 const testDatabaseUrl = process.env.WORKOS_TEST_DATABASE_URL;
 if (!testDatabaseUrl) {
@@ -38,11 +39,11 @@ const withDisposableDatabase = async (test, {maxPoolSize = 4} = {}) => {
     created = true;
     const databaseUrl = new URL(testDatabaseUrl);
     databaseUrl.pathname = `/${name}`;
-    const pool = new Pool({connectionString: databaseUrl.toString(), max: maxPoolSize});
+    const pool = createDisposablePool({connectionString: databaseUrl.toString(), max: maxPoolSize});
     try {
       return await test(pool, databaseUrl.toString());
     } finally {
-      await pool.end();
+      await closeDisposablePool(pool);
     }
   } finally {
     if (created) {
