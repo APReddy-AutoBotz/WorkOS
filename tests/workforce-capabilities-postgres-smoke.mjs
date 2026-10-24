@@ -1,0 +1,70 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {copyFile,readdir} from 'node:fs/promises';
+import {join} from 'node:path';
+import {runMigrations} from '../server/migrate.mjs';
+import {commercialFixture as f,commercialServerDir,withCommercialDatabase,withPreCommercialMigrations,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
+import {workSnapshot} from './support/work-assignment-test.mjs';
+const prefix='/api/v1/workforce-capabilities/workers',migration='054_wos04_workforce_capabilities';
+const profile={skills:[{skill:'Synthetic skill 雪🚀',proficiency:'Buyer β'}],certifications:[{certification:'Synthetic Cert',validFrom:'2026-01-01',validThrough:'2026-10-24',noExpiry:false}],availabilityNote:'Synthetic note\nDoes not calculate capacity'};
+const empty={skills:[],certifications:[],availabilityNote:null};
+const table=async(pool,name)=>(await pool.query(`select to_jsonb(t) value from ${name} t order by to_jsonb(t)::text`)).rows;
+const grantFixtures=async pool=>{
+ await pool.query("insert into roles(name) values('HR') on conflict do nothing");
+ await pool.query(`insert into role_permissions(role_name,permission_key,enabled) values
+ ('Admin','employees.view',true),('Admin','employees.manage',true),('Admin','allocations.view',true),
+ ('HR','employees.view',true),('HR','employees.manage',true),('HR','allocations.view',true),
+ ('Employee','employees.view',true),('TeamLead','employees.view',true),('TeamLead','allocations.view',true)
+ on conflict(role_name,permission_key) do update set enabled=excluded.enabled`);
+};
+await withCommercialDatabase(async({pool})=>{
+ await withPreCommercialMigrations(async rootDir=>{
+  for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-3])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));
+  await runMigrations({pool,rootDir,logger:{log(){}}});await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);
+  const tables=['employees','project_allocations','timesheets','timesheet_entries','work_entry_source_claims','role_permissions','work_submission_evidence','import_export_logs','commercial_contract_versions'];const before=Object.fromEntries(await Promise.all(tables.map(async t=>[t,await table(pool,t)])));
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration]);for(const t of tables)assert.deepEqual(await table(pool,t),before[t],t+' is unchanged by upgrade');assert.deepEqual(await table(pool,'workforce_capability_versions'),[]);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of tables)assert.deepEqual(await table(pool,t),before[t]);
+ });
+});
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ await migrateCommercialDatabase(pool);await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);const identities=await seedCommercialIdentities(pool);await grantFixtures(pool);
+ const worker=async(id='synthetic-cap-'+randomUUID(),manager=null)=>{await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id,reporting_manager_id) values($1,$1,'Synthetic capability worker',$2,'Consultant','Delivery','US','director-commercial','Active',$3,$4,$5)`,[id,'synthetic-'+randomUUID()+'@example.test',f.organizationId,f.legalEntityId,manager]);return id;};
+ const lead=await worker('synthetic-cap-lead');identities.reader.employeeRecordId=f.ownerId;identities.reader.employeeId='SYNTHETIC-COMMERCIAL-LOCAL';identities.denied.employeeRecordId=lead;identities.denied.employeeId=lead;
+ for(const who of [identities.reader,identities.denied])await pool.query('update users set employee_record_id=$1,employee_id=$2 where id=$3',[who.employeeRecordId,who.employeeId,who.id]);
+ const unrelated=await worker(),report=await worker('synthetic-cap-report',lead);
+ await pool.query('update timesheet_entries set source_identity=$1 where id=$2',[JSON.stringify({namespace:'synthetic.capability-regression',externalId:'WORK-KEEP'}),f.workId]);
+ const preserved=await workSnapshot(pool),grants=await table(pool,'role_permissions'),sourceClaims=await table(pool,'work_entry_source_claims');assert.equal(sourceClaims.length,1);
+ await withCommercialApi({databaseUrl,identities},async({request})=>{
+  const get=(id=f.ownerId,options)=>request(prefix+'/'+encodeURIComponent(id),options),save=(id,body,options={})=>get(id,{method:'POST',body,...options}),command=(expectedLatestId=null,p=profile)=>({expectedLatestId,profile:p,reason:'Synthetic capability update'});
+  assert.equal((await get()).body.current,null,'legacy unrecorded profile is not fabricated');
+  assert.equal((await get(f.ownerId,{authenticated:false})).status,401);assert.equal((await get(f.otherOwnerId)).status,404);assert.equal((await get(f.foreignOwnerId)).status,404);
+  assert.equal((await get(f.ownerId,{identity:identities.reader})).status,200);assert.equal((await get(unrelated,{identity:identities.reader})).status,404);
+  assert.equal((await save(f.ownerId,command(),{identity:identities.reader})).status,403);assert.equal((await get(prefix)).status,404);
+  assert.equal((await get(f.ownerId,{scope:{organizationId:f.organizationId,legalEntityId:f.otherLegalEntityId}})).status,403);
+  for(const input of [{}, {...command(),profile:{skills:[]}}, {...command(),extra:true}, {...command(),expectedLatestId:undefined}, {...command(),profile:{...profile,certifications:[{...profile.certifications[0],noExpiry:true}]}}])assert.equal((await save(f.ownerId,input)).status,400);
+  const created=await save(f.ownerId,command());assert.equal(created.status,201,JSON.stringify(created.body));const first=created.body.current;assert.equal(first.sequence,1);assert.deepEqual(first.profile,profile);
+  assert.equal((await save(f.ownerId,command())).status,409);assert.equal((await get()).body.versions[0].id,first.id);
+  assert.equal((await get(f.ownerId+'?beforeSequence=0')).status,404);assert.equal((await request(prefix+'/'+f.ownerId+'?beforeSequence=0')).status,400);
+  const second=await save(f.ownerId,command(first.id,empty));assert.equal(second.status,201);assert.deepEqual(second.body.current.profile,empty);const history=(await get()).body;assert.equal(history.versions.length,2);assert.deepEqual(history.versions[1].profile,profile);
+  const race=await Promise.all([save(f.ownerId,command(second.body.current.id,profile)),save(f.ownerId,command(second.body.current.id,{...profile,availabilityNote:'Other synthetic race note'}))]);assert.deepEqual(race.map(v=>v.status).sort(),[201,409]);
+  assert.deepEqual(await workSnapshot(pool),preserved);assert.deepEqual(await table(pool,'role_permissions'),grants);assert.deepEqual(await table(pool,'work_entry_source_claims'),sourceClaims);
+  await assert.rejects(pool.query('update workforce_capability_versions set reason=$1 where id=$2',['changed',first.id]),e=>e.code==='55000');await assert.rejects(pool.query('delete from workforce_capability_versions where id=$1',[first.id]),e=>e.code==='55000');
+  const rows=(await pool.query("select * from audit_logs where action='Record Worker Capabilities' order by created_at")).rows;assert.equal(rows.length,3);assert(rows.every(r=>r.user_id===identities.manager.id&&r.user_role==='Admin'&&r.source==='Web'&&r.reason==='Synthetic capability update'));
+  for(const bad of [{...profile,skills:[...profile.skills,...profile.skills]},{...profile,certifications:[{...profile.certifications[0],validFrom:'2026-02-30'}]},{...profile,availabilityNote:' bad'}, {...profile,skills:[{skill:'bad\u0085',proficiency:null}]}])assert.equal((await pool.query('select valid_workforce_capabilities($1::jsonb) valid',[JSON.stringify(bad)])).rows[0].valid,false);
+  assert.equal((await pool.query('select valid_workforce_capabilities($1::jsonb) valid',[JSON.stringify(profile)])).rows[0].valid,true);
+  await assert.rejects(pool.query(`insert into workforce_capability_versions(id,organization_id,legal_entity_id,employee_id,sequence,contract_version,profile,actor_id,active_role,source,reason)values($1,$2,$3,$4,1,'workforce-capabilities/1',$5,'synthetic','Admin','Web','Synthetic reason')`,[randomUUID(),f.organizationId,f.otherLegalEntityId,f.ownerId,JSON.stringify(profile)]),e=>e.code==='23503');
+  for(let i=0;i<25;i++){const id=await worker('synthetic-match-'+String(i).padStart(2,'0'),i===0?lead:null);assert.equal((await save(id,command(null,{...profile,availabilityNote:null}))).status,201);}
+  const noExpiry=await worker('synthetic-no-expiry');await save(noExpiry,command(null,{...profile,certifications:[{...profile.certifications[0],noExpiry:true,validThrough:null}]}));
+  const search=async(query='',options)=>request(prefix+query,options),criteria='?skill='+encodeURIComponent(profile.skills[0].skill)+'&proficiency='+encodeURIComponent('Buyer β')+'&certification=Synthetic%20Cert&validOn=2026-10-24';
+  const page1=await search(criteria);assert.equal(page1.status,200,JSON.stringify(page1.body));assert.equal(page1.body.workers.length,20);assert(page1.body.nextAfterEmployeeId);const page2=await search(criteria+'&afterEmployeeId='+encodeURIComponent(page1.body.nextAfterEmployeeId));assert(page2.body.workers.length>=6);assert.equal(new Set([...page1.body.workers,...page2.body.workers].map(w=>w.employeeId)).size,page1.body.workers.length+page2.body.workers.length);
+  assert.equal((await search('?proficiency=Buyer')).status,400);assert.equal((await search('?certification=Synthetic%20Cert')).status,400);assert.equal((await search('?validOn=2026-10-24')).status,400);
+  assert.equal((await search('?skill='+encodeURIComponent(profile.skills[0].skill.toLowerCase()))).body.workers.length,0);assert.equal((await search(criteria.replace('2026-10-24','2025-12-31'))).body.workers.length,0);
+  assert.deepEqual((await search(criteria.replace('2026-10-24','2026-10-25'))).body.workers.map(w=>w.employeeId),[noExpiry]);
+  const scoped=await search('?skill='+encodeURIComponent(profile.skills[0].skill),{identity:identities.denied});assert.equal(scoped.status,200);assert(scoped.body.workers.every(w=>w.employeeId===lead||w.employeeId==='synthetic-match-00'||w.employeeId===report));
+  assert.equal((await save(unrelated,command(),{identity:identities.denied})).status,403);
+  assert.equal((await search('',{identity:identities.reader})).status,403);const projection=JSON.stringify(page1.body);assert.doesNotMatch(projection,/email|cost_rate|margin|salary|employee_record_id|actor_id/);
+  let latest=(await get()).body.current;for(let i=0;i<10;i++){latest=(await save(f.ownerId,command(latest.id,empty))).body.current;}const firstHistory=(await get()).body;assert.equal(firstHistory.versions.length,10);assert(firstHistory.nextBeforeSequence);const oldHistory=(await request(prefix+'/'+f.ownerId+'?beforeSequence='+firstHistory.nextBeforeSequence)).body;assert.equal(oldHistory.versions.at(-1).id,first.id);
+  assert.deepEqual(await workSnapshot(pool),preserved);assert.deepEqual(await table(pool,'role_permissions'),grants);
+ });
+});
+console.log('Workforce capabilities real PostgreSQL/API fresh/053 upgrade/replay neutrality, scoped immutable versions/CAS/concurrency/audit, exact inclusive-date AND matching/pagination, existing role/scope denials and retained work passed.');

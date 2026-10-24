@@ -1,6 +1,6 @@
 # PR-008M: Structured workforce capabilities and deterministic filtering
 
-**Status:** Pre-implementation acceptance plan. Dependent development on fixed Draft PR66 `2585b0a0d6dc03285d85155c091376b317c71839`, tree `287027d041369414b4fe46e92cf742ab55fabcf0`. Optional independent/formal reviews remain deferred/outstanding, not passed. No milestone or integration acceptance.
+**Status:** Acceptance plan committed before implementation as `3866a451c8dbbf48edbf104c0b25b3509597e0d4`. Focused shared/production-transport, real PostgreSQL/API fresh/053-upgrade/replay and real HR/Employee React/API/PostgreSQL journeys passed; exact frozen-source retained/local/hosted receipts remain required. Dependent development on fixed Draft PR66 `2585b0a0d6dc03285d85155c091376b317c71839`, tree `287027d041369414b4fe46e92cf742ab55fabcf0`. Optional independent/formal reviews remain deferred/outstanding, not passed. No milestone or integration acceptance.
 
 ## Authoritative lineage and selected outcome
 
