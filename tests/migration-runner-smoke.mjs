@@ -5119,13 +5119,14 @@ await withDisposableDatabase(async (pool) => {
     '046_wos04_work_capture_modes',
     '047_wos04_work_entry_evidence',
     '048_wos04_work_entry_reference',
+    '049_wos04_required_work_evidence',
   ], 'PR-006 and PR-007A–D add request/provenance/history/import contracts and additive commercial modules in order');
   assert.deepEqual([...preOrganizationAuditUpgrade.applied, ...upgrade.applied], candidateMigrations.map(item => item.id),
     'upgrade from merged main applies all additive PR-006/PR-007A–D migrations in order');
-  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle', '042_wos04_scoped_client_profiles', '043_wos04_governed_amendments', '044_wos04_work_submission_evidence', '045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference'],
+  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle', '042_wos04_scoped_client_profiles', '043_wos04_governed_amendments', '044_wos04_work_submission_evidence', '045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence'],
     'organization-scope and import-operation migrations apply after historical and legal-entity audit rows already exist');
-  assert.equal(upgrade.skipped.length, manifest.length - 11);
-  assert.equal(after.rows[0].count, before.rows[0].count + 11, 'the final upgrade appends migrations 038 through 048 to its ledger');
+  assert.equal(upgrade.skipped.length, manifest.length - 12);
+  assert.equal(after.rows[0].count, before.rows[0].count + 12, 'the final upgrade appends migrations 038 through 049 to its ledger');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
   assert.deepEqual(status.legacyUnverifiedIds, manifest.filter(item => item.id < '033_').map(item => item.id),

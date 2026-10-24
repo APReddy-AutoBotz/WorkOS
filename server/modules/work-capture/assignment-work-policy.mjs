@@ -12,6 +12,7 @@ const date=value=>value instanceof Date?value.toISOString().slice(0,10):String(v
 const shift=(value,days)=>{const d=new Date(`${value}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
 export const workPolicyError=(res,error)=>{
   if(error?.code==='WWP01'){res.status(409).json({error:'Retained submitted work cannot be rewritten.',code:'WORK_HISTORY_IMMUTABLE'});return true;}
+  if(error?.code==='WCR06'){res.status(422).json({error:'An evidence URL is required for each positive work entry on this work date.',code:'WORK_CAPTURE_EVIDENCE_REQUIRED'});return true;}
   if(error?.code==='WCR05'){res.status(409).json({error:'Capture policy requires open authoritative reporting periods.',code:'WORK_CAPTURE_PERIOD_AUTHORITY'});return true;}
   if(['WCR03','WCR04'].includes(error?.code)){res.status(422).json({error:'Work violates the effective capture increment, comment or aggregate limit.',code:'WORK_CAPTURE_POLICY_VIOLATION'});return true;}
   if(!(error instanceof WorkPolicyError))return false;

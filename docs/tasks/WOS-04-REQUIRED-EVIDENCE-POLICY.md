@@ -1,6 +1,6 @@
 # PR-008F: Buyer-configurable required evidence URLs
 
-**Status:** Acceptance plan recorded before implementation. Dependent development only; optional independent/formal code and security reviews are deferred and outstanding.
+**Status:** Dependent implementation candidate; acceptance plan was recorded before product edits in commit `680088e`. Exact-head engineering receipts remain required. Dependent development only; optional independent/formal code and security reviews are deferred and outstanding.
 **Authority:** WOS-TIM-005 requires buyer-configurable comment/evidence requirements. WORK_CAPTURE_AND_TIMESHEET_SPEC.md defines buyer-configurable evidence policies and rejection of missing required evidence. PR-008 includes evidence policy. This is selected from those approved sources, not a security/gap review.
 **Dependency:** Unchanged Draft PR59 `c8fcafd6b61c7e9407aaf623a23001ad144b6ef1`, tree `2c261f67740c702e52ad345e82c3599e92de0d18`.
 

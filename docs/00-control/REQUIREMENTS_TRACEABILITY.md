@@ -333,3 +333,7 @@ WOS-TIM-003 evidence-link dimension is implemented as an optional per-entry URL 
 ### PR-008E bounded continuation: descriptive work references
 
 WOS-TIM-003's optional task/ticket/milestone reference text is implemented in [PR-008E](../tasks/WOS-04-WORK-ENTRY-REFERENCE.md), based on unchanged PR58 `39cf7e10537972e232498a6a99a1f89df05c765b`. Additive migration048, manual/both import contracts, independent metadata omission/clear preservation, reference-only revisions and immutable history have dedicated unit/PostgreSQL/React gates. This text is not an authoritative milestone binding, source identity or duplicate/financial key. Optional reviews remain deferred/outstanding; full TIM003/PR008, prerequisites and integrated acceptance remain open.
+
+### PR-008F bounded continuation: buyer-configurable required evidence
+
+WOS-TIM-005's evidence requirement is addressed by [PR-008F](../tasks/WOS-04-REQUIRED-EVIDENCE-POLICY.md), dependent on unchanged PR59 `c8fcafd6b61c7e9407aaf623a23001ad144b6ef1`. The existing capture policy gains an opt-in positive-entry URL requirement, independent of text references and with no default adoption. Migration049 preserves old rules/work/history and adds deferred SQL enforcement. Manual/import parity, legacy option inheritance, effective opt-out, immutable decisions/corrections, fresh/048 upgrade/replay and actual React/API/PostgreSQL configuration/entry journeys have dedicated tests. Optional reviews remain deferred; full TIM005/PR008 and integrated acceptance remain open.

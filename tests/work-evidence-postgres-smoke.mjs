@@ -23,7 +23,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
 
   const before=(await pool.query('select to_jsonb(e) value from timesheet_entries e order by id')).rows;
   const grants=(await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows;
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'048_wos04_work_entry_reference']);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'048_wos04_work_entry_reference','049_wos04_required_work_evidence']);
   assert.deepEqual((await pool.query("select to_jsonb(e)-array['evidence_url','work_reference'] value from timesheet_entries e order by id")).rows,before);
   assert.equal((await pool.query('select count(*)::int n from timesheet_entries where evidence_url is not null')).rows[0].n,0);
   assert.deepEqual((await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows,grants);
