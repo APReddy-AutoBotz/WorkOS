@@ -1,6 +1,6 @@
 # PR-008I: Named worker/approver correction-cycle evidence
 
-**Status:** Acceptance plan recorded before test implementation. Test/documentation slice only; no new product policy, feature, permission, schema or dependency is proposed.
+**Status:** Checklist and acceptance plan committed before test implementation as `abe2260`; focused real named-role cycle passes. Full exact-source gates and dependent publication remain pending. Test/documentation slice only; no new product policy, feature, permission, schema or dependency is proposed.
 **Fixed base:** Draft PR62 `0eaf501b4988af107d1a503fe93ccab96b2eb96f`, tree `2ae3aaff3729c699c4bf6c8e3d5c6397a87a2ba3`.
 **Authority:** WORK_CAPTURE_AND_TIMESHEET_SPEC.md positive cases (enter daily/weekly work across assigned projects; submit, reject with reason, correct and approve preserving history), WOS-TIM-001/003/004/008/009 and WOS-WKF-007. This is finite evidence gate E1 in [the28-requirement checklist](WOS-04-PR008-ACCEPTANCE-CHECKLIST.md), not another policy feature or full PR008 acceptance.
 
