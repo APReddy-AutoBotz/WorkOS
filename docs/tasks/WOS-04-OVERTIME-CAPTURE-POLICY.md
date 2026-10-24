@@ -1,0 +1,29 @@
+# PR-008J: Explicit overtime capture thresholds and treatment
+
+**Status:** Acceptance plan recorded before implementation. Dependent development only; optional independent/formal reviews remain deferred/outstanding.
+**Fixed dependency:** Draft PR63 `b40712739d613d5fef9f8b4926d70f1e691e9b08`, tree `ddfb91120ddecc832afcb8b17bc03313b991c8b2`.
+**Authority:** PRODUCT_REQUIREMENTS.md WOS-TIM-005; WORK_CAPTURE_AND_TIMESHEET_SPEC.md Modes and policy; existing capture-policy all-header/all-state aggregate/prospective/immutable contract (migrations045/049). WOS-CORE-003–005/DEC012/013 require authoritative exact rules and retained truth. WOS-DEC-016 excludes payroll. [D1–D8 resolution](WOS-04-POLICY-DECISION-RESOLUTION.md) removes the mistaken blanket configuration blocker without choosing buyer values or adding scope.
+
+## Ownership and boundary
+
+Pre-write2026-10-24 reconciliation found only this writer active, all five Actions queue states empty, PR63 Draft/unmerged at the fixed head, active controller342036167 and its latest successful run40083556930 on unchanged main `b9a57f8a462d8585bb3f73129080d6fae5173343`. No monitoring/automation change. Prior source heads/integration alias stay fixed. This is R2 only, not full PR008 acceptance, merge or deployment.
+
+## Concrete behavior
+
+- Extend existing scoped capture policy with optional `overtime`: null explicitly selects off; omission inherits the latest choice for old editors. An enabled object has explicit daily and/or Weekly positive decimal standard threshold(s) and explicit `action` warn or block. Thresholds are caller-selected, not seeded; at least one is required. Existing physical24/168-hour quantity bounds and four-place policy precision apply. No standard hours or action is inferred from worker capacity, contract, locale or jurisdiction.
+- Apply at the existing prospective authoritative Weekly boundary, under expected-latest CAS and immutable history. All recorded worker entries across headers/states count exactly once, as they already do for capture maxima. Replacement excludes its old content once; import preview stages accepted prospective replacements and apply uses the same final totals. Daily and Weekly flags stay distinct, never summed as payable overtime.
+- Existing hard maxima, increments, comment/evidence, assignment/period/source/CAS/approval rules remain in force. Block denies excess without changing work; warn allows valid work and exposes server-derived current warnings in worker/approver and import preview/apply. It does not increase a maximum, create an exception/approval, change hours/billability or produce payroll, premium rates, utilization/financial value.
+- Preserve policy IDs in existing immutable capture references. New policy can never rewrite stored work, submission JSON or earlier decisions. Current warnings are labelled as current recorded-work checks, not a historical wage or approval decision. No fabricated past overtime result.
+- Add migration051 only for nullable policy configuration, nullable saved import-warning diagnostics and additive SQL guards/read function. Legacy fields/rows/work/grants remain unchanged. SQL omission inherits enabled rules; explicit off marker disables prospectively. Old API clients cannot silently erase configuration. Import warnings are saved with the batch so same-key replay remains stable; row errors/counts, partial results and source identifiers stay unchanged.
+- Keep existing settings permission and timesheet/header scopes. Warning projection discloses only the target header's affected dates/period and configured threshold condition, no other headers' entries/hours. Work/import viewers receive no new financial/personnel data or grant. Scope/session changes clear owner-bound metadata and suppress late responses.
+
+## Required acceptance plan
+
+1. Unit/contract: no-policy/explicit-off/omitted inheritance; exact thresholds/equality/high precision; warn/block; independent daily/Weekly evaluation; all-state/all-header/replacement/staged totals; malformed config/DTO rejection; no payroll/max bypass.
+2. Real PostgreSQL/API: fresh/050 upgrade/replay neutrality, no default/grants, immutable/prospective/CAS policy; manual/both import aliases and preview/apply/replay warning/block parity, saved batch warnings; existing hard-max precedence, direct SQL deferred enforcement/locking, old-client SQL/API inheritance and explicit off; immutable submission/decision references and legacy readability.
+3. Real React/API/PostgreSQL: explicit policy configuration without activated defaults, warning save/read/reload and approver display, unchanged exact/hidden/weekend/zero/reference data, import preview/apply warnings, block preserves work, validation/conflict/uncertain results and owner invalidation. Retain the named Employee/approver cycle and all prior journeys.
+4. Locked install, type/lint, aggregate tests, retained PostgreSQL/migration/browser and production identity/build/Compose/container/configured CI. Publish one authorized dependent Draft after required local gates, read exact head/tree/base, and follow hosted protected runs to terminal. No manual scan or denied review/repair retry.
+
+## Operations and exclusions
+
+Retain additive schema, immutable policies/import diagnostics and guards on rollback; use a forward-compatible binary that understands enabled block rules before resuming writes. No destructive down migration. Missing or conflicting policy/period authority remains unavailable/denied, never silently off. No first-buyer defaults/adoption, payroll/rate/legal determination, overtime exception approval, hard-limit waiver, categories/deadlines/reopen/resource/finance expansion, new grant/spend, merge/deploy or monitoring/protection change. PR30 never-merge; excluded reference repository untouched.
