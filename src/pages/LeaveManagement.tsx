@@ -833,7 +833,7 @@ const EmployeeLeavePanel = ({
         </Card>
 
         <Card title={editingRequestId ? 'Edit Leave Request' : 'New Leave Request'} headerVariant="secondary">
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit}><fieldset className="space-y-4" disabled={calendar.enabled&&calendar.waiting}>
             <label className="block">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Leave Type</span>
               <select value={form.leaveTypeId} onChange={event => setForm({ ...form, leaveTypeId: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">
@@ -861,7 +861,7 @@ const EmployeeLeavePanel = ({
               )}
               <button className="btn-primary flex-1 py-2.5" type="submit" disabled={calendar.enabled&&(!calendar.ready||calendar.waiting)}>{editingRequestId ? 'Save Changes' : 'Submit Request'}</button>
             </div>
-          </form>
+          </fieldset></form>
         </Card>
       </div>
       <LeaveRequestTable requests={requests} onEdit={editRequest} onCancel={cancelRequest} />

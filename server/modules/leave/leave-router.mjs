@@ -338,7 +338,7 @@ export const createLeaveRouter = ({
     const params = [];
     const where = buildEmployeeScopeWhere(req, params, 'e');
     await run(res, `
-      select lr.*, ce.quote as calendar_quote, e.name as employee_name, lt.name as leave_type_name
+      select lr.*, lr.start_date::text as start_date,lr.end_date::text as end_date,ce.quote as calendar_quote, e.name as employee_name, lt.name as leave_type_name
       from leave_requests lr
       left join leave_calendar_evidence ce on ce.id=lr.calendar_evidence_id and ce.request_id=lr.id and ce.employee_id=lr.employee_id
       join employees e on e.id = lr.employee_id
@@ -485,7 +485,7 @@ export const createLeaveRouter = ({
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
+      const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
         await client.query('rollback');
         res.status(404).json({ error: 'Leave request not found' });
@@ -584,7 +584,7 @@ export const createLeaveRouter = ({
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
+      const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
         await client.query('rollback');
         res.status(404).json({ error: 'Leave request not found' });
@@ -654,7 +654,7 @@ export const createLeaveRouter = ({
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
+      const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
         await client.query('rollback');
         res.status(404).json({ error: 'Leave request not found' });
