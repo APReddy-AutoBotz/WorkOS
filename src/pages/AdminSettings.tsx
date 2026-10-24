@@ -271,11 +271,12 @@ export const AdminSettings = () => {
     setNotice({ type: 'success', message: 'Utilization settings were saved and demo calculations were refreshed.' });
   };
 
+  const captureModesLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/work-capture-modes">Edit work capture modes</Link>;
   const capturePolicyLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/work-capture-policy">Edit work capture policy</Link>;
   const calendarLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/working-calendars">Inspect working calendars</Link>;
   const terminologyLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/terminology">Edit terminology</Link>;
   const profileLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/organization-profile">Edit organization profile</Link>;
-  if (loading || !settings) return <div>{profileLink}{terminologyLink}{calendarLink}{capturePolicyLink}<p role="status" className="mt-4">Loading governance settings…</p></div>;
+  if (loading || !settings) return <div>{profileLink}{terminologyLink}{calendarLink}{capturePolicyLink}{captureModesLink}<p role="status" className="mt-4">Loading governance settings…</p></div>;
 
   const [directorMappingCounts, directorClientCounts, departmentUsage, countryUsage, industryUsage] = [
     countryDirectors.reduce<Record<string, number>>((counts, director) => {
@@ -310,7 +311,7 @@ export const AdminSettings = () => {
         breadcrumb={['System', 'Governance']}
       />
 
-      {profileLink}{terminologyLink}{calendarLink}{capturePolicyLink}
+      {profileLink}{terminologyLink}{calendarLink}{capturePolicyLink}{captureModesLink}
 
       {notice && (
         <NoticeBanner
@@ -339,7 +340,7 @@ export const AdminSettings = () => {
           <div className="flex items-center justify-between gap-4 mb-4">
             <div>
               <h2 id="setup-readiness-title" className="text-lg font-bold text-heading">Organization setup readiness</h2>
-              {profileLink}{terminologyLink}{calendarLink}{capturePolicyLink}
+              {profileLink}{terminologyLink}{calendarLink}{capturePolicyLink}{captureModesLink}
               <p className="text-xs text-body opacity-70">Calculated from persisted server configuration for {setupReadiness.organizationId} / {setupReadiness.legalEntityId}.</p>
             </div>
             <Badge variant={setupReadiness.ready ? 'success' : 'warning'}>{setupReadiness.ready ? 'Ready' : 'Action required'}</Badge>

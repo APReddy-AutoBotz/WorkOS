@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments, codex/wos-04-flexible-work-capture]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments, codex/wos-04-flexible-work-capture, codex/wos-04-work-capture-policy]
   push:
     branches: [main]
   workflow_dispatch:
@@ -70,6 +70,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Verify work capture modes PostgreSQL migration and API acceptance
+        run: npm run test:work-capture-modes-postgres
+
       - name: Verify work capture policy PostgreSQL migration and API acceptance
         run: npm run test:work-capture-postgres
 
@@ -84,6 +87,9 @@ jobs:
 
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
+
+      - name: Verify real work capture modes PostgreSQL browser journey
+        run: npm run test:work-capture-modes-journey
 
       - name: Verify real work capture policy PostgreSQL browser journey
         run: npm run test:work-capture-journey

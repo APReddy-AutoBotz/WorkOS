@@ -703,6 +703,7 @@ export interface WorkSubmissionAssurance {
 }
 
 export interface TimesheetSummary {
+  writeToken?: string;
   workAssurance?: WorkSubmissionAssurance;
   id?: string;
   employeeId: string;

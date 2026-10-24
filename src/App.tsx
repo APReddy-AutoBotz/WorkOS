@@ -22,6 +22,7 @@ const ClientPortfolio = lazy(() => import('./pages/ClientPortfolio').then(module
 const ClientProfilesWorkspace = lazy(() => import('./pages/ClientProfilesWorkspace').then(module => ({default: module.ClientProfilesWorkspace})));
 const CommercialDraftingWorkspace = lazy(() => import('./pages/CommercialDraftingWorkspace').then(module => ({ default: module.CommercialDraftingWorkspace })));
 const CommercialLifecycleWorkspace = lazy(() => import('./components/CommercialLifecycleWorkspace').then(module => ({default:module.CommercialLifecycleWorkspace})));
+const WorkCaptureModesEditor = lazy(() => import('./pages/WorkCaptureModesEditor').then(module => ({default: module.WorkCaptureModesEditor})));
 const WorkCapturePolicyEditor = lazy(() => import('./pages/WorkCapturePolicyEditor').then(module => ({default: module.WorkCapturePolicyEditor})));
 const MyTimesheet = lazy(() => import('./pages/MyTimesheet').then(module => ({ default: module.MyTimesheet })));
 const TimesheetApproval = lazy(() => import('./pages/TimesheetApproval').then(module => ({ default: module.TimesheetApproval })));
@@ -350,6 +351,7 @@ export default function App() {
                     <OrganizationProfileEditor />
                   </RoleRoute>
                 } />
+                <Route path="/admin/work-capture-modes" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><WorkCaptureModesEditor /></RoleRoute>} />
                 <Route path="/admin/work-capture-policy" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><WorkCapturePolicyEditor /></RoleRoute>} />
                 <Route path="/admin/working-calendars" element={
                   <RoleRoute roles={ROUTE_ROLES.adminSettings}>

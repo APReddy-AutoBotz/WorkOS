@@ -3018,7 +3018,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(timesheetFutureBody.errors, [{
       rowNumber: 2,
       field: 'date',
-      message: 'Future week timesheets and future-dated entries cannot be imported.',
+      message: 'Future work dates cannot be imported; Submitted headers must also end no later than today.',
       sourceIdentifier: null,
     }], 'future timesheet rows must retain their pre-existing rejection and error shape');
     const timesheetFutureAudit = await pool.query(`select count(*)::int as audit_rows
@@ -5115,20 +5115,21 @@ await withDisposableDatabase(async (pool) => {
     '043_wos04_governed_amendments',
     '044_wos04_work_submission_evidence',
     '045_wos04_work_capture_policy',
+    '046_wos04_work_capture_modes',
   ], 'PR-006 and PR-007A–D add request/provenance/history/import contracts and additive commercial modules in order');
   assert.deepEqual([...preOrganizationAuditUpgrade.applied, ...upgrade.applied], candidateMigrations.map(item => item.id),
     'upgrade from merged main applies all additive PR-006/PR-007A–D migrations in order');
-  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle', '042_wos04_scoped_client_profiles', '043_wos04_governed_amendments', '044_wos04_work_submission_evidence', '045_wos04_work_capture_policy'],
+  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle', '042_wos04_scoped_client_profiles', '043_wos04_governed_amendments', '044_wos04_work_submission_evidence', '045_wos04_work_capture_policy','046_wos04_work_capture_modes'],
     'organization-scope and import-operation migrations apply after historical and legal-entity audit rows already exist');
-  assert.equal(upgrade.skipped.length, manifest.length - 8);
-  assert.equal(after.rows[0].count, before.rows[0].count + 8, 'the final upgrade appends migrations 038 through 045 to its ledger');
+  assert.equal(upgrade.skipped.length, manifest.length - 9);
+  assert.equal(after.rows[0].count, before.rows[0].count + 9, 'the final upgrade appends migrations 038 through 046 to its ledger');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
   assert.deepEqual(status.legacyUnverifiedIds, manifest.filter(item => item.id < '033_').map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 13, 'all PR-006/PR-007/PR-008 migrations are ledgered');
+  assert.equal(newMigrations.length, candidateMigrations.length, 'all PR-006/PR-007/PR-008 migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),
