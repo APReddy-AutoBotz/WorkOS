@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import {validCategoryCatalog,validCategoryDefinition,readCategoryReference,readCategoryEntry,categoryContext,CATEGORY_KINDS} from '../shared/work-category.mjs';
+import {validCategoryCatalog,validCategoryDefinition,readCategoryReference,readCategoryEntry,categoryContext,categoryImportKeySuffix,CATEGORY_KINDS} from '../shared/work-category.mjs';
 import {categoryCatalog,categoryDefinition} from './support/work-category-test.mjs';
 import {resolveWorkEntryMetadataReplacement} from '../server/modules/work-capture/work-evidence.mjs';
 import {hydrateWorkCaptureGrid,patchVisibleCaptureRow,removeVisibleCaptureRow,captureCellPresent} from '../src/services/workCaptureGrid.ts';
-assert(validCategoryCatalog(categoryCatalog));assert.equal(categoryCatalog.categories.length,7);assert.deepEqual(new Set(categoryCatalog.categories.map(v=>v.kind)),new Set(CATEGORY_KINDS));
+assert.equal(categoryImportKeySuffix(undefined),'');assert.equal(categoryImportKeySuffix(null),'');assert.notEqual(categoryImportKeySuffix('CASE').toLowerCase(),categoryImportKeySuffix('case').toLowerCase());assert(validCategoryCatalog(categoryCatalog));assert.equal(categoryCatalog.categories.length,7);assert.deepEqual(new Set(categoryCatalog.categories.map(v=>v.kind)),new Set(CATEGORY_KINDS));
 for(const bad of [{}, {...categoryCatalog,extra:true},{enabled:true,categories:[]},{enabled:false,categories:categoryCatalog.categories},{enabled:true,categories:[...categoryCatalog.categories,categoryCatalog.categories[0]]},{enabled:true,categories:categoryCatalog.categories.map(c=>({...c,active:false}))}])assert(!validCategoryCatalog(bad));
 for(const patch of [{kind:'absence'},{kind:'leave'},{code:' edged '},{label:'\tbad'},{contexts:['project','none']},{contexts:['none','none']},{extra:true},{includeInUtilization:undefined},{billability:'billable'}])assert(!validCategoryDefinition({...categoryCatalog.categories[2],...patch}));
 assert(!validCategoryDefinition(categoryDefinition('BAD','billable_client',['none'])));assert(!validCategoryDefinition(categoryDefinition('BAD','non_billable_client',['none'])));assert(!validCategoryDefinition(categoryDefinition('BAD','training',['project'],{billability:'project_bound'})));

@@ -1,3 +1,4 @@
+import {categoryImportKeySuffix} from '../../shared/work-category.mjs';
 import {overlapImportNotice} from '../../shared/assignment-overlap-policy.mjs';
 import {resolveWorkSourceIdentityAliases,sourceIdentityImportNotice} from '../../shared/work-source-identity.mjs';
 import {importSubmissionTimingNotice} from '../services/submissionDeadline';
@@ -307,7 +308,7 @@ export const ImportExport = () => {
     return [{
       field: 'timesheetEntryKey',
       label: 'Timesheet entry key',
-      value: [row.employeeId, row.weekEnding, row.date, row.workType, row.projectId || row.clientName].map(normalizeImportKey).join('|'),
+      value: [row.employeeId, row.weekEnding, row.date, row.workType, row.projectId || row.clientName].map(normalizeImportKey).join('|')+categoryImportKeySuffix(row.categoryCode),
     }].filter(item => item.value.replace(/\|/g, ''));
   };
 
@@ -425,6 +426,7 @@ export const ImportExport = () => {
         if (row.workType === 'Client Misc Task' && !row.clientName) {
           addError(errors, rowNumber, 'clientName', 'Client Misc Task entries require a client name.');
         }
+        if(row.workType==='Non-client Work'&&(row.projectId||row.clientName))addError(errors,rowNumber,'workType','Non-client work cannot carry a project or client context.');
         if (row.status && !timesheetStatuses.includes(row.status as TimesheetSummary['status'])) {
           addError(errors, rowNumber, 'status', `Status must be one of: ${timesheetStatuses.join(', ')}.`);
         }

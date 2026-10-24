@@ -1,3 +1,4 @@
+import {categoryImportKeySuffix} from '../../../shared/work-category.mjs';
 import {categoryCodeInput,applyWorkCategories} from '../work-capture/work-category.mjs';
 import {overlapAssessment} from '../planning/assignment-overlap-policy.mjs';
 import {setAssignmentVersionContext} from '../planning/assignment-version-context.mjs';
@@ -488,7 +489,7 @@ export const createOperationalImportRouter = ({
     const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => versioned ? [] : [{
       field: 'timesheetEntryKey',
       label: 'Timesheet entry key',
-      value: [row.employeeId, row.weekEnding, row.date, row.workType, row.projectId || row.clientName].join('|'),
+      value: [row.employeeId, row.weekEnding, row.date, row.workType, row.projectId || row.clientName].join('|')+categoryImportKeySuffix(row.categoryCode),
     }], index => rowNumbers[index]);
     const client = await pool.connect();
     const errors = [...clientErrors, ...duplicateImportRows.errors];
@@ -547,9 +548,10 @@ export const createOperationalImportRouter = ({
           }
         }
         if (row.workType === 'Client Misc Task' && !row.clientName) rowErrors.push({rowNumber, field: 'clientName', message: 'Client Misc Task entries require a client name.'});
-        const naturalTarget = row.workType === 'Project Work' ? project?.id : row.clientName;
+        if(row.workType==='Non-client Work'&&(row.projectId||row.clientName))rowErrors.push({rowNumber,field:'workType',message:'Non-client work cannot carry a project or client context.',code:'WORK_CATEGORY_CONTEXT'});
+        const naturalTarget = row.workType === 'Project Work' ? project?.id : row.workType==='Non-client Work'?'non-client':row.clientName;
         if (versioned && employee && naturalTarget) {
-          const naturalKey = [employee.id, row.weekEnding, row.date, row.workType, naturalTarget].join('|');
+          const naturalKey = [employee.id, row.weekEnding, row.date, row.workType, naturalTarget].join('|')+categoryImportKeySuffix(row.categoryCode);
           if (seenTimesheetEntryKeys.has(naturalKey)) {
             rowErrors.push({rowNumber, field: 'timesheetEntryKey', message: 'This employee, week, date, and work item already appears in the import.'});
           } else {

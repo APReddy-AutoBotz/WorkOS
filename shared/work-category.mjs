@@ -23,3 +23,7 @@ export const readCategoryEntry=(code,reference,workType,date,billable,label)=>{
  if(!ref||code!==ref.code||ref.context!==categoryContext(workType)||date<ref.effectiveFrom||label!==ref.label||ref.billability==='non_billable'&&billable||ref.kind==='billable_client'&&!billable)throw new TypeError('Work category acknowledgement does not match its entry. Reload explicitly.');
  return {categoryCode:code,categoryReference:ref};
 };
+
+// Legacy import duplicate flags fold their whole key; encode this new exact ASCII
+// dimension so case-sensitive buyer codes remain distinct without changing old keys.
+export const categoryImportKeySuffix=code=>validCategoryCode(code)?'|category:'+Array.from(code,c=>c.charCodeAt(0).toString(16).padStart(2,'0')).join(''):'';
