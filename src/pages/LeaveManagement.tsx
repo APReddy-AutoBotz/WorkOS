@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -244,7 +244,7 @@ const SummaryTile = ({ label, value, sub, icon: Icon }: { label: string; value: 
   </Card>
 );
 
-export const ESSHome = ({ initialSection = 'overview' }: { initialSection?: EssSection } = {}) => {
+export const ESSHome = ({ initialSection = 'overview',workPlanning }: { initialSection?: EssSection;workPlanning?:ReactNode } = {}) => {
   const { state, loading, notice, setNotice, refresh } = useLeaveViewState();
   const [activeSection, setActiveSection] = useState<EssSection>(initialSection);
   const employee = getCurrentEmployee(state.employees);
@@ -358,6 +358,8 @@ export const ESSHome = ({ initialSection = 'overview' }: { initialSection?: EssS
           </Link>
         )}
       />
+      {activeSection==='work'&&workPlanning}
+      {activeSection==='work'&&workPlanning&&<p className="text-sm text-body/70">The overview figures below use existing compatibility calculations. Use the selected-period view above for dated capacity; unified utilization reconciliation remains pending.</p>}
       {loading ? <Card>Loading employee self-service data...</Card> : !employee ? (
         <Card>
           <div className="py-8 text-center">

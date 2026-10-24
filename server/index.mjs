@@ -1,3 +1,4 @@
+import {createOwnWorkPlanningRouter} from './modules/planning/own-work-planning-router.mjs';
 import {createAssignmentVersionRouter} from './modules/planning/assignment-version-router.mjs';
 import {setAssignmentVersionContext} from './modules/planning/assignment-version-context.mjs';
 import {createWorkerCapacityRouter} from './modules/planning/worker-capacity-router.mjs';
@@ -6450,6 +6451,7 @@ app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
 app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,getSetting,audit,recordAllocationChangeApproval}));
+app.use('/api/v1/my-work-planning',createOwnWorkPlanningRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere}));
 app.use('/api/v1/resource-demand',createResourceDemandRouter({pool,requireDatabase,requireAuth,requirePermission,buildProjectScopeWhere,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/workforce-capabilities',createWorkforceCapabilitiesRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/work-capture-modes',createCaptureModesRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
