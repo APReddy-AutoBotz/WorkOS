@@ -1,0 +1,9 @@
+import assert from 'node:assert/strict';
+import {validDemandQuantity,validDemandDefinition,matchesDemandCapabilities} from '../shared/resource-demand.mjs';
+const d={title:'Synthetic 雪 demand',role:'Synthetic Role',startsOn:'2026-10-01',endsOn:'2026-10-24',quantityUnit:'hours',quantityExact:'0.10000000000000001',status:'Open',criteria:{skill:'Synthetic skill',proficiency:'Buyer β',certification:'Synthetic certification'},note:null};
+assert(validDemandDefinition(d));for(const q of ['0','-1','1.00','1e3','01','NaN',0.1])assert.equal(validDemandQuantity(q),false);assert(validDemandQuantity('1000000000000000000000000000000000000000000000000000.00000001'));
+for(const change of [{quantityUnit:''},{status:''},{endsOn:'2026-09-30'},{criteria:{...d.criteria,skill:null}},{role:' edged '},{quantityExact:'1.0'},{extra:true}])assert.equal(validDemandDefinition({...d,...change}),false);
+const profile={skills:[{skill:'Synthetic skill',proficiency:'Buyer β'}],certifications:[{certification:'Synthetic certification',validFrom:'2026-10-01',validThrough:'2026-10-24',noExpiry:false}],availabilityNote:null};assert(matchesDemandCapabilities(profile,d));
+for(const change of [{...profile,skills:[{skill:'synthetic skill',proficiency:'Buyer β'}]},{...profile,skills:[{skill:'Synthetic skill',proficiency:'Higher (not ranked)'}]},{...profile,certifications:[{...profile.certifications[0],validThrough:'2026-10-23'}]},{...profile,certifications:[{...profile.certifications[0],validFrom:'2026-10-02'}]}])assert.equal(matchesDemandCapabilities(change,d),false);
+assert(matchesDemandCapabilities(null,{...d,criteria:{skill:null,proficiency:null,certification:null}}));assert(matchesDemandCapabilities({...profile,certifications:[{...profile.certifications[0],validThrough:null,noExpiry:true}]},d));
+console.log('Demand explicit exact units/status/dates, no numeric conversion, and exact full-range capability matching passed.');

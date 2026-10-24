@@ -19,7 +19,7 @@ await withCommercialDatabase(async ({pool}) => {
     const before = await tableSnapshot(pool, 'timesheet_entries'), headers = await tableSnapshot(pool, 'timesheets');
     for(const row of before){row.value.evidence_url=null;row.value.work_reference=null;row.value.source_identity=null;} // additive 047/048 column
     const grants = await tableSnapshot(pool, 'role_permissions');
-    const installed = await migrateCommercialDatabase(pool); assert.deepEqual(installed.applied, [migration,'046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities']);
+    const installed = await migrateCommercialDatabase(pool); assert.deepEqual(installed.applied, [migration,'046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand']);
     assert.deepEqual(await tableSnapshot(pool, 'timesheet_entries'), before); assert.deepEqual(await tableSnapshot(pool, 'timesheets'), headers);
     assert.deepEqual(await tableSnapshot(pool, 'role_permissions'), grants);
     assert.equal((await pool.query('select count(*)::int n from work_capture_policy_versions')).rows[0].n, 0);

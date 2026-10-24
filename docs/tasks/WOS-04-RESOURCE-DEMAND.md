@@ -1,6 +1,6 @@
 # PR-008N: Demand-to-recorded-assignment planning journey
 
-**Status:** Pre-implementation acceptance plan on fixed Draft PR67 `75726becaeca0a4080c663436a693a7d90378abb`, tree `de2597cdc6ee2e65ef0d00e9c3dbbfc46912dc9c`. Optional independent/formal reviews remain deferred/outstanding, not passed. No integration/milestone/UAT/release acceptance.
+**Status:** Acceptance plan committed before implementation as `418d1c2a9d207b1e1b99483b4a4178c3dc0f056b`. Focused shared/production-transport, fresh/054 upgrade/replay PostgreSQL/API and real authorized Admin planner/TeamLead reader React/API/PostgreSQL end-to-end journeys passed; frozen-source retained/local/hosted receipts remain required. Dependent development on fixed Draft PR67 `75726becaeca0a4080c663436a693a7d90378abb`, tree `de2597cdc6ee2e65ef0d00e9c3dbbfc46912dc9c`. Optional independent/formal reviews remain deferred/outstanding, not passed. No integration/milestone/UAT/release acceptance.
 
 ## Finite reconciliation through PR67
 

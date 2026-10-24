@@ -119,6 +119,12 @@ export const validateAssignmentPolicy=async(client,req,input)=>{
     if(input.billable&&!policy.billable)fail('WORK_BILLABILITY_POLICY','A non-billable project cannot have a billable assignment.');
   }
 };
+// Demand uses the same project/lifecycle timeline without inventing a worker,
+// allocation, commercial treatment, capacity denominator or exception.
+export const validateDemandProjectPolicy=async(client,req,projectId,startsOn,endsOn)=>{
+  await lockWorkPolicy(client,req);const loaded=await loadProject(client,req,projectId);
+  for(const at of policySegmentDates(startsOn,endsOn,loaded))resolveProjectDate(loaded,at,{assignment:true});
+};
 export const validateWorkEntries=async(client,req,employeeId,entries)=>{
   await lockWorkPolicy(client,req,[employeeId]);
   await assertWorkActorScope(client,req,employeeId);
