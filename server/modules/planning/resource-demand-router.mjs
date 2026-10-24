@@ -2,6 +2,7 @@ import {Router} from 'express';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {RESOURCE_DEMAND_VERSION,validDemandDefinition,matchesDemandCapabilities} from '../../../shared/resource-demand.mjs';
+import {demandCandidateCapacity} from './worker-capacity-service.mjs';
 import {validateAssignmentPolicy,validateDemandProjectPolicy,lockWorkPolicy,workPolicyError} from '../work-capture/assignment-work-policy.mjs';
 const id=z.string().min(1).max(200),revision=z.string().regex(/^[a-f0-9]{64}$/),uuid=z.string().uuid();
 const command=z.object({projectId:id,expectedLatestId:uuid.nullable(),definition:z.unknown().refine(validDemandDefinition),assignmentRefs:z.array(z.object({assignmentId:id,expectedRevision:revision,expectedCapabilityVersionId:uuid.nullable()}).strict()).max(20),reason:z.string().trim().min(1).max(1000)}).strict();
@@ -43,7 +44,8 @@ export const createResourceDemandRouter=({pool,requireDatabase,requireAuth,requi
  router.get('/demands/:id/candidates',handle(false,async(client,req)=>{
   const q=parse(z.object({after:id.optional()}).strict(),req.query),r=await root(client,req,req.params.id);if(!r)fail('RESOURCE_DEMAND_NOT_FOUND','Demand is unavailable in this scope.',404);const v=await latest(client,r),params=[],where=buildEmployeeScopeWhere(req,params,'e');params.push(q.after??null,JSON.stringify(v.definition));const after=params.length-1,definition=params.length;
   const rows=(await client.query(`select e.id,e.employee_id,e.name,c.id capability_id,c.profile from employees e left join lateral(select id,profile from workforce_capability_versions where employee_id=e.id and organization_id=e.organization_id and legal_entity_id=e.legal_entity_id order by sequence desc limit 1)c on true where ${where} and ($${after}::text is null or e.id collate "C">$${after} collate "C") and resource_capability_matches(c.profile,$${definition}::jsonb) order by e.id collate "C" limit 21`,params)).rows,selected=rows.slice(0,20);
-  return {...envelope(req),demandId:r.id,demandVersionId:v.id,candidates:selected.map(w=>({employeeId:w.id,employeeCode:w.employee_id,employeeName:w.name,capabilityVersionId:w.capability_id??null,capabilityProfile:w.profile??null})),nextAfter:rows.length>20?selected.at(-1).id:null};
+  const candidates=[];for(const w of selected)candidates.push({employeeId:w.id,employeeCode:w.employee_id,employeeName:w.name,capabilityVersionId:w.capability_id??null,capabilityProfile:w.profile??null,capacity:await demandCandidateCapacity(client,req,w.id,v.definition.startsOn,v.definition.endsOn,buildEmployeeScopeWhere)});
+  return {...envelope(req),demandId:r.id,demandVersionId:v.id,candidates,nextAfter:rows.length>20?selected.at(-1).id:null};
  }));
  router.get('/demands/:id/assignments',handle(false,async(client,req)=>{
   const q=parse(cursorQuery,req.query),r=await root(client,req,req.params.id);if(!r)fail('RESOURCE_DEMAND_NOT_FOUND','Demand is unavailable in this scope.',404);const v=await latest(client,r),params=[],where=buildEmployeeScopeWhere(req,params,'e');params.push(r.project_id,q.employeeId??null,q.after??null,JSON.stringify(v.definition));const [projectId,worker,after,def]=[params.length-3,params.length-2,params.length-1,params.length];

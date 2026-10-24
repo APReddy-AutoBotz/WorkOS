@@ -1,3 +1,4 @@
+import {createWorkerCapacityRouter} from './modules/planning/worker-capacity-router.mjs';
 import {createResourceDemandRouter} from './modules/planning/resource-demand-router.mjs';
 import {createWorkforceCapabilitiesRouter} from './modules/workforce/capabilities-router.mjs';
 import {workSourceIdentityInput,validateWorkSourceReplacement} from './modules/work-capture/work-source-identity.mjs';
@@ -6443,6 +6444,7 @@ registerOrganizationSetupRoutes({
 const workHistoryRouter=createWorkHistoryRouter({pool,requireDatabase,requireAuth,requirePermission});
 app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
+app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/resource-demand',createResourceDemandRouter({pool,requireDatabase,requireAuth,requirePermission,buildProjectScopeWhere,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/workforce-capabilities',createWorkforceCapabilitiesRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/work-capture-modes',createCaptureModesRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));

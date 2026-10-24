@@ -1,6 +1,6 @@
 # PR-008O: Effective worker capacity authority through demand planning
 
-**Status:** Pre-implementation requirement and acceptance plan on fixed Draft PR68 `70d8566b3381e051d9e4f2625a211f194f248413`, tree `9824e13e82ac8929f791d4cbe43cf553d1a7dbe3`. Optional independent/formal reviews remain deferred/outstanding, not passed. No milestone/integration/UAT/release acceptance.
+**Status:** Acceptance plan committed before implementation as `785f5d98cbd1cad82f83eb439172525c94ac88fe`. Focused unit/production-transport, real PostgreSQL/API fresh/055-upgrade/replay and React/API/PostgreSQL journeys pass; frozen-source retained/local/hosted receipts remain required. Requirement and acceptance plan on fixed Draft PR68 `70d8566b3381e051d9e4f2625a211f194f248413`, tree `9824e13e82ac8929f791d4cbe43cf553d1a7dbe3`. Optional independent/formal reviews remain deferred/outstanding, not passed. No milestone/integration/UAT/release acceptance.
 
 ## Prerequisite ordering and finite reduction
 
