@@ -1,3 +1,4 @@
+import {GovernedActualWork} from '../components/GovernedActualWork';
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { KPIStrip } from '../components/ui/KPIStrip';
@@ -68,6 +69,7 @@ export const ActualUtilizationStatus = ({ status, retry }: { status: ActualStatu
 };
 
 export const ActualUtilization = () => {
+  const [basis,setBasis]=useState<'compatibility'|'governed'>('compatibility');
   const [result, setResult] = useState<ActualResult>({ status: 'loading', generation: 0, snapshot: null });
   const requestVersion = useRef(0);
   const mounted = useRef(false);
@@ -282,6 +284,7 @@ export const ActualUtilization = () => {
     );
   };
 
+  if(basis==='governed')return <div><PageHeader title="Governed actual utilization" subtitle="Approved included work divided by effective eligible available capacity." breadcrumb={['Reports','Actual utilization']}/><button className="rounded border p-2" onClick={()=>setBasis('compatibility')}>Use compatibility report</button><GovernedActualWork mode="report"/></div>;
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       <PageHeader
@@ -334,6 +337,7 @@ export const ActualUtilization = () => {
         }
       />
 
+      <p>Compatibility report: retained legacy billable/global-hours figures. The governed selected-period calculation is separate.</p><button className="rounded border p-2" onClick={()=>setBasis('governed')}>Use governed period</button>
       <ActualUtilizationStatus status={status} retry={loadReport} />
       {status === 'ready' && !hasData && (
         <div className="space-y-4 rounded-2xl border border-border-light bg-white p-8 text-center text-sm font-bold text-slate-600">
