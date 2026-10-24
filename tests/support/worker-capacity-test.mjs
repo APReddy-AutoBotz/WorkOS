@@ -19,3 +19,7 @@ export const approveCapacityLeave=async(request,date)=>{
  const decided=await request('/api/leave/requests/'+created.body.id+'/status',{method:'PATCH',body:{status:'Approved',comments:'Synthetic existing approval command'}});assert.equal(decided.status,200,JSON.stringify(decided.body));return created.body.id;
 };
 export const insertLegacyCapacityLeave=(pool,id,start,end,amount,status='Approved')=>pool.query(`insert into leave_requests(id,employee_id,leave_type_id,start_date,end_date,total_days,status,reason) values($1,$2,'leave-type-annual',$3,$4,$5,$6,'Synthetic private legacy reason')`,[id,f.ownerId,start,end,amount,status]);
+
+// New governed intake correctly rejects holiday-only requests. Keep the original
+// once-only legacy overlap source as an explicitly identified existing fixture.
+export const rejectCalendarHolidayAndRetainLegacyFixture=async(pool,request,date)=>{const response=await request('/api/leave/requests',{method:'POST',body:{employee_id:f.ownerId,leave_type_id:'leave-type-annual',start_date:date,end_date:date,reason:'Synthetic holiday-only intake must be rejected'}});assert.equal(response.status,422,JSON.stringify(response.body));const id='synthetic-existing-holiday-absence-'+date;await insertLegacyCapacityLeave(pool,id,date,date,1);return id;};

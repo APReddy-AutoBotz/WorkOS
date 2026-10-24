@@ -1,3 +1,4 @@
+import {assertCalendarLeaveDecision,calendarLeaveError} from './modules/leave/calendar-leave-service.mjs';
 import {createActualWorkRouter} from './modules/planning/actual-work-router.mjs';
 import {createWorkCategoryRouter} from './modules/work-capture/work-category-router.mjs';
 import {categoryCodeInput,applyWorkCategories,categoryEntryProjection} from './modules/work-capture/work-category.mjs';
@@ -3416,12 +3417,13 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     }
 
     if (approval.entity_type === 'LeaveRequest') {
-      const previous = (await client.query('select * from leave_requests where id = $1 for update', [approval.entity_id])).rows[0];
+      const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [approval.entity_id])).rows[0];
       if (!previous || previous.status !== 'Submitted') {
         await client.query('rollback');
         res.status(422).json({ error: 'Linked leave request is not submitted' });
         return;
       }
+      await assertCalendarLeaveDecision(client,req,previous,parsed.data.status,buildEmployeeScopeWhere,getBusinessLeaveDays);
       await client.query(`
         update leave_requests
         set status = $2,
@@ -3457,6 +3459,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;
     if (workPolicyError(res,error)) return;
+    if (calendarLeaveError(res,error)) return;
     console.error(error);
     res.status(500).json({ error: 'Approval status update failed' });
   } finally {

@@ -55,7 +55,8 @@ const pool = {
         if (sql.includes('select * from leave_types where id = $1')) {
           return {rows: params[0] === existingLeaveType.id ? [existingLeaveType] : []};
         }
-        if (sql.includes('select * from leave_requests where id = $1 for update')) {
+        if (sql.includes('from leave_requests where id = $1 for update')) {
+          assert.match(sql,/start_date::text,end_date::text/,'business DATE fields must remain canonical dates');
           const request = leaveRequests.get(params[0]);
           return {rows: request ? [{...request}] : []};
         }
@@ -145,6 +146,7 @@ const routeSignatures = leaveRouter.stack.filter(layer => layer.route).map(layer
   return `${method.toUpperCase()} ${layer.route.path}`;
 });
 assert.deepEqual(routeSignatures, [
+  'GET /v1/leave-calendar/workers/:id/period', 'GET /v1/leave-calendar/requests/:id/history',
   'GET /leave/types', 'POST /leave/types',
   'GET /leave/policies', 'POST /leave/policies',
   'GET /holiday-calendars', 'POST /holiday-calendars',
@@ -152,7 +154,7 @@ assert.deepEqual(routeSignatures, [
   'GET /leave/requests', 'POST /leave/requests',
   'PATCH /leave/requests/:id', 'PATCH /leave/requests/:id/cancel',
   'PATCH /leave/requests/:id/status',
-], 'the leave module must register the same legacy API route group');
+], 'the leave module retains every legacy route plus the two calendar authority readers');
 
 const app = express();
 app.use(express.json());
