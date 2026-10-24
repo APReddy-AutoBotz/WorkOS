@@ -1,3 +1,4 @@
+import {resolveWorkSourceIdentityAliases,sourceIdentityImportNotice} from '../../shared/work-source-identity.mjs';
 import {importSubmissionTimingNotice} from '../services/submissionDeadline';
 import {importOvertimeNotice} from '../services/overtimeCapture';
 import { useEffect, useRef, useState } from 'react';
@@ -88,7 +89,7 @@ const versionedImportSchemas: Partial<Record<ImportChannel, string>> = {
 };
 
 const orderImportRow = (id: ImportChannel, row: Record<string, unknown>) => {
-  return Object.fromEntries(requiredImportHeaders[id].map(header => [header, row[header] ?? '']));
+  return Object.fromEntries([...requiredImportHeaders[id],...(id==='timesheets'?['sourceNamespace','externalWorklogId']:[])].map(header => [header, row[header] ?? '']));
 };
 
 const parseStrictIsoDate = (value: string) => {
@@ -240,17 +241,18 @@ export const ImportExport = () => {
   };
 
   const parseCsv = (text: string): { headers: string[]; rows: CsvRow[] } => {
-    const trimmed = text.trim();
-    if (!trimmed) return { headers: [], rows: [] };
-    const [headerLine, ...lines] = trimmed.split(/\r?\n/);
-    const splitCsvLine = (line: string) => line
-      .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
-      .map(value => value.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+    const contentLines=text.split(/\r?\n/);
+    while(contentLines.length&&!contentLines[0].trim())contentLines.shift();
+    while(contentLines.length&&!contentLines[contentLines.length-1].trim())contentLines.pop();
+    if(!contentLines.length)return {headers:[],rows:[]};
+    const [headerLine,...lines]=contentLines;
+    const splitCsvLine=(line:string,exact=false)=>line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+      .map(value=>(exact?value:value.trim()).replace(/^"|"$/g,'').replace(/""/g,'"'));
     const headers = splitCsvLine(headerLine);
     const rows = lines.filter(Boolean).map(line => {
-      const values = splitCsvLine(line);
+      const values = splitCsvLine(line),exactValues=splitCsvLine(line,true);
       return headers.reduce<CsvRow>((row, header, index) => {
-        row[header] = values[index] || '';
+        row[header] = ['sourceNamespace','externalWorklogId'].includes(header)?exactValues[index]??'':values[index]||'';
         return row;
       }, {});
     });
@@ -403,6 +405,7 @@ export const ImportExport = () => {
       }
 
       if (id === 'timesheets') {
+        try{resolveWorkSourceIdentityAliases(row);}catch(error){addError(errors,rowNumber,'sourceIdentity',error instanceof Error?error.message:'Invalid source identity.');}
         if (!row.employeeId) addError(errors, rowNumber, 'employeeId', 'Employee ID is required.');
         if (row.employeeId && !employeeIds.has(row.employeeId)) addError(errors, rowNumber, 'employeeId', 'Employee does not exist.');
         if (!row.weekEnding || !isValidDate(row.weekEnding)) addError(errors, rowNumber, 'weekEnding', 'Valid week ending date is required.');
@@ -578,7 +581,7 @@ export const ImportExport = () => {
             ? {employeeImportOperation: {...basePending.employeeImportOperation, validationState: 'complete'}}
             : {}),
         });
-        setLastResult(`Server dry run complete for ${fileName}: ${serverValidRows.length}/${rows.length} rows are valid. Review saved errors before applying.`+importOvertimeNotice(result.captureWarnings)+importSubmissionTimingNotice(result.submissionTiming));
+        setLastResult(`Server dry run complete for ${fileName}: ${serverValidRows.length}/${rows.length} rows are valid. Review saved errors before applying.`+importOvertimeNotice(result.captureWarnings)+importSubmissionTimingNotice(result.submissionTiming)+sourceIdentityImportNotice(result.sourceIdentityCheck));
         refreshHistory();
       } catch (error) {
         if (!isCurrentRequest()) return;
@@ -671,7 +674,7 @@ export const ImportExport = () => {
           ? {employeeImportOperation: {...snapshot.employeeImportOperation, validationState: 'complete'}}
           : {}),
       });
-      setLastResult(`Server dry run complete for ${snapshot.fileName}: ${validRows.length}/${snapshot.totalRows} rows are valid. Review saved errors before applying.`+importOvertimeNotice(result.captureWarnings)+importSubmissionTimingNotice(result.submissionTiming));
+      setLastResult(`Server dry run complete for ${snapshot.fileName}: ${validRows.length}/${snapshot.totalRows} rows are valid. Review saved errors before applying.`+importOvertimeNotice(result.captureWarnings)+importSubmissionTimingNotice(result.submissionTiming)+sourceIdentityImportNotice(result.sourceIdentityCheck));
       refreshHistory();
     } catch (error) {
       if (!isCurrentRequest()) return;
@@ -740,7 +743,7 @@ export const ImportExport = () => {
         const resultText = backendResult.status === 'Success'
           ? `Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`
           : `${pendingImport.title} apply finished with ${backendResult.validRows} valid rows and ${backendResult.errorRows} errors for ${pendingImport.fileName}. View saved diagnostic details in Import History.`;
-        setLastResult(resultText+importOvertimeNotice(backendResult.captureWarnings)+importSubmissionTimingNotice(backendResult.submissionTiming));
+        setLastResult(resultText+importOvertimeNotice(backendResult.captureWarnings)+importSubmissionTimingNotice(backendResult.submissionTiming)+sourceIdentityImportNotice(backendResult.sourceIdentityCheck));
         setPendingImport(null);
         refreshHistory();
       } catch (error) {
@@ -850,7 +853,7 @@ export const ImportExport = () => {
       const backendResult = await adminService.applyTimesheetImport(pendingImport.fileName, pendingImport.validRows, pendingImport.errors, pendingImport.rows.length, pendingImport.scope);
       if (!isCurrentApply()) return;
       if (backendResult) {
-        setLastResult(`Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`+importOvertimeNotice(backendResult.captureWarnings)+importSubmissionTimingNotice(backendResult.submissionTiming));
+        setLastResult(`Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`+importOvertimeNotice(backendResult.captureWarnings)+importSubmissionTimingNotice(backendResult.submissionTiming)+sourceIdentityImportNotice(backendResult.sourceIdentityCheck));
         setPendingImport(null);
         refreshHistory();
         return;

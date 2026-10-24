@@ -1,3 +1,4 @@
+import {normalizeWorkSourceIdentity} from '../../shared/work-source-identity.mjs';
 import {normalizeSubmissionTiming} from './submissionDeadline';
 import {normalizeOvertimeWarnings} from './overtimeCapture';
 import {normalizeDuplicateEntryCheck,normalizeDuplicateCheckSummary} from './duplicateEntryCheck';
@@ -425,6 +426,7 @@ export const normalizeTimesheetSummary = (
       remark: entry.remark ? String(entry.remark) : undefined,
       evidenceUrl: typeof entry.evidence_url === 'string' ? entry.evidence_url : null,
       workReference: typeof entry.work_reference === 'string' ? entry.work_reference : null,
+      sourceIdentity:entry.source_identity===undefined?undefined:normalizeWorkSourceIdentity(entry.source_identity),
       status: (entry.status || r.status) as TimesheetEntry['status'],
       billable: Boolean(entry.billable),
       weekEnding: String(entry.week_ending ?? r.week_ending).slice(0, 10),

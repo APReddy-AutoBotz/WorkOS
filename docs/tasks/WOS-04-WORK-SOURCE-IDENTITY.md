@@ -1,6 +1,6 @@
 # PR-008L: Explicit source-linked work identity and create/conflict contract
 
-**Status:** Acceptance plan recorded before implementation. Dependent development only, based on fixed Draft PR65 `4b34af26ea2400c9b81af8d909ced6edbd4755be`, tree `e97e78cf1eca3c0075a01ee83f729a812b80d163`. Optional independent/formal reviews remain deferred/outstanding, not passed.
+**Status:** Acceptance plan recorded before implementation as `42b68e2fa7223134ec4122e5cea9260fd1ed172b`. Focused unit, real PostgreSQL/API and React/API/PostgreSQL journeys pass; exact-source retained/local/hosted receipts remain required. Dependent development only, based on fixed Draft PR65 `4b34af26ea2400c9b81af8d909ced6edbd4755be`, tree `e97e78cf1eca3c0075a01ee83f729a812b80d163`. Optional independent/formal reviews remain deferred/outstanding, not passed.
 
 ## Requirement lineage and bounded selection
 
@@ -22,7 +22,8 @@ Pre-write2026-10-24 reconciliation found only root active; all five protected Ac
 - Old clients preserve omitted identity independently of other metadata on a unique context match; ambiguity conflicts instead of erasing it. Source-aware full-header UI saves retain hidden/weekend/zero/context entries and exact keys across mode changes. Zero-hour source entries remain represented. Claims survive full entry-row replacement and guard direct SQL/concurrent writers under existing locks.
 - Manual, both import aliases and optional CSV namespace/worklog-ID columns use the same normalization/claim/conflict rules. Preview validates existing claims plus staged accepted groups without business mutation; apply has the same deterministic group outcome. Existing batch/source row identifiers, partial results, idempotency and original Web/import provenance remain distinct from the self-asserted source key.
 - New immutable submissions/audit/read/history projections retain source identity. Old work/history/claims are not fabricated or backfilled; namespace/ID never becomes actor or verified provenance. UI labels the exact create-only identity and retained source-linked work; recorded linked cells are read-only in ordinary entry editing. This does not create a task/milestone relationship, financial authority, external credential or provider integration.
-- Migration053 adds only nullable entry identity, strict shape checks, an append-only scoped claim ledger and additive registration/final-state guards. Existing work, policy, grants, decisions and financial history remain unchanged. No endpoint/grant to edit claims.
+- New clients require returned source-key acknowledgement before confirming a tagged manual save. New import batches retain a versioned source-check result/count/mode; old batches remain unchecked, and replay never fabricates current validation. Missing acknowledgement is an uncertain result requiring read-back, not a successful source capture.
+- Migration053 adds only nullable entry identity and import-check metadata, strict shape checks, an append-only scoped claim ledger and additive registration/final-state guards. Existing work, policy, grants, decisions and financial history remain unchanged. No endpoint/grant to edit claims.
 
 ## Concrete acceptance criteria
 

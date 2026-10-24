@@ -1,10 +1,11 @@
+import {normalizeWorkSourceIdentity,workSourceIdentityIsValid} from '../../shared/work-source-identity.mjs';
 import {normalizeSubmissionTiming,type SubmissionTiming} from './submissionDeadline';
 import {api,ApiClientError} from './apiClient';
 import {assertWorkCaptureContext,type WorkCaptureContext} from './workCaptureModes';
 import {canonicalHours} from '../../shared/work-hours.mjs';
 import {normalizeEvidenceUrl,evidenceUrlIsValid} from '../../shared/work-evidence.mjs';
 import {workReferenceIsValid} from '../../shared/work-reference.mjs';
-export type HistoricalWorkEntry={entryId:string;projectId:string|null;workType:'Project Work'|'Client Misc Task';workDate:string;hoursExact:string;billable:boolean;clientName:string|null;category:string|null;remark:string|null;evidenceUrl?:string|null;workReference?:string|null};
+export type HistoricalWorkEntry={sourceIdentity?:import('../types').WorkSourceIdentity|null;entryId:string;projectId:string|null;workType:'Project Work'|'Client Misc Task';workDate:string;hoursExact:string;billable:boolean;clientName:string|null;category:string|null;remark:string|null;evidenceUrl?:string|null;workReference?:string|null};
 export type WorkHistorySubmission={submissionTiming?:SubmissionTiming[];id:string;sequence:number;createdAt:string;activeRole:string;source:string;entries:HistoricalWorkEntry[];decision:null|{status:'Approved'|'Rejected'|'Cancelled';reason:string|null;createdAt:string;activeRole:string;source:string}};
 export type WorkHistoryPage={organizationId:string;legalEntityId:string;timesheetId:string;employeeId:string;weekEnding:string;submissions:WorkHistorySubmission[];nextBeforeSequence:number|null};
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v&&typeof v==='object'&&!Array.isArray(v));
@@ -25,9 +26,10 @@ export const decodeWorkHistoryPage=(value:unknown,before:number|null=null):WorkH
    const entry=rawEntry as Record<string,unknown>;ids.add(entry.entryId as string);
    try{canonicalHours(entry.hoursExact as string);}catch{fail();}
    if(Object.hasOwn(entry,'evidenceUrl')&&(!optionalText(entry.evidenceUrl)||!evidenceUrlIsValid(entry.evidenceUrl)))fail();
+   if(Object.hasOwn(entry,'sourceIdentity')&&!workSourceIdentityIsValid(entry.sourceIdentity))fail();
    if(Object.hasOwn(entry,'workReference')&&(!optionalText(entry.workReference)||!workReferenceIsValid(entry.workReference)))fail();
    return {entryId:entry.entryId,projectId:entry.projectId,workType:entry.workType,workDate:entry.workDate,hoursExact:canonicalHours(entry.hoursExact as string),billable:entry.billable,clientName:entry.clientName,category:entry.category,remark:entry.remark,
-    ...(Object.hasOwn(entry,'evidenceUrl')?{evidenceUrl:normalizeEvidenceUrl(entry.evidenceUrl)}:{}),...(Object.hasOwn(entry,'workReference')?{workReference:entry.workReference}:{})} as HistoricalWorkEntry;
+    ...(Object.hasOwn(entry,'evidenceUrl')?{evidenceUrl:normalizeEvidenceUrl(entry.evidenceUrl)}:{}),...(Object.hasOwn(entry,'workReference')?{workReference:entry.workReference}:{}),...(Object.hasOwn(entry,'sourceIdentity')?{sourceIdentity:normalizeWorkSourceIdentity(entry.sourceIdentity)}:{})} as HistoricalWorkEntry;
   });
   let decision:WorkHistorySubmission['decision']=null;
   if(row.decision!==null){const d=row.decision;if(!object(d)||!['Approved','Rejected','Cancelled'].includes(String(d.status))||!optionalText(d.reason)||!instant(d.createdAt)||!text(d.activeRole)||!text(d.source))fail();const decisionRow=d as Record<string,unknown>;decision={status:decisionRow.status,reason:decisionRow.reason,createdAt:decisionRow.createdAt,activeRole:decisionRow.activeRole,source:decisionRow.source} as WorkHistorySubmission['decision'];}

@@ -1,3 +1,4 @@
+import {sourceIdentityCommandRequiresAcknowledgement,readSourceIdentityCheck} from '../../shared/work-source-identity.mjs';
 import {normalizeImportSubmissionTiming,type ImportSubmissionTiming} from './submissionDeadline';
 import {normalizeImportOvertimeWarnings,type ImportOvertimeWarnings} from './overtimeCapture';
 import {canonicalHours,sumHours} from '../../shared/work-hours.mjs';
@@ -58,6 +59,7 @@ type ImportApplyError = {
 };
 type ImportApplyResult = {
   captureWarnings?: ImportOvertimeWarnings[];
+  sourceIdentityCheck?:{version:'work-source/1';linkedEntries:number;mode:'preview'|'apply'};
   submissionTiming?: ImportSubmissionTiming[];
   status: ImportExportLog['status'];
   totalRows: number;
@@ -616,7 +618,7 @@ export const timesheetService = {
           hours: e.hours,
           remark: e.remark || null,
           evidence_url: e.evidenceUrl,
-          work_reference: e.workReference,
+          work_reference: e.workReference,source_identity:e.sourceIdentity,
           billable: e.billable,
         })),
       });
@@ -2135,7 +2137,7 @@ export const adminService = {
   },
   runVersionedTimesheetImport: async (request: {
     fileName: string;
-    rows: CsvImportRow[];
+    rows: Array<Record<string,unknown>>;
     clientErrors?: ImportApplyError[];
     totalRows: number;
     dryRun: boolean;
@@ -2151,9 +2153,11 @@ export const adminService = {
       totalRows: request.totalRows,
       clientErrors: request.clientErrors || [],
     }, {'Idempotency-Key': request.idempotencyKey});
+    const sourceIdentityCheck=readSourceIdentityCheck(raw.sourceIdentityCheck);
+    if(sourceIdentityCommandRequiresAcknowledgement(request.rows)&&(!sourceIdentityCheck||sourceIdentityCheck.mode!==(request.dryRun?'preview':'apply')))throw new ApiClientError('Source identity validation or capture could not be confirmed. Check Import History before retrying.',{status:503});
     const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
     return {
-      captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),submissionTiming:normalizeImportSubmissionTiming(raw.submissionTiming),
+      sourceIdentityCheck,captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),submissionTiming:normalizeImportSubmissionTiming(raw.submissionTiming),
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? request.totalRows),
       validRows: Number(raw.validRows ?? 0),
@@ -2182,7 +2186,7 @@ export const adminService = {
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
-  applyTimesheetImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
+  applyTimesheetImport: async (fileName: string, rows: Array<Record<string,unknown>>, clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
     assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/timesheets/apply', {
@@ -2191,8 +2195,10 @@ export const adminService = {
       totalRows,
       clientErrors,
     });
+    const sourceIdentityCheck=readSourceIdentityCheck(raw.sourceIdentityCheck);
+    if(sourceIdentityCommandRequiresAcknowledgement(rows)&&(!sourceIdentityCheck||sourceIdentityCheck.mode!=='apply'))throw new ApiClientError('Source identity capture could not be confirmed. Check Import History before retrying.',{status:503});
     return {
-      captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),submissionTiming:normalizeImportSubmissionTiming(raw.submissionTiming),
+      sourceIdentityCheck,captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),submissionTiming:normalizeImportSubmissionTiming(raw.submissionTiming),
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? rows.length),
       validRows: Number(raw.validRows ?? 0),

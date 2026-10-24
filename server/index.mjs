@@ -1,3 +1,4 @@
+import {workSourceIdentityInput,validateWorkSourceReplacement} from './modules/work-capture/work-source-identity.mjs';
 import {createSubmissionDeadlineRouter} from './modules/work-capture/submission-deadline.mjs';
 import {timesheetReadScope} from './modules/work-capture/timesheet-read-scope.mjs';
 import {createWorkHistoryRouter} from './modules/work-capture/work-history-router.mjs';
@@ -2781,7 +2782,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
         'hours_exact', te.hours::text,
         'remark', te.remark,
         'evidence_url', te.evidence_url,
-        'work_reference', te.work_reference,
+        'work_reference', te.work_reference,'source_identity',te.source_identity,
         'status', t.status,
         'billable', te.billable,
         'week_ending', t.week_ending
@@ -2810,6 +2811,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     remark: z.string().optional().nullable(),
     evidence_url: evidenceUrlInput,
     work_reference: workReferenceInput,
+    source_identity:workSourceIdentityInput,
     billable: z.boolean().default(true),
   });
   const schema = z.object({
@@ -2882,6 +2884,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     const evidenceEntries=await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries);
     await assertCaptureReplacementPeriods(client,req,previous?.id);
     parsed.data.entries=await validateCapturePolicy(client,req,employee.id,evidenceEntries,{replacementTimesheetId:previous?.id});
+    await validateWorkSourceReplacement(client,req,employee.id,parsed.data.week_ending,parsed.data.entries,previous?.id||null);
     const totalHours=sumHours(parsed.data.entries.map(entry=>entry.hours));
     const billableHours=sumHours(parsed.data.entries.filter(entry=>entry.billable).map(entry=>entry.hours));
     const timesheetResult = await client.query(`
@@ -2909,8 +2912,8 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     const savedEntries=[];
     for (const entry of parsed.data.entries) {
       const inserted=await client.query(`
-        insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *,work_date::text
+        insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference, source_identity)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) returning *,work_date::text
       `, [
         timesheet.id,
         entry.project_id || null,
@@ -2922,7 +2925,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
         entry.remark || null,
         entry.billable,
         entry.evidence_url,
-        entry.work_reference,
+        entry.work_reference,entry.source_identity?JSON.stringify(entry.source_identity):null,
       ]);
       savedEntries.push({...inserted.rows[0],policy:entry.policy,capturePolicyReference:entry.capturePolicyReference});
     }
@@ -2950,7 +2953,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       entityType: 'Timesheet',
       entityId: String(timesheet.id),
       oldValue: previous?{...previous,entryEvidence:previousEvidence,duplicateEntryCheck:previousDuplicateCheck}:null,
-      newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference})),duplicateEntryCheck},
+      newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference,source_identity:entry.source_identity})),duplicateEntryCheck},
       details: `${previous ? 'Updated' : 'Created'} ${parsed.data.status} timesheet for ${employee.employee_id}, week ending ${parsed.data.week_ending}`,
       reason: parsed.data.rejection_reason || null,
     });

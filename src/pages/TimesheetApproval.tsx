@@ -1,3 +1,4 @@
+import {WorkSourceIdentity} from '../components/WorkSourceIdentity';
 import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
 import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
 import { WorkSubmissionAssurance } from '../components/WorkSubmissionAssurance';
@@ -440,6 +441,7 @@ export const TimesheetApproval = () => {
                           </div>
                           <span className="text-xs font-bold text-primary tabular-nums">{formatHours(entry.hours)}</span>
                         </div>
+                        <WorkSourceIdentity value={entry.sourceIdentity}/>
                         {entry.remark && (
                           <div className="mt-2 bg-slate-50 p-3 rounded-lg border border-slate-100 italic">
                              <p className="text-[10px] text-slate-600 leading-relaxed font-medium">"{entry.remark}"</p>
