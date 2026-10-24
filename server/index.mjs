@@ -1,3 +1,4 @@
+import {createSubmissionDeadlineRouter} from './modules/work-capture/submission-deadline.mjs';
 import {timesheetReadScope} from './modules/work-capture/timesheet-read-scope.mjs';
 import {createWorkHistoryRouter} from './modules/work-capture/work-history-router.mjs';
 import {checkDuplicateEntries,projectTimesheetDuplicateCheck,readDuplicateEntryCheck} from './modules/work-capture/duplicate-entry-check.mjs';
@@ -2766,7 +2767,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
   await run(res, `
     with visible as (select
       t header,t.id,t.updated_at,t.week_ending::text,work_capture_write_token(t.id) write_token,
-      (select json_build_object('id',w.id,'sequence',w.sequence,'policyVersion',w.policy_version,'entryCount',jsonb_array_length(w.entries),'governedEntryCount',(select count(*) from jsonb_array_elements(w.entries) x where x->>'kind'='governed'),'duplicateCheck',case when w.duplicate_entry_check is not null then json_build_object('version',w.duplicate_entry_check->>'version','groupCount',jsonb_array_length(w.duplicate_entry_check->'groups')) else null end) from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id order by w.sequence desc limit 1) work_assurance,
+      (select json_build_object('id',w.id,'sequence',w.sequence,'policyVersion',w.policy_version,'entryCount',jsonb_array_length(w.entries),'governedEntryCount',(select count(*) from jsonb_array_elements(w.entries) x where x->>'kind'='governed'),'submissionTiming',w.submission_timing,'duplicateCheck',case when w.duplicate_entry_check is not null then json_build_object('version',w.duplicate_entry_check->>'version','groupCount',jsonb_array_length(w.duplicate_entry_check->'groups')) else null end) from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id order by w.sequence desc limit 1) work_assurance,
       coalesce(json_agg(json_build_object(
         'id', te.id,
         'employee_id', t.employee_id,
@@ -6438,6 +6439,7 @@ const workHistoryRouter=createWorkHistoryRouter({pool,requireDatabase,requireAut
 app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
 app.use('/api/v1/work-capture-modes',createCaptureModesRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
+app.use('/api/v1/work-submission-deadline',createSubmissionDeadlineRouter({pool,requireDatabase,requireAuth,requirePermission}));
 app.use('/api/v1/work-capture-policy',createCapturePolicyRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
 app.use('/api/v1/commercial-drafting', createCommercialDraftingRouter({pool,requireDatabase,requireAuth,audit}));
 app.use('/api/v1/client-profiles', createClientProfilesRouter({pool,requireDatabase,requireAuth,audit}));

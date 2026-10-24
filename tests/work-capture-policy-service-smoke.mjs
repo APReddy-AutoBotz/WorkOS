@@ -37,6 +37,7 @@ for(const evidenceRequired of [true,false,undefined]){
 for(const overtime of [undefined,null,{action:'warn',dailyThreshold:'8',weeklyThreshold:null}]){
  reset();await service.append({...draft,overtime},capture());const command=JSON.parse(calls.at(-1).body);assert.deepEqual(command.overtime,overtime);assert.equal(Object.hasOwn(command,'overtime'),overtime!==undefined);
 }
+for(const submissionDeadline of [undefined,null,{anchor:'weekly-end-date',timezone:'UTC',daysAfterPeriodEnd:1,time:'12:30',graceMinutes:0,lateTreatment:'block'}]){reset();await service.append({...draft,submissionDeadline},capture());const command=JSON.parse(calls.at(-1).body);assert.deepEqual(command.submissionDeadline,submissionDeadline);assert.equal(Object.hasOwn(command,'submissionDeadline'),submissionDeadline!==undefined);}
 for(const mutate of [()=>values.set('workos_session','null'),()=>values.set('workos_organization_scope',JSON.stringify(other)),()=>values.set('workos_api_token','replacement'),()=>values.set('workos_session',JSON.stringify({...user,permissions:[]}))]){
  reset();const owner=capture();mutate();await assert.rejects(service.get(owner));await assert.rejects(service.append(draft,owner));assert.equal(calls.length,0);
 }

@@ -1,6 +1,6 @@
 # PR-008K: Explicit Weekly submission deadline and grace policy
 
-**Status:** Acceptance plan recorded before implementation. Development-only dependency on unchanged Draft PR64 `e80fdc634277ffd05648117f98ff345c4e60054f`, tree `2c4c318669d37e65eedd5384dc26f806dd173a35`. Optional independent/formal reviews remain deferred/outstanding, not passed.
+**Status:** Acceptance plan recorded before implementation in commit `30c1d54`. Focused unit, real PostgreSQL/API and React/API/PostgreSQL gates pass; final exact-head retained/local/hosted receipts remain required. Development-only dependency on unchanged Draft PR64 `e80fdc634277ffd05648117f98ff345c4e60054f`, tree `2c4c318669d37e65eedd5384dc26f806dd173a35`. Optional independent/formal reviews remain deferred/outstanding, not passed.
 
 ## Approved source and bounded outcome
 

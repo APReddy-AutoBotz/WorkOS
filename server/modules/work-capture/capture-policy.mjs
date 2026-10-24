@@ -1,3 +1,4 @@
+import {submissionDeadlineInput,submissionDeadlineRule} from './submission-deadline.mjs';
 import {overtimeInput,overtimeRule,evaluateOvertime,assertOvertimeAllowed} from './overtime-policy.mjs';
 import {z} from 'zod';
 import {assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS} from '../../reporting-periods.mjs';
@@ -35,6 +36,7 @@ export const capturePolicyInput = z.object({
   commentRequired: z.boolean(),
   evidenceRequired: z.boolean().optional(),
   overtime: overtimeInput.nullable().optional(),
+  submissionDeadline:submissionDeadlineInput.nullable().optional(),
 }).strict().superRefine((input, context) => {
   if (input.dailyMaximum !== null && compareHours(input.dailyMaximum, input.minimumIncrement) < 0) context.addIssue({code: 'custom', path: ['dailyMaximum'], message: 'Daily maximum must permit at least one increment.'});
   if (input.weeklyMaximum !== null && compareHours(input.weeklyMaximum, input.minimumIncrement) < 0) context.addIssue({code: 'custom', path: ['weeklyMaximum'], message: 'Weekly maximum must permit at least one increment.'});
@@ -47,6 +49,7 @@ export const capturePolicyView = row => ({
   commentRequired: row.comment_required,
   evidenceRequired: row.evidence_required === true,
   overtime: overtimeRule(row.overtime_rule),
+  submissionDeadline:submissionDeadlineRule(row.submission_deadline),
 });
 export const resolveCapturePolicy = (policies, at) => [...policies].reverse().find(policy => policy.effective_from <= at) || null;
 export const validateEntryCaptureRules = (entry, policy) => {

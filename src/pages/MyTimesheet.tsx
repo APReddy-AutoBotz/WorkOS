@@ -1,3 +1,4 @@
+import {SubmissionDeadlinePreview} from '../components/SubmissionTiming';
 import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
 import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
 import {workReferenceIsValid,normalizeWorkReference} from '../../shared/work-reference.mjs';
@@ -323,6 +324,7 @@ export const MyTimesheet = () => {
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       <WorkCaptureWarnings warnings={captureWarnings}/>
+      {loaded&&!saving&&!['Submitted','Approved'].includes(status)&&<SubmissionDeadlinePreview dates={[getWeekEnding(currentWeek),...preservedEntries.map(entry=>entry.date),...rows.flatMap(row=>row.hours.flatMap((_,index)=>captureCellPresent(row,index,hourDrafts)?[toIsoDate(shiftDate(currentWeek,index-2))]:[]))]}/>}
       <WorkSubmissionAssurance assurance={workAssurance} status={status} entryCheck={duplicateEntryCheck} />
       {loaded&&historyHeader&&!saving&&<div key={`${historyHeader}:${writeToken}`}><WorkSubmissionHistory timesheetId={historyHeader}/></div>}
       <PageHeader

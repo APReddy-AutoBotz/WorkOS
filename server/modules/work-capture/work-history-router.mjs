@@ -12,7 +12,7 @@ export const projectHistorySubmission=row=>({
  entries:row.entries.map(entry=>({entryId:entry.entryId,projectId:entry.projectId,workType:entry.workType,workDate:entry.workDate,
   hoursExact:canonicalHours(entry.hours),billable:entry.billable,clientName:entry.clientName,category:entry.category,remark:entry.remark,
   ...(Object.hasOwn(entry,'evidenceUrl')?{evidenceUrl:entry.evidenceUrl}:{}),...(Object.hasOwn(entry,'workReference')?{workReference:entry.workReference}:{})})),
- decision:row.decision,
+ decision:row.decision,...(row.submissionTiming!=null?{submissionTiming:row.submissionTiming}:{}),
 });
 export const createWorkHistoryRouter=({pool,requireDatabase,requireAuth,requirePermission,
  logError=error=>console.error('Work history read failed',error?.code||'UNKNOWN')})=>{
@@ -25,7 +25,7 @@ export const createWorkHistoryRouter=({pool,requireDatabase,requireAuth,requireP
    const {params,where}=timesheetReadScope(req);params.push(req.params.id,before);const idParam=params.length-1,cursorParam=params.length;
    const row=(await pool.query(`select t.id,t.employee_id,t.week_ending::text,
     coalesce((select jsonb_agg(page.item order by page.sequence desc) from (
-     select w.sequence,jsonb_build_object('id',w.id,'sequence',w.sequence,'createdAt',w.created_at,'activeRole',w.active_role,'source',w.source,'entries',w.entries,
+     select w.sequence,jsonb_build_object('id',w.id,'sequence',w.sequence,'createdAt',w.created_at,'activeRole',w.active_role,'source',w.source,'entries',w.entries,'submissionTiming',w.submission_timing,
       'decision',(select jsonb_build_object('status',d.status,'reason',d.reason,'createdAt',d.created_at,'activeRole',d.active_role,'source',d.source)
        from work_submission_decisions d where d.submission_id=w.id)) item
      from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id

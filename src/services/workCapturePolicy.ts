@@ -1,3 +1,4 @@
+export type SubmissionDeadlineRule={anchor:'weekly-end-date';timezone:'UTC';daysAfterPeriodEnd:number;time:string;graceMinutes:number;lateTreatment:'warn'|'block'};
 import {api, checkBackend, ApiClientError} from './apiClient';
 import {assertOrganizationProfileContext, type OrganizationProfileContext} from './organizationProfileScope';
 
@@ -5,13 +6,13 @@ export type OvertimeCaptureRule={action:'warn'|'block';dailyThreshold:string|nul
 export type CapturePolicy = {
   id: string; sequence: number; policyVersion: 'work-capture-rules/1';
   effectiveFrom: string; minimumIncrement: string; dailyMaximum: string | null;
-  weeklyMaximum: string | null; commentRequired: boolean; evidenceRequired: boolean; overtime:OvertimeCaptureRule|null;
+  weeklyMaximum: string | null; commentRequired: boolean; evidenceRequired: boolean; overtime:OvertimeCaptureRule|null;submissionDeadline:SubmissionDeadlineRule|null;
 };
 export type CapturePolicyWorkspace = {
   organizationId: string; legalEntityId: string; serverDate: string; latestId: string | null;
   versions: CapturePolicy[]; truncated: boolean; activationDates: string[];
 };
-export type CapturePolicyDraft = Pick<CapturePolicy, 'effectiveFrom' | 'minimumIncrement' | 'dailyMaximum' | 'weeklyMaximum' | 'commentRequired'> & {expectedLatestId: string | null; evidenceRequired?: boolean;overtime?:OvertimeCaptureRule|null};
+export type CapturePolicyDraft = Pick<CapturePolicy, 'effectiveFrom' | 'minimumIncrement' | 'dailyMaximum' | 'weeklyMaximum' | 'commentRequired'> & {expectedLatestId: string | null; evidenceRequired?: boolean;overtime?:OvertimeCaptureRule|null;submissionDeadline?:SubmissionDeadlineRule|null};
 export const workCapturePolicyService = {
   get: async (context: OrganizationProfileContext | null): Promise<CapturePolicyWorkspace> => {
     const owner = assertOrganizationProfileContext(context);
@@ -24,9 +25,9 @@ export const workCapturePolicyService = {
   },
   append: async (input: CapturePolicyDraft, context: OrganizationProfileContext | null): Promise<CapturePolicy> => {
     const owner = assertOrganizationProfileContext(context);
-    const {expectedLatestId, effectiveFrom, minimumIncrement, dailyMaximum, weeklyMaximum, commentRequired, evidenceRequired, overtime} = input;
+    const {expectedLatestId, effectiveFrom, minimumIncrement, dailyMaximum, weeklyMaximum, commentRequired, evidenceRequired, overtime, submissionDeadline} = input;
     const result = await api.requestWithContext<CapturePolicy>('POST', '/api/v1/work-capture-policy', {expectedLatestId, effectiveFrom,
-      minimumIncrement, dailyMaximum, weeklyMaximum, commentRequired, evidenceRequired, overtime}, owner);
+      minimumIncrement, dailyMaximum, weeklyMaximum, commentRequired, evidenceRequired, overtime, submissionDeadline}, owner);
     assertOrganizationProfileContext(owner);
     return result;
   },

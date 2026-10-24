@@ -1,3 +1,4 @@
+import {SubmissionTiming} from './SubmissionTiming';
 import {useEffect,useRef,useState} from 'react';
 import {ApiClientError} from '../services/apiClient';
 import {captureWorkCaptureContext,isWorkCaptureContextCurrent,type WorkCaptureContext} from '../services/workCaptureModes';
@@ -26,7 +27,7 @@ export const WorkSubmissionHistory=({timesheetId}:{timesheetId:string})=>{
    {error&&<div role="alert"><p>{error}</p><button disabled={busy} onClick={()=>void load(cursor.current)}>Retry history</button></div>}
    {page&&<><p>Work period ending {page.weekEnding}. {page.submissions.length} retained versions on this page.</p>
     {page.submissions.length===0?<p>No retained submissions on this page. Earlier work is not assigned an inferred submission or decision history.</p>:page.submissions.map(submission=><article key={submission.id} aria-label={`Retained submission ${submission.sequence}`} className="my-3 rounded-lg border p-3">
-     <h3 className="font-semibold">Submission {submission.sequence}</h3><p>Submitted <time dateTime={submission.createdAt}>{formatInstant(submission.createdAt)}</time> · {submission.activeRole} · {submission.source}</p>
+     <h3 className="font-semibold">Submission {submission.sequence}</h3><SubmissionTiming checks={submission.submissionTiming} retained/><p>Submitted <time dateTime={submission.createdAt}>{formatInstant(submission.createdAt)}</time> · {submission.activeRole} · {submission.source}</p>
      {submission.decision?<p>{submission.decision.status} <time dateTime={submission.decision.createdAt}>{formatInstant(submission.decision.createdAt)}</time> · {submission.decision.activeRole} · {submission.decision.source}{submission.decision.reason?` · Reason: ${submission.decision.reason}`:''}</p>:<p>No retained decision for this submission.</p>}
      <ul>{submission.entries.map(entry=><li key={entry.entryId} className="my-2 border-t pt-2"><p>{entry.workDate} · {entry.hoursExact}h · {entry.workType} · {entry.billable?'Billable':'Non-billable'}</p><p>{entry.clientName||''}{entry.category?` · ${entry.category}`:''}{entry.projectId?` · Project reference: ${entry.projectId}`:''}</p><p>Comment: {entry.remark||'None recorded'}</p><p>Reference: {entry.workReference===undefined?'Not retained in this historical version':entry.workReference||'None recorded'}</p>
       {entry.evidenceUrl?<a href={entry.evidenceUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Open retained evidence link</a>:<p>Evidence link: {entry.evidenceUrl===undefined?'Not retained in this historical version':'None recorded'}</p>}</li>)}</ul>

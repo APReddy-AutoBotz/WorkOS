@@ -707,6 +707,7 @@ export interface DuplicateEntryCheck {
   groups: Array<{key:string;entryIds:string[];workDate:string;hoursExact:string;workType:WorkType;projectId:string|null;clientName:string|null;category:string|null}>;
 }
 export interface WorkSubmissionAssurance {
+  submissionTiming?: import('./services/submissionDeadline').SubmissionTiming[];
   duplicateCheck?: DuplicateEntryCheckSummary;
   id: string;
   sequence: number;
