@@ -290,7 +290,7 @@ assert.match(timesheetImportRoute, /assertReportingPeriodAllows[\s\S]*REPORTING_
   'timesheet provenance must preserve authoritative period checks and existing scoped group upserts');
 assert.match(timesheetImportRoute, /const status = dryRun \? 'Dry Run' : validEntryRows === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
   'timesheet import success, partial and failed counts must retain their existing row semantics');
-assert.match(timesheetImportRoute, /const naturalTarget = row\.workType === 'Project Work' \? project\?\.id : row\.clientName[\s\S]*seenTimesheetEntryKeys/,
+assert.match(timesheetImportRoute, /const naturalTarget = row\.workType === 'Project Work' \? project\?\.id :[\s\S]*row\.clientName[\s\S]*categoryImportKeySuffix\(row\.categoryCode\)[\s\S]*seenTimesheetEntryKeys/,
   'versioned Timesheet Import must detect duplicate natural keys after resolving employee/project aliases');
 assert.match(timesheetImportRoute, /!isWorkDateInsideWeek\(row\.date, row\.weekEnding\)/,
   'versioned Timesheet Import must preserve the existing seven-day work-date rule');
