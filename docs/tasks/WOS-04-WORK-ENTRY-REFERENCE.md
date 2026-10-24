@@ -1,6 +1,6 @@
 # PR-008E: Optional task, ticket or milestone reference text
 
-**Status:** Acceptance plan recorded before implementation; dependent development only. Optional independent/formal code and security reviews are deferred and outstanding.
+**Status:** Dependent implementation candidate; acceptance plan was recorded before product edits in commit `040e02b`. Exact-head engineering receipts remain required. Optional independent/formal code and security reviews are deferred and outstanding.
 **Authority:** PRODUCT_REQUIREMENTS.md §10, WOS-TIM-003: a work entry supports an "optional task/ticket/milestone reference"; IMPLEMENTATION_BACKLOG.md PR-008 explicitly includes work references; WOS-04 issue #6.
 **Dependency:** Unchanged Draft PR58 head `39cf7e10537972e232498a6a99a1f89df05c765b`, tree `f042e173de542dc54845a2f73677072f87d35a05`.
 

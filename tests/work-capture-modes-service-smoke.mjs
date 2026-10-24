@@ -43,6 +43,10 @@ for(const evidenceUrl of [undefined,null,'https://example.test/work/42?revision=
  const entry=JSON.parse(calls.at(-1).body).entries[0];
  assert.equal(entry.evidence_url,evidenceUrl);assert.equal(Object.hasOwn(entry,'evidence_url'),evidenceUrl!==undefined);
 }
+for(const workReference of [undefined,null,'TASK-42 · Discovery checkpoint']){
+ await work.save({...input,entries:[{...input.entries[0],evidenceUrl:'https://example.test/work/42',workReference}]},precondition,capture());
+ const entry=JSON.parse(calls.at(-1).body).entries[0];assert.equal(entry.work_reference,workReference);assert.equal(Object.hasOwn(entry,'work_reference'),workReference!==undefined);assert.equal(entry.evidence_url,'https://example.test/work/42');
+}
 assert.deepEqual(await settings.get(captureSettings()),modeSettings);
 await settings.append({...draft,actorId:'forged'},captureSettings());assert.deepEqual(JSON.parse(calls.at(-1).body),draft);
 for(const mutate of [()=>values.set('workos_session','null'),()=>values.set('workos_organization_scope',JSON.stringify(other)),()=>values.set('workos_api_token','replacement'),()=>values.set('workos_session',JSON.stringify({...user,permissions:[]}))]){

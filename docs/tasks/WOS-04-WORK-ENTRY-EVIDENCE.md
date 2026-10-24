@@ -34,3 +34,7 @@ Before implementation the sole writer checked that no peer agents or implementat
 Keep additive migration047 and immutable histories on rollback; no destructive down migration or URL/history deletion is supplied. A pre047 application does not understand preservation on replacement: keep work writes disabled operationally if such a binary must be restored, then roll forward to an evidence-aware application before resuming writes. This is rollback guidance, not authorization to change any running deployment.
 
 No uploads, URL dereferencing, mandatory-evidence policy, task/ticket/milestone model, categories, deadlines, overtime, approval redesign, protected reopen, assignment-versioning, financial behavior, external provider or deployment is included. Full WOS-TIM-003, PR008 and programme acceptance remain open.
+
+## Separate PR-008E continuation
+
+The task/ticket/milestone model exclusion above is addressed only as descriptive optional reference text by separate [PR-008E](WOS-04-WORK-ENTRY-REFERENCE.md), based on unchanged PR58 `39cf7e10537972e232498a6a99a1f89df05c765b`. It supplies no authoritative task/milestone relationship. PR-008D's URL behavior remains bounded and the preceding stack is not accepted/integrated.

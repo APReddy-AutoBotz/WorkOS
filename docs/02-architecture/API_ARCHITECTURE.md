@@ -205,3 +205,7 @@ The server atomically finalizes an invoice-batch approval and moves the batch to
 ## Optional work-entry evidence references (PR-008D)
 
 See [the bounded contract and compatibility rules](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md). Manual entries accept `evidence_url`; both existing import aliases accept `evidenceUrl`. Omission preserves a uniquely matched prior reference, explicit null/blank clears it, and ambiguous potentially destructive legacy replacement conflicts before writes. URLs are stored/read and included in new immutable submission JSON; no resolver or outbound request is added. Existing full-row revisions include evidence-only edits. All current permission, scope, assignment, period, capture and approval controls remain in their original order.
+
+## Optional descriptive work references (PR-008E)
+
+Manual entries/read accept/return `work_reference`; both existing import aliases accept `workReference`. The single-line Unicode text is optional, bounded to 200 characters, trimmed, and explicitly cleared with null/blank. It supplies no task/milestone relationship, source identity, duplicate key, billability or financial authority. Existing optional metadata preservation resolves evidence URLs and reference text independently under the existing scope/header locks: omission retains a unique prior context, while ambiguity or linked context removal conflicts unless the relevant dimension is explicit. New snapshots/audit include the text; old immutable JSON remains unchanged. See [the bounded contract](../tasks/WOS-04-WORK-ENTRY-REFERENCE.md).

@@ -612,6 +612,7 @@ export const timesheetService = {
           hours: e.hours,
           remark: e.remark || null,
           evidence_url: e.evidenceUrl,
+          work_reference: e.workReference,
           billable: e.billable,
         })),
       });

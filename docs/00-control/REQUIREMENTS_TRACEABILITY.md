@@ -329,3 +329,7 @@ WOS-TIM-001 and the retained WOS-CORE-003–005 / WOS-TIM-004–006/008–009/01
 ### PR-008D bounded continuation: work-entry evidence links
 
 WOS-TIM-003 evidence-link dimension is implemented as an optional per-entry URL in [PR-008D](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md), dependent on unchanged PR57 `02c024d45621fe516e0a46f21657a37f2a1e4532`. Migration047, shared manual/import omitted-field preservation, evidence-only revisions, immutable correction snapshots and real React/API/PostgreSQL gates cover this bounded dimension. Remaining entry dimensions and full PR008 acceptance remain open. This development-only sequencing exception defers optional reviews; it accepts/integrates no prerequisite and authorizes no merge/release/deployment. New exact-head results and deferred review status must accompany the Draft.
+
+### PR-008E bounded continuation: descriptive work references
+
+WOS-TIM-003's optional task/ticket/milestone reference text is implemented in [PR-008E](../tasks/WOS-04-WORK-ENTRY-REFERENCE.md), based on unchanged PR58 `39cf7e10537972e232498a6a99a1f89df05c765b`. Additive migration048, manual/both import contracts, independent metadata omission/clear preservation, reference-only revisions and immutable history have dedicated unit/PostgreSQL/React gates. This text is not an authoritative milestone binding, source identity or duplicate/financial key. Optional reviews remain deferred/outstanding; full TIM003/PR008, prerequisites and integrated acceptance remain open.

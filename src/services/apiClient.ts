@@ -417,6 +417,7 @@ export const normalizeTimesheetSummary = (
       hoursExact: String(entry.hours_exact ?? entry.hours),
       remark: entry.remark ? String(entry.remark) : undefined,
       evidenceUrl: typeof entry.evidence_url === 'string' ? entry.evidence_url : null,
+      workReference: typeof entry.work_reference === 'string' ? entry.work_reference : null,
       status: (entry.status || r.status) as TimesheetEntry['status'],
       billable: Boolean(entry.billable),
       weekEnding: String(entry.week_ending ?? r.week_ending).slice(0, 10),

@@ -75,7 +75,7 @@ export const workCaptureWorkspaceService={
       employee_id:input.employeeId,week_ending:input.weekEnding,status:input.status,
       expected_write_token:precondition.writeToken,capture_mode:precondition.mode,expected_mode_policy_id:precondition.modePolicyId,
       entries:input.entries.map(entry=>({project_id:entry.projectId||null,work_type:entry.workType,client_name:entry.clientName||null,
-        category:entry.category||null,work_date:entry.date,hours:canonicalHours(entry.hoursExact??entry.hours),remark:entry.remark||null,billable:entry.billable,evidence_url:entry.evidenceUrl})),
+        category:entry.category||null,work_date:entry.date,hours:canonicalHours(entry.hoursExact??entry.hours),remark:entry.remark||null,billable:entry.billable,evidence_url:entry.evidenceUrl,work_reference:entry.workReference})),
     },owner);
     assertWorkCaptureContext(owner);
     if(typeof result.write_token!=='string'||!/^[a-f0-9]{64}$/.test(result.write_token))throw new ApiClientError('Save revision could not be confirmed. Reload work.',{status:503});
