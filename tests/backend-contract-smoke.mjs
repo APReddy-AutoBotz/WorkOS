@@ -252,7 +252,7 @@ assert.match(allocationImportRoute, /const importBatchId = randomUUID\(\)/,
   'allocation imports must receive a server-generated batch ID after request validation');
 assert.match(allocationImportRoute, /source: 'Allocation Control CSV'[\s\S]*importBatchId,[\s\S]*sourceIdentifier: row\.id \?\? null,[\s\S]*importProcessingResult: 'Success'/,
   'successful allocation row audits must retain source, optional source ID, batch and processing result');
-assert.match(allocationImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run\)[\s\S]*values \(\$1,'Import','Allocation Control'/,
+assert.match(allocationImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run,assignment_policy_warnings\)[\s\S]*values \(\$1,'Import','Allocation Control'/,
   'allocation batch history must use the same ID as row audits and retain the selected scope');
 assert.match(allocationImportRoute, /await client\.query\('begin'\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'allocation mutations, row audits and the batch result must commit or roll back together');

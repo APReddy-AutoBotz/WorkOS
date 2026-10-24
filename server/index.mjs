@@ -2689,7 +2689,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
     });
     const overlapEvidence=await retainedOverlapEvidence(client,req,result.rows[0].id);
     await client.query('commit');
-    res.json({...result.rows[0],assignment_overlap_evidence:overlapEvidence});
+    res.json({...result.rows[0],...(overlapEvidence?.checks.length?{assignment_overlap_evidence:overlapEvidence}:{})});
   } catch (error) {
     await client.query('rollback');
     if (workPolicyError(res,error)) return;

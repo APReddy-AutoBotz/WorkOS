@@ -149,7 +149,7 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
         'Allocation Management',
         `${allocation ? 'Modified' : 'Created'} allocation for ${employees.find(e => e.id === selectedEmployeeId)?.name} on ${projects.find(p => p.id === selectedProjectId)?.name}`
       );
-      if(receipt?.policyNotice&&policyOwner&&isOverlapContextCurrent(policyOwner))onPolicyWarning?.(receipt.policyNotice);
+      if(receipt&&receipt.policyNotice&&policyOwner&&isOverlapContextCurrent(policyOwner))onPolicyWarning?.(receipt.policyNotice);
       onClose();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Allocation could not be saved. Reload and check the authoritative worker/project dates.");
