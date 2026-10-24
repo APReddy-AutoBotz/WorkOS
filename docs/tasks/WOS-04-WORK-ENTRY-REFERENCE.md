@@ -24,7 +24,7 @@ Pre-implementation checks on 2026-10-24 found no peer writer or active implement
 
 1. Unit/contract tests: valid Unicode, limits/invalid controls, omission versus clear, mixed metadata independence and duplicate/context conflicts; grid/service save transport and hidden/context/zero preservation.
 2. Real PostgreSQL/API: fresh install, 047 upgrade/replay, neutral existing work/grants/immutable JSON; manual save/reload/clear and reference-only stale conflicts; old evidence-aware client omission; both import aliases, preview/replay and explicit replacement; existing scope/status/period denials; Submitted/Rejected/correction snapshots and legacy approval compatibility.
-3. Real React/API/PostgreSQL journey: daily/weekly editing, reload/clear, escaped rendering, mode/hidden/weekend/zero/context preservation and stale tabs. No external request caused by displaying the reference.
+3. Real React/API/PostgreSQL journey: daily/weekly editing, reload/clear, escaped rendering, mode/hidden/weekend/zero/context preservation, stale tabs and an internally scrolling editor on short viewports. No external request caused by displaying the reference.
 4. Locked install, type/lint, aggregate unit/contracts, applicable retained PostgreSQL/migration/browser and production build/startup checks. Publish only a separate dependent Draft with exact head/tree and executable receipts. Existing CI gates remain enabled; no scan/review is manually requested or substituted for engineering tests.
 5. Record optional independent/formal reviews as outstanding. Do not declare full WOS-TIM-003, PR008, prerequisite or integrated acceptance.
 

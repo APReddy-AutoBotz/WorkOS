@@ -575,7 +575,7 @@ export const MyTimesheet = () => {
       {/* Remark Input Modal/Overlay */}
       {activeRemark && (
         <div role="dialog" aria-label="Entry remarks" aria-modal="true" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-border-light w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-border-light w-full max-w-sm max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200">
             <div className="p-4 bg-slate-50 border-b border-border-light flex justify-between items-center">
               <div>
                 <h4 className="text-xs font-bold text-heading">Entry Remarks</h4>

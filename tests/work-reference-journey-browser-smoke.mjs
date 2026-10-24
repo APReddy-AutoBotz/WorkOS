@@ -54,7 +54,11 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    const second=await context.newPage();second.setDefaultTimeout(20000);await loadPast(second);
    await edit(page,'Synthetic Monday',reference);assert.equal(await save(page),200);await page.getByText('Draft timesheet saved.',{exact:true}).waitFor();const winner=await workSnapshot(pool);
    await edit(second,'Synthetic Monday',nextReference);assert.equal(await save(second),409);await second.getByText(/Work changed since it was loaded/).waitFor();assert.deepEqual(await workSnapshot(pool),winner);assert.equal(await second.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
-   await second.close();assert.equal(await page.evaluate(()=>window.syntheticReferenceExecuted),undefined);assert.deepEqual(errors,[]);assert.deepEqual(external,[],'reference text causes no external request');await context.close();
+   await second.close();
+   await page.setViewportSize({width:420,height:500});await rowFor(page,'Synthetic Monday').getByRole('button',{name:'Edit Monday remark',exact:true}).click();
+   const panel=page.getByRole('dialog',{name:'Entry remarks',exact:true}).locator(':scope > div'),box=await panel.boundingBox();assert(box&&box.height<=450,'the expanded entry editor must fit a small viewport and scroll internally');
+   await page.getByLabel('Task / ticket / milestone reference (optional)',{exact:true}).fill('TASK-SMALL-SCREEN');const done=page.getByRole('button',{name:'Save Daily Remark',exact:true});await done.scrollIntoViewIfNeeded();const buttonBox=await done.boundingBox();assert(buttonBox&&buttonBox.y>=0&&buttonBox.y+buttonBox.height<=500);await done.click();
+   assert.equal(await page.evaluate(()=>window.syntheticReferenceExecuted),undefined);assert.deepEqual(errors,[]);assert.deepEqual(external,[],'reference text causes no external request');await context.close();
   }finally{await browser?.close();await vite.close();}
  });
 });
