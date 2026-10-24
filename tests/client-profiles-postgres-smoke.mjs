@@ -107,7 +107,7 @@ await withClientProfileDatabase(async ({pool, databaseUrl}) => {
     const before = await snapshot(pool, [...preservedClientTables, 'audit_logs']);
     for(const row of before.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;} // additive 047/048 column
     assert.equal(before.project_engagement_mappings.length, 1);assert.ok(before.commercial_draft_events.length >= 3);assert.equal(before.commercial_lifecycle_events.length, 3);
-    const upgraded = await migrateClientProfiles(pool);assert.deepEqual(upgraded.applied, [clientProfileMigration, '043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check']);assert.equal(upgraded.status.isCurrent, true);
+    const upgraded = await migrateClientProfiles(pool);assert.deepEqual(upgraded.applied, [clientProfileMigration, '043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy']);assert.equal(upgraded.status.isCurrent, true);
     assert.deepEqual(await snapshot(pool, [...preservedClientTables, 'audit_logs']), before, '042 never rewrites operational, neutral, commercial, lifecycle or work history');
     await defaults(pool);
     for (const table of clientProfileTables) assert.deepEqual((await snapshot(pool, [table]))[table], []);

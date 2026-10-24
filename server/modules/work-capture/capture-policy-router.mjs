@@ -1,3 +1,4 @@
+import {OVERTIME_OFF} from './overtime-policy.mjs';
 import {randomUUID} from 'node:crypto';
 import {Router} from 'express';
 import {lockWorkPolicy} from './assignment-work-policy.mjs';
@@ -10,7 +11,7 @@ export const createCapturePolicyRouter = ({pool, requireDatabase, requireAuth, r
   router.get('/', async (req, res) => {
     try {
       const {organizationId, legalEntityId} = req.organizationScope;
-      const versions = (await pool.query(`select id,sequence,policy_version,effective_from::text,minimum_increment::text,daily_maximum::text,weekly_maximum::text,comment_required,evidence_required
+      const versions = (await pool.query(`select id,sequence,policy_version,effective_from::text,minimum_increment::text,daily_maximum::text,weekly_maximum::text,comment_required,evidence_required,overtime_rule
         from work_capture_policy_versions where organization_id=$1 and legal_entity_id=$2 order by sequence desc limit 51`, [organizationId, legalEntityId])).rows;
       const serverDate = (await pool.query("select (now() at time zone 'UTC')::date::text today")).rows[0].today;
       const starts = (await pool.query(`select starts_on::text from reporting_periods where organization_id=$1 and legal_entity_id=$2 and frequency='Weekly'
@@ -30,17 +31,18 @@ export const createCapturePolicyRouter = ({pool, requireDatabase, requireAuth, r
       client = await pool.connect(); await client.query('begin'); open = true;
       await lockWorkPolicy(client, req);
       const {organizationId, legalEntityId} = req.organizationScope;
-      const latest = (await client.query('select id,sequence,effective_from::text,evidence_required from work_capture_policy_versions where organization_id=$1 and legal_entity_id=$2 order by sequence desc limit 1', [organizationId, legalEntityId])).rows[0];
+      const latest = (await client.query('select id,sequence,effective_from::text,evidence_required,overtime_rule from work_capture_policy_versions where organization_id=$1 and legal_entity_id=$2 order by sequence desc limit 1', [organizationId, legalEntityId])).rows[0];
       if ((latest?.id || null) !== parsed.data.expectedLatestId) {
         await client.query('rollback'); open = false;
         res.status(409).json({error: 'The capture policy changed. Reload before appending another version.', code: 'WORK_CAPTURE_POLICY_CONFLICT'}); return;
       }
       const input = parsed.data;
-      const row = (await client.query(`insert into work_capture_policy_versions(id,organization_id,legal_entity_id,sequence,policy_version,effective_from,minimum_increment,daily_maximum,weekly_maximum,comment_required,evidence_required,actor_id,active_role,source,correlation_id,operation_id)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Web',$14,$15) returning *,effective_from::text`,
+      const row = (await client.query(`insert into work_capture_policy_versions(id,organization_id,legal_entity_id,sequence,policy_version,effective_from,minimum_increment,daily_maximum,weekly_maximum,comment_required,evidence_required,actor_id,active_role,source,correlation_id,operation_id,overtime_rule)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Web',$14,$15,$16::jsonb) returning *,effective_from::text`,
       [`capture-policy-${randomUUID()}`, organizationId, legalEntityId, Number(latest?.sequence || 0) + 1, CAPTURE_POLICY_VERSION,
         input.effectiveFrom, input.minimumIncrement, input.dailyMaximum, input.weeklyMaximum, input.commentRequired, input.evidenceRequired ?? latest?.evidence_required ?? false,
-        req.user.sub, req.user.activeRole, req.correlationId, req.operationId])).rows[0];
+        req.user.sub, req.user.activeRole, req.correlationId, req.operationId,
+        input.overtime===undefined?(latest?.overtime_rule?JSON.stringify(latest.overtime_rule):null):JSON.stringify(input.overtime??OVERTIME_OFF)])).rows[0];
       const result = capturePolicyView(row);
       await audit(client, req, {module: 'Work Capture', action: 'Append Capture Policy', entityType: 'Work Capture Policy', entityId: row.id,
         oldValue: latest || null, newValue: result, details: 'Appended scoped Weekly-boundary capture policy; existing work and evidence remain unchanged.'});

@@ -1,6 +1,6 @@
 # PR-008J: Explicit overtime capture thresholds and treatment
 
-**Status:** Acceptance plan recorded before implementation. Dependent development only; optional independent/formal reviews remain deferred/outstanding.
+**Status:** Acceptance plan recorded before implementation as `c60292ad5bcc5faceff37cd7282a42ecba19c995`. Implementation and focused real PostgreSQL/API and React/API/PostgreSQL journeys are present; exact-head full regression/hosted receipts must accompany publication. Dependent development only; optional independent/formal reviews remain deferred/outstanding.
 **Fixed dependency:** Draft PR63 `b40712739d613d5fef9f8b4926d70f1e691e9b08`, tree `ddfb91120ddecc832afcb8b17bc03313b991c8b2`.
 **Authority:** PRODUCT_REQUIREMENTS.md WOS-TIM-005; WORK_CAPTURE_AND_TIMESHEET_SPEC.md Modes and policy; existing capture-policy all-header/all-state aggregate/prospective/immutable contract (migrations045/049). WOS-CORE-003–005/DEC012/013 require authoritative exact rules and retained truth. WOS-DEC-016 excludes payroll. [D1–D8 resolution](WOS-04-POLICY-DECISION-RESOLUTION.md) removes the mistaken blanket configuration blocker without choosing buyer values or adding scope.
 

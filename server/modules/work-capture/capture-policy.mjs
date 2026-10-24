@@ -1,3 +1,4 @@
+import {overtimeInput,overtimeRule,evaluateOvertime,assertOvertimeAllowed} from './overtime-policy.mjs';
 import {z} from 'zod';
 import {assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS} from '../../reporting-periods.mjs';
 import {WorkPolicyError} from './assignment-work-policy.mjs';
@@ -33,6 +34,7 @@ export const capturePolicyInput = z.object({
   weeklyMaximum: decimal.nullable(),
   commentRequired: z.boolean(),
   evidenceRequired: z.boolean().optional(),
+  overtime: overtimeInput.nullable().optional(),
 }).strict().superRefine((input, context) => {
   if (input.dailyMaximum !== null && compareHours(input.dailyMaximum, input.minimumIncrement) < 0) context.addIssue({code: 'custom', path: ['dailyMaximum'], message: 'Daily maximum must permit at least one increment.'});
   if (input.weeklyMaximum !== null && compareHours(input.weeklyMaximum, input.minimumIncrement) < 0) context.addIssue({code: 'custom', path: ['weeklyMaximum'], message: 'Weekly maximum must permit at least one increment.'});
@@ -44,6 +46,7 @@ export const capturePolicyView = row => ({
   weeklyMaximum: row.weekly_maximum === null ? null : canonicalHours(row.weekly_maximum),
   commentRequired: row.comment_required,
   evidenceRequired: row.evidence_required === true,
+  overtime: overtimeRule(row.overtime_rule),
 });
 export const resolveCapturePolicy = (policies, at) => [...policies].reverse().find(policy => policy.effective_from <= at) || null;
 export const validateEntryCaptureRules = (entry, policy) => {
@@ -52,7 +55,7 @@ export const validateEntryCaptureRules = (entry, policy) => {
   if (policy && !isHourMultiple(hours, policy.minimum_increment)) fail('WORK_CAPTURE_INCREMENT', `Hours must use increments of ${canonicalHours(policy.minimum_increment)} on this work date.`);
   if (policy?.comment_required && compareHours(hours, '0') > 0 && !entry.remark?.trim()) fail('WORK_CAPTURE_COMMENT_REQUIRED', 'A comment is required for each positive work entry on this work date.');
   if (policy?.evidence_required && compareHours(hours, '0') > 0 && !entry.evidence_url) fail('WORK_CAPTURE_EVIDENCE_REQUIRED', 'An evidence URL is required for each positive work entry on this work date.');
-  return {...entry, hours, capturePolicyReference: policy ? {id: policy.id, policyVersion: policy.policy_version} : null};
+  return {...entry, hours, capturePolicyReference: policy ? {id: policy.id, policyVersion: policy.policy_version,...(policy.overtime_rule?{overtime:overtimeRule(policy.overtime_rule)}:{})} : null};
 };
 
 export const assertCaptureReplacementPeriods = async (client, req, timesheetId) => {
@@ -76,7 +79,7 @@ export const validateCapturePolicy = async (client, req, employeeId, entries, {
   const weeks = [...new Map(periods.filter(period => period.frequency === 'Weekly').map(period => [period.id, period])).values()];
   const startsOn = weeks.map(week => week.starts_on).sort()[0];
   const endsOn = weeks.map(week => week.ends_on).sort().at(-1);
-  const policies = (await client.query(`select id,sequence,policy_version,effective_from::text,minimum_increment::text,daily_maximum::text,weekly_maximum::text,comment_required,evidence_required
+  const policies = (await client.query(`select id,sequence,policy_version,effective_from::text,minimum_increment::text,daily_maximum::text,weekly_maximum::text,comment_required,evidence_required,overtime_rule
     from work_capture_policy_versions where organization_id=$1 and legal_entity_id=$2 and effective_from<=$3::date order by effective_from`, [organizationId, legalEntityId, endsOn])).rows;
   const checked = entries.map(entry => validateEntryCaptureRules(entry, resolveCapturePolicy(policies, entry.work_date)));
   const staged = stagedReplacements.filter(change => change.employeeId === employeeId);
@@ -97,5 +100,6 @@ export const validateCapturePolicy = async (client, req, employeeId, entries, {
       if (policy.weekly_maximum !== null && compareHours(weeklyTotal, policy.weekly_maximum) > 0) fail('WORK_CAPTURE_WEEKLY_LIMIT', `All recorded work in Weekly reporting period ${week.code} exceeds the configured weekly maximum.`);
     }
   }
+  assertOvertimeAllowed(evaluateOvertime(weeks,policies,all));
   return checked;
 };

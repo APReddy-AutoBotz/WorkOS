@@ -34,6 +34,9 @@ assert.deepEqual(JSON.parse(calls.at(-1).body),draft,'only command fields cross 
 for(const evidenceRequired of [true,false,undefined]){
  reset();await service.append({...draft,evidenceRequired},capture());const command=JSON.parse(calls.at(-1).body);assert.equal(command.evidenceRequired,evidenceRequired);assert.equal(Object.hasOwn(command,'evidenceRequired'),evidenceRequired!==undefined);
 }
+for(const overtime of [undefined,null,{action:'warn',dailyThreshold:'8',weeklyThreshold:null}]){
+ reset();await service.append({...draft,overtime},capture());const command=JSON.parse(calls.at(-1).body);assert.deepEqual(command.overtime,overtime);assert.equal(Object.hasOwn(command,'overtime'),overtime!==undefined);
+}
 for(const mutate of [()=>values.set('workos_session','null'),()=>values.set('workos_organization_scope',JSON.stringify(other)),()=>values.set('workos_api_token','replacement'),()=>values.set('workos_session',JSON.stringify({...user,permissions:[]}))]){
  reset();const owner=capture();mutate();await assert.rejects(service.get(owner));await assert.rejects(service.append(draft,owner));assert.equal(calls.length,0);
 }

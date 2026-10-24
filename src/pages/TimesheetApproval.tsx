@@ -1,3 +1,4 @@
+import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
 import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
 import { WorkSubmissionAssurance } from '../components/WorkSubmissionAssurance';
 import { useState, useEffect, useMemo } from 'react';
@@ -402,7 +403,8 @@ export const TimesheetApproval = () => {
                       {selectedTimesheet.employeeName.split(' ').map(n => n[0]).join('')}
                    </div>
                    <div>
-                     <WorkSubmissionAssurance assurance={selectedTimesheet.workAssurance} status={selectedTimesheet.status} entryCheck={selectedTimesheet.duplicateEntryCheck} />
+                     <WorkCaptureWarnings warnings={selectedTimesheet.captureWarnings}/>
+              <WorkSubmissionAssurance assurance={selectedTimesheet.workAssurance} status={selectedTimesheet.status} entryCheck={selectedTimesheet.duplicateEntryCheck} />
               {selectedTimesheet.id&&<div key={`${selectedTimesheet.id}:${selectedTimesheet.writeToken}`}><WorkSubmissionHistory timesheetId={selectedTimesheet.id}/></div>}
                      <h4 className="font-bold text-heading">{selectedTimesheet.employeeName}</h4>
                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Period: {selectedTimesheet.weekEnding}</p>

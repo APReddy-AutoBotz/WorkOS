@@ -1,3 +1,4 @@
+import {normalizeImportOvertimeWarnings,type ImportOvertimeWarnings} from './overtimeCapture';
 import {canonicalHours,sumHours} from '../../shared/work-hours.mjs';
 /**
  * api.ts — Dual-mode service layer.
@@ -55,6 +56,7 @@ type ImportApplyError = {
   sourceIdentifier?: string | null;
 };
 type ImportApplyResult = {
+  captureWarnings?: ImportOvertimeWarnings[];
   status: ImportExportLog['status'];
   totalRows: number;
   validRows: number;
@@ -2149,6 +2151,7 @@ export const adminService = {
     }, {'Idempotency-Key': request.idempotencyKey});
     const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
     return {
+      captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? request.totalRows),
       validRows: Number(raw.validRows ?? 0),
@@ -2187,6 +2190,7 @@ export const adminService = {
       clientErrors,
     });
     return {
+      captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? rows.length),
       validRows: Number(raw.validRows ?? 0),

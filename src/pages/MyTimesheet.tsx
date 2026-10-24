@@ -1,9 +1,10 @@
+import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
 import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
 import {workReferenceIsValid,normalizeWorkReference} from '../../shared/work-reference.mjs';
 import {evidenceUrlIsValid,normalizeEvidenceUrl} from '../../shared/work-evidence.mjs';
 import {canonicalHours,sumHours,compareHours} from '../../shared/work-hours.mjs';
 import {hydrateWorkCaptureGrid,parseCaptureHourInput,canonicalCaptureHourInput,captureUtcDate,captureHeaderMonday,captureCellText,captureCellHours,captureCellPresent,setCaptureRowHours,patchVisibleCaptureRow,removeVisibleCaptureRow} from '../services/workCaptureGrid';
-import type {TimesheetEntry,DuplicateEntryCheck} from '../types';
+import type {TimesheetEntry,DuplicateEntryCheck,OvertimeWarning} from '../types';
 import {ApiClientError,resetBackendCheck} from '../services/apiClient';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
@@ -68,6 +69,7 @@ export const MyTimesheet = () => {
   const isFutureWeek = currentWeek > currentSystemWeek;
   const [status, setStatus] = useState<'Draft' | 'Submitted' | 'Approved' | 'Rejected'>('Draft');
 
+  const [captureWarnings,setCaptureWarnings]=useState<OvertimeWarning[]|undefined>();
   const [historyHeader,setHistoryHeader]=useState<string|undefined>();
   const [duplicateEntryCheck,setDuplicateEntryCheck]=useState<DuplicateEntryCheck|undefined>();
   const [workAssurance, setWorkAssurance] = useState<Assurance | undefined>();
@@ -86,7 +88,7 @@ export const MyTimesheet = () => {
   const blockWork=()=>{
     blocked.current=true;++generation.current;loadedContext.current=null;savePending.current=false;
     setLoaded(false);setLoadedOwner(null);setSaving(false);setRows([]);setHourDrafts({});setPreservedEntries([]);setActiveRemark(null);
-    setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
+    setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setCaptureWarnings(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
     setNotice({type:'warning',message:'Access or scope changed. Reload work explicitly for the selected legal entity.'});
   };
   useEffect(()=>{
@@ -106,7 +108,7 @@ export const MyTimesheet = () => {
     const request=++generation.current;let cancelled=false;
     const context=captureWorkCaptureContext(()=>!cancelled&&request===generation.current);
     setLoaded(false);setLoadedOwner(null);loadedContext.current=null;setRows([]);setPreservedEntries([]);setHourDrafts({});setNotice(null);setActiveRemark(null);
-    setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
+    setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setCaptureWarnings(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
     workCaptureWorkspaceService.get(context).then(({projects,allocations,timesheets,modes:projection})=>{
       if(cancelled||request!==generation.current)return;
       if(!context||!isWorkCaptureContextCurrent(context)){blockWork();return;}
@@ -126,11 +128,11 @@ export const MyTimesheet = () => {
       const existing=timesheets.find(t=>t.employeeId===user.id&&t.weekEnding===weekEnding);
       if(existing){
         const hydrated=hydrateWorkCaptureGrid(existing.entries,gridStart,7);setRows(hydrated.rows);setPreservedEntries(hydrated.preservedEntries);
-        setStatus(existing.status);setWriteToken(existing.writeToken!);setWorkAssurance(existing.workAssurance);setDuplicateEntryCheck(existing.duplicateEntryCheck);setHistoryHeader(existing.id);setRejectionNote(existing.rejectionNote||existing.rejectionReason);
+        setStatus(existing.status);setWriteToken(existing.writeToken!);setWorkAssurance(existing.workAssurance);setDuplicateEntryCheck(existing.duplicateEntryCheck);setHistoryHeader(existing.id);setCaptureWarnings(existing.captureWarnings);setRejectionNote(existing.rejectionNote||existing.rejectionReason);
       }else{
         const first=assigned[0];setRows(first?[{id:crypto.randomUUID(),workType:'Project Work',category:'',clientName:'',projectId:first.id,projectName:first.name,
           hours:Array(7).fill(0),exactHours:Array(7).fill('0'),remarks:Array(7).fill(''),evidenceUrls:Array(7).fill(null),workReferences:Array(7).fill(null),rowRemark:'',billable:true}]:[]);
-        setStatus('Draft');setWriteToken(null);setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setRejectionNote(undefined);
+        setStatus('Draft');setWriteToken(null);setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setCaptureWarnings(undefined);setRejectionNote(undefined);
       }
       loadedContext.current=context;setLoadedOwner(context);setLoaded(true);
     }).catch(()=>{if(!cancelled&&request===generation.current)setNotice({type:'danger',message:'Work could not be loaded. Reload before editing.'});});
@@ -144,7 +146,7 @@ export const MyTimesheet = () => {
   const changeWeek=(days:number)=>{
     if(!loaded||saving||savePending.current||!loadedOwner||!isWorkCaptureContextCurrent(loadedOwner))return;
     ++generation.current;loadedContext.current=null;setLoaded(false);setLoadedOwner(null);setActiveRemark(null);
-    setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
+    setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setCaptureWarnings(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
     setCurrentWeek(previous=>shiftDate(previous,days));
   };
 
@@ -219,7 +221,7 @@ export const MyTimesheet = () => {
       const saved=await workCaptureWorkspaceService.save({employeeId:user.id,weekEnding,status:nextStatus,entries},
         {writeToken,mode,modePolicyId:modes?.latestId||null},context);
       if(!current())return;
-      setWriteToken(saved.writeToken);setStatus(nextStatus);setWorkAssurance(saved.workAssurance);setDuplicateEntryCheck(saved.duplicateEntryCheck);setHistoryHeader(saved.timesheetId);
+      setWriteToken(saved.writeToken);setStatus(nextStatus);setWorkAssurance(saved.workAssurance);setDuplicateEntryCheck(saved.duplicateEntryCheck);setHistoryHeader(saved.timesheetId);setCaptureWarnings(saved.captureWarnings);
       setRejectionNote(undefined);
       setNotice({
         type: 'success',
@@ -320,6 +322,7 @@ export const MyTimesheet = () => {
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
+      <WorkCaptureWarnings warnings={captureWarnings}/>
       <WorkSubmissionAssurance assurance={workAssurance} status={status} entryCheck={duplicateEntryCheck} />
       {loaded&&historyHeader&&!saving&&<div key={`${historyHeader}:${writeToken}`}><WorkSubmissionHistory timesheetId={historyHeader}/></div>}
       <PageHeader

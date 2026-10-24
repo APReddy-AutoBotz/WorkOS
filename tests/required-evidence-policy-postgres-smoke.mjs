@@ -28,9 +28,9 @@ await withCommercialDatabase(async({pool})=>{
    '[]'::jsonb,$4,'Admin','Web','synthetic-pre049-correlation','synthetic-pre049-operation' from timesheet_entries e where e.timesheet_id=$3`,[f.organizationId,f.legalEntityId,f.timesheetId,identities.manager.id]);
   const before=await workSnapshot(pool),rules=await table(pool,'work_capture_policy_versions'),grants=await table(pool,'role_permissions');
   for(const row of before.work_submission_evidence)row.value.duplicate_entry_check=null; // additive 050; old JSON contents remain exact
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'050_wos04_identical_entry_check']);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'050_wos04_identical_entry_check','051_wos04_overtime_capture_policy']);
   assert.deepEqual(await workSnapshot(pool),before);assert.deepEqual(await table(pool,'role_permissions'),grants);
-  assert.deepEqual((await pool.query("select to_jsonb(t)-'evidence_required' value from work_capture_policy_versions t order by to_jsonb(t)::text")).rows,rules);
+  assert.deepEqual((await pool.query("select to_jsonb(t)-array['evidence_required','overtime_rule'] value from work_capture_policy_versions t order by to_jsonb(t)::text")).rows,rules);
   const legacy=(await pool.query('select *,effective_from::text,minimum_increment::text,daily_maximum::text,weekly_maximum::text from work_capture_policy_versions')).rows[0];assert.equal(legacy.evidence_required,null);assert.equal(capturePolicyView(legacy).evidenceRequired,false);
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);assert.deepEqual(await workSnapshot(pool),before);
  });

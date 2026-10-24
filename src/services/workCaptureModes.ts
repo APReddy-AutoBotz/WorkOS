@@ -1,3 +1,4 @@
+import {normalizeOvertimeWarnings} from './overtimeCapture';
 import {normalizeDuplicateEntryCheck} from './duplicateEntryCheck';
 import {authService} from './authService';
 import {getEffectivePermissions} from './permissions';
@@ -80,6 +81,6 @@ export const workCaptureWorkspaceService={
     },owner);
     assertWorkCaptureContext(owner);
     if(typeof result.write_token!=='string'||!/^[a-f0-9]{64}$/.test(result.write_token))throw new ApiClientError('Save revision could not be confirmed. Reload work.',{status:503});
-    return {timesheetId:typeof result.id==='string'?result.id:undefined,writeToken:result.write_token,workAssurance:normalizeWorkAssurance(result.work_assurance),duplicateEntryCheck:normalizeDuplicateEntryCheck(result.duplicate_entry_check)} as {timesheetId:string|undefined;duplicateEntryCheck:TimesheetSummary['duplicateEntryCheck'];writeToken:string;workAssurance:TimesheetSummary['workAssurance']};
+    return {captureWarnings:normalizeOvertimeWarnings(result.capture_warnings),timesheetId:typeof result.id==='string'?result.id:undefined,writeToken:result.write_token,workAssurance:normalizeWorkAssurance(result.work_assurance),duplicateEntryCheck:normalizeDuplicateEntryCheck(result.duplicate_entry_check)} as {captureWarnings:TimesheetSummary['captureWarnings'];timesheetId:string|undefined;duplicateEntryCheck:TimesheetSummary['duplicateEntryCheck'];writeToken:string;workAssurance:TimesheetSummary['workAssurance']};
   },
 };
