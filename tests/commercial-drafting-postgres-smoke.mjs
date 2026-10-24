@@ -128,7 +128,7 @@ await withCommercialDatabase(async ({pool}) => {
     await seedCommercialReferences(pool);
     await seedCommercialLegacyWork(pool);
     const before = await legacySnapshot(pool);
-    for(const row of before.timesheet_entries){row.evidence_url=null;row.work_reference=null;row.source_identity=null;} // additive 047/048 column; all pre-existing fields still compare exactly
+    for(const row of before.timesheet_entries){row.evidence_url=null;row.work_reference=null;row.source_identity=null;row.category_code=null;row.category_reference=null;} // additive 047/048 column; all pre-existing fields still compare exactly
     const upgraded = await migrateCommercialDatabase(pool);
     assert.deepEqual(upgraded.applied, [versionId,'041_wos04_governed_lifecycle','042_wos04_scoped_client_profiles','043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand','056_wos04_effective_worker_capacity','057_wos04_assignment_versions','058_wos04_assignment_overlap_policy','059_wos04_work_category_context'], 'upgrade must apply all ordered append-only commercial migrations');
     assert.equal(upgraded.status.isCurrent, true);

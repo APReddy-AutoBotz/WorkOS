@@ -27,7 +27,7 @@ await withCommercialDatabase(async({pool})=>{
    select 'synthetic-pre049-submission',$1,$2,$3,1,'assignment-work-date/1',jsonb_build_array(jsonb_build_object('entryId',e.id,'projectId',e.project_id,'workType',e.work_type,'workDate',e.work_date::text,'hours',e.hours::text,'billable',e.billable,'clientName',e.client_name,'category',e.category,'remark',e.remark,'evidenceUrl',e.evidence_url,'workReference',e.work_reference)),
    '[]'::jsonb,$4,'Admin','Web','synthetic-pre049-correlation','synthetic-pre049-operation' from timesheet_entries e where e.timesheet_id=$3`,[f.organizationId,f.legalEntityId,f.timesheetId,identities.manager.id]);
   const before=await workSnapshot(pool),rules=await table(pool,'work_capture_policy_versions'),grants=await table(pool,'role_permissions');
-  for(const row of before.timesheet_entries)row.value.source_identity=null;
+  for(const row of before.timesheet_entries){row.value.source_identity=null;row.value.category_code=null;row.value.category_reference=null;}
   for(const row of before.work_submission_evidence){row.value.duplicate_entry_check=null;row.value.submission_timing=null;} // additive 050; old JSON contents remain exact
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand','056_wos04_effective_worker_capacity','057_wos04_assignment_versions','058_wos04_assignment_overlap_policy','059_wos04_work_category_context']);
   assert.deepEqual(await workSnapshot(pool),before);assert.deepEqual(await table(pool,'role_permissions'),grants);
