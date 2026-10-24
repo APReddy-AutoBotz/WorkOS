@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import {captureOverlapContext,isOverlapContextCurrent} from '../../services/assignmentOverlap';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   Save,
@@ -18,10 +19,13 @@ import { ALLOCATION_STATUSES } from '../../constants/statuses';
 
 interface AllocationFormProps {
   onClose: () => void;
+  onPolicyWarning?: (notice:string)=>void;
   allocation?: any;
 }
 
-export const AllocationForm = ({ onClose, allocation }: AllocationFormProps) => {
+export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: AllocationFormProps) => {
+  const policyGeneration=useRef(0);
+  useEffect(()=>{const clear=()=>{++policyGeneration.current;};window.addEventListener('workos:organization-scope-switch-requested',clear);window.addEventListener('workos:organization-scope-changed',clear);return()=>{++policyGeneration.current;window.removeEventListener('workos:organization-scope-switch-requested',clear);window.removeEventListener('workos:organization-scope-changed',clear);};},[]);
   const [loading, setLoading] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -138,12 +142,14 @@ export const AllocationForm = ({ onClose, allocation }: AllocationFormProps) => 
     };
 
     try {
-      await allocationService.save(newAllocation);
+      const policyRequest=policyGeneration.current,policyOwner=captureOverlapContext('read',()=>policyRequest===policyGeneration.current);
+      const receipt=await allocationService.save(newAllocation);
       await adminService.logAction(
         allocation ? 'Update' : 'Create',
         'Allocation Management',
         `${allocation ? 'Modified' : 'Created'} allocation for ${employees.find(e => e.id === selectedEmployeeId)?.name} on ${projects.find(p => p.id === selectedProjectId)?.name}`
       );
+      if(receipt?.policyNotice&&policyOwner&&isOverlapContextCurrent(policyOwner))onPolicyWarning?.(receipt.policyNotice);
       onClose();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Allocation could not be saved. Reload and check the authoritative worker/project dates.");

@@ -1,3 +1,4 @@
+import {AssignmentOverlapPolicy} from '../components/AssignmentOverlapPolicy';
 import {AssignmentVersions} from '../components/AssignmentVersions';
 import {captureAssignmentContext} from '../services/assignmentVersions';
 import { useState, useEffect, useMemo, useRef } from 'react';
@@ -47,6 +48,8 @@ interface AllocationControlPanelProps {
 export const AllocationControlPanel = ({ embedded = false, focus, onClearFocus }: AllocationControlPanelProps) => {
   const currentUser = authService.getCurrentUser();
   const canEditAllocations = canManageAllocations(currentUser);
+  const [policyNotice,setPolicyNotice]=useState('');
+  useEffect(()=>{const clear=()=>setPolicyNotice('');window.addEventListener('workos:organization-scope-switch-requested',clear);window.addEventListener('workos:organization-scope-changed',clear);return()=>{window.removeEventListener('workos:organization-scope-switch-requested',clear);window.removeEventListener('workos:organization-scope-changed',clear);};},[]);
   const [view, setView] = useState<'employee' | 'project'>('employee');
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [versionAssignmentId,setVersionAssignmentId]=useState<string|null>(null);
@@ -56,6 +59,7 @@ export const AllocationControlPanel = ({ embedded = false, focus, onClearFocus }
   const [cds, setCds] = useState<CountryDirector[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  useEffect(()=>{if(isFormOpen)setPolicyNotice('');},[isFormOpen]);
   const [selectedAllocation, setSelectedAllocation] = useState<Allocation | undefined>(undefined);
   const [showFilters, setShowFilters] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -350,6 +354,8 @@ export const AllocationControlPanel = ({ embedded = false, focus, onClearFocus }
 
   return (
     <div id="allocation-control" className="animate-in fade-in duration-500 pb-12 scroll-mt-6">
+      <AssignmentOverlapPolicy workers={employees.map(w=>({id:w.id,code:w.employeeId,name:w.name}))}/>
+      {policyNotice&&<p role="status">{policyNotice}</p>}
       {embedded ? (
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -509,6 +515,7 @@ export const AllocationControlPanel = ({ embedded = false, focus, onClearFocus }
             <AllocationForm
               allocation={selectedAllocation}
               onClose={closeAllocationForm}
+              onPolicyWarning={setPolicyNotice}
             />
           </div>
         </div>

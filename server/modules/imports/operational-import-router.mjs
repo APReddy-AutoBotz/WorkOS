@@ -1,3 +1,4 @@
+import {overlapAssessment} from '../planning/assignment-overlap-policy.mjs';
 import {setAssignmentVersionContext} from '../planning/assignment-version-context.mjs';
 import {resolveWorkSourceIdentityAliases} from '../../../shared/work-source-identity.mjs';
 import {workSourceIdentityInput,validateWorkSourceReplacement} from '../work-capture/work-source-identity.mjs';
@@ -32,6 +33,7 @@ const responseFromBatch = (row, versioned) => ({
   validRows: row.valid_rows,
   errorRows: row.error_rows,
   errors: Array.isArray(row.errors) ? row.errors : [],
+  ...(Array.isArray(row.assignment_policy_warnings)?{assignmentPolicyWarnings:row.assignment_policy_warnings}:{}),
   ...(row.source_identity_check?{sourceIdentityCheck:row.source_identity_check}:{}),
   ...(Array.isArray(row.submission_timing)?{submissionTiming:row.submission_timing}:{}),
   ...(Array.isArray(row.capture_warnings)?{captureWarnings:row.capture_warnings}:{}),
@@ -265,6 +267,7 @@ export const createOperationalImportRouter = ({
     const requestHash = versioned ? hashImportRequest(canonicalRequest(parsed.data, parsed.data.rows)) : null;
     const idempotency = context ? {...context, batchId: importBatchId} : null;
     const stagedAllocationChanges = [];
+    const assignmentPolicyWarnings=[];
     const seenAllocationNaturalKeys = new Set();
     let saved = 0;
     let transactionOpen = false;
@@ -360,6 +363,13 @@ export const createOperationalImportRouter = ({
           if (total > 100) rowErrors.push({rowNumber, field: 'percentage', message: `Allocation would exceed 100% for overlapping dates (${total}%).`});
         }
 
+        let overlap=null;
+        const policySource=employee&&project?{id:previous?.id||row.id||'preview-'+randomUUID(),employeeId:employee.id,quantityExact:canonicalHours(String(row.percentage)),startsOn:row.startDate,endsOn:row.endDate,status:nextStatus}:null;
+        if(policySource&&row.endDate>=row.startDate){
+          try{overlap=await overlapAssessment(client,req,employee.id,row.startDate,row.endDate,[...(dryRun?stagedAllocationChanges.map(v=>v.policySource):[]),policySource]);if(overlap.checks.some(v=>v.blockingExceeded))rowErrors.push({rowNumber,field:'percentage',message:'Declared simultaneous percentages exceed the adopted blocking threshold.',code:'ASSIGNMENT_OVERLAP_BLOCKED'});}
+          catch(error){if(error.code!=='ALP02')throw error;rowErrors.push({rowNumber,field:'percentage',message:'Native assignment policy authority is unavailable.',code:'ASSIGNMENT_OVERLAP_AUTHORITY'});}
+        }
+        if(overlap&&overlap.checks.some(v=>v.warningExceeded||v.blockingExceeded))assignmentPolicyWarnings.push({rowNumber,sourceIdentifier:row.id??null,accepted:rowErrors.length===0,assessment:overlap});
         if (rowErrors.length > 0) {
           errors.push(...rowErrors);
           continue;
@@ -372,7 +382,7 @@ export const createOperationalImportRouter = ({
           percentage: Number(row.percentage),
         };
         if (dryRun) {
-          stagedAllocationChanges.push({employeeId: employee.id, previous, next: nextValues});
+          stagedAllocationChanges.push({employeeId: employee.id, previous, next: nextValues,policySource});
           saved += 1;
           continue;
         }
@@ -437,12 +447,12 @@ export const createOperationalImportRouter = ({
         channel, source: 'Allocation Control CSV',
       });
       const logResult = await client.query(`
-        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run)
-        values ($1,'Import','Allocation Control',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run,assignment_policy_warnings)
+        values ($1,'Import','Allocation Control',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         returning *
       `, [importBatchId, parsed.data.fileName, status, totalRows, saved, errors.length,
         errors.length ? JSON.stringify(responseErrors) : null, req.user.username, scope.organizationId,
-        scope.legalEntityId, versioned ? parsed.data.schemaVersion : null, dryRun]);
+        scope.legalEntityId, versioned ? parsed.data.schemaVersion : null, dryRun,assignmentPolicyWarnings.length?JSON.stringify(assignmentPolicyWarnings):null]);
       if (versioned) await persistIdempotency({client, scope, context: idempotency, channel, requestHash});
       await client.query('commit');
       transactionOpen = false;
