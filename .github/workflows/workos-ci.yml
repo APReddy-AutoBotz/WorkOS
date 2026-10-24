@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments, codex/wos-04-flexible-work-capture, codex/wos-04-work-capture-policy, codex/wos-04-daily-weekly-work-capture, codex/wos-04-work-entry-evidence, codex/wos-04-work-entry-reference, codex/wos-04-required-evidence-policy]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments, codex/wos-04-flexible-work-capture, codex/wos-04-work-capture-policy, codex/wos-04-daily-weekly-work-capture, codex/wos-04-work-entry-evidence, codex/wos-04-work-entry-reference, codex/wos-04-required-evidence-policy, codex/wos-04-identical-entry-flags]
   push:
     branches: [main]
   workflow_dispatch:
@@ -70,6 +70,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Verify retained work history PostgreSQL API acceptance
+        run: npm run test:work-submission-history-postgres
+
       - name: Verify identical-entry diagnostic PostgreSQL migration and API acceptance
         run: npm run test:duplicate-entry-check-postgres
 
@@ -99,6 +102,9 @@ jobs:
 
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
+
+      - name: Verify retained work history React/API/PostgreSQL journey
+        run: npm run test:work-submission-history-journey
 
       - name: Verify identical-entry diagnostic React/API/PostgreSQL journey
         run: npm run test:duplicate-entry-check-journey

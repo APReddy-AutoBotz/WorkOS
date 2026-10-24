@@ -80,6 +80,6 @@ export const workCaptureWorkspaceService={
     },owner);
     assertWorkCaptureContext(owner);
     if(typeof result.write_token!=='string'||!/^[a-f0-9]{64}$/.test(result.write_token))throw new ApiClientError('Save revision could not be confirmed. Reload work.',{status:503});
-    return {writeToken:result.write_token,workAssurance:normalizeWorkAssurance(result.work_assurance),duplicateEntryCheck:normalizeDuplicateEntryCheck(result.duplicate_entry_check)} as {duplicateEntryCheck:TimesheetSummary['duplicateEntryCheck'];writeToken:string;workAssurance:TimesheetSummary['workAssurance']};
+    return {timesheetId:typeof result.id==='string'?result.id:undefined,writeToken:result.write_token,workAssurance:normalizeWorkAssurance(result.work_assurance),duplicateEntryCheck:normalizeDuplicateEntryCheck(result.duplicate_entry_check)} as {timesheetId:string|undefined;duplicateEntryCheck:TimesheetSummary['duplicateEntryCheck'];writeToken:string;workAssurance:TimesheetSummary['workAssurance']};
   },
 };

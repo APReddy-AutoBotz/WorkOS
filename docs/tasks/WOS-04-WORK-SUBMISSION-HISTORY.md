@@ -1,6 +1,6 @@
 # PR-008H: Read-only work submission and correction history
 
-**Status:** Acceptance plan recorded before implementation. Dependent ordinary development only; optional independent/formal reviews remain deferred and outstanding.
+**Status:** Acceptance plan committed before implementation as `2b4d596`; focused unit/transport, actual PostgreSQL/API and React/API/PostgreSQL journeys pass. Full exact-source gates and dependent publication remain pending. Dependent ordinary development only; optional independent/formal reviews remain deferred and outstanding.
 **Requirement authority:** WOS-TIM-008 requires preserved prior submitted/approved history and visible rejection reasons; WORK_CAPTURE_AND_TIMESHEET_SPEC.md's Submission and correction/Acceptance cases require preserved submission/decision history. Architecture section5.7 assigns correction/reopen history to work capture. This slice makes already retained evidence inspectable in the existing worker/approver workspaces; it creates no new workflow or buyer policy.
 **Fixed dependency:** Draft PR61 `5b301346688b324af6913ae2ef4d66d2be31b7de`, tree `1c88c1b5c92c6957245215d46caaea877740c4ac`.
 
