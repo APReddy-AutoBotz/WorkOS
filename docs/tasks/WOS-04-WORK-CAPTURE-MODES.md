@@ -30,6 +30,12 @@ This is a fresh PR56-based implementation. The unpublished earlier local candida
 - `test:work-capture-modes-journey`: actual production React/API/PostgreSQL configuration, current Draft daily entry, lossless mode switching and whole-header saves, stale tabs, disabled mode, modal/metadata cleanup and genuine in-flight database-lock scope invalidation.
 - All retained migration, API, authorization, browser, identity, Compose and container gates remain required. Unit or source review is not PostgreSQL/browser acceptance. Hosted results must identify the exact new remote head.
 
+## Recovery and bounded dependency maintenance — 2026-10-24
+
+The recovered source-only archive was verified as 460 files with tree `6e5a391d95b5942bd388091cbbb0b3124865217c` and SHA-256 `89817847a836e9c9074ce330b20024c645b35dff9ab5ca48cbb451dc3639e1c9`. The retained client-profile browser fixture now expects additive migration046; its preservation assertions remain unchanged.
+
+Owner-authorized standard dependency maintenance updates only locked body-parser 1.20.8 to 1.20.9 (`GHSA-27r3-jxmh-p828`) and Zod 4.3.6 to 4.6.7 (`GHSA-mrhx-c7xc-m3w5`), within existing manifest ranges. Express stays at 4.22.1. The focused `test:dependency-input-safety` gate covers isolated compressed-parser survival and legitimate JSON/size-limit behavior, plus early rejection through existing bounded profile/calendar schemas. This supports WOS-NFR-SEC-008/011 and WOS-NFR-RELSE-001; it does not impose new limits on unbounded collection contracts. No middleware, authentication, grants or unrelated security repair changes are included. Full exact-head validation, hosted scans, formal review, prerequisite integration and protection gates remain required; Draft publication is not acceptance.
+
 ## Rollback and deliberate exclusions
 
 Rollback is application rollback with retained additive migration046 and immutable mode history; no destructive down migration or work/evidence deletion is supplied. Older callers continue the documented legacy contract. This adds no grants, default adoption, daily approval, timer, calendar re-keying, categories/non-client contexts, evidence links, overtime, deadlines/grace, reopen policy, planning or financial/reporting redesign. PR008A/B evidence remains bounded, and full PR008/formal product acceptance is not claimed.
