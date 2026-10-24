@@ -1,6 +1,6 @@
 # PR-008G: Identical saved-entry content advisories
 
-**Status:** Acceptance plan recorded before implementation. Dependent development only; optional independent/formal reviews remain deferred and outstanding.
+**Status:** Implemented with focused real PostgreSQL/API and React/API/PostgreSQL checks passing. Full exact-source gates and dependent Draft publication pending. Acceptance plan committed before implementation as `b7501ee`. Dependent development only; optional independent/formal reviews remain deferred and outstanding.
 **Authority:** WOS-TIM-012 expressly permits preventing **or flagging** duplicate manual/imported work using deterministic keys. WORK_CAPTURE_AND_TIMESHEET_SPEC.md requires duplicate work to be blocked or deterministically flagged. PR-008 includes duplicate protection. This slice implements an advisory, not a new rejection, approval or financial policy.
 **Dependency:** Unchanged Draft PR60 `a283b7d9e0fc5ac23536e12f1b914a9a91a78fad`, tree `56aed71f20d5b097d3b11250673af309d3cdb836`.
 
@@ -21,7 +21,7 @@ Pre-implementation checks on 2026-10-24 found only the sole writer active, no ac
 ## Required acceptance plan
 
 1. Unit/contract: canonical exact decimal equality, input-order/ID independence, meaningful field differences, zero entries, valid/empty/unavailable checks, immutable inputs and invalid DTO handling without false clean results.
-2. Real PostgreSQL/API: fresh/049 upgrade/replay neutrality; server-only manual save/read flags with actual stored IDs; distinct contexts preserved; source/CAS/period/authorization behavior unchanged; new submission checks immutable through reject/correct/approve and legacy decisions; both import aliases retain existing duplicate rejection, preview/replay and successful submission behavior.
+2. Real PostgreSQL/API: fresh/049 upgrade/replay neutrality; server-only manual save/read flags with actual stored IDs; distinct contexts preserved; source/CAS/period/authorization behavior unchanged; new submission checks immutable through reject/correct/approve and legacy decisions; both import aliases retain their existing partial-result contract (accept the first valid row, report the duplicate row), preview/replay and successful submission behavior.
 3. Real React/API/PostgreSQL: worker sees/reloads last-saved warnings, meaningful changes clear them after save, mode/hidden/weekend/zero entries persist, stale saves cannot replace accepted flags, scope invalidation clears diagnostics, and approver sees retained/current flags without changed decision behavior. Escaped text, no external calls and the applicable React implementation checklist remain required.
 4. Locked install, type/lint, aggregate unit/contracts, retained migration/PostgreSQL/browser and production build/identity/startup/CI/container gates. Publish an authorized separate dependent Draft only after applicable tests, then follow hosted protected runs to terminal at exact head/tree. No scan/review/security repair is manually invoked.
 5. Keep optional formal review debt explicit. Full WOS-TIM-012/PR008, cross-header/upstream-source identity semantics, broader work categories/deadlines/overtime/reopen and integrated acceptance remain open.

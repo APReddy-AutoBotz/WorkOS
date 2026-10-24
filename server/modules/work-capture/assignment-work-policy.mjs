@@ -1,3 +1,4 @@
+import {checkDuplicateEntries,duplicateCheckSummary} from './duplicate-entry-check.mjs';
 import {randomUUID} from 'node:crypto';
 import {lockCommercialLifecycle} from '../commercial-drafting/project-mutation.mjs';
 import {assertReportingPeriodAllows,REPORTING_PERIOD_OPERATIONS} from '../../reporting-periods.mjs';
@@ -144,11 +145,12 @@ export const retainWorkSubmission=async(client,req,timesheet,entries,source)=>{
   const id=`work-submission-${randomUUID()}`;
   const periods=await assertReportingPeriodAllows(client,{organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,relevantDates:[timesheet.week_ending,...entries.map(entry=>entry.work_date)],operation:REPORTING_PERIOD_OPERATIONS.CONTENT});
   const periodReferences=[...new Map(periods.map(p=>[p.id,{id:p.id,frequency:p.frequency,status:p.status}])).values()];
+  const duplicateEntryCheck=checkDuplicateEntries(entries);
   const evidence=entries.map(entry=>({entryId:entry.id,projectId:entry.project_id||null,workType:entry.work_type,workDate:date(entry.work_date),hours:String(entry.hours),billable:entry.billable,
     clientName:entry.client_name||null,category:entry.category||null,remark:entry.remark||null,evidenceUrl:entry.evidence_url||null,workReference:entry.work_reference||null,kind:entry.policy.kind,bindingId:entry.policy.bindingId||null,assignmentIds:entry.policy.assignmentIds||[],assignmentSnapshots:entry.policy.assignmentSnapshots||[],references:entry.policy.references}));
-  await client.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id,capture_policy_references)
-    values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb)`,[id,...scope(req),timesheet.id,sequence,WORK_POLICY_VERSION,JSON.stringify(evidence),JSON.stringify(periodReferences),req.user.sub,req.user.activeRole,source,req.correlationId,req.operationId,JSON.stringify(entries.map(entry=>({entryId:entry.id,reference:entry.capturePolicyReference||null})))]);
-  return {id,sequence,policyVersion:WORK_POLICY_VERSION,entryCount:evidence.length,governedEntryCount:evidence.filter(x=>x.kind==='governed').length};
+  await client.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id,capture_policy_references,duplicate_entry_check)
+    values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb)`,[id,...scope(req),timesheet.id,sequence,WORK_POLICY_VERSION,JSON.stringify(evidence),JSON.stringify(periodReferences),req.user.sub,req.user.activeRole,source,req.correlationId,req.operationId,JSON.stringify(entries.map(entry=>({entryId:entry.id,reference:entry.capturePolicyReference||null}))),duplicateEntryCheck===null?null:JSON.stringify(duplicateEntryCheck)]);
+  return {id,sequence,policyVersion:WORK_POLICY_VERSION,entryCount:evidence.length,governedEntryCount:evidence.filter(x=>x.kind==='governed').length,duplicateCheck:duplicateCheckSummary(duplicateEntryCheck)};
 };
 // Decision-time period checks cover every stored work date, not just week end.
 // New submissions are evaluated against their immutable evidence, not today's

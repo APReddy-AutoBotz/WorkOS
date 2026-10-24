@@ -20,11 +20,12 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     'entryId',e.id,'projectId',e.project_id,'workType',e.work_type,'workDate',e.work_date::text,'hours',e.hours::text,'billable',e.billable,'clientName',e.client_name,'category',e.category,'remark',e.remark,'evidenceUrl',e.evidence_url)),
     '[]'::jsonb,$4,'Admin','Web','synthetic-pre048-correlation','synthetic-pre048-operation' from timesheet_entries e where e.timesheet_id=$3`,[f.organizationId,f.legalEntityId,f.timesheetId,identities.manager.id]);
   const oldHistory=(await pool.query('select to_jsonb(w) value from work_submission_evidence w')).rows;
+  for(const row of oldHistory)row.value.duplicate_entry_check=null; // additive 050; no historical diagnostic is inferred
   assert.equal(Object.hasOwn(oldHistory[0].value.entries[0],'workReference'),false);
 
   const before=(await pool.query('select to_jsonb(e) value from timesheet_entries e order by id')).rows;
   const grants=(await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows;
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'049_wos04_required_work_evidence']);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'049_wos04_required_work_evidence','050_wos04_identical_entry_check']);
   assert.deepEqual((await pool.query("select to_jsonb(e)-'work_reference' value from timesheet_entries e order by id")).rows,before);
   assert.equal((await pool.query('select count(*)::int n from timesheet_entries where work_reference is not null')).rows[0].n,0);
   assert.deepEqual((await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows,grants);

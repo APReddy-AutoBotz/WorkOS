@@ -1,3 +1,4 @@
+import {normalizeDuplicateEntryCheck,normalizeDuplicateCheckSummary} from './duplicateEntryCheck';
 /**
  * apiClient.ts
  * Low-level HTTP client + backend availability detection + response normalizers.
@@ -378,8 +379,10 @@ export const normalizeWorkAssurance = (value: unknown): TimesheetSummary['workAs
     || !Number.isInteger(r.entryCount) || Number(r.entryCount) < 1
     || !Number.isInteger(r.governedEntryCount) || Number(r.governedEntryCount) < 0
     || Number(r.governedEntryCount) > Number(r.entryCount)) return undefined;
+  const duplicateCheck=normalizeDuplicateCheckSummary(r.duplicateCheck,Number(r.entryCount));
   return {id: r.id, sequence: Number(r.sequence), policyVersion: r.policyVersion,
-    entryCount: Number(r.entryCount), governedEntryCount: Number(r.governedEntryCount)};
+    entryCount: Number(r.entryCount), governedEntryCount: Number(r.governedEntryCount),
+    ...(duplicateCheck?{duplicateCheck}:{})};
 };
 
 export const normalizeTimesheetSummary = (
@@ -389,6 +392,7 @@ export const normalizeTimesheetSummary = (
   const entries = Array.isArray(r.entries) ? (r.entries as Record<string, unknown>[]) : [];
   return {
     workAssurance: normalizeWorkAssurance(r.work_assurance),
+    duplicateEntryCheck: normalizeDuplicateEntryCheck(r.duplicate_entry_check),
     writeToken: typeof r.write_token === 'string' ? r.write_token : undefined,
     id: r.id ? String(r.id) : undefined,
     employeeId: String(r.employee_id),

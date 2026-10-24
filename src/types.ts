@@ -696,7 +696,16 @@ export interface TimesheetEntry {
   weekEnding: string;
 }
 
+export interface DuplicateEntryCheckSummary {
+  version: 'exact-entry-content/1';
+  groupCount: number;
+}
+export interface DuplicateEntryCheck {
+  version: 'exact-entry-content/1';
+  groups: Array<{key:string;entryIds:string[];workDate:string;hoursExact:string;workType:WorkType;projectId:string|null;clientName:string|null;category:string|null}>;
+}
 export interface WorkSubmissionAssurance {
+  duplicateCheck?: DuplicateEntryCheckSummary;
   id: string;
   sequence: number;
   policyVersion: string;
@@ -705,6 +714,7 @@ export interface WorkSubmissionAssurance {
 }
 
 export interface TimesheetSummary {
+  duplicateEntryCheck?: DuplicateEntryCheck;
   writeToken?: string;
   workAssurance?: WorkSubmissionAssurance;
   id?: string;
