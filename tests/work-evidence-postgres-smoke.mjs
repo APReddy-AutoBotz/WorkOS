@@ -3,16 +3,24 @@ import {copyFile,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {runMigrations} from '../server/migrate.mjs';
-import {assertWorkDecisionAllowed} from '../server/modules/work-capture/assignment-work-policy.mjs';
 import {commercialFixture as f,commercialServerDir,withCommercialDatabase,withPreCommercialMigrations,migrateCommercialDatabase,
  seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
-import {amendmentToday,addUtcDays} from './support/commercial-amendments-test.mjs';
+import {amendmentToday} from './support/commercial-amendments-test.mjs';
 import {grantWorkPermissions,workSnapshot,seedWorkPeriods} from './support/work-assignment-test.mjs';
 const migration='047_wos04_work_entry_evidence',link='https://example.test/work/42?revision=1#note',nextLink='https://example.test/work/43';
-await withCommercialDatabase(async({pool})=>{
+await withCommercialDatabase(async({pool,databaseUrl})=>{
  await withPreCommercialMigrations(async rootDir=>{
   for(const file of (await readdir(join(commercialServerDir,'migrations'))).filter(file=>/^04[0-6]_/.test(file)))await copyFile(join(commercialServerDir,'migrations',file),join(rootDir,'migrations',file));
   await runMigrations({pool,rootDir,logger:{log(){}}});await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);
+  const identities=await seedCommercialIdentities(pool);
+  await pool.query("update timesheets set status='Submitted' where id=$1",[f.timesheetId]);
+  await pool.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id)
+   select 'synthetic-pre047-submission',$1,$2,$3,1,'assignment-work-date/1',jsonb_build_array(jsonb_build_object(
+    'entryId',e.id,'projectId',e.project_id,'workType',e.work_type,'workDate',e.work_date::text,'hours',e.hours::text,'billable',e.billable,'clientName',e.client_name,'category',e.category,'remark',e.remark)),
+    '[]'::jsonb,$4,'Admin','Web','synthetic-pre047-correlation','synthetic-pre047-operation' from timesheet_entries e where e.timesheet_id=$3`,[f.organizationId,f.legalEntityId,f.timesheetId,identities.manager.id]);
+  const oldHistory=(await pool.query('select to_jsonb(w) value from work_submission_evidence w')).rows;
+  assert.equal(Object.hasOwn(oldHistory[0].value.entries[0],'evidenceUrl'),false);
+
   const before=(await pool.query('select to_jsonb(e) value from timesheet_entries e order by id')).rows;
   const grants=(await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows;
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration]);
@@ -20,6 +28,16 @@ await withCommercialDatabase(async({pool})=>{
   assert.equal((await pool.query('select count(*)::int n from timesheet_entries where evidence_url is not null')).rows[0].n,0);
   assert.deepEqual((await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows,grants);
   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
+  assert.deepEqual((await pool.query('select to_jsonb(w) value from work_submission_evidence w')).rows,oldHistory,'upgrade and replay leave pre047 immutable JSON byte-equivalent');
+  await grantWorkPermissions(pool);
+  await pool.query(`insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
+   values('evidence-legacy-first',$1,$2,'SYN-EVIDENCE-LEGACY-1','Synthetic legacy first','2020-03-08','2020-03-14','Open','Weekly'),
+   ('evidence-legacy-second',$1,$2,'SYN-EVIDENCE-LEGACY-2','Synthetic legacy second','2020-03-15','2020-03-21','Open','Weekly')`,[f.organizationId,f.legalEntityId]);
+  await withCommercialApi({databaseUrl,identities},async({request})=>{
+   const approved=await request(`/api/timesheets/${f.timesheetId}/status`,{method:'PATCH',body:{status:'Approved'}});assert.equal(approved.status,200,JSON.stringify(approved.body));
+   assert.deepEqual((await pool.query('select to_jsonb(w) value from work_submission_evidence w')).rows,oldHistory,'ordinary approval accepts old missing/null evidence without rewriting its snapshot');
+  });
+
  });
 });
 await withCommercialDatabase(async({pool,databaseUrl})=>{
@@ -83,12 +101,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    assert.equal((await imported([{...row,status:'Submitted'}])).body.status,'Success');
    assert.equal((await pool.query('select w.entries from work_submission_evidence w join timesheets t on t.id=w.timesheet_id where t.employee_id=$1',[employeeId])).rows[0].entries[0].evidenceUrl,link);
   }
-  // Historical pre-evidence snapshots omit the new key. Missing equals null
-  // only for this additive dimension; other immutable comparisons stay exact.
-  const legacyTimesheet={id:f.timesheetId,employee_id:f.ownerId,organization_id:f.organizationId,legal_entity_id:f.legalEntityId,week_ending:'2020-03-15'};
-  const entryRow=(await pool.query('select *,work_date::text from timesheet_entries where timesheet_id=$1',[f.timesheetId])).rows[0];
-  const fakeClient={query:async(sql,params)=>sql.startsWith('select *,work_date')?{rows:[entryRow]}:sql.startsWith('select entries from work_submission_evidence')?{rows:[{entries:[{entryId:entryRow.id,projectId:entryRow.project_id,workType:entryRow.work_type,workDate:entryRow.work_date,hours:String(entryRow.hours),billable:entryRow.billable,clientName:null,category:null,remark:entryRow.remark}]}]}:{rows:params[2].map(relevant_date=>({relevant_date,id:'synthetic-legacy-period',frequency:'Weekly',status:'Open'}))}};
-  await assertWorkDecisionAllowed(fakeClient,{organizationScope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},user:{sub:identities.manager.id}},legacyTimesheet);
+
  });
 });
 console.log('Work evidence PostgreSQL/API fresh/046 upgrade/replay, manual save/read/clear, legacy preservation/conflict, evidence-only CAS, scope, immutable correction history and both import aliases passed.');
