@@ -335,3 +335,7 @@ After Draft PR55's exact-head engineering gates pass, continue [effective-dated 
 ### PR-008C bounded continuation: daily/weekly presentation and optimistic manual saves
 
 Continue WOS-TIM-001 on accepted PR56 under `docs/tasks/WOS-04-WORK-CAPTURE-MODES.md`: explicit scoped buyer modes, the existing weekly header/approval identity, lossless full-header daily/weekly saves, stale revision/mode conflicts and equivalent unfinished-Draft/manual-import period controls. This fresh candidate requires new independent exact-tree review and full exact-head execution, including real PostgreSQL/React acceptance. No default adoption/grants, daily approval, calendar re-keying or previously deferred PR008 scope is included. Full PR008 and formal acceptance remain open.
+
+### PR-008D development-only continuation: optional evidence references
+
+Under the owner's 2026-10-24 instruction to continue permitted development and defer optional reviews, implement [work-entry evidence links](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md) on unchanged PR57 `02c024d45621fe516e0a46f21657a37f2a1e4532`. Preserve existing scope/assignment/period/immutability/CAS semantics, add shared omission-versus-clear preservation for manual and both import writers, retain links across full-header UI saves and immutable correction history, and prove fresh/upgrade/replay plus real React/API/PostgreSQL journeys. Keep the dependent PR Draft/unmerged. The cumulative review remains stopped; no stack integration, protection/monitor changes or programme acceptance is authorized by this slice.

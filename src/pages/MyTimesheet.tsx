@@ -1,3 +1,4 @@
+import {evidenceUrlIsValid,normalizeEvidenceUrl} from '../../shared/work-evidence.mjs';
 import {canonicalHours,sumHours,compareHours} from '../../shared/work-hours.mjs';
 import {hydrateWorkCaptureGrid,parseCaptureHourInput,canonicalCaptureHourInput,captureUtcDate,captureHeaderMonday,captureCellText,captureCellHours,captureCellPresent,setCaptureRowHours,patchVisibleCaptureRow,removeVisibleCaptureRow} from '../services/workCaptureGrid';
 import type {TimesheetEntry} from '../types';
@@ -39,6 +40,11 @@ const shiftDate=(date:Date,days:number)=>{const next=new Date(date);next.setUTCD
 const getWeekStart=(date:Date)=>new Date(`${captureHeaderMonday(toIsoDate(date))}T00:00:00Z`);
 const getWeekEnding=(weekStart:Date)=>toIsoDate(shiftDate(weekStart,4));
 const allDays=['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'];
+const EvidenceLink=({value}:{value?:string|null})=>{
+  if(!value)return null;
+  if(!evidenceUrlIsValid(value))return <span>Invalid evidence URL</span>;
+  return <a href={normalizeEvidenceUrl(value)!} target="_blank" rel="noopener noreferrer" className="text-primary underline text-xs">Open evidence</a>;
+};
 
 export const MyTimesheet = () => {
   const navigate = useNavigate();
@@ -65,6 +71,7 @@ export const MyTimesheet = () => {
   const hasInvalidHours=rows.some(row=>row.hours.some((_,index)=>{
     const raw=hourDrafts[`${row.id}:${index}`];return raw!==undefined&&parseCaptureHourInput(raw)===null;
   }));
+  const hasInvalidEvidence=rows.some(row=>row.evidenceUrls?.some(value=>!evidenceUrlIsValid(value)));
   const [preservedEntries,setPreservedEntries]=useState<TimesheetEntry[]>([]);
   const [loaded,setLoaded]=useState(false);
   const [saving,setSaving]=useState(false);
@@ -116,7 +123,7 @@ export const MyTimesheet = () => {
         setStatus(existing.status);setWriteToken(existing.writeToken!);setWorkAssurance(existing.workAssurance);setRejectionNote(existing.rejectionNote||existing.rejectionReason);
       }else{
         const first=assigned[0];setRows(first?[{id:crypto.randomUUID(),workType:'Project Work',category:'',clientName:'',projectId:first.id,projectName:first.name,
-          hours:Array(7).fill(0),exactHours:Array(7).fill('0'),remarks:Array(7).fill(''),rowRemark:'',billable:true}]:[]);
+          hours:Array(7).fill(0),exactHours:Array(7).fill('0'),remarks:Array(7).fill(''),evidenceUrls:Array(7).fill(null),rowRemark:'',billable:true}]:[]);
         setStatus('Draft');setWriteToken(null);setWorkAssurance(undefined);setRejectionNote(undefined);
       }
       loadedContext.current=context;setLoadedOwner(context);setLoaded(true);
@@ -136,7 +143,7 @@ export const MyTimesheet = () => {
   };
 
   const persistTimesheet = async (nextStatus: 'Draft' | 'Submitted') => {
-    if (!user||!editable()||hasInvalidHours||!mode||!loadedOwner) return;
+    if (!user||!editable()||hasInvalidHours||hasInvalidEvidence||!mode||!loadedOwner) return;
     const owner=generation.current,context=loadedOwner;
     const current=()=>owner===generation.current&&isWorkCaptureContextCurrent(context);
     savePending.current=true;setSaving(true);setActiveRemark(null);
@@ -178,7 +185,7 @@ export const MyTimesheet = () => {
     rows.forEach(row => {
       row.hours.forEach((h: number, i: number) => {
         const quantity=canonicalCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(h));
-        if (quantity!==null&&compareHours(quantity,'0')>0) {
+        if (quantity!==null&&(compareHours(quantity,'0')>0||Boolean(row.evidenceUrls?.[i]))) {
           const d = shiftDate(currentWeek,i-2);
           entries.push({
             id: Math.random().toString(),
@@ -191,6 +198,7 @@ export const MyTimesheet = () => {
             date: toIsoDate(d),
             hours: quantity,
             remark: row.remarks[i],
+            evidenceUrl: normalizeEvidenceUrl(row.evidenceUrls?.[i]??null),
             status: nextStatus,
             billable: row.billable,
             weekEnding
@@ -246,6 +254,11 @@ export const MyTimesheet = () => {
     setRows(rows.map(row=>row.id===rowId?setCaptureRowHours(row,dayIdx,val):row));
   };
 
+  const updateEvidence = (rowId:string,dayIdx:number,value:string)=>{
+    if(!editable())return;
+    setRows(rows.map(row=>row.id===rowId?{...row,evidenceUrls:row.hours.map((_:number,index:number)=>index===dayIdx?value:row.evidenceUrls?.[index]??null)}:row));
+  };
+
   const updateRemark = (rowId: string, dayIdx: number, val: string) => {
     if (!editable()) return;
     setRows(rows.map(r => r.id === rowId ? {
@@ -265,7 +278,7 @@ export const MyTimesheet = () => {
       projectId: type === 'Project Work' ? firstProject?.id || '' : undefined,
       projectName: type === 'Project Work' ? firstProject?.name || 'Select Assigned Project' : 'Client Support Activity',
       hours: Array(7).fill(0), exactHours:Array(7).fill('0'),
-      remarks: Array(7).fill(''),
+      remarks: Array(7).fill(''), evidenceUrls:Array(7).fill(null),
       rowRemark: '',
       billable: true
     }]);
@@ -329,14 +342,14 @@ export const MyTimesheet = () => {
                <>
                  <button
                     onClick={handleSaveDraft}
-                    disabled={isFutureWeek||!editable()||hasInvalidHours}
+                    disabled={isFutureWeek||!editable()||hasInvalidHours||hasInvalidEvidence}
                     className="hidden sm:flex btn-secondary py-2.5 px-5 items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Save size={14} /> Save Draft
                  </button>
                  <button
                   onClick={handleSubmit}
-                  disabled={isFutureWeek||getWeekEnding(currentWeek)>serverDate||!editable()||hasInvalidHours}
+                  disabled={isFutureWeek||getWeekEnding(currentWeek)>serverDate||!editable()||hasInvalidHours||hasInvalidEvidence}
                   className="btn-primary py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Send size={14} /> Submit for Approval
@@ -494,6 +507,7 @@ export const MyTimesheet = () => {
                           <MessageSquare size={12} />
                         </button>
                       </div>
+                      <EvidenceLink value={row.evidenceUrls?.[i]}/>
                     </td>
                   );})}
                   <td className="py-5 px-4 border-l border-gray-100">
@@ -544,8 +558,9 @@ export const MyTimesheet = () => {
 
       </fieldset>
       {hasInvalidHours&&<p role="alert">Correct invalid hours before saving. Use a decimal quantity from 0 to 24; invalid values have not changed the work totals.</p>}
-      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hoursExact??entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'}</p>)}</section>}
-      {hiddenCells.length>0&&<section aria-label="Preserved unseen entries" className="mt-4 rounded-xl border p-4"><p>These cells are outside the current view and remain in the same whole-header save. Change their context only in a view that includes their dates.</p>{hiddenCells.map(({row,index})=><p key={`${row.id}:${index}`}>{toIsoDate(shiftDate(currentWeek,index-2))}: {captureCellText(row,index,hourDrafts)}h, {row.projectName||row.clientName||row.workType}, {row.category||'No category'}, {row.remarks[index]||'No comment'}</p>)}</section>}
+      {hasInvalidEvidence&&<p role="alert">Use an absolute HTTP or HTTPS evidence URL of at most 2048 characters without embedded credentials.</p>}
+      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hoursExact??entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'} <EvidenceLink value={entry.evidenceUrl}/></p>)}</section>}
+      {hiddenCells.length>0&&<section aria-label="Preserved unseen entries" className="mt-4 rounded-xl border p-4"><p>These cells are outside the current view and remain in the same whole-header save. Change their context only in a view that includes their dates.</p>{hiddenCells.map(({row,index})=><p key={`${row.id}:${index}`}>{toIsoDate(shiftDate(currentWeek,index-2))}: {captureCellText(row,index,hourDrafts)}h, {row.projectName||row.clientName||row.workType}, {row.category||'No category'}, {row.remarks[index]||'No comment'} <EvidenceLink value={row.evidenceUrls?.[index]}/></p>)}</section>}
       {!loaded&&<p role="status">Work is not ready for editing. Reload this page after checking connection and access.</p>}
       {saving&&<p role="status">Saving work…</p>}
       {/* Remark Input Modal/Overlay */}
@@ -572,6 +587,14 @@ export const MyTimesheet = () => {
                 value={rows.find(r => r.id === activeRemark.rowId)?.remarks[activeRemark.dayIdx] || ''}
                 onChange={(e) => updateRemark(activeRemark.rowId, activeRemark.dayIdx, e.target.value)}
               />
+              <label className="block mt-3 text-sm">Evidence URL (optional)
+                <input type="url" maxLength={2048} disabled={!editable()} placeholder="https://example.test/work-reference"
+                  className="w-full border rounded-lg p-2 mt-1 text-sm"
+                  value={rows.find(row=>row.id===activeRemark.rowId)?.evidenceUrls?.[activeRemark.dayIdx]??''}
+                  aria-invalid={!evidenceUrlIsValid(rows.find(row=>row.id===activeRemark.rowId)?.evidenceUrls?.[activeRemark.dayIdx]??null)}
+                  onChange={event=>updateEvidence(activeRemark.rowId,activeRemark.dayIdx,event.target.value)}/>
+              </label>
+              <p className="text-xs mt-1">An empty URL clears this entry's link. The link is stored without a preview.</p>
               <button
                 onClick={() => setActiveRemark(null)}
                 className="w-full mt-4 btn-primary py-3 text-xs font-bold shadow-lg shadow-primary/20"

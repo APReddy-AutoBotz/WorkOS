@@ -41,3 +41,7 @@ Owner-authorized standard dependency maintenance updates only locked body-parser
 ## Rollback and deliberate exclusions
 
 Rollback is application rollback with retained additive migration046 and immutable mode history; no destructive down migration or work/evidence deletion is supplied. Older callers continue the documented legacy contract. This adds no grants, default adoption, daily approval, timer, calendar re-keying, categories/non-client contexts, evidence links, overtime, deadlines/grace, reopen policy, planning or financial/reporting redesign. PR008A/B evidence remains bounded, and full PR008/formal product acceptance is not claimed.
+
+## Separate PR-008D continuation
+
+The evidence-link exclusion above is now addressed only by the separate dependent [PR-008D evidence-link slice](WOS-04-WORK-ENTRY-EVIDENCE.md), based on unchanged PR57 `02c024d45621fe516e0a46f21657a37f2a1e4532`. This does not expand PR-008C or accept/integrate the stack. Optional review is deferred under the owner's 2026-10-24 development instruction and remains outstanding.

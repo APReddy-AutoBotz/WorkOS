@@ -38,6 +38,11 @@ assert(calls.slice(1).every(call=>call.headers.Authorization==='Bearer synthetic
 await work.save({...input,organizationId:'forged',actorId:'forged'},precondition,capture());const body=JSON.parse(calls.at(-1).body);
 assert.deepEqual(Object.keys(body).sort(),['capture_mode','employee_id','entries','expected_mode_policy_id','expected_write_token','status','week_ending'].sort());
 assert.equal(body.entries[0].hours,'0.25000000000000001');assert.equal(body.expected_write_token,token);assert.equal(body.capture_mode,'daily');assert.equal(body.expected_mode_policy_id,'m1');assert.equal(body.entries[0].billable,false);
+for(const evidenceUrl of [undefined,null,'https://example.test/work/42?revision=1#note']){
+ await work.save({...input,entries:[{...input.entries[0],evidenceUrl}]},precondition,capture());
+ const entry=JSON.parse(calls.at(-1).body).entries[0];
+ assert.equal(entry.evidence_url,evidenceUrl);assert.equal(Object.hasOwn(entry,'evidence_url'),evidenceUrl!==undefined);
+}
 assert.deepEqual(await settings.get(captureSettings()),modeSettings);
 await settings.append({...draft,actorId:'forged'},captureSettings());assert.deepEqual(JSON.parse(calls.at(-1).body),draft);
 for(const mutate of [()=>values.set('workos_session','null'),()=>values.set('workos_organization_scope',JSON.stringify(other)),()=>values.set('workos_api_token','replacement'),()=>values.set('workos_session',JSON.stringify({...user,permissions:[]}))]){

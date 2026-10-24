@@ -103,6 +103,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const proposalInput=projectInput(dates,'SYN-UPGRADE-PROMOTION',{id:'pending',billable:true},{budgetAllocation:'0.0000'});
     const proposedId=await seedProposal(pool,proposalInput);
     const oldLegacy=await snapshot(pool,legacyTables);
+    for(const row of oldLegacy.timesheet_entries)row.snapshot.evidence_url=null; // additive 047 column
     await copyFile(join(commercialServerDir,'migrations',`${migration040}.sql`),join(rootDir,'migrations',`${migration040}.sql`));
     const before041=await runMigrations({pool,rootDir,logger:quiet});assert.deepEqual(before041.applied,[migration040]);
     const identities=await seedCommercialIdentities(pool);
@@ -115,7 +116,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       await client.query('commit');
     }catch(error){await client.query('rollback');throw error;}finally{client.release();}
     const immutable040=await snapshot(pool,draftTables);
-    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration041,'042_wos04_scoped_client_profiles','043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes']);assert.equal(upgraded.status.isCurrent,true);
+    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration041,'042_wos04_scoped_client_profiles','043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence']);assert.equal(upgraded.status.isCurrent,true);
     assert.deepEqual(await snapshot(pool,legacyTables),oldLegacy,'041 upgrade must not change old project/work/client/employee identities or fields');
     assert.deepEqual(await snapshot(pool,draftTables),immutable040,'041 upgrade never converts or edits 040 drafts, terms, events or neutral mappings');
     assert.equal((await counts(pool)).events,0);assert.equal((await counts(pool)).bindings,0);
