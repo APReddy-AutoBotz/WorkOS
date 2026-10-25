@@ -1,3 +1,5 @@
+import { AssignmentCreationRequest } from '../AssignmentCreationApprovals';
+import { canonicalHours } from '../../../shared/work-hours.mjs';
 import {captureOverlapContext,isOverlapContextCurrent} from '../../services/assignmentOverlap';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -43,6 +45,7 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
   const [roleOnProject, setRoleOnProject] = useState(allocation?.roleOnProject || '');
   const [remarks, setRemarks] = useState(allocation?.remarks || '');
   const [formError, setFormError] = useState('');
+  const [creationRequest, setCreationRequest] = useState(false);
 
   const [employeeAllocations, setEmployeeAllocations] = useState<any[]>([]);
 
@@ -171,6 +174,7 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
           </div>
         </div>
         <button
+          aria-label="Close allocation form"
           onClick={onClose}
           className="p-2 hover:bg-white/10 rounded-xl transition-colors"
         >
@@ -178,6 +182,7 @@ export const AllocationForm = ({ onClose, allocation,onPolicyWarning }: Allocati
         </button>
       </div>
 
+      {!allocation?.id && <div className="px-8 pt-3"><button type="button" onClick={() => setCreationRequest(v => !v)}>Request configured creation approval</button>{creationRequest && <div key={JSON.stringify([selectedEmployeeId, selectedProjectId, roleOnProject, allocationPercent, startDate, endDate, status, isBillable, remarks])}><AssignmentCreationRequest workerId={selectedEmployeeId} projectId={selectedProjectId} definition={{ role: roleOnProject || null, quantityUnit: 'percentage', quantityExact: canonicalHours(String(allocationPercent)), startsOn: startDate, endsOn: endDate, billable: isBillable === 'true', status: status as 'Active' | 'Paused' | 'Completed', comment: remarks.trim() || null }} /></div>}</div>}
       <form onSubmit={handleSubmit} className="p-8 overflow-y-auto space-y-8">
         {formError && (
           <NoticeBanner

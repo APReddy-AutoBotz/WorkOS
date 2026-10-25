@@ -17,6 +17,7 @@ export type AssignmentApprovalDefinition = {
         body: string;
     }[];
     completionInApp: boolean;
+    creationRequired?: boolean;
 };
 export type AssignmentApprovalPolicy = {
     id: string;
@@ -71,7 +72,7 @@ export type AssignmentApprovalPage = {
     ownerKey: string;
 };
 export type AssignmentApprovalNotice = {
-    kind: 'assignment-approval';
+    kind: 'assignment-approval' | 'assignment-creation-approval';
     id: string;
     eventId: string;
     instanceId: string;
@@ -110,11 +111,13 @@ const receipt = (v: unknown, id: string): WorkDecisionReceipt => {
         return fail();
     return v as unknown as WorkDecisionReceipt;
 };
-export const decodeAssignmentApprovalInstance = (v: unknown, id?: string): AssignmentApprovalInstance => {
-    if (!obj(v) || !keys(v, ['id', 'assignmentId', 'employeeId', 'projectId', 'sourceRevision', 'sourceVersionId', 'sourceToken', 'requesterUserId', 'requestId', 'reason', 'createdAt', 'worker', 'policy', 'before', 'proposed', 'currentRevision', 'currentVersionId', 'state', 'transitions', 'notificationFailures']) || !uuid(v.id) || id !== undefined && v.id !== id || !text(v.assignmentId, 239) || !text(v.employeeId) || !text(v.projectId) || !hash(v.sourceRevision) || !nullableUuid(v.sourceVersionId) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !uuid(v.requestId) || !text(v.reason, 1000) || !instant(v.createdAt) || !obj(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || v.worker.id !== v.employeeId || !text(v.worker.code) || !text(v.worker.name, 2000) || !snapshot(v.before, v.assignmentId) || v.before.employeeId !== v.employeeId || v.before.projectId !== v.projectId || !validAssignmentDefinition(v.proposed) || !hash(v.currentRevision) || !nullableUuid(v.currentVersionId) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !Array.isArray(v.notificationFailures))
+export type AssignmentCreationInstance = Omit<AssignmentApprovalInstance, 'before'> & { operationKind: 'Creation'; before: null };
+export type AssignmentCreationPage = { instance: AssignmentCreationInstance; actorUserId: string; ownerKey: string };
+const decodeInstance = (v: unknown, id?: string, creation = false): AssignmentApprovalInstance | AssignmentCreationInstance => {
+    if (!obj(v) || !keys(v, ['id', 'assignmentId', 'employeeId', 'projectId', 'sourceRevision', 'sourceVersionId', 'sourceToken', 'requesterUserId', 'requestId', 'reason', 'createdAt', 'worker', 'policy', 'before', 'proposed', 'currentRevision', 'currentVersionId', 'state', 'transitions', 'notificationFailures', ...(creation ? ['operationKind'] : [])]) || (creation && v.operationKind !== 'Creation') || !uuid(v.id) || id !== undefined && v.id !== id || !text(v.assignmentId, 239) || creation && (!v.assignmentId.startsWith('a-') || !uuid(v.assignmentId.slice(2))) || !text(v.employeeId) || !text(v.projectId) || !hash(v.sourceRevision) || !nullableUuid(v.sourceVersionId) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !uuid(v.requestId) || !text(v.reason, 1000) || !instant(v.createdAt) || !obj(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || v.worker.id !== v.employeeId || !text(v.worker.code) || !text(v.worker.name, 2000) || (creation ? v.before !== null || v.sourceVersionId !== null : !snapshot(v.before, v.assignmentId) || v.before.employeeId !== v.employeeId || v.before.projectId !== v.projectId) || !validAssignmentDefinition(v.proposed) || !hash(v.currentRevision) || !nullableUuid(v.currentVersionId) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !Array.isArray(v.notificationFailures))
         return fail();
     const p = decodeAssignmentApprovalPolicy(v.policy), r = v as unknown as AssignmentApprovalInstance;
-    if (!p.definition.workerIds.includes(r.employeeId) || !materialAssignmentFields(r.before, r.proposed, p.definition.materialFields).length)
+    if (!p.definition.workerIds.includes(r.employeeId) || (creation ? p.definition.creationRequired !== true : !materialAssignmentFields(r.before, r.proposed, p.definition.materialFields).length))
         return fail();
     let state: WorkStageState;
     try {
@@ -136,8 +139,10 @@ export const decodeAssignmentApprovalInstance = (v: unknown, id?: string): Assig
         return fail();
     return r;
 };
+export const decodeAssignmentApprovalInstance = (v: unknown, id?: string): AssignmentApprovalInstance => decodeInstance(v, id) as AssignmentApprovalInstance;
+export const decodeAssignmentCreationInstance = (v: unknown, id?: string): AssignmentCreationInstance => decodeInstance(v, id, true) as AssignmentCreationInstance;
 export const decodeAssignmentApprovalNotice = (v: unknown): AssignmentApprovalNotice => {
-    if (!obj(v) || !keys(v, ['kind', 'id', 'eventId', 'instanceId', 'assignmentId', 'sourceToken', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'deliveryId', 'deliveryStatus', 'createdAt', 'readAt']) || v.kind !== 'assignment-approval' || !uuid(v.id) || !uuid(v.instanceId) || !text(v.assignmentId, 239) || !hash(v.sourceToken) || !integer(v.transitionSequence, 0, 10) || !APPROVAL_EVENT_KEYS.includes(v.eventKey as string) || !text(v.operationId) || v.eventId !== assignmentApprovalIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !uuid(v.templateId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || !v.reasons.length || v.reasons.length > 3 || v.reasons.some(k => !['requester', 'affected_worker', 'current_stage_approver'].includes(k)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !uuid(v.deliveryId) || v.deliveryStatus !== 'Delivered' || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== 'ACTION_REQUIRED' || v.channelDecision !== 'Required'))
+    if (!obj(v) || !keys(v, ['kind', 'id', 'eventId', 'instanceId', 'assignmentId', 'sourceToken', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'deliveryId', 'deliveryStatus', 'createdAt', 'readAt']) || !['assignment-approval', 'assignment-creation-approval'].includes(String(v.kind)) || !uuid(v.id) || !uuid(v.instanceId) || !text(v.assignmentId, 239) || !hash(v.sourceToken) || !integer(v.transitionSequence, 0, 10) || !APPROVAL_EVENT_KEYS.includes(v.eventKey as string) || !text(v.operationId) || v.eventId !== assignmentApprovalIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !uuid(v.templateId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || !v.reasons.length || v.reasons.length > 3 || v.reasons.some(k => !['requester', 'affected_worker', 'current_stage_approver'].includes(k)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !uuid(v.deliveryId) || v.deliveryStatus !== 'Delivered' || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== 'ACTION_REQUIRED' || v.channelDecision !== 'Required'))
         return fail();
     return v as AssignmentApprovalNotice;
 };
@@ -253,7 +258,36 @@ export const createAssignmentApprovalClient = (request: Transport) => {
                 return fail();
             return page(await call('GET', '/instances/' + id, c), id);
         },
-        decide: async (p: AssignmentApprovalPage, decision: 'Approved' | 'Rejected', reason: string, requestId: string, c: WorkApprovalContext | null) => {
+        creationPolicy: async (employeeId: string, projectId: string, c: WorkApprovalContext | null) => {
+            if (c?.mode !== 'assignment' || !text(employeeId) || !text(projectId)) return fail();
+            const r = await call('GET', '/creation-policy?' + new URLSearchParams({ employeeId, projectId }), c);
+            if (r.employeeId !== employeeId || r.projectId !== projectId) return fail();
+            const p = r.policy === null ? null : decodeAssignmentApprovalPolicy(r.policy);
+            if (p && (p.definition.creationRequired !== true || !p.definition.workerIds.includes(employeeId))) return fail();
+            return p;
+        },
+        requestCreation: async (employeeId: string, projectId: string, policy: AssignmentApprovalPolicy, definition: AssignmentDefinition, reason: string, requestId: string, c: WorkApprovalContext | null) => {
+            if (c?.mode !== 'assignment' || !text(employeeId) || !text(projectId) || !uuid(requestId) || policy.definition.creationRequired !== true || !validAssignmentDefinition(definition) || !text(reason.trim(), 1000)) return fail();
+            const r = await call('POST', '/creations', c, { employeeId, projectId, expectedPolicyId: policy.id, definition, reason: reason.trim(), requestId });
+            const i = decodeAssignmentCreationInstance(r.instance);
+            if (typeof r.replayed !== 'boolean' || i.employeeId !== employeeId || i.projectId !== projectId || i.policy.id !== policy.id || i.requestId !== requestId || i.requesterUserId !== r.actorUserId || i.reason !== reason.trim() || canon(i.proposed) !== canon(definition)) return fail();
+            return { instance: i, actorUserId: r.actorUserId as string, ownerKey: r.ownerKey as string, replayed: r.replayed };
+        },
+        creation: async (id: string, c: WorkApprovalContext | null): Promise<AssignmentCreationPage> => {
+            if (!uuid(id)) return fail();
+            const r = await call('GET', '/creation-instances/' + id, c);
+            return { instance: decodeAssignmentCreationInstance(r.instance, id), actorUserId: r.actorUserId as string, ownerKey: r.ownerKey as string };
+        },
+        creations: async (c: WorkApprovalContext | null, after: string | null = null) => {
+            if (after !== null && !uuid(after)) return fail();
+            const r = await call('GET', '/creation-instances' + (after ? '?after=' + after : ''), c);
+            if (!Array.isArray(r.instances) || r.instances.length > 20) return fail();
+            let previous = after ?? '';
+            const instances = r.instances.map(v => { const i = decodeAssignmentCreationInstance(v); if (i.id <= previous) return fail(); previous = i.id; return i; });
+            if (r.nextAfter !== null && (instances.length !== 20 || r.nextAfter !== previous)) return fail();
+            return { instances, nextAfter: r.nextAfter as string | null };
+        },
+        decide: async (p: AssignmentApprovalPage | AssignmentCreationPage, decision: 'Approved' | 'Rejected', reason: string, requestId: string, c: WorkApprovalContext | null) => {
             const i = p.instance;
             if (c?.mode !== 'assignment-decide' || i.state.status !== 'Pending' || !uuid(requestId) || !['Approved', 'Rejected'].includes(decision) || !text(reason.trim(), 1000))
                 return fail();
