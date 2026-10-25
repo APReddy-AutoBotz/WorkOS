@@ -2,7 +2,7 @@
 create function valid_assignment_approval_definition(d jsonb)returns boolean language plpgsql immutable as $$
 declare k text;
 begin
- if not valid_work_approval_definition((d-'materialFields')||jsonb_build_object('entityType','Timesheet')) or d->>'entityType'<>'Assignment' or jsonb_typeof(d->'materialFields')is distinct from'array' or jsonb_array_length(d->'materialFields')not between 1 and 7 or length(d->>'locale')>100 then return false;end if;
+ if not valid_work_approval_definition((d-'materialFields')||jsonb_build_object('entityType','Timesheet')) or d->>'entityType'is distinct from'Assignment' or jsonb_typeof(d->'materialFields')is distinct from'array' or jsonb_array_length(d->'materialFields')not between 1 and 7 or length(d->>'locale')>100 then return false;end if;
  if(select count(distinct v)from jsonb_array_elements_text(d->'materialFields')v)<>jsonb_array_length(d->'materialFields')then return false;end if;
  for k in select jsonb_array_elements_text(d->'materialFields')loop if k not in('billable','comment','endsOn','quantityExact','role','startsOn','status')then return false;end if;end loop;return true;
 exception when others then return false;end $$;

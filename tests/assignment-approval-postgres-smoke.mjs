@@ -185,6 +185,15 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await assert.rejects(pool.query(`delete from ${t} where ${key}=$1`, [first[key]]), { code: '55000' });
         }
         await assert.rejects(pool.query('update assignment_approval_instances set reason=$1 where id=$2', ['rewrite', reject.id]), { code: '55000' });
+        for (const discriminator of ['missing', null]) {
+            const malformed = { ...d };
+            if (discriminator === 'missing')
+                delete malformed.entityType;
+            else
+                malformed.entityType = null;
+            assert.equal((await pool.query('select valid_assignment_approval_definition($1::jsonb)accepted', [JSON.stringify(malformed)])).rows[0].accepted, false, 'Required Assignment discriminator must reject missing/null in SQL');
+            assert.equal((await request(base + '/policies', { method: 'POST', body: { expectedOwnerKey: owner, expectedLatestId: policy.id, effectiveFrom: fx.today, definition: malformed, reason: 'Synthetic missing/null policy discriminator' } })).status, 400);
+        }
         const invalidPolicy = { ...d, materialFields: ['quantityExact', 'quantityExact'] };
         assert.equal((await request(base + '/policies', { method: 'POST', body: { expectedOwnerKey: owner, expectedLatestId: policy.id, effectiveFrom: fx.today, definition: invalidPolicy, reason: 'Synthetic invalid duplicate material fields' } })).status, 400);
     });
