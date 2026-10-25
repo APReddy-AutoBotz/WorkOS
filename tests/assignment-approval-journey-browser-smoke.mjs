@@ -1,3 +1,4 @@
+import { compareCapabilityIds } from '../shared/workforce-capabilities.mjs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -9,6 +10,9 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     await migrateCommercialDatabase(pool);
     const fx = await seedAssignmentApproval(pool), { identities } = fx;
+    const unicodeWorkers = ['synthetic-\ue000-worker', 'synthetic-😀-worker'];
+    for (const [id, i] of unicodeWorkers.map((id, i) => [id, i]))
+        await pool.query("insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)values($1,$1,$2,$3,'Consultant','Delivery','US','director-commercial','Active',$4,$5)", [id, 'Synthetic Unicode worker ' + i, 'synthetic-unicode-' + i + '@example.test', f.organizationId, f.legalEntityId]);
     await withCommercialApi({ databaseUrl, identities }, async ({ request, tokenFor, baseUrl: apiUrl }) => {
         const assignment = await createApprovalAssignment(request, fx), vite = await createServer({ root, mode: 'production', clearScreen: false, logLevel: 'error', server: { host: '127.0.0.1', port: 0, hmr: false, proxy: { '/api': { target: apiUrl, changeOrigin: true } } }, define: { 'import.meta.env.VITE_APP_MODE': JSON.stringify('production'), 'import.meta.env.VITE_ALLOW_TEST_FALLBACK': JSON.stringify('false') } });
         let browser;
@@ -22,8 +26,10 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             for (const p of [a, b, r, w, stale]) {
                 p.setDefaultTimeout(20000);
                 p.on('pageerror', e => errors.push(e.stack ?? e.message));
-                p.on('request', q => { if (/^https?:/.test(q.url()) && new URL(q.url()).origin !== origin)
-                    external.push(q.url()); });
+                p.on('request', q => {
+                    if (/^https?:/.test(q.url()) && new URL(q.url()).origin !== origin)
+                        external.push(q.url());
+                });
             }
             const policyPanel = p => p.getByRole('region', { name: 'Material assignment approval policy', exact: true }), proposalPanel = p => p.getByRole('region', { name: 'Material assignment proposals', exact: true }), readSource = async (p) => { const q = proposalPanel(p); await q.getByLabel('Assignment proposal source', { exact: true }).fill(assignment.id); await q.getByRole('button', { name: 'Load assignment proposal source', exact: true }).click(); await q.getByLabel('Proposed assignment percentage', { exact: true }).waitFor(); return q; }, readProposal = async (p, id) => { const q = proposalPanel(p); await q.getByRole('button', { name: 'Load material assignment proposals', exact: true }).click(); await q.getByRole('button', { name: 'Inspect material proposal ' + id, exact: true }).click(); await q.getByRole('article', { name: 'Current material assignment proposal', exact: true }).waitFor(); return q; };
             await a.goto(url);
@@ -34,8 +40,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             assert.equal(await q.getByLabel('Assignment informational completion', { exact: true }).inputValue(), '');
             assert(await q.getByRole('button', { name: 'Record material assignment policy', exact: true }).isDisabled());
             const definition = assignmentApprovalDefinition(identities);
+            definition.workerIds = [f.ownerId, ...unicodeWorkers].sort(compareCapabilityIds);
             await q.getByLabel('Material policy effective date', { exact: true }).fill(fx.today);
-            await q.getByLabel('Material policy workers', { exact: true }).selectOption([f.ownerId]);
+            await q.getByLabel('Material policy workers', { exact: true }).selectOption(definition.workerIds);
             await q.getByLabel('Fields requiring material approval', { exact: true }).selectOption(definition.materialFields);
             await q.getByLabel('Assignment stage 1 account', { exact: true }).selectOption(identities.manager.id);
             await q.getByLabel('Assignment stage 1 role', { exact: true }).selectOption('Admin');
@@ -51,7 +58,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await q.getByLabel('Material policy reason', { exact: true }).fill('Synthetic browser explicit material adoption');
             const adopting = a.waitForResponse(v => new URL(v.url()).pathname === base + '/policies' && v.request().method() === 'POST');
             await q.getByRole('button', { name: 'Record material assignment policy', exact: true }).click();
-            assert.equal((await adopting).status(), 201);
+            const adopted = await adopting;
+            assert.equal(adopted.status(), 201);
+            assert.deepEqual((await adopted.json()).policy.definition.workerIds, definition.workerIds, 'Real UI adopts explicit Unicode workers in existing PostgreSQL C order');
             await q.getByRole('article', { name: 'Material assignment policy 1', exact: true }).waitFor();
             await r.goto(url);
             let rp = await readSource(r);
