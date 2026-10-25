@@ -90,9 +90,10 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     try { assert.equal((await decideAssignment(request, ids.second, await get(changedProject.id))).status, 422); assert.deepEqual(await ledger(), beforeProject); await noSource(changedProject.assignmentId); }
     finally { await pool.query("update projects set status='Active'where id=$1", [f.projectId]); }
     for (const changed of ['date', 'billability']) {
-      const pending = await create(); assert.equal((await decideAssignment(request, ids.manager, pending)).status, 201);
+      const tomorrow = new Date(Date.parse(today + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+      const pending = await create(changed === 'date' ? { definition: { ...definition, endsOn: tomorrow } } : {}); assert.equal((await decideAssignment(request, ids.manager, pending)).status, 201);
       const original = (await pool.query('select end_date::text,billable from projects where id=$1', [f.projectId])).rows[0];
-      if (changed === 'date') await pool.query('update projects set end_date=$1::date-1 where id=$2', [today, f.projectId]);
+      if (changed === 'date') await pool.query('update projects set end_date=$1::date where id=$2', [today, f.projectId]);
       else await pool.query('update projects set billable=false where id=$1', [f.projectId]);
       const before = await ledger();
       try { const final = await decideAssignment(request, ids.second, await get(pending.id)); assert.equal(final.status, 422, JSON.stringify(final.body)); assert.deepEqual(await ledger(), before); await noSource(pending.assignmentId); }
