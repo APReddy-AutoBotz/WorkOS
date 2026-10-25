@@ -21,3 +21,6 @@ assert(validAssignmentApprovalPolicy({ ...d, creationRequired: false }));
 for (const value of [null, 'true', 1, {}, []]) assert.equal(validAssignmentApprovalPolicy({ ...d, creationRequired: value }), false);
 assert(validAssignmentApprovalPolicy({ ...d, creationRequired: false, materialFields: [] }), 'Explicit creation-only retirement needs no invented material field');
 console.log('Explicit creation-only/mixed policy, absent legacy option and invalid option contracts passed.');
+
+// Configured prospective due handoff is part of this required gate.
+await import('./approval-due-smoke.mjs');

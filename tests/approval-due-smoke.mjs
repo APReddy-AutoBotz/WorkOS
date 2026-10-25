@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { APPROVAL_DUE_KEY as key, validApprovalDueDefinition as valid, approvalDueRecipients, approvalDueIdentity, renderApprovalDue } from '../shared/approval-due.mjs';
+const user='00000001-1111-4111-8111-111111111111',other='00000002-1111-4111-8111-111111111111';
+const d={workerIds:['synthetic-worker'],sourceKinds:['Creation','Material','Work'],clockBasis:'StagePendingUTC',cohort:'NewInstances',dueAfterMinutes:1,target:{userId:user,role:'Admin'},locale:'en-GB',template:{key,subject:'Overdue {{sourceRef}}',body:'{{workerCode}} stage {{stageNumber}} pending {{pendingAt}} due {{dueAt}}.'}};
+assert(valid(d));assert(valid({...d,workerIds:[]}));
+for(const patch of [{clockBasis:undefined},{clockBasis:'BusinessDays'},{cohort:'ExistingInstances'},{dueAfterMinutes:0},{dueAfterMinutes:1.5},{dueAfterMinutes:'1'},{dueAfterMinutes:527041},{dueAfterMinutes:NaN},{workerIds:['z','a']},{workerIds:['a','a']},{sourceKinds:['Work','Creation']},{sourceKinds:[]},{target:{userId:user,role:'Admin',grant:true}},{locale:'en-gb'},{template:{...d.template,body:'{{financialAmount}}'}},{template:{...d.template,body:'{{dueAt}' }},{scheduler:true}])assert(!valid({...d,...patch}),JSON.stringify(patch));
+assert.deepEqual(approvalDueRecipients(user,user),[{userId:user,reasons:['configured_escalation_target','current_stage_approver']}]);assert.equal(approvalDueRecipients(user,other).length,2);
+assert.equal(approvalDueIdentity(user,'synthetic/operation'),`approval-due/${user}/${key}/synthetic%2Foperation`);
+const vars={workerCode:'SYN',sourceRef:'work/'+user,stageNumber:'1',pendingAt:'2026-10-25T12:00:00.000Z',dueAt:'2026-10-25T12:01:00.000Z'};
+assert.equal(renderApprovalDue(d.template,vars).body,'SYN stage 1 pending 2026-10-25T12:00:00.000Z due 2026-10-25T12:01:00.000Z.');assert.throws(()=>renderApprovalDue(d.template,{...vars,dueAt:''}));
+console.log('Explicit new-instance UTC clock policy, finite timing/template validation and same-user mandatory-reason dedup passed.');

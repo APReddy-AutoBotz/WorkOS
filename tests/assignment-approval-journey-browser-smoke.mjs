@@ -153,3 +153,6 @@ await import('./e2-version-state-journey-browser-smoke.mjs');
 await import('./assignment-creation-journey-browser-smoke.mjs');
 
 await import('./reviewed-approval-batch-journey-browser-smoke.mjs');
+
+// Configured prospective due handoff is part of this required gate.
+await import('./approval-due-journey-browser-smoke.mjs');
