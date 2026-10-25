@@ -5,10 +5,19 @@ import { commercialFixture as f, withCommercialDatabase, migrateCommercialDataba
 import { WORK_APPROVAL_BASE as base, workApprovalWorkers as workers, seedWorkApproval, withPreWorkApprovalMigrations, stagedDefinition, readApprovalOwner, adoptStagedPolicy, prepareStagedWork, submitStagedWork, stagedWorkEntries } from './support/work-approval-test.mjs';
 import { shiftCapacityDate } from '../shared/worker-capacity.mjs';
 const table = async (p, t) => (await p.query(`select to_jsonb(t)v from ${t} t order by to_jsonb(t)::text`)).rows, newTables = ['work_approval_policy_versions', 'work_approval_templates', 'work_approval_instances', 'work_approval_transitions', 'work_approval_events', 'work_approval_recipients', 'work_approval_notification_failures', 'work_approval_reads'];
-await withCommercialDatabase(async ({ pool }) => withPreWorkApprovalMigrations(async (rootDir) => { await runMigrations({ pool, rootDir, logger: { log() { } } }); await seedWorkApproval(pool); const keep = ['timesheets', 'timesheet_entries', 'work_submission_evidence', 'work_submission_decisions', 'approval_records', 'approval_delegations', 'notification_events', 'notification_templates', 'notification_preferences', 'notification_delivery_attempts', 'role_permissions', 'users', 'project_allocations', 'assignment_versions', 'worker_capacity_versions', 'native_forecast_evidence'], before = Object.fromEntries(await Promise.all(keep.map(async (t) => [t, await table(pool, t)]))); assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['063_wos05_staged_work_approvals']); for (const t of newTables)
-    assert.deepEqual(await table(pool, t), []); for (const t of keep)
-    assert.deepEqual(await table(pool, t), before[t], t + ' unchanged'); assert.deepEqual((await migrateCommercialDatabase(pool)).applied, []); for (const t of keep)
-    assert.deepEqual(await table(pool, t), before[t]); }));
+await withCommercialDatabase(async ({ pool }) => withPreWorkApprovalMigrations(async (rootDir) => {
+    await runMigrations({ pool, rootDir, logger: { log() { } } });
+    await seedWorkApproval(pool);
+    const keep = ['timesheets', 'timesheet_entries', 'work_submission_evidence', 'work_submission_decisions', 'approval_records', 'approval_delegations', 'notification_events', 'notification_templates', 'notification_preferences', 'notification_delivery_attempts', 'role_permissions', 'users', 'project_allocations', 'assignment_versions', 'worker_capacity_versions', 'native_forecast_evidence'], before = Object.fromEntries(await Promise.all(keep.map(async (t) => [t, await table(pool, t)])));
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['063_wos05_staged_work_approvals']);
+    for (const t of newTables)
+        assert.deepEqual(await table(pool, t), []);
+    for (const t of keep)
+        assert.deepEqual(await table(pool, t), before[t], t + ' unchanged');
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, []);
+    for (const t of keep)
+        assert.deepEqual(await table(pool, t), before[t]);
+}));
 await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     await migrateCommercialDatabase(pool);
     const { identities, today, next } = await seedWorkApproval(pool);
@@ -21,6 +30,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const policy = await adoptStagedPolicy(request, identities, today);
         assert.equal((await request('/api/timesheets/' + legacy.body.id + '/status', { method: 'PATCH', body: { status: 'Approved' } })).status, 200, 'already submitted work stays unadopted legacy');
         const own = await readApprovalOwner(request, identities.manager), get = async (id, identity = identities.manager) => request(base + '/instances/' + id, { identity }), decide = async (v, identity, decision = 'Approved', key = randomUUID(), reason = 'Synthetic staged decision', extra = {}) => request(base + '/instances/' + v.id + '/decisions', { method: 'POST', identity, body: { expectedOwnerKey: identity === identities.manager ? own : await readApprovalOwner(request, identity), expectedSourceToken: v.sourceToken, expectedSequence: v.state.sequence, requestId: key, decision, reason, ...extra } }), header = async (id) => (await pool.query('select * from timesheets where id=$1', [id])).rows[0], counts = async () => (await pool.query('select(select count(*)from work_approval_instances)i,(select count(*)from work_approval_transitions)t,(select count(*)from work_approval_events)e,(select count(*)from work_approval_recipients)r,(select count(*)from work_submission_decisions)d')).rows[0];
+        const canonicalPolicy = stagedDefinition(identities);
+        canonicalPolicy.stages[0].userId = 'ABCDEF01-1111-4111-8111-111111111111';
+        const badCase = await request(base + '/policies', { method: 'POST', body: { expectedOwnerKey: own, expectedLatestId: policy.id, effectiveFrom: next, definition: canonicalPolicy, reason: 'Synthetic noncanonical account input' } });
+        assert.equal(badCase.status, 400, JSON.stringify(badCase.body));
+        assert.equal((await pool.query('select valid_work_approval_definition($1::jsonb) ok', [JSON.stringify(canonicalPolicy)])).rows[0].ok, false);
         const first = await submitStagedWork(request, identities.first, today);
         assert(first.instance);
         let v = first.instance;

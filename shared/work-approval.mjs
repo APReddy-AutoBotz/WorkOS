@@ -4,7 +4,7 @@ export const APPROVAL_EVENT_KEYS = ['approval.action_required', 'approval.reject
 export const APPROVAL_TEMPLATE_VARIABLES = ['workerCode', 'sourceRef', 'stageNumber', 'decisionReason'];
 export const approvalObject = v => Boolean(v && typeof v === 'object' && !Array.isArray(v));
 export const approvalKeys = (v, keys) => approvalObject(v) && Object.keys(v).sort().join(',') === [...keys].sort().join(',');
-export const approvalUuid = v => typeof v === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
+export const approvalUuid = v => typeof v === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(v);
 export const approvalHash = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 export const approvalText = (v, max = 200) => typeof v === 'string' && v.length > 0 && v.length <= max && v === v.trim() && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(v);
 export const validApprovalTemplate = t => approvalKeys(t, ['key', 'subject', 'body']) && APPROVAL_EVENT_KEYS.includes(t.key) && approvalText(t.subject, 200) && approvalText(t.body, 8000) && [t.subject, t.body].every(s => { const stripped = s.replace(/\{\{([a-zA-Z]+)\}\}/g, (_m, k) => APPROVAL_TEMPLATE_VARIABLES.includes(k) ? '' : 'INVALID_TEMPLATE_VARIABLE'); return !/[{}]/.test(stripped) && !stripped.includes('INVALID_TEMPLATE_VARIABLE'); });

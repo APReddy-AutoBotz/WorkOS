@@ -5,7 +5,7 @@ import { WORK_APPROVAL_VERSION, validWorkApprovalPolicy, approvalUuid, approvalH
 import { validCapabilityDate } from '../../../shared/workforce-capabilities.mjs';
 import { lockWorkPolicy } from '../work-capture/assignment-work-policy.mjs';
 import { workApprovalEnvelope, workApprovalOwner, workApprovalFail, workApprovalScope, setWorkApprovalContext, workApprovalActor, scopedWorkApproval, workApprovalView, decideWorkApproval } from './work-approval-service.mjs';
-const uuid = z.string().uuid(), hash = z.string().refine(approvalHash), date = z.string().refine(validCapabilityDate), reason = z.string().trim().min(1).max(1000);
+const uuid = z.string().uuid().refine(approvalUuid), hash = z.string().refine(approvalHash), date = z.string().refine(validCapabilityDate), reason = z.string().trim().min(1).max(1000);
 const configPermissions = ['settings.manage', 'permissions.manage', 'notifications.manage', 'approvals.view'];
 export const createWorkApprovalRouter = options => {
     const { pool, requireDatabase, requireAuth, requirePermission, buildEmployeeScopeWhere, audit } = options, router = Router();

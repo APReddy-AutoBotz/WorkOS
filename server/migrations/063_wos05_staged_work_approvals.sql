@@ -89,7 +89,7 @@ begin
  if(select count(distinct v)from jsonb_array_elements_text(d->'workerIds')v)<>jsonb_array_length(d->'workerIds')then return false;end if;
  for x in select value from jsonb_array_elements(d->'workerIds')loop if jsonb_typeof(x)<>'string'or length(x#>>'{}')not between 1 and 200 then return false;end if;end loop;
  for x in select value from jsonb_array_elements(d->'stages')loop
-  if jsonb_typeof(x)<>'object'or not(x?&array['userId','role'])or(select count(*)from jsonb_object_keys(x))<>2 or jsonb_typeof(x->'userId')is distinct from 'string'or jsonb_typeof(x->'role')is distinct from 'string'or x->>'userId'!~*'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'or length(btrim(x->>'role'))not between 1 and 100 then return false;end if;
+  if jsonb_typeof(x)<>'object'or not(x?&array['userId','role'])or(select count(*)from jsonb_object_keys(x))<>2 or jsonb_typeof(x->'userId')is distinct from 'string'or jsonb_typeof(x->'role')is distinct from 'string'or x->>'userId'!~'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'or length(btrim(x->>'role'))not between 1 and 100 then return false;end if;
  end loop;
  if(select count(distinct v->>'key')from jsonb_array_elements(d->'templates')v)<>3 then return false;end if;
  for t in select value from jsonb_array_elements(d->'templates')loop
