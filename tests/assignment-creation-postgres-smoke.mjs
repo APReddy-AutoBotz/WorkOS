@@ -89,6 +89,15 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     await pool.query("update projects set status='Completed'where id=$1", [f.projectId]); const beforeProject = await ledger();
     try { assert.equal((await decideAssignment(request, ids.second, await get(changedProject.id))).status, 422); assert.deepEqual(await ledger(), beforeProject); await noSource(changedProject.assignmentId); }
     finally { await pool.query("update projects set status='Active'where id=$1", [f.projectId]); }
+    for (const changed of ['date', 'billability']) {
+      const pending = await create(); assert.equal((await decideAssignment(request, ids.manager, pending)).status, 201);
+      const original = (await pool.query('select end_date::text,billable from projects where id=$1', [f.projectId])).rows[0];
+      if (changed === 'date') await pool.query('update projects set end_date=$1::date-1 where id=$2', [today, f.projectId]);
+      else await pool.query('update projects set billable=false where id=$1', [f.projectId]);
+      const before = await ledger();
+      try { const final = await decideAssignment(request, ids.second, await get(pending.id)); assert.equal(final.status, 422, JSON.stringify(final.body)); assert.deepEqual(await ledger(), before); await noSource(pending.assignmentId); }
+      finally { await pool.query('update projects set end_date=$1::date,billable=$2 where id=$3', [original.end_date, original.billable, f.projectId]); }
+    }
     const revoked = await create(); await pool.query("update role_permissions set enabled=false where role_name='Admin'and permission_key='allocations.manage'");
     try { assert.equal((await decideAssignment(request, ids.manager, revoked)).status, 403); await noSource(revoked.assignmentId); }
     finally { await pool.query("update role_permissions set enabled=true where role_name='Admin'and permission_key='allocations.manage'"); }
