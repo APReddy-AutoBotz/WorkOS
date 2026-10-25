@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments, codex/wos-04-flexible-work-capture, codex/wos-04-work-capture-policy, codex/wos-04-daily-weekly-work-capture, codex/wos-04-work-entry-evidence, codex/wos-04-work-entry-reference, codex/wos-04-required-evidence-policy, codex/wos-04-identical-entry-flags, codex/wos-04-work-submission-history, codex/wos-04-capture-role-acceptance, codex/wos-04-overtime-capture-policy, codex/wos-04-submission-deadline-policy, codex/wos-04-work-source-identity, codex/wos-04-workforce-capabilities, codex/wos-04-resource-demand, codex/wos-04-effective-worker-capacity, codex/wos-04-assignment-version-authority, codex/wos-04-own-work-planning, codex/wos-04-assignment-overlap-policy, codex/wos-04-work-category-context, codex/wos-04-actual-work-reconciliation]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments, codex/wos-04-flexible-work-capture, codex/wos-04-work-capture-policy, codex/wos-04-daily-weekly-work-capture, codex/wos-04-work-entry-evidence, codex/wos-04-work-entry-reference, codex/wos-04-required-evidence-policy, codex/wos-04-identical-entry-flags, codex/wos-04-work-submission-history, codex/wos-04-capture-role-acceptance, codex/wos-04-overtime-capture-policy, codex/wos-04-submission-deadline-policy, codex/wos-04-work-source-identity, codex/wos-04-workforce-capabilities, codex/wos-04-resource-demand, codex/wos-04-effective-worker-capacity, codex/wos-04-assignment-version-authority, codex/wos-04-own-work-planning, codex/wos-04-assignment-overlap-policy, codex/wos-04-work-category-context, codex/wos-04-actual-work-reconciliation, codex/wos-04-calendar-leave-intake]
   push:
     branches: [main]
   workflow_dispatch:
@@ -72,6 +72,9 @@ jobs:
 
       - name: Verify calendar backed leave PostgreSQL migration and API acceptance
         run: npm run test:calendar-leave-postgres
+
+      - name: Native percentage forecast PostgreSQL acceptance
+        run: npm run test:native-forecast-postgres
 
       - name: Verify approved actual work PostgreSQL migration and API acceptance
         run: npm run test:actual-work-postgres
@@ -192,6 +195,9 @@ jobs:
 
       - name: Verify calendar backed leave Employee approver R6 React API PostgreSQL journey
         run: npm run test:calendar-leave-journey
+
+      - name: Native percentage forecast planner browser acceptance
+        run: npm run test:native-forecast-journey
 
       - name: Verify actual work own report export React API PostgreSQL journey
         run: npm run test:actual-work-journey
