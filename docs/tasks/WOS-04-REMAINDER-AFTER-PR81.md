@@ -1,0 +1,18 @@
+# Finite remainder after PR81 and local reviewed bulk candidate
+
+Published Draft PR81 is fixed at `c2d4db104f87e87150ed2cf65a483b8164c20445`, tree `75b342614159ac6398f9c6e44b25a5fa801cfc9a`, dependent on unchanged PR80. Its own67 local commands and original hosted40180991746 attempt1,86/86 steps establish configured creation approval's bounded source/stage/notification/planning path. Zero submitted formal reviews were recorded. These results are not proof of the new bulk candidate.
+
+| Boundary | Delivered component and finite remaining work |
+|---|---|
+| R1/R2/R5 | Category/context, evidence/reference, overtime and duplicate/source identity delivered. Buyer adoption remains explicit configuration. Provider verification, changed-source amendment and ambiguous legacy mapping remain unavailable. |
+| R3 | UTC deadline and authenticated on-demand in-app producer delivered. Unattended execution, wider profiles/timezones and unsupported legacy/rejected/correction/closed-period authority remain. |
+| R4/R7 | Work, material-assignment and creation named stages delivered; no pending creation allocation/reservation, final source/history atomicity preserved. Current local PR009E targets reviewed bulk decisions only for these sources, reusing existing independent commands/transactions. Its own frozen source evidence is required. Richer routing, delegation/reassignment, SLA/escalation, other sources and eligible protected corrections remain. |
+| R6 | Explicit prospective capacity/calendar and unambiguous/new full-day leave delivered. Ambiguous legacy partial leave, missing/retired calendar authority, broader migration and physical reconciliation remain. |
+| R8 | Capability candidates and documentary demand/assignment references delivered, now connected through creation approval. Quantitative fulfilment/reservation/exclusivity or inferred ranking are not supplied. |
+| R9/R10 | Actual/capacity/own/report/CSV and native percentage forecast/planner/history/export delivered within stated bounds. Physical planned/forecast parity, demand gaps, wider historical reporting and portfolio/hierarchy/unified physical actions remain. |
+| E1/E2 | Earlier source/role/import/history and connected proofs retained. Local bulk adds independently reviewed mixed decisions, exact request reconciliation and owner/transport failure evidence. Broader all-outcome/source/physical composites remain. |
+| E3/integration/UAT/release | Optional independent/formal reviews deferred/outstanding. Prerequisite acceptance, main-based or serial dependency integration with fresh gates and actual qualified-review/controller/expected-head conditions, owner UAT and release remain separate. No full-milestone acceptance is inferred. |
+
+No user business decision is needed for APR008's already specified per-item mechanics. No batch authority, new grant/default/migration, external delivery, conversion/transfer/reopen/delegation/SLA or manager mapping is added. Assignment-effect manager notification remains distinct from optional approval completion. Physical conversion bases/range distribution, record-specific legacy capacity lineage and downstream protected correction evidence remain consequential unknown boundaries; other listed mechanics are implementation work rather than blanket buyer blockers.
+
+This candidate is LOCAL ONLY. No push/new Draft, merge/deploy, denied review/security repair, access/network/protection/controller/monitoring change, spending or destructive cleanup. PR30 never-merge; prior published heads/main/alias preserved. Existing immutable records survive removal of bulk UI/coordinator; there is no history deletion/down migration. Publication requires a separately authorized bounded proposal.

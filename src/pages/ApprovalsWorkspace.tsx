@@ -1,3 +1,4 @@
+import { ReviewedApprovalBatch } from '../components/ReviewedApprovalBatch';
 import { AssignmentCreationApprovals } from '../components/AssignmentCreationApprovals';
 import {MaterialAssignmentApprovals} from '../components/MaterialAssignmentApprovals';
 import {WorkPeriodNoticeProducer} from '../components/WorkPeriodNoticeProducer';
@@ -235,7 +236,7 @@ export const ApprovalsWorkspace = () => {
 
   return (
     <div className="space-y-6 pb-12">
-      <MaterialAssignmentApprovals/><AssignmentCreationApprovals/><GovernedWorkApprovals/><WorkPeriodNoticeProducer/>
+      <ReviewedApprovalBatch/><MaterialAssignmentApprovals/><AssignmentCreationApprovals/><GovernedWorkApprovals/><WorkPeriodNoticeProducer/>
       <PageHeader
         title="Approvals Inbox"
         subtitle="Shared approval inbox, approval history, delegations, and SLA governance."
