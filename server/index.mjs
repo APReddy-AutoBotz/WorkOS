@@ -3322,7 +3322,7 @@ const buildApprovalScopeWhere = (req, params) => {
   return `(${buildEmployeeScopeWhere(req, params, 'e')} or ${delegatedScope})`;
 };
 
-const workApprovalOptions={fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord};
+const workApprovalOptions={getSetting,buildProjectScopeWhere,fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord};
 
 const approvalSelect = `
   select ar.*, e.name as subject_employee_name

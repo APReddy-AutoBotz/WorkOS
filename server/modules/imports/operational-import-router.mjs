@@ -1,3 +1,4 @@
+import {assertAssignmentMaterialWrite} from '../planning/assignment-approval-check.mjs';
 import {categoryImportKeySuffix} from '../../../shared/work-category.mjs';
 import {categoryCodeInput,applyWorkCategories} from '../work-capture/work-category.mjs';
 import {overlapAssessment} from '../planning/assignment-overlap-policy.mjs';
@@ -366,6 +367,7 @@ export const createOperationalImportRouter = ({
           if (total > 100) rowErrors.push({rowNumber, field: 'percentage', message: `Allocation would exceed 100% for overlapping dates (${total}%).`});
         }
 
+        if(employee&&project&&previous){try{await assertAssignmentMaterialWrite(client,req,previous,{employee_id:employee.id,project_id:project.id,role_on_project:row.roleOnProject||previous.role_on_project||employee.designation,percentage:row.percentage,start_date:row.startDate,end_date:row.endDate,billable:parseBoolean(row.billable,previous.billable??true),status:nextStatus,comments:row.comments||previous.comments||null});}catch(error){if(!(error instanceof WorkPolicyError))throw error;rowErrors.push({rowNumber,field:'id',message:error.message,code:error.code});}}
         let overlap=null;
         const policySource=employee&&project?{id:previous?.id||row.id||'preview-'+randomUUID(),employeeId:employee.id,quantityExact:canonicalHours(String(row.percentage)),startsOn:row.startDate,endsOn:row.endDate,status:nextStatus}:null;
         if(policySource&&row.endDate>=row.startDate){

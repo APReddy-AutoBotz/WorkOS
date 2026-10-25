@@ -9,7 +9,7 @@ await withCommercialDatabase(async ({ pool }) => withPreWorkApprovalMigrations(a
     await runMigrations({ pool, rootDir, logger: { log() { } } });
     await seedWorkApproval(pool);
     const keep = ['timesheets', 'timesheet_entries', 'work_submission_evidence', 'work_submission_decisions', 'approval_records', 'approval_delegations', 'notification_events', 'notification_templates', 'notification_preferences', 'notification_delivery_attempts', 'role_permissions', 'users', 'project_allocations', 'assignment_versions', 'worker_capacity_versions', 'native_forecast_evidence'], before = Object.fromEntries(await Promise.all(keep.map(async (t) => [t, await table(pool, t)])));
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['063_wos05_staged_work_approvals','064_wos04_work_period_notices']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['063_wos05_staged_work_approvals','064_wos04_work_period_notices','065_wos05_assignment_material_approvals']);
     for (const t of newTables)
         assert.deepEqual(await table(pool, t), []);
     for (const t of keep)
