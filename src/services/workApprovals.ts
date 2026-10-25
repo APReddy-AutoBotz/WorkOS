@@ -1,3 +1,4 @@
+import {createPeriodNoticeClient,decodePeriodNotice,type PeriodNotice} from './workPeriodNotices';
 import { WORK_APPROVAL_VERSION, APPROVAL_EVENT_KEYS, approvalKeys, approvalUuid, approvalHash, approvalText, approvalState, approvalEventIdentity, validWorkApprovalPolicy } from '../../shared/work-approval.mjs';
 import { canonicalHours, sumHours } from '../../shared/work-hours.mjs';
 import { evidenceUrlIsValid } from '../../shared/work-evidence.mjs';
@@ -123,6 +124,7 @@ export type WorkApprovalNotification = {
     createdAt: string;
     readAt: string | null;
 };
+export type CanonicalWorkNotice=WorkApprovalNotification|PeriodNotice;
 export type WorkApprovalContext = ApiRequestContext & {
     mode: 'read' | 'configure' | 'decide' | 'inbox';
     identityKey: string;
@@ -195,11 +197,13 @@ export const decodeWorkApprovalInstance = (v: unknown, id?: string): WorkApprova
 };
 const policy = (v: unknown): WorkPolicy => { if (!object(v) || !keys(v, ['id', 'sequence', 'effectiveFrom', 'definition', 'actorId', 'activeRole', 'reason', 'createdAt']) || !uuid(v.id) || !integer(v.sequence, 1) || !validCapabilityDate(v.effectiveFrom) || !validWorkApprovalPolicy(v.definition) || !uuid(v.actorId) || !text(v.activeRole) || !text(v.reason, 1000) || !instant(v.createdAt))
     return invalid(); return v as WorkPolicy; };
-const notification = (v: unknown): WorkApprovalNotification => { if (!object(v) || !keys(v, ['id', 'eventId', 'instanceId', 'timesheetId', 'submissionId', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'createdAt', 'readAt']) || !uuid(v.id) || !uuid(v.instanceId) || !uuid(v.timesheetId) || !text(v.submissionId) || !integer(v.transitionSequence, 0, 10) || !APPROVAL_EVENT_KEYS.includes(v.eventKey as string) || !uuid(v.templateId) || !text(v.operationId) || v.eventId !== approvalEventIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || v.reasons.length < 1 || v.reasons.some(r => !['requester', 'affected_worker', 'current_stage_approver'].includes(r)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== 'ACTION_REQUIRED' || v.channelDecision !== 'Required'))
+const notification = (v: unknown): CanonicalWorkNotice => {
+    if(object(v)&&v.kind==='work-period')return decodePeriodNotice(v); if (!object(v) || !keys(v, ['id', 'eventId', 'instanceId', 'timesheetId', 'submissionId', 'transitionSequence', 'eventKey', 'policyClass', 'templateId', 'operationId', 'locale', 'title', 'body', 'reasons', 'channelDecision', 'createdAt', 'readAt']) || !uuid(v.id) || !uuid(v.instanceId) || !uuid(v.timesheetId) || !text(v.submissionId) || !integer(v.transitionSequence, 0, 10) || !APPROVAL_EVENT_KEYS.includes(v.eventKey as string) || !uuid(v.templateId) || !text(v.operationId) || v.eventId !== approvalEventIdentity(v.instanceId, v.transitionSequence, v.eventKey, v.operationId) || !text(v.locale, 100) || !text(v.title, 1200) || !text(v.body, 12000) || !Array.isArray(v.reasons) || v.reasons.length < 1 || v.reasons.some(r => !['requester', 'affected_worker', 'current_stage_approver'].includes(r)) || v.reasons.join(',') !== [...new Set(v.reasons)].sort().join(',') || !instant(v.createdAt) || v.readAt !== null && !instant(v.readAt) || (v.eventKey === 'approval.completed' ? v.policyClass !== 'INFORMATIONAL' || v.channelDecision !== 'Enabled' : v.policyClass !== 'ACTION_REQUIRED' || v.channelDecision !== 'Required'))
     return invalid(); return v as WorkApprovalNotification; };
 const request = async (method: 'GET' | 'POST', tail: string, c: WorkApprovalContext | null, body?: Record<string, unknown>) => { const captured = owner(c), expected = await ownerKey(captured); owner(captured); const raw = await api.requestWithContext<unknown>(method, '/api/v1/work-approvals' + tail, body ? { ...body, expectedOwnerKey: expected } : undefined, captured); owner(captured); if (!object(raw) || raw.contractVersion !== WORK_APPROVAL_VERSION || raw.organizationId !== captured.scope.organizationId || raw.legalEntityId !== captured.scope.legalEntityId || raw.ownerKey !== expected || !uuid(raw.actorUserId) || captured.actorId !== undefined && raw.actorUserId !== captured.actorId)
     return invalid(); captured.actorId = raw.actorUserId; return raw; };
 export const workApprovals = {
+    deadlines:createPeriodNoticeClient(request),
     choices: async (afterWorker: string | null, afterUser: string | null, c: WorkApprovalContext | null) => { const ctx = owner(c); if (ctx.mode !== 'configure')
         return invalid(); const q = new URLSearchParams({ ...afterWorker ? { afterWorker } : {}, ...afterUser ? { afterUser } : {} }), r = await request('GET', '/choices?' + q, ctx); if (!Array.isArray(r.workers) || r.workers.length > 200 || !Array.isArray(r.users) || r.users.length > 200 || !validCapabilityDate(r.today))
         return invalid(); let wp = afterWorker ?? '', up = afterUser ?? ''; for (const w of r.workers) {
@@ -254,7 +258,7 @@ export const workApprovals = {
         return invalid(); let prior = after ?? ''; const rows = r.notifications.map(v => { const n = notification(v); if (compareCapabilityIds(n.id, prior) <= 0)
         return invalid(); prior = n.id; return n; }); if (r.nextAfter !== null && (rows.length !== 20 || r.nextAfter !== prior))
         return invalid(); return { notifications: rows, nextAfter: r.nextAfter as string | null }; },
-    read: async (n: WorkApprovalNotification, c: WorkApprovalContext | null) => { const ctx = owner(c); if (ctx.mode !== 'inbox')
-        return invalid(); const r = await request('POST', '/inbox/' + encodeURIComponent(n.id) + '/read', ctx, {}), out = notification(r.notification); if (Object.keys(n).some(k => k !== 'readAt' && JSON.stringify(out[k as keyof WorkApprovalNotification]) !== JSON.stringify(n[k as keyof WorkApprovalNotification])) || out.readAt === null || n.readAt && n.readAt !== out.readAt)
+    read: async (n: CanonicalWorkNotice, c: WorkApprovalContext | null) => { const ctx = owner(c); if (ctx.mode !== 'inbox')
+        return invalid(); const r = await request('POST', '/inbox/' + encodeURIComponent(n.id) + '/read', ctx, {}), out = notification(r.notification); if (Object.keys(n).some(k => k !== 'readAt' && JSON.stringify((out as unknown as Record<string,unknown>)[k]) !== JSON.stringify((n as unknown as Record<string,unknown>)[k])) || out.readAt === null || n.readAt && n.readAt !== out.readAt)
         return invalid(); return out; }
 };

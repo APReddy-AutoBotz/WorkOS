@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { validPeriodNoticeDefinition, periodNoticePhase, periodNoticeRecipients, periodNoticeIdentity, renderPeriodNotice } from '../shared/work-period-notices.mjs';
+const worker = '11111111-1111-4111-8111-111111111111', owner = '22222222-2222-4222-8222-222222222222', definition = { workerIds: ['synthetic-worker'], reminderMinutesBeforeDeadline: 60, overdueBoundary: 'grace-end', escalationOwner: { userId: owner, role: 'Admin' }, locale: 'en-GB', templates: [{ key: 'work_period.submission_due', subject: 'Due {{periodCode}}', body: 'Worker {{workerCode}} deadline {{deadlineAt}}' }, { key: 'work_period.submission_overdue', subject: 'Overdue {{periodCode}}', body: 'Grace {{graceEndsAt}}, reminder {{reminderAt}}' }] }, timing = { deadlineAt: '2026-12-31T23:00:00Z', graceEndsAt: '2027-01-01T00:00:00Z' }, phase = (now, d = definition, start = '2026-12-31') => periodNoticePhase(timing, d, start, now);
+assert(validPeriodNoticeDefinition(definition));
+assert(validPeriodNoticeDefinition({ ...definition, workerIds: [] }));
+for (const patch of [{ workerIds: ['z', 'a'] }, { workerIds: ['a', 'a'] }, { reminderMinutesBeforeDeadline: -1 }, { reminderMinutesBeforeDeadline: 0.1 }, { overdueBoundary: 'infer' }, { escalationOwner: { userId: owner.toUpperCase().replace(/^2/, 'A'), role: 'Admin' } }, { locale: 'en-gb' }, { templates: definition.templates.map(t => ({ ...t, body: '{{salary}}' })) }, { recipients: [worker] }])
+    assert.equal(validPeriodNoticeDefinition({ ...definition, ...patch }), false);
+assert.equal(phase('2026-12-31T21:59:59Z').state, 'not_due');
+assert.equal(phase('2026-12-31T22:00:00Z').eventKey, 'work_period.submission_due');
+assert.equal(phase('2026-12-31T23:00:00Z').state, 'due');
+assert.equal(phase('2027-01-01T00:00:00Z').state, 'due');
+assert.equal(phase('2027-01-01T00:00:00.001Z').eventKey, 'work_period.submission_overdue');
+assert.equal(phase('2026-12-31T23:00:00.001Z', { ...definition, overdueBoundary: 'deadline' }).state, 'overdue');
+assert.equal(phase('2026-12-31T23:00:00Z', { ...definition, reminderMinutesBeforeDeadline: 1440 }).state, 'unavailable');
+assert.deepEqual(periodNoticeRecipients(worker, worker, 'work_period.submission_overdue'), [{ userId: worker, reasons: ['affected_worker', 'configured_escalation_owner'] }]);
+assert.equal(periodNoticeRecipients(worker, owner, 'work_period.submission_due').length, 1);
+assert.throws(() => periodNoticeRecipients(worker, null, 'work_period.submission_overdue'));
+assert.equal(periodNoticeIdentity('a'.repeat(64), 'work_period.submission_due', 'op/1'), 'work-period/' + 'a'.repeat(64) + '/work_period.submission_due/op%2F1');
+assert.equal(renderPeriodNotice(definition.templates[0], { workerCode: 'SYN', periodCode: 'PERIOD', deadlineAt: timing.deadlineAt, graceEndsAt: timing.graceEndsAt, reminderAt: '2026-12-31T22:00:00Z' }).title, 'Due PERIOD');
+console.log('Work-period notice explicit configuration, UTC reminder/deadline/grace equality/year boundaries, exclusive phases, canonical operation identity, safe template variables and complete deduplicated recipient reasons passed.');
