@@ -588,6 +588,7 @@ export const normalizeLeaveRequest = (r: Record<string, unknown>): LeaveRequest 
   leaveTypeName: r.leave_type_name ? String(r.leave_type_name) : r.leaveTypeName ? String(r.leaveTypeName) : undefined,
   startDate: String(r.start_date ?? r.startDate).slice(0, 10),
   endDate: String(r.end_date ?? r.endDate).slice(0, 10),
+  approvalInstanceId: r.approval_instance_id ? String(r.approval_instance_id) : undefined,
   totalDays: Number(r.total_days ?? r.totalDays ?? 0),
   status: String(r.status ?? 'Submitted') as LeaveRequest['status'],
   reason: r.reason ? String(r.reason) : undefined,

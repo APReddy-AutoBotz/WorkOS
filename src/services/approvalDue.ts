@@ -3,7 +3,7 @@ import { approvalKeys as keys, approvalUuid as uuid, approvalHash as hash, appro
 import { validCapabilityDate, compareCapabilityIds } from '../../shared/workforce-capabilities.mjs';
 import { ApiClientError } from './apiClient';
 import type { WorkApprovalContext, WorkStageState } from './workApprovals';
-export type DueKind = 'Creation' | 'Material' | 'Work';
+export type DueKind = 'Creation' | 'Leave' | 'Material' | 'Work';
 export type DueDefinition = { workerIds: string[]; sourceKinds: DueKind[]; clockBasis: 'StagePendingUTC'; cohort: 'NewInstances'; dueAfterMinutes: number; target: { userId: string; role: string }; locale: string; template: { key: string; subject: string; body: string } };
 export type DuePolicy = { id: string; sequence: number; effectiveFrom: string; definition: DueDefinition; actorId: string; activeRole: string; reason: string; createdAt: string };
 export type DueClock = { id: string; policyId: string; policySequence: number; effectiveFrom: string; stage: number; sourceEventId: string; pendingAt: string; dueAt: string; clockBasis: 'StagePendingUTC'; cohort: 'NewInstances'; dueAfterMinutes: number; approver: { userId: string; role: string }; target: { userId: string; role: string }; locale: string };

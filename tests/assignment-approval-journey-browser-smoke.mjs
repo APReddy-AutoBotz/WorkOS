@@ -159,3 +159,6 @@ await import('./approval-due-journey-browser-smoke.mjs');
 
 // Independent staged-work/calendar-leave composite proof.
 await import('./staged-leave-journey-browser-smoke.mjs');
+
+// Configured canonical leave end-to-end proof is part of this required gate.
+await import('./leave-approval-journey-browser-smoke.mjs');

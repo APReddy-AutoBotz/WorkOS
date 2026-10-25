@@ -168,3 +168,6 @@ assert.deepEqual(batchResults.map(r => r.status), ['Uncertain', 'NotAttempted'])
 
 // Configured prospective due handoff is part of this required gate.
 await import('./approval-due-service-smoke.mjs');
+
+// Configured canonical leave approval is part of this required gate.
+await import('./leave-approval-service-smoke.mjs');

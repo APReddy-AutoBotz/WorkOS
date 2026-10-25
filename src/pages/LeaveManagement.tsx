@@ -1,3 +1,4 @@
+import {LeaveApprovalInbox} from '../components/GovernedLeaveApprovals';
 import {useCalendarLeaveRequest,CalendarLeaveSummary,CalendarLeaveHistory} from '../components/CalendarLeave';
 import {OwnWorkPlanning} from '../components/OwnWorkPlanning';
 import { useEffect, useMemo, useState } from 'react';
@@ -869,7 +870,7 @@ const EmployeeLeavePanel = ({
   );
 };
 
-export const MyLeave = () => <ESSHome initialSection="leave" />;
+export const MyLeave = () => <><ESSHome initialSection="leave" /><LeaveApprovalInbox/></>;
 
 const LeaveRequestTable = ({
   requests,
@@ -901,7 +902,7 @@ const LeaveRequestTable = ({
         </thead>
         <tbody>
           {requests.map(request => {
-            const canDecide = request.status === 'Submitted';
+            const canDecide = request.status === 'Submitted' && !request.approvalInstanceId;
             const canEdit = request.status === 'Submitted';
             const canCancel = request.status === 'Submitted' || request.status === 'Approved';
             return (
@@ -927,7 +928,7 @@ const LeaveRequestTable = ({
                         <button type="button" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-700" onClick={() => onCancel(request)}>Cancel</button>
                       )}
                     </div>
-                    <CalendarLeaveHistory requestId={request.id} employeeId={request.employeeId}/>
+                    {request.approvalInstanceId&&<p className="text-xs">Configured stages: inspect leave review {request.approvalInstanceId} in Approvals.</p>}<CalendarLeaveHistory requestId={request.id} employeeId={request.employeeId}/>
                   </td>
                 )}
               </tr>

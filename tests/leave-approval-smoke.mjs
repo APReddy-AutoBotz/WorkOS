@@ -1,0 +1,8 @@
+import assert from 'node:assert/strict';
+import {validLeaveApprovalPolicy,leaveApprovalIdentity} from '../shared/leave-approval.mjs';
+import {APPROVAL_EVENT_KEYS} from '../shared/work-approval.mjs';
+const userId='00000001-1111-4111-8111-111111111111',definition={entityType:'LeaveRequest',workerIds:['synthetic-worker'],stages:[{userId,role:'Admin'}],locale:'en-GB',completionInApp:false,templates:APPROVAL_EVENT_KEYS.map(key=>({key,subject:'{{sourceRef}}',body:'{{workerCode}} stage {{stageNumber}}'}))};
+assert(validLeaveApprovalPolicy(definition));assert(validLeaveApprovalPolicy({...definition,stages:[...definition.stages,...definition.stages]}),'Existing named-stage policy permits explicitly repeated accounts; stage sequence is authoritative.');assert(validLeaveApprovalPolicy({...definition,workerIds:[]}));
+for(const change of [{entityType:null},{entityType:'Timesheet'},{workerIds:['synthetic-worker','synthetic-worker']},{stages:[{userId,role:''}]},{locale:'bad_locale'},{templates:definition.templates.slice(1)},{completionInApp:null},{manager:'inferred'},{templates:definition.templates.map(t=>({...t,body:'{{leaveReason}}'}))}])assert.equal(validLeaveApprovalPolicy({...definition,...change}),false,JSON.stringify(change));
+assert.equal(validLeaveApprovalPolicy({...definition,templates:definition.templates.map(t=>({...t,body:'{{decisionReason}}'.repeat(13)}))}),false,'Worst-case rendered bound is checked at adoption');assert(leaveApprovalIdentity(userId,0,APPROVAL_EVENT_KEYS[0],'synthetic-operation').startsWith('leave-approval/'));
+console.log('Explicit LeaveRequest policy, sorted worker cohort, named stages, retained bounded templates and separate canonical event identity passed.');
