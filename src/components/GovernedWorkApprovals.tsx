@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { APPROVAL_EVENT_KEYS, validWorkApprovalPolicy, approvalUuid } from '../../shared/work-approval.mjs';
 import { compareCapabilityIds, validCapabilityDate } from '../../shared/workforce-capabilities.mjs';
 import { ApiClientError } from '../services/apiClient';
-import { workApprovals, captureWorkApprovalContext, isWorkApprovalContextCurrent, type WorkApprovalContext, type WorkApprovalDefinition, type WorkPolicy, type WorkApprovalInstance, type WorkApprovalPage, type WorkDecisionReceipt, type WorkApprovalNotification } from '../services/workApprovals';
-const useApprovalLease = (reset: () => void) => {
+import { workApprovals, captureWorkApprovalContext, isWorkApprovalContextCurrent, type WorkApprovalContext, type WorkApprovalDefinition, type WorkPolicy, type WorkApprovalInstance, type WorkApprovalPage, type WorkDecisionReceipt, type CanonicalWorkNotice } from '../services/workApprovals';
+export const useApprovalLease = (reset: () => void) => {
     const generation = useRef(0), mounted = useRef(false), busy = useRef(false), owner = useRef<WorkApprovalContext | null>(null), resetRef = useRef(reset), [phase, setPhase] = useState<'idle' | 'loading' | 'saving' | 'ready' | 'blocked' | 'uncertain'>('idle'), [notice, setNotice] = useState('');
     resetRef.current = reset;
     const block = () => { ++generation.current; owner.current = null; busy.current = false; resetRef.current(); setPhase('blocked'); setNotice('Account, active role or scope changed. Reload explicitly.'); };
@@ -98,16 +98,16 @@ export const GovernedWorkApprovalInbox = () => {
 };
 export const GovernedWorkApprovals = () => <><WorkApprovalPolicyEditor /><GovernedWorkApprovalInbox /></>;
 export const CanonicalApprovalInbox = () => {
-    const [rows, setRows] = useState<WorkApprovalNotification[]>([]), [next, setNext] = useState<string | null>(null), lease = useApprovalLease(() => { setRows([]); setNext(null); });
+    const [rows, setRows] = useState<CanonicalWorkNotice[]>([]), [next, setNext] = useState<string | null>(null), lease = useApprovalLease(() => { setRows([]); setNext(null); });
     const load = (after: string | null = null) => lease.run('inbox', false, async (c, live) => { const out = await workApprovals.inbox(after, c); if (live()) {
         setRows(v => after ? [...v, ...out.notifications] : out.notifications);
         setNext(out.nextAfter);
     } });
-    const read = (n: WorkApprovalNotification) => lease.run('inbox', true, async (c, live) => { const out = await workApprovals.read(n, c); if (live()) {
+    const read = (n: CanonicalWorkNotice) => lease.run('inbox', true, async (c, live) => { const out = await workApprovals.read(n, c); if (live()) {
         setRows(v => v.map(r => r.id === out.id ? out : r));
         lease.setNotice('Your in-app acknowledgement is recorded.');
     } });
     if (!captureWorkApprovalContext('inbox'))
         return null;
-    return <section aria-label="Canonical work approval notifications" className="my-4 rounded-xl border p-4 space-y-3"><h2 className="font-semibold">My governed approval notifications</h2><p>These are retained canonical in-app events addressed to your account in the current scope. A message is not proof that its stage is still pending; inspect the current approval before acting. External delivery is not invoked.</p><button disabled={lease.waiting} onClick={() => void load()}>Load my governed notifications</button>{next && <button disabled={lease.waiting} onClick={() => void load(next)}>More governed notifications</button>}{lease.notice && <p role="status">{lease.notice}</p>}{rows.map(n => <article key={n.id} aria-label={`Governed notification ${n.id}`} className="rounded border p-3"><h3>{n.title}</h3><p>{n.body}</p><p>{n.eventKey} · {n.policyClass} · {n.locale} · {n.createdAt}</p><p>Recipient reasons: {n.reasons.join(', ')} · In-app {n.channelDecision} · {n.readAt ? 'Read ' + n.readAt : 'Unread'}</p><p>Approval instance {n.instanceId}</p>{!n.readAt && <button disabled={lease.waiting || lease.phase === 'uncertain'} onClick={() => void read(n)}>Mark governed notification read {n.id}</button>}</article>)}</section>;
+    return <section aria-label="Canonical work approval notifications" className="my-4 rounded-xl border p-4 space-y-3"><h2 className="font-semibold">My governed work notifications</h2><p>These are retained canonical in-app events addressed to your account in the current scope. A message is a retained observation; inspect the current work or approval source before acting. External delivery is not invoked.</p><button disabled={lease.waiting} onClick={() => void load()}>Load my governed notifications</button>{next && <button disabled={lease.waiting} onClick={() => void load(next)}>More governed notifications</button>}{lease.notice && <p role="status">{lease.notice}</p>}{rows.map(n => <article key={n.id} aria-label={`Governed notification ${n.id}`} className="rounded border p-3"><h3>{n.title}</h3><p>{n.body}</p><p>{n.eventKey} · {n.policyClass} · {n.locale} · {n.createdAt}</p><p>Recipient reasons: {n.reasons.join(', ')} · In-app {n.channelDecision} · {n.readAt ? 'Read ' + n.readAt : 'Unread'}</p>{'kind'in n?<p>Work period {n.periodId} · Accepted in-app delivery {n.deliveryStatus}</p>:<p>Approval instance {n.instanceId}</p>}{!n.readAt && <button disabled={lease.waiting || lease.phase === 'uncertain'} onClick={() => void read(n)}>Mark governed notification read {n.id}</button>}</article>)}</section>;
 };
