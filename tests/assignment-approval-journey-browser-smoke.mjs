@@ -162,3 +162,6 @@ await import('./staged-leave-journey-browser-smoke.mjs');
 
 // Configured canonical leave end-to-end proof is part of this required gate.
 await import('./leave-approval-journey-browser-smoke.mjs');
+
+// Existing import-to-approved-actual/export composite proof.
+await import('./import-approval-export-journey-browser-smoke.mjs');
