@@ -199,3 +199,6 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     });
 });
 console.log('Material assignment real PostgreSQL/API source proposal -> two named stages -> atomic final source version passed.');
+
+// Connected source/state/history proof is part of this required gate.
+await import('./e2-version-state-postgres-smoke.mjs');

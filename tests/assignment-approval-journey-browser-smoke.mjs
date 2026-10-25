@@ -145,3 +145,6 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     });
 });
 console.log('Material assignment actual React policy/proposal -> two named stages -> effective source/version reload/history -> named worker canonical inbox/read/reload, stale draft and accepted late old-owner suppression passed without external delivery.');
+
+// Connected source/state/history proof is part of this required gate.
+await import('./e2-version-state-journey-browser-smoke.mjs');
