@@ -208,3 +208,6 @@ await import('./assignment-creation-postgres-smoke.mjs');
 
 // Configured prospective due handoff is part of this required gate.
 await import('./approval-due-postgres-smoke.mjs');
+
+// Independent staged-work/calendar-leave composite proof.
+await import('./staged-leave-postgres-smoke.mjs');
