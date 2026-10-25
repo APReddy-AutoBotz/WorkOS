@@ -15,13 +15,13 @@ export const reviewApproval = (kind: ReviewKind, page: ApprovalPage, decision: '
 };
 const context = (item: ReviewedApproval, c: BulkContexts) => item.kind === 'Work' ? c.work : c.assignment;
 const current = (c: BulkContexts) => Boolean((c.work || c.assignment) && [c.work, c.assignment].every(v => !v || isWorkApprovalContextCurrent(v)));
-export const executeReviewedApprovals = async (items: readonly ReviewedApproval[], c: BulkContexts, live: () => boolean, report: (r: ItemResult) => void) => {
+export const executeReviewedApprovals = async (items: readonly ReviewedApproval[], c: BulkContexts, live: () => boolean, report: (r: ItemResult) => void, uncertainBefore: ReadonlySet<string> = new Set()) => {
   if (!items.length || items.length > 20 || new Set(items.map(i => i.kind + ':' + i.page.instance.id)).size !== items.length || new Set(items.map(i => i.requestId)).size !== items.length) throw new Error('Choose one to twenty distinct reviewed sources.');
   let stopped = false;
   for (const item of items) {
-    if (stopped || !live() || !current(c)) { report({ requestId: item.requestId, status: 'NotAttempted' }); stopped = true; continue; }
+    if (stopped || !live() || !current(c)) { report({ requestId: item.requestId, status: uncertainBefore.has(item.requestId) ? 'Uncertain' : 'NotAttempted' }); stopped = true; continue; }
     const ctx = context(item, c);
-    if (!ctx) { report({ requestId: item.requestId, status: 'Denied', httpStatus: 403 }); continue; }
+    if (!ctx) { const unresolved = uncertainBefore.has(item.requestId); report({ requestId: item.requestId, status: unresolved ? 'Uncertain' : 'Denied', httpStatus: 403 }); if (unresolved) stopped = true; continue; }
     try {
       const out = item.kind === 'Work'
         ? await workApprovals.decide(item.page as WorkApprovalPage, item.decision, item.reason, item.requestId, ctx)
@@ -30,7 +30,9 @@ export const executeReviewedApprovals = async (items: readonly ReviewedApproval[
       else report({ requestId: item.requestId, status: 'Confirmed', receipt: out.receipt });
     } catch (error) {
       const status = error instanceof ApiClientError ? error.status : undefined;
-      const definitive = live() && current(c) && status !== undefined && [400, 403, 404, 409, 422].includes(status);
+      // A definitive retry refusal describes only that attempt. It cannot
+      // establish whether the original uncertain request committed.
+      const definitive = !uncertainBefore.has(item.requestId) && live() && current(c) && status !== undefined && [400, 403, 404, 409, 422].includes(status);
       report({ requestId: item.requestId, status: definitive ? 'Denied' : 'Uncertain', httpStatus: status });
       if (!definitive) stopped = true;
     }

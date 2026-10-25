@@ -158,3 +158,10 @@ reset(); raw = { ...envelope, instance: { ...instance, currentRevision: 'c'.repe
 assert.equal((await reconcileReviewedApproval(reviewed, capture('assignment'))).status, 'Changed');
 reset(); raw = { ...envelope, instance: { ...instance, transitions: [{ ...receipt, reason: 'Synthetic conflicting history' }], state: receipt.outcome } };
 await assert.rejects(reconcileReviewedApproval(reviewed, capture('assignment'))); assert.equal(calls.length, 1);
+
+batchContext = batchSetup(); signal = () => { status = 403; raw = { error: 'Synthetic retry denied' }; }; batchResults = [];
+await executeReviewedApprovals([reviewed, another], batchContext, () => true, r => batchResults.push(r), new Set([reviewed.requestId]));
+assert.deepEqual(batchResults.map(r => r.status), ['Uncertain', 'NotAttempted'], 'A denied retry cannot establish the original uncertain request did not commit'); assert.equal(calls.length, 1);
+batchContext = batchSetup(); batchResults = [];
+await executeReviewedApprovals([reviewed, another], { work: null, assignment: null }, () => true, r => batchResults.push(r), new Set([reviewed.requestId]));
+assert.deepEqual(batchResults.map(r => r.status), ['Uncertain', 'NotAttempted']); assert.equal(calls.length, 0);

@@ -20,7 +20,8 @@ export const ReviewedApprovalBatch = () => {
   const report = (r: ItemResult) => setResults(v => ({ ...v, [r.requestId]: r }));
   const execute = (selected: ReviewedApproval[]) => lease.run(mode, true, async (_c, live) => {
     setReads({}); const contexts = { work: captureWorkApprovalContext('decide', live), assignment: captureWorkApprovalContext('assignment-decide', live) };
-    await executeReviewedApprovals(selected, contexts, live, r => { if (live()) report(r); });
+    const uncertain = new Set(selected.filter(i => results[i.requestId]?.status === 'Uncertain').map(i => i.requestId));
+    await executeReviewedApprovals(selected, contexts, live, r => { if (live()) report(r); }, uncertain);
   });
   const reconcile = (item: ReviewedApproval) => lease.run(mode, false, async (_c, live) => { const out = await reconcileReviewedApproval(item, captureWorkApprovalContext(item.kind === 'Work' ? 'read' : 'assignment', live)); if (live()) { if (out.status === 'Confirmed') { report({ requestId: item.requestId, status: 'Confirmed', receipt: out.receipt }); setReads(v => { const n = { ...v }; delete n[item.requestId]; return n; }); } else setReads(v => ({ ...v, [item.requestId]: out.status })); } });
   const change = () => { setPage(null); setDecision(''); setChecked(false); };
