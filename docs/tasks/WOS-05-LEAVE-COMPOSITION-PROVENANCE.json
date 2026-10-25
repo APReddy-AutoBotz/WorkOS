@@ -1,0 +1,74 @@
+{
+  "base_PR83": "dfacb2974c63939a8172b7eed68800e61fc4f817",
+  "proof_PR84": "defe6e157a0446038919ab39a763fb50024a3314",
+  "proof_base": "704fbe8585216dcbe01a959e1126b833869080f2",
+  "files": [
+    {
+      "path": ".github/workflows/workos-ci.yml",
+      "source_sha256": "43e0e6b69d69db20e89d19ace64562896376593574cd10addae59feb64f3b92d",
+      "union_sha256": "43e0e6b69d69db20e89d19ace64562896376593574cd10addae59feb64f3b92d",
+      "resolution": "identical shared CI change already in PR83, retained once"
+    },
+    {
+      "path": "docs/00-control/REQUIREMENTS_TRACEABILITY.md",
+      "source_sha256": "c67fec85f4400c3bb085873ab42e4dbca2b6cbdd84b5a2350a16b25610ed8be5",
+      "union_sha256": "494393df79d7ffbf8c2d27754e7107f2f7769141b6eb101be70cc54918125716",
+      "resolution": "append-only union; retained all PR83 additions and all PR84 additions"
+    },
+    {
+      "path": "docs/05-delivery/IMPLEMENTATION_BACKLOG.md",
+      "source_sha256": "9198207f2bd45ba6787f737900b207868dcf891efae67da46f040ccb4599f7f5",
+      "union_sha256": "d531c871b998f4502c49ac5a4f1da0f3eb40db6e89cf7e49e34c4ee1c2d80bc1",
+      "resolution": "append-only union; retained all PR83 additions and all PR84 additions"
+    },
+    {
+      "path": "docs/tasks/WOS-04-STAGED-WORK-LEAVE-PROOF.md",
+      "source_sha256": "5f06effb60cfa961609761999e03ee55bd9ffaba2209ac29a6232e26686cd1e4",
+      "union_sha256": "5f06effb60cfa961609761999e03ee55bd9ffaba2209ac29a6232e26686cd1e4",
+      "resolution": "exact new-file copy"
+    },
+    {
+      "path": "tests/assignment-approval-journey-browser-smoke.mjs",
+      "source_sha256": "41476c9444720a1636826c5bab5344f2665fb2b7cc2b26471a4b3fc1c4578ea2",
+      "union_sha256": "3716f80bbe88859945945b3e7a665a15f3100031f7ba70502b08c55807a224fb",
+      "resolution": "append-only union; retained all PR83 additions and all PR84 additions"
+    },
+    {
+      "path": "tests/assignment-approval-postgres-smoke.mjs",
+      "source_sha256": "02e0f889a1399c93a22bb2f117ca5b54afe7092e06933203f77470e5ddd6ef86",
+      "union_sha256": "5fdff34297d9f60085870f6da285bf7b556e2ea37abefe85fe6abd0c861ff769",
+      "resolution": "append-only union; retained all PR83 additions and all PR84 additions"
+    },
+    {
+      "path": "tests/fixtures/staged-leave.html",
+      "source_sha256": "913edbe5c8ce176531a29f606b7f8bd1bd7e0a328c7f41c6ae0ee3da9ed5a711",
+      "union_sha256": "913edbe5c8ce176531a29f606b7f8bd1bd7e0a328c7f41c6ae0ee3da9ed5a711",
+      "resolution": "exact new-file copy"
+    },
+    {
+      "path": "tests/fixtures/staged-leave.tsx",
+      "source_sha256": "26b6bfb0f27e8a6f805ac08e6a1413e632a74ee6bfbb72aab853521b593d2dd9",
+      "union_sha256": "26b6bfb0f27e8a6f805ac08e6a1413e632a74ee6bfbb72aab853521b593d2dd9",
+      "resolution": "exact new-file copy"
+    },
+    {
+      "path": "tests/staged-leave-journey-browser-smoke.mjs",
+      "source_sha256": "e32b29698eda9134fa43322a9c1d0a1cde024ab24de85827d1d4d247edd7afee",
+      "union_sha256": "e32b29698eda9134fa43322a9c1d0a1cde024ab24de85827d1d4d247edd7afee",
+      "resolution": "exact new-file copy"
+    },
+    {
+      "path": "tests/staged-leave-postgres-smoke.mjs",
+      "source_sha256": "de616aaed1fb9458c629e0e44e88d46a8f0db2f9d7da600de78b04f1b3368789",
+      "union_sha256": "de616aaed1fb9458c629e0e44e88d46a8f0db2f9d7da600de78b04f1b3368789",
+      "resolution": "exact new-file copy"
+    },
+    {
+      "path": "tests/support/staged-leave-test.mjs",
+      "source_sha256": "cb9c0e8881a8f788317bfa35e96ff4aec6c16a5e63b63c6357f34bc9f229bf28",
+      "union_sha256": "cb9c0e8881a8f788317bfa35e96ff4aec6c16a5e63b63c6357f34bc9f229bf28",
+      "resolution": "exact new-file copy"
+    }
+  ],
+  "published_refs_changed": false
+}

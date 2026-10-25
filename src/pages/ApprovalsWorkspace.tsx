@@ -1,3 +1,4 @@
+import {GovernedLeaveApprovals} from '../components/GovernedLeaveApprovals';
 import { ReviewedApprovalBatch } from '../components/ReviewedApprovalBatch';
 import { ApprovalDueNotices } from '../components/ApprovalDueNotices';
 import { AssignmentCreationApprovals } from '../components/AssignmentCreationApprovals';
@@ -90,7 +91,7 @@ const ApprovalTable = ({
               <td className="py-3 pr-4"><Badge variant={statusVariant(record.status)}>{record.status}</Badge></td>
               {onDecide && (
                 <td className="py-3 text-right">
-                  {record.status === 'Pending' && (
+                  {record.status === 'Pending' && !leaveRequest?.approvalInstanceId && (
                     <div className="flex justify-end gap-2">
                       <button className="rounded-lg border border-green-200 bg-green-50 p-2 text-green-700" title="Approve" onClick={() => onDecide(record, 'Approved')}>
                         <CheckCircle2 size={16} />
@@ -237,7 +238,7 @@ export const ApprovalsWorkspace = () => {
 
   return (
     <div className="space-y-6 pb-12">
-      <ApprovalDueNotices/><ReviewedApprovalBatch/><MaterialAssignmentApprovals/><AssignmentCreationApprovals/><GovernedWorkApprovals/><WorkPeriodNoticeProducer/>
+      <ApprovalDueNotices/><ReviewedApprovalBatch/><MaterialAssignmentApprovals/><AssignmentCreationApprovals/><GovernedLeaveApprovals/><GovernedWorkApprovals/><WorkPeriodNoticeProducer/>
       <PageHeader
         title="Approvals Inbox"
         subtitle="Shared approval inbox, approval history, delegations, and SLA governance."

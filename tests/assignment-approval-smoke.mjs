@@ -24,3 +24,6 @@ console.log('Explicit creation-only/mixed policy, absent legacy option and inval
 
 // Configured prospective due handoff is part of this required gate.
 await import('./approval-due-smoke.mjs');
+
+// Configured canonical leave approval is part of this required gate.
+await import('./leave-approval-smoke.mjs');

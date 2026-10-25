@@ -51,6 +51,7 @@ const pool = {
     return {
       async query(sql, params = []) {
         transactionQueries.push({sql, params});
+        if(sql.includes('pg_advisory_')||sql.includes('from leave_approval_instances')||sql.includes('from leave_selected_approval_policy'))return {rows:[],rowCount:0};
         if (['begin', 'commit', 'rollback'].includes(sql)) return {rows: []};
         if (sql.includes('select * from leave_types where id = $1')) {
           return {rows: params[0] === existingLeaveType.id ? [existingLeaveType] : []};
