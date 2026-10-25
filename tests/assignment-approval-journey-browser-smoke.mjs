@@ -148,3 +148,6 @@ console.log('Material assignment actual React policy/proposal -> two named stage
 
 // Connected source/state/history proof is part of this required gate.
 await import('./e2-version-state-journey-browser-smoke.mjs');
+
+// Configured creation approval is part of the required assignment gate.
+await import('./assignment-creation-journey-browser-smoke.mjs');

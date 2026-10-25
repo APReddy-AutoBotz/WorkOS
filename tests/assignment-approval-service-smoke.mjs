@@ -105,3 +105,27 @@ for (const code of [400, 409, 422, 503]) {
 }
 assert.deepEqual(fallback, []);
 console.log('Material assignment production source/policy/stage/current-version/CAS/receipt/canonical-inbox/delivery/read acknowledgement, late200/401 owner isolation and no fallback/retry passed.');
+
+reset();
+const creationPolicy = { ...policy, definition: { ...definition, creationRequired: true } }, creationId = 'a-' + versionId;
+const creation = { ...instance, operationKind: 'Creation', assignmentId: creationId, requesterUserId: actor, before: null, sourceVersionId: null, currentVersionId: null, policy: creationPolicy };
+raw = { ...envelope, employeeId: before.employeeId, projectId: before.projectId, policy: creationPolicy };
+assert.deepEqual(await s.creationPolicy(before.employeeId, before.projectId, capture('assignment')), creationPolicy);
+raw = { ...envelope, instance: creation, replayed: false };
+const created = await s.requestCreation(before.employeeId, before.projectId, creationPolicy, proposed, creation.reason, requestId, capture('assignment'));
+assert.equal(created.instance.operationKind, 'Creation'); assert.equal(created.instance.before, null);
+assert.equal(JSON.parse(calls.at(-1).body).expectedPolicyId, policyId);
+for (const patch of [{ operationKind: 'MaterialChange' }, { assignmentId: 'redirect' }, { before }, { sourceVersionId: versionId }, { employeeId: 'redirect' }, { proposed: { ...proposed, quantityExact: 25 } }, { policy: { ...creationPolicy, definition } }, { state: { status: 'Approved', sequence: 0, currentStage: null } }]) {
+ raw = { ...envelope, instance: { ...creation, ...patch } };
+ await assert.rejects(s.creation(instanceId, capture('assignment')), { status: 503 });
+}
+raw = { ...envelope, instance: creation }; assert.equal((await s.creation(instanceId, capture('assignment'))).instance.before, null);
+raw = { ...envelope, instances: [creation], nextAfter: null }; assert.equal((await s.creations(capture('assignment'))).instances.length, 1);
+raw = { ...envelope, notifications: [{ ...notice, kind: 'assignment-creation-approval', assignmentId: creationId }], nextAfter: null };
+assert.equal((await workApprovals.inbox(null, capture('inbox'))).notifications[0].kind, 'assignment-creation-approval');
+let finishCreation; gate = new Promise(resolve => { finishCreation = resolve; });
+raw = { ...envelope, instance: creation, replayed: false };
+const lateCreation = s.requestCreation(before.employeeId, before.projectId, creationPolicy, proposed, creation.reason, requestId, capture('assignment'));
+values.set('workos_session', JSON.stringify({ ...user, userName: 'synthetic-other-account' })); finishCreation();
+await assert.rejects(lateCreation); assert.deepEqual(fallback, []);
+console.log('Creation production policy/request/source-absence/current-stage/canonical-inbox and malformed/accepted-late acknowledgement contracts passed.');

@@ -15,3 +15,9 @@ assert.throws(() => approvalState(d.stages, [{ sequence: 2, stage: 0, decision: 
 assert.deepEqual(approvalRecipients([{ userId, reason: 'requester' }, { userId, reason: 'affected_worker' }]), [{ userId, reasons: ['affected_worker', 'requester'] }]);
 console.log('Material assignment explicit field/stage/locale/template/render limits, exact native quantity selection, state, canonical identity and recipient-reason dedup passed.');
 assert.equal(validAssignmentApprovalPolicy({ ...d, templates: d.templates.map(t => ({ ...t, subject: 'Review {{decisionReason}}' })) }), false, 'Action-required blank reason must not create an unreadable trailing-space acknowledgement');
+
+assert(validAssignmentApprovalPolicy({ ...d, creationRequired: true, materialFields: [] }));
+assert(validAssignmentApprovalPolicy({ ...d, creationRequired: false }));
+for (const value of [null, 'true', 1, {}, []]) assert.equal(validAssignmentApprovalPolicy({ ...d, creationRequired: value }), false);
+assert(validAssignmentApprovalPolicy({ ...d, creationRequired: false, materialFields: [] }), 'Explicit creation-only retirement needs no invented material field');
+console.log('Explicit creation-only/mixed policy, absent legacy option and invalid option contracts passed.');
