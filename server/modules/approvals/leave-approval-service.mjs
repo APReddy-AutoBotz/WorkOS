@@ -61,7 +61,7 @@ export const startLeaveApproval=async(c,req,row,o,isNew)=>{
 };
 export const assertLegacyLeaveApproval=async(c,id)=>{if((await c.query('select 1 from leave_approval_instances where request_id=$1',[id])).rowCount)fail('LEAVE_APPROVAL_ENGINE_REQUIRED','This leave request uses configured stages. Inspect its exact current review in Approvals.');};
 export const retainLeaveCancellation=async(c,req,row,reason)=>{
- const i=(await c.query('select id from leave_approval_instances where request_id=$1 order by sequence desc limit 1',[row.id])).rows[0];if(!i)return;await setLeaveApprovalContext(c,req,i.id,'Cancel');await c.query('insert into leave_approval_cancellations(id,instance_id,actor_id,active_role,reason,previous_status,operation_id)values($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),i.id,req.user.sub,req.user.activeRole,reason??null,row.status,req.operationId]);
+ const i=(await c.query('select id from leave_approval_instances where request_id=$1 order by sequence desc limit 1',[row.id])).rows[0];if(!i)return;await setLeaveApprovalContext(c,req,i.id,'Cancel');await c.query('insert into leave_approval_cancellations(id,instance_id,actor_id,active_role,reason,previous_status,operation_id)values($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),i.id,req.user.sub,req.user.activeRole,reason??null,row.status,req.operationId]);return true;
 };
 export const decideLeaveApproval=async(c,req,id,input,o)=>{
  const v=await scopedLeaveApproval(c,req,id,o),fingerprint=capacityHash({instanceId:id,actorId:req.user.sub,activeRole:req.user.activeRole,...input}),prior=(await c.query('select * from leave_approval_transitions where instance_id=$1 and request_id=$2',[id,input.requestId])).rows[0];

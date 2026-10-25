@@ -611,7 +611,7 @@ export const createLeaveRouter = ({
         res.status(403).json({ error: 'Employees can cancel only their own leave requests' });
         return;
       }
-      await retainLeaveCancellation(client,req,previous,parsed.data.comments);
+      const governed=await retainLeaveCancellation(client,req,previous,parsed.data.comments);
       const result = await client.query(`
         update leave_requests
         set status = 'Cancelled',
@@ -627,6 +627,7 @@ export const createLeaveRouter = ({
         entityId: req.params.id,
         status: 'Cancelled',
         comments: parsed.data.comments || null,
+        ...(governed?{suppressNotification:true}:{}),
       });
       await audit(client, req, {
         module: 'Leave',
@@ -718,7 +719,8 @@ export const createLeaveRouter = ({
           return;
         }
       }
-      if(parsed.data.status==='Cancelled')await retainLeaveCancellation(client,req,previous,parsed.data.comments);else await assertLegacyLeaveApproval(client,previous.id);
+      let governed=false;
+      if(parsed.data.status==='Cancelled')governed=Boolean(await retainLeaveCancellation(client,req,previous,parsed.data.comments));else await assertLegacyLeaveApproval(client,previous.id);
       await assertCalendarLeaveDecision(client,req,previous,parsed.data.status,buildEmployeeScopeWhere,getBusinessLeaveDays);
       const result = await client.query(`
         update leave_requests
@@ -747,6 +749,7 @@ export const createLeaveRouter = ({
         entityId: req.params.id,
         status: parsed.data.status,
         comments: parsed.data.comments || null,
+        ...(governed?{suppressNotification:true}:{}),
       });
       await client.query('commit');
       res.json(result.rows[0]);
