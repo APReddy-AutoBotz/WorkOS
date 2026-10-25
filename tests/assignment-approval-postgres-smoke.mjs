@@ -205,3 +205,6 @@ await import('./e2-version-state-postgres-smoke.mjs');
 
 // Configured creation approval is part of the required assignment gate.
 await import('./assignment-creation-postgres-smoke.mjs');
+
+// Independent staged-work/calendar-leave composite proof.
+await import('./staged-leave-postgres-smoke.mjs');

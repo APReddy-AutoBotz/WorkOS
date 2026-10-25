@@ -153,3 +153,6 @@ await import('./e2-version-state-journey-browser-smoke.mjs');
 await import('./assignment-creation-journey-browser-smoke.mjs');
 
 await import('./reviewed-approval-batch-journey-browser-smoke.mjs');
+
+// Independent staged-work/calendar-leave composite proof.
+await import('./staged-leave-journey-browser-smoke.mjs');
