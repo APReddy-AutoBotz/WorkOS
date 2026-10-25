@@ -24,11 +24,12 @@ export const registerAssignmentApprovalRoutes = (router, o, { config, handle, pa
     }));
     router.get('/assignments/policies', ...config, manage, ...read, handle(false, async (c, req) => { const q = parse(z.object({ before: z.coerce.number().int().min(1).max(2147483647).optional() }).strict(), req.query), rows = (await c.query('select *,effective_from::text from assignment_approval_policies where organization_id=$1 and legal_entity_id=$2 and($3::integer is null or sequence<$3)order by sequence desc limit 11', [...scope(req), q.before ?? null])).rows; return { policies: rows.slice(0, 10).map(assignmentApprovalPolicyView), nextBefore: rows.length > 10 ? rows[9].sequence : null }; }));
     router.post('/assignments/policies', ...config, manage, ...read, handle(true, async (c, req) => {
-        const d = parse(z.object({ expectedOwnerKey: hash, expectedLatestId: uuid.nullable(), effectiveFrom: date, definition: z.unknown().refine(validAssignmentApprovalPolicy), reason }).strict(), req.body), latest = (await c.query('select * from assignment_approval_policies where organization_id=$1 and legal_entity_id=$2 order by sequence desc limit 1', scope(req))).rows[0];
+        const d = parse(z.object({ expectedOwnerKey: hash, expectedLatestId: uuid.nullable(), effectiveFrom: date, definition: z.record(z.string(), z.unknown()), reason }).strict(), req.body), latest = (await c.query('select * from assignment_approval_policies where organization_id=$1 and legal_entity_id=$2 order by sequence desc limit 1', scope(req))).rows[0];
         if ((latest?.id ?? null) !== d.expectedLatestId)
             fail('ASSIGNMENT_APPROVAL_POLICY_STALE', 'Policy changed. Reload before adopting.');
         if (!Object.hasOwn(d.definition, 'creationRequired') && Object.hasOwn(latest?.definition ?? {}, 'creationRequired'))
             d.definition = { ...d.definition, creationRequired: latest.definition.creationRequired };
+        parse(z.unknown().refine(validAssignmentApprovalPolicy), d.definition);
         const p = [], where = o.buildEmployeeScopeWhere(req, p, 'e');
         p.push(d.definition.workerIds);
         if ((await c.query(`select e.id from employees e where ${where} and e.status='Active'and e.id=any($${p.length}::text[])`, p)).rowCount !== d.definition.workerIds.length)
