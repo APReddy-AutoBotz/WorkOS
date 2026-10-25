@@ -11,7 +11,7 @@ await withCommercialDatabase(async ({ pool }) => withPreAssignmentApprovalMigrat
     await runMigrations({ pool, rootDir, logger: { log() { } } });
     await seedAssignmentApproval(pool);
     const keep = ['project_allocations', 'assignment_versions', 'assignment_overlap_policy_versions', 'assignment_overlap_evidence', 'approval_records', 'users', 'role_permissions', 'timesheets', 'timesheet_entries', 'work_submission_evidence', 'work_submission_decisions', 'resource_demands', 'resource_demand_versions', 'work_approval_instances', 'work_approval_events', 'work_period_notice_policies', 'work_period_notice_events', 'notification_events'], before = await snapshot(pool, keep);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['065_wos05_assignment_material_approvals','066_wos05_assignment_creation_approvals','067_wos05_approval_due_notices','068_wos05_canonical_leave_approvals']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['065_wos05_assignment_material_approvals','066_wos05_assignment_creation_approvals','067_wos05_approval_due_notices','068_wos05_canonical_leave_approvals', '069_wos05_canonical_delegation']);
     assert.deepEqual(await snapshot(pool, keep), before);
     for (const t of tables)
         assert.deepEqual(await table(pool, t), []);
@@ -214,3 +214,6 @@ await import('./staged-leave-postgres-smoke.mjs');
 
 // Configured canonical leave approval is part of this required gate.
 await import('./leave-approval-postgres-smoke.mjs');
+
+// Prospective configured canonical delegation is part of this required gate.
+await import('./canonical-delegation-postgres-smoke.mjs');

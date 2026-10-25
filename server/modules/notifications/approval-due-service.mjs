@@ -1,3 +1,4 @@
+import {canonicalStageRecipients} from '../approvals/canonical-delegation-service.mjs';
 import {scopedLeaveApproval,leaveApprovalActor} from '../approvals/leave-approval-service.mjs';
 import { randomUUID } from 'node:crypto';
 import { APPROVAL_DUE_KEY, approvalDueRecipients, approvalDueIdentity, renderApprovalDue } from '../../../shared/approval-due.mjs';
@@ -28,15 +29,18 @@ export const approvalDuePreview = async (c, req, origin, instanceId, stage, o) =
   const current = (await c.query('select approval_due_current($1,$2,$3) current', [origin, instanceId, stage])).rows[0].current;
   const existing = row ? (await c.query('select id from approval_due_events where clock_id=$1', [row.id])).rows[0]?.id ?? null : null;
   const state = source.state.status !== 'Pending' ? 'Terminal' : source.state.currentStage !== stage || !current ? 'Stale' : !clock ? 'Unconfigured' : Date.parse(now) <= Date.parse(clock.dueAt) ? 'Waiting' : existing ? 'Notified' : 'Overdue';
-  let recipients = [];
+  let recipients = [],delegatedApprover;
   if (state === 'Overdue') {
     if (origin === 'Work') await workApprovalActor(c, req, clock.approver, (await c.query('select * from timesheets where id=$1', [source.v.i.timesheet_id])).rows[0], o);
     else if(origin==='Leave')await leaveApprovalActor(c,req,clock.approver,source.v.a,o);
     else await assignmentApprovalActor(c, req, clock.approver, source.v.a, o);
     await approvalDueTarget(c, req, clock.target, source.worker.id, [origin], source.projectId, o);
-    recipients = approvalDueRecipients(clock.approver.userId, clock.target.userId);
+    const v=source.v,stages=origin==='Work'?v.policy.definition.stages:v.p.definition.stages,validator=origin==='Work'?workApprovalActor:origin==='Leave'?leaveApprovalActor:assignmentApprovalActor,record=origin==='Work'?(await c.query('select * from timesheets where id=$1',[v.i.timesheet_id])).rows[0]:v.a;
+    const actors=await canonicalStageRecipients(c,req,v,stages,stage,record,validator,o),binding=(v.delegations??[]).find(b=>b.stage===stage&&b.eligible);
+    if(binding)delegatedApprover={bindingId:binding.id,delegationId:binding.delegationId,userId:binding.delegateUserId,role:binding.role};
+    recipients = approvalDueRecipients(clock.approver.userId, clock.target.userId,actors.filter(a=>a.userId!==clock.approver.userId).map(a=>a.userId));
   }
-  const view = { origin, instanceId, stage, worker: source.worker, sourceVersion: source.sourceToken, sourceState: source.state, clock, state, eventKey: state === 'Overdue' ? APPROVAL_DUE_KEY : null, existingEvent: existing, recipientReasons: recipients }, canonical = capacityCanonical(view);
+  const view = { ...(delegatedApprover?{delegatedApprover}:{}),origin, instanceId, stage, worker: source.worker, sourceVersion: source.sourceToken, sourceState: source.state, clock, state, eventKey: state === 'Overdue' ? APPROVAL_DUE_KEY : null, existingEvent: existing, recipientReasons: recipients }, canonical = capacityCanonical(view);
   return { ...view, sourceToken: capacityHash(canonical), checkedAt: now, sourceCanonical: canonical };
 };
 export const approvalDuePreviewView = ({ sourceCanonical: _c, ...v }) => v;

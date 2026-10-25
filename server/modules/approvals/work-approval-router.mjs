@@ -1,3 +1,4 @@
+import {registerCanonicalDelegationRoutes} from './canonical-delegation-router.mjs';
 import {registerLeaveApprovalRoutes} from './leave-approval-router.mjs';
 import {leaveApprovalInboxRows,setLeaveApprovalContext} from './leave-approval-service.mjs';
 import { registerApprovalDueRoutes } from '../notifications/approval-due-router.mjs';
@@ -53,9 +54,9 @@ export const createWorkApprovalRouter = options => {
                 res.status(e.statusCode).json({ error: e.message, code: e.code });
             else if (['ALP01', 'ALP02'].includes(e.code))
                 res.status(422).json({ error: 'Current assignment overlap policy rejects or cannot validate this final source. Reload planning and policy.', code: e.code === 'ALP01' ? 'ASSIGNMENT_OVERLAP_BLOCKED' : 'ASSIGNMENT_OVERLAP_AUTHORITY' });
-            else if (['LGA02','LGA03','LGA04','ADN02','ADN03','ASA01','ASA02','ASA03','ASA04','WDN02', 'WDN03', '23505', '40001', 'WGA02', 'WGA03', 'WGA04', 'WGA05'].includes(e.code))
+            else if (['CDG02','CDG03','LGA02','LGA03','LGA04','ADN02','ADN03','ASA01','ASA02','ASA03','ASA04','WDN02', 'WDN03', '23505', '40001', 'WGA02', 'WGA03', 'WGA04', 'WGA05'].includes(e.code))
                 res.status(409).json({ error: 'Work approval authority, source or current stage changed. Read history before retrying.', code: 'WORK_APPROVAL_CONFLICT' });
-            else if (['LGA01','ADN01','WDN01', '23514', '23503', 'WGA01'].includes(e.code))
+            else if (['CDG01','LGA01','ADN01','WDN01', '23514', '23503', 'WGA01'].includes(e.code))
                 res.status(422).json({ error: 'The scoped work approval configuration/evidence is invalid.', code: 'WORK_APPROVAL_AUTHORITY' });
             else {
                 console.error('Work approval operation unavailable', e.code ?? 'UNKNOWN');
@@ -134,6 +135,7 @@ export const createWorkApprovalRouter = options => {
     router.post('/inbox/:id/read', requirePermission('notifications.view'), handle(true, async (c, req) => { parse(z.object({ expectedOwnerKey: hash }).strict(), req.body); const id = parse(uuid, req.params.id), legacy = await inboxRows(c, req, { id }), period = await periodNoticeInboxRows(c, req, options, { id }), assignment=await assignmentApprovalInboxRows(c,req,options,{id}),due=await approvalDueInboxRows(c,req,options,{id}),leave=await leaveApprovalInboxRows(c,req,options,{id}); if (legacy.length + period.length + assignment.length + due.length + leave.length !== 1)
         workApprovalFail('WORK_APPROVAL_NOTIFICATION_NOT_FOUND', 'In-app notification is unavailable for the current recipient/scope.', 404); const row = [...legacy, ...period,...assignment,...due,...leave][0], table = leave.length?'leave_approval_reads':due.length?'approval_due_reads':assignment.length?'assignment_approval_reads':period.length ? 'work_period_notice_reads' : 'work_approval_reads'; await setWorkApprovalContext(c, req);if(assignment.length)await setAssignmentApprovalContext(c,req);if(leave.length)await setLeaveApprovalContext(c,req); const saved = await c.query(`insert into ${table}(recipient_id,user_id)values($1,$2)on conflict do nothing returning *`, [id, req.user.sub]); if (saved.rowCount)
         await audit(c, req, { module: 'Notifications', action: leave.length?'Read Leave Approval Notification':assignment.length?'Read Assignment Approval Notification':period.length ? 'Read Work Period Notice' : 'Read Governed Approval Notification', entityType: leave.length?'LeaveApprovalNotification':assignment.length?'AssignmentApprovalNotification':period.length ? 'WorkPeriodNoticeNotification' : 'WorkApprovalNotification', entityId: id, newValue: { recipientId: id, eventId: row.eventId }, details: 'Acknowledged only this authenticated scoped recipient record.' }); return { notification: (leave.length?await leaveApprovalInboxRows(c,req,options,{id}):due.length?await approvalDueInboxRows(c,req,options,{id}):assignment.length?await assignmentApprovalInboxRows(c,req,options,{id}):period.length ? await periodNoticeInboxRows(c, req, options, { id }) : await inboxRows(c, req, { id }))[0] }; }));
+    registerCanonicalDelegationRoutes(router,options,{handle,parse,uuid,hash,reason});
     registerLeaveApprovalRoutes(router,options,{config,handle,parse,uuid,hash,date,reason});
     registerAssignmentApprovalRoutes(router,options,{config,handle,parse,uuid,hash,date,reason});
     registerPeriodNoticeRoutes(router, options, { config, handle, parse, uuid, hash, date, reason });
