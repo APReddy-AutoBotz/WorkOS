@@ -1,3 +1,4 @@
+import {GovernedNativeForecast} from '../components/GovernedNativeForecast';
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { KPIStrip } from '../components/ui/KPIStrip';
@@ -101,6 +102,7 @@ const addMonths = (date: Date, months: number) => {
 };
 
 export const ForecastUtilization = () => {
+  const [basis,setBasis]=useState<'compatibility'|'native'>('compatibility');
   const [horizon, setHorizon] = useState('3 Months');
   const [result, setResult] = useState<ForecastResult>({ status: 'loading', generation: 0, horizon: '3 Months', snapshot: null });
   const requestVersion = useRef(0);
@@ -343,8 +345,10 @@ export const ForecastUtilization = () => {
   };
 
 
+  if(basis==='native')return <div><PageHeader title="Native percentage forecast" subtitle="Recorded assignments with explicit checkpoint and source authority." breadcrumb={['Reports','Forecast']}/><button onClick={()=>setBasis('compatibility')}>Use compatibility forecast</button><GovernedNativeForecast/></div>;
   return (
     <div className="animate-in fade-in duration-500 pb-12">
+      <button onClick={()=>setBasis('native')}>Use native percentage forecast</button>
       <PageHeader
         title="Forecast Utilization"
         subtitle="Forward-looking capacity models analyzing potential demand and resource roll-off dynamics."
