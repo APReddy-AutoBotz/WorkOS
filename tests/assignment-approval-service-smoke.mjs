@@ -165,3 +165,6 @@ assert.deepEqual(batchResults.map(r => r.status), ['Uncertain', 'NotAttempted'],
 batchContext = batchSetup(); batchResults = [];
 await executeReviewedApprovals([reviewed, another], { work: null, assignment: null }, () => true, r => batchResults.push(r), new Set([reviewed.requestId]));
 assert.deepEqual(batchResults.map(r => r.status), ['Uncertain', 'NotAttempted']); assert.equal(calls.length, 0);
+
+// Configured prospective due handoff is part of this required gate.
+await import('./approval-due-service-smoke.mjs');
