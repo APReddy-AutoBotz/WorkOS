@@ -151,3 +151,5 @@ await import('./e2-version-state-journey-browser-smoke.mjs');
 
 // Configured creation approval is part of the required assignment gate.
 await import('./assignment-creation-journey-browser-smoke.mjs');
+
+await import('./reviewed-approval-batch-journey-browser-smoke.mjs');

@@ -129,3 +129,32 @@ const lateCreation = s.requestCreation(before.employeeId, before.projectId, crea
 values.set('workos_session', JSON.stringify({ ...user, userName: 'synthetic-other-account' })); finishCreation();
 await assert.rejects(lateCreation); assert.deepEqual(fallback, []);
 console.log('Creation production policy/request/source-absence/current-stage/canonical-inbox and malformed/accepted-late acknowledgement contracts passed.');
+
+// Reviewed batch coordinator uses the same strict production per-item clients.
+const { reviewApproval, executeReviewedApprovals, reconcileReviewedApproval } = await import('../src/services/reviewedApprovalBatch.ts');
+const reviewedPage = { instance, actorUserId: actor, ownerKey };
+const reviewed = reviewApproval('Material', reviewedPage, 'Approved', receipt.reason, requestId);
+assert(Object.isFrozen(reviewed) && Object.isFrozen(reviewed.page.instance.proposed));
+assert.throws(() => reviewApproval('Creation', reviewedPage, 'Approved', receipt.reason));
+const anotherId = ids[11], anotherKey = ids[10], another = reviewApproval('Material', { ...reviewedPage, instance: { ...instance, id: anotherId } }, 'Approved', receipt.reason, anotherKey);
+const batchSetup = () => { reset(); signal = () => { const call = calls.at(-1), id = call.url.split('/').at(-2), input = JSON.parse(call.body); status = 200; raw = { ...envelope, receipt: { ...receipt, instanceId: id, requestId: input.requestId }, replayed: false, sourceToken: instance.sourceToken }; }; return { work: null, assignment: capture('assignment-decide') }; };
+let batchContext = batchSetup(), batchResults = [];
+await executeReviewedApprovals([reviewed, another], batchContext, () => true, r => batchResults.push(r));
+assert.deepEqual(batchResults.map(r => r.status), ['Confirmed', 'Confirmed']); assert.equal(calls.length, 2);
+await assert.rejects(executeReviewedApprovals([reviewed, reviewed], batchContext, () => true, () => {}));
+batchContext = batchSetup(); const successfulSignal = signal; signal = () => { successfulSignal(); if (calls.length === 1) { status = 409; raw = { error: 'Synthetic stale source' }; } }; batchResults = [];
+await executeReviewedApprovals([reviewed, another], batchContext, () => true, r => batchResults.push(r)); assert.deepEqual(batchResults.map(r => r.status), ['Denied', 'Confirmed']);
+batchContext = batchSetup(); signal = () => { raw = { malformed: true }; }; batchResults = [];
+await executeReviewedApprovals([reviewed, another], batchContext, () => true, r => batchResults.push(r)); assert.deepEqual(batchResults.map(r => r.status), ['Uncertain', 'NotAttempted']); assert.equal(calls.length, 1);
+batchContext = batchSetup(); signal = () => { values.set('workos_api_token', 'synthetic-owner-changed'); }; batchResults = [];
+await executeReviewedApprovals([reviewed, another], batchContext, () => true, r => batchResults.push(r)); assert.deepEqual(batchResults.map(r => r.status), ['Uncertain', 'NotAttempted']); assert.equal(calls.length, 1);
+reset(); raw = { ...envelope, instance };
+assert.equal((await reconcileReviewedApproval(reviewed, capture('assignment'))).status, 'Unresolved'); assert.equal(calls.length, 1, 'Reconciliation is read-only');
+reset(); raw = { ...envelope, instance: { ...instance, transitions: [receipt], state: receipt.outcome } };
+assert.equal((await reconcileReviewedApproval(reviewed, capture('assignment'))).status, 'Confirmed'); assert.equal(calls.length, 1);
+console.log('Reviewed bulk immutable snapshots, distinct selection, independent strict receipts/denials, uncertain stop, owner stop and read-only exact request reconciliation passed.');
+
+reset(); raw = { ...envelope, instance: { ...instance, currentRevision: 'c'.repeat(64) } };
+assert.equal((await reconcileReviewedApproval(reviewed, capture('assignment'))).status, 'Changed');
+reset(); raw = { ...envelope, instance: { ...instance, transitions: [{ ...receipt, reason: 'Synthetic conflicting history' }], state: receipt.outcome } };
+await assert.rejects(reconcileReviewedApproval(reviewed, capture('assignment'))); assert.equal(calls.length, 1);
