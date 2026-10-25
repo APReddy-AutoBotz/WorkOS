@@ -71,18 +71,26 @@ begin
  end loop;return null;
 end $$;
 create constraint trigger work_period_notice_commit after insert on work_period_notice_runs deferrable initially deferred for each row execute function validate_period_notice_commit();
+create function work_period_notice_units(value text)returns integer language sql immutable strict as $$select coalesce(sum(case when ascii(ch)>65535 then 2 else 1 end),0)::integer from regexp_split_to_table(value,'')ch where ch<>''$$;
 create function valid_work_period_notice_definition(d jsonb)returns boolean language plpgsql immutable as $$
-declare x jsonb;t jsonb;v text;stripped text;
+declare x jsonb;t jsonb;v text;stripped text;field_name text;expanded text;
 begin
- if jsonb_typeof(d)is distinct from 'object'or not(d?&array['workerIds','reminderMinutesBeforeDeadline','overdueBoundary','escalationOwner','locale','templates'])or(select count(*)from jsonb_object_keys(d))<>6 or jsonb_typeof(d->'workerIds')is distinct from 'array'or jsonb_array_length(d->'workerIds')>200 or jsonb_typeof(d->'reminderMinutesBeforeDeadline')is distinct from 'number'or(d->>'reminderMinutesBeforeDeadline')!~'^[0-9]+$'or(d->>'reminderMinutesBeforeDeadline')::numeric not between 0 and 527040 or coalesce(d->>'overdueBoundary','')not in('deadline','grace-end')or jsonb_typeof(d->'locale')is distinct from 'string'or(d->>'locale')!~'^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$'or jsonb_typeof(d->'templates')is distinct from 'array'or jsonb_array_length(d->'templates')<>2 then return false;end if;
+ if jsonb_typeof(d)is distinct from 'object'or not(d?&array['workerIds','reminderMinutesBeforeDeadline','overdueBoundary','escalationOwner','locale','templates'])or(select count(*)from jsonb_object_keys(d))<>6 or jsonb_typeof(d->'workerIds')is distinct from 'array'or jsonb_array_length(d->'workerIds')>200 or jsonb_typeof(d->'reminderMinutesBeforeDeadline')is distinct from 'number'or(d->>'reminderMinutesBeforeDeadline')!~'^[0-9]+$'or(d->>'reminderMinutesBeforeDeadline')::numeric not between 0 and 527040 or coalesce(d->>'overdueBoundary','')not in('deadline','grace-end')or jsonb_typeof(d->'locale')is distinct from 'string'or work_period_notice_units(d->>'locale')>100 or(d->>'locale')!~'^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$'or jsonb_typeof(d->'templates')is distinct from 'array'or jsonb_array_length(d->'templates')<>2 then return false;end if;
  x=d->'escalationOwner';if jsonb_typeof(x)is distinct from 'object'or not(x?&array['userId','role'])or(select count(*)from jsonb_object_keys(x))<>2 or jsonb_typeof(x->'userId')is distinct from 'string'or(x->>'userId')!~'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'or jsonb_typeof(x->'role')is distinct from 'string'or length(btrim(x->>'role'))not between 1 and 100 then return false;end if;
  if(select count(distinct value)from jsonb_array_elements_text(d->'workerIds'))<>jsonb_array_length(d->'workerIds')then return false;end if;
  for x in select value from jsonb_array_elements(d->'workerIds')loop if jsonb_typeof(x)is distinct from 'string'or length(x#>>'{}')not between 1 and 200 then return false;end if;end loop;
  if(select count(distinct item->>'key')from jsonb_array_elements(d->'templates')item)<>2 then return false;end if;
  for t in select value from jsonb_array_elements(d->'templates')loop
   if jsonb_typeof(t)is distinct from 'object'or not(t?&array['key','subject','body'])or(select count(*)from jsonb_object_keys(t))<>3 or coalesce(t->>'key','')not in('work_period.submission_due','work_period.submission_overdue')or jsonb_typeof(t->'subject')is distinct from 'string'or jsonb_typeof(t->'body')is distinct from 'string'or length(btrim(t->>'subject'))not between 1 and 200 or length(btrim(t->>'body'))not between 1 and 8000 then return false;end if;
-  foreach v in array array[t->>'subject',t->>'body']loop stripped=v;foreach v in array array['workerCode','periodCode','deadlineAt','graceEndsAt','reminderAt']loop stripped=replace(stripped,'{{'||v||'}}','');end loop;if stripped~'[{}]'then return false;end if;end loop;
+  foreach field_name in array array['subject','body']loop
+   stripped=t->>field_name;expanded=stripped;
+   if work_period_notice_units(stripped)>(case when field_name='subject'then 200 else 8000 end) then return false;end if;
+   foreach v in array array['workerCode','periodCode','deadlineAt','graceEndsAt','reminderAt']loop stripped=replace(stripped,'{{'||v||'}}','');expanded=replace(expanded,'{{'||v||'}}',repeat('x',case when v in('workerCode','periodCode')then 200 else 40 end));end loop;
+   if stripped~'[{}]'or work_period_notice_units(expanded)>(case when field_name='subject'then 1200 else 12000 end) then return false;end if;
+  end loop;
  end loop;return true;
 exception when others then return false;
 end $$;
 alter table work_period_notice_policies add constraint work_period_notice_definition_shape check(valid_work_period_notice_definition(definition));
+
+alter table work_period_notice_events add constraint work_period_notice_render_bounds check(work_period_notice_units(title)between 1 and 1200 and work_period_notice_units(body)between 1 and 12000 and work_period_notice_units(locale)between 1 and 100);

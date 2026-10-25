@@ -91,7 +91,9 @@ export const evaluatePeriodNotice = async (c, req, input, o) => {
         const template = (await c.query('select * from work_period_notice_templates where policy_id=$1 and event_key=$2', [v.policy.id, v.eventKey])).rows[0];
         if (!template)
             fail('PERIOD_NOTICE_TEMPLATE_UNAVAILABLE', 'The retained canonical template is unavailable.');
-        const rendered = renderPeriodNotice({ key: template.event_key, subject: template.subject, body: template.body }, { workerCode: v.worker.code, periodCode: v.period.code, deadlineAt: v.deadlineAt, graceEndsAt: v.graceEndsAt, reminderAt: v.reminderAt });
+        let rendered;try{
+            rendered = renderPeriodNotice({ key: template.event_key, subject: template.subject, body: template.body }, { workerCode: v.worker.code, periodCode: v.period.code, deadlineAt: v.deadlineAt, graceEndsAt: v.graceEndsAt, reminderAt: v.reminderAt });
+        }catch(e){if(e instanceof RangeError)fail('PERIOD_NOTICE_RENDER_LIMIT','Notice template/source expansion exceeds its supported in-app bounds.',422);throw e;}
         await c.query('insert into work_period_notice_events(id,run_id,source_version,event_key,policy_class,template_id,operation_id,correlation_id,locale,title,body,organization_id,legal_entity_id,employee_id,period_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)', [eventId, id, v.sourceVersion, v.eventKey, v.eventKey === PERIOD_NOTICE_KEYS[0] ? 'ACTION_REQUIRED' : 'CONTROL_MANDATORY', template.id, req.operationId, req.correlationId, template.locale, rendered.title, rendered.body,...workApprovalScope(req),v.worker.id,v.period.id]);
         for (const person of v.recipientReasons ?? v.recipients) {
             const recipientId = randomUUID();

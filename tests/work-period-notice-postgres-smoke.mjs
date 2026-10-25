@@ -18,7 +18,8 @@ for (const mode of ['due', 'overdue'])
             assert.equal(none.body.preview.state, 'unconfigured');
             assert.equal((await previewPeriodNotice(request, fx, identities.first)).status, 403);
             await assert.rejects(pool.query("insert into work_period_notice_policies(id,organization_id,legal_entity_id,sequence,effective_from,definition,actor_id,active_role,reason)values($1,$2,$3,1,$4,$5,$6,'Admin','Synthetic unsupported direct SQL')", [randomUUID(), f.organizationId, f.legalEntityId, fx.today, JSON.stringify(noticeDefinition(identities, mode)), identities.manager.id]), { code: 'WDN01' });
-            const configured = await configurePeriodNotices(request, fx, { ...noticeDefinition(identities, mode), workerIds: Object.values(workers).sort() });
+            const overflowing=noticeDefinition(identities,mode);overflowing.templates[1].body=Array(530).fill('{{workerCode}}').join(' ');const invalid=await request(base+'/policies',{method:'POST',body:{expectedOwnerKey:await readApprovalOwner(request,identities.manager),expectedLatestId:null,effectiveFrom:fx.today,definition:overflowing,reason:'Synthetic expansion contract regression'}});assert.equal(invalid.status,400);assert.equal((await table(pool,'work_period_notice_policies')).length,0);assert.equal((await pool.query('select valid_work_period_notice_definition($1::jsonb)ok',[JSON.stringify(overflowing)])).rows[0].ok,false);assert.equal((await pool.query("select work_period_notice_units('🙂')n")).rows[0].n,2);assert.equal((await pool.query("select work_period_notice_units('')n")).rows[0].n,0);
+        const configured = await configurePeriodNotices(request, fx, { ...noticeDefinition(identities, mode), workerIds: Object.values(workers).sort() });
             let p = (await previewPeriodNotice(request, fx)).body.preview;
             assert.equal(p.state, mode, JSON.stringify(p));
             assert.equal(p.eventKey, 'work_period.submission_' + mode);
@@ -56,7 +57,8 @@ for (const mode of ['due', 'overdue'])
                 await pool.query('drop trigger synthetic_notice_delivery_failure on work_period_notice_deliveries');
                 await pool.query('drop function synthetic_notice_delivery_failure()');
             }
-            const fault = mode === 'overdue' ? `if exists(select 1 from work_period_notice_recipients where event_id=new.event_id)then raise exception 'Synthetic second recipient failure';end if;` : `raise exception 'Synthetic first recipient failure';`;
+            await pool.query('update employees set employee_id=$1 where id=$2',['x'.repeat(201),fx.workerId]);const unsupported=(await previewPeriodNotice(request,fx)).body.preview;assert.equal((await evaluatePeriodNotice(request,fx,unsupported)).status,422);assert.deepEqual(await counts(),empty,'Unsupported rendered metadata leaves no protected success fragments');await pool.query('update employees set employee_id=$1 where id=$2',[fx.workerId,fx.workerId]);
+        const fault = mode === 'overdue' ? `if exists(select 1 from work_period_notice_recipients where event_id=new.event_id)then raise exception 'Synthetic second recipient failure';end if;` : `raise exception 'Synthetic first recipient failure';`;
             await pool.query(`create function synthetic_notice_recipient_failure()returns trigger language plpgsql as $$begin ${fault}return new;end$$;create trigger synthetic_notice_recipient_failure before insert on work_period_notice_recipients for each row execute function synthetic_notice_recipient_failure()`);
             try {
                 assert.equal((await evaluatePeriodNotice(request, fx, p, key)).status, 503);
