@@ -14,3 +14,4 @@ assert.deepEqual(approvalState(d.stages, [{ sequence: 1, stage: 0, decision: 'Ap
 assert.throws(() => approvalState(d.stages, [{ sequence: 2, stage: 0, decision: 'Approved' }]));
 assert.deepEqual(approvalRecipients([{ userId, reason: 'requester' }, { userId, reason: 'affected_worker' }]), [{ userId, reasons: ['affected_worker', 'requester'] }]);
 console.log('Material assignment explicit field/stage/locale/template/render limits, exact native quantity selection, state, canonical identity and recipient-reason dedup passed.');
+assert.equal(validAssignmentApprovalPolicy({ ...d, templates: d.templates.map(t => ({ ...t, subject: 'Review {{decisionReason}}' })) }), false, 'Action-required blank reason must not create an unreadable trailing-space acknowledgement');

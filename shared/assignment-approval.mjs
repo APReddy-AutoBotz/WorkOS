@@ -7,7 +7,8 @@ export const validAssignmentApprovalPolicy = d => {
     const { materialFields: _fields, ...base } = d;
     return validWorkApprovalPolicy({ ...base, entityType: 'Timesheet' }) && d.templates.every(t => {
         const rendered = renderApprovalTemplate(t, { workerCode: 'w'.repeat(200), sourceRef: 's'.repeat(250), stageNumber: '10', decisionReason: 'r'.repeat(1000) });
-        return rendered.title.length <= 1200 && rendered.body.length <= 12000;
+        const action = renderApprovalTemplate(t, { workerCode: 'w'.repeat(200), sourceRef: 's'.repeat(250), stageNumber: '10', decisionReason: t.key === 'approval.action_required' ? '' : 'r' });
+        return approvalText(rendered.title, 1200) && approvalText(rendered.body, 12000) && approvalText(action.title, 1200) && approvalText(action.body, 12000);
     });
 };
 export const materialAssignmentFields = (before, after, fields) => fields.filter(k => before[k] !== after[k]);

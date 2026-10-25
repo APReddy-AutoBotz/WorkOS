@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { validAssignmentDefinition } from '../../../shared/assignment-version.mjs';
 import { validAssignmentApprovalPolicy, materialAssignmentFields, assignmentApprovalIdentity } from '../../../shared/assignment-approval.mjs';
-import { approvalState, approvalRecipients, renderApprovalTemplate } from '../../../shared/work-approval.mjs';
+import { approvalState, approvalRecipients, renderApprovalTemplate, approvalText } from '../../../shared/work-approval.mjs';
 import { capacityHash, capacityCanonical } from '../planning/worker-capacity-service.mjs';
 import { workApprovalScope as scope, workApprovalUser, workApprovalFail as fail } from './work-approval-service.mjs';
 import { validateAssignmentPolicy } from '../work-capture/assignment-work-policy.mjs';
@@ -72,7 +72,7 @@ const emit = async (c, req, v, key, sequence, stage, reason, o) => {
     if (!t || v.a.worker_code.length > 200 || v.i.assignment_id.length > 239)
         fail('ASSIGNMENT_APPROVAL_TEMPLATE_UNAVAILABLE', 'Source/template cannot be represented by the canonical inbox.', 422);
     const rendered = renderApprovalTemplate({ key, subject: t.subject, body: t.body }, { workerCode: v.a.worker_code, sourceRef: 'assignment/' + v.i.assignment_id, stageNumber: String(stage + 1), decisionReason: reason ?? '' });
-    if (rendered.title.length > 1200 || rendered.body.length > 12000)
+    if (!approvalText(rendered.title, 1200) || !approvalText(rendered.body, 12000))
         fail('ASSIGNMENT_APPROVAL_TEMPLATE_UNAVAILABLE', 'Rendered text exceeds the canonical inbox contract.', 422);
     const id = assignmentApprovalIdentity(v.i.id, sequence, key, req.operationId), mandatory = key !== 'approval.completed';
     await c.query('insert into assignment_approval_events(id,instance_id,transition_sequence,stage,event_key,policy_class,template_id,operation_id,locale,title,body)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [id, v.i.id, sequence, stage, key, mandatory ? 'ACTION_REQUIRED' : 'INFORMATIONAL', t.id, req.operationId, t.locale, rendered.title, rendered.body]);
