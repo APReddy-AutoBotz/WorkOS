@@ -1,3 +1,4 @@
+import {MaterialAssignmentApprovals} from '../components/MaterialAssignmentApprovals';
 import {WorkPeriodNoticeProducer} from '../components/WorkPeriodNoticeProducer';
 import {GovernedWorkApprovals} from '../components/GovernedWorkApprovals';
 import { useEffect, useMemo, useState } from 'react';
@@ -233,7 +234,7 @@ export const ApprovalsWorkspace = () => {
 
   return (
     <div className="space-y-6 pb-12">
-      <GovernedWorkApprovals/><WorkPeriodNoticeProducer/>
+      <MaterialAssignmentApprovals/><GovernedWorkApprovals/><WorkPeriodNoticeProducer/>
       <PageHeader
         title="Approvals Inbox"
         subtitle="Shared approval inbox, approval history, delegations, and SLA governance."
