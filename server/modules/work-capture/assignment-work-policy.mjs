@@ -15,6 +15,7 @@ const scope=req=>[req.organizationScope.organizationId,req.organizationScope.leg
 const date=value=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
 const shift=(value,days)=>{const d=new Date(`${value}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
 export const workPolicyError=(res,error)=>{
+  if(['WGA01','WGA02','WGA03','WGA04','WGA05'].includes(error?.code)){res.status(409).json({error:'The selected work approval policy, source or stage requires its governed command. Read current history.',code:'WORK_APPROVAL_CONFLICT'});return true;}
   if(['WCC02','WCC03'].includes(error?.code)){res.status(422).json({error:error.code==='WCC02'?'Choose an active category under the adopted catalog for this work date.':'The category context or authorized billability is invalid.',code:error.code==='WCC02'?'WORK_CATEGORY_REQUIRED':'WORK_CATEGORY_CONTEXT'});return true;}
   if(['ALP01','ALP02'].includes(error?.code)){res.status(422).json({error:error.code==='ALP01'?'Declared simultaneous assignment percentages exceed an adopted blocking threshold.':'Native assignment policy authority is unavailable.',code:error.code==='ALP01'?'ASSIGNMENT_OVERLAP_BLOCKED':'ASSIGNMENT_OVERLAP_AUTHORITY'});return true;}
   if(error?.code==='WDL01'){res.status(422).json({error:'The configured submission deadline and grace period have elapsed. Save a Draft or follow the authorized policy process.',code:'WORK_SUBMISSION_DEADLINE_BLOCKED'});return true;}
