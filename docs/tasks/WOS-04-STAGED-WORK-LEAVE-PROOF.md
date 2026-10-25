@@ -1,0 +1,30 @@
+# Staged work, calendar leave and exact actual/export integration proof
+
+Pre-code acceptance plan on preserved Draft PR82 head704fbe8585216dcbe01a959e1126b833869080f2/tree1d641f46fc31d068422b0c73af7b977b11e3fec0. This is an independent local proof-only checkout. Frozen PR009F dfacb2974c63939a8172b7eed68800e61fc4f817/tree3c7c9aa4d3769d62eddf51a875f9f8d9b18b3560 and its publication proposal/receipt remain byte-identical and unpublished. No new push/PR, merge/deploy, review, denied security work or controller/monitoring/settings change is authorized.
+
+## Existing authority and precise proof gap
+
+PRODUCT_REQUIREMENTS WKF003 capacity/effective dates, WKF005 approved leave reduces availability exactly once and never enters productive work, WKF007 own-worker view, TIM010 approved included work over applicable available capacity, APR003/006 ordered current named stages, RPT002 explicit denominator/inclusion and RPT006 scoped audited exports; CORE003–005 server authority/effective truth/history. RESOURCE_PLANNING_SPEC Workforce/capacity, Utilization and positive acceptance specify leave-adjusted capacity without double counting; WORK_CAPTURE_AND_TIMESHEET_SPEC and APPROVAL_AND_POLICY_ENGINE_SPEC preserve final named approval and immutable evidence. Existing PR008/009 scope authorizes these mechanics.
+
+The retained calendar journey uses compatibility work status approval, while the retained E2 staged-work proof has no leave-driven denominator transition. This slice connects already-implemented contracts; it does not implement a new business rule or claim complete R6–R10/E2/E3 acceptance.
+
+## Connected acceptance
+
+Use actual authenticated React/API/PostgreSQL with isolated synthetic fixtures and existing held roles/permissions. Explicit current-UTC-date capacity/calendar/category/stage configuration is test setup, not buyer adoption. Reuse the existing calendar-leave fixture capability for self-service; do not change product grants or permission definitions. No fake clock, backdated capacity/profile, future work or conversion.
+
+1. Create current-day assignment V1 and nonempty four-hour project work with retained evidence/reference; submit through the named worker's real API in the supported initial Weekly ending today. Distinguish API submission from UI submission. Submitted/intermediate named work stages contribute zero approved actual hours. Final named work approval contributes exactly4h once over explicit8h available capacity, giving50%; exact decision replay cannot duplicate transitions/submission decisions or hours.
+2. Compare worker-own and authorized report result/source identity. Retain and download the actual server CSV and snapshot nonempty work/submission/entry/approval/assignment history.
+3. Named worker uses the real current calendar quote/request path for one full day. Submitted leave preserves availability8h and approved numerator4h. Existing scoped authorized manager approval reduces availability once by8h to0h; approved work remains4h, with actual ratio explicitly not applicable rather than zero/infinite. Leave never becomes productive work. Record leave balance/calendar evidence independently of work.
+4. Worker-own and report paths agree before/after leave. Retain zero-capacity calculation/CSV; reject a fresh export request with a stale pre-leave source token without creating another retained row. Current history and both earlier CSVs remain readable and immutable.
+5. Existing authorized worker cancellation restores8h and50%, with4h approved hours and unchanged work/V1/submission/decision bytes. Current leave balance/evidence/status follow existing cancellation semantics; this is not protected work/approval reopening. Retrieve retained50% and not-applicable CSVs byte-for-byte after restoration.
+6. Exercise named React current-stage review, calendar request/approval/cancel, worker-own/report/history/download through real production transport. Assert unrelated/unauthorized read or decision denial, current state/history and exact replay. No service mocks or external delivery. Existing role and owner-fencing suites remain required.
+
+## Scope, verification and stop condition
+
+Only tests, synthetic fixture/navigation, traceability and existing required test-entrypoint wiring may change. No runtime/shared calculator, migration, dependency, default, live grant, deployment or provider change. Any runtime contract violation must retain its exact failure/source and be reported with expected/actual evidence and a proposed minimal fix before runtime scope expands. Test assumptions may be corrected to the existing contract; assertions cannot be weakened to hide defects.
+
+Add focused real API/PostgreSQL and React drivers to the existing assignment-approval required gates, leaving all existing commands/assertions intact. Freeze a clean local candidate, perform locked reinstall and all67 retained core/PostgreSQL/browser/production commands. Every receipt belongs to its exact head/tree. Optional formal reviews remain deferred/outstanding; no hosted result is inferred. Return a separate publication proposal against fixed PR82; publication needs separate authority and does not supersede the pending PR009F proposal.
+
+Initial reconciliation: root is the only visible agent; five Actions queues empty; controller342036167 active/latest40180429130 successful on unchanged mainb9a57f8a462d8585bb3f73129080d6fae5173343. All43 published open heads/main/alias preserved; PR82 original40189048891 attempt1 green and formal reviews0. PR26/30 closed-unmerged, PR30 never-merge, PR28/37 historical merges, PR38 Draft. Monitoring remains enabled hourly and unchanged; excluded repository untouched.
+
+Rollback removes proof wiring only and never deletes product evidence. Physical planned/forecast conversions, ambiguous legacy absence, broader source/routing/protected-reopen authority, independent/formal reviews, dependency integration, buyer configuration/UAT and release remain outside this proof.
