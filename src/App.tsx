@@ -49,6 +49,7 @@ const TeamsActionLanding = lazy(() => import('./pages/TeamsActionLanding').then(
 const EntraLoginComplete = lazy(() => import('./pages/EntraLoginComplete').then(module => ({ default: module.EntraLoginComplete })));
 const ImportExport = lazy(() => import('./pages/ImportExport').then(module => ({ default: module.ImportExport })));
 const AuditTrail = lazy(() => import('./pages/AuditTrail').then(module => ({ default: module.AuditTrail })));
+const CalendarAuthoringWorkspace = lazy(() => import('./pages/CalendarAuthoringWorkspace').then(m=>({default:m.CalendarAuthoringWorkspace})));
 const WorkingCalendarInspector = lazy(() => import('./pages/WorkingCalendarInspector').then(module => ({ default: module.WorkingCalendarInspector })));
 const TerminologyConfigurationEditor = lazy(() => import('./pages/TerminologyConfigurationEditor').then(module => ({ default: module.TerminologyConfigurationEditor })));
 const OrganizationProfileEditor = lazy(() => import('./pages/OrganizationProfileEditor').then(module => ({ default: module.OrganizationProfileEditor })));
@@ -359,6 +360,7 @@ export default function App() {
                 } />
                 <Route path="/admin/work-capture-modes" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><WorkCaptureModesEditor /></RoleRoute>} />
                 <Route path="/admin/work-capture-policy" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><WorkCapturePolicyEditor /></RoleRoute>} />
+                <Route path="/admin/calendar-authoring" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><CalendarAuthoringWorkspace/></RoleRoute>} />
                 <Route path="/admin/working-calendars" element={
                   <RoleRoute roles={ROUTE_ROLES.adminSettings}>
                     <WorkingCalendarInspector />

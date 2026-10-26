@@ -1,3 +1,4 @@
+import {createCalendarAuthoringRouter} from './modules/workforce/calendar-authoring-router.mjs';
 import {createWorkforceDirectoryRouter} from './modules/workforce/directory-router.mjs';
 import {createOwnWorkspaceRouter} from './modules/workforce/own-workspace-router.mjs';
 import {createOperationalControlRouter} from './modules/reports/operational-control-router.mjs';
@@ -6483,6 +6484,7 @@ app.use('/api/v1/operational-control',createOperationalControlRouter({pool,requi
 app.use('/api/v1/actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/my-actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit,own:true}));
 app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
+app.use('/api/v1/calendar-authoring',createCalendarAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar authoring request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-directory',createWorkforceDirectoryRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole}));
 app.use('/api/v1/my-workspace',createOwnWorkspaceRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole}));
 app.use('/api/v1/my-work-planning',createOwnWorkPlanningRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere}));
