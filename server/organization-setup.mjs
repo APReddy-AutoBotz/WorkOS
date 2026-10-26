@@ -380,7 +380,7 @@ export const registerOrganizationSetupRoutes = ({
         country_authority_legal_entity_id,worker_group_id,code,name,timezone,working_days,hours_per_day,effective_from)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,[...values,parsed.data.name,parsed.data.timezone,parsed.data.workingDays,parsed.data.hoursPerDay,parsed.data.effectiveFrom]);
       await audit(client,req,{module:'Organization Setup',action:'Version Calendar',entityType:'Working Calendar',entityId:result.rows[0].id,newValue:result.rows[0],details:'Created an effective-dated working calendar version'}); await client.query('commit');res.status(201).json(result.rows[0]);
-    }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});if(/^GCA0[1-5]$/.test(error.code))return res.status(409).json({error:'Use governed prospective calendar authoring for this source',code:'CALENDAR_GOVERNED'});res.status(500).json({error:'Calendar creation failed'});}finally{client.release();}
+    }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Calendar version conflict',code:'CALENDAR_VERSION_CONFLICT'});if(/^(?:GCA|SCA)0[1-5]$/.test(error.code))return res.status(409).json({error:'Use governed prospective calendar authoring for this source',code:'CALENDAR_GOVERNED'});res.status(500).json({error:'Calendar creation failed'});}finally{client.release();}
   });
   router.post('/calendars/:id/retire',requirePermission('settings.manage'),async(req,res)=>{
     const client=await pool.connect();try{await client.query('begin');
@@ -397,7 +397,7 @@ export const registerOrganizationSetupRoutes = ({
       const result=await client.query(`update working_calendars set active=false,effective_to=least(coalesce(effective_to,current_date),current_date) where id=$1 returning *`,[calendar.id]);
       await audit(client,req,{module:'Organization Setup',action:'Retire Calendar',entityType:'Working Calendar',entityId:calendar.id,oldValue:calendar,newValue:result.rows[0],details:'Retired working calendar after dependency analysis'});
       await client.query('commit');res.json(result.rows[0]);
-    }catch(error){await client.query('rollback');if(/^GCA0[1-5]$/.test(error.code))return res.status(409).json({error:'Use governed prospective calendar authoring for this source',code:'CALENDAR_GOVERNED'});res.status(500).json({error:'Calendar retirement failed'});}finally{client.release();}
+    }catch(error){await client.query('rollback');if(/^(?:GCA|SCA)0[1-5]$/.test(error.code))return res.status(409).json({error:'Use governed prospective calendar authoring for this source',code:'CALENDAR_GOVERNED'});res.status(500).json({error:'Calendar retirement failed'});}finally{client.release();}
   });
   router.get('/calendars/:id/holidays',async(req,res)=>{
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
@@ -430,7 +430,7 @@ export const registerOrganizationSetupRoutes = ({
         values(coalesce($1,'calendar-holiday-'||gen_random_uuid()::text),$2,$3,$4,$5,$6,$7,$8) returning *`,[holidayId,req.organizationScope.organizationId,calendar.id,parsed.data.holidayDate,parsed.data.label,parsed.data.holidayType,parsed.data.effectiveFrom,req.user.sub]);
       await audit(client,req,{module:'Organization Setup',action:previous?'Update Calendar Holiday':'Create Calendar Holiday',entityType:'Calendar Holiday',entityId:result.rows[0].holiday_id,oldValue:previous,newValue:result.rows[0],details:`${parsed.data.holidayType} holiday authority for ${parsed.data.holidayDate}`});
       await client.query('commit');res.status(previous?200:201).json(result.rows[0]);
-    }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Holiday date conflicts with existing authority',code:'CALENDAR_HOLIDAY_CONFLICT'});if(/^GCA0[1-5]$/.test(error.code))return res.status(409).json({error:'Use governed prospective calendar authoring for this source',code:'CALENDAR_GOVERNED'});res.status(500).json({error:'Calendar holiday mutation failed'});}finally{client.release();}
+    }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Holiday date conflicts with existing authority',code:'CALENDAR_HOLIDAY_CONFLICT'});if(/^(?:GCA|SCA)0[1-5]$/.test(error.code))return res.status(409).json({error:'Use governed prospective calendar authoring for this source',code:'CALENDAR_GOVERNED'});res.status(500).json({error:'Calendar holiday mutation failed'});}finally{client.release();}
   };
   router.post('/calendars/:calendarId/holidays',requirePermission('settings.manage'),mutateHoliday);
   router.put('/calendars/:calendarId/holidays/:holidayId',requirePermission('settings.manage'),mutateHoliday);
@@ -445,7 +445,7 @@ export const registerOrganizationSetupRoutes = ({
       const result=await client.query(`update working_calendar_holidays set active=false,effective_to=case when effective_from<current_date then least(coalesce(effective_to,current_date-1),current_date-1) else effective_to end where id=$1 returning *`,[previous.id]);
       await audit(client,req,{module:'Organization Setup',action:'Retire Calendar Holiday',entityType:'Calendar Holiday',entityId:previous.holiday_id,oldValue:previous,newValue:result.rows[0],details:'Retired calendar holiday authority'});
       await client.query('commit');res.json(result.rows[0]);
-    }catch(error){await client.query('rollback');if(/^GCA0[1-5]$/.test(error.code))return res.status(409).json({error:'Use governed prospective calendar authoring for this source',code:'CALENDAR_GOVERNED'});res.status(500).json({error:'Calendar holiday retirement failed'});}finally{client.release();}
+    }catch(error){await client.query('rollback');if(/^(?:GCA|SCA)0[1-5]$/.test(error.code))return res.status(409).json({error:'Use governed prospective calendar authoring for this source',code:'CALENDAR_GOVERNED'});res.status(500).json({error:'Calendar holiday retirement failed'});}finally{client.release();}
   });
   router.get('/reporting-periods', async (req,res) => {
     const result=await pool.query(`select * from reporting_periods where organization_id=$1
