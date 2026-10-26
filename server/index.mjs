@@ -1,3 +1,4 @@
+import {createOperationalControlRouter} from './modules/reports/operational-control-router.mjs';
 import {assertLegacyLeaveApproval} from './modules/approvals/leave-approval-service.mjs';
 import {createWorkApprovalRouter} from './modules/approvals/work-approval-router.mjs';
 import {startWorkApproval,assertLegacyWorkApproval} from './modules/approvals/work-approval-service.mjs';
@@ -6476,6 +6477,7 @@ app.use('/api/v1/work-approvals',createWorkApprovalRouter({pool,requireDatabase,
 app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,getSetting,audit,recordAllocationChangeApproval}));
 app.use('/api/v1/native-forecast',createNativeForecastRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,audit}));
+app.use('/api/v1/operational-control',createOperationalControlRouter({pool,requireDatabase,requireAuth,requirePermission,...workApprovalOptions,logError:e=>console.error('Operational control unavailable',e.code??'UNKNOWN')}));
 app.use('/api/v1/actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/my-actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit,own:true}));
 app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));

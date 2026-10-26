@@ -226,3 +226,6 @@ await import('./import-delegation-postgres-smoke.mjs');
 
 // Configured prospective reminder authority is part of this required gate.
 await import('./approval-reminder-postgres-smoke.mjs');
+
+// Scoped operational-control workflow retains the original per-item approval gates.
+await import('./operational-control-postgres-smoke.mjs');

@@ -9,6 +9,7 @@ import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from './config/feat
 import { RuntimeTerminology } from './config/RuntimeTerminology';
 import { OrganizationScopeGate } from './components/auth/OrganizationScopeGate';
 
+const OperationalControlWorkspace = lazy(() => import('./pages/OperationalControlWorkspace').then(module => ({default:module.OperationalControlWorkspace})));
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
 const EmployeeMaster = lazy(() => import('./pages/EmployeeMaster').then(module => ({ default: module.EmployeeMaster })));
 const EmployeeDetail = lazy(() => import('./pages/EmployeeDetail').then(module => ({ default: module.EmployeeDetail })));
@@ -321,6 +322,7 @@ export default function App() {
                     <Navigate to="/planning" replace />
                   </RoleRoute>
                 } />
+                <Route path="/reports/operational-control" element={<RoleRoute roles={ROUTE_ROLES.utilization}><OperationalControlWorkspace/></RoleRoute>} />
                 <Route path="/reports/command-center" element={
                   <Navigate to="/" replace />
                 } />

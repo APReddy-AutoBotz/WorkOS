@@ -33,3 +33,6 @@ await import('./canonical-delegation-smoke.mjs');
 
 // Configured prospective reminders reuse the required approval gate.
 await import('./approval-reminder-smoke.mjs');
+
+// Scoped operational-control workflow retains the original per-item approval gates.
+await import('./operational-control-smoke.mjs');
