@@ -1,0 +1,10 @@
+# Finite remainder after scoped workforce directory
+
+This map distinguishes bounded Draft implementation/evidence from accepted main, final review, UAT and release. The historic207-ID evidence inventory is not automatically reclassified or converted into a percentage.
+
+- **Owned workspace:** preserve PR92 receipt and explicit Friday UI/API-source causal boundary. No new approval or work-capture behavior in this increment.
+- **Recorded scoped directory:** WKF008 current minimal directory, literal search, stable bounded paging, visible recorded manager/direct-report navigation and original capability/capacity handoffs are the selected engineering boundary. Existing server relationship scope is reused; no full-company tree, manager inference, relationship editing, title-based ownership or hierarchy administration is claimed. Full frozen-source tests decide evidence.
+- **Wider workforce and operations:** remaining organization/catalog/hierarchy maintenance, broader account/worker lifecycle, quality/reporting/event families and unattended/external adapters remain their existing approved dependencies. Explicit buyer configuration differs from missing configuration mechanics.
+- **Finance:** PR010–012 effective billing/cost/rate precedence, deterministic valuation/snapshots/EAC/PO and invoice eligibility/register/occupancy/batches/export/reconciliation remain without closing implementation/evidence. Do not invent finance authority, policy defaults or physical quantity conversions.
+- **Unresolved data/authority:** ambiguous legacy calendars/partial leave, percentage-to-hours/range-hours bases, source identity transfer/amendment and downstream protected reopening remain unavailable until exact governing authority/data exists.
+- **Delivery:** optional independent/formal reviews deferred, not passed. Prior Drafts remain unintegrated; protections/dependency acceptance, role UAT, restore/handover and release remain unpassed. Denied cumulative review/security repair/completed-job log downloads remain stopped. No deployment or merge. Prior refs/main/alias/controller unchanged and separate hourly automation off.

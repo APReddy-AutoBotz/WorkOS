@@ -59,6 +59,7 @@ export const Sidebar = () => {
     {
       group: 'Workforce',
       items: [
+        { name: 'Scoped workforce directory', path: '/workforce/directory', icon: Users, roles: ROUTE_ROLES.employees },
         { name: `${termTitle('employee')} Directory`, path: '/employees', icon: Users, roles: ROUTE_ROLES.employees, navRoles: ['Admin', 'HR', 'CountryDirector', 'TeamLead'] },
         { name: 'My Leave', path: '/leave/my', icon: CalendarDays, roles: ROUTE_ROLES.leaveSelfService, navRoles: ['Employee'], feature: 'leave' },
         { name: 'Team Leave Calendar', path: '/leave/team-calendar', icon: CalendarDays, roles: ROUTE_ROLES.leaveTeam, navRoles: ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead'], feature: 'leave' },

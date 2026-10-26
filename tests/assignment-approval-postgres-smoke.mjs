@@ -232,3 +232,6 @@ await import('./operational-control-postgres-smoke.mjs');
 
 // Canonical own workspace retains the original per-item source gates.
 await import('./own-workspace-postgres-smoke.mjs');
+
+// Scoped directory relationship/handoff workflow is part of this required gate.
+await import('./workforce-directory-postgres-smoke.mjs');
