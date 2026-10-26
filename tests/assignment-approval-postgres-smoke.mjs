@@ -214,3 +214,6 @@ await import('./staged-leave-postgres-smoke.mjs');
 
 // Configured canonical leave approval is part of this required gate.
 await import('./leave-approval-postgres-smoke.mjs');
+
+// Existing import-to-approved-actual/export composite proof.
+await import('./import-approval-export-postgres-smoke.mjs');
