@@ -9,6 +9,7 @@ import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from './config/feat
 import { RuntimeTerminology } from './config/RuntimeTerminology';
 import { OrganizationScopeGate } from './components/auth/OrganizationScopeGate';
 
+const WorkforceDirectory = lazy(() => import('./pages/WorkforceDirectory').then(module => ({default:module.WorkforceDirectory})));
 const OwnWorkspace = lazy(() => import('./pages/OwnWorkspace').then(module => ({default:module.OwnWorkspace})));
 const OperationalControlWorkspace = lazy(() => import('./pages/OperationalControlWorkspace').then(module => ({default:module.OperationalControlWorkspace})));
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
@@ -160,6 +161,7 @@ export default function App() {
                   <Route path="/dashboard" element={<Navigate to="/" replace />} />
 
                 {/* Employee Routes */}
+                <Route path="/workforce/directory" element={<RoleRoute roles={ROUTE_ROLES.employees}><WorkforceDirectory/></RoleRoute>} />
                 <Route path="/my-workspace/current" element={<RoleRoute roles={ROUTE_ROLES.employeeWorkspace}><OwnWorkspace/></RoleRoute>} />
                 <Route path="/my-workspace" element={
                   <RoleRoute roles={ROUTE_ROLES.employeeWorkspace}>

@@ -180,3 +180,6 @@ await import('./operational-control-journey-browser-smoke.mjs');
 
 // Canonical own workspace retains the original per-item source gates.
 await import('./own-workspace-journey-browser-smoke.mjs');
+
+// Scoped directory relationship/handoff workflow is part of this required gate.
+await import('./workforce-directory-journey-browser-smoke.mjs');
