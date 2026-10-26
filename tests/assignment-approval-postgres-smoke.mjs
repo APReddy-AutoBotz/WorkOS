@@ -220,3 +220,6 @@ await import('./canonical-delegation-postgres-smoke.mjs');
 
 // Existing import-to-approved-actual/export composite proof.
 await import('./import-approval-export-postgres-smoke.mjs');
+
+// Connected imported source -> delegated stage/revocation -> immutable actual export.
+await import('./import-delegation-postgres-smoke.mjs');

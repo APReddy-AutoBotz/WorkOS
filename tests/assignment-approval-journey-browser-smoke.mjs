@@ -168,3 +168,6 @@ await import('./canonical-delegation-journey-browser-smoke.mjs');
 
 // Existing import-to-approved-actual/export composite proof.
 await import('./import-approval-export-journey-browser-smoke.mjs');
+
+// Connected imported source -> delegated stage/revocation -> immutable actual export.
+await import('./import-delegation-journey-browser-smoke.mjs');
