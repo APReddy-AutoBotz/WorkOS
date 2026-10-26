@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,copyFile,readdir,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {runMigrations} from '../server/migrate.mjs';
+import {withCommercialDatabase,migrateCommercialDatabase,withCommercialApi,commercialServerDir} from './support/commercial-drafting-test.mjs';
+import {seedDelegationFixture,prepareDelegationInputs,createDelegationSources,canonicalSnapshot,decideDelegationInstance} from './support/canonical-delegation-test.mjs';
+import {readApprovalOwner} from './support/work-approval-test.mjs';
+import {randomUUID} from 'node:crypto';
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ const dir=await mkdtemp(join(tmpdir(),'workos-reminder-upgrade-'));
+ try{
+  await mkdir(join(dir,'migrations'));await copyFile(join(commercialServerDir,'schema.sql'),join(dir,'schema.sql'));for(const n of await readdir(join(commercialServerDir,'migrations')))if(/^\d{3}[a-z]?_.*\.sql$/.test(n)&&Number(n.slice(0,3))<70)await copyFile(join(commercialServerDir,'migrations',n),join(dir,'migrations',n));await runMigrations({pool,rootDir:dir,logger:{log(){}}});const fx=await seedDelegationFixture(pool),ids=fx.identities;
+  await withCommercialApi({databaseUrl,identities:ids},async({request})=>{
+   const inputs=await prepareDelegationInputs(request,fx,{dueMinutes:3}),sources=await createDelegationSources(request,fx,inputs);
+   const tables=(await pool.query("select tablename from pg_tables where schemaname='public'and tablename<>'schema_migrations' order by tablename")).rows.map(r=>r.tablename),before=await canonicalSnapshot(pool,tables);
+   assert(before.approval_due_clocks.length===4&&before.work_submission_evidence.length>0&&before.timesheet_entries.length>0);
+   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['070_wos05_approval_reminders']);assert.deepEqual(await canonicalSnapshot(pool,tables),before);
+   const fresh=['policies','templates','bindings','runs','events','recipients','deliveries','reads'].map(t=>'approval_reminder_'+t);for(const t of fresh)assert.equal((await pool.query('select count(*)::int n from '+t)).rows[0].n,0,t+' contains no seed/backfill');assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);assert.deepEqual(await canonicalSnapshot(pool,tables),before);
+   const due=before.approval_due_policies[0].v,owner=await readApprovalOwner(request,ids.manager),result=await request('/api/v1/work-approvals/reminders/policies',{method:'POST',body:{expectedOwnerKey:owner,expectedLatestId:null,duePolicyId:due.id,effectiveFrom:fx.today,definition:{afterMinutes:1,locale:'en-GB',template:{key:'approval.action_required',subject:'Reminder {{sourceRef}}',body:'Worker {{workerCode}} pending {{pendingAt}} reminder {{reminderAt}} due {{dueAt}}.'}},reason:'Synthetic post-upgrade prospective rule',requestId:randomUUID()}});assert.equal(result.status,201,JSON.stringify(result.body));
+   for(const[k,i]of sources){const read=async stage=>request('/api/v1/work-approvals/reminders/preview?'+new URLSearchParams({origin:k,instanceId:i.id,stage:String(stage)}));assert.equal((await read(0)).body.preview.state,'Unconfigured');const decision=await decideDelegationInstance(request,ids.manager,k,i);assert.equal(decision.status,201,JSON.stringify(decision.body));assert.equal((await read(1)).body.preview.state,'Unconfigured','Old instance remains unbound on a later stage');}
+   assert.equal((await pool.query('select count(*)::int n from approval_reminder_bindings')).rows[0].n,0);console.log('Reminder fresh/nonempty069 upgrade/replay: all prior table rows byte-equivalent, empty new tables, no old cohort or later-stage adoption.');
+  });
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
