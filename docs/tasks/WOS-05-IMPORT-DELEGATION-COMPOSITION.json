@@ -1,0 +1,69 @@
+{
+  "new_isolated_checkout": "/workspace/workos-recovery/import-delegation-source",
+  "base_pr": 87,
+  "base_head": "4124cd1023d3783f30bc5dcbc4b23bb95f20e12b",
+  "base_tree": "738273795a1a2377666ad6fb7281a57fcd9a3b38",
+  "proof_dependency_pr": 88,
+  "proof_dependency_head": "582f663b302725128ecbbaf4bfedc25769bb2e25",
+  "proof_dependency_tree": "232497c0ffc046357bb3fb1b3c09f4a3d528fc1b",
+  "proof_delta_base": "2d80f30282a8bdcff3236c0de6f2a4d54d684577",
+  "overlap_resolution": "Retain PR87 runtime, migrations and CI filter. Union appended assignment test entrypoints and traceability/backlog notes with PR88. Only PR88 proof files/delta are composed; no main/alias or published refs are changed.",
+  "acceptance": "Fresh combined exact-source local checks; sibling greens are not acceptance. Development composition is not main integration or cumulative review.",
+  "composed_files": [
+    {
+      "file": ".github/workflows/workos-ci.yml",
+      "resolution": "identical existing PR86 base filter retained",
+      "pinned_file_sha256": "38d7ba6b45b44312a8e395c0f6cbd6176b1f5b2d7b2d1baa4ec42aac63c35819"
+    },
+    {
+      "file": "docs/00-control/REQUIREMENTS_TRACEABILITY.md",
+      "resolution": "append-only semantic union",
+      "pinned_file_sha256": "02633f8136424f0cd3d9a264ab174cdb958f374b12a974c7b9a5f3a7843d969b"
+    },
+    {
+      "file": "docs/05-delivery/IMPLEMENTATION_BACKLOG.md",
+      "resolution": "append-only semantic union",
+      "pinned_file_sha256": "a87844fc9808be58294aaa69c1be7f28bd01a79f6a857912cec046069fa309a4"
+    },
+    {
+      "file": "docs/tasks/WOS-04-IMPORT-APPROVAL-EXPORT-PROOF.md",
+      "resolution": "pinned new proof file",
+      "pinned_file_sha256": "cbfaf8b7d82ab0bd6670fe299e45349c27b913c594a60766802a27e85fdcd6ec"
+    },
+    {
+      "file": "tests/assignment-approval-journey-browser-smoke.mjs",
+      "resolution": "append-only semantic union",
+      "pinned_file_sha256": "ce442658f496a11ae5cdc18501259f2eb6eead99cc7d463d10ae1168f03ebe16"
+    },
+    {
+      "file": "tests/assignment-approval-postgres-smoke.mjs",
+      "resolution": "append-only semantic union",
+      "pinned_file_sha256": "7aa8d41002dd23421e9bcb1d16451a711a0ed1f5b2e75bbb354313ee1c9737a7"
+    },
+    {
+      "file": "tests/fixtures/import-approval-export.html",
+      "resolution": "pinned new proof file",
+      "pinned_file_sha256": "ba63570d8e0c102f27f3c0d416953e150e059fca86cdd2e517275c7c5a5b5a24"
+    },
+    {
+      "file": "tests/fixtures/import-approval-export.tsx",
+      "resolution": "pinned new proof file",
+      "pinned_file_sha256": "02c1a24f7175c95e06016944ae3cc8e0b03c976fc7b7c58a76bccc2d47067630"
+    },
+    {
+      "file": "tests/import-approval-export-journey-browser-smoke.mjs",
+      "resolution": "pinned new proof file",
+      "pinned_file_sha256": "ab0b8e32de218cf18ab12351f22168a1c095e64faad294b540db1ee787fb0373"
+    },
+    {
+      "file": "tests/import-approval-export-postgres-smoke.mjs",
+      "resolution": "pinned new proof file",
+      "pinned_file_sha256": "3b38c47848b04c8ecb5584a75f7e453f6440f51b5ee2d7c3ffa1792caf0efd67"
+    },
+    {
+      "file": "tests/support/import-approval-export-test.mjs",
+      "resolution": "pinned new proof file",
+      "pinned_file_sha256": "dacb748d024830a887ea20936cf6b2ad19a04fb77f304d125cc18ab2be9302c6"
+    }
+  ]
+}

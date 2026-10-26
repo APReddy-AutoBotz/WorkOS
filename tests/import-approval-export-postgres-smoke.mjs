@@ -1,0 +1,3 @@
+import {withCommercialDatabase,migrateCommercialDatabase,withCommercialApi} from './support/commercial-drafting-test.mjs';
+import {seedWorkApproval,configureImportedWork,proveImportedWork} from './support/import-approval-export-test.mjs';
+for(const versioned of [true,false])await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercialDatabase(pool);const fx=await seedWorkApproval(pool);await withCommercialApi({databaseUrl,identities:fx.identities,onServerError:s=>process.stderr.write(s)},async({request})=>{await configureImportedWork(pool,request,fx);await proveImportedWork({pool,request,fx,versioned});});});
