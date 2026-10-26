@@ -457,3 +457,7 @@ The WKF007 current owned profile/leave/work/actual/canonical-inbox workflow is d
 ### PR008 scoped directory continuation
 
 The bounded WOS-WKF-008 recorded directory/hierarchy navigation workflow follows PR92 directly, as described in `docs/tasks/WOS-04-SCOPED-WORKFORCE-DIRECTORY.md`. This ordinary development sequencing continues already-approved PR008 read/relationship behavior and consumes no sibling composition. Scope, roles and original capability/capacity commands remain authoritative. New engineering evidence is reported separately from prior Draft receipts, merged programme credit, qualified final reviews, UAT and release.
+
+### Prospective calendar/capacity development increment
+
+WOS-ORG-008 supported NEW legal-entity calendar/holiday authoring is a direct isolated development descendant of PR93, with no sibling composition or accepted-main claim. The committed acceptance boundary is `docs/tasks/WOS-02-GOVERNED-CALENDAR-AUTHORING.md`; finite remaining implementation/configuration/authority and final integration/UAT/release gates are in `docs/tasks/WOS-02-CALENDAR-AUTHORING-REMAINDER.md`. Four calendar-authoring suites run inside the existing assignment-approval contract/service/PostgreSQL/browser gates. CI adds only the PR93 base-branch filter; job permissions, required checks, concurrency and protections remain unchanged. Formal reviews are deferred, not passed.

@@ -1,0 +1,12 @@
+# Finite remainder after prospective calendar authoring
+
+Engineering evidence for dependent Drafts is distinct from accepted main, UAT and release. The historical 207-ID inventory is not automatically reclassified; no whole-product percentage is inferred.
+
+- **Supported workflow:** WOS-ORG-008 new legal-entity calendar lineages, explicit prospective complete versions/holiday bundles, immutable history, current settings authority, exact-request replay/reconciliation and explicit original worker-capacity adoption. Existing WKF003/005, named leave stages and retained RPT002/006 artifact contracts are exercised together. This does not close every ORG008 calendar tier or the entire workforce milestone.
+- **Calendar remainder:** country/group authoring, retirement, adoption of existing or retired calendar codes and ambiguous legacy leave/calendar conversion remain separate implementation/data-authority work. Missing configuration mechanics are not merely buyer-default questions. Missing exact legacy sources remain unavailable.
+- **Workforce/operations:** wider organization/catalog/hierarchy maintenance, account/worker lifecycle, broader quality/report/event families and unattended/external adapters remain existing approved dependencies. Current directory/capacity/own-workspace receipts do not accept these broader families.
+- **Finance PR010–012:** effective billing/cost/rate precedence, valuation/snapshots/EAC/PO and invoice eligibility/register/occupancy/batches/export/reconciliation lack closing implementation/evidence. Explicit buyer values differ from missing mechanics; no financial defaults or authority are fabricated here.
+- **Undefined data/authority:** physical quantity conversions, percentage-to-hours/range-hours bases, identity transfer/amendment and downstream protected reopening remain unavailable without their governing contract. Future actual work remains refused.
+- **Delivery:** optional qualified formal reviews deferred, not passed. Dependency/protection/main integration, composite release acceptance, role UAT, restore/handover and release remain open. Prior Draft heads/main/alias/controller preserved; separate hourly automation stays off. Denied cumulative review/security repair/completed-log and process-cwd reads remain stopped.
+
+Fresh frozen-source and hosted receipts determine this candidate's tested boundary. Initial failures and subsequent diagnostics/retests remain separate evidence; passing retests do not establish repair of PR93's four unexplained failures.

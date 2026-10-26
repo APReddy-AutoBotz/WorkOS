@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+Prospective calendar-authoring increment: WOS-ORG-008 with CORE004/005, IAM003/005/010, WKF003/005 and RPT002/006 is mapped in `docs/tasks/WOS-02-GOVERNED-CALENDAR-AUTHORING.md`. The supported NEW legal-entity lineage profile uses additive migration071, modular `calendar-authoring` router/service, strict shared/client contracts and `CalendarAuthoringWorkspace`; four `tests/calendar-authoring-*` suites are included in existing required assignment-approval gates. Fresh/070-upgrade/replay neutrality, exact concurrent commands/CAS, complete-bundle/audit rollback, scoped authority, compatibility/SQL refusal and real React/API/PostgreSQL authoring → explicit capacity adoption → staged leave/cancel → later version → retained CSV/history are the bounded evidence. Named leave decisions are exercised through existing API commands; calendar/capacity/request/cancel/report/export use actual product UI. This is not full ORG008/milestone acceptance, final review, integrated main, UAT or release. See the finite `WOS-02-CALENDAR-AUTHORING-REMAINDER.md` and exact-source receipts for actual outcomes.
+
 **Status:** Blueprint mapping; PR/test/evidence columns are populated as implementation proceeds.  
 **Authoritative requirements:** `PRODUCT_REQUIREMENTS.md` and `NON_FUNCTIONAL_REQUIREMENTS.md`
 

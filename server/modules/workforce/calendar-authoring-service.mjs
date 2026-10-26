@@ -1,0 +1,47 @@
+import {randomUUID} from 'node:crypto';
+import {CALENDAR_AUTHORING_VERSION,CALENDAR_AUTHORING_PAGE_SIZE,calendarCommandCanonical} from '../../../shared/calendar-authoring.mjs';
+import {capacityFailure} from '../planning/worker-capacity-service.mjs';
+import {workApprovalOwner} from '../approvals/work-approval-service.mjs';
+const failure=(code,message,status=409)=>capacityFailure(code,message,status);
+const columns=`v.id "versionId",v.lineage_id "lineageId",l.code,v.sequence,to_char(v.effective_from,'YYYY-MM-DD')"effectiveFrom",v.previous_version_id "previousVersionId",v.calendar_id "calendarId",v.definition,v.request_id "requestId",v.request_fingerprint "requestFingerprint",v.actor_id "actorUserId",v.active_role "activeRole",v.reason,v.source,v.created_at "createdAt"`;
+const scope=req=>({contractVersion:CALENDAR_AUTHORING_VERSION,organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,ownerKey:workApprovalOwner(req),actorUserId:req.user.sub,activeRole:req.user.activeRole});
+const versionView=row=>row&&({...row,createdAt:row.createdAt.toISOString()});
+export const calendarAuthoringContext=async(c,req)=>({...scope(req),serverDate:(await c.query("select to_char((clock_timestamp()at time zone'UTC')::date,'YYYY-MM-DD')today")).rows[0].today});
+export const listAuthoredCalendars=async(c,req,after=null)=>{
+ const rows=(await c.query(`select l.id,l.code,v.id "latestId",v.sequence,to_char(v.effective_from,'YYYY-MM-DD')"effectiveFrom",v.calendar_id "calendarId",v.definition->>'name'name from calendar_authoring_lineages l join lateral(select * from calendar_authoring_versions where lineage_id=l.id order by sequence desc limit 1)v on true where l.organization_id=$1 and l.legal_entity_id=$2 and($3::text is null or l.id::text collate "C">$3::text collate "C")order by l.id::text collate "C" limit ${CALENDAR_AUTHORING_PAGE_SIZE+1}`,[req.organizationScope.organizationId,req.organizationScope.legalEntityId,after])).rows;
+ return{...await calendarAuthoringContext(c,req),lineages:rows.slice(0,CALENDAR_AUTHORING_PAGE_SIZE),nextAfter:rows.length>CALENDAR_AUTHORING_PAGE_SIZE?rows[CALENDAR_AUTHORING_PAGE_SIZE-1].id:null};
+};
+export const readAuthoredCalendar=async(c,req,id,before=null)=>{
+ const args=[req.organizationScope.organizationId,req.organizationScope.legalEntityId,id];
+ const latest=(await c.query(`select ${columns} from calendar_authoring_versions v join calendar_authoring_lineages l on l.id=v.lineage_id where v.organization_id=$1 and v.legal_entity_id=$2 and l.id=$3 order by v.sequence desc limit 1`,args)).rows[0];if(!latest)failure('CALENDAR_AUTHORING_NOT_FOUND','Authored calendar is unavailable in this scope.',404);
+ const versions=(await c.query(`select ${columns} from calendar_authoring_versions v join calendar_authoring_lineages l on l.id=v.lineage_id where v.organization_id=$1 and v.legal_entity_id=$2 and l.id=$3 and($4::integer is null or v.sequence<$4::integer)order by v.sequence desc limit ${CALENDAR_AUTHORING_PAGE_SIZE+1}`,[...args,before])).rows;
+ return{...await calendarAuthoringContext(c,req),lineageId:id,latest:versionView(latest),versions:versions.slice(0,CALENDAR_AUTHORING_PAGE_SIZE).map(versionView),nextBefore:versions.length>CALENDAR_AUTHORING_PAGE_SIZE?versions[CALENDAR_AUTHORING_PAGE_SIZE-1].sequence:null};
+};
+const ownedCommand=async(c,req,requestId)=> (await c.query(`select ${columns},v.command from calendar_authoring_versions v join calendar_authoring_lineages l on l.id=v.lineage_id where v.organization_id=$1 and v.legal_entity_id=$2 and v.actor_id=$3 and v.request_id=$4`,[req.organizationScope.organizationId,req.organizationScope.legalEntityId,req.user.sub,requestId])).rows[0];
+export const readCalendarCommand=async(c,req,requestId)=>{
+ const row=await ownedCommand(c,req,requestId);if(!row||row.activeRole!==req.user.activeRole)failure('CALENDAR_AUTHORING_COMMAND_NOT_FOUND','No committed command is confirmed for this actor and active role. An earlier request may still be in flight; do not invent a replacement key.',404);
+ const{command,...version}=row;return{...await calendarAuthoringContext(c,req),command,version:versionView(version)};
+};
+export const appendAuthoredCalendar=async(c,req,input,audit)=>{
+ const {organizationId,legalEntityId}=req.organizationScope;
+ await c.query('select pg_advisory_xact_lock(hashtext($1))',['calendar-authoring-command:'+organizationId+':'+legalEntityId+':'+req.user.sub+':'+input.requestId]);
+ const replay=await ownedCommand(c,req,input.requestId);if(replay){if(replay.activeRole!==req.user.activeRole||calendarCommandCanonical(replay.command)!==calendarCommandCanonical(input))failure('CALENDAR_AUTHORING_KEY_CONFLICT','This request key belongs to a different exact calendar command. Reconcile the original; do not replace it.');const{command,...version}=replay;return{...await calendarAuthoringContext(c,req),command,version:versionView(version),replayed:true};}
+ await c.query('select pg_advisory_xact_lock(hashtext($1))',[`calendar:${organizationId}:legal_entity:${legalEntityId}:${input.code}`]);
+ const today=(await calendarAuthoringContext(c,req)).serverDate;if(input.effectiveFrom<=today)failure('CALENDAR_AUTHORING_PROSPECTIVE','Choose an explicit future effective date after the current server UTC date.');
+ if(!(await c.query('select 1 from pg_timezone_names where name=$1',[input.definition.timezone])).rowCount)failure('CALENDAR_AUTHORING_TIMEZONE','Choose an explicit IANA timezone supported by the calendar database.',400);
+ const lineage=(await c.query('select * from calendar_authoring_lineages where organization_id=$1 and legal_entity_id=$2 and code=$3 for update',[organizationId,legalEntityId,input.code])).rows[0];
+ if((lineage?.id??null)!==input.lineageId)failure('CALENDAR_AUTHORING_STALE','Calendar lineage changed or is already present. Load the authored calendar before changing it.');
+ let previous=null;if(lineage)previous=(await c.query(`select *,to_char(effective_from,'YYYY-MM-DD')"effectiveFrom" from calendar_authoring_versions where lineage_id=$1 order by sequence desc limit 1`,[lineage.id])).rows[0];
+ if((previous?.id??null)!==input.expectedLatestId||previous&&input.effectiveFrom<=previous.effectiveFrom)failure('CALENDAR_AUTHORING_STALE','A newer calendar version or date boundary exists. Load current history before saving.');
+ if(!lineage&&(await c.query("select 1 from working_calendars where organization_id=$1 and legal_entity_id=$2 and applicability_type='legal_entity'and code=$3 limit 1",[organizationId,legalEntityId,input.code])).rowCount)failure('CALENDAR_AUTHORING_LEGACY','An existing or retired legacy calendar owns that code. No implicit adoption or reactivation is supported.');
+ const lineageId=lineage?.id??randomUUID(),id=randomUUID(),calendarId='authored-calendar-'+id;
+ await c.query("select set_config('workos.calendar_authoring_context',$1,true)",[JSON.stringify({organizationId,legalEntityId,actorId:req.user.sub,activeRole:req.user.activeRole,lineageId,versionId:id,calendarId,requestId:input.requestId,operationId:req.operationId})]);
+ if(!lineage)await c.query('insert into calendar_authoring_lineages(id,organization_id,legal_entity_id,code,actor_id,active_role)values($1,$2,$3,$4,$5,$6)',[lineageId,organizationId,legalEntityId,input.code,req.user.sub,req.user.activeRole]);
+ await c.query(`insert into calendar_authoring_versions(id,organization_id,legal_entity_id,lineage_id,sequence,previous_version_id,contract_version,effective_from,definition,calendar_id,request_id,command,request_fingerprint,actor_id,active_role,source,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,encode(digest($12::jsonb::text,'sha256'),'hex'),$13,$14,'Web',$15,$16)`,[id,organizationId,legalEntityId,lineageId,(previous?.sequence??0)+1,previous?.id??null,CALENDAR_AUTHORING_VERSION,input.effectiveFrom,JSON.stringify(input.definition),calendarId,input.requestId,JSON.stringify(input),req.user.sub,req.user.activeRole,input.reason,req.operationId]);
+ if(previous)await c.query('update working_calendars set effective_to=$2::date-1 where id=$1',[previous.calendar_id,input.effectiveFrom]);
+ const d=input.definition;await c.query(`insert into working_calendars(id,organization_id,legal_entity_id,code,name,timezone,working_days,hours_per_day,effective_from,active,applicability_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,true,'legal_entity')`,[calendarId,organizationId,legalEntityId,input.code,d.name,d.timezone,d.workingDays,d.hoursPerDayExact,input.effectiveFrom]);
+ for(let n=0;n<d.holidays.length;n++){const h=d.holidays[n],key='authored-holiday-'+id+'-'+n;await c.query('insert into working_calendar_holidays(id,holiday_id,organization_id,calendar_id,holiday_date,label,holiday_type,effective_from,created_by)values($1,$1,$2,$3,$4,$5,$6,$7,$8)',[key,organizationId,calendarId,h.date,h.label,h.type,input.effectiveFrom,req.user.sub]);}
+ const row=await ownedCommand(c,req,input.requestId),{command,...raw}=row,version=versionView(raw);
+ await audit(c,req,{module:'Calendar Authoring',action:'Append Prospective Calendar',entityType:'AuthoredCalendarVersion',entityId:id,oldValue:previous?{versionId:previous.id,calendarId:previous.calendar_id,definition:previous.definition,effectiveFrom:previous.effectiveFrom}:null,newValue:version,reason:input.reason,details:'Recorded complete explicit prospective legal-entity calendar/holiday authority; existing worker adoption remains separate.'});
+ return{...await calendarAuthoringContext(c,req),command,version,replayed:false};
+};

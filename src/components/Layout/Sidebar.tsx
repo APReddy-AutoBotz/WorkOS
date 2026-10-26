@@ -112,6 +112,7 @@ export const Sidebar = () => {
         { name: 'Governance Settings', path: '/admin', icon: Settings, roles: ROUTE_ROLES.adminSettings },
         { name: 'Work Capture Modes', path: '/admin/work-capture-modes', icon: Settings, roles: ROUTE_ROLES.adminSettings },
         { name: 'Work Capture Policy', path: '/admin/work-capture-policy', icon: Settings, roles: ROUTE_ROLES.adminSettings },
+        { name: 'Calendar Authoring', path: '/admin/calendar-authoring', icon: Settings, roles: ROUTE_ROLES.adminSettings },
         { name: 'Working Calendars', path: '/admin/working-calendars', icon: Settings, roles: ROUTE_ROLES.adminSettings },
         { name: 'Terminology', path: '/admin/terminology', icon: Settings, roles: ROUTE_ROLES.adminSettings },
         { name: 'Organization Profile', path: '/admin/organization-profile', icon: Settings, roles: ROUTE_ROLES.adminSettings },

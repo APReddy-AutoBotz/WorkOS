@@ -42,3 +42,6 @@ await import('./own-workspace-smoke.mjs');
 
 // Scoped directory relationship/handoff workflow is part of this required gate.
 await import('./workforce-directory-smoke.mjs');
+
+// Explicit prospective legal-entity calendar authoring and connected capacity workflow.
+await import('./calendar-authoring-smoke.mjs');
