@@ -217,3 +217,6 @@ await import('./leave-approval-postgres-smoke.mjs');
 
 // Prospective configured canonical delegation is part of this required gate.
 await import('./canonical-delegation-postgres-smoke.mjs');
+
+// Existing import-to-approved-actual/export composite proof.
+await import('./import-approval-export-postgres-smoke.mjs');
