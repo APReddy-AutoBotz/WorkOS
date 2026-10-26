@@ -25,3 +25,5 @@ Legacy text remains explicitly labeled recorded legacy profile. Omitted classifi
 ## Operations / limitations
 
 Suspend new authoring to roll back operationally; retain ledger, referenced sources and audit. Roll forward using an explicit later version; do not drop retained data or rewrite earlier migrations. Buyer choices are explicit configuration. Broader legacy catalog adoption, same-date amendments, dated identity transfer and authority changes require their existing governing contracts, not inferred business policy. Preserve all prior unexplained failure evidence, disabled hourly automation, controller and denied-operation boundaries.
+
+Confirmed400/409/422 refusals clear the unsent request lock and require explicit reload; an uncertain transport/server/response-validation result keeps original-key GET reconciliation and blocks replacement writes. A real UI/API/PostgreSQL stale-worker409 test proves zero event persistence and usable reload, followed by a fresh deliberate save. The earlier frozen candidate and ongoing acceptance receipts are preserved before revalidation of this correction.
