@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {validApprovalReminderDefinition as valid,approvalReminderRecipients,approvalReminderIdentity,renderApprovalReminder} from '../shared/approval-reminder.mjs';
+const id='00000001-1111-4111-8111-111111111111',other='00000002-1111-4111-8111-111111111111',key='approval.action_required';
+const d={afterMinutes:1,locale:'en-GB',template:{key,subject:'Reminder {{sourceRef}}',body:'Worker {{workerCode}} stage {{stageNumber}} pending {{pendingAt}}, reminder {{reminderAt}}, due {{dueAt}}.'}};
+assert(valid(d));
+for(const patch of [{afterMinutes:0},{afterMinutes:1.5},{afterMinutes:'1'},{afterMinutes:527040},{afterMinutes:NaN},{locale:'en-gb'},{template:{...d.template,key:'approval.overdue_or_escalated'}},{template:{...d.template,body:'{{cost}}'}},{template:{...d.template,body:'{{dueAt}'}},{template:{...d.template,subject:'{{sourceRef}}'.repeat(6)}},{recipients:[id]},{schedule:true}])assert(!valid({...d,...patch}),JSON.stringify(patch));
+const actor=userId=>({userId,reason:'current_stage_approver'});
+assert.deepEqual(approvalReminderRecipients([actor(id),actor(id)]),[{userId:id,reasons:['current_stage_approver']}]);assert.equal(approvalReminderRecipients([actor(id),actor(other)]).length,2);
+for(const actors of [[],[actor(id),actor(other),actor(id)],[{userId:id,reason:'configured_escalation_target'}],[{...actor(id),role:'Admin'}]])assert.throws(()=>approvalReminderRecipients(actors));
+assert.equal(approvalReminderIdentity(id,'synthetic/op'),`approval-reminder/${id}/${key}/synthetic%2Fop`);
+const vars={workerCode:'SYN',sourceRef:'work/'+id,stageNumber:'1',pendingAt:'2026-10-26T12:00:00.000Z',reminderAt:'2026-10-26T12:01:00.000Z',dueAt:'2026-10-26T12:03:00.000Z'};
+assert.equal(renderApprovalReminder(d,vars).title,'Reminder work/'+id);assert.throws(()=>renderApprovalReminder(d,{...vars,reminderAt:''}));
+console.log('Explicit reminder definition, bounded retained template variables, current-stage-only recipient identity and canonical triggering operation passed.');

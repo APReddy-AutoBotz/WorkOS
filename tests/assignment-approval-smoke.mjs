@@ -30,3 +30,6 @@ await import('./leave-approval-smoke.mjs');
 
 // Prospective configured canonical delegation is part of this required gate.
 await import('./canonical-delegation-smoke.mjs');
+
+// Configured prospective reminders reuse the required approval gate.
+await import('./approval-reminder-smoke.mjs');

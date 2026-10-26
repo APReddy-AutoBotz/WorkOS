@@ -171,3 +171,6 @@ await import('./import-approval-export-journey-browser-smoke.mjs');
 
 // Connected imported source -> delegated stage/revocation -> immutable actual export.
 await import('./import-delegation-journey-browser-smoke.mjs');
+
+// Configured prospective reminder authority is part of this required gate.
+await import('./approval-reminder-journey-browser-smoke.mjs');
