@@ -229,3 +229,6 @@ await import('./approval-reminder-postgres-smoke.mjs');
 
 // Scoped operational-control workflow retains the original per-item approval gates.
 await import('./operational-control-postgres-smoke.mjs');
+
+// Canonical own workspace retains the original per-item source gates.
+await import('./own-workspace-postgres-smoke.mjs');

@@ -177,3 +177,6 @@ await import('./approval-reminder-journey-browser-smoke.mjs');
 
 // Scoped operational-control workflow retains the original per-item approval gates.
 await import('./operational-control-journey-browser-smoke.mjs');
+
+// Canonical own workspace retains the original per-item source gates.
+await import('./own-workspace-journey-browser-smoke.mjs');
