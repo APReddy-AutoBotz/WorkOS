@@ -16,7 +16,7 @@ export type BusinessList=Envelope&{type:BusinessType;lineages:{id:string;latest:
 export type BusinessHistory=Envelope&{lineageId:string;latest:BusinessEvent;events:BusinessEvent[];nextBefore:number|null};
 export type BusinessParents=Envelope&{selection:{type:BusinessType;effectiveFrom:string;lineageId:string|null};parents:BusinessParentOption[];nextAfter:string|null};
 export type BusinessReceipt=Envelope&{command:BusinessCommand;event:BusinessEvent;replayed?:boolean};
-export type BusinessCounts={catalogChildren:number;workingCalendars:number;capacityVersions:number;commercialEngagements:number;commercialBindings:number};
+export type BusinessCounts={catalogChildren:number;workingCalendars:number;capacityVersions:number;commercialEngagements:number;commercialBindings:number;workforceClassifications:number};
 export type BusinessImpact=Envelope&{lineageId:string;latestId:string;nativeItemId:string;counts:BusinessCounts;total:number};
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v&&typeof v==='object'&&!Array.isArray(v));
 const invalid=():never=>{throw new ApiClientError('The catalog response could not be confirmed. Reconcile the original request before another save.',{status:503,code:'BUSINESS_STRUCTURE_RESPONSE_INVALID'});};
@@ -60,7 +60,7 @@ export const businessStructureService={
   if(r.nextAfter!==null&&(!businessItemId(r.nextAfter)||r.parents.length!==BUSINESS_STRUCTURE_PAGE_SIZE||r.nextAfter!==r.parents.at(-1)?.parent.itemId))return invalid();return r as unknown as BusinessParents;
  },
  impact:async(id:string,c:BusinessContext|null):Promise<BusinessImpact>=>{
-  if(!uuid(id))return invalid();const{raw,ctx,key}=await call('GET','/lineages/'+id+'/impact',undefined,c),r=envelope(raw,ctx,key,['lineageId','latestId','nativeItemId','counts','total']);if(r.lineageId!==id||!uuid(r.latestId)||!businessItemId(r.nativeItemId)||!object(r.counts)||!keys(r.counts,['catalogChildren','workingCalendars','capacityVersions','commercialEngagements','commercialBindings'])||Object.values(r.counts).some(x=>!Number.isSafeInteger(x)||Number(x)<0)||!Number.isSafeInteger(r.total)||Number(r.total)!==Object.values(r.counts).reduce<number>((n,x)=>n+Number(x),0))return invalid();return r as unknown as BusinessImpact;
+  if(!uuid(id))return invalid();const{raw,ctx,key}=await call('GET','/lineages/'+id+'/impact',undefined,c),r=envelope(raw,ctx,key,['lineageId','latestId','nativeItemId','counts','total']);if(r.lineageId!==id||!uuid(r.latestId)||!businessItemId(r.nativeItemId)||!object(r.counts)||!keys(r.counts,['catalogChildren','workingCalendars','capacityVersions','commercialEngagements','commercialBindings','workforceClassifications'])||Object.values(r.counts).some(x=>!Number.isSafeInteger(x)||Number(x)<0)||!Number.isSafeInteger(r.total)||Number(r.total)!==Object.values(r.counts).reduce<number>((n,x)=>n+Number(x),0))return invalid();return r as unknown as BusinessImpact;
  },
  apply:async(input:BusinessCommand,sequence:number,c:BusinessContext|null):Promise<BusinessReceipt>=>{if(!validBusinessCommand(input)||!Number.isSafeInteger(sequence)||sequence<0)return invalid();const{raw,ctx,key}=await call('POST','/commands',input,c);return receipt(raw,ctx,key,input,sequence,true);},
  reconcile:async(input:BusinessCommand,sequence:number,c:BusinessContext|null):Promise<BusinessReceipt>=>{if(!validBusinessCommand(input)||!Number.isSafeInteger(sequence)||sequence<0)return invalid();const{raw,ctx,key}=await call('GET','/commands/'+input.requestId,undefined,c);return receipt(raw,ctx,key,input,sequence,false);}

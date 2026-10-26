@@ -1,0 +1,11 @@
+import {approvalKeys,approvalUuid,approvalHash} from './work-approval.mjs';
+import {BUSINESS_STRUCTURE_TYPES,businessItemId,businessCommandCanonical} from './business-structure.mjs';
+import {validCapabilityDate} from './workforce-capabilities.mjs';
+import {calendarLabel} from './calendar-authoring.mjs';
+export const CLASSIFICATION_VERSION='workforce-classification/1';
+export const CLASSIFICATION_PAGE_SIZE=20;
+export const classificationFields=BUSINESS_STRUCTURE_TYPES;
+export const emptyClassification=()=>Object.fromEntries(classificationFields.map(k=>[k,null]));
+export const validClassification=definition=>approvalKeys(definition,classificationFields)&&classificationFields.every(k=>definition[k]===null||approvalKeys(definition[k],['itemId','token'])&&businessItemId(definition[k].itemId)&&approvalHash(definition[k].token));
+export const validClassificationCommand=c=>approvalKeys(c,['requestId','employeeId','expectedLatestId','expectedWorkerToken','effectiveFrom','definition','reason'])&&approvalUuid(c.requestId)&&businessItemId(c.employeeId)&&(c.expectedLatestId===null||approvalUuid(c.expectedLatestId))&&approvalHash(c.expectedWorkerToken)&&validCapabilityDate(c.effectiveFrom)&&validClassification(c.definition)&&calendarLabel(c.reason,1000);
+export const classificationCanonical=businessCommandCanonical;

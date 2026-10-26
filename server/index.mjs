@@ -1,3 +1,4 @@
+import {createWorkforceClassificationRouter} from './modules/workforce/classification-router.mjs';
 import {createBusinessStructureRouter} from './modules/workforce/business-structure-router.mjs';
 import {createCalendarScopeAuthoringRouter} from './modules/workforce/calendar-scope-authoring-router.mjs';
 import {createCalendarAuthoringRouter} from './modules/workforce/calendar-authoring-router.mjs';
@@ -6489,6 +6490,7 @@ app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,require
 app.use('/api/v1/calendar-scope-authoring',createCalendarScopeAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar scope request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/business-structure',createBusinessStructureRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Business structure request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/calendar-authoring',createCalendarAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar authoring request failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/workforce-classification',createWorkforceClassificationRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,audit,logError:e=>console.error('Classification request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-directory',createWorkforceDirectoryRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole}));
 app.use('/api/v1/my-workspace',createOwnWorkspaceRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole}));
 app.use('/api/v1/my-work-planning',createOwnWorkPlanningRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere}));
