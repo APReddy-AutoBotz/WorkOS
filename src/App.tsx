@@ -50,6 +50,7 @@ const EntraLoginComplete = lazy(() => import('./pages/EntraLoginComplete').then(
 const ImportExport = lazy(() => import('./pages/ImportExport').then(module => ({ default: module.ImportExport })));
 const AuditTrail = lazy(() => import('./pages/AuditTrail').then(module => ({ default: module.AuditTrail })));
 const CalendarScopeAuthoringWorkspace = lazy(() => import('./pages/CalendarScopeAuthoringWorkspace').then(m=>({default:m.CalendarScopeAuthoringWorkspace})));
+const BusinessStructureWorkspace = lazy(() => import('./pages/BusinessStructureWorkspace').then(m=>({default:m.BusinessStructureWorkspace})));
 const CalendarAuthoringWorkspace = lazy(() => import('./pages/CalendarAuthoringWorkspace').then(m=>({default:m.CalendarAuthoringWorkspace})));
 const WorkingCalendarInspector = lazy(() => import('./pages/WorkingCalendarInspector').then(module => ({ default: module.WorkingCalendarInspector })));
 const TerminologyConfigurationEditor = lazy(() => import('./pages/TerminologyConfigurationEditor').then(module => ({ default: module.TerminologyConfigurationEditor })));
@@ -362,6 +363,7 @@ export default function App() {
                 <Route path="/admin/work-capture-modes" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><WorkCaptureModesEditor /></RoleRoute>} />
                 <Route path="/admin/work-capture-policy" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><WorkCapturePolicyEditor /></RoleRoute>} />
                 <Route path="/admin/calendar-scope-authoring" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><CalendarScopeAuthoringWorkspace/></RoleRoute>} />
+                <Route path="/admin/business-structure" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><BusinessStructureWorkspace/></RoleRoute>} />
                 <Route path="/admin/calendar-authoring" element={<RoleRoute roles={ROUTE_ROLES.adminSettings}><CalendarAuthoringWorkspace/></RoleRoute>} />
                 <Route path="/admin/working-calendars" element={
                   <RoleRoute roles={ROUTE_ROLES.adminSettings}>

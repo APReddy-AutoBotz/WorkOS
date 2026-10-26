@@ -48,3 +48,6 @@ await import('./calendar-authoring-smoke.mjs');
 
 // Explicit country/group authoring and original native capacity precedence.
 await import('./calendar-scope-smoke.mjs');
+
+// Six-family business structure, retained sources and unused-node retirement.
+await import('./business-structure-smoke.mjs');

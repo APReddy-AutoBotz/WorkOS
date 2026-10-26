@@ -318,6 +318,7 @@ export const registerOrganizationSetupRoutes = ({
     } catch (error) {
       await client.query('rollback');
       if (['23P01','23505','23514'].includes(error.code)) return res.status(409).json({ error:'Catalog version conflicts with existing history', code:'CATALOG_VERSION_CONFLICT' });
+      if (/^BSG0[1-5]$/.test(error.code??'')) return res.status(409).json({error:'Use the governed business-structure command for this source.',code:'CATALOG_GOVERNED'});
       console.error(error); res.status(500).json({ error:'Catalog item creation failed' });
     } finally { client.release(); }
   });
@@ -340,7 +341,7 @@ export const registerOrganizationSetupRoutes = ({
       const result = await client.query('update organization_catalog_items set active=false,effective_to=coalesce(effective_to,current_date),updated_at=now() where id=$1 returning *',[item.id]);
       await audit(client,req,{module:'Organization Setup',action:'Retire Catalog Item',entityType:req.params.type,entityId:item.id,oldValue:item,newValue:result.rows[0],details:'Retired catalog item after dependency analysis'});
       await client.query('commit'); res.json(result.rows[0]);
-    } catch(error) { await client.query('rollback'); console.error(error); res.status(500).json({error:'Catalog retirement failed'}); } finally { client.release(); }
+    } catch(error) { await client.query('rollback'); if (/^BSG0[1-5]$/.test(error.code??'')) return res.status(409).json({error:'Use the governed business-structure command for this source.',code:'CATALOG_GOVERNED'}); console.error(error); res.status(500).json({error:'Catalog retirement failed'}); } finally { client.release(); }
   });
 
   router.get('/calendars', async (req,res) => {
