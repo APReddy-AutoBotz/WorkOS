@@ -82,6 +82,7 @@ export const Sidebar = () => {
     {
       group: 'Reports',
       items: [
+        { name: 'Operational Control', path: '/reports/operational-control', icon: BarChart3, roles: ROUTE_ROLES.utilization },
         { name: 'Utilization Reports', path: '/reports/utilization', icon: BarChart3, roles: ROUTE_ROLES.utilization },
         { name: 'Reports Center', path: '/reports/center', icon: Download, roles: ROUTE_ROLES.reportsCenter },
       ]
