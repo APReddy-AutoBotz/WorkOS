@@ -1,0 +1,12 @@
+{
+  "new_isolated_checkout": "/workspace/workos-recovery/import-delegation-source",
+  "base_pr": 87,
+  "base_head": "4124cd1023d3783f30bc5dcbc4b23bb95f20e12b",
+  "base_tree": "738273795a1a2377666ad6fb7281a57fcd9a3b38",
+  "proof_dependency_pr": 88,
+  "proof_dependency_head": "582f663b302725128ecbbaf4bfedc25769bb2e25",
+  "proof_dependency_tree": "232497c0ffc046357bb3fb1b3c09f4a3d528fc1b",
+  "proof_delta_base": "2d80f30282a8bdcff3236c0de6f2a4d54d684577",
+  "overlap_resolution": "Retain PR87 runtime, migrations and CI filter. Union appended assignment test entrypoints and traceability/backlog notes with PR88. Only PR88 proof files/delta are composed; no main/alias or published refs are changed.",
+  "acceptance": "Fresh combined exact-source local checks; sibling greens are not acceptance. Development composition is not main integration or cumulative review."
+}
