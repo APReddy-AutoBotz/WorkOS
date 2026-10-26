@@ -189,3 +189,6 @@ await import('./workforce-directory-service-smoke.mjs');
 
 // Explicit prospective legal-entity calendar authoring and connected capacity workflow.
 await import('./calendar-authoring-service-smoke.mjs');
+
+// Explicit country/group authoring and original native capacity precedence.
+await import('./calendar-scope-service-smoke.mjs');
