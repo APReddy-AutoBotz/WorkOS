@@ -27,3 +27,6 @@ await import('./approval-due-smoke.mjs');
 
 // Configured canonical leave approval is part of this required gate.
 await import('./leave-approval-smoke.mjs');
+
+// Prospective configured canonical delegation is part of this required gate.
+await import('./canonical-delegation-smoke.mjs');

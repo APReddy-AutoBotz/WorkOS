@@ -1,3 +1,4 @@
+import {validInstanceDelegations,validStageReceipt,type DelegationBinding} from './canonicalDelegations';
 import { validAssignmentApprovalPolicy, assignmentApprovalIdentity, materialAssignmentFields } from '../../shared/assignment-approval.mjs';
 import { validAssignmentDefinition } from '../../shared/assignment-version.mjs';
 import { approvalKeys, approvalUuid, approvalHash, approvalText, approvalState, APPROVAL_EVENT_KEYS } from '../../shared/work-approval.mjs';
@@ -37,6 +38,7 @@ export type AssignmentApprovalSource = {
     policy: AssignmentApprovalPolicy | null;
 };
 export type AssignmentApprovalInstance = {
+    delegations?: DelegationBinding[];
     id: string;
     assignmentId: string;
     employeeId: string;
@@ -107,18 +109,19 @@ export const decodeAssignmentApprovalPolicy = (v: unknown): AssignmentApprovalPo
     return v as AssignmentApprovalPolicy;
 };
 const receipt = (v: unknown, id: string): WorkDecisionReceipt => {
-    if (!obj(v) || !keys(v, ['id', 'instanceId', 'sequence', 'stage', 'decision', 'actorId', 'activeRole', 'requestId', 'operationId', 'reason', 'outcome', 'createdAt']) || !uuid(v.id) || v.instanceId !== id || !integer(v.sequence, 1, 10) || !integer(v.stage, 0, 9) || !['Approved', 'Rejected'].includes(String(v.decision)) || !uuid(v.actorId) || !text(v.activeRole, 100) || !uuid(v.requestId) || !text(v.operationId) || !text(v.reason, 1000) || !obj(v.outcome) || !keys(v.outcome, ['status', 'sequence', 'currentStage']) || v.outcome.sequence !== v.sequence || !instant(v.createdAt))
+    if (!obj(v) || !keys(v, ['id', 'instanceId', 'sequence', 'stage', 'decision', 'actorId', 'activeRole', 'requestId', 'operationId', 'reason', 'outcome', 'createdAt',...('delegationBindingId' in v?['delegationBindingId']:[])]) || 'delegationBindingId' in v&&!uuid(v.delegationBindingId) || !uuid(v.id) || v.instanceId !== id || !integer(v.sequence, 1, 10) || !integer(v.stage, 0, 9) || !['Approved', 'Rejected'].includes(String(v.decision)) || !uuid(v.actorId) || !text(v.activeRole, 100) || !uuid(v.requestId) || !text(v.operationId) || !text(v.reason, 1000) || !obj(v.outcome) || !keys(v.outcome, ['status', 'sequence', 'currentStage']) || v.outcome.sequence !== v.sequence || !instant(v.createdAt))
         return fail();
     return v as unknown as WorkDecisionReceipt;
 };
 export type AssignmentCreationInstance = Omit<AssignmentApprovalInstance, 'before'> & { operationKind: 'Creation'; before: null };
 export type AssignmentCreationPage = { instance: AssignmentCreationInstance; actorUserId: string; ownerKey: string };
 const decodeInstance = (v: unknown, id?: string, creation = false): AssignmentApprovalInstance | AssignmentCreationInstance => {
-    if (!obj(v) || !keys(v, ['id', 'assignmentId', 'employeeId', 'projectId', 'sourceRevision', 'sourceVersionId', 'sourceToken', 'requesterUserId', 'requestId', 'reason', 'createdAt', 'worker', 'policy', 'before', 'proposed', 'currentRevision', 'currentVersionId', 'state', 'transitions', 'notificationFailures', ...(creation ? ['operationKind'] : [])]) || (creation && v.operationKind !== 'Creation') || !uuid(v.id) || id !== undefined && v.id !== id || !text(v.assignmentId, 239) || creation && (!v.assignmentId.startsWith('a-') || !uuid(v.assignmentId.slice(2))) || !text(v.employeeId) || !text(v.projectId) || !hash(v.sourceRevision) || !nullableUuid(v.sourceVersionId) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !uuid(v.requestId) || !text(v.reason, 1000) || !instant(v.createdAt) || !obj(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || v.worker.id !== v.employeeId || !text(v.worker.code) || !text(v.worker.name, 2000) || (creation ? v.before !== null || v.sourceVersionId !== null : !snapshot(v.before, v.assignmentId) || v.before.employeeId !== v.employeeId || v.before.projectId !== v.projectId) || !validAssignmentDefinition(v.proposed) || !hash(v.currentRevision) || !nullableUuid(v.currentVersionId) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !Array.isArray(v.notificationFailures))
+    if (!obj(v) || !keys(v, ['id', 'assignmentId', 'employeeId', 'projectId', 'sourceRevision', 'sourceVersionId', 'sourceToken', 'requesterUserId', 'requestId', 'reason', 'createdAt', 'worker', 'policy', 'before', 'proposed', 'currentRevision', 'currentVersionId', 'state', 'transitions', 'notificationFailures', ...(creation ? ['operationKind'] : []),...('delegations' in v?['delegations']:[])]) || (creation && v.operationKind !== 'Creation') || !uuid(v.id) || id !== undefined && v.id !== id || !text(v.assignmentId, 239) || creation && (!v.assignmentId.startsWith('a-') || !uuid(v.assignmentId.slice(2))) || !text(v.employeeId) || !text(v.projectId) || !hash(v.sourceRevision) || !nullableUuid(v.sourceVersionId) || !hash(v.sourceToken) || !uuid(v.requesterUserId) || !uuid(v.requestId) || !text(v.reason, 1000) || !instant(v.createdAt) || !obj(v.worker) || !keys(v.worker, ['id', 'code', 'name']) || v.worker.id !== v.employeeId || !text(v.worker.code) || !text(v.worker.name, 2000) || (creation ? v.before !== null || v.sourceVersionId !== null : !snapshot(v.before, v.assignmentId) || v.before.employeeId !== v.employeeId || v.before.projectId !== v.projectId) || !validAssignmentDefinition(v.proposed) || !hash(v.currentRevision) || !nullableUuid(v.currentVersionId) || !Array.isArray(v.transitions) || v.transitions.length > 10 || !Array.isArray(v.notificationFailures))
         return fail();
     const p = decodeAssignmentApprovalPolicy(v.policy), r = v as unknown as AssignmentApprovalInstance;
     if (!p.definition.workerIds.includes(r.employeeId) || (creation ? p.definition.creationRequired !== true : !materialAssignmentFields(r.before, r.proposed, p.definition.materialFields).length))
         return fail();
+    if(!validInstanceDelegations(r,p.definition.stages))return fail();
     let state: WorkStageState;
     try {
         state = approvalState(p.definition.stages, r.transitions) as WorkStageState;
@@ -131,7 +134,7 @@ const decodeInstance = (v: unknown, id?: string, creation = false): AssignmentAp
     const requests = new Set<string>();
     for (const [t, i] of r.transitions.map((t, i) => [t, i] as const)) {
         receipt(t, r.id);
-        if (requests.has(t.requestId) || t.actorId !== p.definition.stages[t.stage].userId || t.activeRole !== p.definition.stages[t.stage].role || t.actorId === r.requesterUserId || canon(t.outcome) !== canon(approvalState(p.definition.stages, r.transitions.slice(0, i + 1))))
+        if (requests.has(t.requestId) || !validStageReceipt(p.definition.stages,r.delegations,t) || t.actorId === r.requesterUserId || canon(t.outcome) !== canon(approvalState(p.definition.stages, r.transitions.slice(0, i + 1))))
             return fail();
         requests.add(t.requestId);
     }
@@ -292,7 +295,7 @@ export const createAssignmentApprovalClient = (request: Transport) => {
             if (c?.mode !== 'assignment-decide' || i.state.status !== 'Pending' || !uuid(requestId) || !['Approved', 'Rejected'].includes(decision) || !text(reason.trim(), 1000))
                 return fail();
             const r = await call('POST', '/instances/' + i.id + '/decisions', c, { expectedSourceToken: i.sourceToken, expectedSequence: i.state.sequence, decision, reason: reason.trim(), requestId }), t = receipt(r.receipt, i.id);
-            if (typeof r.replayed !== 'boolean' || r.ownerKey !== p.ownerKey || r.actorUserId !== p.actorUserId || t.actorId !== p.actorUserId || t.activeRole !== c.activeRole || t.requestId !== requestId || t.decision !== decision || t.reason !== reason.trim() || t.stage !== i.state.currentStage || t.sequence !== i.state.sequence + 1 || r.sourceToken !== i.sourceToken || canon(t.outcome) !== canon(approvalState(i.policy.definition.stages, [...i.transitions, t])))
+            if (typeof r.replayed !== 'boolean' || r.ownerKey !== p.ownerKey || r.actorUserId !== p.actorUserId || t.actorId !== p.actorUserId || t.activeRole !== c.activeRole || t.requestId !== requestId || t.decision !== decision || t.reason !== reason.trim() || t.stage !== i.state.currentStage || !validStageReceipt(i.policy.definition.stages,i.delegations,t) || t.sequence !== i.state.sequence + 1 || r.sourceToken !== i.sourceToken || canon(t.outcome) !== canon(approvalState(i.policy.definition.stages, [...i.transitions, t])))
                 return fail();
             return { receipt: t, replayed: r.replayed };
         }

@@ -1,3 +1,4 @@
+import {delegationBindings,delegationReceiptProof,assertCanonicalActor,canonicalStageRecipients} from './canonical-delegation-service.mjs';
 import { randomUUID } from 'node:crypto';
 import { WORK_APPROVAL_VERSION, APPROVAL_EVENT_KEYS, approvalState, approvalEventIdentity, approvalRecipients, renderApprovalTemplate, validWorkApprovalPolicy } from '../../../shared/work-approval.mjs';
 import { canonicalHours } from '../../../shared/work-hours.mjs';
@@ -59,10 +60,11 @@ export const scopedWorkApproval = async (c, req, id, o, lock = false, includeSou
             workApprovalFail('WORK_APPROVAL_SOURCE_UNAVAILABLE', 'Retained source identity does not match the instance.');
         source = { weekEnding: captured.header.weekEnding, totalHoursExact: canonicalHours(captured.header.totalHours), billableHoursExact: canonicalHours(captured.header.billableHours), currentHeaderStatus: header.status, isCurrentSubmission: latest?.id === i.submission_id, entries: captured.submission.entries.map(e => ({ id: e.entryId, date: e.workDate, workType: e.workType, projectId: e.projectId ?? null, clientName: e.clientName ?? null, category: e.category ?? null, categoryCode: e.categoryCode ?? null, hoursExact: canonicalHours(e.hours), billable: e.billable, remark: e.remark ?? null, evidenceUrl: e.evidenceUrl ?? null, workReference: e.workReference ?? null })) };
     }
-    return { i, policy, transitions, state: approvalState(policy.definition.stages, transitions), worker, notificationFailures, source };
+    await delegationReceiptProof(c,'Work',transitions);const delegations=await delegationBindings(c,req,'Work',id);
+    return { i, policy, transitions, delegations, state: approvalState(policy.definition.stages, transitions), worker, notificationFailures, source };
 };
-export const workApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at });
-export const workApprovalView = v => ({ id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, source: v.source });
+export const workApprovalReceipt = t => ({ id: t.id, instanceId: t.instance_id, sequence: t.sequence, stage: t.stage, decision: t.decision, actorId: t.actor_id, activeRole: t.active_role, requestId: t.request_id, operationId: t.operation_id, reason: t.reason, outcome: t.outcome, createdAt: t.created_at,...(t.delegation_binding_id?{delegationBindingId:t.delegation_binding_id}:{}) });
+export const workApprovalView = v => ({...(v.delegations?.length?{delegations:v.delegations}:{}), id: v.i.id, timesheetId: v.i.timesheet_id, submissionId: v.i.submission_id, submissionSequence: v.i.submission_sequence, sourceToken: v.i.source_token, requesterUserId: v.i.requester_user_id, worker: v.worker, createdAt: v.i.created_at, policy: { id: v.policy.id, sequence: v.policy.sequence, effectiveFrom: v.policy.effective_from, stages: v.policy.definition.stages }, state: v.state, transitions: v.transitions.map(workApprovalReceipt), notificationFailures: v.notificationFailures, source: v.source });
 const recipientScope = async (c, req, id, workerId, o) => { const u = await workApprovalUser(c, req, id, o); for (const role of u.roles) {
     const permissions = await o.getEffectivePermissionsForUser(c, u.id, role);
     if (!['employees.view', 'notifications.view'].every(k => permissions.includes(k)))
@@ -73,8 +75,7 @@ const recipientScope = async (c, req, id, workerId, o) => { const u = await work
 } workApprovalFail('WORK_APPROVAL_RELATIONSHIP_UNAVAILABLE', 'A mandatory recipient no longer has an existing scoped in-app relationship.'); };
 const requiredRecipients = async (c, req, v, key, stage, o) => {
     if (key === 'approval.action_required') {
-        const actor = await workApprovalActor(c, req, v.policy.definition.stages[stage], await sourceHeader(c, req, v.i.timesheet_id), o);
-        return approvalRecipients([{ userId: actor.user.sub, reason: 'current_stage_approver' }]);
+        return approvalRecipients(await canonicalStageRecipients(c,req,v,v.policy.definition.stages,stage,await sourceHeader(c,req,v.i.timesheet_id),workApprovalActor,o));
     }
     await workApprovalUser(c, req, v.i.requester_user_id, o);
     const users = (await c.query('select u.id from users u join user_organization_scopes s on s.user_id=u.id where u.employee_record_id=$1 and u.status=\'Active\'and s.organization_id=$2 and s.legal_entity_id=$3 and s.active order by u.id limit 2', [v.i.employee_id, ...workApprovalScope(req)])).rows;
@@ -130,6 +131,7 @@ export const assertLegacyWorkApproval = async (c, req, timesheetId) => { const t
 export const decideWorkApproval = async (c, req, id, input, o) => {
     await lockWorkPolicy(c, req);
     const v = await scopedWorkApproval(c, req, id, o, true), fingerprint = capacityHash({ instanceId: id, actorId: req.user.sub, activeRole: req.user.activeRole, ...input }), prior = (await c.query('select * from work_approval_transitions where instance_id=$1 and request_id=$2', [id, input.requestId])).rows[0];
+    await delegationReceiptProof(c,'Work',prior?[prior]:[]);
     if (prior) {
         if (prior.request_fingerprint !== fingerprint)
             workApprovalFail('WORK_APPROVAL_REQUEST_CONFLICT', 'This decision request has different content. Read history.');
@@ -138,8 +140,7 @@ export const decideWorkApproval = async (c, req, id, input, o) => {
     if (v.state.status !== 'Pending' || v.state.sequence !== input.expectedSequence || v.i.source_token !== input.expectedSourceToken)
         workApprovalFail('WORK_APPROVAL_STALE', 'The source or current stage changed. Reload before deciding.');
     const stage = v.policy.definition.stages[v.state.currentStage];
-    if (stage.userId !== req.user.sub || stage.role !== req.user.activeRole)
-        workApprovalFail('WORK_APPROVAL_STAGE_DENIED', 'Only the named current-stage user in its configured existing role may decide.', 403);
+    await assertCanonicalActor(c,req,'Work',v,v.policy.definition.stages,await sourceHeader(c,req,v.i.timesheet_id),workApprovalActor,o);
     const t = await sourceHeader(c, req, v.i.timesheet_id, true), s = await submission(c, req, t.id);
     if (t.status !== 'Submitted' || s?.id !== v.i.submission_id || workApprovalSourceToken(t, s) !== v.i.source_token)
         workApprovalFail('WORK_APPROVAL_SOURCE_CHANGED', 'Submitted work no longer matches the retained instance.');
@@ -150,6 +151,7 @@ export const decideWorkApproval = async (c, req, id, input, o) => {
     const sequence = v.state.sequence + 1, next = input.decision === 'Rejected' ? { status: 'Rejected', sequence, currentStage: null } : sequence === v.policy.definition.stages.length ? { status: 'Approved', sequence, currentStage: null } : { status: 'Pending', sequence, currentStage: sequence };
     await setWorkApprovalContext(c, req, id);
     const saved = (await c.query('insert into work_approval_transitions(id,instance_id,sequence,stage,decision,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,outcome)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)returning *', [randomUUID(), id, sequence, v.state.currentStage, input.decision, req.user.sub, req.user.activeRole, input.requestId, fingerprint, input.reason, req.operationId, JSON.stringify(next)])).rows[0];
+    await delegationReceiptProof(c,'Work',[saved]);
     if (next.status !== 'Pending') {
         await c.query("update timesheets set status=$2,rejection_reason=case when $2='Rejected'then $3 else null end,approved_at=case when $2='Approved'then now()else approved_at end,approved_by=case when $2='Approved'then $4 else approved_by end,rejected_at=case when $2='Rejected'then now()else rejected_at end,rejected_by=case when $2='Rejected'then $4 else rejected_by end,updated_at=now()where id=$1", [t.id, next.status, input.reason, req.user.username]);
         await o.retainWorkDecision(c, req, t, next.status, input.reason, 'Governed approval workspace');
