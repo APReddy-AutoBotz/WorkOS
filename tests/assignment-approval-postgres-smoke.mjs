@@ -247,3 +247,6 @@ await import('./business-structure-postgres-smoke.mjs');
 
 // Explicit catalog-to-workforce classification and historical source preservation.
 await import('./workforce-classification-postgres-smoke.mjs');
+
+// Reviewed canonical exit impact and retained lifecycle receipts.
+await import('./reviewed-worker-exit-postgres-smoke.mjs');

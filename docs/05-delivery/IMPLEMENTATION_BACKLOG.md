@@ -472,3 +472,7 @@ From unchanged PR95, `docs/tasks/WOS-02-BUSINESS-STRUCTURE.md` commits the exist
 ### Supported local development continuation — catalog-to-workforce classification
 
 Dependent on preserved PR96, with no main integration or prior-head rewrite. Existing employee profile/import fields remain legacy text; explicit prospective classification is a separate exact-source workforce-master record. See `docs/tasks/WOS-02-WORKFORCE-CLASSIFICATION.md` for established projection/effectivity contracts, acceptance and unavailable extensions. No new buyer defaults, grants or manager editor. Required local/hosted gates apply; deferred formal review is not acceptance.
+
+### Bounded WOS-02 continuation — reviewed canonical worker exit
+
+Dependent on PR97, WOS-WKF-006 now has a connected current-impact → explicit reason/confirmation → existing terminal exit → retained owned receipt/reloaded status workflow. It reuses canonical dependency/date/account synchronization contracts, without a migration or new permissions/grants. Tests and exact-head engineering receipts are required; broad IAM009, master/type and lifecycle remainder remain open in WOS-02-REVIEWED-WORKER-EXIT-REMAINDER.md. This continuation is ordinary dependent development and does not satisfy programme merge credit, qualified final review, main integration, UAT or release.
