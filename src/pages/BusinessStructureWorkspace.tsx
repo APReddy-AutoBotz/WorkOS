@@ -1,3 +1,4 @@
+import {WorkerTypes} from '../components/WorkerTypes';
 import {useEffect,useRef,useState} from 'react';
 import {Link} from 'react-router-dom';
 import {BUSINESS_STRUCTURE_TYPES,validBusinessCommand,businessCode} from '../../shared/business-structure.mjs';
@@ -48,7 +49,7 @@ export const BusinessStructureWorkspace=()=>{
  const reconcile=()=>{if(intent)void run(async c=>{const r=await service.reconcile(intent.command,intent.sequence,c);if(current(c))saved(r);});};
  const allowed=Boolean(captureBusinessContext()),locked=!allowed||busy||Boolean(intent)||!list||history?.latest.action==='Retire',appendReady=businessCode(code)&&calendarLabel(name,150)&&validCapabilityDate(date)&&(!list||date>=list.serverDate)&&calendarLabel(reason,1000)&&Boolean(parentChoice)&&confirmed;
  return <main className="mx-auto max-w-5xl space-y-4 pb-12">
-  <h1 className="text-2xl font-semibold">Business structure</h1>
+  <h1 className="text-2xl font-semibold">Business structure</h1><WorkerTypes/>
   <p>Configure explicit legal-entity-owned catalog sources. Later effective versions receive new exact references and close the earlier date interval. Existing workers, calendars and commercial sources keep their pinned references; expired references remain unavailable until explicitly changed through their existing workflows.</p>
   {!allowed&&<p role="alert">Existing settings access and a selected organization and legal entity are required.</p>}
   <label>Catalog family<select aria-label="Catalog family" value={type} disabled={!allowed||busy||Boolean(intent)||Boolean(history)} onChange={e=>{clear();setType(e.target.value as BusinessType|'');setNotice('');}}><option value="">Choose an explicit catalog family</option>{BUSINESS_STRUCTURE_TYPES.map(t=><option key={t} value={t}>{label(t as BusinessType)}</option>)}</select></label>

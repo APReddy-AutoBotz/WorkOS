@@ -1,0 +1,5 @@
+# Finite remainder after explicit canonical worker types
+
+The bounded WKF002 mechanism supports five configured canonical types and explicit scoped worker adoption, subject to exact-source tests and Draft validation. Legacy/native worker_type references remain separate; no contract_type conversion, default kind, calendar/billability effect or automatic authority is inferred. Later configured labels are resolved for the inspection date; the original selected source/label remains retained.
+
+Broader workforce/operational ownership and lifecycle, legacy/shared catalog/calendar adoption and amendments, quantitative conversion/distribution where rules are absent, approved reporting/events/adapters, and PR010–012 rates/costs, valuation/margin and invoice eligibility/export remain open. Partial-day legacy leave/calendar data, identity amendments and protected reopening require their exact governing contracts. Reviews are deferred, not passed; stack/protection/main integration, buyer UAT, restore/handover and release are not complete. Prior PR93/94 unexplained failures remain separate from later green results.

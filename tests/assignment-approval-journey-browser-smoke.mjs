@@ -198,3 +198,6 @@ await import('./workforce-classification-journey-browser-smoke.mjs');
 
 // Reviewed canonical exit impact and retained lifecycle receipts.
 await import('./reviewed-worker-exit-journey-browser-smoke.mjs');
+
+// Explicit configured worker types and retained scoped adoption.
+await import('./worker-type-journey-browser-smoke.mjs');
