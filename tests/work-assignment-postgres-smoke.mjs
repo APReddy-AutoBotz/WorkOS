@@ -1,3 +1,4 @@
+import {assertRateCandidatePermissionAdditions} from './support/rate-candidate-permission-expectations.mjs';
 import assert from 'node:assert/strict';
 import {copyFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -19,7 +20,7 @@ await withCommercialDatabase(async({pool})=>{
     assert.deepEqual(await workSnapshotBefore044(pool),before,'043 upgrade preserves every legacy ID and byte of accepted work');
     assert.equal((await pool.query('select count(*)::int n from work_submission_evidence')).rows[0].n,0,'no historical pins are inferred');
     assert.equal((await pool.query('select count(*)::int n from work_submission_decisions')).rows[0].n,0);
-    assert.deepEqual(await permissionSnapshot(pool),grants,'migration adds no grants or permissions');
+    const permissionsAfter=await permissionSnapshot(pool);assertRateCandidatePermissionAdditions(grants[0].value.definitions,permissionsAfter[0].value.definitions);assert.deepEqual({roles:permissionsAfter[0].value.roles,users:permissionsAfter[0].value.users},{roles:grants[0].value.roles,users:grants[0].value.users},'migration adds no role or user grants');
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);assert.deepEqual(await workSnapshotBefore044(pool),before);
   });
 });
