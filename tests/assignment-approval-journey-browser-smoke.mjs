@@ -192,3 +192,6 @@ await import('./calendar-scope-journey-browser-smoke.mjs');
 
 // Six-family business structure, retained sources and unused-node retirement.
 await import('./business-structure-journey-browser-smoke.mjs');
+
+// Explicit catalog-to-workforce classification and historical source preservation.
+await import('./workforce-classification-journey-browser-smoke.mjs');

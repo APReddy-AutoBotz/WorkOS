@@ -51,3 +51,6 @@ await import('./calendar-scope-smoke.mjs');
 
 // Six-family business structure, retained sources and unused-node retirement.
 await import('./business-structure-smoke.mjs');
+
+// Explicit catalog-to-workforce classification and historical source preservation.
+await import('./workforce-classification-smoke.mjs');

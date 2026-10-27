@@ -2,10 +2,11 @@ import {lazy,Suspense,useEffect,useRef,useState} from 'react';
 import {directorySearch} from '../../shared/workforce-directory.mjs';
 import {ApiClientError} from '../services/apiClient';
 import {captureDirectoryContext,isDirectoryContextCurrent,workforceDirectoryService,type DirectoryContext,type DirectoryPage,type DirectorySelection,type DirectoryPaging} from '../services/workforceDirectory';
+const WorkerClassification=lazy(()=>import('../components/WorkerClassification').then(m=>({default:m.WorkerClassification})));
 const WorkerCapacity=lazy(()=>import('../components/WorkerCapacity').then(m=>({default:m.WorkerCapacity})));
 const WorkerCapabilities=lazy(()=>import('../components/WorkerCapabilities').then(m=>({default:m.WorkerCapabilities})));
 export const WorkforceDirectory=()=>{
- const[search,setSearch]=useState(''),[page,setPage]=useState<DirectoryPage|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[pane,setPane]=useState<'capacity'|'capabilities'|null>(null);
+ const[search,setSearch]=useState(''),[page,setPage]=useState<DirectoryPage|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[pane,setPane]=useState<'capacity'|'capabilities'|'classification'|null>(null);
  const generation=useRef(0),mounted=useRef(false),inFlight=useRef(false),context=useRef<DirectoryContext|null>(null);
  const clear=(message='')=>{++generation.current;context.current=null;inFlight.current=false;setPage(null);setPane(null);setBusy(false);setNotice(message);};
  const block=()=>{clear('Account, role or scope changed. Directory and unsent handoffs cleared. Reload explicitly.');setSearch('');};
@@ -18,7 +19,7 @@ export const WorkforceDirectory=()=>{
   finally{if(mounted.current&&n===generation.current){inFlight.current=false;setBusy(false);}}
  };
  const navigate=(id:string|null)=>{if(!page||!current())return;void load({search:'',parentId:id},{expectedRosterToken:page.rosterToken});};
- const handoff=(kind:'capacity'|'capabilities')=>{if(page?.parent&&current())setPane(kind);};
+ const handoff=(kind:'capacity'|'capabilities'|'classification')=>{if(page?.parent&&current())setPane(kind);};
  const permitted=Boolean(captureDirectoryContext());
  return <div className="mx-auto max-w-6xl pb-12 space-y-4"><h1 className="text-2xl font-semibold">Scoped workforce directory</h1><p>Current recorded directory and reporting relationships within your active-role scope. Counts include only visible direct reports. A manager absent from this view is not evidence of an organizational root; no manager or ownership is inferred from a title.</p>
  {!permitted&&<p role="alert">Existing workforce read access and a selected organization and legal entity are required.</p>}
@@ -28,11 +29,11 @@ export const WorkforceDirectory=()=>{
  <button type="button" disabled={busy} onClick={()=>void load()}>Reload first directory page</button>
  {page.parent&&<section aria-label="Selected directory worker" className="rounded-xl border p-4 space-y-2"><h2>{page.parent.name} · {page.parent.code}</h2><p>{page.parent.designation} · {page.parent.department} · {page.parent.country} · {page.parent.status}</p><p>Recorded business unit: {page.parent.businessUnit??'Not recorded'} · Region: {page.parent.region??'Not recorded'} · Visible direct reports: {page.parent.visibleDirectReports}</p>
  {page.parent.manager?<p>Visible recorded manager: {page.parent.manager.name} · <button type="button" disabled={busy} onClick={()=>navigate(page.parent!.manager!.id)}>Open recorded manager {page.parent.manager.code}</button></p>:<p>No recorded manager is shown in this authorized view.</p>}
- <div className="flex gap-3"><button type="button" disabled={busy} onClick={()=>handoff('capabilities')}>Inspect selected worker capabilities</button><button type="button" disabled={busy} onClick={()=>handoff('capacity')}>Inspect selected worker capacity</button><button type="button" disabled={busy} onClick={()=>navigate(null)}>Return to scoped directory</button></div><h3>Visible direct reports</h3></section>}
+ <div className="flex gap-3"><button type="button" disabled={busy} onClick={()=>handoff('classification')}>Inspect selected worker classification</button><button type="button" disabled={busy} onClick={()=>handoff('capabilities')}>Inspect selected worker capabilities</button><button type="button" disabled={busy} onClick={()=>handoff('capacity')}>Inspect selected worker capacity</button><button type="button" disabled={busy} onClick={()=>navigate(null)}>Return to scoped directory</button></div><h3>Visible direct reports</h3></section>}
  {page.workers.length===0&&<p role="status">No workers match this current scoped selection. Other relationships and scopes are not inferred.</p>}
  <ul aria-label={page.parent?'Visible direct reports':'Visible directory workers'} className="space-y-2">{page.workers.map(w=><li key={w.id} className="rounded-xl border p-3"><h3>{w.name} · {w.code}</h3><p>{w.designation} · {w.department} · {w.country} · {w.status} · Visible direct reports {w.visibleDirectReports}</p><p>{w.manager?'Visible recorded manager: '+w.manager.name:'No recorded manager shown in this view.'}</p><button type="button" disabled={busy} onClick={()=>navigate(w.id)}>Open reporting context {w.code}</button></li>)}</ul>
  {page.nextAfter&&<button type="button" disabled={busy} onClick={()=>{if(current())void load(page.selection,{after:page.nextAfter!,expectedRosterToken:page.rosterToken});}}>Next scoped directory page</button>}
  </section>}
- {page?.parent&&pane&&<section aria-label="Selected workforce handoff" className="border-t pt-4"><h2>{page.parent.name} · {page.parent.code}</h2><p>Original governed workspace: fresh source authorization and existing permissions apply independently. Directory visibility grants no change, export or approval authority.</p><button type="button" onClick={()=>setPane(null)}>Close workforce handoff</button><Suspense fallback={<p role="status">Loading worker workspace…</p>}>{pane==='capacity'?<WorkerCapacity key={page.rosterToken+'/capacity/'+page.parent.id} employeeId={page.parent.id}/>:<WorkerCapabilities key={page.rosterToken+'/capabilities/'+page.parent.id} employeeId={page.parent.id}/>}</Suspense></section>}
+ {page?.parent&&pane&&<section aria-label="Selected workforce handoff" className="border-t pt-4"><h2>{page.parent.name} · {page.parent.code}</h2><p>Original governed workspace: fresh source authorization and existing permissions apply independently. Directory visibility grants no change, export or approval authority.</p><button type="button" onClick={()=>setPane(null)}>Close workforce handoff</button><Suspense fallback={<p role="status">Loading worker workspace…</p>}>{pane==='classification'?<WorkerClassification key={page.rosterToken+'/classification/'+page.parent.id} employeeId={page.parent.id}/>:pane==='capacity'?<WorkerCapacity key={page.rosterToken+'/capacity/'+page.parent.id} employeeId={page.parent.id}/>:<WorkerCapabilities key={page.rosterToken+'/capabilities/'+page.parent.id} employeeId={page.parent.id}/>}</Suspense></section>}
  </div>;
 };
