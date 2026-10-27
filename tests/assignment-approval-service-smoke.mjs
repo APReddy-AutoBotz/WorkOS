@@ -198,3 +198,6 @@ await import('./business-structure-service-smoke.mjs');
 
 // Explicit catalog-to-workforce classification and historical source preservation.
 await import('./workforce-classification-service-smoke.mjs');
+
+// Reviewed canonical exit impact and retained lifecycle receipts.
+await import('./reviewed-worker-exit-service-smoke.mjs');

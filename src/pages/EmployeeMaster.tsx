@@ -25,7 +25,7 @@ import { EmployeeForm } from '../components/forms/EmployeeForm';
 import { AllocationForm } from '../components/forms/AllocationForm';
 import { cn } from '../lib/utils';
 import { downloadCsv } from '../lib/csv';
-import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { ReviewedWorkerExit } from '../components/employee/ReviewedWorkerExit';
 import { SortableHeader } from '../components/ui/SortableHeader';
 import { DataTable } from '../components/ui/DataTable';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
@@ -40,7 +40,7 @@ import { UtilizationHeatmap } from '../components/employee/UtilizationHeatmap';
 import { OrgChartView } from '../components/employee/OrgChartView';
 import { isUtilizationEligibleEmployee } from '../services/calculations';
 import { canEditEmployeeData, canManageAllocations } from '../services/accessControl';
-import { filterEmployeesByOrgVisibility, filterEmployeesForOrgChart, getOrgChartFilters, validateDeactivateManager } from '../services/orgChart';
+import { filterEmployeesByOrgVisibility, filterEmployeesForOrgChart, getOrgChartFilters } from '../services/orgChart';
 
 import { productConfig } from '../config/productConfig';
 type EmployeeSortKey = 'employee' | 'designation' | 'director' | 'utilization' | 'projects' | 'status';
@@ -217,13 +217,6 @@ export const EmployeeMaster = () => {
   const handleDeactivate = (emp: Employee) => {
     if (emp.status === 'Exited') return;
     setEmployeeToDeactivate(emp);
-  };
-
-  const confirmDeactivate = async () => {
-    if (!employeeToDeactivate) return;
-    await employeeService.delete(employeeToDeactivate.id);
-    setEmployeeToDeactivate(null);
-    fetchData();
   };
 
   const handleExport = () => {
@@ -500,15 +493,7 @@ export const EmployeeMaster = () => {
         </div>
       )}
 
-      <ConfirmDialog
-        open={!!employeeToDeactivate}
-        title="Deactivate Employee"
-        description={`${employeeToDeactivate?.name || 'This employee'} will be marked as Exited and their demo login will be disabled. Existing historical allocations and timesheets remain intact for auditability.${employeeToDeactivate ? ` ${validateDeactivateManager(employees, employeeToDeactivate.id).warnings.join(' ')}` : ''}`}
-        confirmLabel="Deactivate"
-        variant="danger"
-        onConfirm={confirmDeactivate}
-        onCancel={() => setEmployeeToDeactivate(null)}
-      />
+      {employeeToDeactivate && <div key={employeeToDeactivate.id}><ReviewedWorkerExit employeeId={employeeToDeactivate.id} onClose={() => {setEmployeeToDeactivate(null);void fetchData();}}/></div>}
 
       {view === 'org' && (
         <OrgChartView
@@ -582,6 +567,7 @@ export const EmployeeMaster = () => {
                           {emp.name}
                         </Link>
                         <span className="text-[10px] text-body/60 font-mono tracking-tight">{emp.employeeId}</span>
+                        <Badge variant={emp.status === 'Exited' ? 'neutral' : emp.status === 'Active' ? 'success' : 'warning'}>{emp.status}</Badge>
                       </div>
                     </div>
                   </td>
