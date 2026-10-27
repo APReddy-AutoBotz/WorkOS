@@ -480,3 +480,7 @@ Dependent on PR97, WOS-WKF-006 now has a connected current-impact → explicit r
 ### Bounded WOS-02 continuation — explicit worker types
 
 WOS-WKF-002 supports five canonical kinds with explicit buyer-configured dated labels and scoped worker selections with retained source/history. Existing arbitrary legacy worker-type catalog references and contract types are not inferred or rewritten. See WOS-02-WORKER-TYPE.md; exact-source local/hosted checks and final qualified reviews remain required for their respective acceptance gates. Programme merge credit and release remain separate.
+
+### Bounded PR-010 candidate continuation
+
+Unapproved billing-rate and confidential cost-rate candidate storage and matching-currency/unit preview is a preliminary dependency, not PR-010 completion. See `docs/tasks/WOS-06-RATE-COST-CANDIDATES.md`. Authoritative adoption and its configured commercial approval path, additional rate dimensions, currency/FX/rounding, budgets/POs, valuation and invoice readiness remain open. No automatic financial authority or buyer default is introduced.

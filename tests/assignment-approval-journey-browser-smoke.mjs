@@ -201,3 +201,6 @@ await import('./reviewed-worker-exit-journey-browser-smoke.mjs');
 
 // Explicit configured worker types and retained scoped adoption.
 await import('./worker-type-journey-browser-smoke.mjs');
+
+// Protected rate/cost candidates and non-authoritative resolution preview.
+await import('./rate-candidate-journey-browser-smoke.mjs');
