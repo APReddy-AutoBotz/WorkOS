@@ -493,7 +493,7 @@ export const EmployeeMaster = () => {
         </div>
       )}
 
-      {employeeToDeactivate && <ReviewedWorkerExit employeeId={employeeToDeactivate.id} onClose={() => {setEmployeeToDeactivate(null);void fetchData();}}/>}
+      {employeeToDeactivate && <div key={employeeToDeactivate.id}><ReviewedWorkerExit employeeId={employeeToDeactivate.id} onClose={() => {setEmployeeToDeactivate(null);void fetchData();}}/></div>}
 
       {view === 'org' && (
         <OrgChartView

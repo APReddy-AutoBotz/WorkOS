@@ -24,3 +24,5 @@ Preserve existing manual/import/delete/lifecycle compatibility, dependency rules
 ## Operations
 
 The assessment is an observation, not a reservation. Resolve dependencies through their existing authorized workflows and inspect again. Terminal exit is not automatically reversible; do not reactivate or rewrite retained history to roll back. Stop use of the new authoring UI if necessary and retain canonical data/audit; roll forward under an authorized correction contract. Missing receipt may still be in flight. Preserve the original request and perform read-only reconciliation.
+
+Employee selection is an owned component boundary: changing the selected worker unmounts prior inspection/reason/confirmation and suppresses old asynchronous updates. The connected employee-page browser test switches targets with unsent confirmed input, proves zero writes, blank new state and fresh target-bound inspection. Earlier frozen validation remains retained and cannot be used as acceptance of this corrected head.
