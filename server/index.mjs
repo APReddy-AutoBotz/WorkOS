@@ -1,3 +1,4 @@
+import {createWorkerTypeRouter} from './modules/workforce/worker-type-router.mjs';
 import {createReviewedWorkerExitRouter} from './modules/workforce/exit-router.mjs';
 import {createWorkforceClassificationRouter} from './modules/workforce/classification-router.mjs';
 import {createBusinessStructureRouter} from './modules/workforce/business-structure-router.mjs';
@@ -6491,6 +6492,7 @@ app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,require
 app.use('/api/v1/calendar-scope-authoring',createCalendarScopeAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar scope request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/business-structure',createBusinessStructureRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Business structure request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/calendar-authoring',createCalendarAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar authoring request failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/worker-type',createWorkerTypeRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,getEffectivePermissionsForUser,audit,logError:e=>console.error('Worker type failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-exit',createReviewedWorkerExitRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,getEffectivePermissionsForUser,workerExitDependencies,assertWorkerMayExit,synchronizeWorkerExit,audit,logError:e=>console.error('Reviewed worker exit failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-classification',createWorkforceClassificationRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,audit,logError:e=>console.error('Classification request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-directory',createWorkforceDirectoryRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole}));

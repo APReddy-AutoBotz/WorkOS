@@ -476,3 +476,7 @@ Dependent on preserved PR96, with no main integration or prior-head rewrite. Exi
 ### Bounded WOS-02 continuation — reviewed canonical worker exit
 
 Dependent on PR97, WOS-WKF-006 now has a connected current-impact → explicit reason/confirmation → existing terminal exit → retained owned receipt/reloaded status workflow. It reuses canonical dependency/date/account synchronization contracts, without a migration or new permissions/grants. Tests and exact-head engineering receipts are required; broad IAM009, master/type and lifecycle remainder remain open in WOS-02-REVIEWED-WORKER-EXIT-REMAINDER.md. This continuation is ordinary dependent development and does not satisfy programme merge credit, qualified final review, main integration, UAT or release.
+
+### Bounded WOS-02 continuation — explicit worker types
+
+WOS-WKF-002 supports five canonical kinds with explicit buyer-configured dated labels and scoped worker selections with retained source/history. Existing arbitrary legacy worker-type catalog references and contract types are not inferred or rewritten. See WOS-02-WORKER-TYPE.md; exact-source local/hosted checks and final qualified reviews remain required for their respective acceptance gates. Programme merge credit and release remain separate.
