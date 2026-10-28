@@ -204,3 +204,4 @@ await import('./worker-type-journey-browser-smoke.mjs');
 
 // Protected rate/cost candidates and non-authoritative resolution preview.
 await import('./rate-candidate-journey-browser-smoke.mjs');
+await import('./commercial-owner-journey-browser-smoke.mjs');
