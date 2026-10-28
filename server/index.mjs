@@ -1,3 +1,4 @@
+import {createRateAdoptionRouter} from './modules/commercial-rates/adoption-router.mjs';
 import {createCommercialCandidateApprovalRouter} from './modules/commercial-rates/approval-router.mjs';
 import {createRateCandidateRouter} from './modules/commercial-rates/router.mjs';
 import {createWorkerTypeRouter} from './modules/workforce/worker-type-router.mjs';
@@ -6511,6 +6512,7 @@ app.use('/api/v1/business-structure',createBusinessStructureRouter({pool,require
 app.use('/api/v1/calendar-authoring',createCalendarAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar authoring request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/rate-candidates',createRateCandidateRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Rate candidate failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/commercial-candidate-approvals',createCommercialCandidateApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Commercial candidate approval failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/approved-rate-sources',createRateAdoptionRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Approved rate source failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/worker-type',createWorkerTypeRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,getEffectivePermissionsForUser,audit,logError:e=>console.error('Worker type failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-exit',createReviewedWorkerExitRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,getEffectivePermissionsForUser,workerExitDependencies,assertWorkerMayExit,synchronizeWorkerExit,audit,logError:e=>console.error('Reviewed worker exit failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-classification',createWorkforceClassificationRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,audit,logError:e=>console.error('Classification request failed',e?.code||'UNKNOWN')}));

@@ -206,3 +206,6 @@ await import('./worker-type-journey-browser-smoke.mjs');
 await import('./rate-candidate-journey-browser-smoke.mjs');
 await import('./commercial-owner-journey-browser-smoke.mjs');
 await import('./commercial-approval-journey-browser-smoke.mjs');
+
+// Real approved source adoption and native resolution across billing and cost.
+await import('./rate-adoption-journey-browser-smoke.mjs');
