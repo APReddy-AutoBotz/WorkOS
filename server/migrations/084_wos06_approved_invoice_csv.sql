@@ -1,7 +1,3 @@
--- Local development safeguard: remove after transactional artifact acceptance,
--- source and final-state guards, failure evidence and full tests are complete.
-do $$ begin raise exception 'Approved invoice CSV migration is incomplete'; end $$;
-
 -- Opt-in definitions only. No roles, users or buyer policies are granted.
 insert into permission_definitions(permission_key,module,label,description,protected) values
  ('commercial.invoice_export.view','Commercial','View invoice CSV artifacts','Retrieve scoped retained invoice-ready CSV artifact bytes.',false),
@@ -35,7 +31,7 @@ do $$declare t text;begin foreach t in array array['invoice_csv_artifacts','invo
 -- consumers decode columns whose names end in _b64.
 create function invoice_csv_base64(value text) returns text language sql immutable strict as $$select 'b64:'||replace(replace(encode(convert_to(value,'UTF8'),'base64'),E'\n',''),E'\r','')$$;
 create function invoice_csv_bytes(b invoice_draft_batches) returns bytea language sql stable as $$
- select convert_to('schema_version,batch_id,line_id,line_sequence,item_id,item_version,event_id,snapshot_id,billing_evidence_b64,client_id_b64,contract_id_b64,engagement_id_b64,work_date,eligible_date,currency,amount'||E'\r\n'||coalesce(string_agg(concat_ws(',', 'workos.invoice-tm-csv/1',b.id::text,l.id::text,l.sequence::text,l.item_id::text,l.item_version::text,l.event_id::text,l.snapshot_id::text,invoice_csv_base64(l.billing_evidence::text),invoice_csv_base64(b.client_id),invoice_csv_base64(b.contract_id),invoice_csv_base64(b.engagement_id),l.billing_evidence->>'workDate',ev.eligible_on::text,l.currency,trim_scale(l.amount)::text)||E'\r\n','' order by l.sequence),''),'UTF8')
+ select convert_to('schema_version,batch_id,line_id,line_sequence,item_id,item_version,event_id,snapshot_id,billing_evidence_b64,client_id_b64,contract_id_b64,engagement_id_b64,work_date,eligible_date,currency,amount,period_start,period_end,period_basis'||E'\r\n'||coalesce(string_agg(concat_ws(',', 'workos.invoice-tm-csv/1',b.id::text,l.id::text,l.sequence::text,l.item_id::text,l.item_version::text,l.event_id::text,l.snapshot_id::text,invoice_csv_base64(l.billing_evidence::text),invoice_csv_base64(b.client_id),invoice_csv_base64(b.contract_id),invoice_csv_base64(b.engagement_id),l.billing_evidence->>'workDate',ev.eligible_on::text,l.currency,trim_scale(l.amount)::text,b.period_start::text,b.period_end::text,b.period_basis)||E'\r\n','' order by l.sequence),''),'UTF8')
  from invoice_draft_lines l join billing_eligibility_events ev on ev.id=l.event_id and ev.organization_id=l.organization_id and ev.legal_entity_id=l.legal_entity_id where l.batch_id=b.id
 $$;
 
