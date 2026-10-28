@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.tm_billing.view',module:'Commercial',label:'View T&M billing eligibility',description:'View scoped T&M billing-safe approval and register evidence.',protected:false},
+ {permission_key:'commercial.tm_billing.manage',module:'Commercial',label:'Manage T&M billing eligibility',description:'Configure explicit review and request T&M eligibility in scope.',protected:false},
+ {permission_key:'commercial.tm_billing.decide',module:'Commercial',label:'Decide T&M billing eligibility',description:'Decide an explicitly assigned in-scope T&M eligibility stage.',protected:false},
  {permission_key:'commercial.tm_valuation.view',module:'Commercial',label:'View protected T&M valuation',description:'View scoped native-currency T&M snapshots, with separately held billing and cost access.',protected:false},
  {permission_key:'commercial.tm_valuation.create',module:'Commercial',label:'Create protected T&M valuation',description:'Configure scoped T&M policy and create source-bound snapshots, with separately held billing and cost access.',protected:false},
  {permission_key:'commercial.cost_approvals.decide',module:'Commercial',label:'Decide cost candidate approvals',description:'Decide an explicitly assigned scoped confidential cost candidate approval.',protected:false},
@@ -14,6 +17,6 @@ export const assertRateCandidatePermissionAdditions=(before,after)=>{
  assert(before.every(x=>!keys.has(x.permission_key)),'candidate permissions were not present in the old ledger');
  assert.deepEqual(after.filter(x=>!keys.has(x.permission_key)),before,'all earlier permission definitions remain byte-equivalent');
  const added=after.filter(x=>keys.has(x.permission_key)).sort((a,b)=>a.permission_key.localeCompare(b.permission_key));
- assert.equal(added.length,expected.length,'exactly the eight specified opt-in definitions are added');
+ assert.equal(added.length,expected.length,'exactly the eleven specified opt-in definitions are added');
  assert.deepEqual(added.map(({created_at,...row})=>{assert.equal(typeof created_at,'string');return row;}),[...expected].sort((a,b)=>a.permission_key.localeCompare(b.permission_key)),'new definition metadata matches the explicit migration contract');
 };
