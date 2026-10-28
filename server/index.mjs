@@ -2,6 +2,7 @@ import {createGovernedTmRouter} from './modules/commercial-tm/router.mjs';
 import {createRateAdoptionRouter} from './modules/commercial-rates/adoption-router.mjs';
 import {createCommercialCandidateApprovalRouter} from './modules/commercial-rates/approval-router.mjs';
 import {createTmBillingRouter} from './modules/tm-billing/router.mjs';
+import {createInvoiceDraftRouter} from './modules/invoice-drafts/router.mjs';
 import {createRateCandidateRouter} from './modules/commercial-rates/router.mjs';
 import {createWorkerTypeRouter} from './modules/workforce/worker-type-router.mjs';
 import {createReviewedWorkerExitRouter} from './modules/workforce/exit-router.mjs';
@@ -195,6 +196,10 @@ const permissionDefinitions = [
   ['commercial.tm_billing.view', 'Commercial', 'View T&M billing eligibility', false],
   ['commercial.tm_billing.manage', 'Commercial', 'Manage T&M billing eligibility', false],
   ['commercial.tm_billing.decide', 'Commercial', 'Decide T&M billing eligibility', false],
+  ['commercial.invoice_drafts.view', 'Commercial', 'View invoice-ready drafts', false],
+  ['commercial.invoice_drafts.prepare', 'Commercial', 'Prepare invoice-ready drafts', false],
+  ['commercial.invoice_drafts.own', 'Commercial', 'Own invoice-ready drafts', false],
+  ['commercial.invoice_drafts.cancel', 'Commercial', 'Cancel invoice-ready drafts', false],
   ['allocations.view', 'Planning', 'Planning Workspace', false],
   ['allocations.manage', 'Planning', 'Manage Allocations', false],
   ['timesheets.submit', 'Timesheets', 'Submit Timesheets', false],
@@ -222,7 +227,7 @@ const permissionDefinitions = [
 ];
 const protectedPermissionKeys = new Set(permissionDefinitions.filter(([, , , protectedCore]) => protectedCore).map(([key]) => key));
 const defaultRolePermissions = {
-  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.contracts.view', 'commercial.contracts.manage', 'commercial.lifecycle.manage', 'commercial.rate_candidates.view', 'commercial.rate_candidates.manage', 'commercial.cost_candidates.view', 'commercial.cost_candidates.manage', 'commercial.rate_approvals.decide', 'commercial.cost_approvals.decide', 'commercial.tm_valuation.view', 'commercial.tm_valuation.create', 'commercial.tm_billing.view', 'commercial.tm_billing.manage', 'commercial.tm_billing.decide'].includes(key)).map(([key]) => key),
+  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.contracts.view', 'commercial.contracts.manage', 'commercial.lifecycle.manage', 'commercial.rate_candidates.view', 'commercial.rate_candidates.manage', 'commercial.cost_candidates.view', 'commercial.cost_candidates.manage', 'commercial.rate_approvals.decide', 'commercial.cost_approvals.decide', 'commercial.tm_valuation.view', 'commercial.tm_valuation.create', 'commercial.tm_billing.view', 'commercial.tm_billing.manage', 'commercial.tm_billing.decide', 'commercial.invoice_drafts.view', 'commercial.invoice_drafts.prepare', 'commercial.invoice_drafts.own', 'commercial.invoice_drafts.cancel'].includes(key)).map(([key]) => key),
   HR: ['dashboard.view', 'employees.view', 'employees.manage', 'employees.password_reset', 'projects.view', 'projects.manage', 'projects.status_update', 'clients.view', 'clients.manage', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'leave.admin', 'approvals.view', 'notifications.view', 'notifications.manage', 'integrations.identity', 'integrations.teams', 'integrations.teams_actions', 'settings.manage'],
   CountryDirector: ['dashboard.view', 'employees.view', 'projects.view', 'clients.view', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
   ProjectManager: ['pm_workspace.view', 'employees.view', 'projects.view', 'projects.status_update', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
@@ -6520,6 +6525,7 @@ app.use('/api/v1/calendar-authoring',createCalendarAuthoringRouter({pool,require
 app.use('/api/v1/rate-candidates',createRateCandidateRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Rate candidate failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/commercial-candidate-approvals',createCommercialCandidateApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Commercial candidate approval failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/tm-billing-eligibility',createTmBillingRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('T&M billing eligibility failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/invoice-drafts',createInvoiceDraftRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice draft failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/approved-rate-sources',createRateAdoptionRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Approved rate source failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/governed-tm-valuations',createGovernedTmRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Governed T&M valuation failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/worker-type',createWorkerTypeRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,getEffectivePermissionsForUser,audit,logError:e=>console.error('Worker type failed',e?.code||'UNKNOWN')}));
