@@ -209,3 +209,6 @@ await import('./commercial-approval-journey-browser-smoke.mjs');
 
 // Real approved source adoption and native resolution across billing and cost.
 await import('./rate-adoption-journey-browser-smoke.mjs');
+
+// Protected T&M workspace: approved work and adopted native rate sources.
+await import('./governed-tm-journey-browser-smoke.mjs');
