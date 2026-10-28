@@ -1,6 +1,7 @@
 import {cloneElement, isValidElement, useEffect, useId, useRef, useState, type FormEvent, type ReactNode} from 'react';
 import {PageHeader} from '../components/ui/PageHeader';
 import {RateCandidates} from '../components/RateCandidates';
+import {GovernedTmWorkspace} from '../components/GovernedTmWorkspace';
 import {termPluralTitle, termTitle} from '../config/terminology';
 import {ApiClientError} from '../services/apiClient';
 import {
@@ -238,7 +239,7 @@ export const CommercialDraftingWorkspace = () => {
   return <div className="mx-auto max-w-7xl pb-12">
     <PageHeader title="Commercial drafting" subtitle={`Confidential contract terms, ${engagementPlural.toLowerCase()}, purchase orders and draft milestones.`} breadcrumb={['Delivery', 'Commercial drafting']} />
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-      <p className="max-w-3xl text-sm text-slate-600">Drafting only. No acceptance, closure, invoice readiness, consumption, cost or margin calculations are performed here. The server validates every saved record.</p>
+      <p className="max-w-3xl text-sm text-slate-600">Commercial drafts remain separate from activation, closure, consumption and invoice readiness. Protected T&M calculations appear in their own scoped workspace. The server validates every saved record.</p>
       <button type="button" className={buttonClass} onClick={reload} disabled={Boolean(owned && (state.saving || state.status === 'loading'))}>{state.status === 'error' ? 'Retry workspace' : 'Reload workspace'}</button>
     </div>
     {(!owned && state.status !== 'loading') && <p role="alert" className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4">Scope or access changed. Content and draft cleared. Reload with commercial-view access and a selected organization and legal entity. A submitted save may still complete in its original scope.</p>}
@@ -246,6 +247,7 @@ export const CommercialDraftingWorkspace = () => {
     {owned && state.message && state.status !== 'loading' && <p role={state.status === 'error' ? 'alert' : 'status'} className="mb-5 rounded-xl border border-slate-300 p-4">{state.message}</p>}
     {workspace && <>
       <RateCandidates kind="billing" choices={[...workspace.contracts.map(x=>({type:'contract' as const,id:x.id,label:x.number})),...workspace.engagements.map(x=>({type:'engagement' as const,id:x.id,label:x.name}))]}/>
+      <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
         <p>Server snapshot: {workspace.asOf}. {canManage ? 'Commercial drafting access enabled.' : 'Read-only commercial access. A separate manage permission is required to create drafts.'}</p>
         <p className="mt-1">Legacy {termPluralTitle('project').toLowerCase()} mapped: {workspace.legacyMappings.mappedProjects} of {workspace.legacyMappings.totalProjects}. Neutral migration snapshot coverage only; governed bindings appear separately below. Mapping does not establish invoice eligibility.</p>
