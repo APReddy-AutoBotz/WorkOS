@@ -1,3 +1,5 @@
+import {createInvoiceNoticeConfigRouter} from './modules/invoice-export/notice-config-router.mjs';
+import {createInvoiceCsvRouter} from './modules/invoice-export/router.mjs';
 import {createInvoiceBatchApprovalRouter} from './modules/invoice-approval/router.mjs';
 import {createGovernedTmRouter} from './modules/commercial-tm/router.mjs';
 import {createRateAdoptionRouter} from './modules/commercial-rates/adoption-router.mjs';
@@ -6527,6 +6529,8 @@ app.use('/api/v1/business-structure',createBusinessStructureRouter({pool,require
 app.use('/api/v1/calendar-authoring',createCalendarAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar authoring request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/rate-candidates',createRateCandidateRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Rate candidate failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/commercial-candidate-approvals',createCommercialCandidateApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Commercial candidate approval failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/invoice-export-notice-config',createInvoiceNoticeConfigRouter({pool,requireDatabase,requireAuth,audit,logError:e=>console.error('Invoice notification configuration failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/invoice-csv',createInvoiceCsvRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice CSV failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-batch-approvals',createInvoiceBatchApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice batch approval failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/tm-billing-eligibility',createTmBillingRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('T&M billing eligibility failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-drafts',createInvoiceDraftRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice draft failed',e?.code||'UNKNOWN')}));

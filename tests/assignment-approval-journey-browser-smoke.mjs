@@ -221,3 +221,5 @@ await import('./invoice-draft-journey-browser-smoke.mjs');
 
 // Configured invoice review, inbox and scope-fenced receipt recovery.
 await import('./invoice-batch-approval-journey-browser-smoke.mjs');
+
+await import('./invoice-csv-journey-browser-smoke.mjs');

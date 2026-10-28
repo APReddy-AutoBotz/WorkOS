@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.invoice_export.configure',module:'Commercial',label:'Configure invoice export notices',description:'Configure prospective scoped invoice-export recipient and template policy.',protected:false},
+ {permission_key:'commercial.invoice_export.recover_notices',module:'Commercial',label:'Recover invoice export notices',description:'Attempt scoped recovery of incomplete invoice-export notification evidence.',protected:false},
+ {permission_key:'integrations.invoice_alert_routes.manage',module:'Integrations',label:'Manage invoice alert routes',description:'Configure prospective invoice operational-alert outbox routes.',protected:false},
+ {permission_key:'commercial.invoice_export.view',module:'Commercial',label:'View invoice CSV artifacts',description:'Retrieve scoped retained invoice-ready CSV artifact bytes.',protected:false},
+ {permission_key:'commercial.invoice_export.create',module:'Commercial',label:'Create invoice CSV artifacts',description:'Accept one approved scoped invoice-ready CSV artifact.',protected:false},
  {permission_key:'commercial.invoice_approval.manage',module:'Commercial',label:'Manage invoice batch approvals',description:'Configure prospective scoped invoice batch approval and submit Drafts.',protected:false},
  {permission_key:'commercial.invoice_approval.decide',module:'Commercial',label:'Decide invoice batch approvals',description:'Decide an explicitly assigned current scoped invoice batch approval stage.',protected:false},
  {permission_key:'commercial.invoice_drafts.view',module:'Commercial',label:'View invoice-ready drafts',description:'View scoped draft batches and their billing-safe item lineage.',protected:false},
