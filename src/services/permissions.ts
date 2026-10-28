@@ -38,6 +38,8 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.invoice_drafts.cancel', module: 'Commercial', label: 'Cancel Invoice Drafts', description: 'Opt-in cancellation and protected occupancy release.', optIn: true },
   { key: 'commercial.invoice_approval.manage', module: 'Commercial', label: 'Manage Invoice Approvals', description: 'Opt-in scoped policy and submission management.', optIn: true },
   { key: 'commercial.invoice_approval.decide', module: 'Commercial', label: 'Decide Invoice Approvals', description: 'Opt-in decisions for assigned scoped stages.', optIn: true },
+  { key: 'commercial.invoice_export.view', module: 'Commercial', label: 'View Invoice CSV', description: 'Opt-in scoped access to retained invoice CSV artifacts.', optIn: true },
+  { key: 'commercial.invoice_export.create', module: 'Commercial', label: 'Create Invoice CSV', description: 'Opt-in acceptance of approved invoice CSV artifacts.', optIn: true },
   { key: 'allocations.view', module: 'Planning', label: 'Planning Workspace', description: 'View planning signals and allocation records inside data scope.' },
   { key: 'allocations.manage', module: 'Planning', label: 'Manage Allocations', description: 'Create, edit, and end allocations inside data scope.' },
   { key: 'timesheets.submit', module: 'Timesheets', label: 'Submit Timesheets', description: 'Create and submit own or scoped timesheets.' },
