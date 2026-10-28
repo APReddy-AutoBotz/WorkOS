@@ -19,3 +19,14 @@ export const renderCommercialApproval=(template,candidateId,stage)=>{
  if(!approvalUuid(candidateId)||!Number.isInteger(stage)||stage<1||stage>10||[template?.subject,template?.body].some(x=>typeof x!=='string'||x.includes('{{decisionReason}}')||x.includes('{{workerCode}}')))throw TypeError('Invalid commercial template or source.');
  return renderApprovalTemplate(template,{workerCode:'',sourceRef:'commercial-candidate/'+candidateId,stageNumber:String(stage),decisionReason:''});
 };
+
+// Inputs must come from the current locked server observation, never caller-supplied claims.
+export const commercialApprovalSourceCurrent=(pin,current)=>{
+ const keys=['candidateId','ownerEventId','policyId'];
+ if(!approvalKeys(pin,keys)||!keys.every(k=>approvalUuid(pin[k]))||!approvalKeys(current,[...keys,'ownerEligible'])||typeof current.ownerEligible!=='boolean')return false;
+ return current.ownerEligible&&keys.every(k=>current[k]===pin[k]);
+};
+export const commercialApprovalActorAllowed=(policy,transitions,sourceCurrent,actor,requesterUserId,affectedWorkerUserId=null)=>{
+ if(sourceCurrent!==true||!validCommercialCandidatePolicy(policy)||!approvalUuid(requesterUserId)||(affectedWorkerUserId!==null&&!approvalUuid(affectedWorkerUserId))||!approvalKeys(actor,['userId','role','active','heldRole','scopedSourceAccess','decisionPermission','inboxPermission'])||!approvalUuid(actor.userId)||typeof actor.role!=='string'||!['active','heldRole','scopedSourceAccess','decisionPermission','inboxPermission'].every(k=>actor[k]===true)||actor.userId===requesterUserId||actor.userId===affectedWorkerUserId)return false;
+ try{const state=commercialApprovalState(policy,transitions);if(state.status!=='Pending')return false;const stage=policy.stages[state.currentStage];return stage.userId===actor.userId&&stage.role===actor.role;}catch{return false;}
+};
