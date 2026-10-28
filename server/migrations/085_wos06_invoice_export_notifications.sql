@@ -102,3 +102,105 @@ declare action_name text;expected jsonb;begin
 end $$;
 create constraint trigger complete_invoice_alert_route after insert on invoice_alert_route_versions deferrable initially deferred for each row execute function complete_invoice_notice_configuration();
 create constraint trigger complete_invoice_export_notice_policy after insert on invoice_export_notice_policies deferrable initially deferred for each row execute function complete_invoice_notice_configuration();
+
+create function invoice_export_expected_recipients(ev invoice_export_notice_events) returns table(recipient uuid,held_role text,recipient_reason text) language plpgsql stable as $$
+declare b invoice_draft_batches;p invoice_export_notice_policies;begin
+ select * into b from invoice_draft_batches where id=ev.batch_id;select * into p from invoice_export_notice_policies where id=ev.policy_id;
+ if b.id is null or p.id is null or b.organization_id<>p.organization_id or b.legal_entity_id<>p.legal_entity_id or b.engagement_id<>p.engagement_id then raise exception 'Retained invoice notification relationships are unavailable.' using errcode='INC02';end if;
+ recipient=b.owner_user_id;held_role=b.owner_role;recipient_reason='invoice_batch_owner';return next;
+ recipient=p.finance_owner_id;held_role=p.finance_owner_role;recipient_reason='finance_billing_owner';return next;
+ if ev.event_key='invoice_batch.export_failed' then recipient=p.integration_admin_id;held_role=p.integration_admin_role;recipient_reason='integration_administrator';return next;end if;
+end $$;
+create function guard_invoice_export_notice() returns trigger language plpgsql as $$
+declare ctx jsonb;ev invoice_export_notice_events;b invoice_draft_batches;p invoice_export_notice_policies;t jsonb;src record;rel record;expected text[];pref boolean;decision text;rec invoice_export_notice_recipients;latest uuid;begin
+ begin ctx=nullif(current_setting('workos.invoice_notice_event_context',true),'')::jsonb;exception when others then ctx=null;end;
+ if ctx is null then raise exception 'An exact protected notification operation is required.' using errcode='INC01';end if;
+ if tg_table_name='invoice_export_notice_events' then
+  select * into b from invoice_draft_batches where id=new.batch_id;select * into p from invoice_export_notice_policies where id=new.policy_id;
+  if new.artifact_id is not null then select id,batch_id,actor_id,active_role,operation_id into src from invoice_csv_artifacts where id=new.artifact_id;else select id,batch_id,actor_id,active_role,operation_id into src from invoice_csv_failures where id=new.failure_id;end if;
+  select id into latest from invoice_export_notice_policies where organization_id=b.organization_id and legal_entity_id=b.legal_entity_id and engagement_id=b.engagement_id and effective_from<=(clock_timestamp() at time zone 'UTC')::date order by effective_from desc,sequence desc limit 1;
+  select x into t from jsonb_array_elements(p.definition->'templates')x where x->>'key'=new.event_key;
+  if b.id is null or p.id is null or src.id is null or t is null or new.id::text is distinct from ctx->>'eventId' or b.id::text is distinct from ctx->>'batchId' or p.id::text is distinct from ctx->>'policyId' or src.id::text is distinct from ctx->>'resultId' or src.actor_id::text is distinct from ctx->>'actorId' or src.active_role is distinct from ctx->>'activeRole' or src.operation_id is distinct from ctx->>'operationId' or new.operation_id<>src.operation_id or src.batch_id<>b.id or b.organization_id is distinct from ctx->>'organizationId' or b.legal_entity_id is distinct from ctx->>'legalEntityId' or p.organization_id<>b.organization_id or p.legal_entity_id<>b.legal_entity_id or p.engagement_id<>b.engagement_id or p.id is distinct from latest or new.locale is distinct from p.definition->>'locale' or new.title is distinct from replace(t->>'subject','{{sourceRef}}','invoice-batch/'||b.id::text) or new.body is distinct from replace(t->>'body','{{sourceRef}}','invoice-batch/'||b.id::text) then raise exception 'Exact operation, current policy and sanitized event required.' using errcode='INC02';end if;return new;
+ end if;
+ if tg_table_name='invoice_export_notice_deliveries' then select * into rec from invoice_export_notice_recipients where id=new.recipient_id;select * into ev from invoice_export_notice_events where id=rec.event_id;else select * into ev from invoice_export_notice_events where id=new.event_id;end if;select * into b from invoice_draft_batches where id=ev.batch_id;select * into p from invoice_export_notice_policies where id=ev.policy_id;
+ if ev.id is null or ev.id::text is distinct from ctx->>'eventId' or b.id::text is distinct from ctx->>'batchId' or p.id::text is distinct from ctx->>'policyId' or ev.operation_id is distinct from ctx->>'operationId' then raise exception 'Exact retained event is required.' using errcode='INC02';end if;
+ if tg_table_name='invoice_export_alert_outbox' then
+  if ev.event_key<>'invoice_batch.export_failed' or new.route_id<>p.route_id or new.status<>'Pending' then raise exception 'Exact configured operational route is required.' using errcode='INC02';end if;return new;
+ elsif tg_table_name='invoice_export_notice_failures' then return new;
+ elsif tg_table_name='invoice_export_notice_deliveries' then
+  select * into rec from invoice_export_notice_recipients where id=new.recipient_id;
+  if rec.id is null or not rec.in_app then raise exception 'Delivery must match its in-app recipient.' using errcode='INC02';end if;return new;
+ end if;
+ select array_agg(distinct x.recipient_reason order by x.recipient_reason) into expected from invoice_export_expected_recipients(ev)x where x.recipient=new.user_id;
+ for rel in select * from invoice_export_expected_recipients(ev)x where x.recipient=new.user_id loop
+  perform lock_commercial_candidate_identity(b.organization_id,b.legal_entity_id,rel.recipient,rel.held_role);
+  if not invoice_notice_named_recipient(b.organization_id,b.legal_entity_id,rel.recipient,rel.held_role) or (rel.recipient_reason='finance_billing_owner' and (not invoice_draft_actor_valid(b.organization_id,b.legal_entity_id,rel.recipient,rel.held_role,'view') or exists(select 1 from invoice_draft_lines l where l.batch_id=b.id and not tm_billing_worker_visible(b.organization_id,b.legal_entity_id,l.snapshot_id,rel.recipient,rel.held_role)))) then raise exception 'Current scoped notification recipient required.' using errcode='INC01';end if;
+ end loop;
+ select n.in_app into pref from notification_preferences n join users u on u.employee_record_id=n.employee_id where u.id=new.user_id and n.event_type=ev.event_key for share of n;
+ decision=case when ev.event_key='invoice_batch.export_failed' then 'Required' when not(p.definition->>'completionInApp')::boolean then 'SuppressedPolicy' when pref is false then 'SuppressedPreference' else 'Enabled' end;
+ if expected is null or (select array_agg(x order by x) from unnest(new.reasons)x) is distinct from expected or new.channel_decision<>decision or new.in_app is distinct from(decision in('Required','Enabled')) then raise exception 'Exact recipient reasons and channel policy required.' using errcode='INC02';end if;return new;
+end $$;
+create trigger guard_invoice_export_notice_event before insert on invoice_export_notice_events for each row execute function guard_invoice_export_notice();
+create trigger guard_invoice_export_notice_recipient before insert on invoice_export_notice_recipients for each row execute function guard_invoice_export_notice();
+create trigger guard_invoice_export_notice_delivery before insert on invoice_export_notice_deliveries for each row execute function guard_invoice_export_notice();
+create trigger guard_invoice_export_notice_failure before insert on invoice_export_notice_failures for each row execute function guard_invoice_export_notice();
+create trigger guard_invoice_export_alert_outbox before insert on invoice_export_alert_outbox for each row execute function guard_invoice_export_notice();
+
+create function complete_invoice_export_notice() returns trigger language plpgsql as $$
+declare b invoice_draft_batches;p invoice_export_notice_policies;has_failure boolean;expected_users uuid[];u uuid;expected_reasons text[];rec invoice_export_notice_recipients;actual_count int;begin
+ select * into b from invoice_draft_batches where id=new.batch_id;select * into p from invoice_export_notice_policies where id=new.policy_id;
+ if b.id is null or p.id is null then raise exception 'Retained event scope is required.' using errcode='INC03';end if;
+ has_failure=exists(select 1 from invoice_export_notice_failures where event_id=new.id);
+ if new.event_key='invoice_batch.export_failed' and not exists(select 1 from invoice_export_alert_outbox x where x.event_id=new.id and x.route_id=p.route_id and x.status='Pending') then raise exception 'A durable configured operational outbox entry is required.' using errcode='INC03';end if;
+ select array_agg(distinct x.recipient order by x.recipient) into expected_users from invoice_export_expected_recipients(new)x;
+ select count(*)::int into actual_count from invoice_export_notice_recipients where event_id=new.id;
+ if expected_users is null or(not has_failure and actual_count<>cardinality(expected_users)) or(has_failure and actual_count not in(0,cardinality(expected_users))) then raise exception 'Recipient evidence must be complete or visibly unavailable.' using errcode='INC03';end if;
+ if actual_count>0 then foreach u in array expected_users loop
+  select array_agg(distinct x.recipient_reason order by x.recipient_reason) into expected_reasons from invoice_export_expected_recipients(new)x where x.recipient=u;
+  select * into rec from invoice_export_notice_recipients where event_id=new.id and user_id=u;
+  if rec.id is null or(select array_agg(x order by x) from unnest(rec.reasons)x) is distinct from expected_reasons or(new.event_key='invoice_batch.export_failed' and(not rec.in_app or rec.channel_decision<>'Required')) or(rec.in_app and not exists(select 1 from invoice_export_notice_deliveries d where d.recipient_id=rec.id and d.channel='InApp' and d.status='Delivered')) then raise exception 'Exact recipient and delivery evidence must commit.' using errcode='INC03';end if;
+ end loop;end if;
+ return null;
+end $$;
+create constraint trigger complete_invoice_export_notice after insert on invoice_export_notice_events deferrable initially deferred for each row execute function complete_invoice_export_notice();
+
+create function require_invoice_export_notice() returns trigger language plpgsql as $$
+begin
+ if tg_table_name='invoice_csv_artifacts' then
+  if not exists(select 1 from invoice_export_notice_events where artifact_id=new.id and batch_id=new.batch_id and event_key='invoice_batch.exported_or_billed_confirmed' and operation_id=new.operation_id) then raise exception 'An accepted export requires its retained canonical event.' using errcode='INC03';end if;
+ else
+  if not exists(select 1 from invoice_export_notice_events where failure_id=new.id and batch_id=new.batch_id and event_key='invoice_batch.export_failed' and operation_id=new.operation_id) then raise exception 'A recorded failure requires its retained canonical event.' using errcode='INC03';end if;
+ end if;return null;
+end $$;
+create constraint trigger require_invoice_csv_artifact_notice after insert on invoice_csv_artifacts deferrable initially deferred for each row execute function require_invoice_export_notice();
+create constraint trigger require_invoice_csv_failure_notice after insert on invoice_csv_failures deferrable initially deferred for each row execute function require_invoice_export_notice();
+
+create function guard_invoice_export_notice_read() returns trigger language plpgsql as $$
+declare ctx jsonb;begin
+ begin ctx=nullif(current_setting('workos.invoice_notice_read_context',true),'')::jsonb;exception when others then ctx=null;end;
+ if ctx is null or new.user_id::text is distinct from ctx->>'actorId' or not exists(select 1 from invoice_export_notice_recipients r join invoice_export_notice_events ev on ev.id=r.event_id join invoice_draft_batches b on b.id=ev.batch_id where r.id=new.recipient_id and r.user_id=new.user_id and r.in_app and b.organization_id=ctx->>'organizationId' and b.legal_entity_id=ctx->>'legalEntityId' and invoice_notice_actor_has(b.organization_id,b.legal_entity_id,new.user_id,ctx->>'activeRole','notifications.view')) then raise exception 'Only the current scoped named recipient may acknowledge this notice.' using errcode='INC01';end if;return new;
+end $$;
+create trigger guard_invoice_export_notice_read before insert on invoice_export_notice_reads for each row execute function guard_invoice_export_notice_read();
+
+-- If the canonical event itself cannot be persisted, the valid export/failure
+-- can still commit with explicit recovery evidence and no partial event rows.
+create table invoice_export_notice_producer_failures(
+ id uuid primary key,batch_id uuid not null references invoice_draft_batches(id),policy_id uuid not null references invoice_export_notice_policies(id),artifact_id uuid references invoice_csv_artifacts(id),failure_id uuid references invoice_csv_failures(id),operation_id text not null,code text not null check(code='NOTIFICATION_EVENT_UNAVAILABLE'),created_at timestamptz not null default clock_timestamp(),check((artifact_id is null)<>(failure_id is null)),unique(artifact_id),unique(failure_id)
+);
+create trigger immutable_invoice_export_notice_producer_failures before update or delete on invoice_export_notice_producer_failures for each row execute function reject_commercial_draft_rewrite();
+create function guard_invoice_export_notice_producer_failure() returns trigger language plpgsql as $$
+declare ctx jsonb;b invoice_draft_batches;p invoice_export_notice_policies;src record;begin
+ begin ctx=nullif(current_setting('workos.invoice_notice_event_context',true),'')::jsonb;exception when others then ctx=null;end;
+ select * into b from invoice_draft_batches where id=new.batch_id;select * into p from invoice_export_notice_policies where id=new.policy_id;
+ if new.artifact_id is not null then select id,batch_id,actor_id,active_role,operation_id into src from invoice_csv_artifacts where id=new.artifact_id;else select id,batch_id,actor_id,active_role,operation_id into src from invoice_csv_failures where id=new.failure_id;end if;
+ if ctx is null or b.id is null or p.id is null or src.id is null or b.id::text is distinct from ctx->>'batchId' or p.id::text is distinct from ctx->>'policyId' or src.id::text is distinct from ctx->>'resultId' or src.actor_id::text is distinct from ctx->>'actorId' or src.active_role is distinct from ctx->>'activeRole' or src.operation_id is distinct from ctx->>'operationId' or new.operation_id<>src.operation_id or src.batch_id<>b.id or b.organization_id is distinct from ctx->>'organizationId' or b.legal_entity_id is distinct from ctx->>'legalEntityId' or p.organization_id<>b.organization_id or p.legal_entity_id<>b.legal_entity_id or p.engagement_id<>b.engagement_id or exists(select 1 from invoice_export_notice_events ev where (new.artifact_id is not null and ev.artifact_id=new.artifact_id) or (new.failure_id is not null and ev.failure_id=new.failure_id)) then raise exception 'Exact operation and visible isolated notification failure required.' using errcode='INC02';end if;return new;
+end $$;
+create trigger guard_invoice_export_notice_producer_failure before insert on invoice_export_notice_producer_failures for each row execute function guard_invoice_export_notice_producer_failure();
+create or replace function require_invoice_export_notice() returns trigger language plpgsql as $$
+begin
+ if tg_table_name='invoice_csv_artifacts' then
+  if not exists(select 1 from invoice_export_notice_events where artifact_id=new.id and batch_id=new.batch_id and event_key='invoice_batch.exported_or_billed_confirmed' and operation_id=new.operation_id) and not exists(select 1 from invoice_export_notice_producer_failures where artifact_id=new.id and batch_id=new.batch_id and operation_id=new.operation_id) then raise exception 'Accepted export requires a canonical event or visible recovery evidence.' using errcode='INC03';end if;
+ else
+  if not exists(select 1 from invoice_export_notice_events where failure_id=new.id and batch_id=new.batch_id and event_key='invoice_batch.export_failed' and operation_id=new.operation_id) and not exists(select 1 from invoice_export_notice_producer_failures where failure_id=new.id and batch_id=new.batch_id and operation_id=new.operation_id) then raise exception 'Recorded failure requires a canonical event or visible recovery evidence.' using errcode='INC03';end if;
+ end if;return null;
+end $$;
