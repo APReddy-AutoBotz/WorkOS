@@ -42,6 +42,7 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.invoice_export.create', module: 'Commercial', label: 'Create Invoice CSV', description: 'Opt-in acceptance of approved invoice CSV artifacts.', optIn: true },
   { key: 'commercial.invoice_export.configure', module: 'Commercial', label: 'Configure Invoice Notices', description: 'Opt-in scoped notification policy configuration.', optIn: true },
   { key: 'commercial.invoice_export.recover_notices', module: 'Commercial', label: 'Recover Invoice Notices', description: 'Opt-in scoped notification recovery.', optIn: true },
+  { key: 'commercial.invoice_batch.confirm', module: 'Commercial', label: 'Confirm Invoice Billing', description: 'Opt-in scoped manual billing attestation.', optIn: true },
   { key: 'integrations.invoice_alert_routes.manage', module: 'Integrations', label: 'Manage Invoice Alert Routes', description: 'Opt-in internal alert-route configuration.', optIn: true },
   { key: 'allocations.view', module: 'Planning', label: 'Planning Workspace', description: 'View planning signals and allocation records inside data scope.' },
   { key: 'allocations.manage', module: 'Planning', label: 'Manage Allocations', description: 'Create, edit, and end allocations inside data scope.' },

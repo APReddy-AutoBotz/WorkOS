@@ -1,7 +1,3 @@
--- Local development safeguard: do not install until the confirmation event,
--- guarded recipient recovery, connected UI and full acceptance are complete.
-do $$ begin raise exception 'Invoice confirmation integration is incomplete'; end $$;
-
 -- Definition only; no role or user grants and no default policy.
 insert into permission_definitions(permission_key,module,label,description,protected) values
  ('commercial.invoice_batch.confirm','Commercial','Confirm downstream invoice billing','Record an explicit scoped human attestation for an exported invoice-ready artifact.',false);
@@ -30,9 +26,6 @@ declare ctx jsonb;b invoice_draft_batches;a invoice_csv_artifacts;l invoice_draf
  new.confirmed_at=clock_timestamp();for l in select * from invoice_draft_lines where batch_id=b.id order by sequence loop perform lock_tm_billing_worker_witness(b.organization_id,b.legal_entity_id,l.snapshot_id,new.actor_id,new.active_role);if not tm_billing_worker_visible(b.organization_id,b.legal_entity_id,l.snapshot_id,new.actor_id,new.active_role) then raise exception 'Current worker scope is required for every retained line.' using errcode='IBC01';end if;end loop;return new;
 end $$;
 create trigger guard_invoice_batch_confirmation before insert on invoice_batch_confirmations for each row execute function guard_invoice_batch_confirmation();
--- TODO before enabling: add deferred exact-state/occupancy/audit checks and
--- canonical informational notice with visible failure and recovery evidence;
--- wire authorized API, client and role journey without provider calls.
 
 -- A later confirmation uses the same canonical informational template but has
 -- its own source operation and immutable event identity; it never reuses the

@@ -14,10 +14,10 @@ await withCommercialDatabase(async({pool})=>{
   await runMigrations({pool,rootDir:dir,logger:{log(){}}});await seedWorkApproval(pool);
   const tables=['users','user_roles','user_organization_scopes','role_permissions','user_permission_grants','invoice_draft_batches','invoice_draft_lines','invoice_draft_occupancies','invoice_batch_approval_instances','invoice_batch_approval_transitions','audit_logs'];
   const snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async t=>[t,(await pool.query('select to_jsonb(t) v from '+t+' t order by to_jsonb(t)::text')).rows])));
-  const before=await snapshot(),keys=['commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage'];
+  const before=await snapshot(),keys=['commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage','commercial.invoice_batch.confirm'];
   assert.equal((await pool.query('select count(*)::int n from permission_definitions where permission_key=any($1::text[])',[keys])).rows[0].n,0);
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['085_wos06_invoice_export_notifications']);assert.deepEqual(await snapshot(),before);
-  assert.equal((await pool.query('select count(*)::int n from permission_definitions where permission_key=any($1::text[])',[keys])).rows[0].n,3);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['085_wos06_invoice_export_notifications','086_wos06_invoice_billing_confirmation']);assert.deepEqual(await snapshot(),before);
+  assert.equal((await pool.query('select count(*)::int n from permission_definitions where permission_key=any($1::text[])',[keys])).rows[0].n,4);
   for(const t of ['invoice_alert_route_versions','invoice_export_notice_policies','invoice_export_notice_events','invoice_export_notice_recipients','invoice_export_notice_deliveries','invoice_export_notice_reads','invoice_export_alert_outbox','invoice_export_notice_failures','invoice_export_notice_producer_failures','invoice_export_notice_recoveries'])assert.equal((await pool.query('select count(*)::int n from '+t)).rows[0].n,0);
   assert.equal((await pool.query('select count(*)::int n from role_permissions where permission_key=any($1::text[])',[keys])).rows[0].n,0);
   assert.equal((await pool.query('select count(*)::int n from user_permission_grants where permission_key=any($1::text[])',[keys])).rows[0].n,0);
