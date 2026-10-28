@@ -3353,7 +3353,7 @@ app.get('/api/approvals', requireDatabase, requireAuth, requirePermission('appro
   const where = buildApprovalScopeWhere(req, params);
   await run(res, `
     ${approvalSelect}
-    where ${where}
+    where (${where}) and ar.entity_type <> 'CommercialCandidateApproval'
     order by case when ar.status = 'Pending' then 0 else 1 end, ar.created_at desc
   `, params);
 });
@@ -3378,6 +3378,11 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     await lockWorkPolicy(client,req);
     const approval = (await client.query('select * from approval_records where id = $1 for update', [req.params.id])).rows[0];
     if (!approval) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Approval record not found' });
+      return;
+    }
+    if (approval.entity_type === 'CommercialCandidateApproval') {
       await client.query('rollback');
       res.status(404).json({ error: 'Approval record not found' });
       return;
@@ -4080,6 +4085,10 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
         await client.query('rollback');
         res.status(404).json({ error: 'Approval record not found' });
         return;
+      }
+      if(approval.rows[0].entity_type==='CommercialCandidateApproval'){
+        await client.query('rollback');
+        res.status(404).json({error:'Approval record not found'});return;
       }
       if(approval.rows[0].entity_type==='Timesheet'){
         await client.query('rollback');
@@ -5352,7 +5361,7 @@ app.get('/api/reports/workforce-command-center', requireDatabase, requireAuth, r
           count(*) filter (where ar.due_at is not null and ar.due_at < now())::int as overdue
         from approval_records ar
         left join employees e on e.id = ar.subject_employee_id
-        where ar.status = $1 and ${approvalScopeWhere}
+        where ar.status = $1 and ar.entity_type <> 'CommercialCandidateApproval' and ${approvalScopeWhere}
       `, approvalParams),
       pool.query(`
         with scoped_employees as (
