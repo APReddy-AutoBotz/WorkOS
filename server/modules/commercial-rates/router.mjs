@@ -45,3 +45,6 @@ export const createRateCandidateRouter=o=>{
  const row=(await c.query(`insert into commercial_candidate_owners(id,organization_id,legal_entity_id,candidate_id,sequence,previous_id,owner_user_id,owner_role,request_id,actor_id,active_role,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)returning ${ownerProjection}`,[eventId,...scope(r),d.candidateId,(previous?.sequence??0)+1,previous?.id??null,d.ownerUserId,d.ownerRole,d.requestId,r.user.sub,r.user.activeRole,d.reason,r.operationId])).rows[0];await o.audit(c,r,{module:'Commercial Owner',action:'Assign Owner',entityType:'CommercialCandidateOwner',entityId:eventId,oldValue:previous?{ownerEventId:previous.id,candidateId:d.candidateId}:null,newValue:{ownerEventId:eventId,candidateId:d.candidateId},reason:'Protected commercial owner recorded.',details:'Ownership does not grant approval or financial authority.'});return{...await context(c,r),kind:candidate.kind,owner:row,replayed:false};}));
  return router;
 };
+
+// Reuse the same scoped candidate boundaries in the commercial approval domain.
+export {authorize as authorizeRateCandidate,ref as scopedRateCandidateSource,context as rateCandidateContext};

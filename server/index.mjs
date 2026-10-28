@@ -1,3 +1,4 @@
+import {createCommercialCandidateApprovalRouter} from './modules/commercial-rates/approval-router.mjs';
 import {createRateCandidateRouter} from './modules/commercial-rates/router.mjs';
 import {createWorkerTypeRouter} from './modules/workforce/worker-type-router.mjs';
 import {createReviewedWorkerExitRouter} from './modules/workforce/exit-router.mjs';
@@ -184,6 +185,8 @@ const permissionDefinitions = [
   ['commercial.rate_candidates.manage', 'Commercial', 'Manage billing rate candidates', false],
   ['commercial.cost_candidates.view', 'Commercial', 'View cost rate candidates', false],
   ['commercial.cost_candidates.manage', 'Commercial', 'Manage cost rate candidates', false],
+  ['commercial.rate_approvals.decide', 'Commercial', 'Decide billing candidate approvals', false],
+  ['commercial.cost_approvals.decide', 'Commercial', 'Decide cost candidate approvals', false],
   ['allocations.view', 'Planning', 'Planning Workspace', false],
   ['allocations.manage', 'Planning', 'Manage Allocations', false],
   ['timesheets.submit', 'Timesheets', 'Submit Timesheets', false],
@@ -211,7 +214,7 @@ const permissionDefinitions = [
 ];
 const protectedPermissionKeys = new Set(permissionDefinitions.filter(([, , , protectedCore]) => protectedCore).map(([key]) => key));
 const defaultRolePermissions = {
-  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.contracts.view', 'commercial.contracts.manage', 'commercial.lifecycle.manage', 'commercial.rate_candidates.view', 'commercial.rate_candidates.manage', 'commercial.cost_candidates.view', 'commercial.cost_candidates.manage'].includes(key)).map(([key]) => key),
+  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.contracts.view', 'commercial.contracts.manage', 'commercial.lifecycle.manage', 'commercial.rate_candidates.view', 'commercial.rate_candidates.manage', 'commercial.cost_candidates.view', 'commercial.cost_candidates.manage', 'commercial.rate_approvals.decide', 'commercial.cost_approvals.decide'].includes(key)).map(([key]) => key),
   HR: ['dashboard.view', 'employees.view', 'employees.manage', 'employees.password_reset', 'projects.view', 'projects.manage', 'projects.status_update', 'clients.view', 'clients.manage', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'leave.admin', 'approvals.view', 'notifications.view', 'notifications.manage', 'integrations.identity', 'integrations.teams', 'integrations.teams_actions', 'settings.manage'],
   CountryDirector: ['dashboard.view', 'employees.view', 'projects.view', 'clients.view', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
   ProjectManager: ['pm_workspace.view', 'employees.view', 'projects.view', 'projects.status_update', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
@@ -3353,7 +3356,7 @@ app.get('/api/approvals', requireDatabase, requireAuth, requirePermission('appro
   const where = buildApprovalScopeWhere(req, params);
   await run(res, `
     ${approvalSelect}
-    where ${where}
+    where (${where}) and ar.entity_type <> 'CommercialCandidateApproval'
     order by case when ar.status = 'Pending' then 0 else 1 end, ar.created_at desc
   `, params);
 });
@@ -3378,6 +3381,11 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     await lockWorkPolicy(client,req);
     const approval = (await client.query('select * from approval_records where id = $1 for update', [req.params.id])).rows[0];
     if (!approval) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Approval record not found' });
+      return;
+    }
+    if (approval.entity_type === 'CommercialCandidateApproval') {
       await client.query('rollback');
       res.status(404).json({ error: 'Approval record not found' });
       return;
@@ -4080,6 +4088,10 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
         await client.query('rollback');
         res.status(404).json({ error: 'Approval record not found' });
         return;
+      }
+      if(approval.rows[0].entity_type==='CommercialCandidateApproval'){
+        await client.query('rollback');
+        res.status(404).json({error:'Approval record not found'});return;
       }
       if(approval.rows[0].entity_type==='Timesheet'){
         await client.query('rollback');
@@ -5352,7 +5364,7 @@ app.get('/api/reports/workforce-command-center', requireDatabase, requireAuth, r
           count(*) filter (where ar.due_at is not null and ar.due_at < now())::int as overdue
         from approval_records ar
         left join employees e on e.id = ar.subject_employee_id
-        where ar.status = $1 and ${approvalScopeWhere}
+        where ar.status = $1 and ar.entity_type <> 'CommercialCandidateApproval' and ${approvalScopeWhere}
       `, approvalParams),
       pool.query(`
         with scoped_employees as (
@@ -6498,6 +6510,7 @@ app.use('/api/v1/calendar-scope-authoring',createCalendarScopeAuthoringRouter({p
 app.use('/api/v1/business-structure',createBusinessStructureRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Business structure request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/calendar-authoring',createCalendarAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar authoring request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/rate-candidates',createRateCandidateRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Rate candidate failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/commercial-candidate-approvals',createCommercialCandidateApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Commercial candidate approval failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/worker-type',createWorkerTypeRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,getEffectivePermissionsForUser,audit,logError:e=>console.error('Worker type failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-exit',createReviewedWorkerExitRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,getEffectivePermissionsForUser,workerExitDependencies,assertWorkerMayExit,synchronizeWorkerExit,audit,logError:e=>console.error('Reviewed worker exit failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/workforce-classification',createWorkforceClassificationRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,audit,logError:e=>console.error('Classification request failed',e?.code||'UNKNOWN')}));

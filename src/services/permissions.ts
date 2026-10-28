@@ -25,6 +25,8 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.rate_candidates.manage', module: 'Commercial', label: 'Manage Billing Rate Candidates', description: 'Opt-in append of scoped unapproved billing rate candidates.', optIn: true },
   { key: 'commercial.cost_candidates.view', module: 'Commercial', label: 'View Cost Rate Candidates', description: 'Opt-in scoped access to confidential unapproved cost candidates.', optIn: true },
   { key: 'commercial.cost_candidates.manage', module: 'Commercial', label: 'Manage Cost Rate Candidates', description: 'Opt-in append of scoped confidential cost candidates.', optIn: true },
+  { key: 'commercial.rate_approvals.decide', module: 'Commercial', label: 'Decide Billing Candidate Approvals', description: 'Opt-in decisions on explicitly assigned scoped billing candidates.', optIn: true },
+  { key: 'commercial.cost_approvals.decide', module: 'Commercial', label: 'Decide Cost Candidate Approvals', description: 'Opt-in decisions on explicitly assigned scoped confidential cost candidates.', optIn: true },
   { key: 'allocations.view', module: 'Planning', label: 'Planning Workspace', description: 'View planning signals and allocation records inside data scope.' },
   { key: 'allocations.manage', module: 'Planning', label: 'Manage Allocations', description: 'Create, edit, and end allocations inside data scope.' },
   { key: 'timesheets.submit', module: 'Timesheets', label: 'Submit Timesheets', description: 'Create and submit own or scoped timesheets.' },
