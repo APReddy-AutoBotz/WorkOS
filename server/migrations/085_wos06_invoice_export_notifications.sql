@@ -86,3 +86,19 @@ declare ctx jsonb;last_route invoice_alert_route_versions;last_policy invoice_ex
 end $$;
 create trigger guard_invoice_alert_route before insert on invoice_alert_route_versions for each row execute function guard_invoice_notice_configuration();
 create trigger guard_invoice_export_notice_policy before insert on invoice_export_notice_policies for each row execute function guard_invoice_notice_configuration();
+
+-- Configuration and sanitized audit evidence must commit together. This also
+-- rechecks held authority and named relationships at the transaction boundary.
+create function complete_invoice_notice_configuration() returns trigger language plpgsql as $$
+declare action_name text;expected jsonb;begin
+ if tg_table_name='invoice_alert_route_versions' then
+  if not invoice_notice_actor_has(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'integrations.invoice_alert_routes.manage') then raise exception 'Alert-route authority changed.' using errcode='INC03';end if;
+  action_name='Configure Alert Route';expected=jsonb_build_object('routeId',new.id,'routeKey',new.route_key);
+ else
+  if not invoice_csv_actor_valid(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'view') or not invoice_notice_actor_has(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'commercial.invoice_export.configure') or not invoice_notice_named_recipient(new.organization_id,new.legal_entity_id,new.finance_owner_id,new.finance_owner_role) or not invoice_draft_actor_valid(new.organization_id,new.legal_entity_id,new.finance_owner_id,new.finance_owner_role,'view') or not invoice_notice_named_recipient(new.organization_id,new.legal_entity_id,new.integration_admin_id,new.integration_admin_role) or not invoice_alert_route_current(new.route_id,new.organization_id,new.legal_entity_id) then raise exception 'Policy authority, route or recipients changed.' using errcode='INC03';end if;
+  action_name='Configure Invoice Notification';expected=jsonb_build_object('policyId',new.id,'engagementId',new.engagement_id,'routeId',new.route_id);
+ end if;
+ if not exists(select 1 from audit_logs a where a.organization_id=new.organization_id and a.legal_entity_id=new.legal_entity_id and a.user_id=new.actor_id::text and a.active_role=new.active_role and a.module='Invoice Export Notifications' and a.action=action_name and a.entity_id=new.id::text and a.operation_id=new.operation_id and a.new_value=expected) then raise exception 'Configuration and sanitized audit must commit together.' using errcode='INC03';end if;return null;
+end $$;
+create constraint trigger complete_invoice_alert_route after insert on invoice_alert_route_versions deferrable initially deferred for each row execute function complete_invoice_notice_configuration();
+create constraint trigger complete_invoice_export_notice_policy after insert on invoice_export_notice_policies deferrable initially deferred for each row execute function complete_invoice_notice_configuration();
