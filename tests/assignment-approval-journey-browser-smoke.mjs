@@ -215,3 +215,6 @@ await import('./governed-tm-journey-browser-smoke.mjs');
 
 // Real T&M billing review and approved-unbilled register journey.
 await import('./tm-billing-eligibility-journey-browser-smoke.mjs');
+
+// Connected Draft creation, reservation, receipt recovery and cancellation.
+await import('./invoice-draft-journey-browser-smoke.mjs');
