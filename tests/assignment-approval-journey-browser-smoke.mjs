@@ -212,3 +212,6 @@ await import('./rate-adoption-journey-browser-smoke.mjs');
 
 // Protected T&M workspace: approved work and adopted native rate sources.
 await import('./governed-tm-journey-browser-smoke.mjs');
+
+// Real T&M billing review and approved-unbilled register journey.
+await import('./tm-billing-eligibility-journey-browser-smoke.mjs');

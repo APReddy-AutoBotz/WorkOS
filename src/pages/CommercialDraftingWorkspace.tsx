@@ -2,6 +2,7 @@ import {cloneElement, isValidElement, useEffect, useId, useRef, useState, type F
 import {PageHeader} from '../components/ui/PageHeader';
 import {RateCandidates} from '../components/RateCandidates';
 import {GovernedTmWorkspace} from '../components/GovernedTmWorkspace';
+import {TmBillingEligibilityWorkspace} from '../components/TmBillingEligibilityWorkspace';
 import {termPluralTitle, termTitle} from '../config/terminology';
 import {ApiClientError} from '../services/apiClient';
 import {
@@ -248,6 +249,7 @@ export const CommercialDraftingWorkspace = () => {
     {workspace && <>
       <RateCandidates kind="billing" choices={[...workspace.contracts.map(x=>({type:'contract' as const,id:x.id,label:x.number})),...workspace.engagements.map(x=>({type:'engagement' as const,id:x.id,label:x.name}))]}/>
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <TmBillingEligibilityWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
         <p>Server snapshot: {workspace.asOf}. {canManage ? 'Commercial drafting access enabled.' : 'Read-only commercial access. A separate manage permission is required to create drafts.'}</p>
         <p className="mt-1">Legacy {termPluralTitle('project').toLowerCase()} mapped: {workspace.legacyMappings.mappedProjects} of {workspace.legacyMappings.totalProjects}. Neutral migration snapshot coverage only; governed bindings appear separately below. Mapping does not establish invoice eligibility.</p>
