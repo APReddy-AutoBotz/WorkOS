@@ -1,6 +1,5 @@
 import {Router} from 'express';import {randomUUID} from 'node:crypto';import {z} from 'zod';import {capacityCanonical,capacityHash} from '../planning/worker-capacity-service.mjs';import {assertCommercialAuthority} from '../commercial-drafting/service.mjs';import {workApprovalOwner} from '../approvals/work-approval-service.mjs';import {validInvoiceExportNotificationPolicy} from '../../../shared/invoice-export-notification.mjs';
-// Development-only until migration 085's event, inbox and outbox guards and
-// complete acceptance pass. No route targets external addresses or providers.
+// Routes identify internal outbox targets, never external addresses or providers.
 export const createInvoiceNoticeConfigRouter=o=>{
  const router=Router(),uuid=z.string().uuid(),hash=z.string().regex(/^[a-f0-9]{64}$/),reason=z.string().trim().min(3).max(1000),scope=r=>[r.organizationScope.organizationId,r.organizationScope.legalEntityId],fail=(statusCode,code,message)=>Object.assign(Error(message),{statusCode,code}),parse=(s,v)=>{const x=s.safeParse(v);if(!x.success)throw fail(400,'INVOICE_NOTICE_INPUT','Explicit valid configuration is required.');return x.data;},fingerprint=x=>capacityHash(capacityCanonical(x));
  router.use((_r,res,next)=>{res.set('Cache-Control','no-store');next();},o.requireDatabase,o.requireAuth);

@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {invoiceExportRecipients,renderInvoiceExportNotice,validInvoiceExportNotificationPolicy} from '../../../shared/invoice-export-notification.mjs';
-// Development-only until the guarded migration and complete acceptance pass.
+// Recipient and producer failures remain visible without erasing valid exports.
 // An internal outbox entry never invokes an external provider.
 export const currentInvoiceNoticePolicy=async(c,b)=>{
  const policy=(await c.query("select * from invoice_export_notice_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and effective_from<=(clock_timestamp() at time zone 'UTC')::date order by effective_from desc,sequence desc limit 1 for share",[b.organization_id,b.legal_entity_id,b.engagement_id])).rows[0];

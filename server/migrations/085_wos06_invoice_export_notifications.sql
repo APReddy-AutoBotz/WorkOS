@@ -32,10 +32,7 @@ create table invoice_export_notice_reads(recipient_id uuid primary key reference
 create table invoice_export_alert_outbox(id uuid primary key,event_id uuid not null unique references invoice_export_notice_events(id),route_id uuid not null references invoice_alert_route_versions(id),status text not null check(status='Pending'),created_at timestamptz not null default clock_timestamp());
 create table invoice_export_notice_failures(id uuid primary key,event_id uuid not null unique references invoice_export_notice_events(id),code text not null check(code='NOTIFICATION_PERSISTENCE_UNAVAILABLE'),created_at timestamptz not null default clock_timestamp());
 do $$declare t text;begin foreach t in array array['invoice_alert_route_versions','invoice_export_notice_policies','invoice_export_notice_events','invoice_export_notice_recipients','invoice_export_notice_deliveries','invoice_export_notice_reads','invoice_export_alert_outbox','invoice_export_notice_failures'] loop execute format('create trigger immutable_%I before update or delete on %I for each row execute function reject_commercial_draft_rewrite()',t,t);end loop;end $$;
--- TODO: protected prospective policy/route admission and version validation;
--- exact source-scoped event and relationship guards; deferred complete-set or
--- failure evidence; durable required outbox; current-recipient inbox/read;
--- and integration with the export transaction must precede sentinel removal.
+-- Configuration, source, recipient and commit guards follow below.
 
 -- Validate exact shape, named roles, canonical event/template keys, and the
 -- only allowed rendered variable. Application validation also canonicalizes
