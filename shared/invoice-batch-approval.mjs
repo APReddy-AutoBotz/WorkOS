@@ -31,3 +31,16 @@ export const renderInvoiceBatchApprovalNotice = (template, batchId, stage) => {
   }
   return renderApprovalTemplate(template, { workerCode: '', sourceRef: `invoice-batch/${batchId}`, stageNumber: String(stage), decisionReason: '' });
 };
+
+// The server supplies relationships resolved from the locked source, never
+// arbitrary client recipients. All reasons survive identity deduplication.
+export const invoiceBatchApprovalRecipients = relationships => {
+  const allowed = ['current_stage_approver', 'requester', 'affected_worker', 'invoice_batch_owner', 'finance_preparer'];
+  if (!Array.isArray(relationships) || !relationships.length) throw new TypeError('Protected recipients are required.');
+  const users = new Map();
+  for (const row of relationships) {
+    if (!approvalKeys(row, ['userId', 'reason']) || !approvalUuid(row.userId) || !allowed.includes(row.reason)) throw new TypeError('Invalid protected recipient.');
+    const reasons = users.get(row.userId) ?? new Set(); reasons.add(row.reason); users.set(row.userId, reasons);
+  }
+  return [...users].sort(([a], [b]) => a.localeCompare(b)).map(([userId, reasons]) => ({ userId, reasons: [...reasons].sort() }));
+};

@@ -218,3 +218,6 @@ await import('./tm-billing-eligibility-journey-browser-smoke.mjs');
 
 // Connected Draft creation, reservation, receipt recovery and cancellation.
 await import('./invoice-draft-journey-browser-smoke.mjs');
+
+// Configured invoice review, inbox and scope-fenced receipt recovery.
+await import('./invoice-batch-approval-journey-browser-smoke.mjs');
