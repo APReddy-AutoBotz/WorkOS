@@ -1,2 +1,2 @@
-// Superset preserves invoice CSV journey assertions and adds configuration/recovery.
-await import('./invoice-export-notification-ui-browser-smoke.mjs');
+// Superset preserves CSV, notice and recovery journey checks plus attestation.
+await import('./invoice-billing-confirmation-journey-browser-smoke.mjs');
