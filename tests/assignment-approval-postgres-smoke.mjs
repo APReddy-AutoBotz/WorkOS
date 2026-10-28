@@ -11,7 +11,7 @@ await withCommercialDatabase(async ({ pool }) => withPreAssignmentApprovalMigrat
     await runMigrations({ pool, rootDir, logger: { log() { } } });
     await seedAssignmentApproval(pool);
     const keep = ['project_allocations', 'assignment_versions', 'assignment_overlap_policy_versions', 'assignment_overlap_evidence', 'approval_records', 'users', 'role_permissions', 'timesheets', 'timesheet_entries', 'work_submission_evidence', 'work_submission_decisions', 'resource_demands', 'resource_demand_versions', 'work_approval_instances', 'work_approval_events', 'work_period_notice_policies', 'work_period_notice_events', 'notification_events'], before = await snapshot(pool, keep);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['065_wos05_assignment_material_approvals','066_wos05_assignment_creation_approvals','067_wos05_approval_due_notices','068_wos05_canonical_leave_approvals', '069_wos05_canonical_delegation','070_wos05_approval_reminders','071_wos02_governed_calendar_authoring','072_wos02_country_group_calendar_authoring','073_wos02_business_structure_authoring','074_wos02_workforce_classification','075_wos02_worker_type','076_wos06_rate_cost_candidates','077_wos06_candidate_owners','078_wos06_commercial_candidate_approvals']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['065_wos05_assignment_material_approvals','066_wos05_assignment_creation_approvals','067_wos05_approval_due_notices','068_wos05_canonical_leave_approvals', '069_wos05_canonical_delegation','070_wos05_approval_reminders','071_wos02_governed_calendar_authoring','072_wos02_country_group_calendar_authoring','073_wos02_business_structure_authoring','074_wos02_workforce_classification','075_wos02_worker_type','076_wos06_rate_cost_candidates','077_wos06_candidate_owners','078_wos06_commercial_candidate_approvals','079_wos06_approved_rate_adoptions']);
     assert.deepEqual(await snapshot(pool, keep), before);
     for (const t of tables)
         assert.deepEqual(await table(pool, t), []);
@@ -261,3 +261,7 @@ await import('./commercial-owner-upgrade-postgres-smoke.mjs');
 await import('./commercial-approval-sql-smoke.mjs');
 await import('./commercial-approval-postgres-smoke.mjs');
 await import('./commercial-approval-upgrade-postgres-smoke.mjs');
+
+// Explicitly approved and adopted rate sources retain review lineage.
+await import('./rate-adoption-postgres-smoke.mjs');
+await import('./rate-adoption-upgrade-postgres-smoke.mjs');
