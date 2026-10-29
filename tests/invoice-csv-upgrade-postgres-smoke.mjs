@@ -16,7 +16,7 @@ await withCommercialDatabase(async({pool})=>{
   const snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async t=>[t,(await pool.query('select to_jsonb(t) v from '+t+' t order by to_jsonb(t)::text')).rows])));
   const before=await snapshot(),keys=['commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage','commercial.invoice_batch.confirm'];
   assert.equal((await pool.query('select count(*)::int n from permission_definitions where permission_key=any($1::text[])',[keys])).rows[0].n,0);
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['084_wos06_approved_invoice_csv','085_wos06_invoice_export_notifications','086_wos06_invoice_billing_confirmation']);assert.deepEqual(await snapshot(),before);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['084_wos06_approved_invoice_csv','085_wos06_invoice_export_notifications','086_wos06_invoice_billing_confirmation','087_wos06_invoice_action_required']);assert.deepEqual(await snapshot(),before);
   assert.equal((await pool.query('select count(*)::int n from permission_definitions where permission_key=any($1::text[])',[keys])).rows[0].n,6);
   for(const t of ['invoice_csv_artifacts','invoice_csv_failures','invoice_csv_request_keys'])assert.equal((await pool.query('select count(*)::int n from '+t)).rows[0].n,0);
   assert.equal((await pool.query('select count(*)::int n from role_permissions where permission_key=any($1::text[])',[keys])).rows[0].n,0);

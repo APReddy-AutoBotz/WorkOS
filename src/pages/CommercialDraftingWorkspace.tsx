@@ -12,6 +12,7 @@ import {MilestoneBillingWorkspace} from '../components/MilestoneBillingWorkspace
 import {InvoiceDraftWorkspace} from '../components/InvoiceDraftWorkspace';
 import {InvoiceBatchApprovalWorkspace} from '../components/InvoiceBatchApprovalWorkspace';
 import {ReviewedInvoiceBatch} from '../components/ReviewedInvoiceBatch';
+import {InvoiceActionNotice} from '../components/InvoiceActionNotice';
 import {termPluralTitle, termTitle} from '../config/terminology';
 import {ApiClientError} from '../services/apiClient';
 import {
@@ -267,6 +268,7 @@ export const CommercialDraftingWorkspace = () => {
       <InvoiceCsvWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceNoticeRecovery choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceBillingConfirmation choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceActionNotice choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
         <p>Server snapshot: {workspace.asOf}. {canManage ? 'Commercial drafting access enabled.' : 'Read-only commercial access. A separate manage permission is required to create drafts.'}</p>
         <p className="mt-1">Legacy {termPluralTitle('project').toLowerCase()} mapped: {workspace.legacyMappings.mappedProjects} of {workspace.legacyMappings.totalProjects}. Neutral migration snapshot coverage only; governed bindings appear separately below. Mapping does not establish invoice eligibility.</p>
