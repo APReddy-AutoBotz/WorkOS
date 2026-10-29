@@ -39,8 +39,8 @@ export const BillingReconciliation = ({choices}:{choices:Choice[]}) => {
       {report && <div><p>As of {report.asOf}. Control exceptions: {report.exceptionCount}.</p>
         <h3>Visible control totals</h3><ul>{report.totals.map(t=><li key={t.currency+':'+t.status}>{t.currency} {t.status}: {t.lineCount} items, {t.amount}</li>)}</ul>
         <h3>Item lineage</h3><ul>{report.items.map(item=><li key={item.itemId}>
-          <span>{item.currency} {item.amount} · {item.status} · item {item.itemId} v{item.itemVersion} · event {item.eventId} v{item.eventVersion} · source {item.snapshotId}</span>
-          {item.batchId && <span> · batch {item.batchId} ({item.batchState}) · line {item.lineId}</span>}
+          <span>{item.currency} {item.amount} · {item.status} · item {item.itemId} v{item.itemVersion} · event {item.eventId} v{item.eventVersion} · source {item.snapshotId} · eligibility approval {item.eligibilityApprovalId} · decision {item.eligibilityDecisionId}</span>
+          {item.batchId && <span> · batch {item.batchId} ({item.batchState}) · line {item.lineId} · acquisition request {item.acquisitionRequestId} · operation {item.acquisitionOperationId}</span>}
           {item.artifactId && <span> · retained export {item.artifactId} · SHA-256 {item.artifactHash}</span>}
           {item.confirmationId && <span> · manual confirmation {item.confirmationId}</span>}
           {item.history.map(line=><span key={line.lineId}> · historical line {line.lineId} in batch {line.batchId} ({line.batchState})</span>)}

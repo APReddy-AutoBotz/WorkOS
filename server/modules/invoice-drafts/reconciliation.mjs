@@ -10,16 +10,19 @@ export const readBillingReconciliation = async (client, req, engagementId, optio
   const rows = (await client.query(`
     select item.id as "itemId", item.version as "itemVersion", ev.id as "eventId",
       ev.version as "eventVersion", ev.source_type as "sourceType", ev.snapshot_id as "snapshotId",
+      ev.instance_id as "eligibilityApprovalId", ev.decision_id as "eligibilityDecisionId",
       ev.client_id as "clientId", ev.contract_id as "contractId", ev.engagement_id as "engagementId",
       ev.eligible_on::text as "eligibleOn", ev.currency, ev.amount::text as amount,
       ev.billing_evidence as evidence,
       tm_billing_source_valid(ev.organization_id,ev.legal_entity_id,ev.engagement_id,ev.snapshot_id) as "sourceCurrent",
-      occ.batch_id as "batchId", occ.line_id as "lineId",
+      occ.batch_id as "batchId", occ.line_id as "lineId", line.request_id as "acquisitionRequestId",
+      line.operation_id as "acquisitionOperationId",
       case when occ.batch_id is not null then invoice_batch_governed_state(occ.batch_id) end as "batchState",
       art.id as "artifactId", art.sha256 as "artifactHash", conf.id as "confirmationId",
       case when occ.line_id is null then true else coalesce(
         line.id=occ.line_id and line.batch_id=occ.batch_id and line.item_id=item.id
         and line.item_version=item.version and line.event_id=ev.id and line.snapshot_id=ev.snapshot_id
+        and line.organization_id=ev.organization_id and line.legal_entity_id=ev.legal_entity_id
         and line.currency=ev.currency and line.amount=ev.amount and line.billing_evidence=ev.billing_evidence
         and batch.organization_id=ev.organization_id and batch.legal_entity_id=ev.legal_entity_id
         and batch.client_id=ev.client_id and batch.contract_id=ev.contract_id
