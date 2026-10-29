@@ -8,6 +8,7 @@ import {shiftCapacityDate} from '../shared/worker-capacity.mjs';
 // This test is intentionally not runnable while migration 088 has its sentinel.
 // It creates only synthetic permissions and a temporary local test session in a
 // disposable database; execution requires authorization for that setup.
+if(process.env.WOS_SYNTHETIC_MILESTONE_FIXTURE_AUTHORIZED!=='yes')throw new Error('Authorization is required before creating the disposable milestone test session and synthetic permission grants.');
 const ok=(r,status=200)=>{assert.equal(r.status,status,JSON.stringify(r.body));return r.body;};
 const events=['approval.action_required','approval.rejected_or_correction_required','approval.completed'];
 await withCommercialDatabase(async({pool,databaseUrl})=>{
