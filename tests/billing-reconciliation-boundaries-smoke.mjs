@@ -25,4 +25,5 @@ assert.deepEqual(mixed.controls.filter(c=>c.boundary==='REGISTER_ITEM').map(c=>[
 const token=reconciliationToken(scope,mixed),csv=reconciliationCsv({...scope,organizationId:'=synthetic'},mixed,token);
 assert(csv.includes('"\'=synthetic"'),'Spreadsheet formula prefixes must be escaped');
 assert(csv.includes('EVENT_BACKED_SOURCE')&&csv.includes('REGISTER_ITEM'));
+assert(csv.trimEnd().split('\r\n').every(line=>line.split('","').length===23),'Every CSV row must have the declared columns');
 console.log('Scoped reconciliation 500/501 boundary, currency isolation and CSV escaping passed.');
