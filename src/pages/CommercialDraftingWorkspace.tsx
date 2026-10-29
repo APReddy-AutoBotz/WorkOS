@@ -1,3 +1,4 @@
+import {BillingReconciliation} from '../components/BillingReconciliation';
 import {InvoiceBillingConfirmation} from '../components/InvoiceBillingConfirmation';
 import {InvoiceNoticeRecovery} from '../components/InvoiceNoticeRecovery';
 import {InvoiceNoticeConfiguration} from '../components/InvoiceNoticeConfiguration';
@@ -258,6 +259,7 @@ export const CommercialDraftingWorkspace = () => {
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <TmBillingEligibilityWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceDraftWorkspace choices={workspace.engagements.flatMap(x=>x.model==='time_and_materials'&&x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency}]:[])}/>
+      <BillingReconciliation choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceBatchApprovalWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <ReviewedInvoiceBatch choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceNoticeConfiguration choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
