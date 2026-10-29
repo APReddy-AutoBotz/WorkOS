@@ -9,7 +9,7 @@ export const validMilestoneEvidence = (e,required) => {
   return e.every(x=>{
     if (!approvalKeys(x,['kind','reference','url']) || !required.includes(x.kind) || !approvalText(x.reference) ||
         x.reference.length>200 || /[\u0000-\u001f\u007f]/u.test(x.reference) || typeof x.url!=='string' || x.url.length>2048 ||
-        x.url!==x.url.trim() || /[\u0000-\u001f\u007f]/u.test(x.url)) return false;
+        x.url!==x.url.trim() || !x.url.startsWith('https://') || /[\s\u0000-\u001f\u007f]/u.test(x.url)) return false;
     try {const url=new URL(x.url);return url.protocol==='https:'&&!url.username&&!url.password;} catch{return false;}
   }) && new Set(e.map(x=>x.kind)).size===required.length;
 };

@@ -7,7 +7,7 @@ const evidence=[{kind:'INTERNAL_ASSERTION',reference:'Synthetic internal accepta
 assert(validMilestoneBillingPolicy(policy));assert(validMilestoneEvidence(evidence,policy.evidenceKinds));
 assert(!validMilestoneEvidence(evidence.slice(0,1),policy.evidenceKinds));
 assert(!validMilestoneEvidence([evidence[0],evidence[0]],policy.evidenceKinds));
-for(const url of ['http://example.test/evidence','https://user@example.test/',' https://example.test/','file:///tmp/test'])assert(!validMilestoneEvidence([{...evidence[0],url},evidence[1]],policy.evidenceKinds));
+for(const url of ['http://example.test/evidence','https://user@example.test/',' https://example.test/','https://example.test/a b','https://example.test:99999/','https://:80/','file:///tmp/test'])assert(!validMilestoneEvidence([{...evidence[0],url},evidence[1]],policy.evidenceKinds));
 assert(!validMilestoneBillingPolicy({...policy,evidenceKinds:[]}));
 assert(!validMilestoneBillingPolicy({...policy,templates:templates.map(t=>({...t,body:'{{workerCode}}'}))}));
 const actor={userId:first,role:'Admin',active:true,heldRole:true,scopedSourceAccess:true,decisionPermission:true,inboxPermission:true};
