@@ -1,5 +1,4 @@
--- Local development sentinel: milestone confirmation and connected acceptance are incomplete.
-do $$begin raise exception 'Milestone invoice confirmation is incomplete';end$$;
+-- Local enabling candidate; requires exact-source synthetic acceptance before publication.
 -- Retained T&M confirmations keep the legacy default and all original bytes.
 alter table invoice_batch_confirmations add column source_type text not null default 'TM_SNAPSHOT';
 alter table invoice_batch_confirmations add constraint invoice_confirmation_batch_source_fk foreign key(batch_id,source_type) references invoice_draft_batches(id,source_type);

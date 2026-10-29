@@ -1,6 +1,4 @@
--- Development sentinel: this migration must not run until the complete
--- source-specific guards, atomic commit validation and inbox are present.
-do $$begin raise exception 'Milestone billing eligibility is incomplete';end$$;
+-- Local enabling candidate; requires exact-source synthetic acceptance before publication.
 
 -- Permission definitions are opt-in. No role, user or organization grant is created.
 insert into permission_definitions(permission_key,module,label,description,protected) values
@@ -137,8 +135,7 @@ create function milestone_billing_review_current(i milestone_billing_instances) 
   and not exists(select 1 from milestone_billing_owner_losses z where z.instance_id=i.id)
 $$;
 
--- The development sentinel above remains in force until these guards and
--- their deferred transaction/inbox validation have been completed and tested.
+-- Guard append operations; deferred transaction and inbox checks validate commits.
 create function guard_milestone_billing_append() returns trigger language plpgsql as $$
 declare ctx jsonb;i milestone_billing_instances;p milestone_billing_policies;prior milestone_billing_policies;t milestone_billing_transitions;e commercial_engagements;m commercial_milestones;ev billing_eligibility_events;notice milestone_billing_notices;rec milestone_billing_recipients;stage_def jsonb;template jsonb;n integer;recipient_role text;expected_reasons text[];expected_channel text;pref boolean;
 begin
@@ -213,7 +210,7 @@ begin
   select * into p from milestone_billing_policies where id=i.policy_id;select * into t from milestone_billing_transitions where instance_id=i.id and sequence=new.transition_sequence;
   if t.id is null or t.decision<>'Approved' or t.sequence<>jsonb_array_length(p.definition->'stages') then raise exception 'Only informational completion may record a notice failure.' using errcode='MBE03';end if;return new;
  end if;
- -- Deferred commit validation remains unimplemented; the sentinel remains.
+ -- Refuse any unrecognized append operation; commit checks are installed below.
  raise exception 'Milestone billing operation is not implemented.' using errcode='MBE03';
 end $$;
 

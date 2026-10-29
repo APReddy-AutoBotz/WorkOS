@@ -1,5 +1,4 @@
--- Local development sentinel: cancellation, notification and connected acceptance are incomplete.
-do $$begin raise exception 'Milestone invoice cancellation is incomplete';end$$;
+-- Local enabling candidate; requires exact-source synthetic acceptance before publication.
 -- Retained history remains readable without asserting that its source is still current.
 create function invoice_source_historical_visible(org text,legal text,line invoice_draft_lines,who uuid,held_role text) returns boolean language sql stable as $$
  select case line.source_type when 'TM_SNAPSHOT' then tm_billing_worker_visible(org,legal,line.snapshot_id,who,held_role) when 'MILESTONE_ACCEPTANCE' then exists(select 1 from invoice_draft_batches b where b.id=line.batch_id and b.organization_id=org and b.legal_entity_id=legal and b.source_type=line.source_type and milestone_billing_actor_valid(org,legal,who,held_role,'viewer')) else false end

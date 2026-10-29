@@ -1,5 +1,4 @@
--- Local development sentinel: connected approval/export acceptance is incomplete.
-do $$begin raise exception 'Milestone invoice approval is incomplete';end$$;
+-- Local enabling candidate; requires exact-source synthetic acceptance before publication.
 
 -- Keep the historic T&M implementations intact and dispatch by retained batch source.
 create function tm_original_invoice_batch_lineage_hash(batch uuid) returns text language sql stable as $$

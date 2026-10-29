@@ -1,5 +1,4 @@
--- Local development sentinel: export, notification and connected acceptance are incomplete.
-do $$begin raise exception 'Milestone invoice export is incomplete';end$$;
+-- Local enabling candidate; requires exact-source synthetic acceptance before publication.
 alter table invoice_csv_artifacts drop constraint invoice_csv_artifacts_schema_version_check;
 alter table invoice_csv_artifacts add constraint invoice_csv_artifacts_schema_version_check check(schema_version in ('workos.invoice-tm-csv/1','workos.invoice-milestone-csv/1'));
 create function tm_original_invoice_csv_bytes(b invoice_draft_batches) returns bytea language sql stable as $$

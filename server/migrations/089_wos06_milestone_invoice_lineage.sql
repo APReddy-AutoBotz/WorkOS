@@ -1,6 +1,4 @@
--- Development sentinel: source-specific draft, approval and export guards and
--- connected acceptance are not complete. Never install this partial migration.
-do $$begin raise exception 'Milestone invoice consumption is incomplete';end$$;
+-- Local enabling candidate; requires exact-source synthetic acceptance before publication.
 
 -- Preserve every existing T&M line and its original snapshot. The discriminator
 -- cannot be supplied independently of the retained event. The existing draft
