@@ -1,3 +1,4 @@
+import {createInvoiceActionRouter} from './modules/invoice-action/router.mjs';
 import {createInvoiceNoticeConfigRouter} from './modules/invoice-export/notice-config-router.mjs';
 import {createInvoiceCsvRouter} from './modules/invoice-export/router.mjs';
 import {createInvoiceBatchApprovalRouter} from './modules/invoice-approval/router.mjs';
@@ -6529,6 +6530,7 @@ app.use('/api/v1/business-structure',createBusinessStructureRouter({pool,require
 app.use('/api/v1/calendar-authoring',createCalendarAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar authoring request failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/rate-candidates',createRateCandidateRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Rate candidate failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/commercial-candidate-approvals',createCommercialCandidateApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Commercial candidate approval failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/invoice-action-notices',createInvoiceActionRouter({pool,requireDatabase,requireAuth,audit,buildEmployeeScopeWhere,logError:e=>console.error('Invoice action notification failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-export-notice-config',createInvoiceNoticeConfigRouter({pool,requireDatabase,requireAuth,audit,logError:e=>console.error('Invoice notification configuration failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-csv',createInvoiceCsvRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice CSV failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-batch-approvals',createInvoiceBatchApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice batch approval failed',e?.code||'UNKNOWN')}));

@@ -10,6 +10,7 @@ import {TmBillingEligibilityWorkspace} from '../components/TmBillingEligibilityW
 import {InvoiceDraftWorkspace} from '../components/InvoiceDraftWorkspace';
 import {InvoiceBatchApprovalWorkspace} from '../components/InvoiceBatchApprovalWorkspace';
 import {ReviewedInvoiceBatch} from '../components/ReviewedInvoiceBatch';
+import {InvoiceActionNotice} from '../components/InvoiceActionNotice';
 import {termPluralTitle, termTitle} from '../config/terminology';
 import {ApiClientError} from '../services/apiClient';
 import {
@@ -260,6 +261,7 @@ export const CommercialDraftingWorkspace = () => {
       <InvoiceDraftWorkspace choices={workspace.engagements.flatMap(x=>x.model==='time_and_materials'&&x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency}]:[])}/>
       <InvoiceBatchApprovalWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <ReviewedInvoiceBatch choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceActionNotice choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceNoticeConfiguration choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceCsvWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceNoticeRecovery choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
