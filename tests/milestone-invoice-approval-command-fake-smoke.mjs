@@ -7,7 +7,7 @@ import {capacityHash,capacityCanonical} from '../server/modules/planning/worker-
 // HTTP command against a synthetic transactional double, not PostgreSQL acceptance.
 const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const user={sub:id(1),username:'synthetic',activeRole:'Admin'},organizationScope={organizationId:'synthetic-org',legalEntityId:'synthetic-legal'};
-const b={id:id(2),organization_id:'synthetic-org',legal_entity_id:'synthetic-legal',client_id:'client',contract_id:'contract',engagement_id:'engagement',currency:'USD',period_start:'2026-10-01',period_end:'2026-10-31',period_basis:'ELIGIBLE_DATE',owner_user_id:id(3),owner_role:'Admin',preparer_user_id:id(4),preparer_role:'Admin',state:'Draft',current:true,lineage_hash:'a'.repeat(64)};
+const b={id:id(2),source_type:'MILESTONE_ACCEPTANCE',organization_id:'synthetic-org',legal_entity_id:'synthetic-legal',client_id:'client',contract_id:'contract',engagement_id:'engagement',currency:'USD',period_start:'2026-10-01',period_end:'2026-10-31',period_basis:'ELIGIBLE_DATE',owner_user_id:id(3),owner_role:'Admin',preparer_user_id:id(4),preparer_role:'Admin',state:'Draft',current:true,lineage_hash:'a'.repeat(64)};
 const policy={id:id(5),engagement_id:'engagement',sequence:1,previous_id:null,effective_from:'2026-10-01',actor_id:id(3),active_role:'Admin',reason:'Synthetic policy',request_id:id(6),created_at:'2026-10-01T00:00:00Z',definition:{entityType:'InvoiceBatch',engagementId:'engagement',stages:[{userId:id(7),role:'Admin'}],locale:'en-US',templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(key=>({key,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'})),completionInApp:false}};
 let mode='stale',writes=[],fingerprint='';
 const fake={async query(sql,args=[]){const q=String(sql);
@@ -35,6 +35,7 @@ try{
  const body={expectedOwnerKey:workApprovalOwner({user,organizationScope}),requestId:id(12),batchId:b.id,expectedPolicyId:policy.id,expectedLineCount:1,expectedLineageHash:b.lineage_hash,reason:'Synthetic review'};fingerprint=capacityHash(capacityCanonical(body));
  const command=()=>fetch(`http://127.0.0.1:${server.address().port}/requests`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
  let response=await command();assert.equal(response.status,409);assert.equal(writes.length,0);
+ b.source_type='TM_SNAPSHOT';response=await command();assert.equal(response.status,404);assert.equal(writes.length,0);b.source_type='MILESTONE_ACCEPTANCE';
  mode='replay';response=await command();assert.equal(response.status,200);const result=await response.json();assert.equal(result.replayed,true);assert.equal(result.approval.state.status,'Pending');assert.equal(writes.length,0);
  fingerprint='f'.repeat(64);response=await command();assert.equal(response.status,409);assert.equal(writes.length,0);
 }finally{await new Promise(resolve=>server.close(resolve));}

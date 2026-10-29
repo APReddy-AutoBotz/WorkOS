@@ -44,6 +44,7 @@ try{
  fingerprint=capacityHash(capacityCanonical(body));
  const command=()=>fetch(`http://127.0.0.1:${server.address().port}/batches/${batch.id}/lines`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
  let response=await command();assert.equal(response.status,409);assert.equal(writes.length,0);
+ batch.sourceType='TM_SNAPSHOT';response=await command();assert.equal(response.status,409);assert.equal(writes.length,0);batch.sourceType='MILESTONE_ACCEPTANCE';
  mode='unauthorized';response=await command();assert.equal(response.status,403);assert.equal(writes.length,0);
  mode='replay';response=await command();assert.equal(response.status,200);assert.equal((await response.json()).replayed,true);assert.equal(writes.length,0);
  mode='replay';fingerprint='f'.repeat(64);response=await command();assert.equal(response.status,409);assert.equal(writes.length,0);
