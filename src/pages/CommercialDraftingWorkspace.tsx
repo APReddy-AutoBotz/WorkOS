@@ -1,4 +1,5 @@
 import {hasTypePermission} from '../services/workerType';
+import {BillingReconciliation} from '../components/BillingReconciliation';
 import {InvoiceBillingConfirmation} from '../components/InvoiceBillingConfirmation';
 import {InvoiceNoticeRecovery} from '../components/InvoiceNoticeRecovery';
 import {InvoiceNoticeConfiguration} from '../components/InvoiceNoticeConfiguration';
@@ -269,6 +270,7 @@ export const CommercialDraftingWorkspace = () => {
       <InvoiceNoticeRecovery choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceBillingConfirmation choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceActionNotice choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <BillingReconciliation choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
         <p>Server snapshot: {workspace.asOf}. {canManage ? 'Commercial drafting access enabled.' : 'Read-only commercial access. A separate manage permission is required to create drafts.'}</p>
         <p className="mt-1">Legacy {termPluralTitle('project').toLowerCase()} mapped: {workspace.legacyMappings.mappedProjects} of {workspace.legacyMappings.totalProjects}. Neutral migration snapshot coverage only; governed bindings appear separately below. Mapping does not establish invoice eligibility.</p>

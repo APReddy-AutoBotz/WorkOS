@@ -150,6 +150,27 @@ jobs:
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
+      - name: Verify T&M reconciliation boundaries
+        run: node tests/billing-reconciliation-boundaries-smoke.mjs
+
+      - name: Verify scoped T&M reconciliation and audited export with PostgreSQL
+        env:
+          NODE_ENV: test
+          APP_MODE: test
+          VITE_APP_MODE: test
+          ALLOW_TEST_FALLBACK: "true"
+          VITE_ALLOW_TEST_FALLBACK: "true"
+        run: node tests/billing-reconciliation-postgres-smoke.mjs
+
+      - name: Verify T&M reconciliation and audited export browser journey
+        env:
+          NODE_ENV: test
+          APP_MODE: test
+          VITE_APP_MODE: test
+          ALLOW_TEST_FALLBACK: "true"
+          VITE_ALLOW_TEST_FALLBACK: "true"
+        run: node tests/billing-reconciliation-journey-browser-smoke.mjs
+
       - name: Verify work source identity React/API/PostgreSQL journey
         run: npm run test:work-source-identity-journey
 
