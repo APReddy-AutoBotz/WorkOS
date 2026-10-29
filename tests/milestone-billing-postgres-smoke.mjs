@@ -63,9 +63,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    assert.equal((await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1',[final.itemId])).rows[0].n,0);
   }finally{await context?.close();await browser?.close();await vite.close();}
   console.log('Real React/API/PostgreSQL milestone reservation and cancellation verified.');
-  const draft=ok(await request(drafts+'/batches',{method:'POST',body:{...create,requestId:randomUUID()}}),201);assert.equal(draft.batch.sourceType,'MILESTONE_ACCEPTANCE');
-  const acquire={expectedOwnerKey:draft.ownerKey,requestId:randomUUID(),itemId:final.itemId,itemVersion:1,expectedLineCount:0,reason:'Synthetic milestone reserve'};
-  const reservations=await Promise.all([request(drafts+'/batches/'+draft.batch.id+'/lines',{method:'POST',body:acquire}),request(drafts+'/batches/'+draft.batch.id+'/lines',{method:'POST',body:acquire})]);assert.deepEqual(reservations.map(x=>x.status).sort(),[200,201]);
+  const competitors=await Promise.all([request(drafts+'/batches',{method:'POST',body:{...create,requestId:randomUUID()}}),request(drafts+'/batches',{method:'POST',body:{...create,requestId:randomUUID()}})]);const candidates=competitors.map(x=>ok(x,201));assert(candidates.every(x=>x.batch.sourceType==='MILESTONE_ACCEPTANCE'));
+  const commands=candidates.map(x=>({expectedOwnerKey:x.ownerKey,requestId:randomUUID(),itemId:final.itemId,itemVersion:1,expectedLineCount:0,reason:'Synthetic competing milestone reservation'}));
+  const contested=await Promise.all(candidates.map((x,i)=>request(drafts+'/batches/'+x.batch.id+'/lines',{method:'POST',body:commands[i]})));assert.deepEqual(contested.map(x=>x.status).sort(),[201,409]);const winner=contested.findIndex(x=>x.status===201),draft=candidates[winner],acquire=commands[winner];assert.equal(ok(await request(drafts+'/batches/'+draft.batch.id+'/lines',{method:'POST',body:acquire})).replayed,true);
   assert.equal((await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1',[final.itemId])).rows[0].n,1);
   const retained=ok(await request(drafts+'/batches/'+draft.batch.id));assert.equal(retained.lines[0].sourceType,'MILESTONE_ACCEPTANCE');assert.equal(retained.lines[0].snapshotId,null);assert.equal(retained.total.amount,'125.15');
   console.log('Milestone draft, unique occupancy and replay verified.');
