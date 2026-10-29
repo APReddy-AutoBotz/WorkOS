@@ -46,6 +46,11 @@ raw = { ...raw, instances: [{ ...instance, source: null }, { ...instance, source
 await assert.rejects(s.list(null, capture('read')), { status: 503 });
 raw = { ...envelope, notifications: [notification], nextAfter: null };
 assert.equal((await s.inbox(null, capture('inbox'))).notifications[0].eventId, notification.eventId);
+const milestoneNotice={kind:'milestone-billing-eligibility',id:noticeId,eventId:approvalEventIdentity(instanceId,0,'approval.action_required',notification.operationId).replace(/^work-approval\//,'milestone-billing/'),instanceId,milestoneId:'milestone-synthetic',transitionSequence:0,eventKey:'approval.action_required',policyClass:'ACTION_REQUIRED',templateId,operationId:notification.operationId,locale:'en-GB',title:'Synthetic milestone review',body:'Synthetic review stage',reasons:['current_stage_approver'],channelDecision:'Required',deliveryId:receiptId,deliveryStatus:'Delivered',createdAt,readAt:null};
+raw={...envelope,notifications:[milestoneNotice],nextAfter:null};
+assert.equal((await s.inbox(null,capture('inbox'))).notifications[0].eventId,milestoneNotice.eventId);
+raw={...envelope,notifications:[{...milestoneNotice,eventId:'milestone-billing/other'}],nextAfter:null};
+await assert.rejects(s.inbox(null,capture('inbox')),{status:503});
 raw = { ...envelope, notification: { ...notification, readAt: createdAt } };
 assert.equal((await s.read(notification, capture('inbox'))).readAt, createdAt);
 raw = { ...envelope, notification: { ...notification, body: 'Changed', readAt: createdAt } };
