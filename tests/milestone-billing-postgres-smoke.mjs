@@ -31,6 +31,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const requestRace=await Promise.all([request(route+'/requests',{method:'POST',identity:ids.requester,body:requestBody}),request(route+'/requests',{method:'POST',identity:ids.requester,body:requestBody})]);
   assert.deepEqual(requestRace.map(r=>r.status).sort(),[200,201]);const created=ok(requestRace.find(r=>r.status===201),201).approval;
   assert.equal(created.state.status,'Pending');assert.equal(ok(await request(route+'/requests',{method:'POST',identity:ids.requester,body:requestBody})).replayed,true);
+  const legacy=ok(await request('/api/approvals'));assert(!legacy.some(x=>x.entity_type==='MilestoneBillingEligibilityApproval'));
+  const compatibility=(await pool.query("select id from approval_records where entity_type='MilestoneBillingEligibilityApproval' and entity_id=$1",[created.id])).rows[0];
+  assert.equal((await request('/api/approvals/'+compatibility.id+'/status',{method:'PATCH',body:{status:'Approved'}})).status,404);
   const decision=async(identity,sequence,decision='Approved',requestId=randomUUID())=>request(route+'/instances/'+created.id+'/decisions',{method:'POST',identity,body:{expectedOwnerKey:await readApprovalOwner(request,identity),requestId,expectedSequence:sequence,decision,reason:'Synthetic decision'}});
   assert.equal((await decision(ids.requester,0)).status,409);
   const firstKey=randomUUID(),first=ok(await decision(ids.manager,0,'Approved',firstKey),201);assert.equal(first.approval.state.status,'Pending');assert.equal(first.eventId,null);

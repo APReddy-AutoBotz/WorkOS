@@ -7,6 +7,7 @@ import {PageHeader} from '../components/ui/PageHeader';
 import {RateCandidates} from '../components/RateCandidates';
 import {GovernedTmWorkspace} from '../components/GovernedTmWorkspace';
 import {TmBillingEligibilityWorkspace} from '../components/TmBillingEligibilityWorkspace';
+import {MilestoneBillingWorkspace} from '../components/MilestoneBillingWorkspace';
 import {InvoiceDraftWorkspace} from '../components/InvoiceDraftWorkspace';
 import {InvoiceBatchApprovalWorkspace} from '../components/InvoiceBatchApprovalWorkspace';
 import {ReviewedInvoiceBatch} from '../components/ReviewedInvoiceBatch';
@@ -257,6 +258,7 @@ export const CommercialDraftingWorkspace = () => {
       <RateCandidates kind="billing" choices={[...workspace.contracts.map(x=>({type:'contract' as const,id:x.id,label:x.number})),...workspace.engagements.map(x=>({type:'engagement' as const,id:x.id,label:x.name}))]}/>
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <TmBillingEligibilityWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <MilestoneBillingWorkspace choices={workspace.engagements.filter(x=>x.model==='milestone').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceDraftWorkspace choices={workspace.engagements.flatMap(x=>x.model==='time_and_materials'&&x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency}]:[])}/>
       <InvoiceBatchApprovalWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <ReviewedInvoiceBatch choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>

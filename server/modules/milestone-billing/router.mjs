@@ -14,8 +14,8 @@ const parse=(schema,value)=>{const p=schema.safeParse(value);if(!p.success)throw
 const fingerprint=x=>capacityHash(capacityCanonical(x));
 const policyView=p=>({id:p.id,engagementId:p.engagement_id,sequence:p.sequence,previousId:p.previous_id,effectiveFrom:String(p.effective_from).slice(0,10),definition:p.definition,actorId:p.actor_id,activeRole:p.active_role,requestId:p.request_id,reason:p.reason,createdAt:p.created_at});
 
-// This module is intentionally not mounted while migration 088 carries its
-// fail-closed development sentinel. No incomplete endpoint is exposed.
+// The migration retains a fail-closed development sentinel. The route and UI
+// are wired locally for subsequent connected acceptance, not for deployment.
 export const createMilestoneBillingRouter=o=>{
  const router=Router();router.use((_r,res,next)=>{res.set('Cache-Control','no-store');next();},o.requireDatabase,o.requireAuth);
  const handle=(write,fn)=>async(r,res)=>{let c,begun=false;try{c=await o.pool.connect();await c.query(write?'begin':'begin isolation level repeatable read');begun=true;const result=await fn(c,r);await c.query('commit');begun=false;res.status(write&&!result.replayed?201:200).json(result);}catch(e){if(begun)await c.query('rollback').catch(()=>{});if(e.statusCode)res.status(e.statusCode).json({code:e.code,error:e.message});else if(['MBE01','MBE02','MBE03','MBE04','23505','23514','40001','40P01'].includes(e.code))res.status(e.code==='MBE01'?403:409).json({code:e.code==='MBE01'?'MILESTONE_BILLING_AUTHORITY':'MILESTONE_BILLING_CONFLICT',error:'Current milestone, owner, scope or approval changed. Reload.'});else{o.logError?.(e);res.status(503).json({code:'MILESTONE_BILLING_UNCONFIRMED',error:'The operation could not be confirmed. Read its original receipt.'});}}finally{c?.release();}};
