@@ -1,3 +1,4 @@
+import {hasTypePermission} from '../services/workerType';
 import {InvoiceBillingConfirmation} from '../components/InvoiceBillingConfirmation';
 import {InvoiceNoticeRecovery} from '../components/InvoiceNoticeRecovery';
 import {InvoiceNoticeConfiguration} from '../components/InvoiceNoticeConfiguration';
@@ -259,12 +260,12 @@ export const CommercialDraftingWorkspace = () => {
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <TmBillingEligibilityWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <MilestoneBillingWorkspace choices={workspace.engagements.filter(x=>x.model==='milestone').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceDraftWorkspace choices={workspace.engagements.flatMap(x=>x.model==='time_and_materials'&&x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency}]:[])}/>
-      <InvoiceBatchApprovalWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceDraftWorkspace choices={workspace.engagements.flatMap(x=>(x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view'))&&x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency,...(x.model==='milestone'?{sourceType:'MILESTONE_ACCEPTANCE' as const}:{})}]:[])}/>
+      <InvoiceBatchApprovalWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
       <ReviewedInvoiceBatch choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceNoticeConfiguration choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceCsvWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceNoticeRecovery choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceNoticeConfiguration choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceCsvWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceNoticeRecovery choices={workspace.engagements.filter(x=>x.model==='time_and_materials'||x.model==='milestone'&&hasTypePermission('commercial.milestone_billing.view')).map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceBillingConfirmation choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
         <p>Server snapshot: {workspace.asOf}. {canManage ? 'Commercial drafting access enabled.' : 'Read-only commercial access. A separate manage permission is required to create drafts.'}</p>
