@@ -1,0 +1,7 @@
+# PR113 hosted acceptance correction
+
+PR113's hosted retry reached a runner but stopped at the calendar-leave upgrade assertion: the retained expected migration inventory ended at `087`, while the milestone source adds ordered migrations `088`–`093`. This correction extends affected *explicit* expected inventories to those six exact IDs and retains strict full-list equality, historical-row comparisons, replay, and authorization assertions. The main migration-runner ledger expectation changes from 50 to 56 migrations for the `038`–`093` upgrade.
+
+Migration `088` adds three explicit milestone permission definitions and new source columns; migrations `089` and `093` add a `TM_SNAPSHOT` source discriminator to retained T&M invoice records. Populated upgrade tests check those exact additions while still comparing every pre-existing field and checking that new permissions have no default role or individual grants. The pre-upgrade snapshot is not mutated and unexpected existing discriminator fields are refused.
+
+The workflow also invokes the existing milestone domain/client/command tests, mocked-API browser tests, and the real synthetic populated-upgrade, billing journey and mixed-source bulk journey. The synthetic-fixture authorization flag is scoped to the disposable PostgreSQL/browser step; it is not a production grant. These are added acceptance checks, not evidence that they have passed. GitHub Actions, formal review, stack integration, UAT and release remain separate gates.

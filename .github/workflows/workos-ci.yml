@@ -150,6 +150,32 @@ jobs:
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
+      - name: Verify milestone domain, client and invoice command contracts
+        run: |
+          node tests/milestone-upgrade-expectations-smoke.mjs
+          node --import tsx tests/milestone-billing-eligibility-smoke.mjs
+          node --import tsx tests/milestone-billing-service-smoke.mjs
+          node --import tsx tests/milestone-invoice-source-smoke.mjs
+          node --import tsx tests/milestone-invoice-client-smoke.mjs
+          node --import tsx tests/milestone-invoice-command-fake-smoke.mjs
+          node --import tsx tests/milestone-invoice-approval-command-fake-smoke.mjs
+          node --import tsx tests/milestone-invoice-export-command-fake-smoke.mjs
+          node --import tsx tests/milestone-invoice-notice-config-fake-smoke.mjs
+
+      - name: Verify milestone invoice interface contracts in Chromium
+        run: |
+          node --import tsx tests/milestone-invoice-ui-fake-smoke.mjs
+          node --import tsx tests/milestone-invoice-bulk-ui-fake-smoke.mjs
+          node --import tsx tests/milestone-invoice-confirmation-ui-fake-smoke.mjs
+
+      - name: Verify milestone PostgreSQL and browser acceptance
+        env:
+          WOS_SYNTHETIC_MILESTONE_FIXTURE_AUTHORIZED: "yes"
+        run: |
+          node tests/milestone-populated-upgrade-postgres-smoke.mjs
+          node tests/milestone-billing-postgres-smoke.mjs
+          node tests/milestone-mixed-bulk-postgres-smoke.mjs
+
       - name: Verify T&M reconciliation boundaries
         run: node tests/billing-reconciliation-boundaries-smoke.mjs
 
