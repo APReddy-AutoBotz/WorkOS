@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.milestone_billing.view',module:'Commercial',label:'View milestone billing review',description:'View scoped milestone acceptance and eligibility evidence.',protected:false},
+ {permission_key:'commercial.milestone_billing.manage',module:'Commercial',label:'Manage milestone billing review',description:'Configure and request scoped milestone billing review.',protected:false},
+ {permission_key:'commercial.milestone_billing.decide',module:'Commercial',label:'Decide milestone billing review',description:'Decide a named scoped milestone billing review stage.',protected:false},
  {permission_key:'commercial.invoice_batch.confirm',module:'Commercial',label:'Confirm downstream invoice billing',description:'Record an explicit scoped human attestation for an exported invoice-ready artifact.',protected:false},
  {permission_key:'commercial.invoice_export.configure',module:'Commercial',label:'Configure invoice export notices',description:'Configure prospective scoped invoice-export recipient and template policy.',protected:false},
  {permission_key:'commercial.invoice_export.recover_notices',module:'Commercial',label:'Recover invoice export notices',description:'Attempt scoped recovery of incomplete invoice-export notification evidence.',protected:false},
@@ -29,6 +32,6 @@ export const assertRateCandidatePermissionAdditions=(before,after)=>{
  assert(before.every(x=>!keys.has(x.permission_key)),'candidate permissions were not present in the old ledger');
  assert.deepEqual(after.filter(x=>!keys.has(x.permission_key)),before,'all earlier permission definitions remain byte-equivalent');
  const added=after.filter(x=>keys.has(x.permission_key)).sort((a,b)=>a.permission_key.localeCompare(b.permission_key));
- assert.equal(added.length,expected.length,'exactly the seventeen specified opt-in definitions are added');
+ assert.equal(added.length,expected.length,'exactly the specified opt-in definitions are added');
  assert.deepEqual(added.map(({created_at,...row})=>{assert.equal(typeof created_at,'string');return row;}),[...expected].sort((a,b)=>a.permission_key.localeCompare(b.permission_key)),'new definition metadata matches the explicit migration contract');
 };

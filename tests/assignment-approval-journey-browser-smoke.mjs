@@ -223,3 +223,6 @@ await import('./invoice-draft-journey-browser-smoke.mjs');
 await import('./invoice-batch-approval-journey-browser-smoke.mjs');
 
 await import('./invoice-csv-journey-browser-smoke.mjs');
+
+// Scoped empty-Draft action notice and recipient-owned acknowledgement.
+await import('./invoice-action-journey-browser-smoke.mjs');
