@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/wos02-final-review-acceptance.yml'
       - '.github/scripts/wos02-final-review-live-acceptance.mjs'
+      - '.github/scripts/wos02-final-review-live-acceptance-core.mjs'
+      - 'tests/wos02-harness-session-isolation-smoke.mjs'
       - '.github/scripts/wos02-scope-write-acceptance.mjs'
       - '.github/scripts/wos02-retained-admin-scope-acceptance.mjs'
       - '.github/scripts/wos02-worker-lifecycle-acceptance.mjs'
@@ -186,6 +188,12 @@ jobs:
           test "$(git -C target write-tree)" = "$TARGET_TREE"
           test -z "$(git -C target status --porcelain)"
           test "$(git -C accepted-main rev-parse HEAD)" = "$EXPECTED_MAIN_HEAD"
+
+      - name: Verify synthetic harness session isolation
+        working-directory: controller
+        env:
+          WOS02_TARGET_SERVER: ${{ github.workspace }}/target/server/index.mjs
+        run: node --experimental-vm-modules tests/wos02-harness-session-isolation-smoke.mjs
 
       - name: Locked install
         shell: bash
