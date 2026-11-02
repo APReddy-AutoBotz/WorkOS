@@ -74,7 +74,7 @@ const child = spawn(process.execPath, ['server/index.mjs'], {
   env: {
     ...process.env,
     DATABASE_URL: databaseUrl,
-    API_SESSION_SECRET: 'wos02-final-acceptance-secret',
+    API_SESSION_SECRET: crypto.randomBytes(32).toString('hex'),
     API_PORT: String(port),
     PORT: String(port),
     APP_MODE: 'test',
