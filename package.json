@@ -46,7 +46,8 @@
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",
     "test:document-metadata": "node tests/document-metadata-smoke.mjs",
-    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging"
+    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:backend && npm run test:approvals && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging && npm run test:dependency-security",
+    "test:dependency-security": "node --test tests/dependency-security-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

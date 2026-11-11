@@ -1,5 +1,9 @@
 # WorkOS Requirements Traceability
 
+## Dependency audit repair candidate, 2026-11-11
+
+WOS-NFR-SEC-011 and WOS-OPS-007: compatible dependency updates, a clean-lockfile install, a zero-finding point-in-time npm audit and negative HTTP/proxy/validation regression tests are recorded in [`WOS-DEPENDENCY-AUDIT-REPAIR-2026-11-11.md`](../tasks/WOS-DEPENDENCY-AUDIT-REPAIR-2026-11-11.md). The new suite is part of `npm test`; existing CI audit and secret-scan gates are unchanged. Candidate only: exact-head hosted verification, independent review and integration remain required. This repair does not integrate the held Admin prototype or establish programme/release acceptance.
+
 **Status:** Blueprint mapping; PR/test/evidence columns are populated as implementation proceeds.  
 **Authoritative requirements:** `PRODUCT_REQUIREMENTS.md` and `NON_FUNCTIONAL_REQUIREMENTS.md`
 
