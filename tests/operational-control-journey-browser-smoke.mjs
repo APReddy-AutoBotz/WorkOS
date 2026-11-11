@@ -42,3 +42,6 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   }finally{await browser?.close();await vite.close();}
  });
 });
+
+// Retain the synthetic presentation/owner-fencing journey alongside the real database journey.
+await import('./operational-attention-browser-smoke.mjs');

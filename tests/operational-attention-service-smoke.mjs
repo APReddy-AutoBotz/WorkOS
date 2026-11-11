@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {scope, user, selection, base, next} from './support/operational-attention-test.mjs';
+import {buildOperationalAttention} from '../src/lib/operationalAttention.ts';
+process.env.APP_MODE = process.env.VITE_APP_MODE = 'production';
+process.env.ALLOW_TEST_FALLBACK = process.env.VITE_ALLOW_TEST_FALLBACK = 'false';
+const storage = new Map([['workos_session', JSON.stringify(user)], ['workos_organization_scope', JSON.stringify(scope)], ['workos_api_token', 'synthetic-attention-token']]);
+globalThis.sessionStorage = {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key)};
+globalThis.localStorage = {getItem: () => {throw Error('Fallback forbidden');}};
+globalThis.window = {localStorage, location: {pathname: '/reports/operational-control'}, dispatchEvent: () => true};
+const {operationalControlService, captureOperationalContext} = await import('../src/services/operationalControl.ts');
+let response = base, calls = 0;
+globalThis.fetch = async (_url, init) => {assert.equal(init.method, 'GET'); calls++; return new Response(JSON.stringify(response), {status: 200, headers: {'Content-Type': 'application/json'}});};
+const read = () => operationalControlService.snapshot(selection, null, null, captureOperationalContext());
+const page = await read();
+const projected = buildOperationalAttention(page);
+assert.deepEqual(projected.summary, {pageWorkers: 10, workersWithAttention: 2, itemsByCategory: {approvals: 5, staffing: 3, data: 4}, workersByCategory: {approvals: 1, staffing: 1, data: 2}, visiblePendingStages: 5, pendingSourcesIncomplete: true});
+assert.equal(projected.items.find(item => item.approval)?.pendingDays, 5);
+assert.equal(projected.items.find(item => item.approval)?.approval, page.workers[0].pending[0].items[4]);
+response = next;
+const last = await operationalControlService.snapshot(selection, 'worker-09', base.roster.sourceToken, captureOperationalContext());
+assert.equal(buildOperationalAttention(last).summary.pageWorkers, 1);
+assert.equal(buildOperationalAttention(last).items.length, 0);
+for (const patch of [{organizationId: 'other'}, {coverage: 'AllCompany'}, {workers: [{...base.workers[0], forecast: {...base.workers[0].forecast, physicalUtilization: '120'}}]}]) {
+  response = {...base, ...patch};
+  await assert.rejects(read(), {status: 503});
+}
+const before = calls, captured = captureOperationalContext();
+storage.set('workos_api_token', 'synthetic-replaced-token');
+await assert.rejects(operationalControlService.snapshot(selection, null, null, captured), {status: 403});
+assert.equal(calls, before);
+console.log('Operational attention production decoder/projector contracts passed: exact browser fixtures, page-only controls, original pending identity, next-page isolation, foreign/malformed response denial and stale-context no dispatch; synthetic transport only, no PostgreSQL.');
