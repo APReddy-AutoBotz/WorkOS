@@ -36,6 +36,7 @@
     "test:identity-discovery": "node tests/identity-discovery-smoke.mjs",
     "test:authorization-convergence": "node tests/authorization-convergence-smoke.mjs",
     "test:organization-setup": "node tests/organization-setup-smoke.mjs",
+    "test:admin-authority": "node --test tests/admin-mutation-authority-smoke.mjs",
     "test:environment": "node tests/runtime-environment-smoke.mjs",
     "test:health": "node tests/health-endpoints-smoke.mjs",
     "test:migration-manifest": "node tests/migration-manifest-smoke.mjs",

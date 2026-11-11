@@ -1,5 +1,9 @@
 # WorkOS Requirements Traceability
 
+## Local Admin authority prototype, 2026-11-11
+
+An unintegrated transaction-authority runner and contract-double tests support investigation of WOS-IAM-003/004/005/008/010 and WOS-ORG-002/009. They are separate from the unavailable Admin candidate and do not change runtime routes or accepted status. See [prototype provenance, design and outstanding acceptance](../tasks/WOS-ADMIN-AUTHORITY-PROTOTYPE.md). Real PostgreSQL/API tests and independent acceptance remain required.
+
 **Status:** Blueprint mapping; PR/test/evidence columns are populated as implementation proceeds.  
 **Authoritative requirements:** `PRODUCT_REQUIREMENTS.md` and `NON_FUNCTIONAL_REQUIREMENTS.md`
 
