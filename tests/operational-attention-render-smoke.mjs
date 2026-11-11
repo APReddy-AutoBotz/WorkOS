@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import {createElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {OperationalAttentionPanel} from '../src/components/OperationalAttentionPanel.tsx';
+import {base, next} from './support/operational-attention-test.mjs';
+
+let handoffs = 0;
+const render = page => renderToStaticMarkup(createElement(OperationalAttentionPanel, {page, onOpen: () => {handoffs++;}}));
+const html = render(base);
+assert.match(html, /aria-label="Operational attention"/);
+assert.match(html, /Current page only/);
+assert.match(html, /2 \/ 10/);
+assert.match(html, /hidden counts are unknown/);
+assert.match(html, /Search current-page attention/);
+assert.match(html, /focus-within:outline/);
+assert.equal((html.match(/<article /g) ?? []).length, 8, 'Initial presentation is bounded');
+assert.match(html, /Show more attention items/);
+assert.match(html, /Open source review for SYN-0/);
+assert.match(html, /No company totals or approval authority are inferred/);
+assert.match(render(next), /No attention signals in the returned sources/);
+const hostile = structuredClone(base);
+hostile.workers[0].worker.name = '<script>syntheticUnsafe()</script>';
+const safe = render(hostile);
+assert(!safe.includes('<script>'));
+assert.match(safe, /&lt;script&gt;syntheticUnsafe\(\)&lt;\/script&gt;/);
+assert.equal(handoffs, 0);
+console.log('Operational attention React server-render checks passed: page-only labels, bounded rows, coverage warning, empty-state honesty, original-source controls, visible focus styling and escaped source text. Not a browser-interaction or visual pass.');
