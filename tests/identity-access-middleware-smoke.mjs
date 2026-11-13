@@ -22,7 +22,13 @@ const execute = async (middleware, request) => {
   return {request, response, nextCalled};
 };
 
-const database = {name: 'synthetic-disposable-db'};
+let currentRole = true;
+let identityStorageAvailable = true;
+const database = {query: async (_sql, parameters) => {
+  assert.deepEqual(parameters, ['user-test', 'Admin']);
+  if (!identityStorageAvailable) throw new Error('synthetic storage failure');
+  return {rowCount: currentRole ? 1 : 0};
+}};
 const resolveOrganizationScope = async (_database, request) => {
   if (request.failScope) {
     const error = new Error('scope denied');
@@ -99,4 +105,19 @@ const fallback = await execute(explicitTestFallback.requireAuth, fallbackRequest
 assert.equal(fallback.nextCalled, true, 'only an explicitly injected test fallback may use the default scope');
 assert.deepEqual(fallback.request.organizationScope, {organizationId: 'org-default', legalEntityId: 'legal-default'});
 
-console.log('Identity access middleware smoke tests passed.');
+for (const middleware of [normal.requireIdentity, normal.requireAuth, explicitTestFallback.requireAuth]) {
+  currentRole = false;
+  const removed = await execute(middleware, createRequest({authorization: 'Bearer valid-session'}));
+  assert.equal(removed.nextCalled, false);
+  assert.equal(removed.response.statusCode, 403);
+  assert.equal(removed.response.body.code, 'SESSION_ROLE_REVOKED');
+  currentRole = true;
+  identityStorageAvailable = false;
+  const unavailable = await execute(middleware, createRequest({cookie: 'workos_session=valid-session'}));
+  assert.equal(unavailable.nextCalled, false);
+  assert.equal(unavailable.response.statusCode, 503);
+  assert.equal(unavailable.response.body.code, 'IDENTITY_AUTHORITY_UNAVAILABLE');
+  identityStorageAvailable = true;
+}
+
+console.log('Identity access middleware and current-role revocation smoke tests passed.');

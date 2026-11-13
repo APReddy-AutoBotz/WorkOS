@@ -23,7 +23,7 @@ export const createIdentityAccessMiddleware = ({
     throw new TypeError('Identity access middleware requires token verification, a database, and scope resolution.');
   }
 
-  const attachVerifiedIdentity = (req, res) => {
+  const attachVerifiedIdentity = async (req, res) => {
     const authHeader = req.headers?.authorization || '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
     const cookieToken = readCookie(req, sessionCookieName);
@@ -32,16 +32,32 @@ export const createIdentityAccessMiddleware = ({
       res.status(401).json({error: 'Authentication required'});
       return false;
     }
+    // A signature proves issuance, not that the account still holds this role.
+    // Apply this before both scope discovery/session refresh and scoped routes.
+    try {
+      const current = await database.query(`select 1 from users u
+        join user_roles ur on ur.user_id = u.id
+        join roles r on r.id = ur.role_id
+        where u.id = $1 and u.status = 'Active' and r.name = $2`,
+      [payload.sub, payload.activeRole]);
+      if (!current.rowCount) {
+        res.status(403).json({error: 'The session role is no longer assigned to an active account', code: 'SESSION_ROLE_REVOKED'});
+        return false;
+      }
+    } catch {
+      res.status(503).json({error: 'Current identity authority is unavailable', code: 'IDENTITY_AUTHORITY_UNAVAILABLE'});
+      return false;
+    }
     req.user = payload;
     return true;
   };
 
-  const requireIdentity = (req, res, next) => {
-    if (attachVerifiedIdentity(req, res)) next();
+  const requireIdentity = async (req, res, next) => {
+    if (await attachVerifiedIdentity(req, res)) next();
   };
 
   const requireAuth = async (req, res, next) => {
-    if (!attachVerifiedIdentity(req, res)) return;
+    if (!await attachVerifiedIdentity(req, res)) return;
     try {
       const scope = await resolveOrganizationScope(database, req);
       req.organizationScope = scope;
