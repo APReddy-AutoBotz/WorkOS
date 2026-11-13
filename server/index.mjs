@@ -1,3 +1,4 @@
+import {saveWorkerLogin} from './modules/identity-access/worker-login.mjs';
 import {createInvoiceActionRouter} from './modules/invoice-action/router.mjs';
 import {createInvoiceNoticeConfigRouter} from './modules/invoice-export/notice-config-router.mjs';
 import {createInvoiceCsvRouter} from './modules/invoice-export/router.mjs';
@@ -2015,7 +2016,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       `, [employee.id, directorId]);
     }
 
-    const existingUser = (await client.query('select id, username from users where employee_record_id = $1', [employee.id])).rows[0];
+    const existingUser = (await client.query('select id, username from users where employee_record_id = $1 for update', [employee.id])).rows[0];
     if (!existingUser && !parsed.data.initial_password) {
       throw new Error('initial_password is required when creating a new user.');
     }
@@ -2027,29 +2028,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       if (passwordError) throw Object.assign(new Error(passwordError), {statusCode: 422, code: 'PASSWORD_POLICY_INVALID'});
     }
     const passwordHash = existingUser ? null : await scryptHash(parsed.data.initial_password);
-    const baseUsername = parsed.data.employee_id.toLowerCase();
-    const username = (existingUser?.username || !(await client.query('select 1 from users where lower(username) = lower($1)', [baseUsername])).rowCount)
-      ? (existingUser?.username || baseUsername)
-      : `${baseUsername}-${req.organizationScope.organizationId}-${req.organizationScope.legalEntityId}`.toLowerCase();
-    const userResult = await client.query(`
-      insert into users (username, employee_id, employee_record_id, email, password_hash, status, updated_at)
-      values ($1,$2,$3,$4,$5,$6,now())
-      on conflict (username) do update set
-        employee_id = excluded.employee_id,
-        employee_record_id = excluded.employee_record_id,
-        email = excluded.email,
-        password_hash = coalesce($5, users.password_hash),
-        status = excluded.status,
-        updated_at = now()
-      returning id
-    `, [
-      username,
-      parsed.data.employee_id,
-      employee.id,
-      parsed.data.email,
-      passwordHash,
-      parsed.data.status === 'Exited' ? 'Disabled' : 'Active',
-    ]);
+    const userResult = await saveWorkerLogin(client, {existingUser, employee, passwordHash, scope: req.organizationScope});
     await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,$4) on conflict(user_id,organization_id,legal_entity_id) do update set active=excluded.active`,[userResult.rows[0].id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,employee.status !== 'Exited']);
     if (previous?.status === 'Exited' && employee.status !== 'Exited') {
       await synchronizeWorkerReactivation(client, {
@@ -2094,7 +2073,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       return;
     }
     console.error(error);
-    if ([403, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
+    if ([403, 409, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
     res.status(500).json({ error: 'Employee save failed' });
   } finally {
     client.release();
@@ -6063,7 +6042,7 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
         `, [employee.id, directorId]);
       }
 
-      const existingUser = (await client.query('select id, username from users where employee_record_id = $1', [employee.id])).rows[0];
+      const existingUser = (await client.query('select id, username from users where employee_record_id = $1 for update', [employee.id])).rows[0];
       if (!existingUser && !row.initialPassword) {
         throw new Error(`initialPassword is required for new user ${row.employeeId}`);
       }
@@ -6072,29 +6051,7 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
         if (passwordError) throw Object.assign(new Error(passwordError), {statusCode: 422, code: 'PASSWORD_POLICY_INVALID'});
       }
       const passwordHash = existingUser ? null : await scryptHash(row.initialPassword);
-      const baseUsername = row.employeeId.toLowerCase();
-      const username = (existingUser?.username || !(await client.query('select 1 from users where lower(username) = lower($1)', [baseUsername])).rowCount)
-        ? (existingUser?.username || baseUsername)
-        : `${baseUsername}-${req.organizationScope.organizationId}-${req.organizationScope.legalEntityId}`.toLowerCase();
-      const userResult = await client.query(`
-        insert into users (username, employee_id, employee_record_id, email, password_hash, status, updated_at)
-        values ($1,$2,$3,$4,$5,$6,now())
-        on conflict (username) do update set
-          employee_id = excluded.employee_id,
-          employee_record_id = excluded.employee_record_id,
-          email = excluded.email,
-          password_hash = coalesce($5, users.password_hash),
-          status = excluded.status,
-          updated_at = now()
-        returning id
-      `, [
-        username,
-        row.employeeId,
-        employee.id,
-        row.email,
-        passwordHash,
-        employee.status === 'Exited' ? 'Disabled' : 'Active',
-      ]);
+      const userResult = await saveWorkerLogin(client, {existingUser, employee, passwordHash, scope: req.organizationScope});
       await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,$4) on conflict(user_id,organization_id,legal_entity_id) do update set active=excluded.active`,[userResult.rows[0].id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,employee.status !== 'Exited']);
       if (previous?.status === 'Exited' && employee.status !== 'Exited') {
         try {
@@ -6196,7 +6153,7 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
       return;
     }
     console.error(error);
-    if ([403, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
+    if ([403, 409, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
     res.status(500).json({ error: 'Employee import apply failed' });
   } finally {
     client.release();
