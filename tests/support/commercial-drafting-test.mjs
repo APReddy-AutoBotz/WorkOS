@@ -201,10 +201,11 @@ export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UT
   child.stderr.resume();
   let launchError;
   child.on('error', error => { launchError = error; });
-  const tokenFor = (value = identities.manager, role) => {
+  const tokenFor = (value = identities.manager, role, providerClaims = {}) => {
     const identity = typeof value === 'string' ? Object.values(identities).find(item => item.id === value) : value;
     assert.ok(identity, 'session bootstrap must identify a synthetic fixture account');
-    return signJourneySession({sub: identity.id, username: identity.username,
+    return signJourneySession({identityProvider: providerClaims.identityProvider, entraGroups: providerClaims.entraGroups,
+      sub: identity.id, username: identity.username,
       activeRole: role || identity.role, employeeRecordId: identity.employeeRecordId, employeeId: identity.employeeId, countryDirectorId: identity.countryDirectorId, exp: Date.now() + 15 * 60_000}, secret);
   };
   const request = async (path, {method = 'GET', body, identity = identities.manager,
