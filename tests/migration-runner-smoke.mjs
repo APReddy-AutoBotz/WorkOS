@@ -4260,14 +4260,18 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     ], 'both deployment-wide user grant and revoke events must be null-scope');
 
     await pool.query(`update users set status='Disabled' where id=$1`, [scopeFreeAuditorId]);
+    const disabledCredentials = (await pool.query('select password_hash,must_change_password from users where id=$1', [scopeFreeAuditorId])).rows;
     const disabledScopeFreePasswordChange = await fetch(`${baseUrl}/api/auth/change-password`, {
       method: 'POST',
       headers: {Authorization: `Bearer ${scopeFreeAuditorToken}`, 'Content-Type': 'application/json'},
       body: JSON.stringify({currentPassword: 'Synthetic-Updated-Audit-Passphrase-83', newPassword: 'Another-Updated-Audit-Passphrase-92'}),
       signal: AbortSignal.timeout(5000),
     });
-    assert.equal(disabledScopeFreePasswordChange.status, 404,
-      'scope-free password changes must continue to reject disabled accounts');
+    assert.equal(disabledScopeFreePasswordChange.status, 403,
+      'current-role middleware must reject disabled accounts before scope-free password changes');
+    assert.equal((await disabledScopeFreePasswordChange.json()).code, 'SESSION_ROLE_REVOKED');
+    assert.deepEqual((await pool.query('select password_hash,must_change_password from users where id=$1', [scopeFreeAuditorId])).rows,
+      disabledCredentials, 'a disabled session must not change credentials');
     await pool.query(`update users set status='Active' where id=$1`, [scopeFreeAuditorId]);
 
     const staleActiveRoleToken = tokenFor(auditDeniedActorId, 'synthetic-no-audit', 'Admin');
