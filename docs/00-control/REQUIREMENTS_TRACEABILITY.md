@@ -576,3 +576,7 @@ WOS-NFR-SEC-001/007/008 and WOS-NFR-MNT-005: [verified database TLS](../tasks/WO
 ## Revocable sessions
 
 WOS-IAM-008/010 and WOS-NFR-SEC-003/004/012: [revocable sessions](../tasks/WOS-04-REVOCABLE-SESSIONS.md) adds migration 094, hashed append-only logout evidence, per-request revocation enforcement and absolute expiry across refresh/role changes. Real PostgreSQL, browser and signed-provider tests cover replay denial, failure containment and delayed-refresh races. Offline logout and pre-upgrade token-family limitations are explicit; administrator-wide session management is not claimed.
+
+## Independent legacy leave decisions
+
+WOS-APR-002, WOS-IAM-003/005/010 and WOS-NFR-SEC-004/012: [independent leave decisions](../tasks/WOS-05-INDEPENDENT-LEAVE-DECISIONS.md) enforces affected-worker and recorded-submitter separation on both legacy decision routes, with current database identity and selected-scope/domain-permission checks. Migration 095 indexes retained submitter evidence. Real API/browser negatives prove refusal without protected state changes; independent approval and owner cancellation remain supported.

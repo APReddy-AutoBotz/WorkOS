@@ -215,7 +215,9 @@
     "test:login-rate-limit": "node --test tests/login-rate-limit-smoke.mjs",
     "test:database-tls": "node tests/database-tls-smoke.mjs",
     "test:session-revocation-postgres": "node tests/session-revocation-postgres-smoke.mjs",
-    "test:session-logout-browser": "node tests/session-logout-browser-smoke.mjs"
+    "test:session-logout-browser": "node tests/session-logout-browser-smoke.mjs",
+    "test:leave-decision-independence-postgres": "node tests/leave-decision-independence-postgres-smoke.mjs",
+    "test:leave-decision-independence-browser": "node tests/leave-decision-independence-browser-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

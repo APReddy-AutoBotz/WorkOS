@@ -1,5 +1,6 @@
 import {saveWorkerLogin} from './modules/identity-access/worker-login.mjs';
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
+import {assertIndependentLeaveDecision} from './modules/leave/decision-independence.mjs';
 import {databaseConnectionOptions} from './database-connection.mjs';
 import {createLoginRateLimit, requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createInvoiceActionRouter} from './modules/invoice-action/router.mjs';
@@ -3461,6 +3462,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     }
 
     if (approval.entity_type === 'LeaveRequest') {
+      if(!req.user.permissions.includes('leave.approve')){await client.query('rollback');res.status(403).json({error:'Insufficient permission privileges'});return;}
       await assertLegacyLeaveApproval(client,approval.entity_id);
       const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [approval.entity_id])).rows[0];
       if (!previous || previous.status !== 'Submitted') {
@@ -3468,6 +3470,10 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
         res.status(422).json({ error: 'Linked leave request is not submitted' });
         return;
       }
+      const leaveScopeParams=[previous.employee_id];
+      const leaveInScope=await client.query(`select 1 from employees e where e.id=$1 and ${buildEmployeeScopeWhere(req,leaveScopeParams,'e')}`,leaveScopeParams);
+      if(!leaveInScope.rowCount){await client.query('rollback');res.status(403).json({error:'Leave request is outside active-role data scope'});return;}
+      if(parsed.data.status!=='Cancelled')await assertIndependentLeaveDecision(client,req,previous);
       await assertCalendarLeaveDecision(client,req,previous,parsed.data.status,buildEmployeeScopeWhere,getBusinessLeaveDays);
       await client.query(`
         update leave_requests
@@ -3505,6 +3511,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     if (sendReportingPeriodError(res, error)) return;
     if (workPolicyError(res,error)) return;
     if (calendarLeaveError(res,error)) return;
+    if(error.code==='LEAVE_APPROVAL_SELF_DECISION'){res.status(403).json({error:error.message,code:error.code});return;}
     console.error(error);
     res.status(500).json({ error: 'Approval status update failed' });
   } finally {
