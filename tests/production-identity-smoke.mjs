@@ -536,6 +536,23 @@ try {
     `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
   );
   assert.equal(hasSetCookie(callback.headers, 'workos_session'), true, 'valid linked callback must create a WorkOS session');
+  const productionSessionCookie = (callback.headers.getSetCookie?.() || [callback.headers.get('set-cookie') || ''])
+    .flatMap(value => value.split(/,\s*(?=workos_session=)/))
+    .find(value => value.startsWith('workos_session='))?.split(';')[0];
+  assert.ok(productionSessionCookie, 'signed provider callback must expose the exact session cookie');
+  const providerSession = await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers: {cookie: productionSessionCookie}});
+  assert.equal(providerSession.status, 200);
+  const providerSessionBody = await providerSession.json();
+  const providerClaims = JSON.parse(Buffer.from(productionSessionCookie.slice('workos_session='.length).split('.')[0], 'base64url').toString());
+  const refreshedClaims = JSON.parse(Buffer.from(providerSessionBody.token.split('.')[0], 'base64url').toString());
+  assert.match(providerClaims.sid, /^[a-f0-9-]{36}$/);
+  assert.equal(refreshedClaims.sid, providerClaims.sid);
+  assert.equal(refreshedClaims.exp, providerClaims.exp, 'production refresh retains the original absolute expiry');
+  assert.equal((await fetchWithTimeout(`${serviceOrigin}/api/auth/logout`, {method: 'POST', headers: {cookie: productionSessionCookie}})).status, 200);
+  assert.equal((await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers: {cookie: productionSessionCookie}})).status, 401,
+    'the copied signed-provider cookie must be rejected after logout');
+  assert.equal((await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers: {authorization: `Bearer ${providerSessionBody.token}`}})).status, 401,
+    'the refreshed signed-provider token must be rejected after logout');
   const callbackOperationId = callback.headers.get('x-operation-id');
   assert.match(callbackOperationId || '', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     'the side-effecting Entra callback must expose its server-generated operation ID');

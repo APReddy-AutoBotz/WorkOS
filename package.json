@@ -213,7 +213,9 @@
     "test:notification-delivery-scope-postgres": "node tests/notification-delivery-scope-postgres-smoke.mjs",
     "test:worker-login-ownership-postgres": "node tests/worker-login-ownership-postgres-smoke.mjs",
     "test:login-rate-limit": "node --test tests/login-rate-limit-smoke.mjs",
-    "test:database-tls": "node tests/database-tls-smoke.mjs"
+    "test:database-tls": "node tests/database-tls-smoke.mjs",
+    "test:session-revocation-postgres": "node tests/session-revocation-postgres-smoke.mjs",
+    "test:session-logout-browser": "node tests/session-logout-browser-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

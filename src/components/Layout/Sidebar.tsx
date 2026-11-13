@@ -134,9 +134,9 @@ export const Sidebar = () => {
     })).filter(group => group.items.length > 0);
   }, [user, sidebarGroups]);
 
-  const handleLogout = () => {
-    authService.logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    const result = await authService.logout();
+    navigate(result.serverRevoked ? '/login' : '/login?logout=unconfirmed');
   };
 
   const getInitials = (name: string) => {

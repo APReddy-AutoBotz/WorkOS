@@ -1,3 +1,5 @@
+import {sessionFamily, sessionHash} from './session-lifecycle.mjs';
+
 export const readCookie = (req, name) => {
   const cookieHeader = req.headers?.cookie || '';
   return cookieHeader
@@ -34,7 +36,8 @@ export const createIdentityAccessMiddleware = ({
     const authHeader = req.headers?.authorization || '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
     const cookieToken = readCookie(req, sessionCookieName);
-    const payload = verifyToken(bearerToken || cookieToken);
+    const token = bearerToken || cookieToken;
+    const payload = verifyToken(token);
     if (!payload) {
       res.status(401).json({error: 'Authentication required'});
       return false;
@@ -57,7 +60,18 @@ export const createIdentityAccessMiddleware = ({
       res.status(503).json({error: 'Current identity authority is unavailable', code: 'IDENTITY_AUTHORITY_UNAVAILABLE'});
       return false;
     }
-    req.user = payload;
+    try {
+      const sid = sessionFamily(payload, token);
+      const revoked = await database.query('select 1 from session_revocations where session_hash=$1', [sessionHash(sid)]);
+      if (revoked.rowCount) {
+        res.status(401).json({error: 'This session has been signed out', code: 'SESSION_REVOKED'});
+        return false;
+      }
+      req.user = {...payload, sid};
+    } catch {
+      res.status(503).json({error: 'Session authority is unavailable', code: 'SESSION_AUTHORITY_UNAVAILABLE'});
+      return false;
+    }
     return true;
   };
 

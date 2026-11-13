@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {randomBytes, randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
-import {mkdtemp, mkdir, copyFile, readdir, rm} from 'node:fs/promises';
+import {mkdtemp, mkdir, copyFile, readdir, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:net';
@@ -185,14 +185,30 @@ const stopApi = async child => {
   }
 };
 
-export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UTC', onServerError = null, apiRoot = root}, test) => {
+export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UTC', onServerError = null, apiRoot = root,
+  sessionTtlHours = '0.25', sessionSecret = null, historicalSessionSchema = false}, test) => {
+  // Historical domain-upgrade fixtures need today's real session authority while
+  // populating an older public schema. Keep that prerequisite in a separate
+  // test schema; migration 094 still runs in order against untouched public DDL.
+  // Explicit opt-in prevents missing-table security tests from acquiring a fallback.
+  if (historicalSessionSchema) {
+    const fixture = new pg.Client({connectionString: localDatabaseUrl(databaseUrl).toString()});
+    await fixture.connect();
+    try {
+      assert.equal((await fixture.query("select to_regclass('public.session_revocations') as name")).rows[0].name, null);
+      await fixture.query('create schema workos_test_session_compat');
+      await fixture.query('set search_path = workos_test_session_compat');
+      await fixture.query(await readFile(join(commercialServerDir, 'migrations/094_wos04_session_revocations.sql'), 'utf8'));
+    } finally { await fixture.end(); }
+  }
   const port = await availablePort();
-  const secret = randomBytes(48).toString('base64url');
+  const secret = sessionSecret || randomBytes(48).toString('base64url');
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ['server/index.mjs'], {cwd: apiRoot, stdio: ['ignore', 'pipe', 'pipe'], env: {
     PATH: process.env.PATH, TZ: timeZone, NODE_ENV: 'test', APP_MODE: 'test', PORT: String(port),
     DATABASE_URL: databaseUrl, PGSSLMODE: 'disable', API_SESSION_SECRET: secret, APP_URL: baseUrl,
-    IDENTITY_PROVIDER: 'local', API_SESSION_TTL_HOURS: '0.25', AUTO_SEED_DEMO: 'false', RESET_DEMO_DATA: 'false',
+    ...(historicalSessionSchema ? {PGOPTIONS: '-c search_path=public,workos_test_session_compat'} : {}),
+    IDENTITY_PROVIDER: 'local', API_SESSION_TTL_HOURS: sessionTtlHours, AUTO_SEED_DEMO: 'false', RESET_DEMO_DATA: 'false',
     ALLOW_TEST_FALLBACK: 'false', VITE_ALLOW_TEST_FALLBACK: 'false', ENTRA_ENABLED: 'false', TEAMS_ENABLED: 'false',
     NOTIFICATION_PROVIDER: 'mock', TEAMS_PROVIDER: 'mock',
   }});
@@ -233,7 +249,17 @@ export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UT
     }
     assert.equal(ready, true, 'actual commercial API must connect to the migrated disposable PostgreSQL database');
     await test({baseUrl, request, tokenFor});
-  } finally { await stopApi(child); }
+  } finally {
+    await stopApi(child);
+    if (historicalSessionSchema) {
+      const fixture = new pg.Client({connectionString: localDatabaseUrl(databaseUrl).toString()});
+      await fixture.connect();
+      try {
+        assert.equal((await fixture.query('select count(*)::int n from workos_test_session_compat.session_revocations')).rows[0].n, 0,
+          'historical domain fixtures must not claim session-revocation upgrade coverage');
+      } finally { await fixture.end(); }
+    }
+  }
 };
 
 // Shared real-backend fixture for a separate hosted React/browser journey. The

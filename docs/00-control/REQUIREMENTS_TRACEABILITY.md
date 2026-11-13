@@ -572,3 +572,7 @@ WOS-NFR-SEC-001/002/008 and WOS-NFR-MNT-005: [bounded login throttling](../tasks
 ## Verified database TLS
 
 WOS-NFR-SEC-001/007/008 and WOS-NFR-MNT-005: [verified database TLS](../tasks/WOS-03-VERIFIED-DATABASE-TLS.md) shares certificate-chain and hostname verification between API and migrations, supports an explicit private CA bundle, and rejects URL controls that override verification. Actual driver TLS negative tests and complete PostgreSQL migration acceptance verify transport and compatibility separately. No SQL migration; buyer deployment encryption remains a release acceptance gate.
+
+## Revocable sessions
+
+WOS-IAM-008/010 and WOS-NFR-SEC-003/004/012: [revocable sessions](../tasks/WOS-04-REVOCABLE-SESSIONS.md) adds migration 094, hashed append-only logout evidence, per-request revocation enforcement and absolute expiry across refresh/role changes. Real PostgreSQL, browser and signed-provider tests cover replay denial, failure containment and delayed-refresh races. Offline logout and pre-upgrade token-family limitations are explicit; administrator-wide session management is not claimed.
