@@ -23,8 +23,12 @@ Local Windows / Node 24.22.1 / npm 11.5.2:
 
 This document is engineering evidence for the bounded test repair, not acceptance of the full Draft stack or completion of the enterprise review. Main integration, independent review, buyer UAT and release gates remain open.
 
+Hosted run `43491562590` passed Windows branding and full-history Gitleaks, plus the Linux install, typecheck, lint, build, aggregate unit/contract suite and all database checks preceding browser installation. Browser installation then failed because `ubuntu-latest` resolved to Ubuntu 26.04, for which the locked Playwright registry has no Chromium artifact. The validation job now explicitly uses Ubuntu 24.04, which is present in the installed browser registry. No browser or assertion is skipped; the corrected head must pass the complete hosted pipeline.
+
 ## Operations and rollback
 
 Run `npm ci`, then `npm run test:document-metadata` on Windows or Linux. The test builds twice and removes `dist` afterward; run `npm run build` before starting the application. It uses the installed, lockfile-resolved Vite executable and inherits each test's explicit environment. No shell interpolation or global npm executable lookup is needed.
 
 There are no data migrations or deployment changes. Reverting restores the Windows verification failure but does not change product behavior. Preserve output assertions and existing security gates when adapting the build tool in future.
+
+The hosted Ubuntu run at e2d55ea reached the actual-work composite browser journey and exposed a Friday header collision (Draft hours 0 versus expected 6). This was reproduced locally. A concurrent attempted repair at 33dec01 moved adoption to the preceding Thursday, but the real API correctly rejected that non-prospective catalog adoption with WORK_CATEGORY_STALE. The final fixture tests draft staleness before submission using the real current UTC date, then submits/corrects/approves and verifies the original 3.5/8 ratio, retained CSV hash/history, absence and late-owner protections. On Friday the same header transitions to approved; on other weekdays the separate rolling draft remains explicitly accounted for. The complete real React/API/PostgreSQL journey passed locally with no fake clock, skipped workflow or relaxed financial assertion. Hosted CI must rerun on the corrected head.
