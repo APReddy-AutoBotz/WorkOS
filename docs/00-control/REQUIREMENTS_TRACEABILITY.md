@@ -560,3 +560,7 @@ WOS-NFR-SEC-008, WOS-RPT-006 and WOS-NFR-MNT-005: [timesheet export safety](../t
 ## Notification delivery evidence scope
 
 WOS-IAM-005/010, WOS-INT-002 and WOS-NFR-SEC-004: [notification delivery scope](../tasks/WOS-05-NOTIFICATION-DELIVERY-SCOPE.md) applies the recipient employee's active organization/legal entity and role visibility to delivery attempts. Real PostgreSQL/API tests reproduce baseline foreign/orphan leakage and verify scope switching, own/direct-report access and negative authorization. Existing response fields remain compatible; no migration.
+
+## Worker login ownership
+
+WOS-IAM-003/005/006/010 and WOS-NFR-SEC-003/004/008: [worker login ownership](../tasks/WOS-04-WORKER-LOGIN-OWNERSHIP.md) replaces username-conflict updates with insert-only provisioning and ID/binding/scope-checked existing-account updates. Real PostgreSQL tests reproduce baseline cross-account mutation and verify profile/import collision safety, preserved privileges, concurrent scoped creation and conflict rollback. No migration.

@@ -210,7 +210,8 @@
     "test:protected-identity-postgres": "node tests/protected-identity-administration-postgres-smoke.mjs",
     "test:setup-read-boundaries-postgres": "node tests/setup-read-boundaries-postgres-smoke.mjs",
     "test:timesheet-export-browser": "node tests/timesheet-export-browser-smoke.mjs",
-    "test:notification-delivery-scope-postgres": "node tests/notification-delivery-scope-postgres-smoke.mjs"
+    "test:notification-delivery-scope-postgres": "node tests/notification-delivery-scope-postgres-smoke.mjs",
+    "test:worker-login-ownership-postgres": "node tests/worker-login-ownership-postgres-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
