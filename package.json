@@ -208,7 +208,8 @@
     "test:dependency-security": "node --test tests/dependency-security-smoke.mjs",
     "test:csv-output-safety": "node --import tsx tests/csv-output-safety-smoke.mjs",
     "test:protected-identity-postgres": "node tests/protected-identity-administration-postgres-smoke.mjs",
-    "test:setup-read-boundaries-postgres": "node tests/setup-read-boundaries-postgres-smoke.mjs"
+    "test:setup-read-boundaries-postgres": "node tests/setup-read-boundaries-postgres-smoke.mjs",
+    "test:timesheet-export-browser": "node tests/timesheet-export-browser-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

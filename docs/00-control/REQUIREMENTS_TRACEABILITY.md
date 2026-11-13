@@ -552,3 +552,7 @@ WOS-IAM-003/005/006/010 and WOS-NFR-SEC-003/004/005/008: [protected identity adm
 ## Setup request and workforce read boundaries
 
 WOS-IAM-005/010, WOS-WKF-006 and WOS-NFR-SEC-004/008: [setup read boundaries](../tasks/WOS-02-SETUP-READ-BOUNDARIES.md) validate date inputs, contain rejected asynchronous setup handlers and apply workforce permission plus employee visibility to history/dependency reads. Real API negative tests include malformed input, database failure, unrelated/cross-scope access and permission loss; existing date semantics are verified against PostgreSQL in three timezones. No migrations.
+
+## Timesheet operational export safety
+
+WOS-NFR-SEC-008, WOS-RPT-006 and WOS-NFR-MNT-005: [timesheet export safety](../tasks/WOS-07-TIMESHEET-EXPORT-SAFETY.md) applies the shared CSV literal-text protection to Timesheet Approval Ops Export. The real browser/API/PostgreSQL regression reproduces the baseline formula-prefix weakness and verifies safe fields, ordinary quoting, filename and persisted export audit after repair. No migrations or retained invoice artifact changes.
