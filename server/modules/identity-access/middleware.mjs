@@ -7,6 +7,13 @@ export const readCookie = (req, name) => {
     ?.slice(name.length + 1);
 };
 
+// Only consume these claims after signature verification. They originate from
+// the verified Entra ID token at login, never a request body or role selector.
+export const sessionEntraGroups = payload => payload?.identityProvider === 'entra'
+  && Array.isArray(payload.entraGroups) && payload.entraGroups.length <= 200
+  && payload.entraGroups.every(group => typeof group === 'string' && group.length > 0 && group.length <= 200)
+  ? [...new Set(payload.entraGroups)] : [];
+
 /**
  * Create the shared identity and organization-scope guards used by legacy and
  * versioned API routers. Scope discovery intentionally uses requireIdentity;
@@ -36,10 +43,12 @@ export const createIdentityAccessMiddleware = ({
     // Apply this before both scope discovery/session refresh and scoped routes.
     try {
       const current = await database.query(`select 1 from users u
-        join user_roles ur on ur.user_id = u.id
-        join roles r on r.id = ur.role_id
-        where u.id = $1 and u.status = 'Active' and r.name = $2`,
-      [payload.sub, payload.activeRole]);
+        where u.id = $1 and u.status = 'Active' and (
+          exists (select 1 from user_roles ur join roles r on r.id = ur.role_id
+            where ur.user_id = u.id and r.name = $2)
+          or exists (select 1 from entra_group_role_mappings m
+            where m.active = true and m.role_name = $2 and m.group_id = any($3::text[])))`,
+      [payload.sub, payload.activeRole, sessionEntraGroups(payload)]);
       if (!current.rowCount) {
         res.status(403).json({error: 'The session role is no longer assigned to an active account', code: 'SESSION_ROLE_REVOKED'});
         return false;

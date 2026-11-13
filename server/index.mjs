@@ -63,7 +63,7 @@ import {registerHealthRoutes} from './health.mjs';
 import { listAuthorizedOrganizationScopes, registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
 import {createRequestContextMiddleware} from './api/request-context.mjs';
 import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/error-contract.mjs';
-import {createIdentityAccessMiddleware, readCookie} from './modules/identity-access/middleware.mjs';
+import {createIdentityAccessMiddleware, readCookie, sessionEntraGroups} from './modules/identity-access/middleware.mjs';
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
@@ -954,12 +954,19 @@ const mappedRolesFromEntraGroups = async (clientOrPool, groups = []) => {
   return result.rows.map(row => row.role_name);
 };
 
-const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null, extraRoles = []) => {
+const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null, extraRoles = [], verifiedGroups = []) => {
   if (!user || user.status !== 'Active') throw new Error('User is not active');
   const roles = [...new Set([...(user.roles || []), ...extraRoles])].filter(Boolean);
   if (roles.length === 0) throw new Error('No active role is assigned to this user');
   const activeRole = requestedRole && roles.includes(requestedRole) ? requestedRole : roles[0];
   const permissions = await getEffectivePermissionsForUser(clientOrPool, user.id, activeRole);
+  // Retain one verified mapped group per supported role, not the full tenant
+  // membership list, so session cookies remain bounded and disclose less data.
+  const groups = sessionEntraGroups({identityProvider: 'entra', entraGroups: verifiedGroups});
+  const boundGroups = groups.length ? (await clientOrPool.query(`
+    select distinct on (role_name) group_id from entra_group_role_mappings
+    where active = true and group_id = any($1::text[]) and role_name = any($2::text[])
+    order by role_name, group_id`, [groups, systemRoles])).rows.map(row => row.group_id) : [];
   const sessionExpiresAt = Date.now() + getSessionTtlMs();
   const token = signToken({
     sub: user.id,
@@ -971,6 +978,8 @@ const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null,
     activeRole,
     permissions,
     permissionRole: activeRole,
+    identityProvider: 'entra',
+    entraGroups: boundGroups,
     exp: sessionExpiresAt,
   });
   res.cookie?.('workos_session', token, getSessionCookieOptions());
@@ -1341,7 +1350,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
       await client.query('update employees set entra_object_id = coalesce(entra_object_id, $2), updated_at = now() where id = $1', [user.employee_record_id, providerSubject]);
     }
     const mappedRoles = await mappedRolesFromEntraGroups(client, claims.groups || []);
-    const session = await buildLoginResponse(client, res, user, state.requestedRole, mappedRoles);
+    const session = await buildLoginResponse(client, res, user, state.requestedRole, mappedRoles, claims.groups || []);
     await logIntegrationEvent(client, {
       provider: 'entra',
       eventType: 'EntraLoginSucceeded',
@@ -1498,7 +1507,7 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
       res.status(401).json({ error: 'User is not active' });
       return;
     }
-    const dbRoles = user.roles || [];
+    const dbRoles = [...new Set([...(user.roles || []), ...await mappedRolesFromEntraGroups(pool, sessionEntraGroups(req.user))])];
     if (!dbRoles.includes(parsed.data.role)) {
       res.status(403).json({ error: 'Role is not assigned to this user' });
       return;
@@ -1516,6 +1525,8 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
       activeRole,
       permissions,
       permissionRole: activeRole,
+      identityProvider: req.user.identityProvider,
+      entraGroups: sessionEntraGroups(req.user),
       exp: sessionExpiresAt,
     });
     res.cookie?.('workos_session', token, getSessionCookieOptions());
@@ -1573,6 +1584,7 @@ const refreshIdentitySession = async (req, res) => {
       res.status(401).json({ error: 'User is not active' });
       return;
     }
+    user.roles = [...new Set([...user.roles, ...await mappedRolesFromEntraGroups(pool, sessionEntraGroups(req.user))])];
     const activeRole = user.roles.includes(req.user.activeRole) ? req.user.activeRole : user.roles[0];
     const permissions = await getEffectivePermissionsForUser(pool, user.id, activeRole);
     const sessionExpiresAt = Date.now() + getSessionTtlMs();
@@ -1586,6 +1598,8 @@ const refreshIdentitySession = async (req, res) => {
       activeRole,
       permissions,
       permissionRole: activeRole,
+      identityProvider: req.user.identityProvider,
+      entraGroups: sessionEntraGroups(req.user),
       exp: sessionExpiresAt,
     });
     res.cookie?.('workos_session', token, getSessionCookieOptions());

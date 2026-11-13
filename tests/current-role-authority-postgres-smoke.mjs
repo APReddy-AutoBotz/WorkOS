@@ -23,6 +23,26 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
       'A newly authenticated, currently assigned role remains usable');
     assert.equal((await request('/api/auth/me', {identity: identities.reader, role: 'Admin'})).status, 403,
       'A signed but unassigned active role is not authority');
+    await pool.query(`insert into entra_group_role_mappings(id,group_id,group_name,role_name,active)
+      values ('synthetic-role-map','synthetic-verified-group','Synthetic group','Admin',true)`);
+    const mappedToken = tokenFor(identities.reader, 'Admin', {identityProvider: 'entra', entraGroups: ['synthetic-verified-group']});
+    const mapped = {headers: {Authorization: `Bearer ${mappedToken}`}};
+    const refreshed = await request('/api/auth/me', mapped);
+    assert.equal(refreshed.status, 200, 'Verified Entra group mappings remain supported');
+    assert.equal(refreshed.body.activeRole, 'Admin');
+    const refreshClaims = JSON.parse(Buffer.from(refreshed.body.token.split('.')[0], 'base64url').toString());
+    assert.deepEqual(refreshClaims.entraGroups, ['synthetic-verified-group']);
+    const switched = await request('/api/auth/switch-role', {...mapped, method: 'POST', body: {role: 'Employee'}});
+    assert.equal(switched.status, 200);
+    const switchBack = await request('/api/auth/switch-role', {method: 'POST', body: {role: 'Admin'}, headers: {Authorization: `Bearer ${switched.body.token}`}});
+    assert.equal(switchBack.status, 200, 'Role switching retains verified provider context');
+    const localGroups = tokenFor(identities.reader, 'Admin', {identityProvider: 'local', entraGroups: ['synthetic-verified-group']});
+    assert.equal((await request('/api/auth/me', {headers: {Authorization: `Bearer ${localGroups}`}})).status, 403);
+    await pool.query(`update entra_group_role_mappings set active=false where id='synthetic-role-map'`);
+    for (const retainedToken of [mappedToken, refreshed.body.token, switchBack.body.token]) {
+      assert.equal((await request('/api/auth/me', {headers: {Authorization: `Bearer ${retainedToken}`}})).status, 403,
+        'Revoked mapping must deny original, refreshed and role-switched sessions');
+    }
     await pool.query(`update users set status='Disabled' where id=$1`, [identities.reader.id]);
     assert.equal((await request('/api/v1/auth/me', {identity: identities.reader})).status, 403);
     assert.equal((await request('/api/permissions/config', {authenticated: false})).status, 401);

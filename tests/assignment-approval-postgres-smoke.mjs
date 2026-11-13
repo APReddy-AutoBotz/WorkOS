@@ -152,7 +152,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal(candidate.status, 201);
         i = candidate.body.instance;
         await pool.query("delete from user_roles where user_id=$1", [identities.manager.id]);
-        assert.equal((await request(base + '/instances/' + i.id + '/decisions', { method: 'POST', identity: identities.manager, body: { expectedOwnerKey: owner, expectedSourceToken: i.sourceToken, expectedSequence: 0, requestId: randomUUID(), decision: 'Approved', reason: 'Synthetic revoked role' } })).status, 409);
+        const revokedBefore = await snapshot(pool, [...tables, 'project_allocations', 'assignment_versions', 'approval_records']);
+        const revoked = await request(base + '/instances/' + i.id + '/decisions', { method: 'POST', identity: identities.manager, body: { expectedOwnerKey: owner, expectedSourceToken: i.sourceToken, expectedSequence: 0, requestId: randomUUID(), decision: 'Approved', reason: 'Synthetic revoked role' } });
+        assert.equal(revoked.status, 403, 'Shared identity authority rejects the removed role before domain decisions');
+        assert.equal(revoked.body.error.code, 'SESSION_ROLE_REVOKED');
+        assert.deepEqual(await snapshot(pool, [...tables, 'project_allocations', 'assignment_versions', 'approval_records']), revokedBefore);
         await pool.query("insert into user_roles(user_id,role_id)select $1,id from roles where name='Admin'", [identities.manager.id]);
         assert.equal((await decideAssignment(request, identities.manager, i)).status, 201);
         i = (await request(base + '/instances/' + i.id, { identity: identities.second })).body.instance;

@@ -4,7 +4,7 @@
 
 Addresses WOS-IAM-003, WOS-IAM-005, WOS-IAM-008, WOS-IAM-010 and WOS-NFR-SEC-003/004. A valid signature establishes that a token was issued; it must not preserve a role after that role is removed. The common identity middleware now checks the active account and current role assignment in PostgreSQL before attaching identity, discovering scope, refreshing a session or reaching any scoped API. This covers both cookie and bearer sessions and both legacy and versioned routes.
 
-The selected role must still be assigned. The server does not silently switch to another role or infer authority from the token's historical role list. Removed roles and disabled accounts return a stable forbidden response, preserving the existing domain-level authorization contract. Missing/invalid signatures remain unauthorized. Unavailable identity storage returns service unavailable and cannot use the test scope fallback.
+The selected role must still be assigned, either directly or through a currently active Entra group mapping. Entra login retains bounded provider-verified group IDs in the signed session; refresh and role switching preserve that provenance and reload live mappings. Request bodies and historical role lists cannot supply group authority. The server does not silently switch to another role. Removed roles and disabled accounts return a stable forbidden response, preserving the existing domain-level authorization contract. Missing/invalid signatures remain unauthorized. Unavailable identity storage returns service unavailable and cannot use the test scope fallback.
 
 ## Verification
 
@@ -16,6 +16,10 @@ Local Windows evidence: focused middleware and real PostgreSQL/API tests passed;
 
 ## Operations and rollback
 
-No migration or token-format change. Existing valid sessions retain access only while their selected role and account remain active. After removing a role, the user must authenticate again and select a currently assigned role. Every authenticated request adds one indexed identity/role lookup; no cache delays revocation. Existing transaction-level guards remain in place for concurrent financial/approval mutations.
+No migration or signing-format change. Entra sessions add signed provider/group provenance; older sessions using only a mapped role need fresh Entra authentication to obtain that context. Existing directly assigned sessions retain access only while their selected role and account remain active. After removing a role, the user must authenticate again and select a currently assigned role. Every authenticated request adds one identity/role/mapping lookup; no cache delays local revocation. Entra tenant-group membership itself remains the provider snapshot verified at authentication; this change does not introduce a live Graph membership lookup. Existing transaction-level guards remain in place for concurrent financial/approval mutations.
+
+Additional real PostgreSQL evidence covers mapped-only roles, refreshed and switched sessions, refusal of group claims from local-provider sessions, and immediate denial of all retained mapped tokens after the local mapping is disabled.
+
+After the provider-context addition, the aggregate unit/contract suite passed again, production build passed, and `production-identity-smoke.mjs` passed with a fresh migrated database and synthetic loopback Entra fixture. The first hosted role-authority run exposed an intentional earlier denial: an assignment test expected a domain 409 after role removal. It now requires the shared guard's 403 and `SESSION_ROLE_REVOKED`, plus unchanged approval/source/audit tables. The full assignment acceptance chain and corrected hosted head remain separately tracked.
 
 This is immediate role/account authority validation, not complete per-session logout revocation or an absolute session-lifetime implementation; those remain separate review findings. Employee role-assignment authorization also remains a separate repair. Reverting this change reopens stale-role access, so prefer a tested forward correction. No production deployment or data conversion is performed.

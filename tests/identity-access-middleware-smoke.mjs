@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createIdentityAccessMiddleware, readCookie} from '../server/modules/identity-access/middleware.mjs';
+import {createIdentityAccessMiddleware, readCookie, sessionEntraGroups} from '../server/modules/identity-access/middleware.mjs';
 
 const createRequest = ({authorization, cookie} = {}) => ({
   headers: {
@@ -25,7 +25,7 @@ const execute = async (middleware, request) => {
 let currentRole = true;
 let identityStorageAvailable = true;
 const database = {query: async (_sql, parameters) => {
-  assert.deepEqual(parameters, ['user-test', 'Admin']);
+  assert.deepEqual(parameters, ['user-test', 'Admin', []]);
   if (!identityStorageAvailable) throw new Error('synthetic storage failure');
   return {rowCount: currentRole ? 1 : 0};
 }};
@@ -121,3 +121,8 @@ for (const middleware of [normal.requireIdentity, normal.requireAuth, explicitTe
 }
 
 console.log('Identity access middleware and current-role revocation smoke tests passed.');
+
+assert.deepEqual(sessionEntraGroups({identityProvider: 'local', entraGroups: ['group']}), []);
+assert.deepEqual(sessionEntraGroups({identityProvider: 'entra', entraGroups: ['group', 'group']}), ['group']);
+assert.deepEqual(sessionEntraGroups({identityProvider: 'entra', entraGroups: [null]}), []);
+assert.deepEqual(sessionEntraGroups({identityProvider: 'entra', entraGroups: Array(201).fill('group')}), []);
