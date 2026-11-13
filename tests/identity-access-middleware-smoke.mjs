@@ -25,6 +25,7 @@ const execute = async (middleware, request) => {
 let currentRole = true;
 let identityStorageAvailable = true;
 let sessionRevoked = false;
+let bindings = {employee_id:'current-worker-code',employee_record_id:'current-worker',country_director_id:'current-director'};
 const database = {query: async (sql, parameters) => {
   if (sql.includes('session_revocations')) {
     assert.match(parameters[0], /^[a-f0-9]{64}$/);
@@ -32,7 +33,7 @@ const database = {query: async (sql, parameters) => {
   }
   assert.deepEqual(parameters, ['user-test', 'Admin', []]);
   if (!identityStorageAvailable) throw new Error('synthetic storage failure');
-  return {rowCount: currentRole ? 1 : 0};
+  return {rowCount: currentRole ? 1 : 0,rows:currentRole ? [bindings] : []};
 }};
 const resolveOrganizationScope = async (_database, request) => {
   if (request.failScope) {
@@ -49,7 +50,7 @@ const resolveOrganizationScope = async (_database, request) => {
   return {organizationId: 'org-test', legalEntityId: 'legal-test'};
 };
 const verifyToken = token => token === 'valid-session'
-  ? {sub: 'user-test', username: 'synthetic', activeRole: 'Admin'}
+  ? {sub: 'user-test', username: 'synthetic', activeRole: 'Admin',employeeId:'old-code',employeeRecordId:'old-worker',countryDirectorId:'old-director'}
   : null;
 
 assert.equal(readCookie(createRequest({cookie: 'other=value; workos_session=valid-session'}), 'workos_session'),
@@ -67,6 +68,15 @@ assert.deepEqual(missing.response.body, {error: 'Authentication required'});
 const identityOnly = await execute(normal.requireIdentity, createRequest({authorization: 'Bearer valid-session'}));
 assert.equal(identityOnly.nextCalled, true, 'identity-only routes may run without a selected data scope');
 assert.equal(identityOnly.request.user.sub, 'user-test');
+assert.equal(identityOnly.request.user.employeeId,'current-worker-code');
+assert.equal(identityOnly.request.user.employeeRecordId,'current-worker');
+assert.equal(identityOnly.request.user.countryDirectorId,'current-director');
+bindings={employee_id:null,employee_record_id:null,country_director_id:null};
+const unbound=await execute(normal.requireIdentity,createRequest({cookie:'workos_session=valid-session'}));
+assert.equal(unbound.nextCalled,true);
+assert.equal(unbound.request.user.employeeId,null);
+assert.equal(unbound.request.user.employeeRecordId,null);
+assert.equal(unbound.request.user.countryDirectorId,null);
 assert.equal(identityOnly.request.organizationScope, undefined,
   'scope discovery must not implicitly resolve an organization scope');
 

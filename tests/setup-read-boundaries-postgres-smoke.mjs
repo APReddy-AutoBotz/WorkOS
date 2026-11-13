@@ -6,7 +6,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
  const identities=await seedCommercialIdentities(pool);
  identities.reader.employeeRecordId=f.ownerId;
  identities.reader.employeeId='SYNTHETIC-COMMERCIAL-LOCAL';
- identities.denied.employeeRecordId=f.ownerId;
+ identities.denied.employeeRecordId='synthetic-setup-lead';
+ identities.denied.employeeId='SYNTHETIC-SETUP-LEAD';
+ await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,organization_id,legal_entity_id,status)
+ values ('synthetic-setup-lead','SYNTHETIC-SETUP-LEAD','Synthetic scoped lead','setup-lead@example.test','Lead','Delivery','US','director-commercial','org-default','legal-default','Active')`);
+ for(const identity of [identities.reader,identities.denied]) await pool.query(
+  'update users set employee_record_id=$1,employee_id=$2 where id=$3',[identity.employeeRecordId,identity.employeeId,identity.id]);
  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values ('Employee','employees.view',true),('TeamLead','employees.view',true) on conflict(role_name,permission_key) do update set enabled=true");
  await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,organization_id,legal_entity_id,status)
  values ('synthetic-unrelated-worker','SYNTHETIC-UNRELATED','Synthetic unrelated worker','unrelated@example.test','Analyst','Delivery','US','director-commercial','org-default','legal-default','Active')`);
@@ -30,7 +35,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
    const healthy=await request(`${prefix}/organization-setup/context`);
    assert.equal(healthy.status,200,'API remains available after malformed requests');
   }
-  await pool.query("update employees set reporting_manager_id=$1 where id='synthetic-unrelated-worker'",[f.ownerId]);
+  await pool.query("update employees set reporting_manager_id=$1 where id='synthetic-unrelated-worker'",[identities.denied.employeeRecordId]);
   for(const endpoint of ['history','dependencies']) assert.equal((await request(`/api/organization-setup/workers/synthetic-unrelated-worker/${endpoint}`,{identity:identities.denied})).status,200,'TeamLead can read a currently visible direct report');
   await pool.query("update role_permissions set enabled=false where role_name='Employee' and permission_key='employees.view'");
   for(const endpoint of ['history','dependencies']) assert.equal((await request(`/api/organization-setup/workers/${f.ownerId}/${endpoint}`,{identity:identities.reader})).status,403,'Own scope does not bypass required permission');

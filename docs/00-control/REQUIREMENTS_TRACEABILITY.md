@@ -580,3 +580,7 @@ WOS-IAM-008/010 and WOS-NFR-SEC-003/004/012: [revocable sessions](../tasks/WOS-0
 ## Independent legacy leave decisions
 
 WOS-APR-002, WOS-IAM-003/005/010 and WOS-NFR-SEC-004/012: [independent leave decisions](../tasks/WOS-05-INDEPENDENT-LEAVE-DECISIONS.md) enforces affected-worker and recorded-submitter separation on both legacy decision routes, with current database identity and selected-scope/domain-permission checks. Migration 095 indexes retained submitter evidence. Real API/browser negatives prove refusal without protected state changes; independent approval and owner cancellation remain supported.
+
+## Current workforce bindings
+
+WOS-CORE-003, WOS-IAM-005/009/010, WOS-WKF-008 and WOS-NFR-SEC-004: [current workforce authority](../tasks/WOS-04-LIVE-WORKFORCE-BINDINGS.md) reloads worker and qualified director bindings for every authenticated request. Real issued-token tests cover supported reassignment, removed qualification, null linkage, cookie/bearer parity and legal-entity denial. No schema change or new permission grant.

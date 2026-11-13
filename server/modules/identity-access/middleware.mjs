@@ -44,8 +44,15 @@ export const createIdentityAccessMiddleware = ({
     }
     // A signature proves issuance, not that the account still holds this role.
     // Apply this before both scope discovery/session refresh and scoped routes.
+    let currentIdentity;
     try {
-      const current = await database.query(`select 1 from users u
+      const current = await database.query(`select u.employee_id, e.id as employee_record_id,
+          cd.id as country_director_id
+        from users u
+        left join employees e on e.id = u.employee_record_id
+        left join country_directors cd on cd.id = e.primary_country_director_id
+          and (lower(e.designation) in ('country director', 'regional lead', 'director')
+            or lower(e.department) = 'regional leadership')
         where u.id = $1 and u.status = 'Active' and (
           exists (select 1 from user_roles ur join roles r on r.id = ur.role_id
             where ur.user_id = u.id and r.name = $2)
@@ -56,6 +63,7 @@ export const createIdentityAccessMiddleware = ({
         res.status(403).json({error: 'The session role is no longer assigned to an active account', code: 'SESSION_ROLE_REVOKED'});
         return false;
       }
+      currentIdentity = current.rows[0];
     } catch {
       res.status(503).json({error: 'Current identity authority is unavailable', code: 'IDENTITY_AUTHORITY_UNAVAILABLE'});
       return false;
@@ -67,7 +75,12 @@ export const createIdentityAccessMiddleware = ({
         res.status(401).json({error: 'This session has been signed out', code: 'SESSION_REVOKED'});
         return false;
       }
-      req.user = {...payload, sid};
+      // Signed worker/director claims describe issuance-time relationships.
+      // Current bindings, including their removal, govern every new request.
+      req.user = {...payload, sid,
+        employeeId: currentIdentity.employee_id,
+        employeeRecordId: currentIdentity.employee_record_id,
+        countryDirectorId: currentIdentity.country_director_id};
     } catch {
       res.status(503).json({error: 'Session authority is unavailable', code: 'SESSION_AUTHORITY_UNAVAILABLE'});
       return false;

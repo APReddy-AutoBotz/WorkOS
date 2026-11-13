@@ -405,3 +405,7 @@ Apply migration 094 before the new API. Session refresh and role selection prese
 ## Independent leave decisions
 
 Migration 095 adds the indexed lookup for retained leave submitter identity. Schedule its ordinary transactional index build in the deployment maintenance window. An affected worker or recorded submitter must use an independent authorized approver; switching UI routes or roles does not remove that requirement. Cancellation remains distinct. Preserve historical audit evidence and prior decisions; this release does not retrospectively cancel approved leave. Reverting application code restores the authorization gap, so prefer forward repair. See [leave decision evidence and limitations](../tasks/WOS-05-INDEPENDENT-LEAVE-DECISIONS.md).
+
+## Current workforce session scope
+
+Worker and qualified director relationships are resolved from current database records on each authenticated request. Administrative reassignment takes effect for retained sessions without waiting for token expiry; already admitted requests may finish. Missing identity storage fails closed. No new migration is required. Do not repair missing links by injecting token claims: correct the authorized identity records. Older binaries trust historical bindings; invalidate outstanding sessions before any controlled rollback. See [binding acceptance and limits](../tasks/WOS-04-LIVE-WORKFORCE-BINDINGS.md).
