@@ -88,9 +88,9 @@ export const Header = () => {
     }
   }, [isPasswordChangeRequired]);
 
-  const handleLogout = () => {
-    authService.logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    const result = await authService.logout();
+    navigate(result.serverRevoked ? '/login' : '/login?logout=unconfirmed');
   };
 
   const getInitials = (name: string) => {

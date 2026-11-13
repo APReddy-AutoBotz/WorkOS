@@ -1,4 +1,5 @@
 import {saveWorkerLogin} from './modules/identity-access/worker-login.mjs';
+import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
 import {databaseConnectionOptions} from './database-connection.mjs';
 import {createLoginRateLimit, requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createInvoiceActionRouter} from './modules/invoice-action/router.mjs';
@@ -119,8 +120,10 @@ const signToken = (payload) => {
 };
 
 const verifyToken = (token) => {
-  if (!token || !token.includes('.')) return null;
-  const [body, signature] = token.split('.');
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  const [body, signature] = parts;
   const expected = crypto.createHmac('sha256', sessionSecret).update(body).digest('base64url');
   const signatureBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expected);
@@ -129,7 +132,7 @@ const verifyToken = (token) => {
   }
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    if (!payload.exp || payload.exp < Date.now()) return null;
+    if (!Number.isFinite(payload.exp) || payload.exp <= Date.now()) return null;
     return payload;
   } catch {
     return null;
@@ -326,11 +329,11 @@ const getSessionTtlMs = () => {
   return safeHours * 60 * 60 * 1000;
 };
 
-const getSessionCookieOptions = () => ({
+const getSessionCookieOptions = (expiresAt) => ({
   httpOnly: true,
   sameSite: 'lax',
   secure: isProduction,
-  maxAge: getSessionTtlMs(),
+  maxAge: Math.max(0, expiresAt - Date.now()),
 });
 
 const validateNewPassword = (password, identityValues = []) => {
@@ -954,6 +957,7 @@ const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null,
     order by role_name, group_id`, [groups, systemRoles])).rows.map(row => row.group_id) : [];
   const sessionExpiresAt = Date.now() + getSessionTtlMs();
   const token = signToken({
+    sid: crypto.randomUUID(),
     sub: user.id,
     username: user.username,
     employeeId: user.employee_id,
@@ -967,7 +971,7 @@ const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null,
     entraGroups: boundGroups,
     exp: sessionExpiresAt,
   });
-  res.cookie?.('workos_session', token, getSessionCookieOptions());
+  res.cookie?.('workos_session', token, getSessionCookieOptions(sessionExpiresAt));
   return {
     id: user.id,
     username: user.username,
@@ -1432,6 +1436,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDat
     const permissions = await getEffectivePermissionsForUser(pool, user.id, activeRole);
     const sessionExpiresAt = Date.now() + getSessionTtlMs();
     const token = signToken({
+      sid: crypto.randomUUID(),
       sub: user.id,
       username: user.username,
       employeeId: user.employee_id,
@@ -1443,7 +1448,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDat
       permissionRole: activeRole,
       exp: sessionExpiresAt,
     });
-    res.cookie?.('workos_session', token, getSessionCookieOptions());
+    res.cookie?.('workos_session', token, getSessionCookieOptions(sessionExpiresAt));
     res.json({
       id: user.id,
       username: user.username,
@@ -1466,10 +1471,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDat
   }
 });
 
-app.post('/api/auth/logout', (_req, res) => {
-  res.clearCookie?.('workos_session', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
-  res.json({ status: 'ok' });
-});
+app.post('/api/auth/logout', createSessionLogoutHandler({pool, verifyToken, readCookie, audit, secure: isProduction}));
 
 // Scope discovery deliberately authenticates identity without resolving a
 // context first; it is the only endpoint used to choose among multiple scopes.
@@ -1502,8 +1504,9 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
     }
     const activeRole = parsed.data.role;
     const permissions = await getEffectivePermissionsForUser(pool, user.id, activeRole);
-    const sessionExpiresAt = Date.now() + getSessionTtlMs();
+    const sessionExpiresAt = req.user.exp;
     const token = signToken({
+      sid: req.user.sid,
       sub: user.id,
       username: user.username,
       employeeId: user.employee_id,
@@ -1517,7 +1520,7 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
       entraGroups: sessionEntraGroups(req.user),
       exp: sessionExpiresAt,
     });
-    res.cookie?.('workos_session', token, getSessionCookieOptions());
+    res.cookie?.('workos_session', token, getSessionCookieOptions(sessionExpiresAt));
     await audit(pool, req, {
       module: 'Auth',
       action: 'Switch Role',
@@ -1575,8 +1578,9 @@ const refreshIdentitySession = async (req, res) => {
     user.roles = [...new Set([...user.roles, ...await mappedRolesFromEntraGroups(pool, sessionEntraGroups(req.user))])];
     const activeRole = user.roles.includes(req.user.activeRole) ? req.user.activeRole : user.roles[0];
     const permissions = await getEffectivePermissionsForUser(pool, user.id, activeRole);
-    const sessionExpiresAt = Date.now() + getSessionTtlMs();
+    const sessionExpiresAt = req.user.exp;
     const token = signToken({
+      sid: req.user.sid,
       sub: user.id,
       username: user.username,
       employeeId: user.employee_id,
@@ -1590,7 +1594,7 @@ const refreshIdentitySession = async (req, res) => {
       entraGroups: sessionEntraGroups(req.user),
       exp: sessionExpiresAt,
     });
-    res.cookie?.('workos_session', token, getSessionCookieOptions());
+    res.cookie?.('workos_session', token, getSessionCookieOptions(sessionExpiresAt));
     res.json({
       id: user.id,
       username: user.username,

@@ -5,10 +5,11 @@
  */
 import { UserAccount, UserRole, UserSession, CountryDirector, UserPermissionGrant, RolePermissionSetting } from '../types';
 import { DataStorage, STORAGE_KEYS } from './storage';
-import { checkBackend, storeToken, clearToken, getApiHeaders, resetBackendCheck, isDemoFallbackAllowed } from './apiClient';
+import { checkBackend, storeToken, clearToken, getToken, clearOrganizationScope, getApiHeaders, resetBackendCheck, isDemoFallbackAllowed } from './apiClient';
 import { getDefaultPermissionsForRole, getEffectivePermissions } from './permissions';
 
 const SESSION_KEY = 'workos_session';
+let authGeneration = 0;
 
 // ─── SHA-256 helper (demo mode only) ─────────────────────────────────────────
 const sha256 = async (value: string) => {
@@ -117,6 +118,7 @@ const loadSession = (): UserSession | null => {
 // ─── Public service ───────────────────────────────────────────────────────────
 export const authService = {
   login: async (identifier: string, password = '', requestedRole?: UserRole): Promise<UserSession | null> => {
+    const generation = ++authGeneration;
     let backendConnected = false;
     try {
       backendConnected = await checkBackend();
@@ -124,6 +126,7 @@ export const authService = {
       return null;
     }
 
+    if (generation !== authGeneration) return null;
     if (backendConnected) {
       // ── API mode ──
       try {
@@ -135,6 +138,7 @@ export const authService = {
         });
         if (!res.ok) return null;
         const data = await res.json() as ApiLoginResponse;
+        if (generation !== authGeneration) return null;
         const session = buildApiSession(data);
         clearToken();
         storeToken(data.token);
@@ -151,6 +155,7 @@ export const authService = {
     if (!account || account.status !== 'Active') return null;
     const expectedHash = account.passwordHash.replace(/^sha256:/, '');
     const suppliedHash = await sha256(password);
+    if (generation !== authGeneration) return null;
     if (suppliedHash !== expectedHash) return null;
     const role = requestedRole && account.roles.includes(requestedRole) ? requestedRole : account.primaryRole;
     const session = buildSession(account, role);
@@ -172,6 +177,7 @@ export const authService = {
   },
 
   completeEntraLogin: async (): Promise<UserSession | null> => {
+    const generation = ++authGeneration;
     try {
       resetBackendCheck();
       // A callback may follow an earlier session in the same browser tab. Do
@@ -180,6 +186,7 @@ export const authService = {
       sessionStorage.removeItem(SESSION_KEY);
       localStorage.removeItem(STORAGE_KEYS.AUTH);
       if (!(await checkBackend())) return null;
+      if (generation !== authGeneration) return null;
       const res = await fetch('/api/auth/me', {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
@@ -187,6 +194,7 @@ export const authService = {
       });
       if (!res.ok) return null;
       const data = await res.json() as ApiLoginResponse;
+      if (generation !== authGeneration) return null;
       const session = buildApiSession(data);
       storeToken(data.token);
       saveSession(session);
@@ -199,12 +207,14 @@ export const authService = {
   switchRole: async (role: UserRole): Promise<UserSession | null> => {
     const session = authService.getCurrentUser();
     if (!session || !session.availableRoles.includes(role)) return null;
+    const generation = ++authGeneration;
     let backendConnected = false;
     try {
       backendConnected = await checkBackend();
     } catch {
       return null;
     }
+    if (generation !== authGeneration) return null;
     if (backendConnected) {
       try {
         const res = await fetch('/api/auth/switch-role', {
@@ -216,6 +226,7 @@ export const authService = {
         if (!res.ok) return null;
         const data = await res.json() as ApiLoginResponse;
         const next = buildApiSession(data);
+        if (generation !== authGeneration) return null;
         storeToken(data.token);
         saveSession(next);
         return next;
@@ -227,6 +238,7 @@ export const authService = {
     if (!isDemoFallbackAllowed()) return null;
 
     const next = { ...session, role };
+    if (generation !== authGeneration) return null;
     if (role === 'CountryDirector') {
       const directors = DataStorage.get<CountryDirector[]>(STORAGE_KEYS.CDS, []);
       const cd = directors.find(d => d.name === session.name);
@@ -240,28 +252,33 @@ export const authService = {
   },
 
   logout: async () => {
+    authGeneration++;
     const session = authService.getCurrentUser();
-    let backendConnected = false;
-    try {
-      backendConnected = await checkBackend();
-    } catch {
-      backendConnected = false;
-    }
-    if (backendConnected) {
-      try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch { /* ok */ }
-      clearToken();
-      resetBackendCheck();
-    }
-    if (session) {
-      DataStorage.logAction(session.id, session.name, session.role, 'Logout', 'Auth', 'Logged out');
-    }
+    const token = getToken();
+    // Clear device authority before any network wait, including offline logout.
+    clearToken();
+    clearOrganizationScope();
+    resetBackendCheck();
     sessionStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(STORAGE_KEYS.AUTH);
+    try {
+      if (session) DataStorage.logAction(session.id, session.name, session.role, 'Logout', 'Auth', 'Signed out on this device');
+    } catch { /* A local diagnostic failure must not retain device credentials. */ }
+    try {
+      const response = await fetch('/api/auth/logout', {method: 'POST', credentials: 'include', keepalive: true,
+        headers: token ? {Authorization: `Bearer ${token}`} : {}, signal: AbortSignal.timeout(5000)});
+      const result = await response.json();
+      return {serverRevoked: response.ok && result.status === 'ok'};
+    } catch {
+      return {serverRevoked: !token && isDemoFallbackAllowed()};
+    }
   },
 
   getCurrentUser: (): UserSession | null => loadSession(),
 
   refreshSession: async (): Promise<UserSession | null> => {
+    const generation = authGeneration;
+    const token = getToken();
     const session = authService.getCurrentUser();
     if (!session) return null;
     let backendConnected = false;
@@ -270,6 +287,7 @@ export const authService = {
     } catch {
       return null;
     }
+    if (generation !== authGeneration || token !== getToken()) return null;
     if (backendConnected) {
       try {
         const res = await fetch('/api/auth/me', {
@@ -279,6 +297,7 @@ export const authService = {
         });
         if (!res.ok) return null;
         const data = await res.json() as ApiLoginResponse;
+        if (generation !== authGeneration || token !== getToken()) return null;
         const next = buildApiSession(data);
         storeToken(data.token);
         saveSession(next);
@@ -289,6 +308,7 @@ export const authService = {
     }
 
     if (!isDemoFallbackAllowed()) return null;
+    if (generation !== authGeneration) return null;
     DataStorage.ensureUserAccounts();
     const account = findAccount(session.userName);
     if (!account || account.status !== 'Active') return null;
@@ -312,12 +332,14 @@ export const authService = {
   },
 
   changePassword: async (currentPassword: string, newPassword: string): Promise<boolean> => {
+    const generation = authGeneration;
     let backendConnected = false;
     try {
       backendConnected = await checkBackend();
     } catch {
       return false;
     }
+    if (generation !== authGeneration) return false;
     if (backendConnected) {
       try {
         const res = await fetch('/api/auth/change-password', {
@@ -327,6 +349,7 @@ export const authService = {
           body: JSON.stringify({ currentPassword, newPassword }),
         });
         if (!res.ok) return false;
+        if (generation !== authGeneration) return false;
         const session = authService.getCurrentUser();
         if (session) {
           const next = { ...session, mustChangePassword: false };
@@ -350,6 +373,7 @@ export const authService = {
     if (suppliedHash !== expectedHash) return false;
     const accounts = DataStorage.get<UserAccount[]>(STORAGE_KEYS.USER_ACCOUNTS, []);
     const nextHash = `sha256:${await sha256(newPassword)}`;
+    if (generation !== authGeneration) return false;
     DataStorage.set(STORAGE_KEYS.USER_ACCOUNTS, accounts.map(item =>
       item.id === account.id ? { ...item, passwordHash: nextHash, mustChangePassword: false } : item
     ));

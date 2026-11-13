@@ -397,3 +397,7 @@ Worker and label versions require a current/future UTC date strictly after their
 ### Unapproved rate candidate records
 
 Migration076 creates an empty protected candidate ledger and opt-in permission definitions without assigning any user or role. Candidate previews do not activate rates or calculate financial values. Restore and roll-forward must retain candidate and audit history; do not drop the ledger or rewrite prior migration records after use. Commercial approval and authoritative adoption must be completed before these inputs can be used for valuation or invoice eligibility.
+
+## Session revocation rollout
+
+Apply migration 094 before the new API. Session refresh and role selection preserve the original expiry; monitor SESSION_AUTHORITY_UNAVAILABLE and SESSION_REVOCATION_UNCONFIRMED responses as availability failures. Logout clears device credentials immediately, but users receive an explicit warning if server revocation cannot be confirmed. Preserve session_revocations and audit_logs through restore. Independently issued pre-upgrade tokens expire on their original deadline; use controlled signing-secret rotation if all must be invalidated immediately. Older binaries ignore the ledger, so prefer forward repair; do not delete revocation evidence for rollback. See [session delivery evidence and limitations](../tasks/WOS-04-REVOCABLE-SESSIONS.md).
