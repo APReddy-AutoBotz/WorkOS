@@ -532,3 +532,7 @@ Bounded WOS-RPT-001/002/005, WKF-008, CORE-003/005 and UX-001/005: [Operational 
 ## Retained invoice artifact route proof
 
 WOS-IAM-003/005 and WOS-RPT-006: [test-only scope proof](../tasks/WOS-06-INVOICE-ARTIFACT-SCOPE-PROOF.md) adds direct retained artifact URL employee-permission and foreign-worker-scope negatives, error payload checks, and unchanged authorized retrieval. No policy or runtime change. Exact hosted PostgreSQL evidence remains required; this is not full cross-project UAT or release acceptance.
+
+## Portable branding-build evidence
+
+WOS-OPS-007, WOS-NFR-RELSE-001 and WOS-NFR-MNT-005: [portable build verification](../tasks/WOS-03-PORTABLE-BUILD-EVIDENCE.md) repairs the Windows child-process invocation in the existing default/configured branding regression and adds a Windows execution gate. Existing output assertions and Linux database/browser/container/security checks are retained. This is test infrastructure evidence, not whole-product acceptance.
