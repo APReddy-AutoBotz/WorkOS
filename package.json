@@ -206,7 +206,8 @@
     "test:operational-attention": "node --import tsx tests/operational-attention-smoke.mjs && node --import tsx tests/operational-attention-service-smoke.mjs && node --import tsx tests/operational-attention-render-smoke.mjs",
     "test:operational-attention-browser": "node tests/operational-attention-browser-smoke.mjs",
     "test:dependency-security": "node --test tests/dependency-security-smoke.mjs",
-    "test:csv-output-safety": "node --import tsx tests/csv-output-safety-smoke.mjs"
+    "test:csv-output-safety": "node --import tsx tests/csv-output-safety-smoke.mjs",
+    "test:protected-identity-postgres": "node tests/protected-identity-administration-postgres-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

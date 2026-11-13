@@ -544,3 +544,7 @@ WOS-NFR-SEC-008, WOS-RPT-006 and WOS-NFR-MNT-005: [CSV control-prefix repair](..
 ## Current assigned-role authority
 
 WOS-IAM-003/005/008/010 and WOS-NFR-SEC-003/004: [current-role validation](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md) requires an active database account and currently assigned selected role in the shared middleware for legacy, versioned, identity-only and scoped API requests. Unit and real PostgreSQL negative tests cover removed/unassigned roles, disabled users, cookie/bearer parity and unavailable identity storage. This does not claim per-session logout revocation or completion of the wider security review.
+
+## Protected identity administration
+
+WOS-IAM-003/005/006/010 and WOS-NFR-SEC-003/004/005/008: [protected identity administration](../tasks/WOS-04-PROTECTED-IDENTITY-ADMINISTRATION.md) separates workforce editing from role, credential and identity-binding authority. Profile/import role omissions preserve assignments; code prefixes grant no authority; protected changes require current administrator permission; disabled/pending Entra links cannot be revived through fallback fields. PostgreSQL negative tests and signed production-provider callbacks verify the boundaries. No migration; broader session lifecycle and account-disable review remain separate.
