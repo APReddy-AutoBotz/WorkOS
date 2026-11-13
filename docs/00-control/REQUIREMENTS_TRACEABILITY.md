@@ -536,3 +536,7 @@ WOS-IAM-003/005 and WOS-RPT-006: [test-only scope proof](../tasks/WOS-06-INVOICE
 ## Portable branding-build evidence
 
 WOS-OPS-007, WOS-NFR-RELSE-001 and WOS-NFR-MNT-005: [portable build verification](../tasks/WOS-03-PORTABLE-BUILD-EVIDENCE.md) repairs the Windows child-process invocation in the existing default/configured branding regression and adds a Windows execution gate. Existing output assertions and Linux database/browser/container/security checks are retained. This is test infrastructure evidence, not whole-product acceptance.
+
+## CSV output prefix safety
+
+WOS-NFR-SEC-008, WOS-RPT-006 and WOS-NFR-MNT-005: [CSV control-prefix repair](../tasks/WOS-07-CSV-CONTROL-PREFIXES.md) centralizes spreadsheet-facing field quoting for operational and reconciliation exports. Negative tests cover control/whitespace/full-width formula prefixes in values and headers, ordinary-data preservation, and quoted field boundaries. The Actual Utilization browser fixture exercises a tab-prefixed rejection reason through the real download/audit path. Authorization, calculations and retained invoice artifacts remain unchanged; exact-head CI and broader release review remain required.

@@ -45,13 +45,14 @@ const employees = (tag = 'baseline') => [
   employee(tag, 'inactive', 999, {status: 'Inactive'}),
   employee(tag, 'excluded', 999, {utilizationEligible: false}),
 ];
+const hostileRejection = '\t=1+1, "synthetic"';
 const log = (tag, suffix, weekEnding, status, billableHours, totalHours = 40) => ({
   id: `log-${tag}-${suffix}-${weekEnding}-${status}`, employeeId: `${tag}-${suffix}`,
   employeeName: `Synthetic ${tag}-${suffix}`, weekEnding, status, billableHours, totalHours,
   submittedAt: status === 'Draft' ? undefined : `${weekEnding}T09:00:00Z`,
   approvedAt: status === 'Approved' ? `${weekEnding}T12:00:00Z` : undefined,
   rejectedAt: status === 'Rejected' ? `${weekEnding}T13:00:00Z` : undefined,
-  rejectionReason: status === 'Rejected' ? '=synthetic-formula, "quoted"' : undefined,
+  rejectionReason: status === 'Rejected' ? hostileRejection : undefined,
   entries: [{id: `entry-${tag}-${suffix}`, date: weekEnding, projectId: 'synthetic-project',
     projectName: 'Synthetic Project', hours: totalHours, billable: true, notes: 'Synthetic "quoted", detail\nnext line'}],
 });
@@ -202,7 +203,7 @@ const invalidateAndInvoke = async (after, labels) => {
 const percent = value => `${new Intl.NumberFormat('en-GB', {maximumFractionDigits: 1, minimumFractionDigits: Number.isInteger(Math.round((value + Number.EPSILON) * 10) / 10) ? 0 : 1}).format(Math.round((value + Number.EPSILON) * 10) / 10)}%`;
 const csv = rows => rows.length ? [Object.keys(rows[0]), ...rows.map(row => Object.values(row))].map(row => row.map(value => {
   const text = String(value);
-  return `"${(/^[=+\-@]/.test(text) ? `'${text}` : text).replaceAll('"', '""')}"`;
+  return `"${(text === hostileRejection || /^[=+\-@]/.test(text) ? `'${text}` : text).replaceAll('"', '""')}"`;
 }).join(',')).join('\n') : '';
 const expectedCsv = (name, source, expectedHours = 40) => csv(source.map(item => name === 'Global Report' ? {
   employeeId: item.employeeId, employeeName: item.employeeName, weekEnding: item.weekEnding,

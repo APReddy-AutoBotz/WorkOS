@@ -24,6 +24,10 @@ const mixed=await readBillingReconciliation(fake([row(1),row(2,'EUR')]),req,'syn
 assert.deepEqual(mixed.controls.filter(c=>c.boundary==='REGISTER_ITEM').map(c=>[c.currency,c.amount]),[['EUR','0.0001'],['USD','0.0001']]);
 const token=reconciliationToken(scope,mixed),csv=reconciliationCsv({...scope,organizationId:'=synthetic'},mixed,token);
 assert(csv.includes('"\'=synthetic"'),'Spreadsheet formula prefixes must be escaped');
+for (const unsafeId of ['\t=1+1', '\r=1+1', '  ＝1+1', '＠SUM(1)', '\nordinary']) {
+  const protectedCsv = reconciliationCsv({...scope,organizationId:unsafeId},mixed,token);
+  assert(protectedCsv.includes('"\'' + unsafeId + '"'), 'Reconciliation uses the shared literal-text prefix rule');
+}
 assert(csv.includes('EVENT_BACKED_SOURCE')&&csv.includes('REGISTER_ITEM'));
 assert(csv.trimEnd().split('\r\n').every(line=>line.split('","').length===23),'Every CSV row must have the declared columns');
 console.log('Scoped reconciliation 500/501 boundary, currency isolation and CSV escaping passed.');
