@@ -13,6 +13,7 @@ export const seedDirectory=async pool=>{
  const other='synthetic-directory-other-legal';await add(other,'SYN-DIR-OTHER','Synthetic other legal worker',f.ownerId,f.otherLegalEntityId);
  // One named synthetic account owns this worker binding. Explicitly held test
  // roles exercise active-role scope without bypassing unique account linkage.
+ await pool.query("update employees set designation='Country Director' where id=$1",[f.ownerId]);
  for(const[name,role]of[['denied','TeamLead'],['pm','ProjectManager'],['director','CountryDirector'],['hr','HR']]){
   await pool.query('insert into user_roles(user_id,role_id)select $1,id from roles where name=$2 on conflict do nothing',[ids.reader.id,role]);ids[name]={...ids.reader,role,countryDirectorId:'director-commercial'};
  }
