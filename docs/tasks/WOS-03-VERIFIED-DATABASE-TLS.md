@@ -1,0 +1,15 @@
+# Verified database TLS
+
+Addresses WOS-NFR-SEC-001/007/008 and WOS-NFR-MNT-005. The API, migration runner and non-production demo seeder previously set rejectUnauthorized=false when PGSSLMODE=require. All now use one connection policy that verifies the certificate chain and the configured database hostname. PGSSLMODE=verify-full is an explicit alias for the same verified behavior. Optional PGSSLROOTCERT supplies a read-only mounted private CA bundle; otherwise the runtime trust store applies.
+
+Driver URL parsing can override the explicit TLS object. DATABASE_URL transport query parameters (ssl-prefixed settings and uselibpqcompat) therefore fail closed instead of silently downgrading verification or discarding the CA. Operators must move those settings to PGSSLMODE/PGSSLROOTCERT. Missing or empty CA files fail closed without printing the path or connection credentials. Explicit disable mode remains compatible with local fixtures and the current isolated Compose configuration; this does not establish compliance of a buyer's plaintext deployment with the production encryption requirement.
+
+## Verification and operations
+
+The executable TLS fixture uses the actual node-postgres client against a local synthetic PostgreSQL TLS handshake. Trusted correctly named peers connect in require and verify-full modes; untrusted and trusted-but-wrong-host peers are rejected before receiving PostgreSQL startup data. URL downgrade controls, unreadable CA files, invalid modes, explicit disable and unconfigured development are checked. This fixture proves transport behavior, not production database configuration.
+
+Type checking and syntax checking pass (527 modules). The complete unit/contract suite passes (128 top-level commands), including actual PostgreSQL date checks in three timezones. The full 89-entry migration suite passes fresh/concurrent/replay/upgrade/rollback checks on disposable PostgreSQL. An inherited disabled-account assertion initially expected the old route-level 404; the separately verified parent role-authority correction now asserts early 403 and unchanged credentials. No security control was weakened.
+
+Production build and signed production identity/startup acceptance pass, including refusal to start with an unreadable database CA bundle. The demo seeder's shared-policy wiring passes syntax/backend contracts and a complete non-production seed into a newly migrated disposable database. Both temporary fixture databases were removed after verification. Production seeding remains prohibited.
+
+No SQL migration or dependency change. Locked dependencies reuse the verified parent installation. Exact-head hosted CI remains required. The release runbook and environment examples document CA mounting, certificate rotation and URL setting conversion. No production connection or deployment was performed. Before rollout, provision the correct trusted CA and matching database hostname; deployments previously relying on unverified self-signed certificates will be refused. Rollback restores the certificate-validation weakness, so prefer a forward configuration correction.

@@ -55,7 +55,7 @@ identityReadinessTimer.unref();
 
 let migrationsReady = false;
 try {
-  await runMigrations({databaseUrl: runtimeEnvironment.databaseUrl, sslMode: runtimeEnvironment.pgSslMode});
+  await runMigrations({databaseUrl: runtimeEnvironment.databaseUrl, sslMode: runtimeEnvironment.pgSslMode, sslRootCert: runtimeEnvironment.pgSslRootCert});
   migrationsReady = true;
 } catch (error) {
   console.error(`Production startup blocked: ${formatSafeMigrationFailure(error)}`);
