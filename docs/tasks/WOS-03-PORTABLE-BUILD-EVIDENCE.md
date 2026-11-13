@@ -23,6 +23,8 @@ Local Windows / Node 24.22.1 / npm 11.5.2:
 
 This document is engineering evidence for the bounded test repair, not acceptance of the full Draft stack or completion of the enterprise review. Main integration, independent review, buyer UAT and release gates remain open.
 
+Hosted run `43491562590` passed Windows branding and full-history Gitleaks, plus the Linux install, typecheck, lint, build, aggregate unit/contract suite and all database checks preceding browser installation. Browser installation then failed because `ubuntu-latest` resolved to Ubuntu 26.04, for which the locked Playwright registry has no Chromium artifact. The validation job now explicitly uses Ubuntu 24.04, which is present in the installed browser registry. No browser or assertion is skipped; the corrected head must pass the complete hosted pipeline.
+
 ## Operations and rollback
 
 Run `npm ci`, then `npm run test:document-metadata` on Windows or Linux. The test builds twice and removes `dist` afterward; run `npm run build` before starting the application. It uses the installed, lockfile-resolved Vite executable and inherits each test's explicit environment. No shell interpolation or global npm executable lookup is needed.
