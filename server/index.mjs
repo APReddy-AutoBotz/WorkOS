@@ -6544,6 +6544,7 @@ registerOrganizationSetupRoutes({
   requireDatabase,
   requireAuth,
   requirePermission,
+  buildEmployeeScopeWhere,
   audit,
   mountPaths: ['/api/organization-setup', '/api/v1/organization-setup'],
 });
