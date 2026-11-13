@@ -33,11 +33,33 @@ await withCommercialDatabase(async ({pool,databaseUrl}) => {
       };
       const first = await login();
       assert.ok(first);
+      let releaseLogout, observeLogout;
+      const logoutHeld = new Promise(resolve => {releaseLogout = resolve;});
+      const logoutObserved = new Promise(resolve => {observeLogout = resolve;});
+      await page.route('**/api/auth/logout', async route => {
+        observeLogout();
+        await logoutHeld;
+        await route.continue();
+      });
+      // Clearing device authority can make a route guard navigate before the
+      // server transaction finishes. Observe its acknowledgement before replay.
+      const logoutResponse = page.waitForResponse(response => response.url() === `${origin}/api/auth/logout`
+        && response.request().method() === 'POST');
       await page.getByTitle('Logout',{exact:true}).first().click();
+      await logoutObserved;
+      assert.equal(await page.evaluate(() => sessionStorage.getItem('workos_api_token')),null,
+        'device credentials clear before server acknowledgement');
+      assert.equal((await request('/api/auth/me',{headers:{Authorization:`Bearer ${first}`}})).status,200,
+        'a withheld logout request has not revoked the server session');
+      releaseLogout();
+      const acknowledgedLogout = await logoutResponse;
+      assert.equal(acknowledgedLogout.status(),200);
+      assert.equal((await acknowledgedLogout.json()).status,'ok');
       await page.waitForURL(`${origin}/login`);
       assert.equal((await request('/api/auth/me',{headers:{Authorization:`Bearer ${first}`}})).status,401);
       assert.deepEqual(await page.evaluate(() => ['workos_api_token','workos_organization_scope','workos_session'].map(k=>sessionStorage.getItem(k))),[null,null,null]);
       assert.equal((await pool.query("select count(*)::int n from audit_logs where action='Logout'")).rows[0].n,1);
+      await page.unroute('**/api/auth/logout');
 
       const second = await login();
       let releaseRefresh, observedRefresh;
