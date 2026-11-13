@@ -1,4 +1,5 @@
 import {saveWorkerLogin} from './modules/identity-access/worker-login.mjs';
+import {createLoginRateLimit, requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createInvoiceActionRouter} from './modules/invoice-action/router.mjs';
 import {createInvoiceNoticeConfigRouter} from './modules/invoice-export/notice-config-router.mjs';
 import {createInvoiceCsvRouter} from './modules/invoice-export/router.mjs';
@@ -143,27 +144,10 @@ const {requireIdentity, requireAuth} = createIdentityAccessMiddleware({
   allowTestFallback: () => process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true',
 });
 
-const loginAttempts = new Map();
-const loginRateLimit = (req, res, next) => {
-  const windowMs = 15 * 60 * 1000;
-  const maxAttempts = Number(process.env.LOGIN_RATE_LIMIT || 8);
-  const username = String(req.body?.username || '').toLowerCase().trim();
-  const key = `${req.ip || req.socket.remoteAddress || 'unknown'}:${username}`;
-  const now = Date.now();
-  const attempt = loginAttempts.get(key) || { count: 0, resetAt: now + windowMs };
-  if (attempt.resetAt <= now) {
-    attempt.count = 0;
-    attempt.resetAt = now + windowMs;
-  }
-  attempt.count += 1;
-  loginAttempts.set(key, attempt);
-  if (attempt.count > maxAttempts) {
-    res.setHeader('Retry-After', String(Math.ceil((attempt.resetAt - now) / 1000)));
-    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
-    return;
-  }
-  next();
-};
+const loginRateLimit = createLoginRateLimit({
+  maxAttempts: Number(process.env.LOGIN_RATE_LIMIT || 8),
+  maxIpAttempts: Number(process.env.LOGIN_IP_RATE_LIMIT || 64),
+});
 
 const requireRoles = (...roles) => (req, res, next) => {
   const activeRole = req.user?.activeRole;
@@ -1398,8 +1382,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
   }
 });
 
-app.post('/api/auth/login', loginRateLimit, requireDatabase, async (req, res) => {
-  if (process.env.NODE_ENV === 'production' || process.env.LOCAL_LOGIN_ENABLED === 'false') return res.status(404).json({ error: 'Not found' });
+app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDatabase, async (req, res) => {
   const schema = z.object({
     username: z.string().min(1),
     password: z.string().min(1),

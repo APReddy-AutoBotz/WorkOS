@@ -76,6 +76,7 @@ const testKeys = [
   'IDENTITY_DISCOVERY_RECHECK_MS',
   'LOCAL_LOGIN_ENABLED',
   'LOGIN_RATE_LIMIT',
+  'LOGIN_IP_RATE_LIMIT',
   'EMAIL_PROVIDER',
   'TEAMS_PROVIDER',
 ];
@@ -103,7 +104,7 @@ const cleanEnvironment = (overrides = {}) => {
     WOS_ENTRA_FIXTURE_ORIGIN: `https://localhost:${discoveryPort}`,
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
     IDENTITY_DISCOVERY_RECHECK_MS: '5000',
-    // This fixture makes exactly nine callback requests in one loopback-IP bucket.
+    // This fixture makes eleven callback requests in one loopback-IP bucket.
     LOGIN_RATE_LIMIT: '11',
     EMAIL_PROVIDER: 'mock',
     TEAMS_PROVIDER: 'mock',
