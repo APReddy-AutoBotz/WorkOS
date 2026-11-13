@@ -564,3 +564,7 @@ WOS-IAM-005/010, WOS-INT-002 and WOS-NFR-SEC-004: [notification delivery scope](
 ## Worker login ownership
 
 WOS-IAM-003/005/006/010 and WOS-NFR-SEC-003/004/008: [worker login ownership](../tasks/WOS-04-WORKER-LOGIN-OWNERSHIP.md) replaces username-conflict updates with insert-only provisioning and ID/binding/scope-checked existing-account updates. Real PostgreSQL tests reproduce baseline cross-account mutation and verify profile/import collision safety, preserved privileges, concurrent scoped creation and conflict rollback. No migration.
+
+## Bounded login throttling
+
+WOS-NFR-SEC-001/002/008 and WOS-NFR-MNT-005: [bounded login throttling](../tasks/WOS-04-BOUNDED-LOGIN-THROTTLE.md) bounds retained anonymous input, expires old budgets, rejects capacity overflow and limits username rotation per IP. Disabled local login returns before state/database work. Negative unit/HTTP tests and the signed production identity fixture verify behavior. Process-local limits and shared-NAT tuning remain documented deployment constraints; no migration.
