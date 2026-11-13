@@ -1,3 +1,4 @@
+import {quoteCsvCell} from '../../shared/csv-cell.mjs';
 import {WorkCategory} from '../components/WorkCategory';
 import {WorkSourceIdentity} from '../components/WorkSourceIdentity';
 import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
@@ -210,8 +211,7 @@ export const TimesheetApproval = () => {
       RejectionReason: '',
     };
     const headers = Object.keys(rows[0] || fallback);
-    const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-    const csv = [headers.join(','), ...rows.map(row => headers.map(header => escape(row[header as keyof typeof row])).join(','))].join('\n');
+    const csv = [headers.map(quoteCsvCell).join(','), ...rows.map(row => headers.map(header => quoteCsvCell(row[header as keyof typeof row])).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
