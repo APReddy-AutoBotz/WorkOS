@@ -53,6 +53,7 @@ const pool = {
         transactionQueries.push({sql, params});
         if(sql.includes('pg_advisory_')||sql.includes('from leave_approval_instances')||sql.includes('from leave_selected_approval_policy'))return {rows:[],rowCount:0};
         if (['begin', 'commit', 'rollback'].includes(sql)) return {rows: []};
+        if (sql.includes('as self_decision')) return {rows: [{self_decision: params[1] === 'employee-row-1'}]};
         if (sql.includes('select * from leave_types where id = $1')) {
           return {rows: params[0] === existingLeaveType.id ? [existingLeaveType] : []};
         }
@@ -98,6 +99,7 @@ const pool = {
 const requireDatabase = (_req, _res, next) => next();
 const requireAuth = (req, _res, next) => {
   req.user = {
+    sub: '11111111-1111-4111-8111-111111111111',
     activeRole: req.get('x-active-role') || 'Admin',
     employeeRecordId: req.get('x-employee-record-id') || 'employee-row-1',
     employeeId: req.get('x-employee-id') || 'E-1',

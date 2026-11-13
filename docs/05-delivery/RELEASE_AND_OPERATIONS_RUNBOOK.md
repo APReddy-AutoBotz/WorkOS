@@ -401,3 +401,7 @@ Migration076 creates an empty protected candidate ledger and opt-in permission d
 ## Session revocation rollout
 
 Apply migration 094 before the new API. Session refresh and role selection preserve the original expiry; monitor SESSION_AUTHORITY_UNAVAILABLE and SESSION_REVOCATION_UNCONFIRMED responses as availability failures. Logout clears device credentials immediately, but users receive an explicit warning if server revocation cannot be confirmed. Preserve session_revocations and audit_logs through restore. Independently issued pre-upgrade tokens expire on their original deadline; use controlled signing-secret rotation if all must be invalidated immediately. Older binaries ignore the ledger, so prefer forward repair; do not delete revocation evidence for rollback. See [session delivery evidence and limitations](../tasks/WOS-04-REVOCABLE-SESSIONS.md).
+
+## Independent leave decisions
+
+Migration 095 adds the indexed lookup for retained leave submitter identity. Schedule its ordinary transactional index build in the deployment maintenance window. An affected worker or recorded submitter must use an independent authorized approver; switching UI routes or roles does not remove that requirement. Cancellation remains distinct. Preserve historical audit evidence and prior decisions; this release does not retrospectively cancel approved leave. Reverting application code restores the authorization gap, so prefer forward repair. See [leave decision evidence and limitations](../tasks/WOS-05-INDEPENDENT-LEAVE-DECISIONS.md).

@@ -1,5 +1,6 @@
 import {startLeaveApproval,prepareLeaveSourceEdit,retainLeaveCancellation,assertLegacyLeaveApproval,lockLeaveApprovalScope,unlockLeaveApprovalScope} from '../approvals/leave-approval-service.mjs';
 import {Router} from 'express';
+import {assertIndependentLeaveDecision} from './decision-independence.mjs';
 import {z} from 'zod';
 import {quoteCalendarLeave,requireCalendarLeaveQuote,retainCalendarLeave,assertCalendarLeaveDecision,calendarLeaveError} from './calendar-leave-service.mjs';
 
@@ -721,6 +722,7 @@ export const createLeaveRouter = ({
       }
       let governed=false;
       if(parsed.data.status==='Cancelled')governed=Boolean(await retainLeaveCancellation(client,req,previous,parsed.data.comments));else await assertLegacyLeaveApproval(client,previous.id);
+      if(parsed.data.status!=='Cancelled')await assertIndependentLeaveDecision(client,req,previous);
       await assertCalendarLeaveDecision(client,req,previous,parsed.data.status,buildEmployeeScopeWhere,getBusinessLeaveDays);
       const result = await client.query(`
         update leave_requests
