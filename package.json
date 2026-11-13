@@ -212,7 +212,8 @@
     "test:timesheet-export-browser": "node tests/timesheet-export-browser-smoke.mjs",
     "test:notification-delivery-scope-postgres": "node tests/notification-delivery-scope-postgres-smoke.mjs",
     "test:worker-login-ownership-postgres": "node tests/worker-login-ownership-postgres-smoke.mjs",
-    "test:login-rate-limit": "node --test tests/login-rate-limit-smoke.mjs"
+    "test:login-rate-limit": "node --test tests/login-rate-limit-smoke.mjs",
+    "test:database-tls": "node tests/database-tls-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

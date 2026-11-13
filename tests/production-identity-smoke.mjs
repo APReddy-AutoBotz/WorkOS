@@ -55,6 +55,7 @@ const testKeys = [
   'RESET_DEMO_DATA',
   'DATABASE_URL',
   'PGSSLMODE',
+  'PGSSLROOTCERT',
   'API_SESSION_SECRET',
   'IDENTITY_PROVIDER',
   'ENTRA_TENANT_ID',
@@ -369,6 +370,13 @@ try {
     port: positivePort + 15,
     overrides: {ENTRA_CLIENT_SECRET: 'replace_me'},
     expected: /ENTRA_CLIENT_SECRET must be a configured non-placeholder secret/,
+  }));
+
+  results.push(await assertStartupFailure({
+    name: 'unreadable-database-ca',
+    port: positivePort + 16,
+    overrides: {PGSSLMODE: 'require', PGSSLROOTCERT: join(certificateDirectory, 'missing-database-ca.pem')},
+    expected: /Production startup blocked: database or migration failure/,
   }));
 
   const beforeUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);

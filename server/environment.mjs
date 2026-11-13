@@ -27,7 +27,8 @@ const environmentSchema = z.object({
   API_PORT: portText,
   DATABASE_URL: optionalText,
   PGSSLMODE: z.preprocess((value) => value === '' || value === undefined ? 'disable' : value,
-    z.enum(['disable', 'require'])),
+    z.enum(['disable', 'require', 'verify-full'])),
+  PGSSLROOTCERT: optionalText,
   API_SESSION_SECRET: optionalText,
   APP_URL: optionalText,
   IDENTITY_PROVIDER: z.preprocess((value) => value === '' || value === undefined ? 'local' : value,
@@ -166,6 +167,7 @@ export const validateRuntimeEnvironment = (source = process.env, {purpose = 'ser
     port: environment.PORT ?? environment.API_PORT ?? 4000,
     databaseUrl: environment.DATABASE_URL,
     pgSslMode: environment.PGSSLMODE,
+    pgSslRootCert: environment.PGSSLROOTCERT,
     production,
   };
 };

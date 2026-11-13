@@ -568,3 +568,7 @@ WOS-IAM-003/005/006/010 and WOS-NFR-SEC-003/004/008: [worker login ownership](..
 ## Bounded login throttling
 
 WOS-NFR-SEC-001/002/008 and WOS-NFR-MNT-005: [bounded login throttling](../tasks/WOS-04-BOUNDED-LOGIN-THROTTLE.md) bounds retained anonymous input, expires old budgets, rejects capacity overflow and limits username rotation per IP. Disabled local login returns before state/database work. Negative unit/HTTP tests and the signed production identity fixture verify behavior. Process-local limits and shared-NAT tuning remain documented deployment constraints; no migration.
+
+## Verified database TLS
+
+WOS-NFR-SEC-001/007/008 and WOS-NFR-MNT-005: [verified database TLS](../tasks/WOS-03-VERIFIED-DATABASE-TLS.md) shares certificate-chain and hostname verification between API and migrations, supports an explicit private CA bundle, and rejects URL controls that override verification. Actual driver TLS negative tests and complete PostgreSQL migration acceptance verify transport and compatibility separately. No SQL migration; buyer deployment encryption remains a release acceptance gate.

@@ -23,6 +23,12 @@ Provide a repeatable buyer-owned release, deployment, verification, rollback and
 - Operations owner, alert channel and maintenance window are assigned.
 - Production demo seed/fallback/shared accounts are disabled.
 
+### Database certificate verification
+
+Set PGSSLMODE=require (or verify-full) for database TLS. Both modes verify the certificate chain and database hostname for application connections and migration commands. Publicly trusted certificates use the runtime trust store; private authorities require PGSSLROOTCERT pointing to a read-only mounted PEM CA bundle, available to both processes. Renew the server certificate and CA bundle through the buyer's normal certificate rotation process. Confirm the connection before release; an unreadable bundle, untrusted issuer or mismatched hostname fails closed.
+
+Do not put ssl, sslmode, sslrootcert, sslkey, sslcert or uselibpqcompat in DATABASE_URL. Such query controls can override driver options and are rejected; move transport settings to the documented environment variables. PGSSLMODE=disable explicitly selects plaintext and is retained for local fixtures/current isolated Compose compatibility; it is not evidence that a buyer's production encryption requirement is satisfied. Production acceptance must verify the actual deployment's encrypted transport. Do not work around certificate errors by disabling verification.
+
 ## Deployment sequence
 
 ```text
