@@ -548,3 +548,7 @@ WOS-IAM-003/005/008/010 and WOS-NFR-SEC-003/004: [current-role validation](../ta
 ## Protected identity administration
 
 WOS-IAM-003/005/006/010 and WOS-NFR-SEC-003/004/005/008: [protected identity administration](../tasks/WOS-04-PROTECTED-IDENTITY-ADMINISTRATION.md) separates workforce editing from role, credential and identity-binding authority. Profile/import role omissions preserve assignments; code prefixes grant no authority; protected changes require current administrator permission; disabled/pending Entra links cannot be revived through fallback fields. PostgreSQL negative tests and signed production-provider callbacks verify the boundaries. No migration; broader session lifecycle and account-disable review remain separate.
+
+## Setup request and workforce read boundaries
+
+WOS-IAM-005/010, WOS-WKF-006 and WOS-NFR-SEC-004/008: [setup read boundaries](../tasks/WOS-02-SETUP-READ-BOUNDARIES.md) validate date inputs, contain rejected asynchronous setup handlers and apply workforce permission plus employee visibility to history/dependency reads. Real API negative tests include malformed input, database failure, unrelated/cross-scope access and permission loss; existing date semantics are verified against PostgreSQL in three timezones. No migrations.
