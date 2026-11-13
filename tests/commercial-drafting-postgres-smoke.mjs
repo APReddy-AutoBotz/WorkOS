@@ -211,8 +211,10 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     assert.equal(identity.body.activeRole, 'Admin');
     for (const permission of commercialPermissions) assert.ok(identity.body.permissions.includes(permission));
     assertError(await request('/workspace', {authenticated: false}), 401, 'AUTHENTICATION_REQUIRED');
+    // Assigned TeamLead without commercial access reaches the module permission guard.
     assertError(await request('/workspace', {identity: identities.denied}), 403, 'COMMERCIAL_PERMISSION_DENIED');
-    assertError(await request('/workspace', {identity: identities.reader, role: 'Admin'}), 403, 'COMMERCIAL_PERMISSION_DENIED');
+    // An unassigned active role is rejected earlier by current-role middleware.
+    assertError(await request('/workspace', {identity: identities.reader, role: 'Admin'}), 403, 'SESSION_ROLE_REVOKED');
     assertError(await request('/workspace', {scope: {organizationId: f.organizationId, legalEntityId: f.otherLegalEntityId}}), 403, 'ORG_SCOPE_DENIED');
     assertError(await request('/workspace', {scope: {organizationId: f.otherOrganizationId, legalEntityId: f.foreignLegalEntityId}}), 403, 'ORG_SCOPE_DENIED');
     for (const query of ['?asOf=not-a-date', '?asOf=2025-02-29', '?asOf=2028-02-30', '?organizationId=org-default', '?asOf=2026-01-01&status=Active']) {
