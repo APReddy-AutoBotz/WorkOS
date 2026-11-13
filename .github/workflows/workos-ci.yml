@@ -37,7 +37,7 @@ jobs:
 
   validate:
     name: Validate application, migrations, and container
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     services:
