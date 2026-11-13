@@ -37,6 +37,7 @@ jobs:
 
   validate:
     name: Validate application, migrations, and container
+    # The locked Playwright browser registry supports Ubuntu 24.04.
     runs-on: ubuntu-24.04
     permissions:
       contents: read
