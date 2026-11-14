@@ -50,3 +50,7 @@ No uploads, URL dereferencing, mandatory-evidence policy, task/ticket/milestone 
 ## Separate PR-008E continuation
 
 The task/ticket/milestone model exclusion above is addressed only as descriptive optional reference text by separate [PR-008E](WOS-04-WORK-ENTRY-REFERENCE.md), integrated with accepted PR58 `a7d8da030d10686a8ca317df592a8c76670ba0c6`. It supplies no authoritative task/milestone relationship. PR-008D's URL behavior remains bounded; PR-008E requires its own independent review and acceptance.
+
+## Separate PR-008F policy continuation
+
+The mandatory-evidence-policy exclusion above is addressed only as the buyer's optional positive-entry capture-policy choice in separate [PR-008F](WOS-04-REQUIRED-EVIDENCE-POLICY.md), integrated with accepted PR59. Existing PR-008D URL storage remains unchanged. No global default mandate, upload, URL lookup, category/group exception or integrated acceptance is introduced.

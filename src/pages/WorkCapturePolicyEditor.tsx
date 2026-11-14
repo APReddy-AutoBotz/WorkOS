@@ -37,7 +37,7 @@ export const WorkCapturePolicyEditor = () => {
       publish({...owner, status: 'ready', workspace, draft: {expectedLatestId: workspace.latestId,
         effectiveFrom: workspace.activationDates[0] || '', minimumIncrement: latest?.minimumIncrement || '0.25',
         dailyMaximum: latest?.dailyMaximum ?? null, weeklyMaximum: latest?.weeklyMaximum ?? null,
-        commentRequired: latest?.commentRequired || false}});
+        commentRequired: latest?.commentRequired || false, evidenceRequired: latest?.evidenceRequired || false}});
     }).catch(() => {
       if (current(owner)) publish({...owner, status: 'error', message: 'Capture policy could not be loaded. Check access and connection, then reload.'});
       else if(mounted.current&&request===generation.current)block();
@@ -80,16 +80,16 @@ export const WorkCapturePolicyEditor = () => {
     }
   };
   return <div className="mx-auto max-w-5xl space-y-6 p-6">
-    <PageHeader title="Work capture policy" subtitle="Append effective-dated increments, aggregate limits and required comments for the selected legal entity." breadcrumb={['Admin', 'Work capture policy']} />
+    <PageHeader title="Work capture policy" subtitle="Append effective-dated increments, aggregate limits, required comments and evidence URLs for the selected legal entity." breadcrumb={['Admin', 'Work capture policy']} />
     <Link to="/admin" className="underline">Back to governance settings</Link>
     <p>Policies activate only at an authoritative Weekly reporting-period start. All recorded worker work counts across headers and states. Blank maximums add no capture cap. Existing worker, assignment, date, period-lock and approval controls still apply.</p>
-    <p>No policy is installed by default. This editor does not configure categories, evidence links, overtime exceptions, deadlines, grace periods, protected reopening or capture modes.</p>
+    <p>No policy is installed by default. This editor does not configure categories, overtime exceptions, deadlines, grace periods, protected reopening or capture modes. Evidence requirements apply to every positive entry under the effective policy; zero entries are exempt.</p>
     <div aria-live="polite" role="status">{state.message || (state.status === 'loading' ? 'Loading capture policy…' : state.status === 'saving' ? 'Appending policy version…' : '')}</div>
     <button className={button} disabled={state.status === 'saving' || state.status === 'loading'} onClick={reload}>Reload capture policy</button>
     {state.workspace && <section aria-label="Capture policy history" className="space-y-2">
       <h2 className="font-bold">Retained versions</h2>
       {!state.workspace.versions.length && <p>No explicit capture policy. Existing neutral compatibility applies.</p>}
-      {state.workspace.versions.map(policy => <p key={policy.id}>Version {policy.sequence}, effective {policy.effectiveFrom}: increment {policy.minimumIncrement}h; daily maximum {policy.dailyMaximum ?? 'not configured'}; Weekly maximum {policy.weeklyMaximum ?? 'not configured'}; comments {policy.commentRequired ? 'required' : 'optional'}.</p>)}
+      {state.workspace.versions.map(policy => <p key={policy.id}>Version {policy.sequence}, effective {policy.effectiveFrom}: increment {policy.minimumIncrement}h; daily maximum {policy.dailyMaximum ?? 'not configured'}; Weekly maximum {policy.weeklyMaximum ?? 'not configured'}; comments {policy.commentRequired ? 'required' : 'optional'}; evidence URLs {policy.evidenceRequired ? 'required' : 'optional'}.</p>)}
       {state.workspace.truncated && <p>Only the latest 50 versions are shown.</p>}
     </section>}
     {state.draft && <form onSubmit={save} className="space-y-4">
@@ -100,6 +100,7 @@ export const WorkCapturePolicyEditor = () => {
         <label>Daily maximum (hours, blank for no cap)<input className={control} inputMode="decimal" value={state.draft.dailyMaximum ?? ''} onChange={event => edit('dailyMaximum', event.target.value || null)} /></label>
         <label>Weekly maximum (hours, blank for no cap)<input className={control} inputMode="decimal" value={state.draft.weeklyMaximum ?? ''} onChange={event => edit('weeklyMaximum', event.target.value || null)} /></label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={state.draft.commentRequired} onChange={event => edit('commentRequired', event.target.checked)} />Require a comment on every positive entry</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={state.draft.evidenceRequired || false} onChange={event => edit('evidenceRequired', event.target.checked)} />Require an evidence URL on every positive entry</label>
         <button className={button} type="submit" disabled={!state.draft.effectiveFrom}>Append capture policy</button>
       </fieldset>
       {!state.workspace?.activationDates.length && <p>Configure a future Weekly reporting period before appending a policy. No date is invented here.</p>}
