@@ -17,7 +17,8 @@ concurrency:
 jobs:
   validate:
     name: Validate application, migrations, and container
-    runs-on: ubuntu-latest
+    # The locked Playwright browser registry supports Ubuntu 24.04.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     services:
@@ -50,6 +51,9 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Verify bootstrap hygiene and adversarial scanner fixtures
+        run: node scripts/scan-bootstrap.mjs --self-test
 
       - name: Type check
         run: npm run typecheck
