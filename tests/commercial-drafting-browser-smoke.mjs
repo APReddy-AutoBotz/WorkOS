@@ -4,6 +4,10 @@ const {chromium} = await import(process.env.WORKOS_PLAYWRIGHT_MODULE || 'playwri
 const baseUrl = process.env.WORKOS_BROWSER_BASE_URL || 'http://127.0.0.1:4177';
 const browser = await chromium.launch({headless: true, ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {})});
 const page = await browser.newPage({viewport: {width: 1100, height: 900}});page.setDefaultTimeout(10000);
+// Vite document/module loading is harness setup. Keep business interactions on
+// the 10-second deadline while allowing the same cold-navigation budget as the
+// accepted real import journey on slower local and CI machines.
+page.setDefaultNavigationTimeout(60000);
 const errors = [], unexpectedApi = [], unexpectedRemote = [], allCalls = [], allUnexpected = [];let downloads = 0;
 page.on('pageerror', error => errors.push(error.message));page.on('download', () => downloads++);
 page.on('request', request => {if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== new URL(baseUrl).origin) unexpectedRemote.push(request.url());});
@@ -42,6 +46,7 @@ const create = async (kind, result, updated) => {const after = await lastId();aw
 try {
   await boot();await page.getByText('Legacy projects mapped: 1 of 1.', {exact: false}).waitFor();
   let after = await lastId();await button(`Inspect ${detail.number}`).focus();await page.keyboard.press('Enter');let request = await pending('contract', after);await settle(request, detail);
+  await history().getByText(`Billing terms: ${terms.billingTerms}`, {exact: true}).waitFor();
   assert((await history().innerText()).includes(terms.billingTerms));assert.equal(await history().locator('script,img').count(), 0, 'terms and document labels render as inert text');
   const link = history().getByRole('link', {name: terms.documents[0].name, exact: true});assert.equal(await link.getAttribute('href'), terms.documents[0].url);assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
   assert.equal(await page.evaluate(() => window.syntheticCommercialExecuted), undefined);
@@ -107,8 +112,15 @@ try {
   // Save lock protects native double submit, retained callbacks and uncertain outcomes.
   await boot();await startContract();await capture('old-submit', 'submit');after = await lastId();await page.evaluate(() => window.commercialHarness.submitTwice());request = await pending('create-contract', after);assert.equal((await calls()).filter(call => call.method === 'POST').length, 1);const beforeDuplicate = await calls();await invoke(['old-submit']);await noDispatch(beforeDuplicate, 'in-flight duplicate submit stays locked');
   await settle(request, undefined, 400);await button('Save draft').waitFor();assert.equal(await button('Save draft').isDisabled(), false);await noPrivate();after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await settle(request, undefined, 409);await page.getByRole('alert').getByText('Draft not saved because the latest server version', {exact: false}).waitFor();assert.equal(await button('Save draft').isDisabled(), true);const conflictCalls = await calls();await invoke(['old-submit']);await noDispatch(conflictCalls, 'conflict disables implicit retries');
-  await button('Discard draft').click();assert.equal(await page.locator('form').count(), 0);await startContract();await capture('discarded-submit', 'submit');await button('Discard draft').click();await button('New draft milestone').click();const beforeOldForm = await calls();await invoke(['discarded-submit']);await noDispatch(beforeOldForm, 'discarded form lease cannot submit a replacement draft');
-  for (const failure of [503,'network','malformed-json']) {await boot();await startContract();after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await settle(request, undefined, failure);await page.getByRole('alert').getByText('Save outcome could not be confirmed.', {exact: false}).waitFor();assert.equal(await button('Save draft').isDisabled(), true);await noPrivate();}
+  await button('Discard draft').click();assert.equal(await page.locator('form').count(), 0);assert.equal(await button('New contract / SOW').isDisabled(), true);after = await lastId();await button('Reload workspace').click();request = await pending('workspace', after);await settle(request, workspace());await ready();await startContract();await capture('discarded-submit', 'submit');await button('Discard draft').click();await button('New draft milestone').click();const beforeOldForm = await calls();await invoke(['discarded-submit']);await noDispatch(beforeOldForm, 'discarded form lease cannot submit a replacement draft');
+  for (const failure of [503,'network','malformed-json']) {await boot();await startContract();after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await settle(request, undefined, failure);await page.getByRole('alert').getByText('Save outcome could not be confirmed.', {exact: false}).waitFor();assert.equal(await button('Save draft').isDisabled(), true);await noPrivate();
+    await capture('uncertain-discard', 'Discard draft');await button('Discard draft').click();
+    await page.getByText('Draft discarded. Reload server records before creating another draft;', {exact: false}).waitFor();
+    assert.equal(await page.locator('form').count(), 0);
+    for (const name of ['New contract / SOW','New engagement','New purchase order','New draft milestone']) assert.equal(await button(name).isDisabled(), true);
+    const lockedCalls = await calls();await invoke(['uncertain-discard']);await noDispatch(lockedCalls, 'discard cannot release an uncertain operation lock');
+    after = await lastId();await button('Reload workspace').click();request = await pending('workspace', after);assert.equal(request.method, 'GET');await settle(request, workspace());await ready();assert.equal(await button('New contract / SOW').isEnabled(), true);
+  }
 
   // No completed read or save may restore content after a scope/access switch.
   const changes = [() => page.evaluate(() => window.commercialHarness.scope({organizationId: 'org-b', legalEntityId: 'legal-b'})),

@@ -33,3 +33,11 @@ Local browser execution is unavailable under the authoring sandbox's networking/
 ## Exclusions and rollback
 
 No Forecast, Planned/overview behavior, reporting/denominator/as-of redesign, backend, authentication/authorization, permission, calculation, normalizer, schema, dependency, export-helper/audit semantic, diagnostic or blocked security change is included. Revert this isolated frontend/test/documentation increment for rollback; no database conversion, authoritative-record, grant or credential action is involved.
+
+## Integration checkpoint, 2026-11-14
+
+Reconciled with planned-detail candidate `a5f5269ac68384fd56683bc2b389db7e03ec0174`, subsequently accepted in PR44 at main `a25d08be9309f3d8aa502c2c3459dab0fdbb38fa`. The package-script conflict retains every accepted test and adds both Actual suites. No product code was changed during reconciliation.
+
+Current local evidence passed: fresh lockfile installation (338 installed, 345 audited, zero vulnerabilities), typecheck, lint (109 modules), full supported-mode unit/contracts, bootstrap scan (252 files) and adversarial fixtures, and production build with frontend fallback disabled. The unchanged Chromium suite passed after explicit local Vite fixture-compilation warm-up: all reader failures, keyboard retry, atomic completion, composite/mixed/filter empty states, approved-metric and period/status/search parity, stale/unmounted responses, both real CSV/history/audit paths and narrow recovery. No timeout or assertion was changed. This supersedes only the historical local-browser availability limitation above.
+
+Controller review inspected the complete component, reader/browser tests, fixture and additive gate changes. Historical independent review and hosted CI apply to the old head only; exact-head hosted checks and applicable current-head review remain necessary before merge. No buyer UAT, full reporting/export-governance or release completion is claimed.
