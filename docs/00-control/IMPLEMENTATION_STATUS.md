@@ -82,7 +82,17 @@ Bounded WOS-TIM-001/004-006/008-009/011-012, WOS-CORE-003-005, WOS-NFR-DAT-002/0
 
 Local locked installation, typecheck/lint, aggregate unit/contracts, scanner/adversarial checks, real PostgreSQL fresh/upgrade/replay/concurrency acceptance, production build and browser journeys passed. The first hosted candidate failed an unsynchronized DOM assertion; the test-only correction waits for the blocked-state render before unchanged assertions. Its independent exact-head correction review and fresh full hosted matrix passed. The original frozen candidate's security review covered all 16 source items and supporting changed paths without introduced findings; the separate correction review does not retroactively change that scan. Earlier whole-repository audit findings remain open.
 
-Rollback retains migration046 and immutable mode history with a compatible application. Daily entry does not change weekly approval identity. Full evidence/categorization/overtime/capacity/financial controls and release/buyer acceptance remain open. Optional evidence-link PR58 has passed local integration checks but remains Draft pending independent exact-head review and hosted acceptance; it is not counted as accepted on main.
+Rollback retains migration046 and immutable mode history with a compatible application. Daily entry does not change weekly approval identity. Full evidence/categorization/overtime/capacity/financial controls and release/buyer acceptance remain open. Optional evidence-link PR58 was subsequently accepted as recorded below.
+
+## Optional work-entry evidence integration checkpoint
+
+[PR58](https://github.com/APReddy-AutoBotz/WorkOS/pull/58) merged at `5534e999beab8e40cc1c9b2d49a96f96aaab3180`. Candidate `a7d8da030d10686a8ca317df592a8c76670ba0c6` passed every step of [CI43630671029](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43630671029). Every resulting [main check](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43631361092) also passed.
+
+Bounded WOS-TIM-003 evidence-link support adds migration047, optional validated HTTP/HTTPS references, safe rendered links, independent manual/import omission-versus-clear handling, evidence-only revision conflicts and immutable submission/correction history. It preserves WOS-TIM-001/004/008/009/011/012 and associated data-integrity/UX controls. URLs are stored references only; there is no automatic fetch or preview.
+
+Locked installation (345 audited, zero reported vulnerabilities), typecheck/lint, aggregate unit/contracts, real PostgreSQL fresh/046-upgrade/replay and negative scope/history tests, production build, and evidence/ownership/capture-mode browser journeys passed. The initial browser attempt timed out at navigation before feature assertions; the unchanged retry passed without weakened assertions or increased timeouts. Scanner-rejected literal negative fixtures were replaced with generated ephemeral values, retaining credential-URL rejection coverage. Independent source/security review covered all14 source items/all33 changed paths with no introduced findings or correctness blockers; inherited audit findings remain open.
+
+Rollback retains migration047 and immutable histories. Pre047 applications cannot preserve references during replacement; if restoring one, keep work writes disabled until a compatible binary is restored. Task/ticket/milestone reference PR59 is the next dependent package and requires its own acceptance. Full TIM003/PR008, buyer UAT and deployment remain open.
 
 ## Remaining release work
 
