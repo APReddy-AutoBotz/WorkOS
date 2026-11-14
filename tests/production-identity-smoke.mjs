@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
+import {syntheticCredential, rejectedConfigurationValues} from './support/synthetic-values.mjs';
 
 const {Pool} = pg;
 const databaseUrl = String(process.env.DATABASE_URL || '').trim();
@@ -90,7 +91,7 @@ const cleanEnvironment = (overrides = {}) => {
     RESET_DEMO_DATA: 'false',
     DATABASE_URL: databaseUrl,
     PGSSLMODE: 'disable',
-    API_SESSION_SECRET: 'workos-test-only-session-secret-with-at-least-32-characters',
+    API_SESSION_SECRET: syntheticCredential(),
     IDENTITY_PROVIDER: 'entra',
     ENTRA_TENANT_ID: '00000000-0000-0000-0000-000000000001',
     ENTRA_CLIENT_ID: '00000000-0000-0000-0000-000000000002',
@@ -366,7 +367,7 @@ try {
   results.push(await assertStartupFailure({
     name: 'placeholder-client-secret',
     port: positivePort + 15,
-    overrides: {ENTRA_CLIENT_SECRET: 'replace_me'},
+    overrides: {ENTRA_CLIENT_SECRET: rejectedConfigurationValues.placeholder},
     expected: /ENTRA_CLIENT_SECRET must be a configured non-placeholder secret/,
   }));
 

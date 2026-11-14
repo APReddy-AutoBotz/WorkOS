@@ -21,7 +21,7 @@ export const decodeWorkHistoryPage=(value:unknown,before:number|null=null):WorkH
   if(!object(raw)||!text(raw.id)||seen.has(raw.id)||!Number.isInteger(raw.sequence)||Number(raw.sequence)<1||Number(raw.sequence)>=previous||!instant(raw.createdAt)||!text(raw.activeRole)||!text(raw.source)||!Array.isArray(raw.entries)||raw.entries.length<1||raw.entries.length>100)fail();
   const row=raw as Record<string,unknown>;previous=Number(row.sequence);seen.add(row.id as string);const ids=new Set<string>();
   const entries=(row.entries as unknown[]).map(rawEntry=>{
-   if(!object(rawEntry)||!text(rawEntry.entryId)||ids.has(rawEntry.entryId)||!optionalText(rawEntry.projectId)||!['Project Work','Client Misc Task'].includes(String(rawEntry.workType))||!date(rawEntry.workDate)||typeof rawEntry.hoursExact!=='string'||typeof rawEntry.billable!=='boolean'||!['clientName','category','remark'].every(key=>optionalText(rawEntry[key])))fail();
+   if(!object(rawEntry)||!text(rawEntry.entryId)||ids.has(rawEntry.entryId)||!optionalText(rawEntry.projectId)||typeof rawEntry.workType!=='string'||!['Project Work','Client Misc Task'].includes(rawEntry.workType)||!date(rawEntry.workDate)||typeof rawEntry.hoursExact!=='string'||typeof rawEntry.billable!=='boolean'||!['clientName','category','remark'].every(key=>optionalText(rawEntry[key])))fail();
    const entry=rawEntry as Record<string,unknown>;ids.add(entry.entryId as string);
    try{canonicalHours(entry.hoursExact as string);}catch{fail();}
    if(Object.hasOwn(entry,'evidenceUrl')&&(!optionalText(entry.evidenceUrl)||!evidenceUrlIsValid(entry.evidenceUrl)))fail();
@@ -30,7 +30,7 @@ export const decodeWorkHistoryPage=(value:unknown,before:number|null=null):WorkH
     ...(Object.hasOwn(entry,'evidenceUrl')?{evidenceUrl:normalizeEvidenceUrl(entry.evidenceUrl)}:{}),...(Object.hasOwn(entry,'workReference')?{workReference:entry.workReference}:{})} as HistoricalWorkEntry;
   });
   let decision:WorkHistorySubmission['decision']=null;
-  if(row.decision!==null){const d=row.decision;if(!object(d)||!['Approved','Rejected','Cancelled'].includes(String(d.status))||!optionalText(d.reason)||!instant(d.createdAt)||!text(d.activeRole)||!text(d.source))fail();const decisionRow=d as Record<string,unknown>;decision={status:decisionRow.status,reason:decisionRow.reason,createdAt:decisionRow.createdAt,activeRole:decisionRow.activeRole,source:decisionRow.source} as WorkHistorySubmission['decision'];}
+  if(row.decision!==null){const d=row.decision;if(!object(d)||typeof d.status!=='string'||!['Approved','Rejected','Cancelled'].includes(d.status)||!optionalText(d.reason)||!instant(d.createdAt)||!text(d.activeRole)||!text(d.source))fail();const decisionRow=d as Record<string,unknown>;decision={status:decisionRow.status,reason:decisionRow.reason,createdAt:decisionRow.createdAt,activeRole:decisionRow.activeRole,source:decisionRow.source} as WorkHistorySubmission['decision'];}
   if(row.submissionTiming!==undefined&&!normalizeSubmissionTiming(row.submissionTiming))fail();
   return {...(row.submissionTiming!==undefined?{submissionTiming:normalizeSubmissionTiming(row.submissionTiming)}:{}),id:row.id,sequence:row.sequence,createdAt:row.createdAt,activeRole:row.activeRole,source:row.source,entries,decision} as WorkHistorySubmission;
  });

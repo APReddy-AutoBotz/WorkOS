@@ -21,7 +21,7 @@ const session = (id = 'synthetic-admin-a', role = 'Admin', allowed = true) => ({
   lastLogin: '2026-10-20T00:00:00Z',
 });
 const initialScope = {organizationId: 'org-a', legalEntityId: 'legal-a'};
-const token = 'synthetic-profile-token-a';
+const token = crypto.randomUUID();
 sessionStorage.setItem('workos_session', JSON.stringify(session('synthetic-admin-a', 'Admin', new URLSearchParams(window.location.search).get('access') !== 'none')));
 sessionStorage.setItem('workos_organization_scope', JSON.stringify(initialScope));
 sessionStorage.setItem('workos_api_token', token);
