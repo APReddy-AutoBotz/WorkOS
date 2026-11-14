@@ -592,3 +592,7 @@ WOS-CORE-003, WOS-IAM-005/010, WOS-INV-002, WOS-INT-002 and WOS-NFR-SEC-004/012:
 ## Legacy approval scope and delegation ownership
 
 WOS-CORE-003/005, WOS-IAM-003/005/010, WOS-APR-004 and WOS-NFR-SEC-004/012: [legacy approval boundaries](../tasks/WOS-05-LEGACY-APPROVAL-SCOPE.md) applies selected-entity scope to inbox, SLA and decisions; protects retained delegator ownership; and revalidates participant role, account, permission and lifecycle. Real API tests cover denial without protected mutation, valid delegation, revocation, overlap concurrency and audit rollback. Canonical source-specific approval guards remain authoritative. No migration or automatic historical adoption.
+
+## Settings persistence feedback
+
+WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-003/UX-005: [settings save outcomes](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md) awaits acknowledged writes for both settings actions, preserves edits after refusal, distinguishes newer edits, suppresses unmounted completion and offers initialization retry. The real React/API/PostgreSQL journey covers delayed/refused/successful responses and current permission loss without weakening server authority.

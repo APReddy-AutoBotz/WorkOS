@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test:settings-save-outcomes-browser": "node tests/settings-save-outcomes-browser-smoke.mjs",
     "test:legacy-approval-scope-browser": "node tests/legacy-approval-scope-browser-smoke.mjs",
     "test:legacy-approval-scope-postgres": "node tests/legacy-approval-scope-postgres-smoke.mjs",
     "dev": "vite --port=3000 --host=0.0.0.0",
