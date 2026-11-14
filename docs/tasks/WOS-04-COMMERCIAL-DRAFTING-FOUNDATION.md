@@ -34,3 +34,12 @@ Append-only migration 040 adds commercial roots/immutable versions/drafts and ne
 ## Engineering evidence
 
 Record exact local/hosted results and exact published head/tree in the Draft PR. All existing suites, real PostgreSQL migration tests, browser journeys, identity/fail-closed startup, scans and container gates remain required and unweakened. Local browser/PostgreSQL execution limits must be disclosed, never represented as passes. Formal review can occur at the end, but release/merge/production safeguards remain.
+
+
+## Current integration checkpoint — 2026-11-14
+
+The owner now authorizes eligible integration and merges. PR50 was accepted at main `9f429fa9753ac2fc77c66b07cad313d82617b7a4`; this candidate integrates its reviewed head `4c4e198baad0024eb1804c5d7cbafaeee4059875`, preserving current dependencies, scanner, import journey cleanup and every accepted CI gate. Historical October local restrictions and no-merge statements above describe that original checkpoint, not current infrastructure or owner authorization. No production deployment or buyer release acceptance is implied.
+
+Current local evidence: fresh npm ci installed 338 packages, audited 345 and reported zero vulnerabilities. Type checking passed; lint checked 133 JavaScript modules. The complete supported-mode aggregate suite passed, including actual PostgreSQL calendar and terminology date coverage. The unchanged hygiene scanner passed 291 files and its adversarial fixtures. Commercial PostgreSQL acceptance passed fresh/upgrade/replay, all seven models, scoped API negatives, immutable/pinned terms, concurrent revisions, decimal/date integrity and transactional audit. Production frontend build passed with fallback disabled.
+
+The actual React/API/disposable-PostgreSQL journey passed sequentially with original assertions and timeouts, after an initial navigation timeout during concurrent startup. The separate fixture browser check is not yet accepted: its first compilation warm-up timed out; a sequential run warmed successfully and progressed to the ownership-race loop, then timed out navigating at test line 123. Preserve these failed receipts; do not represent partial interactions as a full pass. Remaining source review, exact-head security review, fixture-browser resolution and fresh hosted gates are pending. No assertion, scanner or permission control has been weakened.

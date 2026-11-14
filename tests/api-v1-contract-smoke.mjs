@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 import express from 'express';
 import {createRequestContextMiddleware} from '../server/api/request-context.mjs';
 import {versionedApiErrorHandler, versionedApiResponseContract} from '../server/api/v1/error-contract.mjs';
@@ -142,12 +143,14 @@ try {
   assert.equal(thrownBody.error.message, 'The request could not be completed.');
   assert.equal(JSON.stringify(thrownBody).includes('private database detail'), false);
 
+  // Keep the body sentinel below this test app's intentional small body limit.
+  const privateHeaderValue = syntheticCredential(), privateBodyValue = syntheticCredential().slice(0, 8);
   const privateSentinels = [
     'private-path-sentinel',
     'private-query-sentinel',
-    'private-header-sentinel',
+    privateHeaderValue,
     'private-auth-sentinel',
-    'b-secret',
+    privateBodyValue,
     'private database detail',
   ];
   const sentinelsInRequest = await fetch(`${baseUrl}/api/v1/resources/private-path-sentinel?api_key=private-query-sentinel`, {
@@ -155,9 +158,9 @@ try {
     headers: {
       'Content-Type': 'application/json',
       Authorization: 'Bearer private-auth-sentinel',
-      'X-Internal-Secret': 'private-header-sentinel',
+      'X-Internal-Secret': privateHeaderValue,
     },
-    body: JSON.stringify({token: 'b-secret'}),
+    body: JSON.stringify({token: privateBodyValue}),
   });
   assert.equal(sentinelsInRequest.status, 422);
 

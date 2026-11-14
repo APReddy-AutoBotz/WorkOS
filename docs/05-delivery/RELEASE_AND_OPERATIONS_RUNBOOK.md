@@ -1,10 +1,18 @@
 # WorkOS Release and Operations Runbook
 
+## WOS03 integration verification
+
+Run `node scripts/scan-bootstrap.mjs --self-test` as a required gate. It scans the candidate and checks adversarial fixtures; passing dependency audit alone does not satisfy it. Test credentials must remain ephemeral or explicitly approved placeholders. Keep the validation runner on Ubuntu24.04 while using the current Playwright lock; Ubuntu26.04 browser installation failed before tests in run43557067008. Changing the runner or browser version requires fresh browser acceptance.
+
+Before accepting PR41 against updated main, run its existing browser, migration, identity and API checks plus `npm run test:import-audit-journey` with a disposable local PostgreSQL service and installed Chromium. The journey uses two synthetic named accounts and the actual UI/API/database; it must not reach external providers. See [integration acceptance](../tasks/WOS-03-INTEGRATION-ACCEPTANCE.md). This increment adds no migration. A code rollback must preserve existing audit/import evidence and migration history; do not erase evidence to restore an older UI. Passing this journey does not establish retention-policy or buyer OIDC acceptance.
+
 ## Purpose
 
 Provide a repeatable buyer-owned release, deployment, verification, rollback and operating process. Provider-specific commands will be added with implementation artifacts; this document defines mandatory control flow.
 
 ## Release preparation
+
+The [main dependency repair](../tasks/WOS-03-MAIN-DEPENDENCY-REPAIR.md) documents the locked versions and negative regression checks required after the 2026-11-14 audit failure. Install with `npm ci`, run `npm run test:dependency-security` and the existing application/production/migration gates, and retain a current `npm audit` result. Do not disable the high/critical audit gate to merge documentation or reuse passing checks from an unmerged feature branch. Reverting the repaired lockfile reintroduces known advisory exposure; prefer a tested forward repair.
 
 - Freeze the exact candidate SHA and version.
 - Confirm changelog, requirements traceability, known limitations and migration notes.
@@ -195,7 +203,7 @@ With locked dependencies and Playwright Chromium installed in the hosted test en
 
 The [bounded journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md) covers actual Project Master CSV dry-run/apply, PostgreSQL project/batch/audit/idempotency witnesses, retained history after reload, independent named reviewer saved provenance and other-legal/denied-scope exclusion. Inspection performs no business/audit mutation or export. Both accounts use canonical migrated Admin permissions, with no new role or grants. This is not production OIDC, owner UAT, full WOS-03B or release acceptance. Product defects require separate disposition and are not repaired by this tests-only increment.
 
-`npm run test:import-audit-harness` runs guard/session-format unit checks without database/browser and is part of the aggregate suite. The hosted dedicated journey is additive to the twelve retained browser suites and all existing gates. Local Chromium remains NOT RUN under the established restriction, with no workaround; missing local PostgreSQL also means the integrated journey is NOT RUN locally, not passed. Require full exact-head hosted evidence and independent exact-tree review. Revert this isolated tests/CI/docs increment for rollback; no product/schema conversion is necessary.
+`npm run test:import-audit-harness` runs guard/session-format unit checks without database/browser and is part of the aggregate suite. The hosted dedicated journey is additive to the twelve retained browser suites and all existing gates. The original October local browser/database execution was NOT RUN; preserve that historical receipt. The journey was subsequently forwardported into accepted PR41 and passed real PostgreSQL/browser hosted execution. Current CI continues to run it; require exact-head evidence for each integration. PR50 now changes documentation only and preserves the newer accepted harness unchanged. Reverting this documentation reconciliation does not remove the accepted journey or require data conversion.
 
 ## Commercial drafting foundation (PR-007A)
 
