@@ -601,6 +601,10 @@ WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-003/UX-005: [settings save outcomes](../
 
 WOS-CORE-003, WOS-NFR-OBS-005 and WOS-NFR-UX-005: [planning read recovery](../tasks/WOS-04-PLANNING-READ-RECOVERY.md) distinguishes failed/denied planning reads from successful empty results, provides retry, suppresses obsolete results and prevents PM repeat loads from session object identity. Browser evidence uses production React components with controlled service promises.
 
+## Retained requirements authority
+
+WOS-GOV-005: [retained requirements authority](../tasks/WOS-00-RETAINED-REQUIREMENTS-AUTHORITY.md) records the owner's historical classification, preserves the original source text, and identifies current scope and blocking-review authority. Documentation-only validation does not imply runtime acceptance.
+
 ## Project detail read recovery
 
 WOS-CORE-003, WOS-NFR-OBS-005 and WOS-NFR-UX-005: [project detail recovery](../tasks/WOS-04-PROJECT-DETAIL-READ-RECOVERY.md) clears obsolete project/edit state on navigation, ignores late responses and distinguishes failed reads from missing records with a retry action. The real React browser journey uses controlled service responses; existing server authorization remains unchanged.
