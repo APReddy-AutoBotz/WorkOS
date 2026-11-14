@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticHexDigest, rejectedConfigurationValues} from './support/synthetic-values.mjs';
 import {readFile} from 'node:fs/promises';
 import {amendmentPreviewSchema,amendmentCommandSchema} from '../server/modules/commercial-drafting/amendment-contracts.mjs';
 import {createCommercialDraftingRouter} from '../server/modules/commercial-drafting/router.mjs';
@@ -8,7 +9,7 @@ import {createCommercialDraftingRouter} from '../server/modules/commercial-draft
 const preview={expectedSequence:0,expectedLifecycleSequence:1,expectedContractVersion:2,contractVersionId:'contract-version-synthetic-2',
   effectiveOn:'2026-10-20',startsOn:'2020-01-01',endsOn:'2099-12-31',budget:'99999999999999.9999',
   reason:'Synthetic governed terms adoption',approvalReference:'SYNTHETIC-APPROVAL'};
-const command={...preview,previewToken:'a'.repeat(64)};
+const command={...preview,previewToken:syntheticHexDigest()};
 assert(amendmentPreviewSchema.safeParse(preview).success);
 assert(amendmentCommandSchema.safeParse(command).success);
 for(const [schema,input] of [[amendmentPreviewSchema,preview],[amendmentCommandSchema,command]]){
@@ -81,7 +82,7 @@ for(const [path,body] of [[previewPath,preview],[readPath,command]]){
 }
 deniedPermission=null;
 for(const [method,path,body,query] of [['get',readPath,undefined,{organizationId:'forged'}],['get',readPath,undefined,{asOf:'2020-01-01'}],
-  ['post',previewPath,{...preview,actorId:'forged'}],['post',readPath,{...command,previewToken:'not-a-token'}]]){
+  ['post',previewPath,{...preview,actorId:'forged'}],['post',readPath,{...command,previewToken:rejectedConfigurationValues.short}]]){
   const before=connected;const result=await invoke(method,path,body,query);
   assert.equal(result.status,400);assert.equal(result.body.error.code,'COMMERCIAL_INVALID_REQUEST');assert.equal(connected,before,'reject malformed request before acquiring DB');
 }

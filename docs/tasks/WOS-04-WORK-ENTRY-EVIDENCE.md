@@ -1,8 +1,20 @@
 # PR-008D: Optional work-entry evidence links
 
-**Status:** Dependent development candidate; formal review, prerequisite acceptance, integration and release acceptance remain outstanding.
+**Status:** Integration candidate with local acceptance passed; independent exact-head review, hosted acceptance, merge and release acceptance remain outstanding.
 **Requirements:** Bounded WOS-TIM-003 evidence-link dimension; preserves WOS-TIM-001/004/008/009/011/012 and WOS-NFR-DAT-002/004/005/006/008, UX-001/003/005.
-**Source:** Issue #6 and PRODUCT_REQUIREMENTS.md §10. Exact unchanged PR57 dependency `02c024d45621fe516e0a46f21657a37f2a1e4532`, tree `dae711a60a422d7129c28f1dae47d949258b8021`.
+**Original development source:** Issue #6 and PRODUCT_REQUIREMENTS.md §10. Exact unchanged PR57 dependency `02c024d45621fe516e0a46f21657a37f2a1e4532`, tree `dae711a60a422d7129c28f1dae47d949258b8021`.
+
+## Current integration checkpoint - 2026-11-15
+
+The owner subsequently authorized reviewed integration and eligible merges without routine approval requests; the development-only sequencing narrative below is historical context, not the current merge policy. Original PR58 `39cf7e10537972e232498a6a99a1f89df05c765b` is integrated with corrected PR57 candidate `01bb4fa6de46ddf210915a85f94381b81c6be5b9` at `dea0f694ebb8ee6a6b0abd10eda550f702a54fed`. PR57 fresh hosted acceptance remains pending at this preparation checkpoint; no prerequisite acceptance is inferred.
+
+PR57 subsequently passed every corrected-head step in CI43629036849 and merged at `07967fddfe8ae0e6304d338db2f71b9f7e3a2198`; every step of its resulting main CI43629890280 also passed. This does not accept PR58.
+
+The merge retains all parent scripts, patched dependencies, strict mode/history response validation, keyed editor ownership, abandoned-save recovery and synchronized timing assertions. An executable comparison confirmed every parent script and complete parsed dependency/lockfile content; an initial raw-text comparison differed only because the Windows checkout uses CRLF. New evidence tests and migration047 expectations are additive. Fresh local integration tests, independent exact-head review and hosted gates remain required before acceptance. No deployment or historical evidence rewrite is included.
+
+Fresh locked installation audited 345 packages with zero reported vulnerabilities. The initial bootstrap scan rejected two literal credential-bearing URLs used as negative fixtures. Both fixtures now construct their rejected URL with the existing ephemeral synthetic credential generator, retaining the embedded-credential rejection assertions. The corrected bootstrap and adversarial fixture scan passed; no scanner rule or allowlist changed. Full integration acceptance is still in progress.
+
+Local integration receipts: `npx tsc --noEmit`, `npm run lint` and the full `npm test` aggregate passed. `test:work-evidence-postgres` passed real PostgreSQL fresh/046-upgrade/replay, unchanged grants and historical snapshots, manual save/read/clear, omitted-field preservation/conflicts, evidence-only stale revision rejection, scope negatives, immutable correction/approval history and both import aliases. The final production frontend build passed in 19.57 seconds. Accepted main ancestry was merged at `3dd7d86b40738e76a3ab31fe30d907e5f523088a` without runtime changes. The first browser attempt timed out at initial page navigation before feature assertions; retained suites did not run in that attempt. The unchanged retry passed the real evidence journey, retained timesheet ownership timing journey and real capture-mode journey, with zero page errors or evidence URL dereferencing. No timeout or assertion was weakened. Independent review and hosted acceptance remain outstanding.
 
 ## Development-only sequencing exception
 
@@ -27,7 +39,7 @@ Before implementation the sole writer checked that no peer agents or implementat
 - `test:work-evidence-postgres`: fresh install, 046 upgrade, replay and neutral history/grants; real manual save/read/clear; legacy replacement conflicts; evidence-only stale token; scope rejection; immutable Submitted/Rejected/correction/Approved history; both import aliases, dry-run and replay.
 - `test:work-evidence-journey`: real React/API/PostgreSQL save/reload/clear, validation/rendering, daily/weekly switching, hidden/weekend/zero/context preservation and evidence-only stale tabs. Observes requests to prove displaying evidence causes no external request.
 - Required retained install, type/lint, unit/contracts, migrations/PostgreSQL, affected browser journeys and production build/startup gates remain applicable. CI includes the new dependent base and feature gates without weakening existing gates. Receipts must identify the exact tested/published source; prior PR57 results are not this feature's acceptance.
-- Independent/formal code and security review remain outstanding by the owner's development-only instruction. No successful security review or completion of the stopped cumulative scan is claimed.
+- Independent code and security review remain outstanding acceptance gates for this integration candidate. The earlier deferral is historical; neither successful review of PR58 nor closure of inherited security findings is claimed.
 
 ## Operations, rollback and exclusions
 
@@ -37,8 +49,8 @@ No uploads, URL dereferencing, mandatory-evidence policy, task/ticket/milestone 
 
 ## Separate PR-008E continuation
 
-The task/ticket/milestone model exclusion above is addressed only as descriptive optional reference text by separate [PR-008E](WOS-04-WORK-ENTRY-REFERENCE.md), based on unchanged PR58 `39cf7e10537972e232498a6a99a1f89df05c765b`. It supplies no authoritative task/milestone relationship. PR-008D's URL behavior remains bounded and the preceding stack is not accepted/integrated.
+The task/ticket/milestone model exclusion above is addressed only as descriptive optional reference text by separate [PR-008E](WOS-04-WORK-ENTRY-REFERENCE.md), integrated with accepted PR58 `a7d8da030d10686a8ca317df592a8c76670ba0c6`. It supplies no authoritative task/milestone relationship. PR-008D's URL behavior remains bounded; PR-008E requires its own independent review and acceptance.
 
 ## Separate PR-008F policy continuation
 
-The mandatory-evidence-policy exclusion above is addressed only as the buyer's optional positive-entry capture-policy choice in separate [PR-008F](WOS-04-REQUIRED-EVIDENCE-POLICY.md), based on unchanged PR59. Existing PR-008D URL storage remains unchanged. No global default mandate, upload, URL lookup, category/group exception or integrated acceptance is introduced.
+The mandatory-evidence-policy exclusion above is addressed only as the buyer's optional positive-entry capture-policy choice in separate [PR-008F](WOS-04-REQUIRED-EVIDENCE-POLICY.md), integrated with accepted PR59. Existing PR-008D URL storage remains unchanged. No global default mandate, upload, URL lookup, category/group exception or integrated acceptance is introduced.

@@ -1,156 +1,120 @@
-# WorkOS Implementation Status
+# WorkOS implementation status
 
-**Status date:** 2026-08-25  
-**Status authority:** Accepted capability on `main`, with active corrective work shown separately  
-**Current target:** Corrected WOS-00 governing baseline before WOS-01 source bootstrap
+Status date: 2026-11-15. This page separates observed merged source from draft engineering evidence and release acceptance. The previous 2026-08-25 status is preserved unchanged as [historical evidence](../evidence/2026-11-14/IMPLEMENTATION_STATUS_2026-08-25.md); its pre-import statements and corrective-hold narrative are not a current-state report.
 
-## 1. Status rules
+## Verified main baseline
 
-- Accepted progress is earned only by merged code/documents and required evidence on `main`.
-- Open branch/PR work is active, not accepted.
-- Percentages are weighted by workstream, not files, commits or lines.
-- A workstream earns weight only after its definition of done and exact-head gates pass.
-- A previously merged baseline may be placed under corrective hold when a later independent review finds a release-blocking governing defect; no dependent workstream receives acceptance while that hold is active.
+GitHub main was initially fetched at `b9a57f8a462d8585bb3f73129080d6fae5173343` for this refresh. Dependency repair PR145 subsequently merged at `839dacf12222261161a93956b646d03ccc56af66` after both jobs passed in [CI43549286444](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43549286444), including dependency audit, negative security tests, migrations, production identity and container checks. The tree contains `src/`, `server/`, tests, migrations, container/environment configuration and CI. Git history identifies source bootstrap at `3070c80a71640fa4275477d0d2f1538cc8d2a819` (PR16), organization/setup integration at `8450e9f8816d95dffb3a0784f2e63e3b7b57a172` (PR37), and the current CI/migration/production-profile foundation commit above.
 
-## 2. Executive status
+This establishes that application source and foundations have been merged. It does not retrospectively certify every requirement, resolve every historical review finding, or demonstrate current production readiness. No numeric readiness score is asserted without a reconstructed requirement-by-requirement acceptance basis.
 
-```text
-Overall accepted WorkOS readiness: 0%
+Product vision, roadmap, README and historical-requirement authority were refreshed through [PR144](https://github.com/APReddy-AutoBotz/WorkOS/pull/144), merged at `bbce9753f151c28f54500fa676ebb9fce502b8df`. [PR41](https://github.com/APReddy-AutoBotz/WorkOS/pull/41) then merged at `006c77a821e9e580a975cfb8b8de293429612352`. Both jobs passed on its exact candidate in [CI43558124217](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43558124217) and on resulting main in [CI43559995432](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43559995432). No required step was skipped. Checks include full unit/contracts, six browser journeys (five controlled suites and real import-to-audit), production identity/startup, 35-entry fresh/upgrade/concurrent migration acceptance, dependency/secret/bootstrap scans and container checks.
 
-Product capability:        0%
-Commercial capability:     0%
-Enterprise platform:       0%
-Quality and evidence:      0%
-Buyer handover readiness:  0%
-```
+PR41's exact-head security diff review accounted for all 56 changed source items with no new reportable finding. It does not close the separate completed frozen-source audit's 18 findings or their unmerged remediation dependencies. The merge used a merge commit to preserve ancestry for the dependent implementation stack, rather than duplicating that history through a squash. Requirements WOS-CORE-003/005 and WOS-GOV-001/002/004 receive bounded implementation evidence; configurable retention, full observability, buyer identity/UAT and release acceptance remain open.
 
-PR #1 was squash-merged to `main@880b3dc244bf516c4e535fb68e455e6153aec395`, but the post-merge Round-14 review published one P1 and one P2. The merged WOS-00 baseline is therefore under **WOS-00F corrective hold** and does not currently earn the 8% WOS-00 accepted weight. Product-owner Gate B remains approved; it authorizes the bounded correction but does not waive exact-head review or merge controls.
+## Draft work and observed checks
 
-## 3. Active work
+Utilization overview recovery [PR43](https://github.com/APReddy-AutoBotz/WorkOS/pull/43) merged at `e139b2a1c0bbd595d59a071379382809619b2e52` after [CI43560797123](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43560797123) passed. Documentation refresh PR147 then merged at `efbce2974efad6b8171f6b1a6574390688905c39`; its resulting [main CI43561460256](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43561460256) passed. Planned-detail recovery [PR44](https://github.com/APReddy-AutoBotz/WorkOS/pull/44) merged at `a25d08be9309f3d8aa502c2c3459dab0fdbb38fa` after both jobs passed in [CI43561683053](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43561683053) and independent Sol review found no introduced security candidates or bounded correctness blockers at head `a5f5269ac68384fd56683bc2b389db7e03ec0174`. Its [post-merge CI43562459691](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43562459691) subsequently passed both jobs. Merge commits preserve the dependent stack's ancestry.
 
-| Field | Current value |
-|---|---|
-| Workstream | WOS-00F — Post-merge governing correction |
-| Governing WOS-00 issue | #2 — reopened under corrective hold |
-| Corrective issue | #13 |
-| Branch | `controller/wos-00f-approval-controls` |
-| Pull request | Draft PR #14 |
-| Base | `main@880b3dc244bf516c4e535fb68e455e6153aec395` |
-| Historical merged PR | PR #1, merged head `e8e05e0f17e78e7ef19a35c078601ebda5881a45` |
-| Exact corrective head | Use live PR #14 metadata; every moved head requires a fresh independent exact-head review before acceptance |
-| Latest independently reviewed head | `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` via review `PRR_kwDOUAv8Lc8AAAABKqRg4w` |
-| State | Two P2 authority/traceability findings from the latest review are under controller convergence; no clean final review is claimed |
-| Current activity | Align the WOS-01A primary traceability row to the complete five-part dependency law and replace stale implementation-status/review scope; then require one fresh independent review of the resulting published head |
-| Product-owner Gate B | Approved; bounded WOS-00F correction authorized |
-| WOS-01A | Draft PR #12 is dependency-blocked and earns no implementation credit |
-| Application source | Not accepted/imported into `main`; reference repository remains read-only |
-| Acceptance blocker | Fresh clean exact-head independent review of the moved PR #14 head, controlled merge and corrected baseline recording; WOS-01A additionally requires explicit controller reauthorization and PR #12 recreate/rebase |
+These two report increments address bounded WOS-NFR-UX-001/005 and OBS-005 behavior: distinct failures/empty states, accessible retry and stale-result suppression; planned exports additionally require current-ready evidence. They preserve existing successful calculations and export semantics. The completed PR44 diff scan covers all three source inventory entries plus changed tests/documentation, with zero introduced findings; inherited findings and broader report/export governance are not closed. No migrations were added. Rollback reverts the corresponding UI/test/documentation package.
 
-## 4. Workstream status
+Actual-detail recovery [PR45](https://github.com/APReddy-AutoBotz/WorkOS/pull/45) merged at `a2e388320165ffdb4b56e5f970958ce20f7dc4b9` after exact-head [CI43562522849](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43562522849) and independent source/security review passed. Its [post-merge CI43563159231](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43563159231) passed. Forecast recovery [PR46](https://github.com/APReddy-AutoBotz/WorkOS/pull/46) merged at `706975be3dec4d39f50a2db51457a873958e3306` after exact-head [CI43563392224](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43563392224) and independent source/security review passed. Its [post-merge CI43563840389](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43563840389) passed.
 
-| Workstream | Weight | State | Accepted weight | Notes |
-|---|---:|---|---:|---|
-| WOS-00 | 8% | Corrective hold | 0% | PR #1 merged, then Round-14 defects triggered WOS-00F PR #14 |
-| WOS-01 | 10% | Dependency-blocked | 0% | Issue #3 / Draft PR #12; no source-bootstrap acceptance before corrected WOS-00 baseline and full five-part reauthorization gate |
-| WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup |
-| WOS-03 | 10% | Not started | 0% | Issue #5; modular platform and CI/migrations |
-| WOS-04 | 16% | Not started | 0% | Issue #6; engagements/work capture |
-| WOS-05 | 8% | Not started | 0% | Issue #7; approval/policy engine |
-| WOS-06 | 20% | Not started | 0% | Issue #8; commercial/invoice readiness |
-| WOS-07 | 6% | Not started | 0% | Issue #9; reporting/leakage/notifications/integrations |
-| WOS-08 | 8% | Not started | 0% | Issue #10; security/operations |
-| WOS-09 | 4% | Not started | 0% | Issue #11; release/handover |
-| **Total** | **100%** |  | **0%** |  |
+Both increments address bounded WOS-NFR-UX-001/005 and OBS-005 recovery and export readiness. Fresh locked installation, typecheck, lint, unit/contracts, bootstrap/adversarial scans, production builds and Chromium journeys passed locally. Exact-head diff scans found no introduced security findings across each package's three source inventory entries and supporting tests/docs. Actual preserves separate report/audit filter scopes; Forecast binds evidence and exports to the current horizon and request generation. Existing calculations and successful zero/omission semantics remain unchanged. No migrations were added; rollback reverts the respective increment. Broader reporting/export governance and the frozen audit's existing findings remain open.
 
-## 5. Release status
+Organization-profile editor [PR47](https://github.com/APReddy-AutoBotz/WorkOS/pull/47) merged at `56ad6a9caa0bcdaeddcbc61719fe71b05987c832` after exact-head [CI43564755040](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43564755040) and independent source/security review passed. Its [post-merge CI43565264142](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43565264142) passed every step. It addresses WOS-ORG-001 and the profile-entry portion of WOS-ORG-010.
 
-| Release | State | Exit criteria |
+Terminology editor [PR48](https://github.com/APReddy-AutoBotz/WorkOS/pull/48) merged at `9b340af766c6298f986126dfcf7a6a2b8ee36ff0` after exact-head [CI43565896139](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43565896139) passed every step and independent source/security review found no introduced findings. It addresses WOS-ORG-006 administration and the terminology-entry portion of WOS-ORG-010. Its [post-merge CI43566283409](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43566283409) passed every step.
+
+Both editor packages passed fresh locked installation (zero reported vulnerabilities), typecheck/lint, aggregate unit/contracts, real PostgreSQL date-route checks in UTC/Asia-Kolkata/America-Los-Angeles, production builds and Chromium journeys. Integration replaced scanner-rejected literal synthetic tokens with generated fixture values while preserving exact-header assertions and scanner rules. Profile scanner263 and terminology scanner270 plus adversarial fixtures passed. Completed diff reviews account for all respective source entries and supporting paths with no deferred coverage. No migrations were added; rollback reverts the corresponding editor/service/date-transport/test/documentation increment. Same-date last-writer behavior, future runtime reload requirements, broader setup/branding and existing security findings remain documented boundaries. No deployment or release acceptance is claimed.
+
+Read-only calendar inspection [PR49](https://github.com/APReddy-AutoBotz/WorkOS/pull/49) merged at `81d3113abd451ddd9cb62e23833f256f40b8e69f`. Exact-head [CI43567063582](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43567063582) and [main CI43567658060](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43567658060) passed every step. Independent review found no introduced security findings. Bounded WOS-ORG-008/010 evidence covers scoped effective-date inspection and stale-result protection; real PostgreSQL date transport passed in three time zones. No migration was added; rollback reverts this inspector increment.
+
+Import/audit acceptance [PR50](https://github.com/APReddy-AutoBotz/WorkOS/pull/50) merged at `9f429fa9753ac2fc77c66b07cad313d82617b7a4`. Its runtime journey had already been integrated with PR41; this package reconciles four evidence/traceability documents for WOS-CORE-003/005 and WOS-GOV-002/004. Exact-head [CI43567939928](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43567939928) and [main CI43568347843](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43568347843) passed every step. No runtime or migration change; rollback is documentation-only.
+
+Commercial drafting [PR51](https://github.com/APReddy-AutoBotz/WorkOS/pull/51) merged at `cc44a12c08ba7c3b3ec03d1d458baaa76a1744bb`, addressing bounded WOS-CORE-003–005, WOS-CTR-001–003 and WOS-ENG-001–002/005. The 28-path package adds migration040, modular API/service boundaries, a scoped React workspace, strict client contracts, PostgreSQL/browser tests and operational/traceability evidence. It supports contracts/SOWs, seven engagement models, PO/milestone drafts, immutable future terms and neutral legacy mappings. Permissions are opt-in without default grants; protected immutable events retain material values while ordinary audit readers receive opaque references.
+
+Exact-head [CI43612214189](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43612214189) passed both jobs and every step at `18ea471684314f8fd7bb23b301d59f668ef2c827`: locked installation, typecheck/lint/build, unit/contracts, real browser/API/PostgreSQL journeys, migration fresh/upgrade/concurrency, production identity/startup/container and dependency/secret scans. Local checks also passed. The original diff scan covered all 15 source entries and supporting paths with no introduced security finding. Independent review found a correctness blocker: discarding an uncertain save prematurely unlocked creation. The correction preserves the lock until a successful explicit reload; independent review and regression cases for conflicts, network failures, 503s and malformed responses passed. Failed CI43569495393 and local navigation failures remain recorded; their skipped gates are not passes. [Main CI43612745307](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43612745307) subsequently passed both jobs and every step.
+
+PR51 itself does not deliver activation, work capture, PO consumption, calculations or invoice readiness. Migration040 and its ledger/tables/immutable evidence must remain during rollback; a pre040 binary is unsupported. Prefer a forward-compatible build that disables the new UI/routes. The completed frozen audit's existing findings remain open. No deployment or release acceptance is claimed.
+
+Governed lifecycle [PR52](https://github.com/APReddy-AutoBotz/WorkOS/pull/52) merged at `e1d0fe67c5c8e2ada03b2b15688c4f9c0f186954`, addressing bounded WOS-CTR-001/003 and WOS-ENG-001–005. Migration041, lifecycle service/UI and negative PostgreSQL/browser tests add exact-version activation, governed projects, Active/On Hold history, immutable pins and guarded legacy promotion. Independent review found that resetting an operational project to Proposed could bypass the intended historical exclusion. The correction requires trusted scoped creation evidence and exclusively Proposed audit/neutral history; missing or ambiguous evidence fails closed without rewriting it.
+
+Corrected exact head `26bdefb3f67cfe7c7fff1692aa895fbd8c08f923` passed independent review and every step in [CI43615708220](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43615708220). [Main CI43616198883](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43616198883) also passed every step. Local locked install, type/lint, aggregate contracts, scanner, production build and real database/browser journeys passed; failed attempts remain documented. The original-head scan and separate correction review are distinct evidence. Rollback must retain migrations040/041, immutable bindings/events and guards in a validated forward-compatible binary; pre041 binaries are unsupported. Terminal closure, work-date convergence, billing authority, performance/UAT and broader security findings remain open.
+
+Scoped customer profiles [PR53](https://github.com/APReddy-AutoBotz/WorkOS/pull/53) merged at `25d291ffa60b84cfbc117090077bb4ad5bafc96f`, addressing bounded WOS-CLI-001–002. Migration042 adds scoped, append-only, effective-dated customer identity, billing units and parent-account links without changing contractual pins or existing work. Review found permission-configuration and strict response-validation defects in the original integrated candidate. Corrected head `36b20f1d3cecb339ef9a481dc4ac55eb3aeb0eb2` enables explicit role/individual enrollment without defaults and rejects array-valued billing-unit kinds. Independent backend/frontend review, local aggregate/database/browser/build checks and exact-head [CI43618402022](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43618402022) passed; resulting-main [CI43619033591](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43619033591) passed every step.
+
+The completed original-candidate security scan covered all13 source inventory entries and supporting changed tests/docs with no introduced security findings; its correctness defects were corrected and independently reviewed on the exact merged candidate above. That scan does not certify the later correction or close inherited audit findings. Customer retirement, tax/payment/invoice routing, cross-legal consolidation and billing authority remain outside this increment. Rollback must retain migration042 and profile/audit histories in a compatible binary.
+
+Governed commercial amendments [PR54](https://github.com/APReddy-AutoBotz/WorkOS/pull/54) merged at `f21f811da12d0225dad3d86d1f8f4f7c15f7f92a`, addressing WOS-CTR-003 and bounded related WOS-ENG-001 through WOS-ENG-005. Migration043, server/UI controls and tests provide explicit per-entity adoption of newer immutable terms, scoped preview confirmation and append-only protected history without child cascades or retrospective repricing. Candidate `8bae0a7178d93b599c36eba6f368dff4b1d50ef9` passed local aggregate, PostgreSQL, scanner, build and browser checks, independent backend/frontend review, and every step of [CI43620529298](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43620529298). Its completed diff scan covered all14 source inventory entries and all32 changed paths with no introduced security findings. Existing audit findings remain open. The first local browser page-load timeout and unchanged passing retry remain recorded. [Post-merge CI43621279981](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43621279981) passed every step.
+
+Rollback must retain migration043, amendment/audit histories and a forward-compatible binary. Billing eligibility, PO consumption, terminal closure and complete financial lifecycle remain outside this increment. No work-capture acceptance is inferred from PR54.
+
+Assignment and work-date convergence [PR55](https://github.com/APReddy-AutoBotz/WorkOS/pull/55) merged at `103b08a356e0c76ef69ff3e004a8d80b26fcb032`, addressing bounded WOS-CORE-003 through WOS-CORE-005, WOS-RES-002/009, WOS-TIM-004/008/009/011 and WOS-NFR-UX-001/005. Migration044 retains immutable submission and decision evidence; server controls converge manual/import work on dated worker, assignment and independently adopted governed-parent authority. Review identified stale MyTimesheet responses after week or identity changes. Corrected candidate `d9ee670cd64881f6c877b42f494f9d2be9ec8eb0` gives each editor a keyed owner and rejects late results, including A-B-A navigation. Independent correction review and every step of [exact-head CI43623644159](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43623644159) and [post-merge CI43624245272](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43624245272) passed.
+
+The original-candidate security scan covered all15 source entries and supporting changed files with no introduced security findings; it explicitly withheld merge clearance for the correctness defect above. The separate corrected-head review and delayed-response browser proof support the fix. Retain migration044, evidence ledgers and guards on rollback and use a compatible binary. Full capture modes, capacity/financial acceptance, existing audit findings and production readiness remain open.
+
+Effective-dated capture policy [PR56](https://github.com/APReddy-AutoBotz/WorkOS/pull/56) merged at `b6d1f760265aefc21e073a071a0eb2740ca61227`, addressing bounded WOS-CORE-003 through WOS-CORE-005, WOS-TIM-005/008/009/011/012 and WOS-NFR-UX-001/005. Migration045 provides scoped append-only increments, aggregate limits and comment rules, exact manual/import quantities, separate capture references and old/new period guards. The editor preserves distinct/off-grid work and exposes policy configuration without inferred defaults.
+
+Independent review found a recovery defect in original candidate `3529d065ec25ee5256265f5c6d3299c8c83f1451`: a failed organization switch during a save could leave the editor busy. Corrected head `88bf1636d3361e64afe347a4ea44944229f73ee2` restores explicit reload after settlement and rejects pre-settlement read results. Local install, type/lint/aggregate, scanner (357 files)/adversarial fixtures, production build, expanded delayed-response and real PostgreSQL/browser acceptance passed; independent exact-head review approved. [CI43626627379](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43626627379) passed all 39 application/migration/container and all 5 full-history secret steps. [Post-merge CI43627395475](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43627395475) passed every step.
+
+The original-candidate security review accounted for all 22 source entries and supporting changed files with no introduced security findings, but explicitly withheld merge clearance for the recovery blocker. The later correction has separate review/test evidence. Rollback retains migration045, immutable policies, capture references and guards in a compatible binary. Existing audit findings, full capture modes, evidence, overtime, capacity/finance and production acceptance remain open. Daily/weekly capture and optimistic saves were subsequently accepted through PR57 as recorded below.
+
+The two-page GitHub inventory contained 104 open PRs before the independent documentation and dependency-repair packages were published. Most later implementation remains in dependent Draft branches. Separate controller branches require their own disposition; open does not mean mergeable or required.
+
+| Package | Observed evidence | Acceptance boundary |
 |---|---|---|
-| v0.1.0 | Corrective hold | Gate B approved; WOS-00F PR #14 must be clean-reviewed/merged and corrected exact `main` baseline recorded |
-| v0.2.0 | Blocked | WOS-01 clean source and neutral configurable brand after corrected v0.1.0 baseline plus explicit controller reauthorization/recreate-or-rebase gate |
-| v0.4.0 | Not started | Organization and platform foundation |
-| v0.5.0 | Not started | Engagements, work capture and policy engine |
-| v0.7.0 | Not started | Commercial and invoice-readiness engine |
-| v0.8.0 | Not started | Reports, leakage, notifications and integrations |
-| v0.9.0 | Not started | Enterprise security/operations release candidate |
-| v1.0.0 | Not started | Sellable buyer-owned release |
+| [PR136 legacy approval scope](https://github.com/APReddy-AutoBotz/WorkOS/pull/136) | All three jobs passed in [CI43539905582](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43539905582) | Draft head `8df0d51840206540e219c84d67f87089aab18374`, not main |
+| [PR137 settings persistence](https://github.com/APReddy-AutoBotz/WorkOS/pull/137) | All three jobs passed in [CI43539970689](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43539970689) | Draft head `861056d0b96871fc62bf447a2545b0644c37f6da`, not main |
+| [PR138 uncertain commercial saves](https://github.com/APReddy-AutoBotz/WorkOS/pull/138) | All three jobs passed in [CI43539981405](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43539981405) | Draft head `d7b9aa0b723bf14812e1d7d8994760a52c5a187f`, not main |
+| [PR139 import-template integrity](https://github.com/APReddy-AutoBotz/WorkOS/pull/139) | All three jobs passed in [CI43541100440](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43541100440) | Draft head `c4096297a65b3d7c5a67f24648e5b616d91779cd`, not main |
+| [PR140 project-detail recovery](https://github.com/APReddy-AutoBotz/WorkOS/pull/140) | All three jobs passed in [CI43542566269](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43542566269) | Draft head `463c6da588d2c4859e889057bb964152c47616ab`, not main |
+| [PR141 planning recovery](https://github.com/APReddy-AutoBotz/WorkOS/pull/141) | All three jobs passed in [CI43543417277](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43543417277) | Draft head `d17826115ac0667986cf507cfda44867cb3f3f0c`, not main |
+| [PR146 project contribution and retained export](https://github.com/APReddy-AutoBotz/WorkOS/pull/146) | Local unit/contracts, scoped PostgreSQL/API, immutable retained CSV, strict client, controlled browser and real React/API/database journey passed. A hosted stale migration expectation was corrected; all three corrected-head hosted jobs passed. | Draft head `0656b09a6571b73ec29f0ddb3167da790251a6f0`; [CI43558923305](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43558923305) passed application/migrations/container, secrets and Windows branding. Separately recorded bootstrap scan debt and dependency integration remain open. |
 
-## 6. Active controls
+These examples are not an exhaustive acceptance register for the entire stack. Each package still needs prerequisite reconciliation, actual-diff review and exact-head merge eligibility. No PR is accepted merely because this table mentions passing CI.
 
-- Preserve the authorized reference source unchanged and read-only.
-- Do not resume, rebase, merge or award credit to WOS-01A PR #12 until WOS-00F is clean-reviewed and merged, the corrected `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases PR #12 from that baseline.
-- Import only the pinned authorized source commit after the corrected WOS-00 baseline is accepted and the complete WOS-01A resume gate is satisfied.
-- Do not merge company-branded imported runtime content; neutralize it in the controlled WOS-01 boundary before any clean-source merge.
-- Keep transaction-specific pricing, valuation, licensing, assignment and negotiation strategy outside the product repository.
-- Treat WorkOS as a temporary configurable name.
-- Keep financial calculations deterministic and server authoritative.
-- Keep operational earned-management metrics explicitly non-statutory, effective-dated and policy-gated.
-- Separate valuation, source-specific billing eligibility, approved-unbilled registration, batching and export. Earned-management output never grants billing eligibility or invoice readiness.
-- Make the approved-unbilled item the only batchable object and retain database-enforced unique current occupancy.
-- Use canonical invoice-batch states/occupancy; failed provider/CSV export remains `Approved`.
-- Invoice-batch approval is final for a batch version once the batch reaches `Approved`; generic reopen is prohibited for `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`.
-- Pre-export material correction of an approved batch uses protected cancellation plus replacement/new approval; post-export/billing correction uses versioned reversal/supersession plus a new correction batch/approval.
-- Require PR-012 engineering acceptance independently proven at an exact head before product-owner Gate C. PR-011 alone cannot satisfy Gate C and Gate C cannot replace engineering evidence.
-- Implement PR-013 against four notification policy classes and thirteen canonical event/template rows.
-- For `approval.rejected_or_correction_required`, resolve requester, affected worker where applicable, commercial change owner for commercial sources, and invoice-batch owner/finance preparer where applicable from authoritative scoped relationships; deduplicate identities while retaining reasons.
-- Mandatory stale/out-of-scope/partial protected-recipient resolution fails closed visibly; callers cannot redirect or omit protected recipients.
-- Generic rejection/correction is mutually exclusive with `commercial.approval_required` and `invoice_batch.action_required` for the same generic decision.
-- Require configured OIDC and named accounts for every production deployment; missing, invalid or unavailable OIDC fails closed with no WorkOS local-auth fallback.
-- Leave/absence is availability-only and cannot become productive/billable work or reduce capacity twice.
+## Daily/weekly capture integration checkpoint
 
-## 7. Review history
+[PR57](https://github.com/APReddy-AutoBotz/WorkOS/pull/57) merged at `07967fddfe8ae0e6304d338db2f71b9f7e3a2198`. Corrected candidate `01bb4fa6de46ddf210915a85f94381b81c6be5b9` passed every step of [CI43629036849](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43629036849); every resulting [main CI43629890280](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43629890280) step also passed. Documentation PR155 is merged at `62458781d3a274a7be39f3e4528b257913b912bd`, with every [post-merge check](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43628900400) passed.
 
-1. `492715dc8a40de6431365b6e52378d317721f617`: five P1, two P2.
-2. `c2e3dbb74bc7c78a8f946222497850ac0c49ac78`: two P1.
-3. `1f36b49461b86516b5855dbf9930a75f234b58e1`: one P1.
-4. `9fc70babdf7c4d5c72f9d18a54f8c2318c903b3b`: one P1.
-5. `649db270e8d43af152076e1f99e07c7204c575fc`: two P1.
-6. `7124709e4f6682ded0321c58d22a6851a5e32b9d`: four P1, two P2.
-7. `76f05c9da71d21b1f774afc91e13dad4323d6358`, review `PRR_kwDOUAv8Lc8AAAABKh3paA`: two P1.
-8. `b30ec6f921262602edcab9e9d96a2dbb1c8571b2`, review `PRR_kwDOUAv8Lc8AAAABKh6Tsg`: two P1.
-9. `be42c047f6bcf2d4aa3476a7368bea04ebff1e70`, review `PRR_kwDOUAv8Lc8AAAABKh-0NA`: one P1, one P2.
-10. `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8`, review `PRR_kwDOUAv8Lc8AAAABKh_5pA`: three P2.
-11. `cd45de9181858d722e2974e92d6aaa53ba04ec17`, review `PRR_kwDOUAv8Lc8AAAABKiBoBw`: two P1, one P2.
-12. `a023ebef80fad7aea354f3759801a430de18cb6e`, review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`: one P1.
-13. `86484cde78f1350a4a0a3f55f368f2e919353663`, review `PRR_kwDOUAv8Lc8AAAABKiIDxA`: one P1, one P2.
-14. Post-merge review of PR #1 head `e8e05e0f17e78e7ef19a35c078601ebda5881a45`, review `PRR_kwDOUAv8Lc8AAAABKiPf2w`: one P1 (`PRRT_kwDOUAv8Lc6beCXL`) and one P2 (`PRRT_kwDOUAv8Lc6beCXQ`), triggering WOS-00F.
-15. Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of WOS-00F head `039789b7860d38115c7dfbd39dd26c0a36314a6a`: three P2 covering canonical recipient matrices, issue ownership and stale implementation status; corrected.
-16. Review `PRR_kwDOUAv8Lc8AAAABKlyssg` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf`: P2 `PRRT_kwDOUAv8Lc6bneWi` for stale primary traceability and P2 `PRRT_kwDOUAv8Lc6bneWu` for missing atomic protected-recipient persistence; corrected.
-17. Review `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of the same exact head: P2 `PRRT_kwDOUAv8Lc6bnl_f` for missing actual verification outcomes and P2 `PRRT_kwDOUAv8Lc6bnl_i` for rollback wording that did not preserve the corrective hold; corrected.
-18. Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264`: three P2 findings covering stale WOS-01 authorization, a forbidden-term evidence contradiction and unsupported Mermaid-validation PASS evidence; corrected.
-19. Review `PRR_kwDOUAv8Lc8AAAABKnm5YA` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264`: two P2 findings covering missing corrected-main baseline recording in backlog authority and incomplete A–I adversarial evidence; corrected.
-20. Review `PRR_kwDOUAv8Lc8AAAABKpzHEw` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed`: two P2 current-authority findings; corrected.
-21. Review `PRR_kwDOUAv8Lc8AAAABKp-K9w` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed`: one P2 current-authority finding; corrected.
-22. Review `PRR_kwDOUAv8Lc8AAAABKqRg4w` of exact head `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6`: two P2 findings — `PRRT_kwDOUAv8Lc6bx0dl` for the incomplete primary WOS-01A traceability gate and `PRRT_kwDOUAv8Lc6bx0du` for stale implementation-status/review scope. This controller convergence addresses both but does not claim a clean final review.
+Bounded WOS-TIM-001/004-006/008-009/011-012, WOS-CORE-003-005, WOS-NFR-DAT-002/004/005/006/008 and WOS-NFR-UX-001/003/005 evidence covers migration046, explicitly configured legal-entity daily/weekly modes, one complete weekly approval header, lossless hidden/zero/context entries and exact quantities, mode-policy/full-row revision conflicts, strict response validation and owned editor recovery. No defaults or permission grants are inferred.
 
-The detailed resolution authority is `docs/evidence/v0.1.0/DOC-WOS-00-002-REVIEW-RESOLUTION.md` plus the WOS-00F correction report. No clean final WOS-00F review is claimed yet.
+Local locked installation, typecheck/lint, aggregate unit/contracts, scanner/adversarial checks, real PostgreSQL fresh/upgrade/replay/concurrency acceptance, production build and browser journeys passed. The first hosted candidate failed an unsynchronized DOM assertion; the test-only correction waits for the blocked-state render before unchanged assertions. Its independent exact-head correction review and fresh full hosted matrix passed. The original frozen candidate's security review covered all 16 source items and supporting changed paths without introduced findings; the separate correction review does not retroactively change that scan. Earlier whole-repository audit findings remain open.
 
-## 8. Next controller actions
+Rollback retains migration046 and immutable mode history with a compatible application. Daily entry does not change weekly approval identity. Full evidence/categorization/overtime/capacity/financial controls and release/buyer acceptance remain open. Optional evidence-link PR58 was subsequently accepted as recorded below.
 
-1. Verify the authority/traceability convergence is fully published on the existing Draft PR #14 branch and re-read the exact moved head.
-2. Revalidate the two Round-22 P2 threads against that published head; resolve them only when the corrected content is present and the threads are outdated or demonstrably addressed.
-3. Request exactly one fresh independent Codex/Sol review of the exact moved PR #14 head against the frozen WOS-00F A–I closure matrix.
-4. Any new P0/P1/P2 blocks Ready/merge and must be corrected on the same PR followed by another exact-head review.
-5. If the fresh review is clean, mark PR #14 ready only under repository-defined authority, re-read the head and squash-merge with an expected-head guard.
-6. Record the corrected exact `main` baseline; close issue #13 and return issue #2 to completed only after merge verification.
-7. Only after the corrected baseline is recorded may the controller explicitly reauthorize WOS-01A; PR #12 must then be recreated or rebased from that corrected baseline before source import resumes.
+## Optional work-entry evidence integration checkpoint
 
-## 9. Status update template
+[PR58](https://github.com/APReddy-AutoBotz/WorkOS/pull/58) merged at `5534e999beab8e40cc1c9b2d49a96f96aaab3180`. Candidate `a7d8da030d10686a8ca317df592a8c76670ba0c6` passed every step of [CI43630671029](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43630671029). Every resulting [main check](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43631361092) also passed.
 
-```text
-Overall accepted readiness: XX%
-Product capability: XX%
-Commercial capability: XX%
-Enterprise platform: XX%
-Quality and evidence: XX%
-Buyer handover: XX%
+Bounded WOS-TIM-003 evidence-link support adds migration047, optional validated HTTP/HTTPS references, safe rendered links, independent manual/import omission-versus-clear handling, evidence-only revision conflicts and immutable submission/correction history. It preserves WOS-TIM-001/004/008/009/011/012 and associated data-integrity/UX controls. URLs are stored references only; there is no automatic fetch or preview.
 
-Current workstream:
-Current PR:
-Exact head:
-CI status:
-Review status:
-Blocking findings:
-Owner decision required:
-Next controller action:
-```
+Locked installation (345 audited, zero reported vulnerabilities), typecheck/lint, aggregate unit/contracts, real PostgreSQL fresh/046-upgrade/replay and negative scope/history tests, production build, and evidence/ownership/capture-mode browser journeys passed. The initial browser attempt timed out at navigation before feature assertions; the unchanged retry passed without weakened assertions or increased timeouts. Scanner-rejected literal negative fixtures were replaced with generated ephemeral values, retaining credential-URL rejection coverage. Independent source/security review covered all14 source items/all33 changed paths with no introduced findings or correctness blockers; inherited audit findings remain open.
+
+Rollback retains migration047 and immutable histories. Pre047 applications cannot preserve references during replacement; if restoring one, keep work writes disabled until a compatible binary is restored. Task/ticket/milestone reference PR59 was subsequently accepted as recorded below. Full TIM003/PR008, buyer UAT and deployment remain open.
+
+## Work-reference and required-evidence integration checkpoint
+
+[PR59](https://github.com/APReddy-AutoBotz/WorkOS/pull/59) merged at `372e209188a147aff2423ad3029a5b1c926b948e`. Candidate `c0a62519f544d752da2678e29eb8da50df4f679b` passed every step of [CI43632315613](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43632315613), and every [main check43633106384](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43633106384) passed. Bounded WOS-TIM-003 support adds migration048 and optional descriptive reference text, independent omission/clear preservation, reference-only revision conflicts and immutable correction history. Text is escaped and is not an authoritative milestone or financial binding.
+
+[PR60](https://github.com/APReddy-AutoBotz/WorkOS/pull/60) merged at `2f4712dec4d546438a6f852b1bb4c83d6567c87c`. Candidate `703ed725e689ae133f6d4c375c76fc2829a0dec2` passed all 47 application/migration/browser/production/container steps and all 5 secret-scan steps in [CI43633877932](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43633877932); every [main check43634758569](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43634758569) also passed. Bounded WOS-TIM-005 and WOS-NFR-UX-001/005 support adds migration049 and prospective buyer-selected evidence requirements for positive entries. Zero entries remain exempt; no default mandate is installed. Omitted API/SQL policy values inherit the latest choice. Malformed response flags and latest-policy projections fail closed; uncertain append acknowledgements require reconciliation without automatic retry.
+
+Both packages passed locked installation (345 audited, zero reported vulnerabilities), type/lint, unit/contracts, dedicated fresh/upgrade/replay PostgreSQL acceptance, production builds, and affected browser journeys. Initial local browser navigation timed out before assertions; unchanged retries passed, with no weakened checks. Independent source/security reviews covered all 15/8 source paths and all 35/29 total changed paths respectively, with no new findings or demonstrated correctness blockers. Existing whole-repository audit findings remain open.
+
+Documentation PR156 merged at `423a9653b611d7567527f8ff53062e318ed5f23f`; its exact-head CI43632036572 passed. Its post-merge run43632936309 was cancelled when superseded, not passed. Subsequent fully passing main runs include that documentation.
+
+Rollback retains migrations048/049, immutable histories and SQL guards. Use a compatible application before resuming work/policy writes. PR61 identical-entry advisories require their own integration/review/hosted acceptance. Full TIM003/TIM005/PR008, cross-header source identity, performance, buyer UAT and deployment remain open.
+
+## Remaining release work
+
+- Integrate and verify the completed frozen-source security audit's findings against the intended release head; do not transfer fix evidence from unrelated revisions or interpret a clean bounded diff as a clean product.
+- Complete consistent project utilization/contribution reporting and governed exports; identify remaining legacy compatibility surfaces and their parity gates.
+- Close remaining workflow failure/recovery gaps and verify affected roles end-to-end.
+- Produce Standard-profile performance/query-plan evidence, production-like backup/restore and operational recovery evidence.
+- Resolve remaining branding-scan and release-document inconsistencies, then run the full acceptance matrix at one immutable head.
+- Complete buyer identity/configuration, operational ownership, reconciliation, UAT and handover. Engineering integration is not buyer acceptance or deployment approval.
+
+## Integration now authorized
+
+The owner requested updated product vision, plan and README, and merging eligible changes. Follow the [enterprise delivery roadmap](../05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md) and [merge policy](../05-delivery/PR_REVIEW_AND_MERGE_POLICY.md). Independent documentation can merge ahead of unfinished features; dependent implementation cannot bypass prerequisites or blocking findings. Record resulting main SHAs and main checks after every integration step.

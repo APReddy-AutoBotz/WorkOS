@@ -1,3 +1,4 @@
+import {syntheticHexDigest,rejectedConfigurationValues} from './support/synthetic-values.mjs';
 import assert from 'node:assert/strict';
 import {z} from 'zod';
 import {captureModeInput,captureModeWriteFields,refineCaptureModeWrite,assertCaptureModeWrite} from '../server/modules/work-capture/capture-modes.mjs';
@@ -6,9 +7,9 @@ const input={expectedLatestId:null,enabledModes:['daily','weekly']};
 assert.deepEqual(captureModeInput.parse(input).enabledModes,['weekly','daily']);
 for(const enabledModes of [[],['daily','daily'],['timer'],['daily','weekly','daily']])assert.equal(captureModeInput.safeParse({...input,enabledModes}).success,false);
 assert.equal(captureModeInput.safeParse({...input,organizationId:'forged'}).success,false);
-const schema=z.object(captureModeWriteFields).superRefine(refineCaptureModeWrite),token='a'.repeat(64);
+const schema=z.object(captureModeWriteFields).superRefine(refineCaptureModeWrite),token=syntheticHexDigest();
 for(const valid of [{},{expected_write_token:null},{expected_write_token:token},{expected_write_token:null,capture_mode:'daily',expected_mode_policy_id:'m1'}])assert(schema.safeParse(valid).success);
-for(const invalid of [{capture_mode:'daily'},{expected_mode_policy_id:null},{expected_write_token:token,capture_mode:'daily'},{expected_write_token:'not-a-token'}])assert.equal(schema.safeParse(invalid).success,false);
+for(const invalid of [{capture_mode:'daily'},{expected_mode_policy_id:null},{expected_write_token:token,capture_mode:'daily'},{expected_write_token:rejectedConfigurationValues.short}])assert.equal(schema.safeParse(invalid).success,false);
 const req={organizationScope:{organizationId:'org-synthetic',legalEntityId:'legal-synthetic'}};
 let calls=0,currentMode={id:'m1',enabled_modes:['daily']},currentToken=token;
 const client={query:async sql=>{++calls;return {rows:sql.includes('from work_capture_mode_versions')?[currentMode]:[{token:currentToken}]};}};
@@ -19,7 +20,7 @@ await assert.rejects(assertCaptureModeWrite(client,req,{expected_write_token:nul
 await assert.rejects(assertCaptureModeWrite(client,req,{expected_write_token:token},null),{code:'WORK_CAPTURE_WRITE_CONFLICT'});
 for(const modeInput of [{capture_mode:'weekly',expected_mode_policy_id:'m1'},{capture_mode:'daily',expected_mode_policy_id:'old'}])await assert.rejects(assertCaptureModeWrite(client,req,modeInput,null),{code:'WORK_CAPTURE_MODE_CONFLICT'});
 await assertCaptureModeWrite(client,req,{capture_mode:'daily',expected_mode_policy_id:'m1',expected_write_token:null},null);
-currentToken='b'.repeat(64);await assert.rejects(assertCaptureModeWrite(client,req,{expected_write_token:token},{id:'header-synthetic'}),{code:'WORK_CAPTURE_WRITE_CONFLICT'});
+currentToken=syntheticHexDigest();await assert.rejects(assertCaptureModeWrite(client,req,{expected_write_token:token},{id:'header-synthetic'}),{code:'WORK_CAPTURE_WRITE_CONFLICT'});
 for(const [date,monday] of [['2026-10-16','2026-10-12'],['2026-10-17','2026-10-19'],['2026-10-18','2026-10-19'],['2026-12-31','2026-12-28'],['2027-01-02','2027-01-04']])assert.equal(captureHeaderMonday(date),monday);
 assert.throws(()=>captureHeaderMonday('2026-02-30'));
 const entry=(id,date,hours)=>({id,date,hours:Number(hours),hoursExact:hours,workType:'Client Misc Task',clientName:'Synthetic context',category:id,remark:'Synthetic comment',billable:false});

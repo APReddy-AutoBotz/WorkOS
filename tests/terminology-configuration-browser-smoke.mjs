@@ -51,7 +51,8 @@ const pending = async (kind, after = 0) => {
   }, {kind, after});
 };
 const settle = (request, result, status) => page.evaluate(({id, result, status}) => window.terminologyConfigurationHarness.settle(id, result, status), {id: request.id, result, status});
-const headers = (request, organizationId = 'org-a', legalEntityId = 'legal-a', token = 'synthetic-terminology-token-a') => {
+let fixtureToken;
+const headers = (request, organizationId = 'org-a', legalEntityId = 'legal-a', token = fixtureToken) => {
   assert.deepEqual(request.headers, {
     authorization: `Bearer ${token}`, 'content-type': 'application/json',
     'x-organization-id': organizationId, 'x-legal-entity-id': legalEntityId,
@@ -106,6 +107,7 @@ const open = async ({strict = false, runtime = false, access = 'manage'} = {}) =
   const params = new URLSearchParams({...(strict ? {strict: '1'} : {}), ...(runtime ? {runtime: '1'} : {}), ...(access === 'none' ? {access} : {})});
   await page.goto(`${baseUrl}/tests/fixtures/terminology-configuration.html?${params}`);
   await page.getByRole('heading', {name: 'Terminology configuration', exact: true}).waitFor();
+  fixtureToken = await page.evaluate(() => window.terminologyConfigurationHarness.syntheticToken);
 };
 const boot = async (value = configuration()) => {
   await open();

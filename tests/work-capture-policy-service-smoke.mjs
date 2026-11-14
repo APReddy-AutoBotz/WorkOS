@@ -11,7 +11,7 @@ const {getToken,getOrganizationScope,resetBackendCheck}=await import('../src/ser
 const scope={organizationId:'org-synthetic',legalEntityId:'legal-synthetic'},other={organizationId:'org-other',legalEntityId:'legal-other'};
 const user={id:'worker-synthetic',employeeId:'worker-synthetic',name:'Synthetic operator',role:'Admin',permissionRole:'Admin',permissions:['settings.manage']};
 const draft={expectedLatestId:null,effectiveFrom:'2026-10-21',minimumIncrement:'0.25',dailyMaximum:'8',weeklyMaximum:'40',commentRequired:true};
-const policy={id:'capture-synthetic',sequence:1,policyVersion:'work-capture-rules/1',...draft};delete policy.expectedLatestId;
+const policy={id:'capture-synthetic',sequence:1,policyVersion:'work-capture-rules/1',...draft,evidenceRequired:false};delete policy.expectedLatestId;
 const workspace={...scope,serverDate:'2026-10-21',latestId:null,versions:[],truncated:false,activationDates:['2026-10-21']};
 const calls=[];let health='connected',status=200,gate=null,payload=null;
 const response=(body,code=200)=>new Response(JSON.stringify(body),{status:code,headers:{'Content-Type':'application/json'}});
@@ -33,6 +33,19 @@ assert.deepEqual(await service.append({...draft,organizationId:'forged',actorId:
 assert.deepEqual(JSON.parse(calls.at(-1).body),draft,'only command fields cross the boundary');
 for(const evidenceRequired of [true,false,undefined]){
  reset();await service.append({...draft,evidenceRequired},capture());const command=JSON.parse(calls.at(-1).body);assert.equal(command.evidenceRequired,evidenceRequired);assert.equal(Object.hasOwn(command,'evidenceRequired'),evidenceRequired!==undefined);
+}
+for(const evidenceRequired of [undefined,null,'false',0,[],{}]){
+ reset();payload={...workspace,latestId:policy.id,versions:[{...policy,evidenceRequired}]};
+ await assert.rejects(service.get(capture()),{status:503},'unknown evidence policy must not become an optional checkbox');
+ reset();payload={...policy,evidenceRequired};await assert.rejects(service.append(draft,capture()),{status:503},'malformed acknowledgement must require reconciliation');
+ assert.equal(calls.filter(call=>call.method==='POST').length,1,'uncertain acknowledgement does not retry');
+}
+for(const evidenceRequired of [false,true]){
+ reset();payload={...workspace,latestId:policy.id,versions:[{...policy,evidenceRequired}]};
+ assert.equal((await service.get(capture())).versions[0].evidenceRequired,evidenceRequired);
+}
+for(const fields of [{versions:{}},{versions:[null]},{latestId:policy.id},{latestId:null,versions:[policy]}]){
+ reset();payload={...workspace,...fields};await assert.rejects(service.get(capture()),{status:503},'unverifiable latest policy must not produce defaults');
 }
 for(const mutate of [()=>values.set('workos_session','null'),()=>values.set('workos_organization_scope',JSON.stringify(other)),()=>values.set('workos_api_token','replacement'),()=>values.set('workos_session',JSON.stringify({...user,permissions:[]}))]){
  reset();const owner=capture();mutate();await assert.rejects(service.get(owner));await assert.rejects(service.append(draft,owner));assert.equal(calls.length,0);
