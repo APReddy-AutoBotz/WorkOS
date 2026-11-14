@@ -4,6 +4,10 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+### Fixed — planning read recovery (draft implementation)
+
+- WOS-CORE-003, WOS-NFR-OBS-005 and WOS-NFR-UX-005: planning/PM failures and denied reads now provide retry without false empty metrics; stable PM identity dependencies prevent repeat loads on rendering. See `docs/tasks/WOS-04-PLANNING-READ-RECOVERY.md`. No migration; application rollback restores the defects. No release acceptance is implied.
+
 ### Fixed — project detail recovery (draft implementation)
 
 - WOS-CORE-003, WOS-NFR-OBS-005 and WOS-NFR-UX-005: clear obsolete project/edit state on navigation, ignore late reads and provide distinct failed/denied read feedback with retry. Browser regression evidence and limits are recorded in `docs/tasks/WOS-04-PROJECT-DETAIL-READ-RECOVERY.md`. No schema migration; application rollback restores the stale-display defect. This entry does not imply merge or release acceptance.

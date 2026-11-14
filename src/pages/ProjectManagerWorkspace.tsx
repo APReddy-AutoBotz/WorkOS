@@ -6,6 +6,7 @@ import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { allocationService, adminService, employeeService, projectService, timesheetService } from '../services/api';
 import { authService } from '../services/authService';
+import { ApiClientError } from '../services/apiClient';
 import { Allocation, Employee, Project, SystemSettings, TimesheetSummary } from '../types';
 import { cn } from '../lib/utils';
 import { isProjectAvailableForPlanning, overlapsDateRange } from '../services/calculations';
@@ -17,6 +18,8 @@ const todayIso = () => new Date().toISOString().split('T')[0];
 export const ProjectManagerWorkspace = () => {
   const user = authService.getCurrentUser();
   const [loading, setLoading] = useState(true);
+  const [loadFailure, setLoadFailure] = useState<'access' | 'failed' | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -32,6 +35,13 @@ export const ProjectManagerWorkspace = () => {
 
   useEffect(() => {
     if (!user) return;
+    let active = true;
+    setLoading(true);
+    setLoadFailure(null);
+    setProjects([]);
+    setAllocations([]);
+    setEmployees([]);
+    setTimesheets([]);
     Promise.all([
       projectService.getAll(),
       allocationService.getAll(),
@@ -39,6 +49,7 @@ export const ProjectManagerWorkspace = () => {
       timesheetService.getAll(),
       adminService.getSettings(),
     ]).then(([projectData, allocationData, employeeData, timesheetData, systemSettings]) => {
+      if (!active) return;
       const managed = projectData.filter(project =>
         project.managerId === user.id ||
         project.managerId === user.employeeId ||
@@ -52,8 +63,11 @@ export const ProjectManagerWorkspace = () => {
         timesheet.entries.some(entry => entry.projectId && managedIds.has(entry.projectId))
       ));
       setSettings(systemSettings);
-    }).finally(() => setLoading(false));
-  }, [user]);
+    }).catch(error => {
+      if (active) setLoadFailure(error instanceof ApiClientError && [401, 403].includes(error.status) ? 'access' : 'failed');
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [user?.id, user?.employeeId, user?.name, user?.role, loadAttempt]);
 
   const currentDate = todayIso();
   const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects]);
@@ -97,11 +111,17 @@ export const ProjectManagerWorkspace = () => {
 
   if (loading) {
     return (
-      <div className="h-[60vh] flex items-center justify-center">
+      <div role="status" aria-label="Loading PM workspace" className="h-[60vh] flex items-center justify-center">
         <Loader2 className="animate-spin text-primary" size={32} />
       </div>
     );
   }
+
+  if (loadFailure) return <Card><div role="alert">
+    <p>{loadFailure === 'access' ? 'PM workspace is not authorized for this account.' : 'PM workspace could not be loaded.'}</p>
+    <p>Check your connection and workspace access, then retry.</p>
+    <button type="button" className="btn-primary mt-3" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Retry PM workspace</button>
+  </div></Card>;
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">

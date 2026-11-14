@@ -1,0 +1,13 @@
+# Planning read recovery
+
+Requirements: WOS-CORE-003, WOS-NFR-OBS-005, WOS-NFR-UX-005; RESOURCE_PLANNING_SPEC.md remains authoritative for calculations and scope.
+
+ResourcePlanningSignals leaves a rejected read unhandled and stays loading indefinitely. ProjectManagerWorkspace clears loading after failure but leaves empty metrics and an unhandled rejection. Its effect depends on the freshly parsed session object, so state updates trigger additional reads even when account identity has not changed.
+
+Both views now distinguish loading, successful empty results, denied reads and transient failures. Failures offer explicit retry without private diagnostics. Cleanup suppresses obsolete responses. PM reads depend on stable account/worker/name/role fields and explicit retry, retaining existing project ownership filters and calculations. No API, permission, financial or migration changes.
+
+Acceptance: actual React components with controlled promises, failed and403 reads, retry to honest empty state, stale unmount rejection, and bounded PM request count despite a newly parsed session on every render. Browser mocks prove UI lifecycle only, not server authorization or database persistence. Existing account/scope switching architecture and server rules remain authoritative. Relevant planning/access contracts, typecheck, lint, production build and final diff review are required.
+
+Rollback is application-only; it restores misleading loading/empty states and PM repeat loads. Preserve database/audit history. No dependency changes; use the verified parent lockfile installation. Full-product readiness and unaffected workspaces are not claimed.
+
+Verification: the browser test fails against the original planning page because no error/retry view appears after rejection; corrected-page journey PASS, including populated metrics and retained PM ownership filtering. Initial fixture syntax and ambiguous populated-state locator failures were corrected without changing application controls. `test:planning` PASS (99 rows, 8 bench, 5 overloaded, 7 risks); `test:access` PASS for Admin/HR/ProjectManager/CountryDirector/Employee; `test:phase7-scope` PASS (static contract evidence, not new API execution); final typecheck PASS; lint PASS (544 modules), with final amended browser script syntax checked separately; explicit production-mode build with fallback disabled PASS. Existing >500 kB bundle warning remains. Final diff and whitespace review PASS. The parent full unit/contract aggregate passed in the immediately preceding package; this package reruns the affected subset, not the full aggregate. Backend, migration and production-startup checks are unchanged and not rerun. Hosted CI pending; no merge or deployment claim.
