@@ -2,7 +2,7 @@ import {canonicalHours,sumHours,compareHours} from '../../shared/work-hours.mjs'
 import {hydrateWorkCaptureGrid,parseCaptureHourInput,canonicalCaptureHourInput,captureCalendarDate} from '../services/workCaptureGrid';
 import type {TimesheetEntry} from '../types';
 import {getOrganizationScope,getToken,ApiClientError,resetBackendCheck} from '../services/apiClient';
-import { useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
@@ -55,10 +55,23 @@ const startOfDay = (date: Date) => {
   return next;
 };
 
+const currentOwner = () => {
+  const user = authService.getCurrentUser();
+  const scope = getOrganizationScope();
+  return JSON.stringify([user?.id, user?.role, getToken(), scope?.organizationId, scope?.legalEntityId]);
+};
+
 export const MyTimesheet = () => {
+  const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
+  const owner = currentOwner();
+  return <Fragment key={`${owner}:${toIsoDate(currentWeek)}`}><TimesheetEditor owner={owner} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} /></Fragment>;
+};
+
+const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
+  owner: string; currentWeek: Date; setCurrentWeek: Dispatch<SetStateAction<Date>>;
+}) => {
   const navigate = useNavigate();
   const user = authService.getCurrentUser();
-  const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
   const currentWeekKey = toIsoDate(currentWeek);
   const currentUserId = user?.id;
   const today = startOfDay(new Date());
@@ -75,13 +88,15 @@ export const MyTimesheet = () => {
   const [preservedEntries,setPreservedEntries]=useState<TimesheetEntry[]>([]);
   const [loaded,setLoaded]=useState(false);
   const [saving,setSaving]=useState(false);
-  const savePending=useRef(false),generation=useRef(0);
+  const savePending=useRef(false),generation=useRef(0),mounted=useRef(true);
+  const ownsView=()=>mounted.current&&currentOwner()===owner;
   const [scopeRevision,setScopeRevision]=useState(0);
   useEffect(()=>{
+    mounted.current=true;
     const changed=()=>{++generation.current;setLoaded(false);setRows([]);setPreservedEntries([]);setScopeRevision(value=>value+1);};
     window.addEventListener('workos:organization-scope-switch-requested',changed);
     window.addEventListener('workos:organization-scope-changed',changed);
-    return()=>{++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',changed);window.removeEventListener('workos:organization-scope-changed',changed);};
+    return()=>{mounted.current=false;++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',changed);window.removeEventListener('workos:organization-scope-changed',changed);};
   },[]);
   const [assignedProjects, setAssignedProjects] = useState<any[]>([]);
   const [notice, setNotice] = useState<{ type: 'success' | 'warning' | 'danger'; message: string } | null>(null);
@@ -98,7 +113,7 @@ export const MyTimesheet = () => {
       allocationService.getAll(),
       timesheetService.getAll(),
     ]).then(([projects, allocations, timesheets]) => {
-      if(cancelled||request!==generation.current)return;
+      if(cancelled||request!==generation.current||!ownsView())return;
       const assigned = allocations
         .filter(a => {
           const project = projects.find(p => p.id === a.projectId);
@@ -146,14 +161,14 @@ export const MyTimesheet = () => {
         setRejectionNote(undefined);
       }
       setLoaded(true);
-    }).catch(()=>{if(!cancelled&&request===generation.current)setNotice({type:'danger',message:'Work could not be loaded. Reload before editing.'});});
+    }).catch(()=>{if(!cancelled&&request===generation.current&&ownsView())setNotice({type:'danger',message:'Work could not be loaded. Reload before editing.'});});
     return()=>{cancelled=true;};
   }, [currentUserId, currentWeekKey,scopeRevision,user?.role]);
 
   const persistTimesheet = async (nextStatus: 'Draft' | 'Submitted') => {
-    if (!user||!loaded||savePending.current||hasInvalidHours||!['Draft','Rejected'].includes(status)) return;
+    if (!user||!ownsView()||!loaded||savePending.current||hasInvalidHours||!['Draft','Rejected'].includes(status)) return;
     const owner=generation.current,scope=JSON.stringify(getOrganizationScope()),token=getToken();
-    const current=()=>owner===generation.current&&scope===JSON.stringify(getOrganizationScope())&&token===getToken();
+    const current=()=>ownsView()&&owner===generation.current&&scope===JSON.stringify(getOrganizationScope())&&token===getToken();
     savePending.current=true;setSaving(true);
     try{
     const weekEnding = getWeekEnding(currentWeek);
@@ -257,7 +272,7 @@ export const MyTimesheet = () => {
         message: (error instanceof Error ? error.message : 'Timesheet could not be saved.')+(rejected?'':' Reload work before trying again.'),
       });
     }
-    }finally{savePending.current=false;setSaving(false);}
+    }finally{savePending.current=false;if(current())setSaving(false);}
   };
 
   const handleSubmit = () => {
@@ -339,7 +354,7 @@ export const MyTimesheet = () => {
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
-      <WorkSubmissionAssurance assurance={workAssurance} status={status} />
+      {loaded ? <WorkSubmissionAssurance assurance={workAssurance} status={status} /> : <p role="status">Loading current timesheet...</p>}
       <PageHeader
         title={user?.role === 'Admin' ? 'Admin Self-Log Test' : 'My Timesheet'}
         subtitle={headerSubtitle}
@@ -348,7 +363,7 @@ export const MyTimesheet = () => {
           <div className="flex items-center gap-3">
              <div className="flex items-center bg-white border border-border-light rounded-xl p-1 shadow-sm mr-2">
                 <button
-                  aria-label="Previous week" disabled={saving} onClick={() => setCurrentWeek(prev => {
+                  aria-label="Previous week" onClick={() => setCurrentWeek(prev => {
                     const next = new Date(prev);
                     next.setDate(next.getDate() - 7);
                     return next;
@@ -365,7 +380,7 @@ export const MyTimesheet = () => {
                     next.setDate(next.getDate() + 7);
                     return next;
                   })}
-                  disabled={currentWeek >= currentSystemWeek||saving}
+                  disabled={currentWeek >= currentSystemWeek}
                   className={cn(
                     "p-1.5 rounded-lg transition-colors",
                     currentWeek >= currentSystemWeek
@@ -594,7 +609,7 @@ export const MyTimesheet = () => {
       {hasInvalidHours&&<p role="alert">Correct invalid hours before saving. Use a decimal quantity from 0 to 24; invalid values have not changed the work totals.</p>}
       {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'}</p>)}</section>}
       {!loaded&&<p role="status">Work is not ready for editing. Reload this page after checking connection and access.</p>}
-      {saving&&<p role="status">Saving workâ€¦</p>}
+      {saving&&<p role="status">Saving work…</p>}
       {/* Remark Input Modal/Overlay */}
       {activeRemark && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
@@ -603,7 +618,7 @@ export const MyTimesheet = () => {
               <div>
                 <h4 className="text-xs font-bold text-heading">Entry Remarks</h4>
                 <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
-                  {days[activeRemark.dayIdx]} â€¢ {rows.find(r => r.id === activeRemark.rowId)?.projectName}
+                  {days[activeRemark.dayIdx]} • {rows.find(r => r.id === activeRemark.rowId)?.projectName}
                 </p>
               </div>
               <button onClick={() => setActiveRemark(null)} className="p-1 hover:bg-white rounded-lg transition-colors">

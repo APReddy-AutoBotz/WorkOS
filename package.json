@@ -120,7 +120,8 @@
     "test:work-capture-grid": "node --import tsx tests/work-capture-grid-smoke.mjs",
     "test:work-capture-service": "node --import tsx tests/work-capture-policy-service-smoke.mjs",
     "test:work-capture-postgres": "node tests/work-capture-postgres-smoke.mjs",
-    "test:work-capture-journey": "node tests/work-capture-journey-browser-smoke.mjs"
+    "test:work-capture-journey": "node tests/work-capture-journey-browser-smoke.mjs",
+    "test:timesheet-ownership-browser": "node tests/timesheet-ownership-browser-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

@@ -330,6 +330,8 @@ Strict contract/service checks and real PostgreSQL/HTTP/React acceptance are add
 
 ## PR-008A bounded development evidence
 
+MyTimesheet assurance ownership correction supports WOS-CORE-003/005 and WOS-NFR-UX-001/005: current-week/identity editor ownership prevents delayed reads or save outcomes from relabeling another period's evidence. `test:timesheet-ownership-browser` covers controlled delayed read/save, return-to-week and identity replacement races, with loading/save guards and current-owner completion. This complements, rather than replaces, real PostgreSQL and work-assignment browser acceptance.
+
 | Requirement portions | Implementation | Required executable evidence | Status |
 |---|---|---|---|
 | WOS-CORE-003–005; WOS-RES-002/009; WOS-TIM-004/008/009/011 | Shared manual/import dated assignment and work authority; scoped worker and independently adopted governed parent timelines; server non-billability; append-only submission/decision evidence; protected correction and all-entry period decisions; neutral legacy preservation and operator assurance | `test:work-assignment-policy`, `test:work-assignment-postgres`, `test:work-assignment-journey`; migration044 fresh/043 upgrade/replay; retained full CI and browser matrix | Bounded development slice only; hosted exact-head outcome recorded in dependent Draft PR. Full PR-008 and formal acceptance remain open. |

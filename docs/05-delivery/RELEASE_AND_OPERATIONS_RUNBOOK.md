@@ -239,6 +239,8 @@ New submissions retain immutable work/policy evidence under migration044. Correc
 
 Submission assurance describes retained operational evidence, not billing eligibility or invoice readiness. Do not bypass a locked period or inactive hierarchy through imports, demo reseeding or direct data edits. Rollback requires a forward-compatible binary retaining migration044, submission/decision ledgers and database immutability guards. A pre044 writer is unsupported. Configurable work capture, richer capacity policy and later financial controls remain separate work packages.
 
+MyTimesheet displays assurance only after the selected worker/week loads. Changing week or identity abandons the old view's presentation; an already-dispatched save can still complete on its original period. Return to that period and reload to reconcile its history before repeating an uncertain submission. A failed load keeps submission disabled; reload the current view to recover.
+
 ## Governed commercial amendments (PR-007D)
 
 Amendment operators need explicit `commercial.amendments.manage` enrollment through Permission Settings, plus commercial view and lifecycle management permissions and the applicable organization/legal-entity scope. Permission managers may grant or revoke amendment authority for eligible roles or individual accounts. No role, including Admin, receives this permission by default. Retain permission-change history; granting authority or requesting a preview does not adopt terms.

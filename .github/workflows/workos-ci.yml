@@ -98,6 +98,9 @@ jobs:
       - name: Verify real work assignment PostgreSQL browser journey
         run: npm run test:work-assignment-journey
 
+      - name: Verify timesheet view ownership under delayed responses
+        run: npm run test:timesheet-ownership-browser
+
       - name: Verify real governed amendments PostgreSQL browser journey
         run: npm run test:commercial-amendments-journey
 
