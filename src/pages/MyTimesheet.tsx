@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
@@ -6,6 +6,7 @@ import { NoticeBanner } from '../components/ui/NoticeBanner';
 import { cn } from '../lib/utils';
 import { authService } from '../services/authService';
 import { timesheetService, adminService, projectService, allocationService } from '../services/api';
+import { getToken, getOrganizationScope } from '../services/apiClient';
 import {
   Calendar,
   ChevronLeft,
@@ -51,10 +52,23 @@ const startOfDay = (date: Date) => {
   return next;
 };
 
+const currentOwner = () => {
+  const user = authService.getCurrentUser();
+  const scope = getOrganizationScope();
+  return JSON.stringify([user?.id, user?.role, getToken(), scope?.organizationId, scope?.legalEntityId]);
+};
+
 export const MyTimesheet = () => {
+  const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
+  const owner = currentOwner();
+  return <Fragment key={`${owner}:${toIsoDate(currentWeek)}`}><TimesheetEditor owner={owner} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} /></Fragment>;
+};
+
+const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
+  owner: string; currentWeek: Date; setCurrentWeek: Dispatch<SetStateAction<Date>>;
+}) => {
   const navigate = useNavigate();
   const user = authService.getCurrentUser();
-  const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
   const currentWeekKey = toIsoDate(currentWeek);
   const currentUserId = user?.id;
   const today = startOfDay(new Date());
@@ -68,15 +82,27 @@ export const MyTimesheet = () => {
   const [notice, setNotice] = useState<{ type: 'success' | 'warning' | 'danger'; message: string } | null>(null);
 
   const [rejectionNote, setRejectionNote] = useState<string | undefined>(undefined);
+  const mounted = useRef(true);
+  const savingLock = useRef(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const ownsView = () => mounted.current && currentOwner() === owner;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
+    let active = true;
     const weekEnding = getWeekEnding(currentWeek);
     Promise.all([
       projectService.getAll(),
       allocationService.getAll(),
       timesheetService.getAll(),
     ]).then(([projects, allocations, timesheets]) => {
+      if (!active || !ownsView()) return;
       const assigned = allocations
         .filter(a => {
           const project = projects.find(p => p.id === a.projectId);
@@ -146,17 +172,26 @@ export const MyTimesheet = () => {
         setWorkAssurance(undefined);
         setRejectionNote(undefined);
       }
+      setLoading(false);
+    }).catch(() => {
+      if (!active || !ownsView()) return;
+      setNotice({type:'danger', message:'Timesheet could not be loaded. Reload before editing or submitting.'});
     });
+    return () => { active = false; };
   }, [currentUserId, currentWeekKey]);
 
   const persistTimesheet = async (nextStatus: 'Draft' | 'Submitted') => {
-    if (!user) return;
+    if (!user || !ownsView() || loading || savingLock.current) return;
     const weekEnding = getWeekEnding(currentWeek);
     if (isFutureWeek) {
       setNotice({ type: 'warning', message: 'Future week timesheets cannot be saved or submitted.' });
       return;
     }
+    savingLock.current = true;
+    setSaving(true);
+    try {
     const systemSettings = await adminService.getSettings();
+    if (!ownsView()) return;
     if (nextStatus === 'Submitted' && user.role === 'Admin' && !systemSettings.demoSubmissionMode) {
       setNotice({ type: 'warning', message: "Self-submission is disabled for Admins." });
       return;
@@ -219,7 +254,6 @@ export const MyTimesheet = () => {
       });
     });
 
-    try {
       const assurance = await timesheetService.save({
         employeeId: user.id,
         employeeName: user.name,
@@ -230,6 +264,7 @@ export const MyTimesheet = () => {
         submittedAt: nextStatus === 'Submitted' ? new Date().toISOString() : undefined,
         entries
       });
+      if (!ownsView()) return;
       setStatus(nextStatus);
       setWorkAssurance(assurance);
       setRejectionNote(undefined);
@@ -238,10 +273,14 @@ export const MyTimesheet = () => {
         message: nextStatus === 'Submitted' ? 'Timesheet submitted for review.' : 'Draft timesheet saved.',
       });
     } catch (error) {
+      if (!ownsView()) return;
       setNotice({
         type: 'danger',
         message: error instanceof Error ? error.message : 'Timesheet could not be saved.',
       });
+    } finally {
+      savingLock.current = false;
+      if (ownsView()) setSaving(false);
     }
   };
 
@@ -322,7 +361,7 @@ export const MyTimesheet = () => {
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
-      <WorkSubmissionAssurance assurance={workAssurance} status={status} />
+      {loading ? <p role="status">Loading current timesheet...</p> : <WorkSubmissionAssurance assurance={workAssurance} status={status} />}
       <PageHeader
         title={user?.role === 'Admin' ? 'Admin Self-Log Test' : 'My Timesheet'}
         subtitle={headerSubtitle}
@@ -331,6 +370,7 @@ export const MyTimesheet = () => {
           <div className="flex items-center gap-3">
              <div className="flex items-center bg-white border border-border-light rounded-xl p-1 shadow-sm mr-2">
                 <button
+                  aria-label="Previous week"
                   onClick={() => setCurrentWeek(prev => {
                     const next = new Date(prev);
                     next.setDate(next.getDate() - 7);
@@ -343,6 +383,7 @@ export const MyTimesheet = () => {
                    <span className="text-[10px] font-bold uppercase tracking-widest text-heading">{weekLabel}</span>
                 </div>
                  <button
+                  aria-label="Next week"
                   onClick={() => setCurrentWeek(prev => {
                     const next = new Date(prev);
                     next.setDate(next.getDate() + 7);
@@ -362,14 +403,14 @@ export const MyTimesheet = () => {
                <>
                  <button
                     onClick={handleSaveDraft}
-                    disabled={isFutureWeek}
+                    disabled={isFutureWeek || loading || saving}
                     className="hidden sm:flex btn-secondary py-2.5 px-5 items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Save size={14} /> Save Draft
                  </button>
                  <button
                   onClick={handleSubmit}
-                  disabled={isFutureWeek}
+                  disabled={isFutureWeek || loading || saving}
                   className="btn-primary py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Send size={14} /> Submit for Approval

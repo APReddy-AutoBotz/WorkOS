@@ -115,7 +115,8 @@
     "test:commercial-amendments-domain": "node tests/commercial-amendments-domain-smoke.mjs",
     "test:work-assignment-policy": "node tests/work-assignment-policy-smoke.mjs",
     "test:work-assignment-postgres": "node tests/work-assignment-postgres-smoke.mjs",
-    "test:work-assignment-journey": "node tests/work-assignment-journey-browser-smoke.mjs"
+    "test:work-assignment-journey": "node tests/work-assignment-journey-browser-smoke.mjs",
+    "test:timesheet-ownership-browser": "node tests/timesheet-ownership-browser-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
