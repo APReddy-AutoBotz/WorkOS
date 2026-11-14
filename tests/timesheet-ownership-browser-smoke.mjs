@@ -15,6 +15,10 @@ try {
  const shown=async sequence=>page.getByText(`Submission ${sequence}: 1 work entries retained, including 1 governed entries.`,{exact:true}).waitFor();
  const previous=()=>page.locator('button:has(svg.lucide-chevron-left)').click();
  const next=()=>page.locator('button:has(svg.lucide-chevron-right)').click();
+ const invalidateScope=async()=>{
+   await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+   await page.getByText('Access or scope changed. Reload work explicitly for the selected legal entity.',{exact:true}).waitFor();
+ };
  await count('reads',1);await previous();await count('reads',2);
  assert.equal(await page.getByRole('region',{name:'Work submission assurance',exact:true}).count(),0,'hide evidence until current read completes');
  assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
@@ -49,7 +53,7 @@ try {
  const reload=page.getByRole('button',{name:'Reload work',exact:true});
  const readyToReload=()=>page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Reload work'&&!b.disabled));
  await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('saves',4);
- await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+ await invalidateScope();
  assert.equal(await reload.isDisabled(),true,'wait for dispatched command before reconciling');
  assert.equal(await page.getByRole('region',{name:'Work submission assurance',exact:true}).count(),0);
  assert.equal(await page.evaluate(()=>window.ownership.reads.length),10,'scope invalidation must not start a pre-commit read');
@@ -60,7 +64,7 @@ try {
  // Invalidated settings preflight must send no POST, then permit explicit reload.
  await page.evaluate(()=>window.ownership.holdSettings());
  await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('settings',2);
- await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+ await invalidateScope();
  assert.equal(await reload.isDisabled(),true);
  await page.evaluate(()=>window.ownership.releaseSettings(1));await readyToReload();
  assert.equal(await page.evaluate(()=>window.ownership.saves.length),4);
@@ -72,7 +76,7 @@ try {
  for (const before of [true,false]) {
    await reload.click();const pending=await page.evaluate(()=>window.ownership.reads.length);
    if(before)await release('releaseRead',pending-1,137);
-   await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+   await invalidateScope();
    if(!before)await release('releaseRead',pending-1,137);
    await page.waitForTimeout(100);
    assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
