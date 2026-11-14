@@ -1,5 +1,15 @@
 # WorkOS Release and Operations Runbook
 
+## Governed project contribution and retained exports
+
+In project details, explicitly select a period of at most366 dates and load approved contribution. Each distinct visible worker with period assignment or project work contributes their full-period eligible capacity once. Project-only approved included work is the numerator. Missing authority remains unavailable; zero eligible capacity is not applicable. This is an operational contribution measure, not whole-worker utilization, revenue or billing eligibility. Earlier metrics remain in a labeled compatibility section.
+
+Authorized export users enter a reason and retain the current observation. Sources are checked again before retention. Download uses immutable server CSV bytes with exact controls, rule/version, selected period, observation time and source token; the client verifies the format, hash and byte count. History is bounded to ten visible reports per page, with the complete retained worker cohort authorized before pagination or download. Lost worker access never produces a trimmed historical artifact. Export denial clears the displayed report and history.
+
+An uncertain retention keeps the original request and blocks period edits/new saves. Use **Reconcile original report request**, a read-only lookup. A missing receipt may still be in flight. **Retry same report request** preserves the exact identity/content; do not invent a replacement to resolve uncertainty. Scope/account changes suppress late responses. After leaving the page, use scoped period history to inspect committed reports before another retention; no automatic retry is issued.
+
+Migration097 adds an empty append-only evidence store, ownership/identity constraints and source/artifact guards; no grants, source backfill or buyer policy is installed. Fresh install and populated096 upgrade/replay preserve prior work and permissions. Retention/download audit failures return no artifact, and retention failure rolls back its record. Suspend new report/export routes for rollback while preserving097, retained bytes, audit and authoritative sources; resume with a compatible binary. No destructive down migration or deployment is included. See [package evidence](../tasks/WOS-07-PROJECT-CONTRIBUTION.md) for exact verification limits and outstanding release gates.
+
 ## Purpose
 
 Provide a repeatable buyer-owned release, deployment, verification, rollback and operating process. Provider-specific commands will be added with implementation artifacts; this document defines mandatory control flow.

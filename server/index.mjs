@@ -31,6 +31,7 @@ import {startWorkApproval,assertLegacyWorkApproval} from './modules/approvals/wo
 import {assertCalendarLeaveDecision,calendarLeaveError} from './modules/leave/calendar-leave-service.mjs';
 import {createNativeForecastRouter} from './modules/planning/native-forecast-router.mjs';
 import {createActualWorkRouter} from './modules/planning/actual-work-router.mjs';
+import {createProjectContributionRouter} from './modules/planning/project-contribution-router.mjs';
 import {createWorkCategoryRouter} from './modules/work-capture/work-category-router.mjs';
 import {categoryCodeInput,applyWorkCategories,categoryEntryProjection} from './modules/work-capture/work-category.mjs';
 import {createAssignmentOverlapRouter} from './modules/planning/assignment-overlap-router.mjs';
@@ -6383,6 +6384,7 @@ app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requir
 app.use('/api/v1/native-forecast',createNativeForecastRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,audit}));
 app.use('/api/v1/operational-control',createOperationalControlRouter({pool,requireDatabase,requireAuth,requirePermission,...workApprovalOptions,logError:e=>console.error('Operational control unavailable',e.code??'UNKNOWN')}));
 app.use('/api/v1/actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
+app.use('/api/v1/project-contribution',createProjectContributionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,audit}));
 app.use('/api/v1/my-actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit,own:true}));
 app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/calendar-scope-authoring',createCalendarScopeAuthoringRouter({pool,requireDatabase,requireAuth,requirePermission,hasActiveAssignedRole,audit,logError:e=>console.error('Calendar scope request failed',e?.code||'UNKNOWN')}));

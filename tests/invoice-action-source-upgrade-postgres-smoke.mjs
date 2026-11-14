@@ -37,7 +37,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
    const tables=['users','user_roles','role_permissions','user_permission_grants','invoice_action_templates','invoice_action_events','invoice_action_recipients','invoice_action_deliveries','invoice_action_reads','invoice_draft_batches','invoice_draft_lines','invoice_draft_occupancies','audit_logs'];
    const snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async table=>[table,(await pool.query('select to_jsonb(t) v from '+table+' t order by to_jsonb(t)::text')).rows])));
    const before=await snapshot();assert.equal(before.invoice_action_events.length,1);assert.equal(before.invoice_action_recipients.length,2);
-   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['096_wos06_invoice_action_source_authority']);
+   assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['096_wos06_invoice_action_source_authority','097_wos07_project_contribution_evidence']);
    assert.deepEqual(await snapshot(),before,'upgrade preserves populated invoice, identity and notice history');
    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);assert.deepEqual(await snapshot(),before);
    assert.equal(ok(await request(route+'/receipts/'+command.requestId,{identity:ids.requester})).event.id,event.id);
