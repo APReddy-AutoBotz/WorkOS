@@ -1,5 +1,15 @@
 # PR-007D — Governed material amendments and term rollover
 
+## Integration correction evidence — 2026-11-14 (in progress)
+
+The integration branch includes the corrected client-profile candidate `36b20f1d3cecb339ef9a481dc4ac55eb3aeb0eb2`. Historical development-only restrictions below describe the original slice; the owner's subsequent instructions authorize reviewed, tested integration and eligible merge, without deployment or full release acceptance.
+
+An actual permission-configuration regression failed because `commercial.amendments.manage` was absent from the server registry. The correction registers this capability while explicitly excluding it from Admin defaults. The real PostgreSQL/HTTP suite now passes discovery, unauthorized enrollment denial, explicit role and individual grants, revocation, actor/active-role permission history and proof that previews do not adopt terms. Fresh install, exact042 upgrade/replay, stale previews, concurrency, dependency constraints, atomic audit rollback and immutable history also passed. Amendment contract and service suites passed.
+
+Synthetic preview digests now use the shared generated-value helper instead of fixed credential-shaped strings; invalid digest length/case and stale-preview negatives remain. Scanner rules and production token validation are unchanged. A mistaken invocation of the nonexistent `scripts/scan-secrets.mjs` did not validate scanning; the corrected acceptance command passed the actual `scripts/scan-bootstrap.mjs --self-test` gate and adversarial fixtures.
+
+Local correction acceptance passed type checking, lint, the full aggregate test command and the production frontend build (18.81 seconds). The first real React/API/PostgreSQL browser run timed out loading the local fixture before workflow assertions; the unchanged retry passed exact confirmation, explicit parent-to-child adoption without cascade, stale lifecycle conflict/reload, On Hold preservation, pending/current distinction, immutable history, escaping and scope/token/permission invalidation. Both outcomes are retained in local evidence. Accepted main `25d291ffa60b84cfbc117090077bb4ad5bafc96f` was integrated at `d5fef67725e900d2827bf488c327b316ab81a3ce`; compared with the included client-profile candidate, only three documentation files changed. Exact-head security review and hosted CI remain pending. No merge clearance or release acceptance is claimed.
+
 ## Baseline and bounded continuation
 
 Continue the owner's 2026-10-20 implementation direction without a formal-review development hold. This isolated slice starts from unchanged Draft PR53 head `f609a8e261c3a450487ed4ccfd4fb26c760d59e9`, tree `84a001697739718d8a95d7b11f0df25cc5d9ac98`. PR53 remained Draft/unmerged, main remained `b9a57f8a462d8585bb3f73129080d6fae5173343`, all five active Actions queues were empty, and the latest controller run39386666444 succeeded before writes. One WorkOS writer owns this slice with disjoint UI/test helpers. Development sequencing is not release, merge, prerequisite or production acceptance.

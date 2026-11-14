@@ -6,7 +6,7 @@ const date=(v:unknown)=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Num
 export const normalizeOvertimeWarnings=(value:unknown):OvertimeWarning[]|undefined=>{
  if(!Array.isArray(value))return undefined;const result:OvertimeWarning[]=[],seen=new Set();
  for(const raw of value){
-  if(!object(raw)||raw.version!=='overtime-capture/1'||!['warn','block'].includes(String(raw.action))||!['daily','weekly'].includes(String(raw.kind))||typeof raw.policyId!=='string'||!raw.policyId||typeof raw.periodCode!=='string'||!raw.periodCode||typeof raw.threshold!=='string'
+  if(!object(raw)||raw.version!=='overtime-capture/1'||(raw.action!=='warn'&&raw.action!=='block')||(raw.kind!=='daily'&&raw.kind!=='weekly')||typeof raw.policyId!=='string'||!raw.policyId||typeof raw.periodCode!=='string'||!raw.periodCode||typeof raw.threshold!=='string'
    ||(raw.kind==='daily'?!date(raw.workDate):raw.workDate!==null))return undefined;
   let threshold;try{threshold=canonicalHours(raw.threshold);if(compareHours(threshold,'0')<=0||compareHours(threshold,raw.kind==='daily'?'24':'168')>0)return undefined;}catch{return undefined;}
   const key=JSON.stringify([raw.policyId,raw.periodCode,raw.kind,raw.workDate]);if(seen.has(key))return undefined;seen.add(key);

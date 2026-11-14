@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 import {readFileSync} from 'node:fs';
 process.env.APP_MODE = process.env.VITE_APP_MODE = 'production';
 process.env.ALLOW_TEST_FALLBACK = process.env.VITE_ALLOW_TEST_FALLBACK = 'false';
@@ -13,7 +14,7 @@ assert.equal(isDemoFallbackAllowed(), false);
 assert.equal(CALENDAR_ROW_CAP, 200);
 const scope = {organizationId: 'org-a', legalEntityId: 'legal-a'};
 const user = {id: 'synthetic-calendar-admin', employeeId: 'SYN-CAL', role: 'HR', permissionRole: 'HR', permissions: ['settings.manage']};
-const token = 'synthetic-calendar-session-a';
+const token = syntheticCredential();
 const today = new Date().toISOString().slice(0, 10);
 const calendar = {id: 'calendar-a', organization_id: 'org-a', legal_entity_id: 'legal-a', applicability_type: 'legal_entity', country_code: null,
   country_authority_legal_entity_id: null, worker_group_id: null, code: 'WEEK_A', name: 'Synthetic calendar', timezone: 'Asia/Kolkata', working_days: [1,2,3,4,5], hours_per_day: '7.50', effective_from: '2020-01-01', effective_to: null, active: true};
