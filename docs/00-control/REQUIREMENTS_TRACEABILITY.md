@@ -5,6 +5,8 @@
 
 ## 1. Traceability rules
 
+WOS-NFR-SEC-011 and WOS-GOV-005: [main dependency audit repair](../tasks/WOS-03-MAIN-DEPENDENCY-REPAIR.md) updates advisory-affected locked dependencies and adds negative parser, proxy-scope and application-schema regression evidence. This prerequisite does not accept the unmerged feature stack.
+
 Every accepted requirement must link to:
 
 1. Governing requirement ID.

@@ -6,6 +6,8 @@ Provide a repeatable buyer-owned release, deployment, verification, rollback and
 
 ## Release preparation
 
+The [main dependency repair](../tasks/WOS-03-MAIN-DEPENDENCY-REPAIR.md) documents the locked versions and negative regression checks required after the 2026-11-14 audit failure. Install with `npm ci`, run `npm run test:dependency-security` and the existing application/production/migration gates, and retain a current `npm audit` result. Do not disable the high/critical audit gate to merge documentation or reuse passing checks from an unmerged feature branch. Reverting the repaired lockfile reintroduces known advisory exposure; prefer a tested forward repair.
+
 - Freeze the exact candidate SHA and version.
 - Confirm changelog, requirements traceability, known limitations and migration notes.
 - Run the complete CI/release matrix.

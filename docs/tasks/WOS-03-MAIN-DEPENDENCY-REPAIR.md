@@ -1,0 +1,21 @@
+# Main dependency audit repair
+
+The owner requested updated GitHub product documentation and eligible merges. Documentation PR144's exact-head CI43548215091 passed application and migration checks but failed its existing locked-dependency audit against main's dependency baseline. This prerequisite package starts at main `b9a57f8a462d8585bb3f73129080d6fae5173343`; it does not import the unfinished dependent feature stack or weaken the audit.
+
+## Scope and authority
+
+Address WOS-NFR-SEC-011 dependency management and WOS-GOV-005 traceability. Resolve the seven affected package families reported by `npm audit --package-lock-only --json`: body-parser, proxy-addr, qs, source-map-js, Vite, Zod and esbuild. Update Express and tsx within their existing declared major ranges to permit patched qs/esbuild resolution; pin the reviewed Vite6 security version6.4.6. Keep runtime authorization, request-size configuration, calculations, schema and migrations unchanged.
+
+The same security regression design is already present in the later WorkOS development tree. Port its reviewed tests to main: all resolved dependency instances must be outside the advisory ranges; IPv4-mapped IPv6 subnet parsing must not become trust-all; actual working-calendar validation rejects malformed inputs; delayed compressed-body errors must not terminate the bounded loopback Express process. The request fixture runs in an isolated child and contacts no external service. CI executes these tests without removing existing gates.
+
+The existing document-metadata test now invokes the installed Vite CLI through the current Node executable, matching the portable invocation already verified in the later tree. Its default/configured-brand assertions remain unchanged. This allows the affected Vite dependency to be tested on Windows without a shell or an unavailable bare `npm` executable; it does not skip the build or change application behavior.
+
+Primary advisory references: [body-parser compressed-body handling](https://github.com/advisories/GHSA-27r3-jxmh-p828), [proxy-addr subnet handling](https://github.com/advisories/GHSA-jqcg-44mw-7w3h), [Zod collection validation](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5). The current audit determines the complete affected dependency instances; no absence-of-vulnerability guarantee is inferred from a zero audit count.
+
+## Evidence and completion boundary
+
+Local evidence passed: isolated `npm ci` installed 335 packages and audited 342 with zero reported vulnerabilities; all four `npm run test:dependency-security` tests; `npm run typecheck`; `npm run lint` (44 JavaScript modules); complete `npm test` including default/configured-brand artifact builds; `npm run test:migrations` (28 ordered entries, fresh/concurrent/replay/upgrade/rollback); explicit production build with fallback disabled; and `test:production-identity` using this revision's migrations in an owned disposable database (10 startup/provider cases and 7 callback rejection cases). Final `npm audit --audit-level=high` reports zero vulnerabilities. Production identity checks exercise synthetic loopback identity and database services, not a buyer tenant. No new role-specific UI flow is changed; configured-brand artifact checks cover the affected Vite build. Hosted container/Compose and secret checks remain required before merge.
+
+Resolved versions: body-parser1.20.9, proxy-addr2.0.8, qs6.16.2, source-map-js1.2.2, Vite6.4.6, Zod4.6.7; parent Express4.22.3 and tsx4.23.15 permit qs/esbuild fixes. The tsx esbuild copy is0.28.2; Vite's separate0.25.x copy is outside the reported vulnerable interval. Duplicate qs and obsolete tsx helper dependencies are removed by npm's resolver. No hand-edited package integrity values or blanket overrides are used.
+
+Inspect the final lockfile diff for unrelated upgrades and executable artifacts. No dependency major is intentionally upgraded, no production credentials or data are used, and no migration is introduced. Rollback can restore the prior application lockfile but would reintroduce the known advisory exposure; prefer a tested forward repair. After guarded merge and main checks, reconcile PR144 with main and rerun its checks before merging the documentation.
