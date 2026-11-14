@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { applyPersistedTerminology, getConfiguredTerminologyValue, productConfig, resolveTerminologyValue } from '../src/config/productConfig.ts';
@@ -20,7 +21,7 @@ const runtimeUser = {
   permissions: ['settings.manage', 'employees.view'], name: 'Synthetic Runtime Operator',
 };
 const runtimeScope = {organizationId: 'org-synthetic-runtime-one', legalEntityId: 'legal-synthetic-runtime-one'};
-const runtimeToken = 'synthetic-runtime-session-one';
+const runtimeToken = syntheticCredential();
 const setRuntimeUser = user => sessionValues.set('workos_session', JSON.stringify(user));
 const setRuntimeScope = scope => sessionValues.set('workos_organization_scope', JSON.stringify(scope));
 const resetRuntimeSession = () => {

@@ -1,5 +1,7 @@
 # WorkOS Implementation Backlog
 
+**Current execution direction (2026-11-14):** Follow the [enterprise delivery and integration roadmap](ENTERPRISE_DELIVERY_ROADMAP.md) for verified integration, consistent utilization, workflow recovery and remaining release evidence within the work-package dependencies below. Current merged/draft state is recorded in [implementation status](../00-control/IMPLEMENTATION_STATUS.md); historical controller notes below are not a substitute for live exact-head acceptance evidence.
+
 **Status:** Controller baseline  
 **Delivery model:** Outcome-based work packages implemented through Draft pull requests  
 **Default merge method:** Squash  
@@ -307,3 +309,6 @@ On 2026-10-20, the controller recorded a separate [terminology configuration edi
 On 2026-10-20, a separate [working calendar inspector increment](../tasks/WORKING-CALENDAR-INSPECTOR.md), stacked on unchanged PR48, was recorded as a bounded existing WOS-02 non-overlap exception before product writes. It adds only a read-only WOS-ORG-008 calendar inspector and WOS-ORG-010 calendar entry point. Existing GET scope/permission/ownership/predicate/order/limit contracts stay intact with narrowly scoped DATE-as-text transport. Catalog mutations remain NO-GO pending retired-lineage reactivation and reference-semantics decisions. No calendar mutations, worker assignments, capacity integration, grants, security repairs, schema or credentials are included. All formal prerequisites/review/owner/UAT/merge/release boundaries remain unchanged.
 
 On 2026-10-20, the separate [integrated import-to-audit acceptance journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md) was recorded before edits as a bounded WOS-03 tests/CI/docs-only non-overlap increment stacked on unchanged PR49. It closes the evidence gap between mocked component browser fixtures and separate real API/PostgreSQL tests for one Project Master validate/apply/reload/reviewer-provenance flow. No production/schema/permissions/grants/dependencies or export scope changes. Product defects are separate-scope findings, not fix authority. All twelve existing browser suites, prerequisite chains, blocked security exclusions and formal review/owner/UAT/merge/deployment/release gates remain unchanged.
+
+
+On 2026-11-14, PR50 was reconciled with accepted PR49 main. Its journey implementation had already been forwardported into PR41; all current runtime, test, CI and package files are preserved exactly. Only four documentation files remain in the reconciliation, retaining original failed/not-run receipts while explaining subsequent accepted evidence and current owner merge authorization. WOS-CORE-003/005 and WOS-GOV-002/004 remain bounded synthetic journey coverage, not full release acceptance.

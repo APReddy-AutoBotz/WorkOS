@@ -39,7 +39,7 @@ for (const value of [undefined, null, '', 1, true, {}, ['synthetic']]) {
   assert(render(normalized).includes('Not recorded or unavailable'));
   assert(!render(normalized).includes('[object Object]'));
 }
-for (const value of [' x ', '\u0000secret', 'x'.repeat(300), 'https://synthetic.invalid/teams/actions/bearer-token', '/teams/actions/bearer-token', 'Bearer synthetic-token']) {
+for (const value of [' x ', '\u0000secret', 'x'.repeat(300), 'https://synthetic.example.invalid/teams/actions/bearer-token', '/teams/actions/bearer-token', 'Bearer synthetic-token']) {
   const context = Object.fromEntries(Object.keys(expected).map(name => [name, value]));
   assert(Object.values(readAuditProvenance(context)).every(item => item === undefined), `unsafe saved context must be absent: ${JSON.stringify(value)}`);
   assert(!render(context).includes('bearer-token'));

@@ -1,6 +1,10 @@
 # Integrated Project Master import-to-audit acceptance
 
-## Authority, exact baseline and non-overlap
+## Current integration checkpoint — 2026-11-14
+
+The original journey below was forwardported into accepted PR41 and has already passed the real PostgreSQL/browser hosted gate. PR50 now reconciles its retained evidence with accepted main `81d3113abd451ddd9cb62e23833f256f40b8e69f` (PR49). Its remaining diff is documentation only: runtime code, package scripts, CI, browser assertions and disposable-pool cleanup are identical to main. Preserve the newer main harness, including cold-navigation setup allowance and bounded disposable-pool cleanup. The owner has authorized eligible merges; historical no-merge and local-environment restrictions below describe the original October checkpoint, not current authorization or infrastructure. Existing audit findings and production OIDC/UAT/release acceptance remain open. Rollback of this reconciliation is documentation only.
+
+## Historical authority, exact baseline and non-overlap
 
 This tests/CI/docs-only WOS-03 acceptance increment addresses the existing PR-006 WOS-CORE-003/005 and WOS-GOV-002/004 requirement basis. It is stacked on unchanged Draft PR49, head `764ba7fce13e683bfa7fb6274565a2400ef8b4ea`, tree `bc38df71335780a92e878fffaad407dba3e7d31f`. The isolated local snapshot was taken from the prior writer's index and has that exact tree; earlier snapshots and receipts remain untouched. Sole WorkOS ownership was released to this increment by the parent before edits.
 
