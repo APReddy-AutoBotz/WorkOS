@@ -1,4 +1,5 @@
-import {evidenceUrlInput,resolveWorkEvidenceReplacement,readWorkEvidenceAudit} from './modules/work-capture/work-evidence.mjs';
+import {workReferenceInput} from './modules/work-capture/work-reference.mjs';
+import {evidenceUrlInput,resolveWorkEntryMetadataReplacement,readWorkEvidenceAudit} from './modules/work-capture/work-evidence.mjs';
 import {createCaptureModesRouter} from './modules/work-capture/capture-modes-router.mjs';
 import {captureModeWriteFields,refineCaptureModeWrite,assertCaptureModeWrite} from './modules/work-capture/capture-modes.mjs';
 import {createCapturePolicyRouter} from './modules/work-capture/capture-policy-router.mjs';
@@ -2806,6 +2807,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
         'hours_exact', te.hours::text,
         'remark', te.remark,
         'evidence_url', te.evidence_url,
+        'work_reference', te.work_reference,
         'status', t.status,
         'billable', te.billable,
         'week_ending', t.week_ending
@@ -2830,6 +2832,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     hours: captureHoursInput,
     remark: z.string().optional().nullable(),
     evidence_url: evidenceUrlInput,
+    work_reference: workReferenceInput,
     billable: z.boolean().default(true),
   });
   const schema = z.object({
@@ -2898,7 +2901,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     await assertCaptureModeWrite(client,req,parsed.data,previous);
     assertTimesheetEditable(previous);
     const previousEvidence=await readWorkEvidenceAudit(client,previous?.id);
-    const evidenceEntries=await resolveWorkEvidenceReplacement(client,previous?.id,policyEntries);
+    const evidenceEntries=await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries);
     await assertCaptureReplacementPeriods(client,req,previous?.id);
     parsed.data.entries=await validateCapturePolicy(client,req,employee.id,evidenceEntries,{replacementTimesheetId:previous?.id});
     const totalHours=sumHours(parsed.data.entries.map(entry=>entry.hours));
@@ -2928,8 +2931,8 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     const savedEntries=[];
     for (const entry of parsed.data.entries) {
       const inserted=await client.query(`
-        insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *,work_date::text
+        insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *,work_date::text
       `, [
         timesheet.id,
         entry.project_id || null,
@@ -2941,6 +2944,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
         entry.remark || null,
         entry.billable,
         entry.evidence_url,
+        entry.work_reference,
       ]);
       savedEntries.push({...inserted.rows[0],policy:entry.policy,capturePolicyReference:entry.capturePolicyReference});
     }
@@ -2967,7 +2971,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       entityType: 'Timesheet',
       entityId: String(timesheet.id),
       oldValue: previous?{...previous,entryEvidence:previousEvidence}:null,
-      newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url}))},
+      newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference}))},
       details: `${previous ? 'Updated' : 'Created'} ${parsed.data.status} timesheet for ${employee.employee_id}, week ending ${parsed.data.week_ending}`,
       reason: parsed.data.rejection_reason || null,
     });
