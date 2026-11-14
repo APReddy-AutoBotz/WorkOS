@@ -611,6 +611,7 @@ export const timesheetService = {
           work_date: e.date,
           hours: e.hours,
           remark: e.remark || null,
+          evidence_url: e.evidenceUrl,
           billable: e.billable,
         })),
       });

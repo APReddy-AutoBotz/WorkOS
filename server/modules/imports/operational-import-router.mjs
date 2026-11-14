@@ -1,3 +1,4 @@
+import {evidenceUrlInput,resolveWorkEvidenceReplacement,readWorkEvidenceAudit} from '../work-capture/work-evidence.mjs';
 import {validateCapturePolicy,captureHoursInput,assertCaptureReplacementPeriods} from '../work-capture/capture-policy.mjs';
 import {canonicalHours,sumHours} from '../work-capture/work-hours.mjs';
 import {lockWorkPolicy,validateAssignmentPolicy,validateWorkEntries,assertWorkActorScope,assertTimesheetEditable,validateImportWorkStatus,retainWorkSubmission,WorkPolicyError} from '../work-capture/assignment-work-policy.mjs';
@@ -220,6 +221,7 @@ export const createOperationalImportRouter = ({
     date: strictIsoDateSchema,
     hours: captureHoursInput,
     remark: z.string().optional(),
+    evidenceUrl: evidenceUrlInput,
     billable: z.union([z.boolean(), z.string()]).optional(),
     status: versioned ? optionalImportEnum(['Draft', 'Submitted', 'Approved', 'Rejected']) : z.enum(['Draft', 'Submitted', 'Approved', 'Rejected']).optional(),
     rejectionReason: z.string().optional(),
@@ -556,6 +558,7 @@ export const createOperationalImportRouter = ({
           workDate: row.date,
           hours: canonicalHours(row.hours),
           remark: row.remark || null,
+          evidenceUrl: row.evidenceUrl,
           billable: parseBoolean(row.billable, row.workType === 'Project Work'),
         });
         groups.set(key, group);
@@ -564,16 +567,18 @@ export const createOperationalImportRouter = ({
 
       for (const group of groups.values()) {
         let policyEntries;
-        let previous;
+        let previous,previousEvidence;
         try {
           if(group.entries.length>100)throw new WorkPolicyError('WORK_ENTRY_LIMIT','A work period may contain at most 100 entries.');
           await lockWorkPolicy(client,req,[group.employee.id]);
           previous=(await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update',[scope.organizationId,scope.legalEntityId,group.employee.id,group.weekEnding])).rows[0];
           assertTimesheetEditable(previous);
+          previousEvidence=await readWorkEvidenceAudit(client,previous?.id);
           await assertCaptureReplacementPeriods(client,req,previous?.id);
-          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,remark:entry.remark,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
+          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,remark:entry.remark,evidence_url:entry.evidenceUrl,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
+          policyEntries=await resolveWorkEvidenceReplacement(client,previous?.id,policyEntries);
           policyEntries=await validateCapturePolicy(client,req,group.employee.id,policyEntries,{replacementTimesheetId:previous?.id,stagedReplacements:dryRun?stagedCaptureReplacements:[]});
-          group.entries=group.entries.map((entry,index)=>({...entry,hours:policyEntries[index].hours,billable:policyEntries[index].billable}));
+          group.entries=group.entries.map((entry,index)=>({...entry,hours:policyEntries[index].hours,billable:policyEntries[index].billable,evidenceUrl:policyEntries[index].evidence_url}));
           await assertReportingPeriodAllows(client, {
             organizationId: scope.organizationId,
             legalEntityId: scope.legalEntityId,
@@ -610,9 +615,9 @@ export const createOperationalImportRouter = ({
         const savedEntries=[];
         for (const [index,entry] of group.entries.entries()) {
           const inserted=await client.query(`
-            insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable)
-            values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *,work_date::text
-          `, [timesheet.id, entry.projectId, entry.workType, entry.clientName, entry.category, entry.workDate, entry.hours, entry.remark, entry.billable]);
+            insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url)
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *,work_date::text
+          `, [timesheet.id, entry.projectId, entry.workType, entry.clientName, entry.category, entry.workDate, entry.hours, entry.remark, entry.billable, entry.evidenceUrl]);
           savedEntries.push({...inserted.rows[0],policy:policyEntries[index].policy,capturePolicyReference:policyEntries[index].capturePolicyReference});
         }
         if(group.status==='Submitted'){
@@ -626,8 +631,8 @@ export const createOperationalImportRouter = ({
           action: previous ? 'Import Update Timesheet' : 'Import Create Timesheet',
           entityType: 'Timesheet',
           entityId: String(timesheet.id),
-          oldValue: previous,
-          newValue: timesheet,
+          oldValue: previous?{...previous,entryEvidence:previousEvidence}:null,
+          newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url}))},
           details: `${previous ? 'Updated' : 'Created'} ${group.status} timesheet for ${group.employee.employee_id}, week ending ${group.weekEnding} from ${parsed.data.fileName}`,
           reason: group.rejectionReason,
           source: 'Timesheet Import CSV',

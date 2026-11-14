@@ -14,7 +14,8 @@ await withCommercialDatabase(async({pool})=>{
     for(const file of ['040_wos04_commercial_drafting_foundation.sql','041_wos04_governed_lifecycle.sql','042_wos04_scoped_client_profiles.sql','043_wos04_governed_amendments.sql'])await copyFile(join(commercialServerDir,'migrations',file),join(rootDir,'migrations',file));
     await runMigrations({pool,rootDir,logger:quiet});await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);
     const before=await workSnapshotBefore044(pool),grants=await permissionSnapshot(pool);
-    const installed=await migrateCommercialDatabase(pool);assert.deepEqual(installed.applied,[migration,'045_wos04_work_capture_policy','046_wos04_work_capture_modes']);assert.equal(installed.status.isCurrent,true);
+    for(const row of before.timesheet_entries)row.value.evidence_url=null; // additive 047 column
+    const installed=await migrateCommercialDatabase(pool);assert.deepEqual(installed.applied,[migration,'045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence']);assert.equal(installed.status.isCurrent,true);
     assert.deepEqual(await workSnapshotBefore044(pool),before,'043 upgrade preserves every legacy ID and byte of accepted work');
     assert.equal((await pool.query('select count(*)::int n from work_submission_evidence')).rows[0].n,0,'no historical pins are inferred');
     assert.equal((await pool.query('select count(*)::int n from work_submission_decisions')).rows[0].n,0);

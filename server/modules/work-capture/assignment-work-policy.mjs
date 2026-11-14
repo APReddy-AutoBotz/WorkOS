@@ -144,7 +144,7 @@ export const retainWorkSubmission=async(client,req,timesheet,entries,source)=>{
   const periods=await assertReportingPeriodAllows(client,{organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,relevantDates:[timesheet.week_ending,...entries.map(entry=>entry.work_date)],operation:REPORTING_PERIOD_OPERATIONS.CONTENT});
   const periodReferences=[...new Map(periods.map(p=>[p.id,{id:p.id,frequency:p.frequency,status:p.status}])).values()];
   const evidence=entries.map(entry=>({entryId:entry.id,projectId:entry.project_id||null,workType:entry.work_type,workDate:date(entry.work_date),hours:String(entry.hours),billable:entry.billable,
-    clientName:entry.client_name||null,category:entry.category||null,remark:entry.remark||null,kind:entry.policy.kind,bindingId:entry.policy.bindingId||null,assignmentIds:entry.policy.assignmentIds||[],assignmentSnapshots:entry.policy.assignmentSnapshots||[],references:entry.policy.references}));
+    clientName:entry.client_name||null,category:entry.category||null,remark:entry.remark||null,evidenceUrl:entry.evidence_url||null,kind:entry.policy.kind,bindingId:entry.policy.bindingId||null,assignmentIds:entry.policy.assignmentIds||[],assignmentSnapshots:entry.policy.assignmentSnapshots||[],references:entry.policy.references}));
   await client.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id,capture_policy_references)
     values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb)`,[id,...scope(req),timesheet.id,sequence,WORK_POLICY_VERSION,JSON.stringify(evidence),JSON.stringify(periodReferences),req.user.sub,req.user.activeRole,source,req.correlationId,req.operationId,JSON.stringify(entries.map(entry=>({entryId:entry.id,reference:entry.capturePolicyReference||null})))]);
   return {id,sequence,policyVersion:WORK_POLICY_VERSION,entryCount:evidence.length,governedEntryCount:evidence.filter(x=>x.kind==='governed').length};
@@ -161,8 +161,8 @@ export const assertWorkDecisionAllowed=async(client,req,timesheet)=>{
   // Do not narrow delegation to the work-entry editor's reporting hierarchy.
   const retained=(await client.query('select entries from work_submission_evidence where organization_id=$1 and legal_entity_id=$2 and timesheet_id=$3 order by sequence desc limit 1',[...scope(req),timesheet.id])).rows[0];
   if(retained){
-    const expected=entries.map(x=>({entryId:x.id,projectId:x.project_id||null,workType:x.work_type,workDate:x.work_date,hours:String(x.hours),billable:x.billable,clientName:x.client_name||null,category:x.category||null,remark:x.remark||null}));
-    if(retained.entries.length!==expected.length||expected.some(x=>!retained.entries.some(y=>Object.entries(x).every(([key,value])=>y[key]===value))))fail('WORK_SUBMISSION_CHANGED','Submitted work no longer matches its retained evidence.',409);
+    const expected=entries.map(x=>({entryId:x.id,projectId:x.project_id||null,workType:x.work_type,workDate:x.work_date,hours:String(x.hours),billable:x.billable,clientName:x.client_name||null,category:x.category||null,remark:x.remark||null,evidenceUrl:x.evidence_url||null}));
+    if(retained.entries.length!==expected.length||expected.some(x=>!retained.entries.some(y=>Object.entries(x).every(([key,value])=>(key==='evidenceUrl'?(y[key]??null):y[key])===value))))fail('WORK_SUBMISSION_CHANGED','Submitted work no longer matches its retained evidence.',409);
   }
 };
 
