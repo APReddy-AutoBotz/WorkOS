@@ -1,12 +1,32 @@
 # WorkOS
 
-WorkOS is a buyer-owned professional-services operations platform for workforce, client engagements, work capture, approvals, utilization, revenue, margin and invoice readiness.
+WorkOS is a buyer-owned professional-services operations platform that connects resource planning, approved work, effective capacity and commercial control. Its direction is an enterprise utilization product where every percentage has an explicit period, denominator, inclusion rule and authorized source.
 
 > **Naming note:** WorkOS is the temporary product working name. Runtime branding and buyer terminology must remain configuration-driven.
 
 ## Current programme state
 
-The repository is in the **WOS-00 governing-blueprint stage**. Application source is intentionally not present yet. The authorized source bootstrap starts only after the blueprint is approved and merged.
+Application source, organization/setup foundations, CI/migration/production-profile infrastructure and the modular API/import/audit foundation are present on `main`. Utilization overview, planned, actual and forecast recovery (PR43–46) are merged, including current-evidence export guards in the detail pages. The integration checkpoint is `706975be3dec4d39f50a2db51457a873958e3306`; exact-head checks and independent reviews passed, as did Forecast's [post-merge checks](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43563840389). Source bootstrap entered the repository through PR16.
+
+Substantial operational, commercial and security work remains in dependent Draft pull requests. Passing checks on those branches do not mean the changes are merged or that v1 is production-ready. The governed project-contribution report and retained export in Draft PR146 passed current-head hosted checks; prerequisite integration and recorded bootstrap-scan debt remain open. Organization-profile editor PR47 is undergoing integration verification; it is not yet accepted on main.
+
+Start with the [current implementation status](docs/00-control/IMPLEMENTATION_STATUS.md), [product vision](docs/01-product/PRODUCT_VISION_AND_POSITIONING.md), and [delivery and integration roadmap](docs/05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md).
+
+## Product direction
+
+- **Trust the numbers:** effective part-time capacity, calendars and once-only leave reductions; approved evidence and category inclusion; exact decimal calculations and reproducible exports.
+- **Plan with context:** distinguish planned, approved actual and forecast work; expose bench, overload, demand and roll-off within the viewer's scope.
+- **Recover clearly:** loading, empty, denied, unavailable and uncertain-save states must remain distinct. Preserve edits and reconcile uncertain commands before retrying.
+- **Operate securely:** current identity/role/data scope, independent approvals, immutable audit evidence, verified database TLS, controlled migrations and tested recovery.
+- **Stay buyer-owned:** isolated application/database deployment, configurable terminology and branding, provider adapters and documented handover.
+
+These are product and acceptance commitments, not claims that every capability is already accepted on `main`. Financial valuation, billing eligibility and invoice readiness remain separate decisions; operational earned-management metrics are not statutory accounting recognition.
+
+## Development and operations
+
+The application uses React/TypeScript, Node.js/Express and PostgreSQL in a modular monolith. Install the checked-out revision's lockfile with `npm ci`; consult [environment examples](.env.example), the [deployment architecture](docs/02-architecture/DEPLOYMENT_ARCHITECTURE.md) and [operations runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md) before configuring or running it. Production requires its documented infrastructure and identity configuration; demo/test settings are not production setup.
+
+Available commands and acceptance suites live in [package.json](package.json). Run checks for the revision you intend to use, not a different Draft head. Do not treat this README as a deployment approval or buyer UAT sign-off.
 
 ## Governing documents
 
@@ -43,4 +63,4 @@ WorkOS v1 is not a payroll system, statutory invoicing engine, general ledger, c
 
 ## Contributing
 
-Read `CONTRIBUTING.md`, `SECURITY.md` and `AGENTS.md` before proposing changes. No implementation may be pushed directly to `main`.
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [AGENTS.md](AGENTS.md) before proposing changes. No implementation may be pushed directly to `main`. Merge in dependency order after exact-head review and applicable checks; verify the resulting main-branch checks and update status afterward.
