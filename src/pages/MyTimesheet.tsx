@@ -272,7 +272,20 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
         message: (error instanceof Error ? error.message : 'Timesheet could not be saved.')+(rejected?'':' Reload work before trying again.'),
       });
     }
-    }finally{savePending.current=false;if(current())setSaving(false);}
+    } finally {
+      savePending.current=false;
+      if (ownsView()) {
+        if (!current()) {
+          // A failed scope attempt can retain this editor. Earlier reads cannot
+          // establish the outcome of the abandoned command after it settles.
+          ++generation.current;
+          setLoaded(false);
+          setWorkAssurance(undefined);
+          setNotice({type:'warning',message:'The work context changed during this operation. Reload work before trying again.'});
+        }
+        setSaving(false);
+      }
+    }
   };
 
   const handleSubmit = () => {
@@ -609,7 +622,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
       {hasInvalidHours&&<p role="alert">Correct invalid hours before saving. Use a decimal quantity from 0 to 24; invalid values have not changed the work totals.</p>}
       {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'}</p>)}</section>}
       {!loaded&&<p role="status">Work is not ready for editing. Reload this page after checking connection and access.</p>}
-      {saving&&<p role="status">Saving work…</p>}
+      {saving&&<p role="status">Saving workâ€¦</p>}
       {/* Remark Input Modal/Overlay */}
       {activeRemark && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
@@ -618,7 +631,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
               <div>
                 <h4 className="text-xs font-bold text-heading">Entry Remarks</h4>
                 <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
-                  {days[activeRemark.dayIdx]} • {rows.find(r => r.id === activeRemark.rowId)?.projectName}
+                  {days[activeRemark.dayIdx]} â€¢ {rows.find(r => r.id === activeRemark.rowId)?.projectName}
                 </p>
               </div>
               <button onClick={() => setActiveRemark(null)} className="p-1 hover:bg-white rounded-lg transition-colors">

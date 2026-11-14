@@ -247,6 +247,8 @@ Authorized scoped settings managers append capture rules at a configured current
 
 After an uncertain policy append or an expected-version conflict, reload current policy history before making another decision. Do not manufacture a replacement expected version or bypass old/new period protections through imports or direct data edits. Correct invalid quantities/comments only in editable work. The compatibility grid retains distinct contexts, comments, billability, weekends and off-grid entries; preserved read-only entries still count toward authoritative limits.
 
+If an organization switch fails while a timesheet save is pending, wait for the operation to settle, then select Reload work. Earlier replacement reads cannot establish its final outcome; editing stays disabled until this explicit reload succeeds. Do not repeat an uncertain command before reconciliation.
+
 Migration045 and its immutable policies, capture references and database guards must remain on rollback. Use a forward-compatible binary honoring both assignment and capture authority. Capture rules do not confer billing eligibility or approval authority. Daily-entry modes, full categories, evidence requirements, overtime exceptions, deadlines and protected reopen workflows remain separate packages.
 
 ## Governed commercial amendments (PR-007D)
