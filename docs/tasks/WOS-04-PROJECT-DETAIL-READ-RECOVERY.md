@@ -1,0 +1,13 @@
+# Project detail read recovery
+
+Requirements: WOS-CORE-003, WOS-NFR-OBS-005 and WOS-NFR-UX-005; engagement access remains governed by ENGAGEMENT_AND_CONTRACT_SPEC.md.
+
+The original detail page retains the old project when navigating to a missing or failed project, leaves the edit dialog open across route changes and allows late requests to replace newer data. Failed reads are logged without a corrective user action; an absent route identifier remains loading indefinitely.
+
+Give each route identity its own view lifecycle, clear read data and editing state for each load, and suppress completion after cleanup. A failed read shows a generic actionable retry; 401/403 responses show a distinct access message; a successful missing result uses the existing unavailable view. Existing permission checks, APIs, write behavior and utilization calculations remain unchanged. New loading/error labels use configured project terminology.
+
+Acceptance uses the real React page and form with controlled service promises: successful initial read, route change while editing, failed/403 read without private diagnostic disclosure, retry, missing record, out-of-order completion, unmount rejection and absent identifier. The same browser test fails on the original page because the prior project remains visible after navigation; it passes on the corrected page. Initial test locator/overlay issues were corrected without changing application controls. This harness proves UI lifecycle behavior, not database or server authorization. No dependency or migration change. Typecheck, relevant contracts, production build and final diff review are required before publication.
+
+Rollback is application-only and restores the stale-display defect; prefer forward repair. Do not alter stored project or audit records. This package does not change ProjectForm write recovery, cross-session context management, utilization formulas or full-product acceptance.
+
+Verification: final browser journey PASS; full `npm test` unit/contract aggregate PASS; `npm run typecheck` PASS; `npm run lint` PASS (543 JavaScript modules); explicit production build with fallback disabled PASS. The existing >500 kB bundle warning remains. The repository's keyed-component type convention is retained. Locked dependencies reuse the verified parent installation; no manifest/lockfile change. Final diff/whitespace review passes with only page, synthetic test/fixture, CI and documentation changes. Server/API/migration/startup code is unchanged, so its prior acceptance is not rerun or relabelled as new evidence. Hosted CI remains pending; no merge, deployment or release claim.

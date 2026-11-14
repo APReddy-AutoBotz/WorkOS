@@ -29,6 +29,7 @@ import { ProjectForm } from '../components/forms/ProjectForm';
 import { termTitle } from '../config/terminology';
 import { overlapsDateRange } from '../services/calculations';
 import { authService } from '../services/authService';
+import { ApiClientError } from '../services/apiClient';
 import {
   canAccessProjectDetail,
   canEditProjectData,
@@ -38,46 +39,73 @@ import {
 
 export const ProjectDetail = () => {
   const { id } = useParams<{ id: string }>();
+  return <ProjectDetailView key={JSON.stringify(id) ?? 'no-id'} id={id} />;
+};
+
+const ProjectDetailView = ({id}: {id?: string; key?: string}) => {
   const [project, setProject] = useState<Project | null>(null);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetSummary[]>([]);
   const [isProjectFormOpen, setIsProjectFormOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState<'access' | 'failed' | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [settings, setSettings] = useState<any>({ expectedWeeklyHours: 40 });
   const currentUser = authService.getCurrentUser();
 
-  const fetchProjectData = async () => {
-    if (!id) return;
-    try {
-      const [projData, allAllocations, empData, tsData, setts] = await Promise.all([
-        projectService.getById(id),
-        allocationService.getAll(),
-        employeeService.getAll(),
-        timesheetService.getAll(),
-        adminService.getSettings(),
-      ]);
-      const alcData = allAllocations.filter(a => a.projectId === id);
-      if (projData) setProject(projData);
-      setAllocations(alcData);
-      setEmployees(empData);
-      setTimesheets(tsData);
-      setSettings(setts);
-    } catch (error) {
-      console.error('Failed to fetch project details', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const fetchProjectData = () => setLoadAttempt(attempt => attempt + 1);
 
   useEffect(() => {
-    fetchProjectData();
-  }, [id]);
+    let active = true;
+    setLoading(Boolean(id));
+    setLoadFailed(null);
+    setProject(null);
+    setAllocations([]);
+    setEmployees([]);
+    setTimesheets([]);
+    setIsProjectFormOpen(false);
+    if (!id) return () => { active = false; };
+    const load = async () => {
+      try {
+        const [projData, allAllocations, empData, tsData, setts] = await Promise.all([
+          projectService.getById(id),
+          allocationService.getAll(),
+          employeeService.getAll(),
+          timesheetService.getAll(),
+          adminService.getSettings(),
+        ]);
+        if (!active) return;
+        const alcData = allAllocations.filter(a => a.projectId === id);
+        setProject(projData ?? null);
+        setAllocations(alcData);
+        setEmployees(empData);
+        setTimesheets(tsData);
+        setSettings(setts);
+      } catch (error) {
+        if (active) setLoadFailed(error instanceof ApiClientError && [401, 403].includes(error.status) ? 'access' : 'failed');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [id, loadAttempt]);
 
   if (loading) {
     return (
-      <div className="h-[60vh] flex items-center justify-center">
+      <div role="status" aria-label={`Loading ${termTitle('project').toLowerCase()} details`} className="h-[60vh] flex items-center justify-center">
         <Loader2 className="animate-spin text-primary" size={40} />
+      </div>
+    );
+  }
+
+  if (loadFailed) {
+    return (
+      <div role="alert" className="text-center py-20">
+        <h2 className="text-xl font-bold text-heading">{loadFailed === 'access' ? `${termTitle('project')} details are not authorized` : `${termTitle('project')} details could not be loaded`}</h2>
+        <p className="text-sm text-body/60 mt-2 mb-8">{loadFailed === 'access' ? 'Sign in with access to this workspace, then try again.' : 'Check your connection and workspace access, then try again.'}</p>
+        <button type="button" className="btn-primary py-2 px-6" onClick={fetchProjectData}>Retry loading {termTitle('project').toLowerCase()}</button>
       </div>
     );
   }
