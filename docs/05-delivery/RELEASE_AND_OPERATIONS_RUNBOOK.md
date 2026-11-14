@@ -422,6 +422,10 @@ Legacy approvals and SLA results now stay within the selected legal entity for e
 
 Settings controls show success only after the server response. An unconfirmed save retains the local edits; review connection and current authority before retrying. Network uncertainty can mean the server committed without a delivered response, so reload/reconcile when needed. Newer edits remain unsaved even if an earlier submitted snapshot succeeds. The alternate utilization action saves configuration without claiming an additional server-side recalculation. Initialization failure offers retry. No migration or new permission is introduced; preserve existing configuration/audit history and prefer forward repair over restoring misleading success messages. See [settings evidence](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md).
 
+## Preparing example employee imports
+
+Bundled employee CSV examples use reserved example.invalid email addresses and empty initial passwords. Replace examples with authorized buyer data and configure the referenced directors, managers and catalogs before validating an import. The examples are not a self-contained seed. Run `npm run test:import-templates` after editing templates; it checks every row width and employee column alignment. This correction does not alter existing database records or import permissions. See [template evidence and rollback](../tasks/WOS-02-IMPORT-TEMPLATE-INTEGRITY.md).
+
 ## Commercial save uncertainty
 
 When a commercial draft save outcome is unconfirmed or its source version conflicts, discard and new creation remain unavailable. Use Reload workspace and review current server records before deciding what to create next. A failed reload keeps commands unavailable; successful read does not itself prove whether the prior write succeeded, so inspect the retained records. No write is automatically retried. Ordinary unsaved draft discard remains available. Application-only rollback restores the unsafe discard path; preserve commercial/audit history and prefer forward correction. See [browser recovery evidence](../tasks/WOS-06-COMMERCIAL-UNCERTAIN-SAVE.md).

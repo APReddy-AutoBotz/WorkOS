@@ -19,6 +19,22 @@ for (const [fileName, expectedHeaders] of Object.entries(requiredHeaders)) {
   const headers = headerLine.split(',');
   assert.deepEqual(headers, expectedHeaders, `${fileName} headers must match import contract`);
   assert.ok(rows.length >= 1, `${fileName} should include at least one example row`);
+  for (const [index, row] of rows.entries()) {
+    const values = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(value => value.replace(/^"|"$/g, '').replace(/""/g, '"'));
+    assert.equal(values.length, headers.length, `${fileName} row ${index + 2} must align with every header`);
+    if (fileName === 'employees-template.csv') {
+      const employee = Object.fromEntries(headers.map((header, column) => [header, values[column]]));
+      assert.match(employee.utilizationEligible, /^(true|false)$/);
+      assert.match(employee.joiningDate, /^\d{4}-\d{2}-\d{2}$/);
+      assert.equal(employee.standardWeeklyHours, '40');
+      assert.ok(['Delivery', 'Governance'].includes(employee.capacityType));
+      assert.equal(employee.contractType, 'Permanent');
+      assert.ok(employee.roles.split('|').includes('Employee') || employee.roles === 'Admin');
+      assert.equal(employee.initialPassword, '');
+      assert.equal(employee.status, 'Active');
+      assert.ok(employee.email.endsWith('@example.invalid'), 'Template identities must use a reserved, non-deliverable example domain');
+    }
+  }
 }
 
 console.log(JSON.stringify({
