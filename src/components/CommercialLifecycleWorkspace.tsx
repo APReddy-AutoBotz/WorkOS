@@ -46,6 +46,7 @@ const commandError = (error: unknown) => {
     COMMERCIAL_PROJECT_BUDGET_EXCEEDED: 'Not saved. Combined project allocations cannot exceed the parent budget. Allocation is not consumption or invoice readiness.',
     COMMERCIAL_LEGACY_HISTORY_PRESENT: 'Not promoted. Existing assignment or work history requires a separately governed conversion.',
     COMMERCIAL_LEGACY_PROMOTION_MISMATCH: 'Not promoted. A Proposed project must still match the exact code, name, manager, dates, client and billability.',
+    COMMERCIAL_LEGACY_PROVENANCE_REQUIRED: 'Not promoted. Creation evidence and exclusively Proposed history are required. Previously operational or unverifiable records need a separately governed conversion.',
     COMMERCIAL_INTERNAL_POLICY: 'Not saved. Internal and pre-sales projects must remain non-billable with zero commercial budget allocation.',
   };
   if (code && known[code]) return known[code];

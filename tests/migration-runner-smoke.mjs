@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHmac, randomBytes, randomUUID, scryptSync} from 'node:crypto';
+const legacyScopeToken = randomBytes(32).toString('hex');
 import {spawn} from 'node:child_process';
 import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
@@ -105,7 +106,7 @@ const stopChild = async child => {
 
 const withImportApi = async (databaseUrl, actorId, test) => {
   const port = await findAvailablePort();
-  const secret = 'synthetic-employee-import-session-secret-only';
+  const secret = randomBytes(32).toString('base64url');
   const childEnvironment = {
     PATH: process.env.PATH,
     TZ: 'UTC',
@@ -274,7 +275,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
   const unassignedAuditActorId = randomUUID();
   const disabledOrganizationAuditorId = randomUUID();
   const scopeFreeAuditorId = randomUUID();
-  const scopeFreeAuditorPassword = 'Synthetic-Temporary-Audit-Passphrase-71';
+  const scopeFreeAuditorPassword = randomBytes(32).toString('base64url');
+  const updatedScopeFreeAuditorPassword = randomBytes(32).toString('base64url');
   const scopeFreeAuditorPasswordSalt = 'synthetic-scope-free-auditor-test-salt';
   await pool.query(`insert into roles(name) values ('Admin'),('Employee') on conflict (name) do nothing`);
   await pool.query(`insert into users (id,username,email,status)
@@ -1010,7 +1012,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
           name: 'Synthetic Success Row',
           email: 'employee-import-success@example.test',
           primaryCountryDirectorId: 'cd-import-provenance-test',
-          initialPassword: 'Synthetic-import-test-password-1',
+          initialPassword: randomBytes(32).toString('base64url'),
         },
       ],
     });
@@ -1107,7 +1109,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         name: 'Synthetic Rolled Back Row',
         email: 'employee-import-rollback@example.test',
         primaryCountryDirectorId: 'cd-import-provenance-test',
-        initialPassword: 'Synthetic-import-test-password-2',
+        initialPassword: randomBytes(32).toString('base64url'),
       }],
     });
     assert.equal(rollbackResponse.status, 500, 'a failed batch-log write must return the legacy generic failure');
@@ -4204,7 +4206,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const scopeFreeWrongPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
       method: 'POST',
       headers: {Authorization: `Bearer ${scopeFreeAuditorToken}`, 'Content-Type': 'application/json'},
-      body: JSON.stringify({currentPassword: 'incorrect-synthetic-password', newPassword: 'Synthetic-Updated-Audit-Passphrase-83'}),
+      body: JSON.stringify({currentPassword: randomBytes(32).toString('base64url'), newPassword: updatedScopeFreeAuditorPassword}),
       signal: AbortSignal.timeout(5000),
     });
     assert.equal(scopeFreeWrongPassword.status, 401,
@@ -4216,7 +4218,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const scopeFreePasswordChange = await fetch(`${baseUrl}/api/auth/change-password`, {
       method: 'POST',
       headers: {Authorization: `Bearer ${scopeFreeAuditorToken}`, 'Content-Type': 'application/json'},
-      body: JSON.stringify({currentPassword: scopeFreeAuditorPassword, newPassword: 'Synthetic-Updated-Audit-Passphrase-83'}),
+      body: JSON.stringify({currentPassword: scopeFreeAuditorPassword, newPassword: updatedScopeFreeAuditorPassword}),
       signal: AbortSignal.timeout(5000),
     });
     assert.equal(scopeFreePasswordChange.status, 200,
@@ -4227,7 +4229,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(updatedPasswordScheme, 'scrypt', 'scope-free password change must retain the existing password hash scheme');
     assert.equal(changedScopeFreePassword.rows[0].must_change_password, false,
       'a successful password change must clear the mandatory-change flag');
-    assert.equal(scryptSync('Synthetic-Updated-Audit-Passphrase-83', updatedPasswordSalt, 64).toString('hex'), updatedPasswordHash,
+    assert.equal(scryptSync(updatedScopeFreeAuditorPassword, updatedPasswordSalt, 64).toString('hex'), updatedPasswordHash,
       'scope-free password change must store a hash of the submitted new password');
     const passwordChangeAudit = await pool.query(`select organization_id,legal_entity_id from audit_logs
       where user_id=$1 and action='Change Password' and entity_id=$1`, [scopeFreeAuditorId]);
@@ -4262,7 +4264,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const disabledScopeFreePasswordChange = await fetch(`${baseUrl}/api/auth/change-password`, {
       method: 'POST',
       headers: {Authorization: `Bearer ${scopeFreeAuditorToken}`, 'Content-Type': 'application/json'},
-      body: JSON.stringify({currentPassword: 'Synthetic-Updated-Audit-Passphrase-83', newPassword: 'Another-Updated-Audit-Passphrase-92'}),
+      body: JSON.stringify({currentPassword: updatedScopeFreeAuditorPassword, newPassword: randomBytes(32).toString('base64url')}),
       signal: AbortSignal.timeout(5000),
     });
     assert.equal(disabledScopeFreePasswordChange.status, 404,
@@ -4596,15 +4598,16 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.equal(actionSendResponse.status, 200,
       'a scoped Teams action notification must keep its existing send behavior');
 
+    const scopeLegacyToken = randomBytes(32).toString('hex');
     await pool.query(`insert into teams_action_tokens (token,entity_type,entity_id,action,expires_at)
-      values ('scope-legacy-null-token','PortalLink','legacy-null-portal','open_portal',now()+interval '15 minutes')`);
+      values ($1,'PortalLink','legacy-null-portal','open_portal',now()+interval '15 minutes')`, [scopeLegacyToken]);
     const beforeCrossScopeTokenActions = await pool.query(`select
         (select count(*)::int from integration_event_logs where event_type in ('TeamsActionTokenExecuted','TeamsActionNotificationSent')) as events,
         (select count(*)::int from audit_logs where action in ('Execute Teams Action Token','Send Teams Action Notification')) as audits,
         (select count(*)::int from notification_events where event_type='TeamsAction') as notifications`);
     for (const [candidate, label] of [
       [actionA.token, 'scope A token used from scope B'],
-      ['scope-legacy-null-token', 'legacy null-scope token used from scope B'],
+      [scopeLegacyToken, 'legacy null-scope token used from scope B'],
     ]) {
       const executeResponse = await postScopedJson(`/api/integrations/teams-action-tokens/${encodeURIComponent(candidate)}/execute`,
         multiScopeToken, 'org-scope-beta', 'legal-scope-beta', {comments: 'must not execute cross-scope'});
@@ -4620,11 +4623,11 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(afterCrossScopeTokenActions.rows, beforeCrossScopeTokenActions.rows,
       'rejected cross-scope and legacy token attempts must not create event, audit, or notification side effects');
     const rejectedTokenState = await pool.query(`select token,used_at from teams_action_tokens
-      where token in ($1,'scope-legacy-null-token') order by token`, [actionA.token]);
+      where token in ($1,$2) order by token`, [actionA.token, scopeLegacyToken]);
     assert.deepEqual(rejectedTokenState.rows, [
       {token: actionA.token, used_at: null},
-      {token: 'scope-legacy-null-token', used_at: null},
-    ], 'rejected cross-scope and legacy token attempts must leave tokens unused');
+      {token: scopeLegacyToken, used_at: null},
+    ].sort((a,b) => a.token < b.token ? -1 : a.token > b.token ? 1 : 0), 'rejected cross-scope and legacy token attempts must leave tokens unused');
 
     await pool.query(`insert into integration_event_logs
         (id,provider,event_type,entity_type,entity_id,status,response_payload,organization_id,legal_entity_id)
@@ -5061,7 +5064,7 @@ await withDisposableDatabase(async (pool) => {
     await client.query(`insert into integration_event_logs (id,provider,event_type,entity_type,entity_id,status,response_payload)
       values ('legacy-scope-event','test','LegacyEvent','LegacyEntity','legacy-entity','Success','{"retained":"unchanged"}'::jsonb)`);
     await client.query(`insert into teams_action_tokens (token,entity_type,entity_id,action,expires_at)
-      values ('legacy-scope-token','PortalLink','legacy-portal','open_portal',now()+interval '1 hour')`);
+      values ($1,'PortalLink','legacy-portal','open_portal',now()+interval '1 hour')`, [legacyScopeToken]);
     await client.query(`insert into country_directors (id,name,region)
       values ('legacy-link-director','Legacy link director','Legacy region')`);
     await client.query(`insert into employees (id,employee_id,name,email,designation,department,country,
@@ -5176,8 +5179,8 @@ await withDisposableDatabase(async (pool) => {
   assert.deepEqual(legacyIntegrationLog.rows, [{
     entity_id: 'legacy-entity', response_payload: {retained: 'unchanged'}, organization_id: null, legal_entity_id: null,
   }], 'historical integration events must remain unchanged and explicitly unscoped');
-  const legacyActionToken = await pool.query(`select token,organization_id,legal_entity_id from teams_action_tokens where token='legacy-scope-token'`);
-  assert.deepEqual(legacyActionToken.rows, [{token: 'legacy-scope-token', organization_id: null, legal_entity_id: null}],
+  const legacyActionToken = await pool.query(`select token,organization_id,legal_entity_id from teams_action_tokens where token=$1`, [legacyScopeToken]);
+  assert.deepEqual(legacyActionToken.rows, [{token: legacyScopeToken, organization_id: null, legal_entity_id: null}],
     'historical action tokens must remain unchanged and explicitly unscoped');
 });
 await rm(preOrganizationAuditMigrationRoot, {recursive: true, force: true});

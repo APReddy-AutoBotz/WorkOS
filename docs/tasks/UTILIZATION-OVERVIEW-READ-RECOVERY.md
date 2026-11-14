@@ -40,3 +40,12 @@ Run locked installation, typecheck, lint, build, full supported-environment unit
 When reads fail, check connection and retry; for access failures, check sign-in and report access first. Escalate persistent failures to the administrator. No export, grant or data repair is offered by this overview.
 
 Rollback is a revert of this isolated frontend/test/documentation increment. No database conversion, migration, authoritative-record change or operational credential action is involved. The prerequisite PR41 and its unresolved acceptance work remain separate.
+
+## Current-main integration checkpoint, 2026-11-14
+
+PR41 is merged at006c77a821e9e580a975cfb8b8de293429612352 and its post-merge CI43559995432 passed. This candidate incorporates that accepted main, including dependency repair, scanner fixes and the real import-to-audit journey. The package.json conflict was resolved by retaining every main test plus both overview scripts; no product code was changed during integration.
+
+Fresh npm ci installed338 packages/audited345 with zero vulnerabilities. Typecheck, lint103 modules, full npm test, bootstrap scan244 files and adversarial fixtures, and explicit production build with frontend fallback disabled passed. The real Chromium overview suite passed loading/error/access/unavailable/empty distinctions, keyboard retry, preserved figures/links, refresh races, unmount and narrow layout, with no writes/downloads/provider requests. Its first local attempt timed out at30 seconds during initial page navigation while fresh transforms/builds were running; a rerun after builds finished passed without changing the test or its timeout.
+
+Current diff review covered the component lifecycle, all new service/browser fixtures and CI wiring. Independent reads remain parallel; prior data clears immediately, current generations alone may settle, errors render fixed safe guidance, and normal calculations/ordering remain unchanged. Exact-head hosted verification and final merge remain pending. This increment adds no migration or permission and grants no product/release acceptance; rollback remains the isolated UI/test/documentation revert.
+
