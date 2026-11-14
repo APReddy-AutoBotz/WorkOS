@@ -1,5 +1,9 @@
 # WorkOS Requirements Traceability
 
+## Governed project contribution candidate
+
+WOS-CORE-003/005, WOS-TIM-010, WOS-RPT-002/006, WOS-NFR-PERF-005/007 and WOS-NFR-UX-005: [project contribution package](../tasks/WOS-07-PROJECT-CONTRIBUTION.md) replaces the default legacy project percentage with an explicit-period server report over distinct scoped workers and effective capacity. Batched source reads, exact work/approval controls, immutable migration097 evidence, audited exports, current whole-cohort access and read-only uncertain-request reconciliation have pure, strict-client, PostgreSQL and actual React/API/PostgreSQL coverage. The real journey verifies approved sources, committed acknowledgement loss, exact retained bytes, stale-source refusal, history and live permission denial. Existing legacy output is identified and collapsed as compatibility data. Query-count evidence is not Standard-profile performance acceptance. This is unpublished candidate evidence; exact-head full checks, review, dependent integration and release gates remain open.
+
 ## Combined attention and dependency candidate, 2026-11-11
 
 WOS-NFR-SEC-011 / WOS-OPS-007: [combined candidate evidence and limits](../tasks/WOS-COMBINED-ATTENTION-DEPENDENCIES-2026-11-11.md) reconcile PR #117 with PR #118 while preserving its queue, test stack and Playwright pin. Fresh combined hosted acceptance is required; separate predecessor runs are not combined evidence.

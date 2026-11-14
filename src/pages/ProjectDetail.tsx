@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ProjectForm } from '../components/forms/ProjectForm';
+import { ProjectContribution } from '../components/ProjectContribution';
 import { termTitle } from '../config/terminology';
 import { overlapsDateRange } from '../services/calculations';
 import { authService } from '../services/authService';
@@ -289,6 +290,8 @@ const ProjectDetailView = ({id}: {id?: string; key?: string}) => {
         }
       />
 
+      <ProjectContribution projectId={project.id}/>
+      <p className="mt-6 text-sm text-body/70">Compatibility workspace below: legacy staffing and work summaries use imported rules. Use the explicit-period report above for governed project contribution.</p>
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 mt-8">
         {/* Left Column: Summary & KPIs */}
         <div className="xl:col-span-4 space-y-8">
@@ -337,11 +340,12 @@ const ProjectDetailView = ({id}: {id?: string; key?: string}) => {
                   </div>
                </div>
 
-               <div className="pt-6 border-t border-gray-50">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Real-time Load Indicator</p>
+               <details className="pt-6 border-t border-gray-50">
+                  <summary className="text-xs font-bold text-body/70 cursor-pointer mb-4">Legacy percentage · compatibility only</summary>
+                  <p className="text-xs text-body/70 mb-3">Uses the latest project week and global weekly hours per allocation row. This does not use effective period capacity.</p>
                   <div className="bg-bg-secondary p-5 rounded-2xl border border-border-light relative overflow-hidden group">
                      <div className="relative z-10">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Latest Approved Project Actual</p>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Legacy latest-week percentage</p>
                         <div className="flex items-end gap-2">
                            <p className="text-3xl font-bold text-primary">{projectActual}%</p>
                            <span className="text-[10px] text-success font-bold mb-1.5 flex items-center">
@@ -351,7 +355,7 @@ const ProjectDetailView = ({id}: {id?: string; key?: string}) => {
                      </div>
                      <BarChart3 size={60} className="absolute -right-2 -bottom-2 text-primary opacity-[0.03] group-hover:opacity-10 transition-opacity" />
                   </div>
-               </div>
+               </details>
             </div>
           </Card>
 
@@ -421,7 +425,7 @@ const ProjectDetailView = ({id}: {id?: string; key?: string}) => {
                         <th className="px-6 py-4 font-bold text-gray-500 uppercase tracking-widest">Consultant</th>
                         <th className="px-6 py-4 font-bold text-gray-500 uppercase tracking-widest">Assignment / Home Role</th>
                         <th className="px-6 py-4 font-bold text-gray-500 uppercase tracking-widest text-center">Alloc %</th>
-                        <th className="px-6 py-4 font-bold text-gray-500 uppercase tracking-widest text-center">Project Actual</th>
+                        <th className="px-6 py-4 font-bold text-gray-500 uppercase tracking-widest text-center">Legacy actual · compatibility</th>
                         <th className="px-6 py-4 font-bold text-gray-500 uppercase tracking-widest">Director</th>
                         <th className="px-6 py-4"></th>
                      </tr>
