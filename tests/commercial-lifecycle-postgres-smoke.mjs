@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {copyFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {runMigrations} from '../server/migrate.mjs';
+import {recordAuditEvent} from '../server/modules/audit/audit-record.mjs';
 import {createContract,createEngagement} from '../server/modules/commercial-drafting/service.mjs';
 import {COMMERCIAL_MODELS,ENGAGEMENT_MODELS} from '../server/modules/commercial-drafting/contracts.mjs';
 import {localDatabaseUrl} from './support/import-audit-journey.mjs';
@@ -82,10 +83,12 @@ const defaults=async pool=>{
 };
 const grantLifecycle=async pool=>pool.query(`insert into role_permissions(role_name,permission_key,enabled) values ('Admin',$1,true)
   on conflict(role_name,permission_key) do update set enabled=excluded.enabled`,[lifecyclePermission]);
-const seedProposal=async(pool,input,{id=`project-${randomUUID()}`,clientId=f.clientId,managerId=f.ownerId,status='Proposed',scope=fixtureScope}={})=>{
+const seedProposal=async(pool,input,{id=`project-${randomUUID()}`,clientId=f.clientId,managerId=f.ownerId,status='Proposed',scope=fixtureScope,creationEvidence=true}={})=>{
   await pool.query(`insert into projects(id,organization_id,legal_entity_id,project_code,name,client_id,client,manager_id,manager_name,
     project_type,billable,start_date,end_date,status) values($1,$2,$3,$4,$5,$6,'Synthetic commercial local client',$7,'Synthetic commercial owner',
     'Synthetic legacy model',$8,$9,$10,$11)`,[id,scope.organizationId,scope.legalEntityId,input.code,input.name,clientId,managerId,input.billable,input.startsOn,input.endsOn,status]);
+  if(creationEvidence)await recordAuditEvent(pool,{organizationScope:scope},{module:'Projects',action:'Create Project',entityType:'Project',entityId:id,
+    oldValue:null,newValue:(await pool.query('select * from projects where id=$1',[id])).rows[0],details:'Synthetic original Proposed creation provenance'});
   return id;
 };
 const history=async(request,type,id,options={})=>{
@@ -352,6 +355,60 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       assert.deepEqual(await counts(pool),before);
     }
 
+    // Resetting current status must not erase operational history. Exercise the
+    // real legacy writers, including both CSV aliases, not just injected flags.
+    for(const writer of ['create-active','patch-active','patch-completed','csv-legacy','csv-v1']){
+      const input=projectInput(dates,`SYN-PRIOR-${writer.toUpperCase()}`,engagement,{budgetAllocation:'0.0000'});
+      const payload={project_code:input.code,name:input.name,client_id:f.clientId,manager_id:f.ownerId,
+        start_date:input.startsOn,end_date:input.endsOn,billable:true,status:writer==='create-active'?'Active':'Proposed'};
+      const initial=await request('/api/projects',{method:'POST',body:payload});assert.equal(initial.status,200);
+      const id=initial.body.id;
+      if(writer.startsWith('patch-')){
+        const changed=await request(`/api/projects/${id}/status`,{method:'PATCH',body:{status:writer==='patch-active'?'Active':'Completed'}});
+        assert.equal(changed.status,200);
+      }else if(writer.startsWith('csv-')){
+        const alias=writer==='csv-v1'?'/api/v1':'/api';
+        const changed=await request(`${alias}/imports/projects/apply`,{method:'POST',headers:{'Idempotency-Key':`synthetic-history-${randomUUID()}`},
+          body:{schemaVersion:'project-master/1',dryRun:false,fileName:'synthetic-history.csv',totalRows:1,clientErrors:[],
+            rows:[{projectCode:input.code,name:input.name,clientId:f.clientId,client:'Synthetic commercial local client',managerId:f.ownerId,
+              startDate:input.startsOn,endDate:input.endsOn,status:'Active',billable:true}]}});
+        assert.equal(changed.status,200);assert.equal(changed.body.validRows,1);
+      }
+      const reset=await request('/api/projects',{method:'POST',body:{...payload,id,status:'Proposed'}});assert.equal(reset.status,200);
+      const before=await counts(pool);const original=await snapshot(pool,['projects','project_engagement_mappings']);
+      assertError(await request('/lifecycle/projects',{method:'POST',body:{...input,projectId:id}}),409,'COMMERCIAL_LEGACY_PROVENANCE_REQUIRED');
+      assert.deepEqual(await counts(pool),before);assert.deepEqual(await snapshot(pool,['projects','project_engagement_mappings']),original);
+    }
+    for(const evidence of ['missing','unscoped','ambiguous','malformed','client-reported','pre-scope-active','mapped-active']){
+      const input=projectInput(dates,`SYN-UNKNOWN-${evidence.toUpperCase()}`,engagement,{budgetAllocation:'0.0000'});
+      const id=await seedProposal(pool,input,{creationEvidence:['pre-scope-active','mapped-active'].includes(evidence)});
+      const row=(await pool.query('select * from projects where id=$1',[id])).rows[0];
+      if(evidence==='pre-scope-active'){
+        await recordAuditEvent(pool,{}, {module:'Projects',action:'Update Project Status',entityType:'Project',entityId:id,
+          oldValue:{...row,status:'Active'},newValue:row,details:'Synthetic retained pre-scope status evidence'});
+      }else if(evidence==='mapped-active'){
+        await pool.query(`insert into commercial_engagements(id,organization_id,legal_entity_id,code,name,origin,model,starts_on,ends_on,reason)
+          select 'legacy-engagement-'||id,organization_id,legal_entity_id,'LEGACY-'||id,name,'legacy-neutral','legacy_unclassified',start_date,end_date,'Synthetic retained neutral evidence' from projects where id=$1`,[id]);
+        await pool.query(`insert into project_engagement_mappings(organization_id,legal_entity_id,project_id,engagement_id,source_snapshot)
+          select organization_id,legal_entity_id,id,'legacy-engagement-'||id,to_jsonb(p)||'{"status":"Active"}'::jsonb from projects p where id=$1`,[id]);
+      }else if(evidence==='client-reported'){
+        const forged=await request('/api/audit-events',{method:'POST',body:{action:'Import',module:'Projects',details:'Synthetic untrusted provenance',entityType:'Project',entityId:id,newValue:row}});
+        assert.equal(forged.status,201);
+      }else if(evidence!=='missing'){
+        for(let n=0;n<(evidence==='ambiguous'?2:1);n++)await recordAuditEvent(pool,{organizationScope:evidence==='unscoped'?null:fixtureScope},
+          {module:'Projects',action:'Create Project',entityType:'Project',entityId:id,oldValue:null,
+            newValue:evidence==='malformed'?{id,status:null}:row,details:'Synthetic unverifiable provenance'});
+      }
+      const before=await counts(pool);
+      assertError(await request('/lifecycle/projects',{method:'POST',body:{...input,projectId:id}}),409,'COMMERCIAL_LEGACY_PROVENANCE_REQUIRED');
+      assert.deepEqual(await counts(pool),before);
+    }
+    // A genuine scoped transactional Proposed creation remains eligible.
+    const freshInput=projectInput(dates,'SYN-AUDITED-PROPOSED',engagement,{budgetAllocation:'0.0000'});
+    const fresh=await request('/api/projects',{method:'POST',body:{project_code:freshInput.code,name:freshInput.name,client_id:f.clientId,manager_id:f.ownerId,
+      start_date:freshInput.startsOn,end_date:freshInput.endsOn,billable:true,status:'Proposed'}});assert.equal(fresh.status,200);
+    const promotedFresh=await created(request,'/lifecycle/projects',{...freshInput,projectId:fresh.body.id});assert.equal(promotedFresh.id,fresh.body.id);
+
     // Authorized alternate scopes prove server row isolation, not merely header
     // rejection. Empty reads must not leak IDs, names, lifecycle or history.
     const alternateScopes=[{organizationId:f.organizationId,legalEntityId:f.otherLegalEntityId},{organizationId:f.otherOrganizationId,legalEntityId:f.foreignLegalEntityId}];
@@ -529,7 +586,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   await rejectClone(pool,'commercial_lifecycle_events',latest,{...next,entity_type:'Engagement',entity_id:'synthetic-missing-engagement',
     sequence:1,state:'Active',contract_id:null,contract_version_id:null,before_value:null},'23503');
   const unboundInput={code:'SYN-DB-UNBOUND',name:'Synthetic unbound database fixture',startsOn:commercialBinding.starts_on,endsOn:commercialBinding.ends_on,billable:true};
-  const unboundId=await seedProposal(pool,unboundInput);
+  const unboundId=await seedProposal(pool,unboundInput,{creationEvidence:false});
   await rejectClone(pool,'commercial_lifecycle_events',latest,{...next,entity_type:'Project',entity_id:unboundId,
     sequence:1,state:'Active',contract_id:null,contract_version_id:null,before_value:null},'23503');
   const neverActivated=(await pool.query(`select id from commercial_engagements e where model='internal' and organization_id=$1 and legal_entity_id=$2

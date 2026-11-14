@@ -34,3 +34,11 @@ Local browser execution is unavailable under the authoring sandbox's networking/
 No Actual/Forecast remediation, new report feature, denominator/as-of redesign, backend, authentication/authorization, permission, calculation, normalizer, schema, dependency, export-helper/audit semantic, diagnostic or blocked security change is included. Page-level export availability is deliberately guarded; broader export governance acceptance remains open.
 
 Rollback reverts this isolated frontend/test/documentation increment. No migration, authoritative record conversion, grant or credential action is involved. Existing prerequisite acceptance work remains separate.
+
+## Integration checkpoint, 2026-11-14
+
+Reconciled the package with accepted overview head `8a3209b7222e287be5f454440de51bbb5d4af53c`; PR43 subsequently merged as `e139b2a1c0bbd595d59a071379382809619b2e52`. The package-script conflict preserves every accepted test and appends the planned reader/browser checks. Product changes remain limited to the original planned detail component; no migration is added.
+
+Current local evidence: fresh lockfile installation (338 packages installed, 345 audited, zero vulnerabilities), typecheck, lint (106 JavaScript modules), full supported-mode unit/contracts, unchanged bootstrap scan with adversarial self-tests, and production build with frontend fallback disabled all passed. Chromium acceptance passed all three-reader failures, keyboard recovery, successful metrics/charts/filters/order/links, stale and unmounted response suppression, captured export-handler guards, six deliberate CSV downloads with twelve synthetic history/audit writes, and narrow layouts. The first cold browser navigation timed out at 10 seconds before assertions; the unchanged suite passed on an isolated port after warm-up. No assertion or timeout was weakened.
+
+The historical authoring restriction above no longer describes this local environment. Current controller source review covers the component, both tests, fixture, additive CI and documentation diff. Historical independent review and hosted CI belong to the earlier head and do not substitute for current-head integration gates. Exact-head hosted verification and applicable review remain required before merge; broader reporting, export governance, buyer UAT and release acceptance remain open.

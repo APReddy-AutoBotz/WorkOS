@@ -89,7 +89,7 @@ export const normalizeClientProfileDetail = (value: unknown): ClientProfileDetai
   if (!same(latest, client.latestProfile) || history.some(value => value.parentClientId === client.id)) throw invalid();
   const billingUnits = unique(rows(item.billingUnits, value => {
     const unit = object(value);const latestVersion = integer(unit.latestVersion, 1);const currentProfile = unit.currentProfile === null ? null : unitProfile(unit.currentProfile);
-    if (unit.clientId !== client.id || !['billing_entity', 'business_unit'].includes(String(unit.kind))) throw invalid();
+    if (unit.clientId !== client.id || typeof unit.kind !== 'string' || !['billing_entity', 'business_unit'].includes(unit.kind)) throw invalid();
     return {id: text(unit.id), clientId: text(unit.clientId), code: code(unit.code), kind: unit.kind as ClientBillingUnit['kind'], latestVersion, currentProfile,
       versions: versions(unit.versions, unitProfile, latestVersion, currentProfile, asOf)};
   }));

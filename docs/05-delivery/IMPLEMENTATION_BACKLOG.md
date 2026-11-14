@@ -1,5 +1,7 @@
 # WorkOS Implementation Backlog
 
+**Current execution direction (2026-11-14):** Follow the [enterprise delivery and integration roadmap](ENTERPRISE_DELIVERY_ROADMAP.md) for verified integration, consistent utilization, workflow recovery and remaining release evidence within the work-package dependencies below. Current merged/draft state is recorded in [implementation status](../00-control/IMPLEMENTATION_STATUS.md); historical controller notes below are not a substitute for live exact-head acceptance evidence.
+
 **Status:** Controller baseline  
 **Delivery model:** Outcome-based work packages implemented through Draft pull requests  
 **Default merge method:** Squash  
@@ -308,6 +310,9 @@ On 2026-10-20, a separate [working calendar inspector increment](../tasks/WORKIN
 
 On 2026-10-20, the separate [integrated import-to-audit acceptance journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md) was recorded before edits as a bounded WOS-03 tests/CI/docs-only non-overlap increment stacked on unchanged PR49. It closes the evidence gap between mocked component browser fixtures and separate real API/PostgreSQL tests for one Project Master validate/apply/reload/reviewer-provenance flow. No production/schema/permissions/grants/dependencies or export scope changes. Product defects are separate-scope findings, not fix authority. All twelve existing browser suites, prerequisite chains, blocked security exclusions and formal review/owner/UAT/merge/deployment/release gates remain unchanged.
 
+
+On 2026-11-14, PR50 was reconciled with accepted PR49 main. Its journey implementation had already been forwardported into PR41; all current runtime, test, CI and package files are preserved exactly. Only four documentation files remain in the reconciliation, retaining original failed/not-run receipts while explaining subsequent accepted evidence and current owner merge authorization. WOS-CORE-003/005 and WOS-GOV-002/004 remain bounded synthetic journey coverage, not full release acceptance.
+
 ## Development-only PR-007A sequencing exception
 
 On 2026-10-20, the owner directed continued implementation of the agreed product plan without waiting for formal review, which may occur at the end. The controller recorded [commercial drafting foundation](../tasks/WOS-04-COMMERCIAL-DRAFTING-FOUNDATION.md) as the substantive next PR-007 development slice on unchanged PR50. It adds real scoped contracts/SOWs, seven-model engagement drafts, POs, milestone drafts, immutable future contract revisions and neutral migration mappings. This changes development sequencing only: open prerequisite acceptance, programme credit, required validation, formal release/merge/production gates, denied security repair and the unchanged blocked diagnostic remain separate. The remaining client/project/lifecycle/billing work is explicitly open in the task. Keep the dependent PR Draft and unmerged.
@@ -336,9 +341,9 @@ After Draft PR55's exact-head engineering gates pass, continue [effective-dated 
 
 Continue WOS-TIM-001 on accepted PR56 under `docs/tasks/WOS-04-WORK-CAPTURE-MODES.md`: explicit scoped buyer modes, the existing weekly header/approval identity, lossless full-header daily/weekly saves, stale revision/mode conflicts and equivalent unfinished-Draft/manual-import period controls. This fresh candidate requires new independent exact-tree review and full exact-head execution, including real PostgreSQL/React acceptance. No default adoption/grants, daily approval, calendar re-keying or previously deferred PR008 scope is included. Full PR008 and formal acceptance remain open.
 
-### PR-008D development-only continuation: optional evidence references
+### PR-008D bounded continuation: optional evidence references
 
-Under the owner's 2026-10-24 instruction to continue permitted development and defer optional reviews, implement [work-entry evidence links](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md) on unchanged PR57 `02c024d45621fe516e0a46f21657a37f2a1e4532`. Preserve existing scope/assignment/period/immutability/CAS semantics, add shared omission-versus-clear preservation for manual and both import writers, retain links across full-header UI saves and immutable correction history, and prove fresh/upgrade/replay plus real React/API/PostgreSQL journeys. Keep the dependent PR Draft/unmerged. The cumulative review remains stopped; no stack integration, protection/monitor changes or programme acceptance is authorized by this slice.
+Integrate [work-entry evidence links](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md) after accepted PR57 under the owner's subsequent authorization for reviewed integration and eligible merges. Preserve existing scope/assignment/period/immutability/CAS semantics, add shared omission-versus-clear preservation for manual and both import writers, retain links across full-header UI saves and immutable correction history, and prove fresh/upgrade/replay plus real React/API/PostgreSQL journeys. Keep the dependent PR Draft until its own independent exact-head review and executable acceptance gates pass. The earlier development-only review deferral is historical; no broader programme or deployment acceptance is implied.
 
 ### PR-008E development-only continuation: task/ticket/milestone reference text
 

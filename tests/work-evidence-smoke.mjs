@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 import {normalizeEvidenceUrl,evidenceUrlIsValid} from '../shared/work-evidence.mjs';
 import {evidenceUrlInput,resolveWorkEvidenceReplacement} from '../server/modules/work-capture/work-evidence.mjs';
 import {hydrateWorkCaptureGrid,patchVisibleCaptureRow,removeVisibleCaptureRow,captureCellPresent} from '../src/services/workCaptureGrid.ts';
@@ -8,7 +9,10 @@ for(const value of [null,'','  '])assert.equal(normalizeEvidenceUrl(value),null)
 for(const value of ['https://example.test/work/42?revision=1#note','http://example.test:8080/work','https://example.test/<reference>']){
  assert.equal(normalizeEvidenceUrl(` ${value} `),value);assert.equal(evidenceUrlInput.parse(value),value);
 }
-for(const value of ['javascript:alert(1)','data:text/html,test','//example.test/work','file:///tmp/work','https:example.test','https://user:secret@example.test/work','https://example.test/space here','https://example.test/\\work','https://example.test/\nwork','https://',42,{},'https://example.test/'+ 'a'.repeat(2048)]){
+const credentialUrl = new URL('https://example.test/work');
+credentialUrl.username = 'synthetic-user';
+credentialUrl.password = syntheticCredential();
+for(const value of ['javascript:alert(1)','data:text/html,test','//example.test/work','file:///tmp/work','https:example.test',credentialUrl.href,'https://example.test/space here','https://example.test/\\work','https://example.test/\nwork','https://',42,{},'https://example.test/'+ 'a'.repeat(2048)]){
  assert.equal(evidenceUrlIsValid(value),false);assert.equal(evidenceUrlInput.safeParse(value).success,false);
 }
 assert.equal(evidenceUrlInput.parse(undefined),undefined);
