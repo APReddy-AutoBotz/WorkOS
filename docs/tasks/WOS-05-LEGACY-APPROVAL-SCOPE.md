@@ -25,3 +25,9 @@ The first correction extracts the legacy delegation endpoints, rejects retained-
 Real disposable PostgreSQL/API tests passed recipient takeover denial with unchanged audit, foreign-entity delegation and approval read/decision denial, valid owner/admin edits, concurrent overlap rejection, invalid dates and injected audit-failure rollback. Backend route contracts and Node syntax checks passed. No migration or dependency change.
 
 Still required before publication: current delegator permission/role and lifecycle revalidation at use, retained stale/cross-entity and role-mismatch cases, complete snapshot/positive read coverage, CI and traceability wiring, affected canonical and browser regressions, full quality gates and final independent review. This checkpoint is not a complete delegation-policy remediation or release acceptance.
+
+## Current-authority read checkpoint
+
+Legacy delegated reads now require the retained role to match the active role, an active database-linked delegator account holding that role and approvals.view, an active selected-entity scope, non-exited participants in that entity, and the delegator's current role relationship to the subject. These predicates are extracted into legacy-approval-scope.mjs and shared by inbox, SLA and decision admission. Existing source-specific decision guards remain authoritative.
+
+Real API tests pass positive delegated inbox/SLA reads and immediate loss of delegated access after delegator account disablement, role removal, entity-scope removal, worker exit, delegation role mismatch/revocation and permission loss. The per-user permission positive case passes with the role permission disabled. Backend contracts and diff whitespace checks pass. No release claim: remaining creation-time policy validation, broader negative cases, full gates and browser/independent review still apply.

@@ -1,3 +1,4 @@
+import {legacyApprovalScope} from './modules/approvals/legacy-approval-scope.mjs';
 import {registerLegacyDelegationRoutes} from './modules/approvals/legacy-delegation-router.mjs';
 import {saveWorkerLogin} from './modules/identity-access/worker-login.mjs';
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
@@ -3336,26 +3337,7 @@ app.use('/api', createAvailabilityReportRouter({
   buildEmployeeScopeWhere,
 }));
 
-const buildApprovalScopeWhere = (req, params) => {
-  params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
-  const ownership = `e.organization_id=$${params.length - 1} and e.legal_entity_id=$${params.length}`;
-  if (isGlobalRole(req)) return ownership;
-  params.push(req.user.employeeRecordId);
-  const delegateParam = `$${params.length}`;
-  const delegatedScope = `exists (
-    select 1
-    from approval_delegations ad
-    where ad.delegate_id = ${delegateParam}
-      and ad.status = 'Active'
-      and current_date between ad.start_date and ad.end_date
-      and (e.id = ad.delegator_id or e.reporting_manager_id = ad.delegator_id)
-  )`;
-  if (req.user.activeRole === 'TeamLead') {
-    params.push(req.user.employeeRecordId, req.user.employeeId);
-    return `(${ownership}) and ((e.id = $${params.length - 1} or e.employee_id = $${params.length} or e.reporting_manager_id = $${params.length - 1}) or ${delegatedScope})`;
-  }
-  return `(${ownership}) and (${buildEmployeeScopeWhere(req, params, 'e')} or ${delegatedScope})`;
-};
+const buildApprovalScopeWhere = (req, params) => legacyApprovalScope(req, params, {isGlobalRole, buildEmployeeScopeWhere});
 
 const workApprovalOptions={getSetting,buildProjectScopeWhere,fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord,upsertApprovalRecord,getBusinessLeaveDays,getLeaveYear,ensureLeaveBalanceForRequest,refreshLeaveBalancesForEmployee};
 

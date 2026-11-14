@@ -46,6 +46,33 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   assert.equal(refusedAudit.status,500);
   assert.deepEqual((await pool.query('select * from approval_delegations where id=$1',[created.body.id])).rows,beforeAuditFailure);
   await pool.query('drop trigger synthetic_delegation_audit_failure on audit_logs; drop function synthetic_delegation_audit_failure()');
+  await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='TeamLead' on conflict do nothing",[ids.reader.id]);
+  await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id,reporting_manager_id)
+    values('synthetic-delegated-worker','SYN-DELEGATED','Synthetic delegated worker','delegated-worker@example.test','Analyst','Delivery','US','director-commercial','Active','org-default','legal-default',$1)`,[f.ownerId]);
+  await pool.query(`insert into approval_records(id,entity_type,entity_id,subject_employee_id,requester_name,status)
+    values('synthetic-delegated-approval','LeaveRequest','synthetic-delegated-source','synthetic-delegated-worker','Synthetic requester','Pending')`);
+  await pool.query("update approval_delegations set status='Active' where id=$1",[created.body.id]);
+  const assertDelegated=async expected=>{
+    for(const path of ['/api/approvals','/api/reports/approval-sla']){
+      const result=await request(path,{identity:ids.denied});assert.equal(result.status,200,JSON.stringify(result.body));
+      assert.equal((Array.isArray(result.body)?result.body:result.body.rows).some(x=>x.id==='synthetic-delegated-approval'),expected,path);
+    }
+  };
+  await assertDelegated(true);
+  await pool.query("update users set status='Disabled' where id=$1",[ids.reader.id]);await assertDelegated(false);
+  await pool.query("update users set status='Active' where id=$1",[ids.reader.id]);await assertDelegated(true);
+  await pool.query("delete from user_roles where user_id=$1 and role_id=(select id from roles where name='TeamLead')",[ids.reader.id]);await assertDelegated(false);
+  await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='TeamLead'",[ids.reader.id]);
+  await pool.query("update user_organization_scopes set active=false where user_id=$1",[ids.reader.id]);await assertDelegated(false);
+  await pool.query("update user_organization_scopes set active=true where user_id=$1",[ids.reader.id]);
+  await pool.query("update employees set status='Exited' where id=$1",[f.ownerId]);await assertDelegated(false);
+  await pool.query("update employees set status='Active' where id=$1",[f.ownerId]);
+  await pool.query("update approval_delegations set role='Employee' where id=$1",[created.body.id]);await assertDelegated(false);
+  await pool.query("update approval_delegations set role='TeamLead',status='Inactive' where id=$1",[created.body.id]);await assertDelegated(false);
+  await pool.query("update approval_delegations set status='Active' where id=$1",[created.body.id]);await assertDelegated(true);
+  await pool.query("insert into user_permission_grants(user_id,permission_key) values($1,'approvals.view'),($2,'approvals.view') on conflict do nothing",[ids.reader.id,ids.denied.id]);
+  await pool.query("update role_permissions set enabled=false where role_name='TeamLead' and permission_key='approvals.view'");await assertDelegated(true);
+  await pool.query("delete from user_permission_grants where user_id=$1 and permission_key='approvals.view'",[ids.reader.id]);await assertDelegated(false);
   console.log('Legacy approval selected-entity scope, immutable delegation owner, owner/admin edits, calendar dates and concurrent overlap denial passed.');
  });
 });
