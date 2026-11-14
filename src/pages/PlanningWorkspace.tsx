@@ -1,4 +1,5 @@
 import {CapabilityPlanner} from '../components/CapabilityPlanner';
+import {ResourceDemandPanel} from '../components/ResourceDemandPanel';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, Gauge, Layers3, ShieldCheck, UsersRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -261,6 +262,7 @@ export const PlanningWorkspace = () => {
       />
 
       <CapabilityPlanner/>
+      <ResourceDemandPanel onFocusAllocation={canEditAllocations?focusAllocationControl:undefined}/>
 
       <ResourcePlanningSignals embedded onFocusAllocation={canEditAllocations ? focusAllocationControl : undefined} />
 
