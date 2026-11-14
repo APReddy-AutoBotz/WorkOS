@@ -49,4 +49,4 @@ No uploads, URL dereferencing, mandatory-evidence policy, task/ticket/milestone 
 
 ## Separate PR-008E continuation
 
-The task/ticket/milestone model exclusion above is addressed only as descriptive optional reference text by separate [PR-008E](WOS-04-WORK-ENTRY-REFERENCE.md), based on unchanged PR58 `39cf7e10537972e232498a6a99a1f89df05c765b`. It supplies no authoritative task/milestone relationship. PR-008D's URL behavior remains bounded and the preceding stack is not accepted/integrated.
+The task/ticket/milestone model exclusion above is addressed only as descriptive optional reference text by separate [PR-008E](WOS-04-WORK-ENTRY-REFERENCE.md), integrated with accepted PR58 `a7d8da030d10686a8ca317df592a8c76670ba0c6`. It supplies no authoritative task/milestone relationship. PR-008D's URL behavior remains bounded; PR-008E requires its own independent review and acceptance.
