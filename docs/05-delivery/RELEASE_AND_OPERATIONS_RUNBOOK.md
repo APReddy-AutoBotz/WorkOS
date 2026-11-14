@@ -241,6 +241,14 @@ Submission assurance describes retained operational evidence, not billing eligib
 
 MyTimesheet displays assurance only after the selected worker/week loads. Changing week or identity abandons the old view's presentation; an already-dispatched save can still complete on its original period. Return to that period and reload to reconcile its history before repeating an uncertain submission. A failed load keeps submission disabled; reload the current view to recover.
 
+## Effective-dated capture policy (PR-008B)
+
+Authorized scoped settings managers append capture rules at a configured current or future UTC Weekly reporting-period boundary. Select an actual available boundary; do not infer a start date, backdate a policy or install a default. Rules govern exact time increments, optional daily/weekly totals and positive-entry comments across all of a worker's work headers in the period. Existing work and submission evidence are not silently rewritten.
+
+After an uncertain policy append or an expected-version conflict, reload current policy history before making another decision. Do not manufacture a replacement expected version or bypass old/new period protections through imports or direct data edits. Correct invalid quantities/comments only in editable work. The compatibility grid retains distinct contexts, comments, billability, weekends and off-grid entries; preserved read-only entries still count toward authoritative limits.
+
+Migration045 and its immutable policies, capture references and database guards must remain on rollback. Use a forward-compatible binary honoring both assignment and capture authority. Capture rules do not confer billing eligibility or approval authority. Daily-entry modes, full categories, evidence requirements, overtime exceptions, deadlines and protected reopen workflows remain separate packages.
+
 ## Governed commercial amendments (PR-007D)
 
 Amendment operators need explicit `commercial.amendments.manage` enrollment through Permission Settings, plus commercial view and lifecycle management permissions and the applicable organization/legal-entity scope. Permission managers may grant or revoke amendment authority for eligible roles or individual accounts. No role, including Admin, receives this permission by default. Retain permission-change history; granting authority or requesting a preview does not adopt terms.

@@ -1,6 +1,18 @@
 # PR-008B — Effective-dated work capture rules
 
+## Current integration checkpoint — 2026-11-14
+
+Original PR56 head `09e3b446a1d77b036f2b04a96dfafc4158d66b02` is integrated with corrected PR55 candidate `d9ee670cd64881f6c877b42f494f9d2be9ec8eb0` at integration commit `135646d`. PR55 subsequently passed fresh hosted acceptance and merged; its accepted ancestry is recorded below. Later owner instructions authorize verified integration and eligible merges without production deployment; the development-only restrictions below remain historical context.
+
+Manifest conflicts retain every accepted parent script and patched dependency, adding the policy/grid/service aggregate checks. The lockfile remains the accepted parent's lockfile; fresh installation installed338 packages and audited345 with zero reported vulnerabilities. The earlier Vite/advisory observations below do not describe the current integrated dependency baseline.
+
+The overlapping MyTimesheet changes retain exact decimal entry text, civil dates, separate/off-grid work, capture-policy validation, reload and uncertainty handling alongside PR55's keyed identity/week editor ownership. Read and save callbacks additionally require current ownership; navigation cannot revive an old A-view after A-B-A. The parent's delayed-response regression stays in CI, alongside real work-capture acceptance. Local type/lint/aggregate/scanner/PostgreSQL, browser and build verification passed as recorded below. Independent exact-head review and fresh hosted CI remain required; no merge clearance is claimed.
+
 ## Bounded development continuation
+
+Integration validation passed type checking, lint, full aggregate, bootstrap scan (357 files) plus adversarial fixtures, real PostgreSQL/API fresh/044-upgrade/replay and policy/precision/history/period tests, and production build (17.19 seconds). Accepted PR55 merged at `103b08a356e0c76ef69ff3e004a8d80b26fcb032`; its ancestry was integrated at `75788adaa570701af1d072a5077b1fd52cd36514` without source changes.
+
+The first retained ownership browser run failed waiting for the expected assurance. Its synthetic fixture still converted local Friday midnight with `toISOString`, conflicting with this package's deliberate civil-date correction. An actual browser check in Asia/Calcutta showed ISO date2026-11-12 versus civil date2026-11-13 for the same local Friday. The fixture now constructs its calendar date from local year/month/day; all ownership assertions remain unchanged. The corrected timing suite passed every held-read/save, navigation and identity vector. The real React/API/PostgreSQL capture journey also passed quarter-hours, distinct/off-grid preservation, billability/comments, repeated clicks, outage recovery, validation/conflict/uncertain append recovery and scope invalidation. The failed first attempt remains recorded. Independent review and fresh hosted exact-head CI remain pending.
 
 Continue the owner's approved product development after Draft PR55 head `18d32e869e2b19530a3bba2b416b11c565ea0a5c`, tree `7117471d9ae30f4f4942459b6e58e68ea8a5b7a2`, passed all configured exact-head engineering gates. This changes development sequencing only. Formal prerequisite, programme, product-owner, review, UAT and release acceptance remain separate. Keep the new dependent PR Draft, unmerged and undeployed; do not mark Ready.
 
