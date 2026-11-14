@@ -487,7 +487,7 @@ export const createOperationalImportRouter = ({
         const rowNumber = rowNumbers[index];
         if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
         const rowErrors = [];
-        if (isAfterToday(row.weekEnding) || isAfterToday(row.date)) rowErrors.push({rowNumber, field: 'date', message: 'Future week timesheets and future-dated entries cannot be imported.'});
+        if (((row.status || 'Submitted') === 'Submitted' && isAfterToday(row.weekEnding)) || isAfterToday(row.date)) rowErrors.push({rowNumber, field: 'date', message: 'Future work dates cannot be imported; Submitted headers must also end no later than today.'});
         if (!isWorkDateInsideWeek(row.date, row.weekEnding)) {
           rowErrors.push({rowNumber, field: 'date', message: `Entry work date ${row.date} must fall within the seven-day period ending ${row.weekEnding}.`});
         }

@@ -10,6 +10,7 @@ import {createServer} from 'node:net';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
+import {createDisposablePool,closeDisposablePool} from './disposable-postgres.mjs';
 import {runMigrations} from '../../server/migrate.mjs';
 import {localDatabaseUrl, signJourneySession} from './import-audit-journey.mjs';
 
@@ -47,10 +48,10 @@ export const withCommercialDatabase = async test => {
     created = true;
     const databaseUrl = new URL(adminUrl);
     databaseUrl.pathname = `/${name}`;
-    pool = new pg.Pool({connectionString: databaseUrl.toString(), max: 6});
+    pool = createDisposablePool({connectionString: databaseUrl.toString(), max: 6});
     return await test({pool, databaseUrl: databaseUrl.toString()});
   } finally {
-    try { if (pool) await pool.end(); } finally {
+    try { if (pool) await closeDisposablePool(pool); } finally {
       try {
         if (created) {
           await admin.query('select pg_terminate_backend(pid) from pg_stat_activity where datname=$1 and pid<>pg_backend_pid()', [name]);

@@ -1,5 +1,5 @@
 import {canonicalHours,sumHours,compareHours} from '../../shared/work-hours.mjs';
-import {hydrateWorkCaptureGrid,parseCaptureHourInput,canonicalCaptureHourInput,captureCalendarDate} from '../services/workCaptureGrid';
+import {hydrateWorkCaptureGrid,parseCaptureHourInput,canonicalCaptureHourInput,captureUtcDate,captureHeaderMonday,captureCellText,captureCellHours,captureCellPresent,setCaptureRowHours,patchVisibleCaptureRow,removeVisibleCaptureRow} from '../services/workCaptureGrid';
 import type {TimesheetEntry} from '../types';
 import {getOrganizationScope,getToken,ApiClientError,resetBackendCheck} from '../services/apiClient';
 import { Fragment, useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/Badge';
 import { NoticeBanner } from '../components/ui/NoticeBanner';
 import { cn } from '../lib/utils';
 import { authService } from '../services/authService';
-import { timesheetService, adminService, projectService, allocationService } from '../services/api';
+import {captureWorkCaptureContext,isWorkCaptureContextCurrent,workCaptureWorkspaceService,type WorkCaptureContext,type CaptureMode,type CaptureModesProjection} from '../services/workCaptureModes';
 import {
   Calendar,
   ChevronLeft,
@@ -32,28 +32,13 @@ import { WorkSubmissionAssurance } from '../components/WorkSubmissionAssurance';
 import { isProjectAvailableForPlanning, overlapsDateRange } from '../services/calculations';
 
 import { productConfig } from '../config/productConfig';
-const getWeekStart = (date: Date) => {
-  const next = new Date(date);
-  const day = next.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  next.setDate(next.getDate() + diff);
-  next.setHours(0, 0, 0, 0);
-  return next;
-};
-
-const toIsoDate = captureCalendarDate;
-
-const getWeekEnding = (weekStart: Date) => {
-  const friday = new Date(weekStart);
-  friday.setDate(friday.getDate() + 4);
-  return toIsoDate(friday);
-};
-
-const startOfDay = (date: Date) => {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-};
+const toIsoDate=captureUtcDate;
+const shiftDate=(date:Date,days:number)=>{const next=new Date(date);next.setUTCDate(next.getUTCDate()+days);return next;};
+// Preserve the existing Friday header identity. Saturday/Sunday belong to the
+// following Friday's rolling seven-day header, not a new daily approval unit.
+const getWeekStart=(date:Date)=>new Date(`${captureHeaderMonday(toIsoDate(date))}T00:00:00Z`);
+const getWeekEnding=(weekStart:Date)=>toIsoDate(shiftDate(weekStart,4));
+const allDays=['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'];
 
 const currentOwner = () => {
   const user = authService.getCurrentUser();
@@ -64,18 +49,27 @@ const currentOwner = () => {
 export const MyTimesheet = () => {
   const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
   const owner = currentOwner();
-  return <Fragment key={`${owner}:${toIsoDate(currentWeek)}`}><TimesheetEditor owner={owner} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} /></Fragment>;
+  const aligned = useRef(false);
+  return <Fragment key={`${owner}:${toIsoDate(currentWeek)}`}><TimesheetEditor aligned={aligned} owner={owner} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} /></Fragment>;
 };
 
-const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
-  owner: string; currentWeek: Date; setCurrentWeek: Dispatch<SetStateAction<Date>>;
+const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
+  aligned: {current: boolean}; owner: string; currentWeek: Date; setCurrentWeek: Dispatch<SetStateAction<Date>>;
 }) => {
   const navigate = useNavigate();
   const user = authService.getCurrentUser();
   const currentWeekKey = toIsoDate(currentWeek);
   const currentUserId = user?.id;
-  const today = startOfDay(new Date());
+  const [serverDate,setServerDate]=useState(new Date().toISOString().slice(0,10));
+  const today=new Date(`${serverDate}T00:00:00Z`);
   const currentSystemWeek = getWeekStart(today);
+  const gridStart=toIsoDate(shiftDate(currentWeek,-2));
+  const [modes,setModes]=useState<CaptureModesProjection|null>(null);
+  const [mode,setMode]=useState<CaptureMode|null>(null),[dailyIndex,setDailyIndex]=useState(2);
+  const [writeToken,setWriteToken]=useState<string|null>(null);
+  const [loadedOwner,setLoadedOwner]=useState<WorkCaptureContext|null>(null);
+  const loadedContext=useRef<WorkCaptureContext|null>(null),blocked=useRef(false);
+  const visibleIndices=mode==='daily'?[dailyIndex]:[2,3,4,5,6];
   const isFutureWeek = currentWeek > currentSystemWeek;
   const [status, setStatus] = useState<'Draft' | 'Submitted' | 'Approved' | 'Rejected'>('Draft');
 
@@ -91,12 +85,19 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
   const savePending=useRef(false),generation=useRef(0),mounted=useRef(true);
   const ownsView=()=>mounted.current&&currentOwner()===owner;
   const [scopeRevision,setScopeRevision]=useState(0);
+  const blockWork=()=>{
+    blocked.current=true;++generation.current;loadedContext.current=null;
+    setLoaded(false);setLoadedOwner(null);setRows([]);setHourDrafts({});setPreservedEntries([]);setActiveRemark(null);
+    setStatus('Draft');setWorkAssurance(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
+    setNotice({type:'warning',message:'Access or scope changed. Reload work explicitly for the selected legal entity.'});
+  };
   useEffect(()=>{
     mounted.current=true;
-    const changed=()=>{++generation.current;setLoaded(false);setRows([]);setPreservedEntries([]);setScopeRevision(value=>value+1);};
+    const changed=()=>blockWork();
+    const check=()=>{if(loadedContext.current&&!isWorkCaptureContextCurrent(loadedContext.current))blockWork();};
     window.addEventListener('workos:organization-scope-switch-requested',changed);
-    window.addEventListener('workos:organization-scope-changed',changed);
-    return()=>{mounted.current=false;++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',changed);window.removeEventListener('workos:organization-scope-changed',changed);};
+    window.addEventListener('workos:organization-scope-changed',changed);window.addEventListener('storage',check);window.addEventListener('focus',check);
+    return()=>{mounted.current=false;++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',changed);window.removeEventListener('workos:organization-scope-changed',changed);window.removeEventListener('storage',check);window.removeEventListener('focus',check);};
   },[]);
   const [assignedProjects, setAssignedProjects] = useState<any[]>([]);
   const [notice, setNotice] = useState<{ type: 'success' | 'warning' | 'danger'; message: string } | null>(null);
@@ -104,103 +105,76 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
   const [rejectionNote, setRejectionNote] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!user) return;
+    if(!user||blocked.current)return;
     const request=++generation.current;let cancelled=false;
-    setLoaded(false);setRows([]);setPreservedEntries([]);setHourDrafts({});setNotice(null);
-    const weekEnding = getWeekEnding(currentWeek);
-    Promise.all([
-      projectService.getAll(),
-      allocationService.getAll(),
-      timesheetService.getAll(),
-    ]).then(([projects, allocations, timesheets]) => {
+    const context=captureWorkCaptureContext(()=>!cancelled&&request===generation.current&&ownsView());
+    setLoaded(false);setLoadedOwner(null);loadedContext.current=null;setRows([]);setPreservedEntries([]);setHourDrafts({});setNotice(null);setActiveRemark(null);
+    setStatus('Draft');setWorkAssurance(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
+    workCaptureWorkspaceService.get(context).then(({projects,allocations,timesheets,modes:projection})=>{
       if(cancelled||request!==generation.current||!ownsView())return;
-      const assigned = allocations
-        .filter(a => {
-          const project = projects.find(p => p.id === a.projectId);
-          return a.employeeId === user.id &&
-            a.status === 'Active' &&
-            !!project &&
-            isProjectAvailableForPlanning(project, currentWeekKey, weekEnding) &&
-            overlapsDateRange(a.startDate, a.endDate, currentWeekKey, weekEnding);
-        })
-        .map(a => {
-          const project = projects.find(p => p.id === a.projectId);
-          return {
-            id: a.projectId,
-            name: a.projectName,
-            client: project?.client || '',
-            allocation: a.percentage,
-          };
-        });
-      setAssignedProjects(assigned);
-      const existing = timesheets.find(t => t.employeeId === user.id && t.weekEnding === weekEnding);
-      if (existing) {
-        const hydrated=hydrateWorkCaptureGrid(existing.entries,currentWeekKey);
-        setRows(hydrated.rows);setPreservedEntries(hydrated.preservedEntries);
-        setStatus(existing.status);
-        setWorkAssurance(existing.workAssurance);
-        setRejectionNote(existing.rejectionNote || existing.rejectionReason);
-      } else {
-        const firstProject = assigned[0];
-        setRows(firstProject ? [
-          {
-            id: crypto.randomUUID(),
-            workType: 'Project Work' as WorkType,
-            category: '',
-            clientName: '',
-            projectId: firstProject.id,
-            projectName: firstProject.name,
-            hours: [0, 0, 0, 0, 0],
-            remarks: ['', '', '', '', ''],
-            rowRemark: '',
-            billable: true
-          }
-        ] : []);
-        setStatus('Draft');
-        setWorkAssurance(undefined);
-        setRejectionNote(undefined);
+      if(!context||!isWorkCaptureContextCurrent(context)){blockWork();return;}
+      setServerDate(projection.serverDate);
+      if(!aligned.current){
+        aligned.current=true;const system=getWeekStart(new Date(`${projection.serverDate}T00:00:00Z`));
+        if(toIsoDate(system)!==currentWeekKey){setCurrentWeek(system);return;}
       }
-      setLoaded(true);
+      const weekEnding=getWeekEnding(currentWeek);
+      const assigned=allocations.filter(a=>{
+        const project=projects.find(p=>p.id===a.projectId);
+        return a.employeeId===user.id&&a.status==='Active'&&project&&isProjectAvailableForPlanning(project,gridStart,weekEnding)
+          &&overlapsDateRange(a.startDate,a.endDate,gridStart,weekEnding);
+      }).map(a=>({id:a.projectId,name:a.projectName,client:projects.find(p=>p.id===a.projectId)?.client||'',allocation:a.percentage}));
+      setAssignedProjects(assigned);setModes(projection);setMode(previous=>previous&&projection.enabledModes.includes(previous)?previous:projection.enabledModes[0]||null);
+      setDailyIndex(Math.max(0,Math.min(6,Math.floor((Date.parse(projection.serverDate+'T00:00:00Z')-Date.parse(gridStart+'T00:00:00Z'))/86400000))));
+      const existing=timesheets.find(t=>t.employeeId===user.id&&t.weekEnding===weekEnding);
+      if(existing){
+        const hydrated=hydrateWorkCaptureGrid(existing.entries,gridStart,7);setRows(hydrated.rows);setPreservedEntries(hydrated.preservedEntries);
+        setStatus(existing.status);setWriteToken(existing.writeToken!);setWorkAssurance(existing.workAssurance);setRejectionNote(existing.rejectionNote||existing.rejectionReason);
+      }else{
+        const first=assigned[0];setRows(first?[{id:crypto.randomUUID(),workType:'Project Work',category:'',clientName:'',projectId:first.id,projectName:first.name,
+          hours:Array(7).fill(0),exactHours:Array(7).fill('0'),remarks:Array(7).fill(''),rowRemark:'',billable:true}]:[]);
+        setStatus('Draft');setWriteToken(null);setWorkAssurance(undefined);setRejectionNote(undefined);
+      }
+      loadedContext.current=context;setLoadedOwner(context);setLoaded(true);
     }).catch(()=>{if(!cancelled&&request===generation.current&&ownsView())setNotice({type:'danger',message:'Work could not be loaded. Reload before editing.'});});
     return()=>{cancelled=true;};
-  }, [currentUserId, currentWeekKey,scopeRevision,user?.role]);
+  },[currentUserId,currentWeekKey,scopeRevision,user?.role]);
+  const editable=()=>ownsView()&&loaded&&!saving&&!savePending.current&&['Draft','Rejected'].includes(status)&&Boolean(mode&&loadedOwner&&isWorkCaptureContextCurrent(loadedOwner));
+  const patchRow=(rowId:string,patch:Record<string,unknown>)=>{
+    if(!editable())return;const next=patchVisibleCaptureRow(rows,hourDrafts,rowId,visibleIndices,patch,crypto.randomUUID());setRows(next.rows);setHourDrafts(next.drafts);
+  };
+
+  const changeWeek=(days:number)=>{
+    if(!ownsView())return;
+    aligned.current=true;
+    ++generation.current;loadedContext.current=null;setLoaded(false);setLoadedOwner(null);setActiveRemark(null);
+    setStatus('Draft');setWorkAssurance(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
+    setCurrentWeek(previous=>shiftDate(previous,days));
+  };
 
   const persistTimesheet = async (nextStatus: 'Draft' | 'Submitted') => {
-    if (!user||!ownsView()||!loaded||savePending.current||hasInvalidHours||!['Draft','Rejected'].includes(status)) return;
-    const owner=generation.current,scope=JSON.stringify(getOrganizationScope()),token=getToken();
-    const current=()=>ownsView()&&owner===generation.current&&scope===JSON.stringify(getOrganizationScope())&&token===getToken();
-    savePending.current=true;setSaving(true);
+    if (!user||!editable()||hasInvalidHours||!mode||!loadedOwner) return;
+    const owner=generation.current,context=loadedOwner;
+    const current=()=>ownsView()&&owner===generation.current&&isWorkCaptureContextCurrent(context);
+    savePending.current=true;setSaving(true);setActiveRemark(null);
     try{
     const weekEnding = getWeekEnding(currentWeek);
-    if (isFutureWeek) {
+    if (isFutureWeek||(nextStatus==='Submitted'&&weekEnding>serverDate)) {
       setNotice({ type: 'warning', message: 'Future week timesheets cannot be saved or submitted.' });
       return;
     }
     let systemSettings;
-    try{systemSettings=await adminService.getSettings();}catch{if(current())setNotice({type:'danger',message:'Submission settings could not be loaded. No save was sent.'});return;}
+    try{systemSettings=await workCaptureWorkspaceService.submissionSettings(context);}catch{if(current())setNotice({type:'danger',message:'Submission settings could not be loaded. No save was sent.'});return;}
     if(!current())return;
     if (nextStatus === 'Submitted' && user.role === 'Admin' && !systemSettings.demoSubmissionMode) {
       setNotice({ type: 'warning', message: "Self-submission is disabled for Admins." });
       return;
     }
 
-    const hasFutureHours = rows.some(row =>
-      row.hours.some((h: number, i: number) => {
-        const quantity=canonicalCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(h));
-        if (quantity===null||compareHours(quantity,'0')<=0) return false;
-        const entryDate = startOfDay(new Date(currentWeek));
-        entryDate.setDate(entryDate.getDate() + i);
-        return entryDate > today;
-      })
-    );
-
-    if (nextStatus === 'Submitted' && hasFutureHours) {
-      setNotice({
-        type: 'warning',
-        message: 'Submission blocked: timesheets cannot include hours for future dates. Save a draft or remove future-dated hours before submitting.',
-      });
-      return;
-    }
+    const hasFutureHours=rows.some(row=>row.hours.some((_:number,index:number)=>
+      compareHours(captureCellHours(row,index,hourDrafts),'0')>0&&toIsoDate(shiftDate(currentWeek,index-2))>serverDate))
+      ||preservedEntries.some(entry=>entry.date>serverDate);
+    if(hasFutureHours){setNotice({type:'warning',message:'Future-dated work cannot be saved or submitted.'});return;}
 
     // Validation: Client Misc Task requires remarks
     const missingRemarks = rows.some(row =>
@@ -222,8 +196,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
       row.hours.forEach((h: number, i: number) => {
         const quantity=canonicalCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(h));
         if (quantity!==null&&compareHours(quantity,'0')>0) {
-          const d = new Date(currentWeek);
-          d.setDate(d.getDate() + i);
+          const d = shiftDate(currentWeek,i-2);
           entries.push({
             id: Math.random().toString(),
             employeeId: user.id,
@@ -245,19 +218,10 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
 
     if(!current())return;
     try {
-      const assurance = await timesheetService.save({
-        employeeId: user.id,
-        employeeName: user.name,
-        weekEnding,
-        totalHours: Number(sumHours(entries.map(entry=>entry.hours))),
-        billableHours: Number(sumHours(entries.filter(entry=>entry.billable).map(entry=>entry.hours))),
-        status: nextStatus,
-        submittedAt: nextStatus === 'Submitted' ? new Date().toISOString() : undefined,
-        entries
-      });
+      const saved=await workCaptureWorkspaceService.save({employeeId:user.id,weekEnding,status:nextStatus,entries},
+        {writeToken,mode,modePolicyId:modes?.latestId||null},context);
       if(!current())return;
-      setStatus(nextStatus);
-      setWorkAssurance(assurance);
+      setWriteToken(saved.writeToken);setStatus(nextStatus);setWorkAssurance(saved.workAssurance);
       setRejectionNote(undefined);
       setNotice({
         type: 'success',
@@ -274,15 +238,8 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
     }
     } finally {
       savePending.current=false;
-      if (ownsView()) {
-        if (!current()) {
-          // A failed scope attempt can retain this editor. Earlier reads cannot
-          // establish the outcome of the abandoned command after it settles.
-          ++generation.current;
-          setLoaded(false);
-          setWorkAssurance(undefined);
-          setNotice({type:'warning',message:'The work context changed during this operation. Reload work before trying again.'});
-        }
+      if(ownsView()) {
+        if(!current())blockWork();
         setSaving(false);
       }
     }
@@ -298,28 +255,22 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
 
   const [activeRemark, setActiveRemark] = useState<{rowId: string, dayIdx: number} | null>(null);
 
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const dates = days.map((_, i) => {
-    const d = new Date(currentWeek);
-    d.setDate(d.getDate() + i);
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-  });
-
-  const weekLabel = `${dates[0]} - ${dates[4]} ${currentWeek.getFullYear()}`;
+  const days=visibleIndices.map(index=>allDays[index]);
+  const dates=visibleIndices.map(index=>shiftDate(currentWeek,index-2).toLocaleDateString('en-GB',{day:'2-digit',month:'short',timeZone:'UTC'}));
+  const weekLabel=`${toIsoDate(shiftDate(currentWeek,-2))} - ${getWeekEnding(currentWeek)}`;
+  const visibleRows=rows.filter(row=>visibleIndices.some(index=>captureCellPresent(row,index,hourDrafts))||!row.hours.some((_:number,index:number)=>captureCellPresent(row,index,hourDrafts)));
+  const hiddenCells=rows.flatMap(row=>row.hours.map((_:number,index:number)=>({row,index})).filter(({index})=>!visibleIndices.includes(index)&&captureCellPresent(row,index,hourDrafts)));
 
   const updateHours = (rowId: string, dayIdx: number, val: string) => {
-    if (status !== 'Draft' && status !== 'Rejected') return;
+    if (!editable()) return;
     setHourDrafts(previous=>({...previous,[`${rowId}:${dayIdx}`]:val}));
     const num = parseCaptureHourInput(val);
     if(num===null)return; // Invalid text stays visible and cannot be saved.
-    setRows(rows.map(r => r.id === rowId ? {
-      ...r,
-      hours: r.hours.map((h: number, i: number) => i === dayIdx ? num : h)
-    } : r));
+    setRows(rows.map(row=>row.id===rowId?setCaptureRowHours(row,dayIdx,val):row));
   };
 
   const updateRemark = (rowId: string, dayIdx: number, val: string) => {
-    if (status !== 'Draft' && status !== 'Rejected') return;
+    if (!editable()) return;
     setRows(rows.map(r => r.id === rowId ? {
       ...r,
       remarks: r.remarks.map((rm: string, i: number) => i === dayIdx ? val : rm)
@@ -327,7 +278,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
   };
 
   const addRow = (type: WorkType = 'Project Work') => {
-    if (status !== 'Draft' && status !== 'Rejected') return;
+    if (!editable()) return;
     const firstProject = assignedProjects[0];
     setRows([...rows, {
       id: Math.random().toString(),
@@ -336,21 +287,22 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
       clientName: '',
       projectId: type === 'Project Work' ? firstProject?.id || '' : undefined,
       projectName: type === 'Project Work' ? firstProject?.name || 'Select Assigned Project' : 'Client Support Activity',
-      hours: [0, 0, 0, 0, 0],
-      remarks: ['', '', '', '', ''],
+      hours: Array(7).fill(0), exactHours:Array(7).fill('0'),
+      remarks: Array(7).fill(''),
       rowRemark: '',
       billable: true
     }]);
   };
 
   const removeRow = (id: string) => {
-    if (status !== 'Draft' && status !== 'Rejected') return;
-    setRows(rows.filter(r => r.id !== id));
+    if (!editable()) return;
+    const next=removeVisibleCaptureRow(rows,hourDrafts,id,visibleIndices);setRows(next.rows);setHourDrafts(next.drafts);
   };
 
-  const totalHours=Number(sumHours([...preservedEntries.map(entry=>entry.hours),...rows.flatMap(row=>row.hours)]));
-  const projectHours=Number(sumHours([...preservedEntries.filter(entry=>entry.workType==='Project Work').map(entry=>entry.hours),...rows.filter(row=>row.workType==='Project Work').flatMap(row=>row.hours)]));
-  const miscHours=Number(sumHours([...preservedEntries.filter(entry=>entry.workType==='Client Misc Task').map(entry=>entry.hours),...rows.filter(row=>row.workType==='Client Misc Task').flatMap(row=>row.hours)]));
+  const rowTotal=(row:any)=>sumHours(row.hours.map((_:number,index:number)=>captureCellHours(row,index,hourDrafts)));
+  const totalHours=sumHours([...preservedEntries.map(entry=>entry.hoursExact??entry.hours),...rows.map(rowTotal)]);
+  const projectHours=sumHours([...preservedEntries.filter(entry=>entry.workType==='Project Work').map(entry=>entry.hoursExact??entry.hours),...rows.filter(row=>row.workType==='Project Work').map(rowTotal)]);
+  const miscHours=sumHours([...preservedEntries.filter(entry=>entry.workType==='Client Misc Task').map(entry=>entry.hoursExact??entry.hours),...rows.filter(row=>row.workType==='Client Misc Task').map(rowTotal)]);
 
   const workTypes: WorkType[] = [
     'Project Work',
@@ -367,7 +319,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
-      {loaded ? <WorkSubmissionAssurance assurance={workAssurance} status={status} /> : <p role="status">Loading current timesheet...</p>}
+      {loaded ? <WorkSubmissionAssurance assurance={workAssurance} status={status} /> : <p role="status" className="text-sm text-slate-500">Loading current work assurance...</p>}
       <PageHeader
         title={user?.role === 'Admin' ? 'Admin Self-Log Test' : 'My Timesheet'}
         subtitle={headerSubtitle}
@@ -376,11 +328,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
           <div className="flex items-center gap-3">
              <div className="flex items-center bg-white border border-border-light rounded-xl p-1 shadow-sm mr-2">
                 <button
-                  aria-label="Previous week" onClick={() => setCurrentWeek(prev => {
-                    const next = new Date(prev);
-                    next.setDate(next.getDate() - 7);
-                    return next;
-                  })}
+                  aria-label="Previous week" onClick={() => changeWeek(-7)}
                   className="p-1.5 hover:bg-slate-50 rounded-lg transition-colors"
                 ><ChevronLeft size={16} /></button>
                 <div className="px-4 flex items-center gap-2">
@@ -388,11 +336,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                    <span className="text-[10px] font-bold uppercase tracking-widest text-heading">{weekLabel}</span>
                 </div>
                  <button
-                  onClick={() => setCurrentWeek(prev => {
-                    const next = new Date(prev);
-                    next.setDate(next.getDate() + 7);
-                    return next;
-                  })}
+                  onClick={() => changeWeek(7)}
                   disabled={currentWeek >= currentSystemWeek}
                   className={cn(
                     "p-1.5 rounded-lg transition-colors",
@@ -403,19 +347,19 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                   aria-label="Next week" title={currentWeek >= currentSystemWeek ? 'Future weeks are locked' : 'Next week'}
                 ><ChevronRight size={16} /></button>
              </div>
-             <button className="btn-secondary px-3 py-2" disabled={saving} onClick={()=>{resetBackendCheck();++generation.current;setLoaded(false);setScopeRevision(value=>value+1);}}>Reload work</button>
+             <button className="btn-secondary px-3 py-2" disabled={saving} onClick={()=>{resetBackendCheck();blocked.current=false;++generation.current;setLoaded(false);setLoadedOwner(null);setActiveRemark(null);setScopeRevision(value=>value+1);}}>Reload work</button>
              {(status === 'Draft' || status === 'Rejected') ? (
                <>
                  <button
                     onClick={handleSaveDraft}
-                    disabled={isFutureWeek||!loaded||saving||hasInvalidHours}
+                    disabled={isFutureWeek||!editable()||hasInvalidHours}
                     className="hidden sm:flex btn-secondary py-2.5 px-5 items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Save size={14} /> Save Draft
                  </button>
                  <button
                   onClick={handleSubmit}
-                  disabled={isFutureWeek||!loaded||saving||hasInvalidHours}
+                  disabled={isFutureWeek||getWeekEnding(currentWeek)>serverDate||!editable()||hasInvalidHours}
                   className="btn-primary py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Send size={14} /> Submit for Approval
@@ -455,7 +399,15 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
         </div>
       )}
 
-      <fieldset disabled={saving||!loaded||!['Draft','Rejected'].includes(status)} className="min-w-0">
+      <section aria-label="Capture presentation" className="my-4 flex flex-wrap items-center gap-4">
+        <label>Capture mode <select aria-label="Capture mode" disabled={!loaded||saving||!loadedOwner||!isWorkCaptureContextCurrent(loadedOwner)} value={mode||''} onChange={event=>{if(!loadedOwner||!isWorkCaptureContextCurrent(loadedOwner)||saving)return;setActiveRemark(null);setMode(event.target.value as CaptureMode);}}>
+          {!mode&&<option value="">Not configured</option>}{modes?.enabledModes.map(value=><option key={value} value={value}>{value==='weekly'?'Weekly grid':'Daily entry'}</option>)}
+        </select></label>
+        {mode==='daily'&&<label>Work date <select aria-label="Work date" disabled={!loaded||saving||!loadedOwner||!isWorkCaptureContextCurrent(loadedOwner)} value={dailyIndex} onChange={event=>{if(!loadedOwner||!isWorkCaptureContextCurrent(loadedOwner)||saving)return;setActiveRemark(null);setDailyIndex(Number(event.target.value));}}>{allDays.map((day,index)=><option key={day} value={index}>{day} {toIsoDate(shiftDate(currentWeek,index-2))}</option>)}</select></label>}
+        <p>Daily and weekly views share one whole-header submission and approval. Submitted headers cannot end after {serverDate} (UTC).</p>
+        {loaded&&!mode&&<p role="status">No capture modes enabled. Ask an authorized administrator to configure modes explicitly.</p>}
+      </section>
+      <fieldset disabled={!editable()} className="min-w-0">
       <div className="mt-8 bg-white border border-border-light rounded-3xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -474,7 +426,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <tr key={row.id} className="group hover:bg-slate-50/30 transition-colors">
                   <td className="py-5 px-8">
                     <select
@@ -482,13 +434,8 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                       value={row.workType}
                       onChange={(e) => {
                         const val = e.target.value as WorkType;
-                        setRows(rows.map(r => r.id === row.id ? {
-                          ...r,
-                          workType: val,
-                          projectId: val === 'Project Work' ? r.projectId : undefined,
-                          projectName: val === 'Project Work' ? r.projectName : 'Select Category',
-                          billable: val === 'Project Work'
-                        } : r));
+                        patchRow(row.id,{workType:val,projectId:val==='Project Work'?row.projectId:undefined,
+                          projectName:val==='Project Work'?row.projectName:'Select Category',billable:val==='Project Work'});
                       }}
                     >
                       {workTypes.map(wt => <option key={wt} value={wt}>{wt}</option>)}
@@ -509,7 +456,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                             value={row.projectId}
                             onChange={(e) => {
                               const p = assignedProjects.find(pr => pr.id === e.target.value);
-                              setRows(rows.map(r => r.id === row.id ? { ...r, projectId: e.target.value, projectName: p?.name || '' } : r));
+                              patchRow(row.id,{projectId:e.target.value,projectName:p?.name||''});
                             }}
                           >
                             <option value="">{row.projectName}</option>
@@ -522,14 +469,14 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                               placeholder="Client Name..."
                               className="w-full bg-transparent text-sm font-bold text-heading outline-none"
                               value={(row as any).clientName || ''}
-                              onChange={(e) => setRows(rows.map(r => r.id === row.id ? { ...r, clientName: e.target.value } : r))}
+                              onChange={(e) => patchRow(row.id,{clientName:e.target.value})}
                             />
                             <input
                               type="text"
                               placeholder="Misc Task (e.g. Call, Escalation)..."
                               className="w-full bg-transparent text-[10px] text-slate-400 font-medium outline-none"
                               value={row.category || ''}
-                              onChange={(e) => setRows(rows.map(r => r.id === row.id ? { ...r, category: e.target.value } : r))}
+                              onChange={(e) => patchRow(row.id,{category:e.target.value})}
                             />
                           </div>
                         )}
@@ -538,14 +485,14 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                         </p>
                       </div>
                       <button
-                        onClick={() => removeRow(row.id)}
+                        aria-label="Remove visible entry" onClick={() => removeRow(row.id)}
                         className="opacity-0 group-hover:opacity-100 p-2 text-gray-300 hover:text-danger transition-all"
                       >
                         <Trash2 size={14} />
                       </button>
                     </div>
                   </td>
-                  {row.hours.map((hour, i) => (
+                  {visibleIndices.map(i => {const hour=row.hours[i];return (
                     <td key={i} className="py-5 px-4 border-l border-gray-100 relative group/cell">
                       <div className="relative">
                         <input
@@ -561,7 +508,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                           )}
                         />
                         <button
-                          onClick={() => setActiveRemark({rowId: row.id, dayIdx: i})}
+                          aria-label={`Edit ${allDays[i]} remark`} onClick={() => {if(editable())setActiveRemark({rowId: row.id, dayIdx: i});}}
                           className={cn(
                             "absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md transition-all",
                             row.remarks[i] ? "text-primary opacity-100" : "text-slate-200 opacity-40 hover:opacity-100 hover:text-primary"
@@ -571,18 +518,18 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                         </button>
                       </div>
                     </td>
-                  ))}
+                  );})}
                   <td className="py-5 px-4 border-l border-gray-100">
                     <input
                       type="text"
                       placeholder="Overall activity notes..."
                       className="w-full bg-slate-50 border border-slate-100 rounded-lg py-2 px-3 text-[11px] font-medium text-heading placeholder:text-slate-300 outline-none focus:bg-white focus:border-primary/20 transition-all"
                       value={row.rowRemark || ''}
-                      onChange={(e) => setRows(rows.map(r => r.id === row.id ? { ...r, rowRemark: e.target.value } : r))}
+                      onChange={(e) => patchRow(row.id,{rowRemark:e.target.value})}
                     />
                   </td>
                   <td className="py-5 px-8 text-right font-mono font-bold text-primary bg-orange-50/10 border-l border-gray-100">
-                    {sumHours(row.hours)}
+                    {rowTotal(row)}
                   </td>
                 </tr>
               ))}
@@ -603,9 +550,9 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                     <Plus size={14} /> Add Client Misc Task
                   </button>
                 </td>
-                {days.map((_, i) => (
+                {visibleIndices.map(i => (
                   <td key={i} className="py-6 px-4 text-center text-heading border-l border-gray-100">
-                    {sumHours(rows.map(row=>row.hours[i]))}
+                    {sumHours(rows.map(row=>captureCellHours(row,i,hourDrafts)))}
                   </td>
                 ))}
                 <td className="py-6 px-8 border-l border-gray-100 bg-slate-50/50"></td>
@@ -620,28 +567,29 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
 
       </fieldset>
       {hasInvalidHours&&<p role="alert">Correct invalid hours before saving. Use a decimal quantity from 0 to 24; invalid values have not changed the work totals.</p>}
-      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'}</p>)}</section>}
+      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hoursExact??entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'}</p>)}</section>}
+      {hiddenCells.length>0&&<section aria-label="Preserved unseen entries" className="mt-4 rounded-xl border p-4"><p>These cells are outside the current view and remain in the same whole-header save. Change their context only in a view that includes their dates.</p>{hiddenCells.map(({row,index})=><p key={`${row.id}:${index}`}>{toIsoDate(shiftDate(currentWeek,index-2))}: {captureCellText(row,index,hourDrafts)}h, {row.projectName||row.clientName||row.workType}, {row.category||'No category'}, {row.remarks[index]||'No comment'}</p>)}</section>}
       {!loaded&&<p role="status">Work is not ready for editing. Reload this page after checking connection and access.</p>}
       {saving&&<p role="status">Saving work…</p>}
       {/* Remark Input Modal/Overlay */}
       {activeRemark && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
+        <div role="dialog" aria-label="Entry remarks" aria-modal="true" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-border-light w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-4 bg-slate-50 border-b border-border-light flex justify-between items-center">
               <div>
                 <h4 className="text-xs font-bold text-heading">Entry Remarks</h4>
                 <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
-                  {days[activeRemark.dayIdx]} • {rows.find(r => r.id === activeRemark.rowId)?.projectName}
+                  {allDays[activeRemark.dayIdx]} • {rows.find(r => r.id === activeRemark.rowId)?.projectName}
                 </p>
               </div>
-              <button onClick={() => setActiveRemark(null)} className="p-1 hover:bg-white rounded-lg transition-colors">
+              <button aria-label="Close entry remarks" onClick={() => setActiveRemark(null)} className="p-1 hover:bg-white rounded-lg transition-colors">
                 <X size={16} className="text-slate-400" />
               </button>
             </div>
             <div className="p-4">
               <p className="text-[9px] font-bold text-rose-500 uppercase mb-2">Remarks mandatory for Client Misc Tasks</p>
               <textarea
-                autoFocus
+                autoFocus disabled={!editable()}
                 className="w-full h-32 bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-heading placeholder:text-slate-300 focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none shadow-inner"
                 placeholder="Describe your work for this day in detail..."
                 value={rows.find(r => r.id === activeRemark.rowId)?.remarks[activeRemark.dayIdx] || ''}
@@ -682,7 +630,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-primary"
-                    style={{ width: `${Math.min((projectHours / (totalHours || 1)) * 100, 100)}%` }}
+                    style={{ width: `${Math.min((Number(projectHours) / (Number(totalHours) || 1)) * 100, 100)}%` }}
                   />
                </div>
             </div>

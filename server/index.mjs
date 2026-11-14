@@ -1,3 +1,5 @@
+import {createCaptureModesRouter} from './modules/work-capture/capture-modes-router.mjs';
+import {captureModeWriteFields,refineCaptureModeWrite,assertCaptureModeWrite} from './modules/work-capture/capture-modes.mjs';
 import {createCapturePolicyRouter} from './modules/work-capture/capture-policy-router.mjs';
 import {validateCapturePolicy,captureHoursInput,assertCaptureReplacementPeriods} from './modules/work-capture/capture-policy.mjs';
 import {canonicalHours,sumHours} from './modules/work-capture/work-hours.mjs';
@@ -2788,7 +2790,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
   where = `where t.organization_id = $${params.length-1} and t.legal_entity_id = $${params.length} and e.legal_entity_id = $${params.length}${where ? ` and (${where.replace(/^\s*where\s+/, '').trim()})` : ''}`;
   await run(res, `
     select
-      t.*,t.week_ending::text,
+      t.*,t.week_ending::text,work_capture_write_token(t.id) write_token,
       (select json_build_object('id',w.id,'sequence',w.sequence,'policyVersion',w.policy_version,'entryCount',jsonb_array_length(w.entries),'governedEntryCount',(select count(*) from jsonb_array_elements(w.entries) x where x->>'kind'='governed')) from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id order by w.sequence desc limit 1) work_assurance,
       coalesce(json_agg(json_build_object(
         'id', te.id,
@@ -2833,14 +2835,15 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     status: z.enum(['Draft', 'Submitted']).default('Draft'),
     rejection_reason: z.string().optional().nullable(),
     entries: z.array(entrySchema).min(1).max(100),
-  });
+    ...captureModeWriteFields,
+  }).superRefine(refineCaptureModeWrite);
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
-  if (isAfterToday(parsed.data.week_ending) || parsed.data.entries.some(entry => isAfterToday(entry.work_date))) {
-    res.status(422).json({ error: 'Future week timesheets and future-dated entries cannot be saved or submitted' });
+  if ((parsed.data.status === 'Submitted' && isAfterToday(parsed.data.week_ending)) || parsed.data.entries.some(entry => isAfterToday(entry.work_date))) {
+    res.status(422).json({ error: 'Future work dates cannot be saved; Submitted headers must also end no later than today' });
     return;
   }
   const outOfWeekEntry = parsed.data.entries.find(entry => !isWorkDateInsideWeek(entry.work_date, parsed.data.week_ending));
@@ -2889,6 +2892,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
 
     const policyEntries=await validateWorkEntries(client,req,employee.id,parsed.data.entries);
     const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, parsed.data.employee_id, parsed.data.week_ending])).rows[0];
+    await assertCaptureModeWrite(client,req,parsed.data,previous);
     assertTimesheetEditable(previous);
     await assertCaptureReplacementPeriods(client,req,previous?.id);
     parsed.data.entries=await validateCapturePolicy(client,req,employee.id,policyEntries,{replacementTimesheetId:previous?.id});
@@ -2961,8 +2965,9 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       details: `${previous ? 'Updated' : 'Created'} ${parsed.data.status} timesheet for ${employee.employee_id}, week ending ${parsed.data.week_ending}`,
       reason: parsed.data.rejection_reason || null,
     });
+    const writeToken=(await client.query('select work_capture_write_token($1) token',[timesheet.id])).rows[0].token;
     await client.query('commit');
-    res.json({ ...timesheet, work_assurance:workAssurance, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>entry) });
+    res.json({ ...timesheet, write_token:writeToken, work_assurance:workAssurance, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>entry) });
   } catch (error) {
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;
@@ -6440,6 +6445,7 @@ registerOrganizationSetupRoutes({
   mountPaths: ['/api/organization-setup', '/api/v1/organization-setup'],
 });
 
+app.use('/api/v1/work-capture-modes',createCaptureModesRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
 app.use('/api/v1/work-capture-policy',createCapturePolicyRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
 app.use('/api/v1/commercial-drafting', createCommercialDraftingRouter({pool,requireDatabase,requireAuth,audit}));
 app.use('/api/v1/client-profiles', createClientProfilesRouter({pool,requireDatabase,requireAuth,audit}));

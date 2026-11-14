@@ -389,6 +389,7 @@ export const normalizeTimesheetSummary = (
   const entries = Array.isArray(r.entries) ? (r.entries as Record<string, unknown>[]) : [];
   return {
     workAssurance: normalizeWorkAssurance(r.work_assurance),
+    writeToken: typeof r.write_token === 'string' ? r.write_token : undefined,
     id: r.id ? String(r.id) : undefined,
     employeeId: String(r.employee_id),
     employeeName: employeeMap.get(String(r.employee_id))?.name ?? String(r.employee_id),

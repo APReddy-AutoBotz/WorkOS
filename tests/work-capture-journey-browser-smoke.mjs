@@ -12,9 +12,8 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
   await migrateCommercialDatabase(pool); await seedCommercialReferences(pool); await seedCommercialLegacyWork(pool);
   const identities = await seedCommercialIdentities(pool); await grantWorkPermissions(pool);
   const today = await amendmentToday(pool);
-  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(part=>[part.type,part.value]));
-  const localDay=`${parts.year}-${parts.month}-${parts.day}`,weekday=new Date(`${localDay}T00:00:00Z`).getUTCDay();
-  const currentMonday = addUtcDays(localDay, weekday === 0 ? -6 : 1 - weekday);
+  const weekday=new Date(`${today}T00:00:00Z`).getUTCDay();
+  const currentMonday=addUtcDays(today,weekday===6?2:weekday===0?1:1-weekday);
   const monday = addUtcDays(currentMonday, -7), friday = addUtcDays(monday, 4), saturday = addUtcDays(monday, -2);
   await pool.query(`insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
     values('capture-browser-previous',$1,$2,'SYN-CAPTURE-PREVIOUS','Synthetic previous',$3,$4,'Open','Weekly'),
@@ -29,6 +28,8 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
       values($1,'Client Misc Task','Synthetic client',$2,$3,$4,$5,false)`, [header, category, date, hours, remark]);
   }
   await withCommercialApi({databaseUrl, identities}, async ({baseUrl: apiUrl, tokenFor, request}) => {
+    const modeEnablement=await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly']}});
+    assert.equal(modeEnablement.status,201,JSON.stringify(modeEnablement.body));
     const vite = await createServer({root: rootDir, mode: 'production', clearScreen: false, logLevel: 'error',
       server: {host: '127.0.0.1', port: 0, strictPort: false, hmr: false, proxy: {'/api': {target: apiUrl, changeOrigin: true}}},
       define: {'import.meta.env.VITE_APP_MODE': JSON.stringify('production'), 'import.meta.env.VITE_ALLOW_TEST_FALLBACK': JSON.stringify('false')}});
