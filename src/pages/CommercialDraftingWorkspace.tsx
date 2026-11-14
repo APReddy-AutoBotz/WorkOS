@@ -157,7 +157,8 @@ export const CommercialDraftingWorkspace = () => {
     const owner = live.current;
     if (owner.generation !== state.generation || owner.draft?.lease !== state.draft?.lease || owner.saving || discardStale(owner)) return;
     ++draftLease.current;
-    publish({...owner, draft: undefined, uncertain: false, saveError: undefined});
+    publish({...owner, draft: undefined, saveError: undefined,
+      message: owner.uncertain ? 'Draft discarded. Reload server records before creating another draft; the previous save outcome still needs reconciliation.' : owner.message});
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
