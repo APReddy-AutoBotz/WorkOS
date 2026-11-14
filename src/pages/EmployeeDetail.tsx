@@ -1,4 +1,5 @@
 import {WorkerCapabilities} from '../components/WorkerCapabilities';
+import {WorkerCapacity} from '../components/WorkerCapacity';
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'motion/react';
@@ -284,6 +285,7 @@ export const EmployeeDetail = () => {
       </div>
 
       <WorkerCapabilities key={employee.id} employeeId={employee.id}/>
+      <WorkerCapacity key={employee.id} employeeId={employee.id}/>
       <PageHeader
         title={employee.name}
         subtitle={`${employee.designation} • ${employee.department} • ${employee.country}`}
