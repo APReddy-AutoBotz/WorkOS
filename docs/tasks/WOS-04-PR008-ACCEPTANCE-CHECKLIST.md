@@ -1,5 +1,7 @@
 # PR-008 finite acceptance checklist through PR62
 
+> Historical engineering snapshot: the matrix, counts and decision questions below describe the original 2026-10-24 Draft baseline. They are preserved for traceability, not a current completion or approval register. The owner's later authorization permits independent review and eligible integration; current requirements, feature specifications and implementation status govern. Later accepted decisions/packages must be reconciled against their own evidence rather than inferred from this snapshot.
+
 **Snapshot:** Draft PR62 `0eaf501b4988af107d1a503fe93ccab96b2eb96f`, tree `2ae3aaff3729c699c4bf6c8e3d5c6397a87a2ba3`, on2026-10-24. This is an ordinary product-completeness map of the approved backlog/specifications and delivered receipts, not cumulative code/security review, new findings or authorization to expand scope.
 
 **Authority:** [Implementation backlog PR-008](../05-delivery/IMPLEMENTATION_BACKLOG.md#pr-008--wos-04-flexible-work-capture-and-resource-planning), [product requirements](../00-control/PRODUCT_REQUIREMENTS.md), [work-capture specification](../03-specifications/WORK_CAPTURE_AND_TIMESHEET_SPEC.md), [resource-planning specification](../03-specifications/RESOURCE_PLANNING_SPEC.md). These remain authoritative; this checklist neither changes business policy nor accepts a milestone.
