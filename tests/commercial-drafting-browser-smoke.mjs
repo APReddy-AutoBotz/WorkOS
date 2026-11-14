@@ -1,0 +1,152 @@
+import assert from 'node:assert/strict';
+// Hosted browser CI owns execution. Do not launch locally or bypass restrictions.
+const {chromium} = await import(process.env.WORKOS_PLAYWRIGHT_MODULE || 'playwright');
+const baseUrl = process.env.WORKOS_BROWSER_BASE_URL || 'http://127.0.0.1:4177';
+const browser = await chromium.launch({headless: true, ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {})});
+const page = await browser.newPage({viewport: {width: 1100, height: 900}});page.setDefaultTimeout(10000);
+// Vite document/module loading is harness setup. Keep business interactions on
+// the 10-second deadline while allowing the same cold-navigation budget as the
+// accepted real import journey on slower local and CI machines.
+page.setDefaultNavigationTimeout(60000);
+const errors = [], unexpectedApi = [], unexpectedRemote = [], allCalls = [], allUnexpected = [];let downloads = 0;
+page.on('pageerror', error => errors.push(error.message));page.on('download', () => downloads++);
+page.on('request', request => {if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== new URL(baseUrl).origin) unexpectedRemote.push(request.url());});
+await page.route('**/api/**', route => {unexpectedApi.push({url: route.request().url(), method: route.request().method()});return route.abort();});
+const today = new Date().toISOString().slice(0, 10);
+const future = new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 10);
+const hostile = '<script>window.syntheticCommercialExecuted=true</script><img src=x onerror=alert(1)>';
+const terms = {id: 'term-a-1', version: 1, name: `Synthetic contract ${hostile}`, model: 'fixed_fee', startsOn: '2020-01-01', endsOn: '2099-12-31', effectiveFrom: '2020-01-01', currency: 'GBP', value: '10000.2500', billingTerms: `Synthetic invoice terms ${hostile}`, documents: [{name: `Synthetic SOW ${hostile}`, url: 'https://example.test/synthetic-sow.pdf'}]};
+const detail = {id: 'contract-a', number: 'SYN-CONTRACT-A', clientId: 'client-a', latestVersion: 1, versions: [terms]};
+const summary = {id: detail.id, number: detail.number, clientId: detail.clientId, latestVersion: 1, terms, currentTerms: terms};
+const engagement = {id: 'engagement-a', code: 'SYN-ENG-A', name: `Synthetic engagement ${hostile}`, model: 'fixed_fee', ownerId: 'owner-a', startsOn: '2020-01-01', endsOn: '2099-12-31', currency: 'GBP', budget: '5000.0001', contractId: 'contract-a', contractVersionId: 'term-a-1', clientId: 'client-a', attributionId: null, status: 'Draft', billable: true, origin: 'manual'};
+const workspace = (overrides = {}) => ({asOf: today, contracts: [summary], engagements: [engagement], purchaseOrders: [], milestones: [], choices: {clients: [{id: 'client-a', name: 'Synthetic Client'}], owners: [{id: 'owner-a', name: 'Synthetic Owner'}], attributions: [{id: 'attribution-a', name: 'Synthetic Practice', code: 'SYN-PRACTICE', catalogType: 'business_unit'}]}, limits: {pageSize: 200, truncated: Object.fromEntries(['contracts','engagements','purchaseOrders','milestones','clients','owners','attributions'].map(key => [key, false]))}, legacyMappings: {totalProjects: 1, mappedProjects: 1}, ...overrides});
+const empty = () => workspace({contracts: [], engagements: []});
+const button = name => page.getByRole('button', {name, exact: true});
+const form = name => page.getByRole('form', {name, exact: true});
+const history = () => page.getByRole('region', {name: 'Contract version history', exact: true});
+const calls = () => page.evaluate(() => window.commercialHarness.calls);
+const flush = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+const lastId = async () => Math.max(0, ...(await calls()).map(call => call.id));
+const pending = async (kind, after = 0) => {await page.waitForFunction(({kind, after}) => window.commercialHarness.pending.some(call => call.kind === kind && call.id > after), {kind, after});return page.evaluate(({kind, after}) => {const {id, url, method, headers, credentials, body} = window.commercialHarness.pending.find(call => call.kind === kind && call.id > after);return {id, url, method, headers, credentials, body};}, {kind, after});};
+const settle = (request, result, status) => page.evaluate(({id, result, status}) => window.commercialHarness.settle(id, result, status), {id: request.id, result, status});
+const assertOwned = (request, scope = {organizationId: 'org-a', legalEntityId: 'legal-a'}, token = 'example-commercial-token-a') => {assert.equal(request.credentials, 'include');assert.deepEqual(request.headers, {'authorization': `Bearer ${token}`, 'content-type': 'application/json', 'x-organization-id': scope.organizationId, 'x-legal-entity-id': scope.legalEntityId});};
+const collect = async () => {const prior = await page.evaluate(() => window.commercialHarness ? {calls: window.commercialHarness.calls, unexpected: window.commercialHarness.unexpectedFetches} : null);if (prior) {allCalls.push(...prior.calls);allUnexpected.push(...prior.unexpected);}};
+const open = async (params = '') => {await collect();await page.goto(`${baseUrl}/tests/fixtures/commercial-drafting.html${params}`);await page.getByRole('heading', {name: 'Commercial drafting', exact: true}).waitFor();};
+const ready = async () => page.getByRole('region', {name: 'Contracts and SOWs', exact: true}).waitFor();
+const boot = async (data = workspace(), params = '') => {await open(params);const request = await pending('workspace');assertOwned(request);assert.equal(request.method, 'GET');assert.equal(request.body, null);await settle(request, data);await ready();return request;};
+const capture = (label, name) => page.evaluate(({label, name}) => window.commercialHarness.capture(label, name), {label, name});
+const invoke = labels => page.evaluate(labels => window.commercialHarness.invoke(labels), labels);
+const noDispatch = async (before, reason) => {await flush();assert.deepEqual(await calls(), before, reason);};
+const blocked = async () => {await page.getByRole('alert').getByText('Scope or access changed.', {exact: false}).waitFor();assert.equal(await page.getByRole('region', {name: 'Contracts and SOWs', exact: true}).count(), 0);assert.equal(await page.locator('form').count(), 0);};
+const noPrivate = async () => {const text = await page.locator('body').innerText();assert(!text.includes('synthetic-private'));assert(!text.includes('/internal/provider'));};
+const fill = async (target, fields) => {for (const [label, value] of Object.entries(fields)) await target.getByLabel(label, {exact: true}).fill(value);};
+const startContract = async () => {await button('New contract / SOW').click();const target = form('New contract / SOW');await fill(target, {'Contract / SOW number': 'SYN-NEW-CONTRACT', 'Contract name': `Synthetic new ${hostile}`, 'Starts on': '2020-01-01', 'Ends on': '2099-12-31', 'Terms effective from': '2020-01-01', 'Currency (ISO code)': 'GBP', 'Contract value (decimal)': '99999999999999.9999', 'Billing terms': `Synthetic safe text ${hostile}`, 'Reason for creation / revision': 'Synthetic creation reason'});await target.getByLabel('Client', {exact: true}).selectOption('client-a');await target.getByLabel('Commercial model', {exact: true}).selectOption('fixed_fee');return target;};
+const chooseContract = async target => {const after = await lastId();await target.getByLabel('Contract / SOW', {exact: true}).selectOption('contract-a');const request = await pending('contract', after);assertOwned(request);await settle(request, detail);await history().getByRole('heading', {name: detail.number, exact: true}).waitFor();assert.equal(await target.getByLabel('Pinned contract version', {exact: true}).inputValue(), 'term-a-1');};
+const create = async (kind, result, updated) => {const after = await lastId();await button('Save draft').click();const request = await pending(kind, after);assertOwned(request);assert.equal(request.method, 'POST');await settle(request, result);const refresh = await pending('workspace', request.id);assert.equal(refresh.method, 'GET');await settle(refresh, updated);await ready();await page.getByRole('status').getByText('Draft saved. Server records refreshed.', {exact: true}).waitFor();return request;};
+try {
+  await boot();await page.getByText('Legacy projects mapped: 1 of 1.', {exact: false}).waitFor();
+  let after = await lastId();await button(`Inspect ${detail.number}`).focus();await page.keyboard.press('Enter');let request = await pending('contract', after);await settle(request, detail);
+  await history().getByText(`Billing terms: ${terms.billingTerms}`, {exact: true}).waitFor();
+  assert((await history().innerText()).includes(terms.billingTerms));assert.equal(await history().locator('script,img').count(), 0, 'terms and document labels render as inert text');
+  const link = history().getByRole('link', {name: terms.documents[0].name, exact: true});assert.equal(await link.getAttribute('href'), terms.documents[0].url);assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
+  assert.equal(await page.evaluate(() => window.syntheticCommercialExecuted), undefined);
+  await button('Append effective revision').click();const revision = form(`Append revision to ${detail.number}`);
+  assert.equal(await revision.getByLabel('Commercial model', {exact: true}).isDisabled(), true);assert.equal(await revision.getByLabel('Currency (ISO code)', {exact: true}).isDisabled(), true);
+  await fill(revision, {'Terms effective from': future, 'Contract name': 'Synthetic revised terms', 'Contract value (decimal)': '11000.2500', 'Reason for creation / revision': 'Synthetic future-effective revision'});
+  after = await lastId();await button('Append contract revision').click();request = await pending('append-version', after);assertOwned(request);assert.equal(request.url, '/api/v1/commercial-drafting/contracts/contract-a/versions');assert.equal(request.body.expectedVersion, 1);assert.equal(request.body.effectiveFrom, future);
+  assert.deepEqual(Object.keys(request.body).sort(), ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','expectedVersion','reason'].sort());
+  const revisedTerms = {...terms, id: 'term-a-2', version: 2, effectiveFrom: future, name: 'Synthetic revised terms', value: '11000.2500'};
+  const revised = {...detail, latestVersion: 2, versions: [revisedTerms, terms]};await settle(request, revised);let refresh = await pending('workspace', request.id);await settle(refresh, workspace({contracts: [{...summary, latestVersion: 2, terms: revisedTerms}]}));await ready();
+  assert((await history().innerText()).includes('Version 2'));assert((await history().innerText()).includes('Version 1'));assert((await history().innerText()).includes(terms.billingTerms));
+  assert((await page.getByRole('region', {name: 'Contracts and SOWs'}).innerText()).includes('Currently effective version 1: GBP 10000.2500.'));
+
+  await boot(empty());const contractForm = await startContract();await button('Add document link').click();await fill(contractForm, {'Document 1 name': `Synthetic doc ${hostile}`, 'Document 1 URL': 'https://example.test/new-sow.pdf'});
+  assert.equal(await contractForm.getByLabel('Contract name', {exact: true}).inputValue(), `Synthetic new ${hostile}`);assert.equal(await contractForm.locator('script,img').count(), 0);
+  const createdTerms = {...terms, name: `Synthetic new ${hostile}`, value: '99999999999999.9999', billingTerms: `Synthetic safe text ${hostile}`, documents: [{name: `Synthetic doc ${hostile}`, url: 'https://example.test/new-sow.pdf'}]};
+  const createdDetail = {...detail, number: 'SYN-NEW-CONTRACT', versions: [createdTerms]};const createdSummary = {...summary, number: createdDetail.number, terms: createdTerms, currentTerms: createdTerms};
+  request = await create('create-contract', createdDetail, workspace({contracts: [createdSummary], engagements: []}));assert.equal(request.body.value, '99999999999999.9999');assert.equal(request.body.name, `Synthetic new ${hostile}`);assert.equal(request.body.documents[0].name, `Synthetic doc ${hostile}`);
+  assert(!('organizationId' in request.body || 'actorId' in request.body || 'status' in request.body));
+
+  await boot();await button('New engagement').click();let target = form('New engagement');
+  assert.deepEqual(await target.getByLabel('Commercial model', {exact: true}).locator('option').evaluateAll(options => options.map(option => option.value)), ['time_and_materials','fixed_fee','milestone','retainer','managed_service','internal','pre_sales']);
+  await target.getByLabel('Commercial model', {exact: true}).selectOption('fixed_fee');await chooseContract(target);await target.getByLabel('Engagement owner', {exact: true}).selectOption('owner-a');
+  await fill(target, {'Engagement code': 'SYN-ENG-NEW', 'Engagement name': 'Synthetic created engagement', 'Budget (decimal)': '5000.0001', 'Reason for creation / revision': 'Synthetic engagement reason'});
+  const createdEngagement = {...engagement, id: 'engagement-new', code: 'SYN-ENG-NEW', name: 'Synthetic created engagement'};
+  request = await create('create-engagement', createdEngagement, workspace({engagements: [createdEngagement]}));assert.equal(request.body.contractVersionId, 'term-a-1');assert.equal(request.body.clientId, 'client-a');assert.equal(request.body.attributionId, null);assert(!('billable' in request.body));
+  for (const model of ['internal','pre_sales']) {
+    await button('New engagement').click();target = form('New engagement');await target.getByLabel('Commercial model', {exact: true}).selectOption(model);assert.equal(await target.getByLabel('Contract / SOW', {exact: true}).count(), 0);
+    await target.getByLabel('Engagement owner', {exact: true}).selectOption('owner-a');await target.getByLabel('Business-unit / cost-centre attribution', {exact: true}).selectOption('attribution-a');
+    await fill(target, {'Engagement code': `SYN-${model.toUpperCase()}`, 'Engagement name': 'Synthetic non-billable work', 'Starts on': '2020-01-01', 'Ends on': '2099-12-31', 'Currency (ISO code)': 'GBP', 'Budget (decimal)': '0.0000', 'Reason for creation / revision': 'Synthetic non-billable reason'});
+    const internal = {...engagement, id: `engagement-${model}`, model, code: `SYN-${model.toUpperCase()}`, name: 'Synthetic non-billable work', budget: '0.0000', contractId: null, contractVersionId: null, clientId: null, attributionId: 'attribution-a', billable: false};
+    request = await create('create-engagement', internal, workspace({engagements: [internal]}));assert.equal(request.body.contractId, null);assert.equal(request.body.contractVersionId, null);assert.equal(request.body.clientId, null);assert.equal(request.body.attributionId, 'attribution-a');await page.getByText(`${model === 'internal' ? 'Internal initiative' : 'Pre-sales / non-billable'} · Draft · Non-billable.`, {exact: true}).waitFor();
+  }
+  await boot();await button('New purchase order').click();target = form('New purchase order');await chooseContract(target);await fill(target, {'Purchase order number': 'SYN-PO-A', 'Purchase order value (decimal)': '7500.4500', 'Warning threshold percent (0–100)': '75.25', 'Reason for creation / revision': 'Synthetic PO reason'});
+  const po = {id: 'po-a', contractId: 'contract-a', contractVersionId: 'term-a-1', number: 'SYN-PO-A', value: '7500.4500', currency: 'GBP', startsOn: '2020-01-01', endsOn: '2099-12-31', warningThresholdPercent: '75.25', status: 'Draft'};
+  request = await create('create-po', po, workspace({purchaseOrders: [po]}));assert.equal(request.body.value, po.value);assert.equal(request.body.warningThresholdPercent, '75.25');await page.getByText('No consumption or remaining-value claim.', {exact: false}).waitFor();
+  await button('New draft milestone').click();target = form('New draft milestone');await target.getByLabel('Engagement', {exact: true}).selectOption('engagement-a');await fill(target, {'Milestone code': 'SYN-MILESTONE-A', 'Milestone name': `Synthetic milestone ${hostile}`, 'Due on': future, 'Milestone amount (decimal)': '100.0001', 'Reason for creation / revision': 'Synthetic milestone reason'});
+  const milestone = {id: 'milestone-a', engagementId: 'engagement-a', code: 'SYN-MILESTONE-A', name: `Synthetic milestone ${hostile}`, dueOn: future, amount: '100.0001', currency: 'GBP', status: 'Draft', billingEligible: false};
+  request = await create('create-milestone', milestone, workspace({milestones: [milestone]}));assert.equal(request.body.amount, '100.0001');assert(!('billingEligible' in request.body || 'status' in request.body));await page.getByText('Draft, not accepted, not billing eligible.', {exact: false}).waitFor();assert.equal(await page.getByRole('region', {name: 'Draft milestones'}).locator('script,img').count(), 0);
+
+  await boot(empty());await page.getByText('No contracts returned for this scope.', {exact: true}).waitFor();
+  const capped = workspace();capped.limits.truncated.contracts = true;await boot(capped);await page.getByText('Some records or choices were truncated at 200.', {exact: false}).waitFor();
+  await boot(workspace(), '?access=read');await page.getByText('Read-only commercial access.', {exact: false}).waitFor();assert.equal(await page.getByRole('button', {name: /^New /}).count(), 0);
+  after = await lastId();await button(`Inspect ${detail.number}`).click();request = await pending('contract', after);await settle(request, detail);await history().getByText(terms.billingTerms, {exact: false}).waitFor();assert.equal(await button('Append effective revision').count(), 0);assert((await calls()).every(call => call.method === 'GET'), 'read-only permission never mutates');
+  await open('?access=none');await blocked();assert.deepEqual(await calls(), []);
+
+  for (const failure of [400,401,403,404,500,503,'network','malformed-json']) {
+    await open();request = await pending('workspace');await settle(request, undefined, failure);await button('Retry workspace').waitFor();await noPrivate();assert.equal(await page.getByText('No contracts returned for this scope.', {exact: true}).count(), 0, 'failed load is not empty success');
+    after = await lastId();await button('Retry workspace').click();request = await pending('workspace', after);await settle(request, workspace());await ready();assert.equal(await page.evaluate(() => sessionStorage.getItem('workos_api_token')), 'example-commercial-token-a');
+    if ([401,403].includes(failure)) {await startContract();await capture('denied-detail-submit', 'submit');}
+    after = await lastId();await button(`Inspect ${detail.number}`).click();request = await pending('contract', after);await settle(request, undefined, failure);
+    if ([401,403].includes(failure)) {
+      await blocked();await noPrivate();assert.equal(await button('Retry contract versions').count(), 0, 'authoritative access denial is not a retryable detail error');assert.equal(await page.getByRole('heading', {name: /^SYN-CONTRACT-A/}).count(), 0, 'private summaries are cleared on denied detail read');
+      const beforeDeniedCallback = await calls();await invoke(['denied-detail-submit']);await noDispatch(beforeDeniedCallback, 'retained draft submit cannot mutate after server access denial');assert((await calls()).every(call => call.method === 'GET'));assert.equal(await button('Reload workspace').isEnabled(), true);assert.equal(await page.evaluate(() => sessionStorage.getItem('workos_api_token')), 'example-commercial-token-a');
+      after = await lastId();await button('Reload workspace').click();request = await pending('workspace', after);await settle(request, workspace());await ready();assert.equal(await page.locator('form').count(), 0, 'explicit reload never restores a denied draft');
+    } else {
+      await button('Retry contract versions').waitFor();await noPrivate();assert.equal(await history().getByRole('heading', {name: /^Version /}).count(), 0);
+      after = await lastId();await button('Retry contract versions').click();request = await pending('contract', after);await settle(request, detail);await history().getByRole('heading', {name: /^Version 1/}).waitFor();
+    }
+  }
+  for (const malformed of [{}, workspace({contracts: [{...summary, terms: {...terms, value: 100}}]}), workspace({milestones: [{...milestone, billingEligible: true}]})]) {await open();request = await pending('workspace');await settle(request, malformed);await button('Retry workspace').waitFor();assert.equal(await page.getByRole('region', {name: 'Contracts and SOWs'}).count(), 0);}
+
+  // Save lock protects native double submit, retained callbacks and uncertain outcomes.
+  await boot();await startContract();await capture('old-submit', 'submit');after = await lastId();await page.evaluate(() => window.commercialHarness.submitTwice());request = await pending('create-contract', after);assert.equal((await calls()).filter(call => call.method === 'POST').length, 1);const beforeDuplicate = await calls();await invoke(['old-submit']);await noDispatch(beforeDuplicate, 'in-flight duplicate submit stays locked');
+  await settle(request, undefined, 400);await button('Save draft').waitFor();assert.equal(await button('Save draft').isDisabled(), false);await noPrivate();after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await settle(request, undefined, 409);await page.getByRole('alert').getByText('Draft not saved because the latest server version', {exact: false}).waitFor();assert.equal(await button('Save draft').isDisabled(), true);const conflictCalls = await calls();await invoke(['old-submit']);await noDispatch(conflictCalls, 'conflict disables implicit retries');
+  await button('Discard draft').click();assert.equal(await page.locator('form').count(), 0);assert.equal(await button('New contract / SOW').isDisabled(), true);after = await lastId();await button('Reload workspace').click();request = await pending('workspace', after);await settle(request, workspace());await ready();await startContract();await capture('discarded-submit', 'submit');await button('Discard draft').click();await button('New draft milestone').click();const beforeOldForm = await calls();await invoke(['discarded-submit']);await noDispatch(beforeOldForm, 'discarded form lease cannot submit a replacement draft');
+  for (const failure of [503,'network','malformed-json']) {await boot();await startContract();after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await settle(request, undefined, failure);await page.getByRole('alert').getByText('Save outcome could not be confirmed.', {exact: false}).waitFor();assert.equal(await button('Save draft').isDisabled(), true);await noPrivate();
+    await capture('uncertain-discard', 'Discard draft');await button('Discard draft').click();
+    await page.getByText('Draft discarded. Reload server records before creating another draft;', {exact: false}).waitFor();
+    assert.equal(await page.locator('form').count(), 0);
+    for (const name of ['New contract / SOW','New engagement','New purchase order','New draft milestone']) assert.equal(await button(name).isDisabled(), true);
+    const lockedCalls = await calls();await invoke(['uncertain-discard']);await noDispatch(lockedCalls, 'discard cannot release an uncertain operation lock');
+    after = await lastId();await button('Reload workspace').click();request = await pending('workspace', after);assert.equal(request.method, 'GET');await settle(request, workspace());await ready();assert.equal(await button('New contract / SOW').isEnabled(), true);
+  }
+
+  // No completed read or save may restore content after a scope/access switch.
+  const changes = [() => page.evaluate(() => window.commercialHarness.scope({organizationId: 'org-b', legalEntityId: 'legal-b'})),
+    () => page.evaluate(() => window.commercialHarness.scope({organizationId: 'org-a', legalEntityId: 'legal-b'}, 'storage')),
+    () => page.evaluate(() => window.commercialHarness.identity('synthetic-replacement')),
+    () => page.evaluate(() => window.commercialHarness.identity('synthetic-commercial-admin', 'Admin')),
+    () => page.evaluate(() => window.commercialHarness.identity('synthetic-commercial-admin', 'ProjectManager', 'read')),
+    () => page.evaluate(() => window.commercialHarness.token('example-commercial-token-b')),
+    () => page.evaluate(() => window.commercialHarness.event('workos:organization-scope-switch-requested'))];
+  for (const change of changes) {
+    await open();request = await pending('workspace');await change();await blocked();const before = await calls();await settle(request, workspace());await noDispatch(before, 'late workspace cannot reveal old-scope values');
+    await boot();await startContract();await capture('scope-submit', 'submit');await capture('scope-reload', 'Reload workspace');after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await change();await blocked();const beforeLate = await calls();await invoke(['scope-submit','scope-reload']);await settle(request, createdDetail);await noDispatch(beforeLate, 'stale handlers and save response cannot refresh or replace the current scope');
+  }
+  await boot();await startContract();await capture('silent-submit', 'submit');await page.evaluate(() => window.commercialHarness.token('example-commercial-token-b', null));const silent = await calls();await invoke(['silent-submit']);await blocked();await noDispatch(silent, 'pre-dispatch ownership checks do not depend solely on events');
+  await boot();await startContract();after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await page.evaluate(() => window.commercialHarness.identity('synthetic-new-login', 'ProjectManager', 'manage'));
+  const replacement = await page.evaluate(() => ({token: sessionStorage.getItem('workos_api_token'), session: sessionStorage.getItem('workos_session'), scope: sessionStorage.getItem('workos_organization_scope')}));await settle(request, undefined, 401);await blocked();assert.deepEqual(await page.evaluate(() => ({token: sessionStorage.getItem('workos_api_token'), session: sessionStorage.getItem('workos_session'), scope: sessionStorage.getItem('workos_organization_scope')})), replacement);
+
+  // Explicit reload, detail selection and unmount own distinct generations.
+  await open();const oldWorkspace = await pending('workspace');await capture('old-reload', 'Reload workspace');await page.evaluate(() => window.commercialHarness.scope({organizationId: 'org-b', legalEntityId: 'legal-b'}));await blocked();after = await lastId();await button('Reload workspace').click();const newWorkspace = await pending('workspace', after);assertOwned(newWorkspace, {organizationId: 'org-b', legalEntityId: 'legal-b'});await settle(newWorkspace, empty());await ready();const generationCalls = await calls();await invoke(['old-reload']);await settle(oldWorkspace, workspace());await noDispatch(generationCalls, 'obsolete generation cannot reload or publish old-scope records');await page.getByText('No contracts returned for this scope.', {exact: true}).waitFor();
+  await boot(workspace({contracts: [summary, {...summary, id: 'contract-b', number: 'SYN-CONTRACT-B'}]}));after = await lastId();await page.evaluate(() => window.commercialHarness.clickTwice('Inspect SYN-CONTRACT-A'));const oldDetail = await pending('contract', after);assert.equal((await calls()).filter(call => call.url.endsWith('/contracts/contract-a')).length, 1);
+  after = await lastId();await button('Inspect SYN-CONTRACT-B').click();const newDetail = await pending('contract', after);await settle(newDetail, {...detail, id: 'contract-b', number: 'SYN-CONTRACT-B'});await settle(oldDetail, detail);await flush();await history().getByRole('heading', {name: 'SYN-CONTRACT-B', exact: true}).waitFor();
+  await open();request = await pending('workspace');await capture('unmounted-reload', 'Reload workspace');await page.evaluate(() => window.commercialHarness.hide());const unmounted = await calls();await settle(request, workspace());await invoke(['unmounted-reload']);await noDispatch(unmounted, 'unmounted callbacks/completion are inert');
+  await open('?strict=1');await page.waitForFunction(() => window.commercialHarness.pending.filter(call => call.kind === 'workspace').length >= 2);const strictRequests = await page.evaluate(() => window.commercialHarness.pending.map(({id}) => ({id})));await settle(strictRequests.at(-1), workspace());await ready();for (const stale of strictRequests.slice(0, -1)) await settle(stale, empty());await flush();await button(`Inspect ${detail.number}`).waitFor();
+  await boot();await page.setViewportSize({width: 390, height: 844});await startContract();await flush();assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '390px forms have no horizontal overflow');assert.equal(await page.evaluate(() => window.syntheticCommercialExecuted), undefined);
+
+  await collect();assert.deepEqual(errors, []);assert.deepEqual(unexpectedApi, []);assert.deepEqual(unexpectedRemote, []);assert.deepEqual(allUnexpected, []);assert.equal(downloads, 0);
+  assert(allCalls.every(call => ['GET','POST'].includes(call.method) && call.url.startsWith('/api/v1/commercial-drafting/')), 'no legacy writes, acceptance or billing mutation exists');
+  console.log('Commercial drafting actual React/service mocked browser journey passed: create contract, commercial/internal/pre-sales engagement, PO, milestone and immutable future revision; exact pinned decimal commands, read-only/no-access states, escaped content, failed-load/retry, uncertain-save lock, double-submit/scope/token/generation/selection/unmount/StrictMode races, keyboard and 390px layout.');
+} finally {await browser.close();}

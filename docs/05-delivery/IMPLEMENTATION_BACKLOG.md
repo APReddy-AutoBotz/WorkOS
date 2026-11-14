@@ -312,3 +312,7 @@ On 2026-10-20, the separate [integrated import-to-audit acceptance journey](../t
 
 
 On 2026-11-14, PR50 was reconciled with accepted PR49 main. Its journey implementation had already been forwardported into PR41; all current runtime, test, CI and package files are preserved exactly. Only four documentation files remain in the reconciliation, retaining original failed/not-run receipts while explaining subsequent accepted evidence and current owner merge authorization. WOS-CORE-003/005 and WOS-GOV-002/004 remain bounded synthetic journey coverage, not full release acceptance.
+
+## Development-only PR-007A sequencing exception
+
+On 2026-10-20, the owner directed continued implementation of the agreed product plan without waiting for formal review, which may occur at the end. The controller recorded [commercial drafting foundation](../tasks/WOS-04-COMMERCIAL-DRAFTING-FOUNDATION.md) as the substantive next PR-007 development slice on unchanged PR50. It adds real scoped contracts/SOWs, seven-model engagement drafts, POs, milestone drafts, immutable future contract revisions and neutral migration mappings. This changes development sequencing only: open prerequisite acceptance, programme credit, required validation, formal release/merge/production gates, denied security repair and the unchanged blocked diagnostic remain separate. The remaining client/project/lifecycle/billing work is explicitly open in the task. Keep the dependent PR Draft and unmerged.

@@ -7,6 +7,7 @@ export interface PermissionDefinition {
   label: string;
   description: string;
   protected?: boolean;
+  optIn?: boolean;
 }
 
 export interface RolePermissionSetting {

@@ -29,6 +29,7 @@ import {createIntegrationHistoryRouter} from './modules/integrations/integration
 import {createNotificationRouter} from './modules/notifications/notification-router.mjs';
 import {createLeaveRouter} from './modules/leave/leave-router.mjs';
 import {createAvailabilityReportRouter} from './modules/reports/availability-report-router.mjs';
+import {createCommercialDraftingRouter} from './modules/commercial-drafting/router.mjs';
 import { assertWorkerMayReactivate, disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
@@ -135,6 +136,8 @@ const permissionDefinitions = [
   ['projects.status_update', 'Delivery', 'Update Project Status', false],
   ['clients.view', 'Delivery', 'Client Portfolio', false],
   ['clients.manage', 'Delivery', 'Manage Clients', false],
+  ['commercial.contracts.view', 'Commercial', 'View commercial drafts', false],
+  ['commercial.contracts.manage', 'Commercial', 'Manage commercial drafts', false],
   ['allocations.view', 'Planning', 'Planning Workspace', false],
   ['allocations.manage', 'Planning', 'Manage Allocations', false],
   ['timesheets.submit', 'Timesheets', 'Submit Timesheets', false],
@@ -162,7 +165,7 @@ const permissionDefinitions = [
 ];
 const protectedPermissionKeys = new Set(permissionDefinitions.filter(([, , , protectedCore]) => protectedCore).map(([key]) => key));
 const defaultRolePermissions = {
-  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey].includes(key)).map(([key]) => key),
+  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.contracts.view', 'commercial.contracts.manage'].includes(key)).map(([key]) => key),
   HR: ['dashboard.view', 'employees.view', 'employees.manage', 'employees.password_reset', 'projects.view', 'projects.manage', 'projects.status_update', 'clients.view', 'clients.manage', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'leave.admin', 'approvals.view', 'notifications.view', 'notifications.manage', 'integrations.identity', 'integrations.teams', 'integrations.teams_actions', 'settings.manage'],
   CountryDirector: ['dashboard.view', 'employees.view', 'projects.view', 'clients.view', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
   ProjectManager: ['pm_workspace.view', 'employees.view', 'projects.view', 'projects.status_update', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
@@ -6404,6 +6407,8 @@ registerOrganizationSetupRoutes({
   audit,
   mountPaths: ['/api/organization-setup', '/api/v1/organization-setup'],
 });
+
+app.use('/api/v1/commercial-drafting', createCommercialDraftingRouter({pool,requireDatabase,requireAuth,audit}));
 
 app.use('/api/v1', versionedApiErrorHandler);
 
