@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 
 // Configure production before importing the real service. No browser-local or demo fallback is allowed.
 process.env.APP_MODE = 'production';
@@ -46,7 +47,7 @@ const tokenKey = 'workos_api_token';
 const endpoint = '/api/organization-setup/terminology';
 const originalScope = {organizationId: 'org-synthetic-terms-one', legalEntityId: 'legal-synthetic-terms-one'};
 const nextScope = {organizationId: 'org-synthetic-terms-two', legalEntityId: 'legal-synthetic-terms-two'};
-const originalToken = 'synthetic-terminology-session-one';
+const originalToken = syntheticCredential();
 const originalUser = {
   id: 'worker-synthetic-terms-one', employeeId: 'SYN-TERMS-ONE', role: 'HR', permissionRole: 'HR',
   permissions: ['settings.manage', 'employees.view'], name: 'Synthetic Terminology Operator',

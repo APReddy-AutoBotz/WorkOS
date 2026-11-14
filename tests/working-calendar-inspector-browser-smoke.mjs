@@ -25,12 +25,13 @@ const pending=async(kind,after=0)=>{await page.waitForFunction(({kind,after})=>w
   return page.evaluate(({kind,after})=>{const {id,url,method,headers,credentials,body}=window.workingCalendarHarness.pending.filter(call=>call.kind===kind&&call.id>after).at(-1);return {id,url,method,headers,credentials,body};},{kind,after});};
 const settle=(request,result,status)=>page.evaluate(({id,result,status})=>window.workingCalendarHarness.settle(id,result,status),{id:request.id,result,status});
 const health=async(after=0,connected=true)=>{const request=await pending('health',after);assert.equal(request.url,'/api/health');assert.equal(request.method,'GET');assert.equal(request.credentials,'include');assert.equal(request.body,null);await settle(request,{database:connected?'connected':'offline'});return request;};
-const read=async(kind='calendars',after=0,id='calendar-a',scope={organizationId:'org-a',legalEntityId:'legal-a'},token='synthetic-calendar-token-a')=>{
+let fixtureToken;
+const read=async(kind='calendars',after=0,id='calendar-a',scope={organizationId:'org-a',legalEntityId:'legal-a'},token=fixtureToken)=>{
   const request=await pending(kind,after);assert.equal(request.method,'GET','explicit zero business mutation assertion');assert.equal(request.body,null);assert.equal(request.credentials,'include');
   assert.equal(request.url,`/api/organization-setup/calendars${kind==='holidays'?`/${id}/holidays`:''}?asOf=${today}`);
   assert.deepEqual(request.headers,{'authorization':`Bearer ${token}`,'content-type':'application/json','x-organization-id':scope.organizationId,'x-legal-entity-id':scope.legalEntityId});return request;};
 const collect=async()=>{const prior=await page.evaluate(()=>window.workingCalendarHarness?{calls:window.workingCalendarHarness.calls,unexpected:window.workingCalendarHarness.unexpectedFetches}:null);if(prior){allCalls.push(...prior.calls);allUnexpected.push(...prior.unexpected);}};
-const open=async(params='')=>{await collect();await page.goto(`${baseUrl}/tests/fixtures/working-calendar-inspector.html${params}`);await page.getByRole('heading',{name:'Working calendars',exact:true}).waitFor();};
+const open=async(params='')=>{await collect();await page.goto(`${baseUrl}/tests/fixtures/working-calendar-inspector.html${params}`);await page.getByRole('heading',{name:'Working calendars',exact:true}).waitFor();fixtureToken=await page.evaluate(()=>window.workingCalendarHarness.syntheticToken);};
 const boot=async(rows=calendars)=>{await open();await health();const request=await read();await settle(request,rows);await page.getByRole('heading',{name:`Returned calendars (${rows.length})`,exact:true}).waitFor();return request;};
 const select=async(code='A_LEGAL',id='calendar-a')=>{const after=await lastId();await button(`Inspect ${code}`).click();const request=await read('holidays',after,id);await detail().getByText('Loading holidays…',{exact:true}).waitFor();return request;};
 const capture=(label,name)=>page.evaluate(({label,name})=>window.workingCalendarHarness.capture(label,name),{label,name});
@@ -65,7 +66,7 @@ try {
     const after=await lastId();await button('Retry calendars').click();await health(after);request=await read('calendars',after);await settle(request,calendars);await list().waitFor();
     request=await select();await settle(request,undefined,failure);await button('Retry holidays').waitFor();await noPrivate();assert((await detail().innerText()).includes('Asia/Kolkata'),'holiday failure preserves confirmed calendar details');
     const retryAfter=await lastId();await button('Retry holidays').click();await health(retryAfter);request=await read('holidays',retryAfter);await settle(request,[]);await detail().getByText('No holidays returned',{exact:false}).waitFor();
-    assert.equal(await page.evaluate(()=>sessionStorage.getItem('workos_api_token')),'synthetic-calendar-token-a');
+    assert.equal(await page.evaluate(()=>sessionStorage.getItem('workos_api_token')),fixtureToken);
   }
   await open();await health(0,false);await button('Retry calendars').waitFor();const offlineAfter=await lastId();await button('Retry calendars').click();await health(offlineAfter);request=await read('calendars',offlineAfter);await settle(request,calendars);await list().waitFor();
 

@@ -116,7 +116,7 @@ try {
   for (const malformed of [{}, workspace({limit: 201}), workspace({clients: Array.from({length: 201}, (_, index) => ({...legacy, id: `legacy-${index}`}))}), workspace({clients: [summary, summary]}), workspace({clients: [{...legacy, latestVersion: 1}]}), workspace({clients: [{...summary, currentProfile: {...profile, defaultCurrency: 'gbp'}}]}), workspace({clients: [{...summary, currentProfile: missingNullable}]}), workspace({clients: [{...summary, currentProfile: {...profile, billingContacts: [{name: 'Synthetic', email: 'invalid'}]}}]})]) {
     await open();request = await pending('workspace');await settle(request, malformed);await button('Retry workspace').waitFor();assert.equal(await list().count(), 0);await noPrivate();
   }
-  for (const malformed of [{...detail, versions: []}, {...detail, billingUnits: [{...unit, clientId: 'client-b'}]}, {...detail, versions: [profile, profile]}, {...detail, currentProfile: null}]) {
+  for (const malformed of [{...detail, versions: []}, {...detail, billingUnits: [{...unit, clientId: 'client-b'}]}, ...[['billing_entity'],['business_unit']].map(kind=>({...detail,billingUnits:[{...unit,kind}]})), {...detail, versions: [profile, profile]}, {...detail, currentProfile: null}]) {
     await boot();after = await lastId();await button(`Inspect ${summary.operationalName}`).click();request = await pending('client', after);await settle(request, malformed);await button('Retry client profile').waitFor();assert(!(await history().innerText()).includes(profile.legalName));
   }
 
