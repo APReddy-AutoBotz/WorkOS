@@ -68,6 +68,46 @@ const seedGovernedHistory = async (pool, identities, today) => {
   } catch (failure) {await client.query('rollback');throw failure;} finally {client.release();}
 };
 
+// Exercise enrollment through the real permission product APIs, rather than
+// relying on fixture SQL to make the new opt-in capabilities reachable.
+await withClientProfileDatabase(async ({pool, databaseUrl}) => {
+  await migrateClientProfiles(pool);await seedCommercialReferences(pool);
+  const identities=await seedCommercialIdentities(pool), today=await clientProfileToday(pool);
+  await defaults(pool);
+  await withClientProfileApi({databaseUrl,identities},async({request})=>{
+    const config=await request('/api/permissions/config');assert.equal(config.status,200);
+    for(const key of clientProfilePermissions){
+      const definition=config.body.permissions.find(item=>item.key===key);
+      assert.ok(definition,`permission configuration exposes ${key}`);assert.equal(definition.protected,false);
+      assert.equal((await request('/api/permissions/roles/Employee',{method:'PATCH',identity:identities.reader,body:{permissionKey:key,enabled:true}})).status,403);
+      assert.equal((await request('/api/permissions/user-grants',{method:'POST',identity:identities.reader,body:{userId:identities.reader.id,permissionKey:key}})).status,403);
+    }
+    await defaults(pool);
+    for(const identity of Object.values(identities)) error(await request('/workspace',{identity}),403);
+    const roleGrant=async(key,enabled)=>assert.equal((await request('/api/permissions/roles/Employee',{method:'PATCH',body:{permissionKey:key,enabled}})).status,200);
+    await roleGrant('commercial.clients.view',true);
+    assert.equal((await request('/workspace',{identity:identities.reader})).status,200);
+    error(await request(`/clients/${f.clientId}/profiles`,{method:'POST',identity:identities.reader,body:input(today)}),403);
+    await roleGrant('commercial.clients.manage',true);
+    await profile(request,f.clientId,input(today),{identity:identities.reader});
+    await roleGrant('commercial.clients.manage',false);
+    error(await request(`/clients/${f.clientId}/profiles`,{method:'POST',identity:identities.reader,body:input(day(today,1),{expectedVersion:1})}),403);
+    await roleGrant('commercial.clients.view',false);
+    error(await request('/workspace',{identity:identities.reader}),403);
+    const grants=[];
+    for(const key of clientProfilePermissions){
+      const granted=await request('/api/permissions/user-grants',{method:'POST',body:{userId:identities.reader.id,permissionKey:key}});
+      assert.equal(granted.status,200);grants.push(granted.body);
+    }
+    await profile(request,f.clientId,input(day(today,1),{expectedVersion:1}),{identity:identities.reader});
+    for(const granted of grants) assert.equal((await request(`/api/permissions/user-grants/${granted.id}`,{method:'DELETE'})).status,200);
+    error(await request('/workspace',{identity:identities.reader}),403);
+    await defaults(pool);
+    const changes=(await pool.query('select * from permission_change_history where permission_key=any($1::text[])',[clientProfilePermissions])).rows;
+    assert.equal(changes.length,8);assert(changes.every(row=>row.changed_by===identities.manager.id&&row.active_role==='Admin'));
+  });
+});
+
 // Exact041 upgrade includes real pre-existing work, 040 neutral mappings and
 // immutable commercial/lifecycle histories, not just an empty schema fixture.
 await withClientProfileDatabase(async ({pool, databaseUrl}) => {
