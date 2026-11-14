@@ -8,8 +8,23 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
  values($1,$1,'Synthetic delegate','synthetic-delegate@example.test','Team lead','Delivery','US','director-commercial','Active','org-default','legal-default')`,[employee]);
  await pool.query('update users set employee_record_id=$1,employee_id=$1 where id=$2',[employee,ids.denied.id]);
  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('TeamLead','approvals.view',true) on conflict(role_name,permission_key) do update set enabled=true");
+  await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='TeamLead' on conflict do nothing",[ids.reader.id]);
  await withCommercialApi({databaseUrl,identities:ids},async ({request})=>{
   const body={delegator_id:f.ownerId,delegate_id:employee,role:'TeamLead',start_date:fx.today,end_date:fx.today,status:'Active',reason:'Synthetic delegation'};
+  const invalidRole=await request('/api/approval-delegations',{method:'POST',body:{...body,role:'Admin'}});
+  assert.equal(invalidRole.status,422,'Cannot delegate a role absent from participants');
+  await pool.query("update users set status='Disabled' where id=$1",[ids.reader.id]);
+  const disabledOwner=await request('/api/approval-delegations',{method:'POST',body});assert.equal(disabledOwner.status,422);
+  await pool.query("update users set status='Active' where id=$1",[ids.reader.id]);
+  await pool.query("update users set status='Disabled' where id=$1",[ids.denied.id]);
+  assert.equal((await request('/api/approval-delegations',{method:'POST',body})).status,422);
+  await pool.query("update users set status='Active' where id=$1",[ids.denied.id]);
+  await pool.query("update user_organization_scopes set active=false where user_id=$1",[ids.denied.id]);
+  assert.equal((await request('/api/approval-delegations',{method:'POST',body})).status,422);
+  await pool.query("update user_organization_scopes set active=true where user_id=$1",[ids.denied.id]);
+  await pool.query("update role_permissions set enabled=false where role_name='TeamLead' and permission_key='approvals.view'");
+  assert.equal((await request('/api/approval-delegations',{method:'POST',body})).status,422);
+  await pool.query("insert into user_permission_grants(user_id,permission_key)values($1,'approvals.view'),($2,'approvals.view') on conflict do nothing",[ids.reader.id,ids.denied.id]);
   const created=await request('/api/approval-delegations',{method:'POST',body});assert.equal(created.status,200,JSON.stringify(created.body));
   const listed=await request('/api/approval-delegations',{identity:ids.denied});assert.equal(listed.status,200);assert.ok(listed.body.some(x=>x.id===created.body.id));
   const beforeDenied=(await pool.query("select * from audit_logs where entity_type='ApprovalDelegation' order by id")).rows;
@@ -26,6 +41,19 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   assert.equal(ownerEdited.status,200,JSON.stringify(ownerEdited.body));
   const concurrent=await Promise.all([1,2].map(()=>request('/api/approval-delegations',{identity:ids.denied,method:'POST',body:owned})));
   assert.deepEqual(concurrent.map(x=>x.status).sort(),[200,422]);
+  const contestedId='synthetic-contested-delegation';
+  const competing=await Promise.all([body,owned].map(value=>request('/api/approval-delegations',{method:'POST',body:{...value,id:contestedId,start_date:'2099-01-01',end_date:'2099-01-02'}})));
+  assert.deepEqual(competing.map(x=>x.status).sort(),[200,403]);
+  const winner=competing.find(x=>x.status===200).body;
+  assert.equal((await pool.query('select delegator_id from approval_delegations where id=$1',[contestedId])).rows[0].delegator_id,winner.delegator_id);
+  assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='ApprovalDelegation' and entity_id=$1",[contestedId])).rows[0].n,1);
+  await pool.query(`insert into approval_delegations(id,delegator_id,delegate_id,role,start_date,end_date,status)
+    values('synthetic-retained-cross-entity',$1,$2,'TeamLead',current_date,current_date,'Active')`,[f.ownerId,f.otherOwnerId]);
+  const retainedBefore=(await pool.query("select * from approval_delegations where id='synthetic-retained-cross-entity'")).rows;
+  const retainedRefusal=await request('/api/approval-delegations',{method:'POST',body:{...body,id:'synthetic-retained-cross-entity'}});assert.equal(retainedRefusal.status,403);
+  assert.deepEqual((await pool.query("select * from approval_delegations where id='synthetic-retained-cross-entity'")).rows,retainedBefore);
+  const scopedList=await request('/api/approval-delegations');assert.equal(scopedList.status,200);
+  assert.ok(!scopedList.body.some(row=>row.id==='synthetic-retained-cross-entity'));
   const invalidDate=await request('/api/approval-delegations',{method:'POST',body:{...body,start_date:'2026-02-30'}});
   assert.equal(invalidDate.status,400);
 
@@ -46,7 +74,6 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   assert.equal(refusedAudit.status,500);
   assert.deepEqual((await pool.query('select * from approval_delegations where id=$1',[created.body.id])).rows,beforeAuditFailure);
   await pool.query('drop trigger synthetic_delegation_audit_failure on audit_logs; drop function synthetic_delegation_audit_failure()');
-  await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='TeamLead' on conflict do nothing",[ids.reader.id]);
   await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id,reporting_manager_id)
     values('synthetic-delegated-worker','SYN-DELEGATED','Synthetic delegated worker','delegated-worker@example.test','Analyst','Delivery','US','director-commercial','Active','org-default','legal-default',$1)`,[f.ownerId]);
   await pool.query(`insert into approval_records(id,entity_type,entity_id,subject_employee_id,requester_name,status)

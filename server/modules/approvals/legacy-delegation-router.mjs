@@ -89,6 +89,28 @@ app.post('/api/approval-delegations', requireDatabase, requireAuth, requirePermi
       res.status(422).json({ error: 'Delegation requires active delegator and delegate employees' });
       return;
     }
+    if (parsed.data.status === 'Active') {
+      const accounts = await client.query(`select u.id,u.employee_record_id from users u
+        where u.employee_record_id=any($1::text[]) and u.status='Active' order by u.id for share`,
+      [[delegator.id, delegate.id]]);
+      const accountIds = accounts.rows.map(row => row.id);
+      await client.query('select user_id from user_roles where user_id=any($1::uuid[]) for share', [accountIds]);
+      await client.query('select user_id from user_organization_scopes where user_id=any($1::uuid[]) for share', [accountIds]);
+      await client.query("select role_name from role_permissions where role_name=$1 and permission_key='approvals.view' for share", [parsed.data.role]);
+      await client.query("select user_id from user_permission_grants where user_id=any($1::uuid[]) and permission_key='approvals.view' for share", [accountIds]);
+      const authorized = await client.query(`select distinct u.employee_record_id from users u
+        where u.id=any($1::uuid[]) and u.status='Active'
+          and exists(select 1 from user_roles ur join roles r on r.id=ur.role_id where ur.user_id=u.id and r.name=$2)
+          and exists(select 1 from user_organization_scopes os where os.user_id=u.id and os.organization_id=$3 and os.legal_entity_id=$4 and os.active)
+          and (exists(select 1 from role_permissions rp where rp.role_name=$2 and rp.permission_key='approvals.view' and rp.enabled)
+            or exists(select 1 from user_permission_grants pg where pg.user_id=u.id and pg.permission_key='approvals.view'))`,
+      [accountIds, parsed.data.role, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
+      if (authorized.rowCount !== 2) {
+        await client.query('rollback');
+        res.status(422).json({error: 'Active delegation requires both participants to hold the selected role, scope and approval permission'});
+        return;
+      }
+    }
     const overlapping = (await client.query(`
       select id
       from approval_delegations

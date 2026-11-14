@@ -137,6 +137,7 @@ export const ApprovalsWorkspace = () => {
     return nextWeek.toISOString().slice(0, 10);
   });
   const [delegationReason, setDelegationReason] = useState('');
+  const [savingDelegation, setSavingDelegation] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -221,21 +222,29 @@ export const ApprovalsWorkspace = () => {
   };
 
   const saveDelegation = async () => {
-    if (!delegatorId || !delegateId) return;
-    await approvalService.saveDelegation({
-      id: '',
-      delegatorId,
-      delegateId,
-      role: delegationRole,
-      startDate: delegationStartDate,
-      endDate: delegationEndDate,
-      status: 'Active',
-      reason: delegationReason.trim() || undefined,
-    });
-    const delegate = employees.find(employee => employee.id === delegateId);
-    setNotice(`Created approval delegation${delegate ? ` to ${delegate.name}` : ''}.`);
-    setDelegationReason('');
-    await refresh();
+    if (!delegatorId || !delegateId || savingDelegation) return;
+    setSavingDelegation(true);
+    setNotice('');
+    try {
+      await approvalService.saveDelegation({
+        id: '', delegatorId, delegateId, role: delegationRole,
+        startDate: delegationStartDate, endDate: delegationEndDate,
+        status: 'Active', reason: delegationReason.trim() || undefined,
+      });
+      const delegate = employees.find(employee => employee.id === delegateId);
+      setNotice(`Created approval delegation${delegate ? ` to ${delegate.name}` : ''}.`);
+      setDelegationReason('');
+      try {
+        await refresh();
+      } catch {
+        setLoading(false);
+        setNotice('Delegation was created, but the updated list could not be loaded. Refresh the page to review it.');
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Approval delegation save failed.');
+    } finally {
+      setSavingDelegation(false);
+    }
   };
 
   return (
@@ -246,7 +255,7 @@ export const ApprovalsWorkspace = () => {
         subtitle="Shared approval inbox, approval history, delegations, and SLA governance."
         breadcrumb={['Workforce OS', 'Approvals']}
       />
-      {notice && <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">{notice}</div>}
+      {notice && <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">{notice}</div>}
       {loading ? <Card>Loading approval workspace...</Card> : (
         <>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
@@ -261,13 +270,13 @@ export const ApprovalsWorkspace = () => {
             <Card title="Approval Delegations">
               <div className="mb-5 rounded-xl border border-slate-100 bg-slate-50 p-4">
                 <div className="grid grid-cols-1 gap-3">
-                  <select className="input-field" value={delegatorId} onChange={event => setDelegatorId(event.target.value)}>
+                  <select aria-label="Delegator" className="input-field" value={delegatorId} onChange={event => setDelegatorId(event.target.value)}>
                     {delegatorOptions.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
                   </select>
-                  <select className="input-field" value={delegateId} onChange={event => setDelegateId(event.target.value)}>
+                  <select aria-label="Delegate" className="input-field" value={delegateId} onChange={event => setDelegateId(event.target.value)}>
                     {delegateOptions.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
                   </select>
-                  <select className="input-field" value={delegationRole} onChange={event => setDelegationRole(event.target.value)}>
+                  <select aria-label="Delegation role" className="input-field" value={delegationRole} onChange={event => setDelegationRole(event.target.value)}>
                     {['ProjectManager', 'TeamLead', 'CountryDirector', 'HR', 'Admin'].map(role => <option key={role} value={role}>{role}</option>)}
                   </select>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -283,10 +292,10 @@ export const ApprovalsWorkspace = () => {
                   <button
                     type="button"
                     onClick={saveDelegation}
-                    disabled={!delegatorId || !delegateId || delegationEndDate < delegationStartDate}
+                    disabled={savingDelegation || !delegatorId || !delegateId || delegationEndDate < delegationStartDate}
                     className="btn-primary px-4 py-2 text-sm disabled:opacity-50"
                   >
-                    Create Delegation
+                    {savingDelegation ? 'Saving delegation…' : 'Create Delegation'}
                   </button>
                 </div>
               </div>
