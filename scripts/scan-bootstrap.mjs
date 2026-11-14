@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 const selfTest = process.argv.includes('--self-test');
 const root = path.resolve(selfTest ? process.cwd() : (process.argv[2] || process.cwd()));
@@ -230,7 +231,7 @@ console.log(JSON.stringify({ status: 'passed', filesScanned: new Set(files).size
 
 if (selfTest) {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'wos01a-scan-'));
-  const scanner = new URL(import.meta.url).pathname;
+  const scanner = fileURLToPath(import.meta.url);
   const runFixture = async (name, contents, shouldPass) => {
     const fixture = path.join(fixtureRoot, name);
     for (const dir of scanRoots) await mkdir(path.join(fixture, dir), { recursive: true });
