@@ -8,6 +8,7 @@ import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { planningService } from '../services/api';
 import { authService } from '../services/authService';
+import { ApiClientError } from '../services/apiClient';
 import { canManageAllocations } from '../services/accessControl';
 import { AllocationControlPanel, type AllocationControlFocus } from './AllocationManagement';
 import type { ResourcePlanningReport, ResourcePlanningRow } from '../types';
@@ -44,19 +45,25 @@ interface ResourcePlanningSignalsProps {
 export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }: ResourcePlanningSignalsProps) => {
   const [report, setReport] = useState<ResourcePlanningReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailure, setLoadFailure] = useState<'access' | 'failed' | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [band, setBand] = useState('All');
   const [search, setSearch] = useState('');
   const canFocusAllocationControl = canManageAllocations(authService.getCurrentUser()) && Boolean(onFocusAllocation);
 
-  const refresh = async () => {
-    setLoading(true);
-    setReport(await planningService.getResourcePlanning());
-    setLoading(false);
-  };
-
   useEffect(() => {
-    refresh();
-  }, []);
+    let active = true;
+    setLoading(true);
+    setReport(null);
+    setLoadFailure(null);
+    planningService.getResourcePlanning().then(result => {
+      if (!result) throw new Error('Planning report unavailable');
+      if (active) setReport(result);
+    }).catch(error => {
+      if (active) setLoadFailure(error instanceof ApiClientError && [401, 403].includes(error.status) ? 'access' : 'failed');
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [loadAttempt]);
 
   const filteredRows = useMemo(() => {
     const rows = report?.rows || [];
@@ -93,7 +100,12 @@ export const ResourcePlanningSignals = ({ embedded = false, onFocusAllocation }:
     })).sort((a, b) => b.fte - a.fte).slice(0, 8);
   }, [report]);
 
-  if (loading || !report) return <Card>Loading resource planning...</Card>;
+  if (loading) return <Card><p role="status">Loading resource planning...</p></Card>;
+  if (loadFailure || !report) return <Card><div role="alert">
+    <p>{loadFailure === 'access' ? 'Resource planning is not authorized in this workspace.' : 'Resource planning could not be loaded.'}</p>
+    <p>Check your connection and workspace access, then retry.</p>
+    <button type="button" className="btn-primary mt-3" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Retry resource planning</button>
+  </div></Card>;
 
   return (
     <div className={cn("space-y-6", embedded ? "" : "pb-12")}>

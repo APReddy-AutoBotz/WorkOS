@@ -422,6 +422,10 @@ Legacy approvals and SLA results now stay within the selected legal entity for e
 
 Settings controls show success only after the server response. An unconfirmed save retains the local edits; review connection and current authority before retrying. Network uncertainty can mean the server committed without a delivered response, so reload/reconcile when needed. Newer edits remain unsaved even if an earlier submitted snapshot succeeds. The alternate utilization action saves configuration without claiming an additional server-side recalculation. Initialization failure offers retry. No migration or new permission is introduced; preserve existing configuration/audit history and prefer forward repair over restoring misleading success messages. See [settings evidence](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md).
 
+## Planning read recovery
+
+Planning and PM workspaces show explicit retry when reads fail or access is denied. Do not interpret an error as zero people, no managed projects or no staffing risk. Check connection and current workspace access before retrying. The PM workspace no longer reloads solely because its session object was parsed again. No migration or stored-data change. See [planning verification and rollback](../tasks/WOS-04-PLANNING-READ-RECOVERY.md).
+
 ## Project detail read recovery
 
 When project details cannot be loaded, check connection and workspace access and use Retry loading project. A failed request does not establish that the project is absent. Route changes close obsolete edit dialogs and do not retain the previous project's details. No schema or stored data changes are required; application rollback restores the stale-display issue. See [scope and evidence](../tasks/WOS-04-PROJECT-DETAIL-READ-RECOVERY.md).
