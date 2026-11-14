@@ -1,0 +1,9 @@
+# Settings persistence outcomes
+
+Requirements: WOS-CORE-003/005, WOS-NFR-OBS-005, WOS-NFR-UX-003/005. Governing behavior: ORGANIZATION_AND_SETUP_SPEC.md; server permissions, calculations and audit remain authoritative.
+
+Current AdminSettings starts a delayed save, ignores the promise and displays success regardless of server acknowledgement. Its alternate recalculation action also ignores the promise. Initial Promise.all failures leave an indefinite loading view. This package will make save/load outcomes explicit, retain editable values after refusal, prevent duplicate submissions and obsolete completion messages, and provide retry for failed initialization. A successful settings write must not claim server-side recalculation that did not occur.
+
+Acceptance: real mounted React journey with controlled delayed, refused and successful settings API responses; no success before acknowledgement; retained edits and visible error after refusal; both save entry points share guarded behavior; unmount/stale completion isolation; load failure and retry; real PostgreSQL persistence/permission refusal where affected; typecheck, production build, relevant contracts and final diff review. No migration, new grants, financial algorithm or unrelated catalog behavior changes.
+
+Rollback: application-only forward repair preferred. Failed or uncertain requests do not authorize a false success statement; retain existing server audit and configuration history. This package does not establish full configuration versioning, all catalog command recovery, release acceptance or deployment.
