@@ -4,13 +4,13 @@ Status date: 2026-11-14. This page separates observed merged source from draft e
 
 ## Verified main baseline
 
-GitHub main was fetched at `b9a57f8a462d8585bb3f73129080d6fae5173343` for this refresh. The tree contains `src/`, `server/`, tests, migrations, container/environment configuration and CI. Git history identifies source bootstrap at `3070c80a71640fa4275477d0d2f1538cc8d2a819` (PR16), organization/setup integration at `8450e9f8816d95dffb3a0784f2e63e3b7b57a172` (PR37), and the current CI/migration/production-profile foundation commit above.
+GitHub main was initially fetched at `b9a57f8a462d8585bb3f73129080d6fae5173343` for this refresh. Dependency repair PR145 subsequently merged at `839dacf12222261161a93956b646d03ccc56af66` after both jobs passed in [CI43549286444](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43549286444), including dependency audit, negative security tests, migrations, production identity and container checks. The tree contains `src/`, `server/`, tests, migrations, container/environment configuration and CI. Git history identifies source bootstrap at `3070c80a71640fa4275477d0d2f1538cc8d2a819` (PR16), organization/setup integration at `8450e9f8816d95dffb3a0784f2e63e3b7b57a172` (PR37), and the current CI/migration/production-profile foundation commit above.
 
 This establishes that application source and foundations have been merged. It does not retrospectively certify every requirement, resolve every historical review finding, or demonstrate current production readiness. No numeric readiness score is asserted without a reconstructed requirement-by-requirement acceptance basis.
 
 ## Draft work and observed checks
 
-The live two-page GitHub inventory contained 104 open PRs when inspected. Most implementation work after the modular/API foundation remains in dependent Draft branches. Separate controller branches require their own disposition; open does not mean mergeable or required.
+The two-page GitHub inventory contained 104 open PRs before the independent documentation and dependency-repair packages were published. Most implementation work after the modular/API foundation remains in dependent Draft branches. Separate controller branches require their own disposition; open does not mean mergeable or required.
 
 | Package | Observed evidence | Acceptance boundary |
 |---|---|---|
