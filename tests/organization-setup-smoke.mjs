@@ -34,6 +34,18 @@ for (const invalidTerms of [
 ]) assert(!validateTerminology({terms:invalidTerms,effectiveFrom:'2026-01-01'}).success, 'invalid terminology must fail closed');
 assert.deepEqual(normalizePersistedTerminology({employee:'person'}).employee,{singular:'person',plural:'persons',helpText:''});
 const server = readFileSync('server/index.mjs', 'utf8');
+const projectImportRouter = readFileSync('server/modules/imports/project-import-router.mjs', 'utf8');
+const operationalImportRouter = readFileSync('server/modules/imports/operational-import-router.mjs', 'utf8');
+const allocationImportRouter = operationalImportRouter.slice(
+  operationalImportRouter.indexOf("router.post('/imports/allocations/apply'"),
+  operationalImportRouter.indexOf("router.post('/imports/timesheets/apply'"),
+);
+const timesheetImportRouter = operationalImportRouter.slice(
+  operationalImportRouter.indexOf("router.post('/imports/timesheets/apply'"),
+  operationalImportRouter.indexOf('return router;'),
+);
+const identityMiddleware = readFileSync('server/modules/identity-access/middleware.mjs', 'utf8');
+const identityReadRoutes = readFileSync('server/modules/identity-access/read-router.mjs', 'utf8');
 const ui = readFileSync('src/pages/AdminSettings.tsx', 'utf8');
 const api = readFileSync('src/services/api.ts', 'utf8');
 const runtimeTerminology = readFileSync('src/config/RuntimeTerminology.tsx', 'utf8');
@@ -41,6 +53,13 @@ const apiClient = readFileSync('src/services/apiClient.ts', 'utf8');
 const authService = readFileSync('src/services/authService.ts', 'utf8');
 const appSource = readFileSync('src/App.tsx', 'utf8');
 const scopeGate = readFileSync('src/components/auth/OrganizationScopeGate.tsx', 'utf8');
+const auditTrail = readFileSync('src/pages/AuditTrail.tsx', 'utf8');
+const scopedAuditHistory = readFileSync('src/components/audit/ScopedAuditHistory.tsx', 'utf8');
+const organizationAuditHistory = readFileSync('src/components/audit/OrganizationAuditHistory.tsx', 'utf8');
+const guardedAuditRead = readFileSync('src/components/audit/useAuditRead.ts', 'utf8');
+const deploymentAuditHistory = readFileSync('src/components/audit/DeploymentAuditHistory.tsx', 'utf8');
+const sidebar = readFileSync('src/components/Layout/Sidebar.tsx', 'utf8');
+const header = readFileSync('src/components/Layout/Header.tsx', 'utf8');
 const productConfig = readFileSync('src/config/productConfig.ts', 'utf8');
 
 const routeSource = (start, end) => {
@@ -157,7 +176,10 @@ assert.equal(identityReadinessFromEnvironment({ ...productionEnvironment, ENTRA_
 assert.deepEqual(Object.keys(buildSetupReadiness(completeSetupFacts, productionEnvironment).checks), REQUIRED_SETUP_CHECKS, 'readiness payload keys must remain stable and complete');
 assert.match(service, /user_organization_scopes[\s\S]*where s\.organization_id=\$1 and s\.legal_entity_id=\$2/, 'user, role, and identity readiness evidence must remain in the selected organization/legal scope');
 assert.match(service, /notification_preferences[\s\S]*e\.organization_id=\$1 and e\.legal_entity_id=\$2/, 'notification readiness evidence must remain in the selected organization/legal scope');
-assert.match(service, /new_value->>'organization_id'=\$1 and a\.new_value->>'legal_entity_id'=\$2/, 'imports from another scope must not satisfy readiness');
+assert.match(service, /a\.module='Import'[\s\S]*a\.action like 'Import %'/,
+  'readiness must require an actual import action rather than a generic audit marker');
+assert.match(service, /a\.organization_id=\$1 and a\.legal_entity_id=\$2[\s\S]*a\.organization_id is null and a\.legal_entity_id is null[\s\S]*a\.new_value->>'organization_id'=\$1 and a\.new_value->>'legal_entity_id'=\$2/,
+  'readiness may use exact persisted scope from a legacy import payload without assigning scope to its audit row');
 assert.match(ui, /Object\.entries\(setupReadiness\.checks\)/, 'AdminSettings must dynamically expose every server readiness area');
 
 for (const table of ['organizations','legal_entities','user_organization_scopes','organization_catalog_items','working_calendars','reporting_periods','terminology_versions','worker_profiles','organization_history','worker_history']) {
@@ -193,10 +215,10 @@ assert.ok(
 );
 assert.match(projectLegalScopePrerequisite, /create unique index if not exists uq_projects_org_legal_id[\s\S]*projects\(organization_id, legal_entity_id, id\)/, 'project legal-scope prerequisite must be replay-safe and match the referenced key');
 assert.match(canonicalScopeMigration, /project_allocations_project_legal_scope_fk[\s\S]*foreign key \(organization_id, legal_entity_id, project_id\)[\s\S]*references projects\(organization_id, legal_entity_id, id\)/, 'allocation project legal-scope FK must reference the prerequisite unique project key');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*from employees[\s\S]*organization_id = \$2 and legal_entity_id = \$3[\s\S]*from projects[\s\S]*organization_id = \$2 and legal_entity_id = \$3/, 'timesheet import references must resolve only within authoritative organization and legal scope');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*select \* from timesheets where organization_id = \$1 and legal_entity_id = \$2 and employee_id = \$3 and week_ending = \$4 for update/, 'timesheet import prior-row lookup must be organization/legal scoped and locked');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*insert into timesheets \(employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id\)[\s\S]*on conflict \(organization_id, employee_id, week_ending\)/, 'timesheet import must persist authoritative ownership and use the scoped arbiter');
-assert.match(server, /delete from timesheet_entries where timesheet_id = \$1/, 'timesheet entries must be replaced only through the authorized scoped timesheet');
+assert.match(timesheetImportRouter, /from employees[\s\S]*organization_id = \$2 and legal_entity_id = \$3[\s\S]*from projects[\s\S]*organization_id = \$2 and legal_entity_id = \$3/, 'timesheet import references must resolve only within authoritative organization and legal scope');
+assert.match(timesheetImportRouter, /select \* from timesheets where organization_id = \$1 and legal_entity_id = \$2 and employee_id = \$3 and week_ending = \$4 for update/, 'timesheet import prior-row lookup must be organization/legal scoped and locked');
+assert.match(timesheetImportRouter, /insert into timesheets \(employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id\)[\s\S]*on conflict \(organization_id, employee_id, week_ending\)/, 'timesheet import must persist authoritative ownership and use the scoped arbiter');
+assert.match(timesheetImportRouter, /delete from timesheet_entries where timesheet_id = \$1/, 'timesheet entries must be replaced only through the authorized scoped timesheet');
 assert.match(canonicalScopeMigration, /project_allocations add column if not exists legal_entity_id[\s\S]*project_allocations_employee_legal_scope_fk[\s\S]*project_allocations_project_legal_scope_fk/, 'allocation persistence must enforce employee and project legal ownership');
 assert.match(canonicalScopeMigration, /timesheets add column if not exists legal_entity_id[\s\S]*timesheets_employee_legal_scope_fk/, 'timesheet persistence must enforce employee legal ownership');
 assert.match(reportingPeriodMigration, /drop constraint if exists reporting_periods_status_check[\s\S]*status='Financially Locked' where status='Locked'/, 'legacy Locked periods must be deterministically reconciled before the new state constraint');
@@ -215,7 +237,7 @@ assert.match(server, /let effectiveExitDate = parsed\.data\.exit_date[\s\S]*prev
 assert.match(server, /api\/imports\/employees\/apply[\s\S]*assertWorkerMayExit[\s\S]*errors\.push\(\{ rowNumber, field: 'status'[\s\S]*active=excluded\.active[\s\S]*synchronizeWorkerExit/, 'employee import exits must retain row-level errors and use the canonical lifecycle synchronization');
 assert.match(server, /let effectiveExitDate = row\.exitDate[\s\S]*previous\.status === 'Exited' \? row\.exitDate[\s\S]*code: error\.code[\s\S]*continue;[\s\S]*effectiveExitDate \|\| previous\?\.exit_date/, 'employee import must preserve same-date or omitted terminal authority and keep different-date conflicts row-local');
 const employeeSaveRoute = routeSource("app.post('/api/employees'", "app.delete('/api/employees/:id'");
-const employeeImportRoute = routeSource("app.post('/api/imports/employees/apply'", "app.post('/api/imports/clients/apply'");
+const employeeImportRoute = routeSource("app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'", "app.post(['/api/imports/clients/apply'");
 const employeeDeleteRoute = routeSource("app.delete('/api/employees/:id'", "app.get('/api/projects'");
 assert.match(employeeSaveRoute, /previous\?\.status === 'Exited' && employee\.status !== 'Exited'[\s\S]*await synchronizeWorkerReactivation/, 'direct employee reactivation must synchronize canonical history, profile, and login');
 assert.match(employeeImportRoute, /previous\?\.status === 'Exited' && employee\.status !== 'Exited'[\s\S]*await synchronizeWorkerReactivation/, 'employee-import reactivation must synchronize canonical history, profile, and login');
@@ -231,11 +253,19 @@ assert.match(employeeImportRoute, /const reactivationSavepoint = previous\?\.sta
 assert.match(employeeImportRoute, /rollback to savepoint \$\{reactivationSavepoint\}[\s\S]*release savepoint \$\{reactivationSavepoint\}[\s\S]*errors\.push\(\{ rowNumber, field: 'status'[\s\S]*continue;/, 'a rejected reactivation must roll back only its import row and continue with valid rows');
 for (const [name, route] of [['direct employee save', employeeSaveRoute], ['employee import', employeeImportRoute]]) {
   const begin = route.indexOf("await client.query('begin')");
-  const scopeWrite = route.indexOf('insert into user_organization_scopes');
-  const lifecycleWrite = route.indexOf('await synchronizeWorkerReactivation');
-  const auditWrite = route.indexOf('await audit');
-  const commit = route.indexOf("await client.query('commit')");
-  assert.ok(begin >= 0 && scopeWrite > begin && lifecycleWrite > scopeWrite && auditWrite > lifecycleWrite && commit > auditWrite,
+  const applyRoute = name === 'employee import'
+    ? route.slice(route.indexOf('const directorResult = await client.query'))
+    : route;
+  const scopeWrite = applyRoute.indexOf('insert into user_organization_scopes');
+  const lifecycleWrite = applyRoute.indexOf('await synchronizeWorkerReactivation');
+  const auditWrite = applyRoute.indexOf('await audit');
+  const commit = applyRoute.indexOf("await client.query('commit')", auditWrite);
+  const writePathStart = name === 'employee import'
+    ? route.indexOf('const directorResult = await client.query')
+    : scopeWrite;
+  assert.ok(begin >= 0 && writePathStart > begin,
+    `${name} must begin a transaction before the business-write path`);
+  assert.ok(scopeWrite >= 0 && lifecycleWrite > scopeWrite && auditWrite > lifecycleWrite && commit > auditWrite,
     `${name} must keep employee, identity scope, lifecycle history/profile, and audit in one transaction`);
   assert.match(route, /catch \(error\)[\s\S]*await client\.query\('rollback'\)/, `${name} must roll back the whole operation if reactivation synchronization fails`);
 }
@@ -243,8 +273,8 @@ assert.match(server, /app\.delete\('\/api\/employees\/:id'[\s\S]*assertWorkerMay
 assert.match(server, /api\/projects[\s\S]*select \* from projects where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*Project not found in the authorized organization and legal entity/, 'project ID updates must deny cross-scope rows before upsert');
 const projectSaveRoute = routeSource("app.post('/api/projects'", "app.patch('/api/projects/:id/status'");
 assert.match(projectSaveRoute, /on conflict \(id\) do update set[\s\S]*where projects\.organization_id = excluded\.organization_id[\s\S]*and projects\.legal_entity_id = excluded\.legal_entity_id[\s\S]*returning \*[\s\S]*if \(result\.rowCount === 0\)[\s\S]*Project not found in the authorized organization and legal entity/, 'a racing project ID conflict must update only inside the same organization and legal entity and otherwise roll back with a non-disclosing not-found response');
-assert.match(server, /api\/imports\/projects\/apply[\s\S]*from clients[\s\S]*organization_id=\$3 and legal_entity_id=\$4[\s\S]*from employees[\s\S]*organization_id=\$2 and legal_entity_id=\$3/, 'project imports must resolve clients and managers in the exact request scope');
-assert.match(server, /select \* from projects where project_code=\$1 and organization_id=\$2 and legal_entity_id=\$3[\s\S]*legal_entity_id<>\$3[\s\S]*PROJECT_SCOPE_CONFLICT/, 'project imports must not adopt foreign primary keys and must reject same-organization cross-legal code collisions');
+assert.match(projectImportRouter, /router\.post\('\/imports\/projects\/apply'[\s\S]*from clients[\s\S]*organization_id=\$3 and legal_entity_id=\$4[\s\S]*from employees[\s\S]*organization_id=\$2 and legal_entity_id=\$3/, 'project imports must resolve clients and managers in the exact request scope');
+assert.match(projectImportRouter, /select \* from projects where project_code=\$1 and organization_id=\$2 and legal_entity_id=\$3[\s\S]*legal_entity_id<>\$3[\s\S]*PROJECT_SCOPE_CONFLICT/, 'project imports must not adopt foreign primary keys and must reject same-organization cross-legal code collisions');
 assert.match(server, /api\/allocations[\s\S]*from project_allocations where id = \$1 and organization_id = \$2 and legal_entity_id = \$3 for update[\s\S]*insert into project_allocations \(id,[\s\S]*organization_id, legal_entity_id\)/, 'allocation save must scope existing rows and persist legal ownership');
 assert.match(server, /const allocationIdExistsOutsideScope = parsed\.data\.id && !previous[\s\S]*select 1 from project_allocations where id = \$1[\s\S]*if \(allocationIdExistsOutsideScope\)/, 'a new explicit allocation ID must create while an existing cross-scope ID is denied');
 assert.match(server, /on conflict \(id\) do update set[\s\S]*where project_allocations\.organization_id = excluded\.organization_id[\s\S]*project_allocations\.legal_entity_id = excluded\.legal_entity_id[\s\S]*returning \*/, 'same-scope allocation IDs must update without permitting a cross-scope conflict mutation');
@@ -297,7 +327,7 @@ assert.match(apiClient, /workos:organization-scope-changed/, 'terminology must r
 assert.match(server, /result\.rows\.length === 1 \? result\.rows\[0\] : null/, 'ambiguous local login identifiers must fail closed');
 assert.match(server, /not exists\(select 1 from direct_users\)[\s\S]*u2\.status='Active'[\s\S]*e2\.status<>'Exited'/, 'employee-code login must be used only for active employee-linked users when no unique username or email matched');
 assert.match(server, /insert into project_allocations[\s\S]*organization_id/, 'allocation imports must persist authoritative organization ownership');
-assert.match(server, /api\/imports\/allocations\/apply[\s\S]*organization_id=\$2 and legal_entity_id=\$3[\s\S]*p\.legal_entity_id=\$3 and e\.legal_entity_id=\$3/, 'allocation imports must resolve and update references only in the authorized organization and legal entity');
+assert.match(allocationImportRouter, /organization_id=\$2 and legal_entity_id=\$3[\s\S]*p\.legal_entity_id=\$3 and e\.legal_entity_id=\$3/, 'allocation imports must resolve and update references only in the authorized organization and legal entity');
 assert.match(server, /api\/timesheets[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT[\s\S]*api\/timesheets\/:id\/status[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'canonical save and direct decision paths must use the shared reporting-period guard');
 assert.match(server, /api\/approvals\/:id\/status[\s\S]*approval\.entity_type === 'Timesheet'[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'generic timesheet approval decisions must use the shared reporting-period guard');
 assert.match(server, /api\/approvals\/:id\/status[\s\S]*select \* from approval_records where id = \$1 for update/, 'generic approval decisions must lock the authoritative approval row directly');
@@ -305,7 +335,7 @@ assert.doesNotMatch(server, /approvalSelect} where ar\.id = \$1 for update/, 'ge
 assert.match(server, /select e\.name as subject_employee_name[\s\S]*buildApprovalScopeWhere\(req, scopeParams\)/, 'generic approval scope and display data must be derived separately after locking');
 assert.match(server, /approval\.entity_type === 'Timesheet'[\s\S]*timesheets where id=\$1 and organization_id=\$2 and legal_entity_id=\$3 for update[\s\S]*REPORTING_PERIOD_OPERATIONS\.DECISION/, 'generic timesheet approval must retain linked row scope, locking, and reporting-period authority');
 assert.match(server, /approval\.entity_type === 'LeaveRequest'[\s\S]*leave_requests where id = \$1 for update[\s\S]*decideApprovalRecord/, 'non-timesheet generic approval behavior must remain retained');
-assert.match(server, /api\/imports\/timesheets\/apply[\s\S]*REPORTING_PERIOD_OPERATIONS\.CONTENT/, 'all timesheet import statuses must use the shared content-mutation guard');
+assert.match(timesheetImportRouter, /REPORTING_PERIOD_OPERATIONS\.CONTENT/, 'all timesheet import statuses must use the shared content-mutation guard');
 
 const periodQuery = status => ({ query: async (_sql, params) => ({ rows: status === null ? [] : (Array.isArray(status) ? status : [{ id:'period-1', code:'P1', status }]).map((period, index) => ({
   id:`period-${index}`,code:'P1',frequency:'Weekly',relevant_date:params[2][0],...period,
@@ -352,7 +382,7 @@ const boundedDates = Array.from({length:101}, (_, index) => new Date(Date.UTC(20
 await assert.doesNotReject(assertReportingPeriodAllows({ query: async (_sql, params) => ({ rows: params[2].map(date => ({ id:`weekly-${date}`,code:'W',frequency:'Weekly',status:'Open',relevant_date:date })) }) }, { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:boundedDates.slice(0,100),operation:REPORTING_PERIOD_OPERATIONS.CONTENT }));
 await assert.rejects(assertReportingPeriodAllows(periodQuery('Open'), { organizationId:'org-a',legalEntityId:'legal-a',relevantDates:boundedDates,operation:REPORTING_PERIOD_OPERATIONS.CONTENT }), error => error.code === 'REPORTING_PERIOD_DATE_LIMIT');
 assert.match(server, /relevantDates: \[parsed\.data\.week_ending, \.\.\.parsed\.data\.entries\.map\(entry => entry\.work_date\)\]/, 'direct timesheets must validate every unique entry date with the week ending');
-assert.match(server, /relevantDates: \[group\.weekEnding, \.\.\.group\.entries\.map\(entry => entry\.workDate\)\][\s\S]*error instanceof ReportingPeriodError[\s\S]*continue/, 'imports must skip blocked groups while preserving partial processing');
+assert.match(timesheetImportRouter, /relevantDates: \[group\.weekEnding, \.\.\.group\.entries\.map\(entry => entry\.workDate\)\][\s\S]*error instanceof ReportingPeriodError[\s\S]*continue/, 'imports must skip blocked groups while preserving partial processing');
 assert.equal(canTransitionReportingPeriod('Open','Submission Closed'),true);
 assert.equal(canTransitionReportingPeriod('Approval Closed','Open'),false, 'closed approval authority must not silently reopen');
 
@@ -372,16 +402,45 @@ assert.equal(lifecycleQueries.length, 2, 'employee updates and import replays mu
 assert.equal((server.match(/initializeNewWorkerLifecycle\(client,/g) || []).length, 2, 'canonical employee save and import must both initialize new worker state');
 assert.match(server, /employee:\$\{req\.organizationScope\.organizationId\}:\$\{parsed\.data\.employee_id\}[\s\S]*isNew: !previous/, 'canonical employee save must serialize organization-scoped new-record detection before worker initialization');
 assert.match(server, /api\/imports\/employees\/apply[\s\S]*employee:\$\{req\.organizationScope\.organizationId\}:\$\{row\.employeeId\}[\s\S]*isNew: !previous/, 'employee import must serialize organization-scoped new-record detection before worker initialization');
-assert.match(server, /const requireIdentity = \(req, res, next\)[\s\S]*const requireAuth = async[\s\S]*resolveOrganizationScope\(pool, req\)/, 'identity-only session bootstrap must stay separate from protected data scope enforcement');
-assert.match(server, /app\.get\('\/api\/auth\/me', requireDatabase, requireIdentity/, 'session bootstrap may refresh identity before an organization scope is selected');
-assert.match(server, /app\.get\('\/api\/auth\/organization-scopes', requireDatabase, requireIdentity[\s\S]*listAuthorizedOrganizationScopes/, 'scope discovery must authenticate identity without requiring an already-selected scope');
+assert.match(identityMiddleware, /const requireIdentity =[\s\S]*const requireAuth = async[\s\S]*resolveOrganizationScope\(database, req\)/, 'identity-only session bootstrap must stay separate from protected data scope enforcement');
+assert.match(identityReadRoutes, /router\.get\('\/me', requireDatabase, requireIdentity, refreshSession\)/, 'session bootstrap may refresh identity before an organization scope is selected');
+assert.match(identityReadRoutes, /router\.get\('\/organization-scopes', requireDatabase, requireIdentity, listOrganizationScopes\)/, 'scope discovery must authenticate identity without requiring an already-selected scope');
+assert.match(server, /app\.use\('\/api\/auth', createIdentityReadRouter[\s\S]*app\.use\('\/api\/v1\/auth', createIdentityReadRouter/, 'legacy and versioned identity reads must share one route contract');
+assert.match(server, /mountPaths: \['\/api\/organization-setup', '\/api\/v1\/organization-setup'\]/, 'organization setup paths must share the same compatibility router');
 assert.match(service, /const currentOrganizationScopeSource[\s\S]*legal_entity_profile_versions lp[\s\S]*current_date between lp\.effective_from[\s\S]*listAuthorizedOrganizationScopes[\s\S]*where \$\{currentOrganizationScopePredicate\}/, 'scope discovery and protected scope resolution must share current effective-profile authority');
 assert.match(service, /join users u on u\.id=s\.user_id and u\.status='Active'[\s\S]*coalesce\(op\.name,o\.name\)[\s\S]*coalesce\(lp\.legal_name,le\.name\)/, 'scope discovery must hide disabled accounts and use current effective profile labels');
 assert.match(authService, /fetch\('\/api\/auth\/switch-role'[\s\S]*headers: getApiHeaders\(\)/, 'role switching must propagate the explicitly selected organization scope');
 assert.match(authService, /completeEntraLogin:[\s\S]*clearToken\(\)[\s\S]*fetch\('\/api\/auth\/me'/, 'Entra completion must discard stale tab identity and bootstrap from the session cookie');
 assert.match(apiClient, /export const getApiHeaders[\s\S]*X-Organization-Id[\s\S]*X-Legal-Entity-Id/, 'scope-bound raw auth actions must share the selected-scope headers');
 assert.match(apiClient, /export const clearOrganizationScope/, 'the scope gate must be able to clear an expired or unauthorized selection');
-assert.match(appSource, /<OrganizationScopeGate><RuntimeTerminology>\{children\}<\/RuntimeTerminology><\/OrganizationScopeGate>/, 'authenticated application routes and scoped terminology must not mount until a valid scope is selected');
+assert.match(appSource, /<OrganizationScopeGate allowAuditWithoutScope=\{auditScopeFreePath\}>[\s\S]*<RuntimeTerminology>\{children\}<\/RuntimeTerminology>/, 'only the root and audit routes for explicitly designated auditors may use the scope-free reader path');
+assert.match(appSource, /if \(canOpenAuditWithoutOrganizationScope\(user\) && !getOrganizationScope\(\)\)[\s\S]*Navigate to="\/audit-trail"/, 'a designated auditor logging in without a selected scope must land on the audit reader');
+assert.match(scopeGate, /allowAuditWithoutScope && status !== 'checking'[\s\S]*audit-without-organization-scope/, 'scope-free audit access may render only after scope discovery has completed or failed closed');
+assert.match(auditTrail, /canFetchScopedAuditHistory\([\s\S]*hasSelectedOrganizationScope/, 'the audit page must gate scoped reads on validated scope state');
+assert.match(auditTrail, /<ScopedAuditHistoryStatus status=\{scopedAudit.status\} hasPermission=\{canViewScopedAudit\}/, 'the selected-scope reader must mount its permission-aware status component');
+assert.match(scopedAuditHistory, /status === 'blocked'[\s\S]*Select an organization and legal entity/, 'a blocked selected-scope audit reader must explain that exact-pair history needs a selected organization scope');
+assert.match(auditTrail, /useOrganizationAuditHistory\(canViewOrganizationAudit,[\s\S]*getOrganizationAuditScopesForHistory, adminService\.getOrganizationAuditLogsForHistory/, 'organization audit access must discover only server-designated organizations through its strict readers');
+assert.match(guardedAuditRead, /active && request === requestVersion\.current && key === readCurrentKey\.current\(\)/, 'audit reads may publish only while actor, selection and request remain current');
+assert.match(guardedAuditRead, /return \(\) => \{ active = false; \};/, 'unmounting a designated audit reader must invalidate pending responses');
+assert.match(organizationAuditHistory, /JSON\.stringify\(\[actor, scopes\.dataVersion, selectedId\]\)/, 'organization history must be bound to the actor, current designation generation and selected organization');
+assert.match(organizationAuditHistory, /history\.invalidate\(\);[\s\S]*selectedRef\.current = id/, 'switching designated organizations must invalidate prior rows immediately');
+assert.match(organizationAuditHistory, /options\.some\(option => option\.organizationId === id\)/, 'history selection must come from the current successful designation list');
+assert.match(api, /getDeploymentIntegrationEvents: async[\s\S]*hasPermission\(authService\.getCurrentUser\(\), 'audit\.deployment\.view'\)[\s\S]*\/api\/v1\/deployment-integration-events[\s\S]*normalizeIntegrationEventLog/, 'deployment integration history must use the same explicit deployment-auditor permission and the versioned reader without a local-storage fallback');
+assert.match(auditTrail, /useDeploymentAuditHistory\(canViewDeploymentAudit,[\s\S]*getDeploymentAuditLogsForHistory, adminService\.getDeploymentIntegrationEventsForHistory/, 'only a designated deployment auditor may use both strict presentation readers');
+assert.match(deploymentAuditHistory, /useAuditRead\(enabled, auditKey[\s\S]*useAuditRead\(enabled, integrationKey/, 'deployment histories must retain independent current-request state');
+assert.match(auditTrail, /canViewDeploymentAudit && <button[\s\S]*auditView === 'deployment-integration'[\s\S]*>Integration events/, 'the deployment integration tab must be hidden unless the current user has the protected deployment audit permission');
+assert.match(auditTrail, /auditView === 'deployment-integration'[\s\S]*canViewDeploymentAudit \? deploymentIntegrationLogs : \[\]/, 'the integration tab must render only its dedicated result while the current user retains the protected permission');
+assert.match(auditTrail, /selectedLog && \(auditView !== 'organization' \|\| organizationAudit\.ready\) && \(auditView !== 'scope' \|\| canExportScopedAudit\)/, 'organization and selected-scope detail readiness checks must remain intact');
+assert.match(auditTrail, /auditView !== 'deployment' \|\| canViewDeploymentAudit && deploymentAudit\.audit\.ready/, 'deployment audit detail requires effective permission and current loaded evidence');
+assert.match(auditTrail, /auditView !== 'deployment-integration' \|\| canViewDeploymentAudit && deploymentAudit\.integration\.ready/, 'deployment integration detail requires effective permission and current loaded evidence');
+assert.match(auditTrail, /selectedLogState && selectedLogState\.key === detailKey && selectedLogState\.revision === detailRevision/, 'every audit detail must retain its current actor and attempt identity');
+assert.match(auditTrail, /auditView === 'deployment-integration'[\s\S]*Identity fields and bearer action URLs are redacted/, 'the view must explain the null-scope boundary and redaction');
+assert.match(auditTrail, /const exportLogs = \(\) => \{\s*if \(auditView !== 'scope' \|\| !canExportScopedAudit \|\| !scopedAudit\.isCurrent\(\)\) return;/, 'deployment integration history must remain unavailable for export');
+assert.match(auditTrail, /const exportSelectedLog = \(\) => \{\s*if \(!selectedLog \|\| auditView !== 'scope' \|\| !canExportScopedAudit \|\| !scopedAudit\.isCurrent\(\)\) return;/, 'single deployment integration events must also remain unavailable for export');
+assert.match(sidebar, /name: 'Audit Trail', path: '\/audit-trail',[\s\S]*roles: ROUTE_ROLES\.auditTrail/, 'explicitly designated auditors must retain a sidebar path to the audit page');
+assert.match(header, /id: 'page-audit',[\s\S]*path: '\/audit-trail',[\s\S]*roles: ROUTE_ROLES\.auditTrail/, 'explicitly designated auditors must retain the audit page in navigation search');
+assert.match(header, /canLoadScopedWorkspaceData = canFetchScopedWorkspaceData\([\s\S]*Boolean\(getOrganizationScope\(\)\)[\s\S]*isDemoFallbackAllowed\(\)/, 'the application header must make its scoped preload decision from the validated scope and safe demo mode rules');
+assert.match(header, /if \(!canLoadScopedWorkspaceData\)[\s\S]*setAllEmployees\(\[\]\)[\s\S]*return;/, 'the application header must not request scoped workspace data when the helper denies it');
 assert.match(scopeGate, /\/api\/auth\/organization-scopes[\s\S]*status === 'choosing'[\s\S]*data-testid=\{`organization-scope-option-/, 'the scope gate must render authorized choices before mounting protected application content');
 assert.match(scopeGate, /No active organization access/, 'users with no currently authorized scope must fail closed');
 assert.match(runtimeTerminology, /if \(!getOrganizationScope\(\)\)[\s\S]*applyPersistedTerminology\(\{\}\)/, 'runtime profile data must not be requested before a scope is chosen');

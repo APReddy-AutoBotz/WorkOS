@@ -28,6 +28,39 @@ export interface UserPermissionGrant {
   createdAt?: string;
 }
 
+export interface OrganizationAuditScope {
+  organizationId: string;
+  organizationCode: string;
+  organizationName: string;
+  status: string;
+}
+
+export interface OrganizationAuditGrantUser {
+  id: string;
+  userName: string;
+  employeeId?: string | null;
+  displayName: string;
+  roles: string[];
+}
+
+export interface OrganizationAuditGrant {
+  id: string;
+  organizationId: string;
+  userId: string;
+  grantedBy?: string | null;
+  grantedByActiveRole: string;
+  createdAt: string;
+  userName: string;
+  employeeId?: string | null;
+  displayName: string;
+}
+
+export interface OrganizationAuditGrantConfig {
+  organizationId: string;
+  eligibleUsers: OrganizationAuditGrantUser[];
+  grants: OrganizationAuditGrant[];
+}
+
 export interface PermissionUserSummary {
   id: string;
   employeeRecordId?: string;
@@ -84,6 +117,11 @@ export interface AuditLog {
   userRole: string;
   activeRole?: string;
   source?: 'Web' | 'Teams' | 'Email' | 'Import' | 'System' | string;
+  correlationId?: string;
+  operationId?: string;
+  importBatchId?: string;
+  sourceIdentifier?: string;
+  importProcessingResult?: string;
   action: string;
   module: string;
   details: string;
@@ -106,10 +144,13 @@ export interface ImportExportLog {
   totalRows: number;
   validRows: number;
   errorRows: number;
+  schemaVersion?: string;
+  dryRun?: boolean;
   errors?: Array<{
     rowNumber: number;
     field?: string;
     message: string;
+    sourceIdentifier?: string | null;
   }>;
   userName: string;
   timestamp: string;

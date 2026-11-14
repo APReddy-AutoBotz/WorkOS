@@ -84,6 +84,9 @@ export const clearOrganizationScope = () => {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event('workos:organization-scope-changed'));
 };
 export const selectOrganizationScope = async (scope: OrganizationScope) => {
+  // Let long-running scoped operations retain a warning before authorization
+  // validation completes and the scope-change event triggers a full-page reload.
+  window.dispatchEvent(new Event('workos:organization-scope-switch-requested'));
   const scopes = await apiFetch<OrganizationScope[]>('GET', '/api/auth/organization-scopes');
   if (!scopes.some(item => item.organizationId === scope.organizationId && item.legalEntityId === scope.legalEntityId)) throw new Error('Organization scope is not authorized');
   sessionStorage.setItem(SCOPE_KEY, JSON.stringify(scope));
@@ -92,11 +95,65 @@ export const selectOrganizationScope = async (scope: OrganizationScope) => {
 
 // ─── Core fetch wrapper ───────────────────────────────────────────────────────
 
-type ApiError = { error: string; reason?: string };
+export type ApiErrorPayload = {
+  error?: string | {
+    code?: string;
+    message?: string;
+    correlationId?: string;
+    operationId?: string;
+  };
+  code?: string;
+  reason?: string;
+  correlationId?: string;
+  operationId?: string;
+};
 
-export const getApiHeaders = (): HeadersInit => {
+export type ApiClientErrorDetails = {
+  status: number;
+  code?: string;
+  correlationId?: string;
+  operationId?: string;
+};
+
+export class ApiClientError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly correlationId?: string;
+  readonly operationId?: string;
+
+  constructor(message: string, details: ApiClientErrorDetails) {
+    super(message);
+    this.name = 'ApiClientError';
+    this.status = details.status;
+    this.code = details.code;
+    this.correlationId = details.correlationId;
+    this.operationId = details.operationId;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export const parseApiClientError = (
+  status: number,
+  payload: unknown,
+  headers?: Pick<Headers, 'get'>,
+): ApiClientError => {
+  const body = payload && typeof payload === 'object' ? payload as ApiErrorPayload : {};
+  const envelope = body.error && typeof body.error === 'object' ? body.error : undefined;
+  const message = envelope?.message
+    || (typeof body.error === 'string' ? body.error : '')
+    || body.reason
+    || `API error ${status}`;
+  return new ApiClientError(message, {
+    status,
+    code: envelope?.code || body.code,
+    correlationId: envelope?.correlationId || body.correlationId || headers?.get('X-Correlation-ID') || undefined,
+    operationId: envelope?.operationId || body.operationId || headers?.get('X-Operation-ID') || undefined,
+  });
+};
+
+export const getApiHeaders = (scopeOverride?: OrganizationScope | null): HeadersInit => {
   const token = getToken();
-  const scope = getOrganizationScope();
+  const scope = scopeOverride === undefined ? getOrganizationScope() : scopeOverride;
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -108,26 +165,28 @@ async function apiFetch<T>(
   method: string,
   path: string,
   body?: unknown,
+  additionalHeaders: Record<string, string> = {},
+  scopeOverride?: OrganizationScope | null,
 ): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: getApiHeaders(),
+    headers: {...getApiHeaders(scopeOverride), ...additionalHeaders},
     credentials: 'include',
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
 
   if (res.status === 401) {
+    const payload = await res.json().catch(() => ({}));
     clearToken();
     if (window.location.pathname !== '/login') {
       window.location.href = '/login';
     }
-    throw new Error('Authentication required');
+    throw parseApiClientError(401, payload, res.headers);
   }
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = json as ApiError;
-    throw new Error(err.error || `API error ${res.status}`);
+    throw parseApiClientError(res.status, json, res.headers);
   }
   if (method !== 'GET' && path === '/api/organization-setup/terminology') {
     window.dispatchEvent(new Event('workos:organization-scope-changed'));
@@ -138,6 +197,8 @@ async function apiFetch<T>(
 export const api = {
   get:    <T>(path: string) => apiFetch<T>('GET', path),
   post:   <T>(path: string, body: unknown) => apiFetch<T>('POST', path, body),
+  postWithHeaders: <T>(path: string, body: unknown, headers: Record<string, string>) => apiFetch<T>('POST', path, body, headers),
+  postWithScope: <T>(path: string, body: unknown, scope: OrganizationScope | null) => apiFetch<T>('POST', path, body, {}, scope),
   put:    <T>(path: string, body: unknown) => apiFetch<T>('PUT', path, body),
   patch:  <T>(path: string, body: unknown) => apiFetch<T>('PATCH', path, body),
   delete: <T>(path: string, body?: unknown) => apiFetch<T>('DELETE', path, body),
@@ -320,13 +381,20 @@ export const normalizeTimesheetSummary = (
   };
 };
 
+const auditContextText = (value: unknown) => typeof value === 'string' && value.trim() ? value : undefined;
+
 export const normalizeAuditLog = (r: Record<string, unknown>): AuditLog => ({
   id: String(r.id),
   userId: String(r.user_id),
   userName: String(r.user_name),
   userRole: String(r.user_role),
-  activeRole: r.active_role ? String(r.active_role) : undefined,
-  source: r.source ? String(r.source) : undefined,
+  activeRole: auditContextText(r.active_role),
+  source: auditContextText(r.source),
+  correlationId: auditContextText(r.correlation_id),
+  operationId: auditContextText(r.operation_id),
+  importBatchId: auditContextText(r.import_batch_id),
+  sourceIdentifier: auditContextText(r.source_identifier),
+  importProcessingResult: auditContextText(r.import_processing_result),
   action: String(r.action),
   module: String(r.module),
   details: String(r.details),
@@ -349,6 +417,8 @@ export const normalizeImportExportLog = (r: Record<string, unknown>): ImportExpo
   totalRows: Number(r.total_rows),
   validRows: Number(r.valid_rows),
   errorRows: Number(r.error_rows),
+  schemaVersion: typeof r.schema_version === 'string' && r.schema_version.trim() ? r.schema_version : undefined,
+  dryRun: typeof r.dry_run === 'boolean' ? r.dry_run : undefined,
   errors: Array.isArray(r.errors) ? r.errors as ImportExportLog['errors'] : undefined,
   userName: String(r.user_name),
   timestamp: String(r.created_at),

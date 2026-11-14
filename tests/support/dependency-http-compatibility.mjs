@@ -1,6 +1,6 @@
 // Isolated, bounded loopback regression for GHSA-27r3-jxmh-p828.
 // The late-byte sequencing follows the upstream regression design:
-// https://github.com/expressjs/body-parser/commit/1260c38
+// Upstream reference: expressjs/body-parser commit1260c38.
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {once} from 'node:events';

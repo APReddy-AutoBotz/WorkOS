@@ -7,7 +7,13 @@ type GateStatus = 'checking' | 'choosing' | 'ready' | 'empty' | 'error';
 const sameScope = (left: OrganizationScope | null, right: OrganizationScope) =>
   Boolean(left && left.organizationId === right.organizationId && left.legalEntityId === right.legalEntityId);
 
-export const OrganizationScopeGate = ({ children }: { children: ReactNode }) => {
+export const OrganizationScopeGate = ({
+  children,
+  allowAuditWithoutScope = false,
+}: {
+  children: ReactNode;
+  allowAuditWithoutScope?: boolean;
+}) => {
   const [status, setStatus] = useState<GateStatus>('checking');
   const [scopes, setScopes] = useState<OrganizationScope[]>([]);
   const [selectedScope, setSelectedScope] = useState<OrganizationScope | null>(getOrganizationScope());
@@ -23,7 +29,15 @@ export const OrganizationScopeGate = ({ children }: { children: ReactNode }) => 
       try {
         const backendConnected = await checkBackend();
         if (!backendConnected) {
-          if (active) setStatus('ready');
+          if (allowAuditWithoutScope) {
+            clearOrganizationScope();
+            if (active) {
+              setSelectedScope(null);
+              setStatus('empty');
+            }
+          } else if (active) {
+            setStatus('ready');
+          }
           return;
         }
 
@@ -53,13 +67,17 @@ export const OrganizationScopeGate = ({ children }: { children: ReactNode }) => 
         }
       } catch (cause) {
         if (!active) return;
+        if (allowAuditWithoutScope) {
+          clearOrganizationScope();
+          setSelectedScope(null);
+        }
         setError(cause instanceof Error ? cause.message : 'Unable to load available organization scopes.');
         setStatus('error');
       }
     };
     void resolveScope();
     return () => { active = false; };
-  }, [retry]);
+  }, [retry, allowAuditWithoutScope]);
 
   const chooseScope = async (scope: OrganizationScope) => {
     const key = `${scope.organizationId}:${scope.legalEntityId}`;
@@ -84,6 +102,14 @@ export const OrganizationScopeGate = ({ children }: { children: ReactNode }) => 
         data-organization-id={selectedScope?.organizationId || ''}
         data-legal-entity-id={selectedScope?.legalEntityId || ''}
       >
+        {children}
+      </div>
+    );
+  }
+
+  if (allowAuditWithoutScope && status !== 'checking') {
+    return (
+      <div className="contents" data-testid="audit-without-organization-scope">
         {children}
       </div>
     );

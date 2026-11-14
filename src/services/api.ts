@@ -3,11 +3,11 @@
  * AUTO-DETECTS backend: if /api/health returns database:connected → uses REST API.
  * Otherwise → falls back to localStorage (demo mode). Zero code change needed to switch.
  */
-import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportExportLog, SystemSettings, CountryDirector, RoleDefinition, Client, CatalogItem, UtilizationReport, UtilizationReportMode, UserAccount, DataQualityReport, DashboardReport, LeaveType, LeavePolicy, HolidayCalendar, LeaveBalance, LeaveRequest, LeaveAvailabilityEntry, ApprovalRecord, ApprovalDelegation, ApprovalSlaReport, NotificationEvent, NotificationTemplate, NotificationPreference, NotificationDeliveryAttempt, IdentityProviderLink, EntraRoleMapping, TeamsUserLink, TeamsActionToken, IntegrationEventLog, IntegrationHealthReport, ResourcePlanningReport, WorkforceCommandCenterReport, PermissionConfig, PermissionDefinition, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant, OrganizationSetupReadiness, OrganizationProfile, LegalEntityProfile } from '../types';
+import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportExportLog, SystemSettings, CountryDirector, RoleDefinition, Client, CatalogItem, UtilizationReport, UtilizationReportMode, UserAccount, DataQualityReport, DashboardReport, LeaveType, LeavePolicy, HolidayCalendar, LeaveBalance, LeaveRequest, LeaveAvailabilityEntry, ApprovalRecord, ApprovalDelegation, ApprovalSlaReport, NotificationEvent, NotificationTemplate, NotificationPreference, NotificationDeliveryAttempt, IdentityProviderLink, EntraRoleMapping, TeamsUserLink, TeamsActionToken, IntegrationEventLog, IntegrationHealthReport, ResourcePlanningReport, WorkforceCommandCenterReport, PermissionConfig, PermissionDefinition, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant, OrganizationAuditScope, OrganizationAuditGrantConfig, OrganizationAuditGrant, OrganizationSetupReadiness, OrganizationProfile, LegalEntityProfile } from '../types';
 import { DataStorage, STORAGE_KEYS } from './storage';
 import { authService } from './authService';
 import {
-  api, checkBackend,
+  api, checkBackend, getOrganizationScope, ApiClientError, isDemoFallbackAllowed,
   normalizeEmployee, normalizeProject, normalizeAllocation,
   normalizeClient, normalizeTimesheetSummary, normalizeAuditLog,
   normalizeSettings, normalizeCatalogItem, normalizeRoleDefinition,
@@ -21,6 +21,8 @@ import {
   normalizeTeamsActionToken, normalizeIntegrationEventLog, normalizeIntegrationHealthReport,
   normalizeResourcePlanningReport, normalizeWorkforceCommandCenterReport,
 } from './apiClient';
+import type { OrganizationScope } from './apiClient';
+import {canFetchScopedAuditHistory} from './accessControl';
 import { buildResourcePlanningReport, getAllocationLoad, getLatestApprovedActualUtilization, getActiveAllocationsForEmployee, getDefaultUtilizationEligible, getUtilizationEligibleEmployees } from './calculations';
 import { roundMetric } from '../lib/format';
 import { validateDeactivateManager, validateEmployeeHierarchy } from './orgChart';
@@ -36,10 +38,17 @@ const sha256 = async (value: string) => {
 };
 const generateTemporaryPassword = () => `WOS-${crypto.randomUUID().slice(0, 8)}`;
 type CsvImportRow = Record<string, string>;
+const employeePreviewRowFields = [
+  'employeeId', 'name', 'email', 'designation', 'department', 'country', 'region', 'businessUnit',
+  'reportingManagerId', 'primaryCountryDirectorId', 'mappedCountryDirectorIds', 'utilizationEligible',
+  'joiningDate', 'exitDate', 'standardWeeklyHours', 'capacityType', 'contractType', 'entraObjectId',
+  'teamsUserId', 'roles', 'status',
+] as const;
 type ImportApplyError = {
   rowNumber: number;
   field?: string;
   message: string;
+  sourceIdentifier?: string | null;
 };
 type ImportApplyResult = {
   status: ImportExportLog['status'];
@@ -47,7 +56,21 @@ type ImportApplyResult = {
   validRows: number;
   errorRows: number;
   errors: ImportApplyError[];
+  replayed?: boolean;
   log?: ImportExportLog;
+};
+type VersionedImportResult = ImportApplyResult & {
+  schemaVersion: string;
+  dryRun: boolean;
+};
+
+const assertExpectedImportScope = (expectedScope?: OrganizationScope | null) => {
+  if (expectedScope === undefined) return;
+  const currentScope = getOrganizationScope();
+  if (expectedScope?.organizationId !== currentScope?.organizationId
+    || expectedScope?.legalEntityId !== currentScope?.legalEntityId) {
+    throw new Error('Organization or legal-entity scope changed before the import request was sent. Re-validate the CSV for the current scope.');
+  }
 };
 
 const actor = () => {
@@ -1705,6 +1728,19 @@ export const adminService = {
     if (!(await checkBackend())) return null;
     return api.get<OrganizationSetupReadiness>('/api/organization-setup/readiness');
   },
+  // Strict presentation reader: keep legacy Dashboard/report-export fallback semantics separate.
+  getScopedAuditHistory: async (): Promise<AuditLog[]> => {
+    if (!canFetchScopedAuditHistory(authService.getCurrentUser(), Boolean(getOrganizationScope()), isDemoFallbackAllowed())) {
+      throw new ApiClientError('Selected-scope audit access is required.', {status: 403});
+    }
+    // Production reads always reach the authoritative API; retry is not trapped by a cached health failure.
+    if (!isDemoFallbackAllowed() || await checkBackend()) {
+      const raw = await api.get<Record<string, unknown>[]>('/api/audit-logs');
+      return raw.map(normalizeAuditLog);
+    }
+    // Local evidence is permitted only in explicitly configured test/demo mode.
+    return DataStorage.get<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, []);
+  },
   getAuditLogs: async (): Promise<AuditLog[]> => {
     if (!hasPermission(authService.getCurrentUser(), 'audit.view')) {
       return [];
@@ -1719,6 +1755,81 @@ export const adminService = {
     }
     return DataStorage.get<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, []);
   },
+  getDeploymentAuditLogsForHistory: async (): Promise<AuditLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) {
+      throw new ApiClientError('Deployment audit access is required.', {status: 403});
+    }
+    return (await api.get<Record<string, unknown>[]>('/api/deployment-audit-logs')).map(normalizeAuditLog);
+  },
+  getDeploymentIntegrationEventsForHistory: async (): Promise<IntegrationEventLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) {
+      throw new ApiClientError('Deployment audit access is required.', {status: 403});
+    }
+    return (await api.get<Record<string, unknown>[]>('/api/v1/deployment-integration-events')).map(normalizeIntegrationEventLog);
+  },
+  getDeploymentAuditLogs: async (): Promise<AuditLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) return [];
+    if (!(await checkBackend())) return [];
+    try {
+      const raw = await api.get<Record<string, unknown>[]>('/api/deployment-audit-logs');
+      return raw.map(normalizeAuditLog);
+    } catch {
+      return [];
+    }
+  },
+  getDeploymentIntegrationEvents: async (): Promise<IntegrationEventLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.deployment.view')) return [];
+    if (!(await checkBackend())) return [];
+    try {
+      const raw = await api.get<Record<string, unknown>[]>('/api/v1/deployment-integration-events');
+      return raw.map(normalizeIntegrationEventLog);
+    } catch {
+      return [];
+    }
+  },
+  getOrganizationAuditScopesForHistory: async (): Promise<OrganizationAuditScope[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) {
+      throw new ApiClientError('Organization audit access is required.', {status: 403});
+    }
+    const rows = await api.get<Record<string, unknown>[]>('/api/organization-audit-scopes');
+    return rows.map(row => ({organizationId: String(row.organization_id), organizationCode: String(row.organization_code),
+      organizationName: String(row.organization_name), status: String(row.status)}));
+  },
+  getOrganizationAuditLogsForHistory: async (organizationId: string): Promise<AuditLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) {
+      throw new ApiClientError('Organization audit access is required.', {status: 403});
+    }
+    if (typeof organizationId !== 'string' || !organizationId.trim()) {
+      throw new ApiClientError('An authorized organization must be selected.', {status: 400});
+    }
+    const rows = await api.get<Record<string, unknown>[]>(`/api/organization-audit-logs?organizationId=${encodeURIComponent(organizationId)}`);
+    return rows.map(normalizeAuditLog);
+  },
+  getOrganizationAuditScopes: async (): Promise<OrganizationAuditScope[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) return [];
+    if (!(await checkBackend())) return [];
+    try {
+      const rows = await api.get<Record<string, unknown>[]>('/api/organization-audit-scopes');
+      return rows.map(row => ({
+        organizationId: String(row.organization_id),
+        organizationCode: String(row.organization_code),
+        organizationName: String(row.organization_name),
+        status: String(row.status),
+      }));
+    } catch {
+      return [];
+    }
+  },
+  getOrganizationAuditLogs: async (organizationId: string): Promise<AuditLog[]> => {
+    if (!hasPermission(authService.getCurrentUser(), 'audit.organization.view')) return [];
+    if (!(await checkBackend())) return [];
+    try {
+      const raw = await api.get<Record<string, unknown>[]>(`/api/organization-audit-logs?organizationId=${encodeURIComponent(organizationId)}`);
+      return raw.map(normalizeAuditLog);
+    } catch {
+      return [];
+    }
+  },
   getImportExportLogs: async (): Promise<ImportExportLog[]> => {
     if (await checkBackend()) {
       const raw = await api.get<Record<string, unknown>[]>('/api/import-export-logs');
@@ -1726,9 +1837,11 @@ export const adminService = {
     }
     return DataStorage.get<ImportExportLog[]>(STORAGE_KEYS.IMPORT_EXPORT_LOGS, []);
   },
-  saveImportExportLog: async (log: Omit<ImportExportLog, 'id' | 'timestamp' | 'userName'> & Partial<Pick<ImportExportLog, 'id' | 'timestamp' | 'userName'>>): Promise<ImportExportLog> => {
-    if (await checkBackend()) {
-      const raw = await api.post<Record<string, unknown>>('/api/import-export-logs', {
+  saveImportExportLog: async (log: Omit<ImportExportLog, 'id' | 'timestamp' | 'userName'> & Partial<Pick<ImportExportLog, 'id' | 'timestamp' | 'userName'>>, expectedScope: OrganizationScope | null, requireAuditConfirmation = false): Promise<ImportExportLog> => {
+    const backendAvailable = await checkBackend();
+    assertExpectedImportScope(expectedScope);
+    if (backendAvailable) {
+      const raw = await api.postWithScope<Record<string, unknown>>('/api/import-export-logs', {
         operation: log.operation,
         channel: log.channel,
         fileName: log.fileName,
@@ -1737,8 +1850,10 @@ export const adminService = {
         validRows: log.validRows,
         errorRows: log.errorRows,
         errors: log.errors,
-      });
-      await api.post('/api/audit-events', {
+      }, expectedScope);
+      // Both writes remain bound to the operation's captured organization/entity even
+      // if the UI switches scopes while the first request is in flight.
+      const auditWrite = api.postWithScope('/api/audit-events', {
         action: log.operation,
         module: 'Import / Export',
         details: `${log.operation} ${log.fileName} through ${log.channel} with ${log.totalRows} row${log.totalRows === 1 ? '' : 's'} (${log.status})`,
@@ -1752,9 +1867,12 @@ export const adminService = {
           validRows: log.validRows,
           errorRows: log.errorRows,
         },
-      }).catch(() => {});
+      }, expectedScope);
+      if (requireAuditConfirmation) await auditWrite;
+      else await auditWrite.catch(() => {});
       return normalizeImportExportLog(raw);
     }
+    if (requireAuditConfirmation) throw new Error('Export history and audit require an available backend.');
     const u = actor();
     const nextLog: ImportExportLog = {
       ...log,
@@ -1766,25 +1884,72 @@ export const adminService = {
     DataStorage.set(STORAGE_KEYS.IMPORT_EXPORT_LOGS, [nextLog, ...logs].slice(0, 100));
     return nextLog;
   },
-  applyEmployeeImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  applyEmployeeImport: async (fileName: string, rows: CsvImportRow[], idempotencyKey: string, clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
-    const raw = await api.post<Record<string, unknown>>('/api/imports/employees/apply', {
+    assertExpectedImportScope(expectedScope);
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/employees/apply', {
+      schemaVersion: 'employee-master/1',
       fileName,
       rows,
       totalRows,
       clientErrors,
-    });
+    }, {'Idempotency-Key': idempotencyKey});
     return {
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? rows.length),
       validRows: Number(raw.validRows ?? 0),
       errorRows: Number(raw.errorRows ?? 0),
       errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      replayed: raw.replayed === true,
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
-  applyClientImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  runVersionedEmployeeImport: async (request: {
+    rows: CsvImportRow[];
+    clientErrors?: ImportApplyError[];
+    totalRows: number;
+    idempotencyKey: string;
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
+    const rows = request.rows.map(row => {
+      // CSVs can contain arbitrary extra headers, including credential columns.
+      // Build the preview payload from the canonical nonsecret schema before fetch.
+      const safeRow = employeePreviewRowFields.reduce<CsvImportRow>((result, field) => {
+        if (Object.prototype.hasOwnProperty.call(row, field)) result[field] = row[field];
+        return result;
+      }, {});
+      return {...safeRow, initialPasswordPresent: Boolean(row.initialPassword)};
+    });
+    const clientErrors = (request.clientErrors || []).map(error => ({
+      rowNumber: error.rowNumber,
+      ...(error.field ? {field: error.field} : {}),
+      message: 'The Employee Master row failed preflight validation.',
+    }));
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/employees/apply', {
+      schemaVersion: 'employee-master/1',
+      dryRun: true,
+      fileName: 'Employee Master import.csv',
+      rows,
+      totalRows: request.totalRows,
+      clientErrors,
+    }, {'Idempotency-Key': request.idempotencyKey});
+    const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
+    return {
+      status: raw.status as ImportExportLog['status'],
+      totalRows: Number(raw.totalRows ?? request.totalRows),
+      validRows: Number(raw.validRows ?? 0),
+      errorRows: Number(raw.errorRows ?? 0),
+      errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      replayed: raw.replayed === true,
+      log: log ? normalizeImportExportLog(log) : undefined,
+      schemaVersion: typeof log?.schema_version === 'string' ? log.schema_version : '',
+      dryRun: log?.dry_run === true,
+    };
+  },
+  applyClientImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
+    if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/clients/apply', {
       fileName,
       rows,
@@ -1800,8 +1965,9 @@ export const adminService = {
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
-  applyProjectImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  applyProjectImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/projects/apply', {
       fileName,
       rows,
@@ -1817,8 +1983,129 @@ export const adminService = {
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
-  applyAllocationImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  runVersionedProjectImport: async (request: {
+    fileName: string;
+    rows: CsvImportRow[];
+    clientErrors?: ImportApplyError[];
+    totalRows: number;
+    dryRun: boolean;
+    idempotencyKey: string;
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/projects/apply', {
+      schemaVersion: 'project-master/1',
+      dryRun: request.dryRun,
+      fileName: request.fileName,
+      rows: request.rows,
+      totalRows: request.totalRows,
+      clientErrors: request.clientErrors || [],
+    }, {'Idempotency-Key': request.idempotencyKey});
+    const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
+    return {
+      status: raw.status as ImportExportLog['status'],
+      totalRows: Number(raw.totalRows ?? request.totalRows),
+      validRows: Number(raw.validRows ?? 0),
+      errorRows: Number(raw.errorRows ?? 0),
+      errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      log: log ? normalizeImportExportLog(log) : undefined,
+      schemaVersion: typeof log?.schema_version === 'string' ? log.schema_version : '',
+      dryRun: log?.dry_run === true,
+    };
+  },
+  runVersionedClientImport: async (request: {
+    fileName: string;
+    rows: CsvImportRow[];
+    clientErrors?: ImportApplyError[];
+    totalRows: number;
+    dryRun: boolean;
+    idempotencyKey: string;
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
+    if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/clients/apply', {
+      schemaVersion: 'client-master/1',
+      dryRun: request.dryRun,
+      fileName: request.fileName,
+      rows: request.rows,
+      totalRows: request.totalRows,
+      clientErrors: request.clientErrors || [],
+    }, {'Idempotency-Key': request.idempotencyKey});
+    const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
+    return {
+      status: raw.status as ImportExportLog['status'],
+      totalRows: Number(raw.totalRows ?? request.totalRows),
+      validRows: Number(raw.validRows ?? 0),
+      errorRows: Number(raw.errorRows ?? 0),
+      errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      log: log ? normalizeImportExportLog(log) : undefined,
+      schemaVersion: typeof log?.schema_version === 'string' ? log.schema_version : '',
+      dryRun: log?.dry_run === true,
+    };
+  },
+  runVersionedAllocationImport: async (request: {
+    fileName: string;
+    rows: CsvImportRow[];
+    clientErrors?: ImportApplyError[];
+    totalRows: number;
+    dryRun: boolean;
+    idempotencyKey: string;
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
+    if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/allocations/apply', {
+      schemaVersion: 'allocation-control/1',
+      dryRun: request.dryRun,
+      fileName: request.fileName,
+      rows: request.rows,
+      totalRows: request.totalRows,
+      clientErrors: request.clientErrors || [],
+    }, {'Idempotency-Key': request.idempotencyKey});
+    const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
+    return {
+      status: raw.status as ImportExportLog['status'],
+      totalRows: Number(raw.totalRows ?? request.totalRows),
+      validRows: Number(raw.validRows ?? 0),
+      errorRows: Number(raw.errorRows ?? 0),
+      errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      log: log ? normalizeImportExportLog(log) : undefined,
+      schemaVersion: typeof log?.schema_version === 'string' ? log.schema_version : '',
+      dryRun: log?.dry_run === true,
+    };
+  },
+  runVersionedTimesheetImport: async (request: {
+    fileName: string;
+    rows: CsvImportRow[];
+    clientErrors?: ImportApplyError[];
+    totalRows: number;
+    dryRun: boolean;
+    idempotencyKey: string;
+  }, expectedScope?: OrganizationScope | null): Promise<VersionedImportResult | null> => {
+    if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
+    const raw = await api.postWithHeaders<Record<string, unknown>>('/api/v1/imports/timesheets/apply', {
+      schemaVersion: 'timesheet-import/1',
+      dryRun: request.dryRun,
+      fileName: request.fileName,
+      rows: request.rows,
+      totalRows: request.totalRows,
+      clientErrors: request.clientErrors || [],
+    }, {'Idempotency-Key': request.idempotencyKey});
+    const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
+    return {
+      status: raw.status as ImportExportLog['status'],
+      totalRows: Number(raw.totalRows ?? request.totalRows),
+      validRows: Number(raw.validRows ?? 0),
+      errorRows: Number(raw.errorRows ?? 0),
+      errors: Array.isArray(raw.errors) ? raw.errors as ImportApplyError[] : [],
+      log: log ? normalizeImportExportLog(log) : undefined,
+      schemaVersion: typeof log?.schema_version === 'string' ? log.schema_version : '',
+      dryRun: log?.dry_run === true,
+    };
+  },
+  applyAllocationImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
+    if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/allocations/apply', {
       fileName,
       rows,
@@ -1834,8 +2121,9 @@ export const adminService = {
       log: raw.log && typeof raw.log === 'object' ? normalizeImportExportLog(raw.log as Record<string, unknown>) : undefined,
     };
   },
-  applyTimesheetImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length): Promise<ImportApplyResult | null> => {
+  applyTimesheetImport: async (fileName: string, rows: CsvImportRow[], clientErrors: ImportApplyError[] = [], totalRows = rows.length, expectedScope?: OrganizationScope | null): Promise<ImportApplyResult | null> => {
     if (!(await checkBackend())) return null;
+    assertExpectedImportScope(expectedScope);
     const raw = await api.post<Record<string, unknown>>('/api/imports/timesheets/apply', {
       fileName,
       rows,
@@ -1915,6 +2203,12 @@ export const adminService = {
     }
     requireLocalPermissionManager();
     const permission = PERMISSION_DEFINITIONS.find(item => item.key === permissionKey);
+    if (permissionKey === 'audit.deployment.view' && enabled) {
+      throw new Error('Deployment audit access can be granted only to individual users.');
+    }
+    if (permissionKey === 'audit.organization.view' && enabled) {
+      throw new Error('Organization audit access must be designated for a specific organization.');
+    }
     if (permission?.protected && roleName !== 'Admin') {
       throw new Error('Protected permissions can be assigned only to Admin.');
     }
@@ -1944,7 +2238,15 @@ export const adminService = {
     const account = accounts.find(item => item.employeeRecordId === userId || item.id === userId);
     const permission = PERMISSION_DEFINITIONS.find(item => item.key === permissionKey);
     if (!account) throw new Error('User was not found.');
-    if (permission?.protected && !account.roles.includes('Admin')) {
+    if (permissionKey === 'audit.deployment.view'
+        && (account.status !== 'Active' || account.roles.length === 0
+          || authService.getCurrentUser()?.id === account.employeeRecordId)) {
+      throw new Error('Deployment audit access requires a different active user with an assigned role.');
+    }
+    if (permissionKey === 'audit.organization.view') {
+      throw new Error('Organization audit access must be designated for a specific organization.');
+    }
+    if (permission?.protected && permissionKey !== 'audit.deployment.view' && !account.roles.includes('Admin')) {
       throw new Error('Protected permissions can be granted only to Admin users.');
     }
     const grants = DataStorage.get<UserPermissionGrant[]>(STORAGE_KEYS.PERMISSION_USER_GRANTS, []);
@@ -1984,6 +2286,48 @@ export const adminService = {
         await authService.refreshSession();
       }
     }
+  },
+  getOrganizationAuditGrantConfig: async (): Promise<OrganizationAuditGrantConfig> => {
+    const raw = await api.get<Record<string, unknown>>('/api/permissions/organization-audit-grants');
+    const eligibleUsers = Array.isArray(raw.eligibleUsers) ? raw.eligibleUsers as Record<string, unknown>[] : [];
+    const grants = Array.isArray(raw.grants) ? raw.grants as Record<string, unknown>[] : [];
+    return {
+      organizationId: String(raw.organizationId || ''),
+      eligibleUsers: eligibleUsers.map(row => ({
+        id: String(row.id),
+        userName: String(row.username || ''),
+        employeeId: row.employee_id == null ? null : String(row.employee_id),
+        displayName: String(row.display_name || row.username || ''),
+        roles: Array.isArray(row.roles) ? row.roles.map(String) : [],
+      })),
+      grants: grants.map(row => ({
+        id: String(row.id),
+        organizationId: String(row.organization_id),
+        userId: String(row.user_id),
+        grantedBy: row.granted_by == null ? null : String(row.granted_by),
+        grantedByActiveRole: String(row.granted_by_active_role || ''),
+        createdAt: String(row.created_at),
+        userName: String(row.username || ''),
+        employeeId: row.employee_id == null ? null : String(row.employee_id),
+        displayName: String(row.display_name || row.username || ''),
+      })),
+    };
+  },
+  grantOrganizationAuditAccess: async (userId: string): Promise<OrganizationAuditGrant> => {
+    const row = await api.post<Record<string, unknown>>('/api/permissions/organization-audit-grants', {userId});
+    return {
+      id: String(row.id),
+      organizationId: String(row.organization_id),
+      userId: String(row.user_id),
+      grantedBy: row.granted_by == null ? null : String(row.granted_by),
+      grantedByActiveRole: String(row.granted_by_active_role || ''),
+      createdAt: String(row.created_at),
+      userName: '',
+      displayName: '',
+    };
+  },
+  revokeOrganizationAuditAccess: async (grantId: string): Promise<void> => {
+    await api.delete(`/api/permissions/organization-audit-grants/${encodeURIComponent(grantId)}`);
   },
   getSettings: async (): Promise<SystemSettings> => {
     if (await checkBackend()) {

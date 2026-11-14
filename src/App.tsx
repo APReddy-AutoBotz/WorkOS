@@ -1,8 +1,9 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { AppLayout } from './components/Layout/AppLayout';
 import { authService } from './services/authService';
-import { hasRouteRole, ROUTE_ROLES } from './services/accessControl';
+import { getOrganizationScope } from './services/apiClient';
+import { canOpenAuditWithoutOrganizationScope, hasRouteRole, ROUTE_ROLES } from './services/accessControl';
 import { UserRole } from './types';
 import { EnterpriseFeatureFlag, isEnterpriseFeatureEnabled } from './config/featureFlags';
 import { RuntimeTerminology } from './config/RuntimeTerminology';
@@ -44,10 +45,17 @@ const AdminSettings = lazy(() => import('./pages/AdminSettings').then(module => 
 const Login = lazy(() => import('./pages/Login').then(module => ({ default: module.Login })));
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const location = useLocation();
   if (!authService.isAuthenticated()) {
     return <Navigate to="/login" replace />;
   }
-  return <OrganizationScopeGate><RuntimeTerminology>{children}</RuntimeTerminology></OrganizationScopeGate>;
+  const user = authService.getCurrentUser();
+  const canUseScopeFreeAudit = canOpenAuditWithoutOrganizationScope(user);
+  const auditScopeFreePath = canUseScopeFreeAudit
+    && ['/', '/audit', '/audit-trail'].includes(location.pathname);
+  return <OrganizationScopeGate allowAuditWithoutScope={auditScopeFreePath}>
+    <RuntimeTerminology>{children}</RuntimeTerminology>
+  </OrganizationScopeGate>;
 };
 
 const RoleRoute = ({ children, roles }: { children: React.ReactNode; roles: readonly UserRole[] }) => {
@@ -83,6 +91,9 @@ const getRoleHomePath = (role: UserRole) => {
 const DashboardRoute = () => {
   const user = authService.getCurrentUser();
   if (!user) return <Navigate to="/login" replace />;
+  if (canOpenAuditWithoutOrganizationScope(user) && !getOrganizationScope()) {
+    return <Navigate to="/audit-trail" replace />;
+  }
   if (!hasRouteRole(user, ROUTE_ROLES.dashboard)) {
     return <Navigate to={getRoleHomePath(user.role) || '/no-access'} replace />;
   }

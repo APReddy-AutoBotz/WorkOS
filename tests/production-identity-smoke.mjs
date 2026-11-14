@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
+import {syntheticCredential, rejectedConfigurationValues} from './support/synthetic-values.mjs';
 
 const {Pool} = pg;
 const databaseUrl = String(process.env.DATABASE_URL || '').trim();
@@ -90,7 +91,7 @@ const cleanEnvironment = (overrides = {}) => {
     RESET_DEMO_DATA: 'false',
     DATABASE_URL: databaseUrl,
     PGSSLMODE: 'disable',
-    API_SESSION_SECRET: 'workos-test-only-session-secret-with-at-least-32-characters',
+    API_SESSION_SECRET: syntheticCredential(),
     IDENTITY_PROVIDER: 'entra',
     ENTRA_TENANT_ID: '00000000-0000-0000-0000-000000000001',
     ENTRA_CLIENT_ID: '00000000-0000-0000-0000-000000000002',
@@ -277,6 +278,7 @@ const beginAuthorization = async () => {
 };
 
 const callbackRejections = [];
+let productionOutputForCallback = () => '';
 const assertCallbackRejected = async ({name, claimOverrides, expectedLocation = '/login?error=entra_callback_failed'}) => {
   const {nonce, state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = typeof claimOverrides === 'function'
@@ -289,7 +291,8 @@ const assertCallbackRejected = async ({name, claimOverrides, expectedLocation = 
   );
   const location = callback.headers.get('location');
   assert.equal(callback.status, 302, `${name} must terminate through a redirect`);
-  assert.equal(location, expectedLocation, `${name} must fail closed at the governed error route`);
+  assert.equal(location, expectedLocation,
+    `${name} must fail closed at the governed error route. Production server output: ${productionOutputForCallback()}`);
   assert.equal(hasSetCookie(callback.headers, 'workos_session'), false, `${name} must not create a WorkOS session`);
   callbackRejections.push({
     name,
@@ -364,7 +367,7 @@ try {
   results.push(await assertStartupFailure({
     name: 'placeholder-client-secret',
     port: positivePort + 15,
-    overrides: {ENTRA_CLIENT_SECRET: 'replace_me'},
+    overrides: {ENTRA_CLIENT_SECRET: rejectedConfigurationValues.placeholder},
     expected: /ENTRA_CLIENT_SECRET must be a configured non-placeholder secret/,
   }));
 
@@ -380,6 +383,7 @@ try {
   });
   const production = spawnProduction(environment);
   productionChild = production.child;
+  productionOutputForCallback = production.output;
 
   let health = null;
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -495,12 +499,28 @@ try {
   assert.equal(afterRejectedUsers, beforeUsers, 'rejected callbacks must not create users');
   assert.equal(afterRejectedEmployees, beforeEmployees, 'rejected callbacks must not create employees');
 
-  const syntheticUser = await pool.query("insert into users (username, email, entra_object_id, status) values ('synthetic-user', 'synthetic.user@example.test', 'synthetic-provider-subject', 'Active') returning id");
+  await pool.query(`insert into country_directors (id,name,region)
+    values ('synthetic-login-director','Synthetic login director','Synthetic region')`);
+  const syntheticEmployee = await pool.query(`insert into employees
+      (id,employee_id,name,email,designation,department,country,primary_country_director_id,status,
+        entra_object_id,organization_id,legal_entity_id)
+    values ('synthetic-login-employee','SYNTHETIC-LOGIN-EMP','Synthetic login employee',
+      'synthetic.employee@example.test','Consultant','Synthetic','US','synthetic-login-director','Active',
+      'synthetic-provider-subject','org-default','legal-default') returning id`);
+  const syntheticUser = await pool.query(`insert into users
+      (username,employee_id,employee_record_id,email,entra_object_id,status)
+    values ('synthetic-user','SYNTHETIC-LOGIN-EMP',$1,'synthetic.user@example.test','synthetic-provider-subject','Active')
+    returning id`, [syntheticEmployee.rows[0].id]);
+  await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id)
+    values ($1,'org-default','legal-default')`, [syntheticUser.rows[0].id]);
   await pool.query('insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1', [syntheticUser.rows[0].id]);
   const {state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = {};
   const callbackUrl = `${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`;
-  const callback = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
+  const callback = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {
+    cookie: stateCookie,
+    'x-operation-id': 'caller-selected-callback-operation',
+  }}, 2000);
   assert.equal(callback.status, 302);
   assert.equal(
     callback.headers.get('location'),
@@ -508,10 +528,43 @@ try {
     `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
   );
   assert.equal(hasSetCookie(callback.headers, 'workos_session'), true, 'valid linked callback must create a WorkOS session');
+  const callbackOperationId = callback.headers.get('x-operation-id');
+  assert.match(callbackOperationId || '', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    'the side-effecting Entra callback must expose its server-generated operation ID');
+  assert.notEqual(callbackOperationId, 'caller-selected-callback-operation',
+    'the callback must ignore a caller-supplied operation ID');
+  const syncedIdentityLink = await pool.query(`select id,provider_subject,provenance_reference
+    from identity_provider_links where employee_id=$1 and provider='entra'`, [syntheticEmployee.rows[0].id]);
+  assert.equal(syncedIdentityLink.rowCount, 1, 'a legacy identity match must retain its Entra link upsert');
+  assert.equal(syncedIdentityLink.rows[0].provider_subject, 'synthetic-provider-subject');
+  assert.match(syncedIdentityLink.rows[0].provenance_reference,
+    /^identity-link-ref-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    'the Entra callback must use the server-owned identity-link provenance reference');
+  const loginEvent = await pool.query(`select response_payload
+    from integration_event_logs where event_type='EntraLoginSucceeded' and entity_id=$1 order by created_at desc limit 1`,
+  [syntheticUser.rows[0].id]);
+  assert.equal(loginEvent.rows[0]?.response_payload.identityLinkProvenanceReference,
+    syncedIdentityLink.rows[0].provenance_reference,
+  'the successful Entra login result must reference the identity-link record without using its business ID');
+  assert.equal(loginEvent.rows[0]?.response_payload.operationId, callbackOperationId,
+    'the Entra login event must carry the same server-generated operation ID as the callback response');
+  const loginAudit = await pool.query(`select new_value,operation_id,correlation_id from audit_logs
+    where action='Entra Login' and user_id=$1 order by created_at desc limit 1`,
+    [syntheticUser.rows[0].id]);
+  assert.equal(loginAudit.rows[0]?.new_value.identityLinkProvenanceReference,
+    syncedIdentityLink.rows[0].provenance_reference,
+  'the Entra login audit must retain the safe identity-link provenance reference');
+  assert.equal(loginAudit.rows[0]?.operation_id, callbackOperationId,
+    'the Entra login audit must persist the callback operation ID');
+  assert.ok(loginAudit.rows[0]?.correlation_id,
+    'the Entra login audit must retain the callback correlation ID');
   const replay = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
   assert.equal(replay.status, 302, 'consumed callback replay must reach the OAuth state handler');
   assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');
+  await pool.query('delete from identity_provider_links where employee_id=$1', [syntheticEmployee.rows[0].id]);
   await pool.query("delete from users where username = 'synthetic-user'");
+  await pool.query('delete from employees where id=$1', [syntheticEmployee.rows[0].id]);
+  await pool.query("delete from country_directors where id='synthetic-login-director'");
 
   const discoveryRequestsBeforeOutage = discoveryRequests;
   discoveryUnavailable = true;
@@ -566,6 +619,7 @@ try {
     recoveryReadiness: recoveredReadiness.status,
   });
 } finally {
+  productionOutputForCallback = () => '';
   await closeDiscovery();
   await terminate(productionChild);
   await pool.end();

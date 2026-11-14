@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const server = readFileSync('server/index.mjs', 'utf8');
+const notificationRouter = readFileSync('server/modules/notifications/notification-router.mjs', 'utf8');
+const leaveRouter = readFileSync('server/modules/leave/leave-router.mjs', 'utf8');
 
 assert.match(server, /const buildEmployeeScopeWhere = \(req, params, employeeAlias = 'e'\)/, 'employee data scope helper must exist');
 assert.match(server, /const buildProjectScopeWhere = \(req, params, projectAlias = 'p'\)/, 'project data scope helper must exist');
@@ -29,18 +31,18 @@ assert.doesNotMatch(
 );
 
 assert.match(
-  server,
-  /app\.patch\('\/api\/notifications\/:id\/read'[\s\S]*const where = buildEmployeeScopeWhere\(req, params, 'e'\)[\s\S]*where ne\.id = \$1 and e\.id = ne\.recipient_employee_id and \$\{where\}/,
+  notificationRouter,
+  /router\.patch\('\/notifications\/:id\/read'[\s\S]*const where = buildEmployeeScopeWhere\(req, params, 'e'\)[\s\S]*where ne\.id = \$1 and e\.id = ne\.recipient_employee_id and \$\{where\}/,
   'notification read mutations must be employee-scope checked',
 );
 assert.match(
-  server,
-  /app\.post\('\/api\/notification-preferences'[\s\S]*const scopeWhere = buildEmployeeScopeWhere\(req, scopeParams, 'e'\)[\s\S]*Notification preference is outside active-role data scope/,
+  notificationRouter,
+  /router\.post\('\/notification-preferences'[\s\S]*const scopeWhere = buildEmployeeScopeWhere\(req, scopeParams, 'e'\)[\s\S]*Notification preference is outside active-role data scope/,
   'notification preference saves must be employee-scope checked',
 );
 assert.match(
-  server,
-  /app\.post\('\/api\/leave\/requests'[\s\S]*buildEmployeeScopeWhere\(req, scopeParams, 'e'\)[\s\S]*Leave request is outside active-role data scope/,
+  leaveRouter,
+  /router\.post\('\/leave\/requests'[\s\S]*buildEmployeeScopeWhere\(req, scopeParams, 'e'\)[\s\S]*Leave request is outside active-role data scope/,
   'leave request submission must be employee-scope checked',
 );
 assert.match(

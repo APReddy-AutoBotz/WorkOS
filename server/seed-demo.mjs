@@ -419,9 +419,10 @@ const seed = async () => {
     if (lifecycleInvariant.rowCount) throw new Error('Demo worker identity, scope, or lifecycle invariant failed.');
 
     await query(client, `
-      insert into audit_logs (user_id, user_name, user_role, module, action, entity_type, entity_id, details)
-      values ($1,$2,$3,$4,$5,$6,$7,$8)
-    `, ['system', 'Seeder', 'Admin', 'Seed', reset ? 'Reset Demo Seed' : 'Demo Seed', 'DemoDataset', 'demo', 'Seeded backend demo data for multi-user testing']);
+      insert into audit_logs (user_id, user_name, user_role, module, action, entity_type, entity_id, details, organization_id, legal_entity_id)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    `, ['system', 'Seeder', 'Admin', 'Seed', reset ? 'Reset Demo Seed' : 'Demo Seed', 'DemoDataset', 'demo',
+      'Seeded backend demo data for multi-user testing', DEMO_ORGANIZATION_ID, DEMO_LEGAL_ENTITY_ID]);
 
     await client.query('commit');
     return {

@@ -1,5 +1,11 @@
 # WorkOS Release and Operations Runbook
 
+## WOS03 integration verification
+
+Run `node scripts/scan-bootstrap.mjs --self-test` as a required gate. It scans the candidate and checks adversarial fixtures; passing dependency audit alone does not satisfy it. Test credentials must remain ephemeral or explicitly approved placeholders. Keep the validation runner on Ubuntu24.04 while using the current Playwright lock; Ubuntu26.04 browser installation failed before tests in run43557067008. Changing the runner or browser version requires fresh browser acceptance.
+
+Before accepting PR41 against updated main, run its existing browser, migration, identity and API checks plus `npm run test:import-audit-journey` with a disposable local PostgreSQL service and installed Chromium. The journey uses two synthetic named accounts and the actual UI/API/database; it must not reach external providers. See [integration acceptance](../tasks/WOS-03-INTEGRATION-ACCEPTANCE.md). This increment adds no migration. A code rollback must preserve existing audit/import evidence and migration history; do not erase evidence to restore an older UI. Passing this journey does not establish retention-policy or buyer OIDC acceptance.
+
 ## Purpose
 
 Provide a repeatable buyer-owned release, deployment, verification, rollback and operating process. Provider-specific commands will be added with implementation artifacts; this document defines mandatory control flow.

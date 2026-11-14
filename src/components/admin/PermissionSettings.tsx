@@ -3,8 +3,10 @@ import { Lock, Search, ShieldCheck, SlidersHorizontal, UserPlus } from 'lucide-r
 import { Badge } from '../ui/Badge';
 import { cn } from '../../lib/utils';
 import { adminService } from '../../services/api';
-import { PERMISSION_DEFINITIONS, PROTECTED_PERMISSION_KEYS, SYSTEM_ROLES } from '../../services/permissions';
-import { PermissionConfig, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant, UserRole } from '../../types';
+import { hasPermission, PERMISSION_DEFINITIONS, PROTECTED_PERMISSION_KEYS, SYSTEM_ROLES } from '../../services/permissions';
+import { OrganizationAuditGrantConfig, PermissionConfig, PermissionKey, PermissionUserSummary, RolePermissionSetting, UserPermissionGrant, UserRole } from '../../types';
+import { authService } from '../../services/authService';
+import { getOrganizationScope } from '../../services/apiClient';
 
 type NoticeState = { type: 'success' | 'warning' | 'danger' | 'info'; message: string };
 
@@ -40,6 +42,10 @@ export const PermissionSettings = ({ onNotice }: PermissionSettingsProps) => {
   const [selectedUserId, setSelectedUserId] = useState('');
   const [selectedPermission, setSelectedPermission] = useState<PermissionKey>('dashboard.view');
   const [savingKey, setSavingKey] = useState('');
+  const [organizationAuditConfig, setOrganizationAuditConfig] = useState<OrganizationAuditGrantConfig | null>(null);
+  const [organizationAuditUserId, setOrganizationAuditUserId] = useState('');
+  const [organizationAuditError, setOrganizationAuditError] = useState('');
+  const canManagePermissions = hasPermission(authService.getCurrentUser(), 'permissions.manage');
 
   const load = async () => {
     setConfig(await adminService.getPermissionConfig());
@@ -47,6 +53,14 @@ export const PermissionSettings = ({ onNotice }: PermissionSettingsProps) => {
 
   useEffect(() => {
     load();
+    if (canManagePermissions && getOrganizationScope()) {
+      adminService.getOrganizationAuditGrantConfig()
+        .then(config => {
+          setOrganizationAuditConfig(config);
+          setOrganizationAuditUserId(config.eligibleUsers[0]?.id || '');
+        })
+        .catch(error => setOrganizationAuditError(error instanceof Error ? error.message : 'Organization audit grants could not be loaded.'));
+    }
   }, []);
 
   const visiblePermissions = useMemo(() => {
@@ -66,6 +80,8 @@ export const PermissionSettings = ({ onNotice }: PermissionSettingsProps) => {
     roleSettings.find(setting => setting.roleName === roleName && setting.permissionKey === permissionKey)?.enabled ?? false;
 
   const isLocked = (roleName: UserRole, permissionKey: PermissionKey) =>
+    permissionKey === 'audit.deployment.view' ||
+    permissionKey === 'audit.organization.view' ||
     (PROTECTED_PERMISSION_KEYS.has(permissionKey) && roleName !== 'Admin') ||
     (permissionKey === 'permissions.manage' && roleName === 'Admin');
 
@@ -116,6 +132,43 @@ export const PermissionSettings = ({ onNotice }: PermissionSettingsProps) => {
     } : current);
     setSavingKey('');
     onNotice({ type: 'success', message: `${grant.permissionKey} was removed from ${grant.displayName || grant.userName || 'the user'}.` });
+  };
+
+  const reloadOrganizationAuditGrants = async () => {
+    const config = await adminService.getOrganizationAuditGrantConfig();
+    setOrganizationAuditConfig(config);
+    setOrganizationAuditUserId(current => config.eligibleUsers.some(user => user.id === current)
+      ? current
+      : config.eligibleUsers[0]?.id || '');
+  };
+
+  const grantOrganizationAudit = async () => {
+    if (!organizationAuditUserId) return;
+    setSavingKey(`organization-audit:${organizationAuditUserId}`);
+    setOrganizationAuditError('');
+    try {
+      await adminService.grantOrganizationAuditAccess(organizationAuditUserId);
+      await reloadOrganizationAuditGrants();
+      onNotice({type: 'success', message: 'Organization audit access was designated. The user will receive the updated access on their next sign-in.'});
+    } catch (error) {
+      setOrganizationAuditError(error instanceof Error ? error.message : 'Organization audit access could not be granted.');
+    } finally {
+      setSavingKey('');
+    }
+  };
+
+  const revokeOrganizationAudit = async (grantId: string) => {
+    setSavingKey(`organization-audit-revoke:${grantId}`);
+    setOrganizationAuditError('');
+    try {
+      await adminService.revokeOrganizationAuditAccess(grantId);
+      await reloadOrganizationAuditGrants();
+      onNotice({type: 'success', message: 'Organization audit access was revoked.'});
+    } catch (error) {
+      setOrganizationAuditError(error instanceof Error ? error.message : 'Organization audit access could not be revoked.');
+    } finally {
+      setSavingKey('');
+    }
   };
 
   const previewPermissions = (user: PermissionUserSummary | undefined) => {
@@ -217,6 +270,67 @@ export const PermissionSettings = ({ onNotice }: PermissionSettingsProps) => {
       </div>
       </div>
 
+      {canManagePermissions && (
+        <section className="rounded-2xl border border-slate-100 p-5 space-y-4" aria-labelledby="organization-audit-access-heading">
+          <div>
+            <h4 id="organization-audit-access-heading" className="text-sm font-bold text-heading">Organization audit access</h4>
+            <p className="mt-1 text-[10px] font-medium text-slate-500">
+              Designate an active user for the currently selected organization. This grants access only to organization-owned audit records and does not grant legal-entity data access.
+            </p>
+          </div>
+          {!getOrganizationScope() && <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">Select a verified organization and legal entity before managing organization auditors.</p>}
+          {organizationAuditError && <p className="rounded-xl bg-rose-50 p-3 text-xs text-rose-700" role="alert">{organizationAuditError}</p>}
+          {organizationAuditConfig && (
+            <>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Organization {organizationAuditConfig.organizationId}
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                <select
+                  aria-label="Select user for organization audit access"
+                  value={organizationAuditUserId}
+                  onChange={event => setOrganizationAuditUserId(event.target.value)}
+                  disabled={organizationAuditConfig.eligibleUsers.length === 0}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  {organizationAuditConfig.eligibleUsers.length === 0 && <option value="">No eligible active users</option>}
+                  {organizationAuditConfig.eligibleUsers.map(user => (
+                    <option key={user.id} value={user.id}>{user.displayName} · {user.roles.join(', ')}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void grantOrganizationAudit()}
+                  disabled={!organizationAuditUserId || Boolean(savingKey)}
+                  className="btn-primary px-4 py-2.5 text-xs flex items-center justify-center gap-2"
+                >
+                  <UserPlus size={14} /> Designate auditor
+                </button>
+              </div>
+              <div className="space-y-2">
+                {organizationAuditConfig.grants.length === 0 && <p className="rounded-xl bg-slate-50 p-4 text-xs text-slate-500">No users are designated for this organization.</p>}
+                {organizationAuditConfig.grants.map(grant => (
+                  <div key={grant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                    <div>
+                      <p className="text-xs font-bold text-heading">{grant.displayName}</p>
+                      <p className="text-[10px] text-slate-500">{grant.employeeId || grant.userName} · designated {new Date(grant.createdAt).toLocaleDateString()}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void revokeOrganizationAudit(grant.id)}
+                      disabled={Boolean(savingKey)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-danger"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-6">
         <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5 space-y-4">
           <div>
@@ -270,7 +384,7 @@ export const PermissionSettings = ({ onNotice }: PermissionSettingsProps) => {
                     onChange={(event) => setSelectedPermission(event.target.value)}
                     className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs outline-none focus:ring-2 focus:ring-primary/20"
                   >
-                    {PERMISSION_DEFINITIONS.map(permission => (
+                    {PERMISSION_DEFINITIONS.filter(permission => permission.key !== 'audit.organization.view').map(permission => (
                       <option key={permission.key} value={permission.key}>{permission.label}</option>
                     ))}
                   </select>

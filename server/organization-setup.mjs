@@ -117,7 +117,15 @@ const legalSelect = `select le.id,le.organization_id,le.code,p.legal_name name,p
   p.effective_from profile_effective_from,p.effective_to profile_effective_to
   from legal_entities le join legal_entity_profile_versions p on p.legal_entity_id=le.id and p.organization_id=le.organization_id`;
 
-export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, requireAuth, requirePermission, audit }) => {
+export const registerOrganizationSetupRoutes = ({
+  app,
+  pool,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  audit,
+  mountPaths = ['/api/organization-setup'],
+}) => {
   const router = Router();
   router.use(requireDatabase, requireAuth, async (req, res, next) => {
     try {
@@ -175,7 +183,8 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       await client.query(`update organizations set name=$2,updated_at=now()
         where id=$1 and $3::date <= current_date`,[req.organizationScope.organizationId,parsed.data.name,parsed.data.effectiveFrom]);
       await audit(client,req,{module:'Organization Setup',action:'Update Organization Profile',entityType:'Organization',entityId:req.organizationScope.organizationId,
-        oldValue:{...latest,name:organization.name},newValue:{...result.rows[0],name:parsed.data.name},details:'Versioned organization profile using authoritative request scope'});
+        oldValue:{...latest,name:organization.name},newValue:{...result.rows[0],name:parsed.data.name},details:'Versioned organization profile using authoritative request scope',
+        organizationScope:{organizationId:req.organizationScope.organizationId,legalEntityId:null}});
       const response=await client.query(`${profileSelect} where o.id=$1 and p.id=$2`,[req.organizationScope.organizationId,result.rows[0].id]);
       await client.query('commit');res.json(response.rows[0]);
     }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Organization profile version conflicts with existing history',code:'ORGANIZATION_PROFILE_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Organization profile mutation failed',code:'ORGANIZATION_PROFILE_MUTATION_FAILED'});}finally{client.release();}
@@ -244,7 +253,8 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       if(!previous)await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,true)
         on conflict(user_id,organization_id,legal_entity_id) do update set active=true`,[req.user.sub,req.organizationScope.organizationId,id]);
       await audit(client,req,{module:'Organization Setup',action:previous?'Update Legal Entity':'Create Legal Entity',entityType:'Legal Entity',entityId:id,
-        oldValue:previous?{entity:previous,profile:exactVersion||latest}:null,newValue:{entity:entity.rows[0],profile:profile.rows[0]},details:`${previous?'Updated':'Created'} legal entity in authoritative organization scope`});
+        oldValue:previous?{entity:previous,profile:exactVersion||latest}:null,newValue:{entity:entity.rows[0],profile:profile.rows[0]},details:`${previous?'Updated':'Created'} legal entity in authoritative organization scope`,
+        organizationScope:previous?req.organizationScope:{organizationId:req.organizationScope.organizationId,legalEntityId:null}});
       const response=await client.query(`${legalSelect} where le.id=$1 and p.id=$2`,[id,profile.rows[0].id]);
       await client.query('commit');res.status(previous?200:201).json(response.rows[0]);
     }catch(error){await client.query('rollback');if(error.code==='23505')return res.status(409).json({error:'Legal entity code or identity already exists',code:'LEGAL_ENTITY_UNIQUENESS_CONFLICT'});if(error.code==='23P01'&&error.constraint==='legal_entity_registration_identifier_no_overlap')return res.status(409).json({error:'Registration identifier is already assigned during an overlapping effective period',code:'LEGAL_ENTITY_IDENTIFIER_CONFLICT',field:'registrationIdentifier'});if(error.code==='23P01'&&error.constraint==='legal_entity_tax_identifier_no_overlap')return res.status(409).json({error:'Tax identifier is already assigned during an overlapping effective period',code:'LEGAL_ENTITY_IDENTIFIER_CONFLICT',field:'taxIdentifier'});if(error.code==='23P01')return res.status(409).json({error:'Legal entity profile version conflicts with existing history',code:'LEGAL_ENTITY_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Legal entity mutation failed',code:'LEGAL_ENTITY_MUTATION_FAILED'});}finally{client.release();}
@@ -489,7 +499,8 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
       if(!exact&&latest&&parsed.data.effectiveFrom<dateOnly(latest.effective_from)){await client.query('rollback');return res.status(409).json({error:'Terminology version is stale',code:'TERMINOLOGY_VERSION_CONFLICT'});}
       let result;if(exact) result=await client.query('update terminology_versions set terms=$3,created_by=$4 where organization_id=$1 and effective_from=$2 returning *',[req.organizationScope.organizationId,parsed.data.effectiveFrom,JSON.stringify(parsed.data.terms),req.user.sub]);
       else {if(latest)await client.query("update terminology_versions set effective_to=($2::date-interval '1 day')::date where organization_id=$1 and effective_to is null",[req.organizationScope.organizationId,parsed.data.effectiveFrom]);result=await client.query('insert into terminology_versions(organization_id,terms,effective_from,created_by) values($1,$2,$3,$4) returning *',[req.organizationScope.organizationId,JSON.stringify(parsed.data.terms),parsed.data.effectiveFrom,req.user.sub]);}
-      await audit(client,req,{module:'Organization Setup',action:exact?'Update Terminology':'Version Terminology',entityType:'Terminology',entityId:`${req.organizationScope.organizationId}:${parsed.data.effectiveFrom}`,oldValue:exact||null,newValue:result.rows[0],details:'Updated effective-dated terminology labels and help text'});
+      await audit(client,req,{module:'Organization Setup',action:exact?'Update Terminology':'Version Terminology',entityType:'Terminology',entityId:`${req.organizationScope.organizationId}:${parsed.data.effectiveFrom}`,oldValue:exact||null,newValue:result.rows[0],details:'Updated effective-dated terminology labels and help text',
+        organizationScope:{organizationId:req.organizationScope.organizationId,legalEntityId:null}});
       await client.query('commit');res.status(exact?200:201).json(result.rows[0]);
     }catch(error){await client.query('rollback');if(['23P01','23505'].includes(error.code))return res.status(409).json({error:'Terminology version conflicts with existing history',code:'TERMINOLOGY_VERSION_CONFLICT'});console.error(error);res.status(500).json({error:'Terminology mutation failed'});}finally{client.release();}
   });
@@ -525,8 +536,11 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
         join employees e on e.id=u.employee_record_id and e.organization_id=s.organization_id and e.legal_entity_id=s.legal_entity_id
         join identity_provider_links i on i.employee_id=e.id and i.provider='entra' and i.status='Linked'
         where s.organization_id=$1 and s.legal_entity_id=$2 and s.active=true) identity,
-      exists(select 1 from audit_logs a where a.module='Import'
-        and a.new_value->>'organization_id'=$1 and a.new_value->>'legal_entity_id'=$2) imports,
+      exists(select 1 from audit_logs a
+        where a.module='Import' and a.action like 'Import %'
+          and ((a.organization_id=$1 and a.legal_entity_id=$2)
+            or (a.organization_id is null and a.legal_entity_id is null
+              and a.new_value->>'organization_id'=$1 and a.new_value->>'legal_entity_id'=$2))) imports,
       (select count(*)=3 from system_settings where (key='currency' and jsonb_typeof(value)='string' and length(value#>>'{}')>0)
         or (key='expectedWeeklyHours' and jsonb_typeof(value)='number' and (value#>>'{}')::numeric>0)
         or (key='timesheetPolicyMaxHours' and jsonb_typeof(value)='number' and (value#>>'{}')::numeric>0)) commercial_defaults,
@@ -621,5 +635,6 @@ export const registerOrganizationSetupRoutes = ({ app, pool, requireDatabase, re
     if(!result.rowCount)return res.status(404).json({error:'Worker history not found'});
     res.json(result.rows);
   });
-  app.use('/api/organization-setup',router);
+  for (const mountPath of mountPaths) app.use(mountPath, router);
+  return router;
 };

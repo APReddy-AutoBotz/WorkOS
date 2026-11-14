@@ -3,6 +3,13 @@ import { downloadCsv } from './csv';
 
 import { productConfig } from '../config/productConfig';
 import { term, termPlural, termPluralTitle, termTitle } from '../config/terminology';
+import { getOrganizationScope } from '../services/apiClient';
+import type { OrganizationScope } from '../services/apiClient';
+const matchesScope = (expected: OrganizationScope | null, current: OrganizationScope | null) => (
+  expected?.organizationId === current?.organizationId
+  && expected?.legalEntityId === current?.legalEntityId
+);
+export type CsvExportOutcome = 'completed' | 'completed-original-scope' | 'cancelled' | 'history-unconfirmed';
 export interface ReportExportOption {
   id: string;
   title: string;
@@ -27,21 +34,31 @@ export const downloadAuditedCsv = async (
   rows: object[],
   channel: string,
   status: 'Success' | 'Partial' | 'Failed' = 'Success',
-) => {
+  expectedScope: OrganizationScope | null = getOrganizationScope(),
+): Promise<CsvExportOutcome> => {
+  if (!matchesScope(expectedScope, getOrganizationScope())) return 'cancelled';
   downloadCsv(fileName, rows);
 
-  await adminService.saveImportExportLog({
-    operation: 'Export',
-    channel,
-    fileName,
-    status,
-    totalRows: rows.length,
-    validRows: status === 'Failed' ? 0 : rows.length,
-    errorRows: status === 'Failed' ? rows.length : 0,
-  });
+  try {
+    await adminService.saveImportExportLog({
+      operation: 'Export',
+      channel,
+      fileName,
+      status,
+      totalRows: rows.length,
+      validRows: status === 'Failed' ? 0 : rows.length,
+      errorRows: status === 'Failed' ? rows.length : 0,
+    }, expectedScope, true);
+  } catch {
+    // The browser download already started. A failed or scope-invalidated history
+    // or audit write must not be reported as though the file was cancelled.
+    return 'history-unconfirmed';
+  }
+  return matchesScope(expectedScope, getOrganizationScope()) ? 'completed' : 'completed-original-scope';
 };
 
 export const downloadReportExport = async (id: string) => {
+  const expectedScope = getOrganizationScope();
   const option = getReportExportOptions().find(item => item.id === id);
   if (!option) throw new Error(`Unknown report export: ${id}`);
 
@@ -71,5 +88,5 @@ export const downloadReportExport = async (id: string) => {
     }));
   }
 
-  await downloadAuditedCsv(option.fileName, rows, option.title);
+  return downloadAuditedCsv(option.fileName, rows, option.title, 'Success', expectedScope);
 };

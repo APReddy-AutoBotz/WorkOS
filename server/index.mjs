@@ -11,7 +11,25 @@ import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from
 import {validateRuntimeEnvironment} from './environment.mjs';
 import {registerHealthRoutes} from './health.mjs';
 import { listAuthorizedOrganizationScopes, registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
-import { disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
+import {createRequestContextMiddleware} from './api/request-context.mjs';
+import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/error-contract.mjs';
+import {createIdentityAccessMiddleware, readCookie} from './modules/identity-access/middleware.mjs';
+import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
+import {recordAuditEvent} from './modules/audit/audit-record.mjs';
+import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
+import {createOrganizationAuditRouter} from './modules/audit/organization-audit-router.mjs';
+import {redactIntegrationHistoryRows} from './modules/audit/scoped-history-view.mjs';
+import {attachImportErrorSourceIdentifiers, importErrorRowSchema, resolveImportApplyRowNumbers} from './modules/imports/import-error-provenance.mjs';
+import {safeEmployeeImportDryRunErrors, validateEmployeeImportDryRun} from './modules/imports/employee-import-dry-run.mjs';
+import {createImportHistoryRouter} from './modules/imports/import-history-router.mjs';
+import {createProjectImportRouter} from './modules/imports/project-import-router.mjs';
+import {createOperationalImportRouter} from './modules/imports/operational-import-router.mjs';
+import {createProjectCodeLockKey, createScopedIdempotencyLockKey, hashEmployeeImportRequest, hashImportRequest, normalizeEmployeeImportClientErrors, normalizeIdempotencyKey, redactCredentialEchoes} from './modules/imports/idempotency.mjs';
+import {createIntegrationHistoryRouter} from './modules/integrations/integration-history-router.mjs';
+import {createNotificationRouter} from './modules/notifications/notification-router.mjs';
+import {createLeaveRouter} from './modules/leave/leave-router.mjs';
+import {createAvailabilityReportRouter} from './modules/reports/availability-report-router.mjs';
+import { assertWorkerMayReactivate, disableLinkedWorkerIdentity, initializeNewWorkerLifecycle, synchronizeWorkerReactivation } from './worker-lifecycle.mjs';
 import { assertReportingPeriodAllows, REPORTING_PERIOD_OPERATIONS, ReportingPeriodError, sendReportingPeriodError } from './reporting-periods.mjs';
 
 const { Pool } = pg;
@@ -31,7 +49,13 @@ const pool = new Pool({
 const round1 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
 
 app.set('trust proxy', 1);
-app.use(cors({ origin: process.env.APP_URL || 'http://localhost:3000', credentials: true }));
+app.use(cors({
+  origin: process.env.APP_URL || 'http://localhost:3000',
+  credentials: true,
+  exposedHeaders: ['X-Correlation-ID', 'X-Operation-ID'],
+}));
+app.use('/api', createRequestContextMiddleware());
+app.use('/api/v1', versionedApiResponseContract);
 app.use(express.json({ limit: '1mb' }));
 
 const signToken = (payload) => {
@@ -58,6 +82,13 @@ const verifyToken = (token) => {
   }
 };
 
+const {requireIdentity, requireAuth} = createIdentityAccessMiddleware({
+  verifyToken,
+  database: pool,
+  resolveOrganizationScope,
+  allowTestFallback: () => process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true',
+});
+
 const loginAttempts = new Map();
 const loginRateLimit = (req, res, next) => {
   const windowMs = 15 * 60 * 1000;
@@ -80,54 +111,6 @@ const loginRateLimit = (req, res, next) => {
   next();
 };
 
-const readCookie = (req, name) => {
-  const cookieHeader = req.headers.cookie || '';
-  return cookieHeader
-    .split(';')
-    .map(part => part.trim())
-    .find(part => part.startsWith(`${name}=`))
-    ?.slice(name.length + 1);
-};
-
-const attachVerifiedIdentity = (req, res) => {
-  const authHeader = req.headers.authorization || '';
-  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
-  const cookieToken = readCookie(req, 'workos_session');
-  const payload = verifyToken(bearerToken || cookieToken);
-  if (!payload) {
-    res.status(401).json({ error: 'Authentication required' });
-    return false;
-  }
-  req.user = payload;
-  return true;
-};
-
-// Identity-only routes may establish or refresh a session before the user has
-// chosen one of several authorized data scopes. They must not read or mutate
-// organization data without the separate requireAuth scope check below.
-const requireIdentity = (req, res, next) => {
-  if (attachVerifiedIdentity(req, res)) next();
-};
-
-const requireAuth = async (req, res, next) => {
-  if (!attachVerifiedIdentity(req, res)) return;
-  try {
-    const scope = await resolveOrganizationScope(pool, req);
-    req.organizationScope = scope;
-    req.user.organizationId = scope.organizationId;
-    req.user.legalEntityId = scope.legalEntityId;
-    next();
-  } catch (error) {
-    const allowFallback = process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true';
-    if (allowFallback && error?.code === '42P01') {
-      req.organizationScope = { organizationId: 'org-default', legalEntityId: 'legal-default' };
-      next();
-      return;
-    }
-    res.status(error?.statusCode || 503).json({ error: 'Authoritative organization scope is unavailable', code: error?.code || 'ORG_SCOPE_UNAVAILABLE' });
-  }
-};
-
 const requireRoles = (...roles) => (req, res, next) => {
   const activeRole = req.user?.activeRole;
   if (!roles.includes(activeRole)) {
@@ -137,6 +120,8 @@ const requireRoles = (...roles) => (req, res, next) => {
   next();
 };
 
+const deploymentAuditPermissionKey = 'audit.deployment.view';
+const organizationAuditPermissionKey = 'audit.organization.view';
 const systemRoles = ['Admin', 'HR', 'CountryDirector', 'ProjectManager', 'TeamLead', 'Employee'];
 const permissionDefinitions = [
   ['dashboard.view', 'Home', 'Overview Dashboard', false],
@@ -170,12 +155,14 @@ const permissionDefinitions = [
   ['integrations.teams_actions', 'Integrations', 'Teams Actions', false],
   ['imports.manage', 'Admin', 'Import / Export', false],
   ['audit.view', 'Admin', 'Audit Trail', true],
+  [deploymentAuditPermissionKey, 'Admin', 'Deployment Audit View', true],
+  [organizationAuditPermissionKey, 'Admin', 'Organization Audit View', true],
   ['settings.manage', 'Admin', 'Governance Settings', false],
   ['permissions.manage', 'Admin', 'Permission Settings', true],
 ];
 const protectedPermissionKeys = new Set(permissionDefinitions.filter(([, , , protectedCore]) => protectedCore).map(([key]) => key));
 const defaultRolePermissions = {
-  Admin: permissionDefinitions.map(([key]) => key),
+  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey].includes(key)).map(([key]) => key),
   HR: ['dashboard.view', 'employees.view', 'employees.manage', 'employees.password_reset', 'projects.view', 'projects.manage', 'projects.status_update', 'clients.view', 'clients.manage', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'leave.admin', 'approvals.view', 'notifications.view', 'notifications.manage', 'integrations.identity', 'integrations.teams', 'integrations.teams_actions', 'settings.manage'],
   CountryDirector: ['dashboard.view', 'employees.view', 'projects.view', 'clients.view', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
   ProjectManager: ['pm_workspace.view', 'employees.view', 'projects.view', 'projects.status_update', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
@@ -187,7 +174,11 @@ const permissionPayloadDefinitions = () => permissionDefinitions.map(([key, modu
   key,
   module,
   label,
-  description: label,
+  description: key === deploymentAuditPermissionKey
+    ? 'Read null-scope deployment audit records through an explicit individual user grant.'
+    : key === organizationAuditPermissionKey
+      ? 'Read organization-scoped audit records through an explicit per-organization user grant.'
+      : label,
   protected: Boolean(protectedCore),
 }));
 
@@ -206,7 +197,17 @@ const getEffectivePermissionsForUser = async (client, userId, activeRole) => {
       'select permission_key from user_permission_grants where user_id = $1',
       [userId],
     );
-    return [...new Set([...rolePermissions, ...grantResult.rows.map(row => row.permission_key)])];
+    const effectivePermissions = [...new Set([...rolePermissions, ...grantResult.rows.map(row => row.permission_key)])];
+    try {
+      const organizationAuditGrant = await client.query(
+        'select 1 from organization_audit_grants where user_id = $1 limit 1',
+        [userId],
+      );
+      if (organizationAuditGrant.rowCount > 0) effectivePermissions.push(organizationAuditPermissionKey);
+    } catch (error) {
+      if (error?.code !== '42P01') throw error;
+    }
+    return [...new Set(effectivePermissions)];
   } catch (error) {
     if (error?.code === '42P01') return getDefaultPermissionsForRole(activeRole);
     throw error;
@@ -226,6 +227,14 @@ const requirePermission = (permissionKey) => async (req, res, next) => {
     console.error(error);
     res.status(500).json({ error: 'Permission check failed' });
   }
+};
+
+const hasActiveAssignedRole = async (client, userId, activeRole) => {
+  const result = await client.query(`select 1 from users u
+    join user_roles ur on ur.user_id=u.id
+    join roles r on r.id=ur.role_id
+    where u.id=$1 and u.status='Active' and r.name=$2`, [userId, activeRole]);
+  return result.rowCount > 0;
 };
 
 const verifyPassword = async (password, passwordHash) => {
@@ -337,12 +346,12 @@ const splitPipeList = (value) => {
   return String(value || '').split('|').map(item => item.trim()).filter(Boolean);
 };
 const normalizeImportKey = (value) => String(value || '').trim().toLowerCase();
-const collectDuplicateImportRows = (rows, getKeys) => {
+const collectDuplicateImportRows = (rows, getKeys, getRowNumber = index => index + 2) => {
   const seen = new Map();
   const duplicateRowNumbers = new Set();
   const errors = [];
   rows.forEach((row, index) => {
-    const rowNumber = index + 2;
+    const rowNumber = getRowNumber(index);
     for (const { field, value, label } of getKeys(row)) {
       const normalizedValue = normalizeImportKey(value);
       if (!normalizedValue) continue;
@@ -451,45 +460,27 @@ const getSetting = async (key, fallback) => {
   return raw === undefined ? fallback : raw;
 };
 
-const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '').split(',')[0].trim();
+const audit = recordAuditEvent;
 
-const audit = async (client, req, { module, action, entityType, entityId, oldValue, newValue, details, reason, source = 'Web' }) => {
-  await client.query(`
-    insert into audit_logs (
-      user_id, user_name, user_role, active_role, source, module, action, entity_type, entity_id,
-      old_value, new_value, details, reason, ip_address, session_id
-    )
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-  `, [
-    req.user?.sub || 'system',
-    req.user?.username || 'system',
-    req.user?.activeRole || 'system',
-    req.user?.activeRole || 'system',
-    source,
-    module,
-    action,
-    entityType,
-    entityId,
-    oldValue ? JSON.stringify(oldValue) : null,
-    newValue ? JSON.stringify(newValue) : null,
-    details,
-    reason || null,
-    getRequestIp(req) || null,
-    req.user?.sub || null,
-  ]);
-};
-
-const workerExitDependencies = async (client, employeeId, { organizationId, legalEntityId }) => client.query(`select kind,id from (
+const workerExitDependencies = async (client, employeeId, { organizationId, legalEntityId }, simulatedDirectReportIds) => {
+  const directReportQuery = Array.isArray(simulatedDirectReportIds)
+    ? `union all select 'direct_report',id from unnest($4::text[]) as simulated_reports(id)`
+    : `union all select 'direct_report',id from employees where reporting_manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status<>'Exited'`;
+  const params = Array.isArray(simulatedDirectReportIds)
+    ? [employeeId, organizationId, legalEntityId, simulatedDirectReportIds]
+    : [employeeId, organizationId, legalEntityId];
+  return client.query(`select kind,id from (
   select 'active_assignment' kind,id from project_allocations where employee_id=$1 and organization_id=$2 and legal_entity_id=$3 and status='Active'
   union all select 'pending_approval',id::text from approval_records where subject_employee_id=$1 and status='Pending'
   union all select 'open_work',id::text from timesheets where employee_id=$1 and organization_id=$2 and legal_entity_id=$3 and status in ('Draft','Submitted')
   union all select 'project_owner',id from projects where manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status in ('Proposed','Active','On Hold')
-  union all select 'direct_report',id from employees where reporting_manager_id=$1 and organization_id=$2 and legal_entity_id=$3 and status<>'Exited'
-) d limit 101`, [employeeId, organizationId, legalEntityId]);
+  ${directReportQuery}
+) d limit 101`, params);
+};
 
 const isoDateOnly = value => typeof value === 'string' ? value.slice(0, 10) : value.toISOString().slice(0, 10);
 
-const assertWorkerMayExit = async (client, employee, scope, effectiveFrom) => {
+const assertWorkerMayExit = async (client, employee, scope, effectiveFrom, {simulatedDirectReportIds} = {}) => {
   if (!employee) return effectiveFrom;
   if (employee.status === 'Exited') {
     const terminal = (await client.query(`select effective_from from worker_history where employee_id=$1 and organization_id=$2 and legal_entity_id=$3 and status='Exited' order by effective_from desc limit 1 for update`,
@@ -507,7 +498,7 @@ const assertWorkerMayExit = async (client, employee, scope, effectiveFrom) => {
     }
     return authoritativeExitDate;
   }
-  const dependencies = await workerExitDependencies(client, employee.id, scope);
+  const dependencies = await workerExitDependencies(client, employee.id, scope, simulatedDirectReportIds);
   if (dependencies.rowCount) {
     const error = new Error('Worker has active dependencies');
     error.code = 'WORKER_DEPENDENCY_CONFLICT';
@@ -852,7 +843,8 @@ const verifyEntraIdToken = async (idToken, { nonce, config }) => {
 
 const userAuthSelect = `
   select u.id, u.username, u.employee_id, u.email, u.must_change_password, u.status,
-    e.id as employee_record_id, e.name, cd.id as country_director_id,
+    e.id as employee_record_id, e.organization_id as employee_organization_id,
+    e.legal_entity_id as employee_legal_entity_id, e.name, cd.id as country_director_id,
     coalesce(json_agg(distinct r.name) filter (where r.name is not null), '[]') as roles
   from users u
   left join employees e on e.id = u.employee_record_id
@@ -869,7 +861,7 @@ const fetchUserAuthRowByWhere = async (clientOrPool, whereSql, params) => {
   const result = await clientOrPool.query(`
     ${userAuthSelect}
     ${whereSql}
-    group by u.id, e.id, e.name, cd.id
+    group by u.id, e.id, e.organization_id, e.legal_entity_id, e.name, cd.id
     limit 1
   `, params);
   return result.rows[0] || null;
@@ -1108,6 +1100,7 @@ const sendNotification = async (client, req, {
           entityId: entityId || event.id,
           status: 'Success',
           responsePayload: metadata,
+          organizationScope: req?.organizationScope,
         });
       }
     } catch (error) {
@@ -1126,6 +1119,7 @@ const sendNotification = async (client, req, {
         entityId: entityId || event.id,
         status: 'Failed',
         responsePayload: { error: error.message },
+        organizationScope: req?.organizationScope,
       });
     }
   }
@@ -1191,6 +1185,11 @@ app.get('/api/auth/entra/start', requireDatabase, async (req, res) => {
 });
 
 app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req, res) => {
+  // This OAuth callback is a GET for protocol compatibility, but consumes state
+  // and may synchronize an identity link. Give this side-effect boundary its
+  // own server-generated operation ID without changing GET handling globally.
+  req.operationId = crypto.randomUUID();
+  res.setHeader('X-Operation-ID', req.operationId);
   const client = await pool.connect();
   try {
     const code = req.query.code ? String(req.query.code) : '';
@@ -1239,14 +1238,19 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
         entityType: 'IdentityProviderLink',
         entityId: providerSubject || upn || null,
         status: 'Failed',
-        responsePayload: { reason: 'No active linked user', upn, providerSubject },
+        responsePayload: { reason: 'No active linked user', upn, providerSubject, operationId: req.operationId },
       });
       await client.query('commit');
       res.redirect('/login?error=entra_unlinked_user');
       return;
     }
+    const loginScope = user.employee_organization_id && user.employee_legal_entity_id
+      ? { organizationId: user.employee_organization_id, legalEntityId: user.employee_legal_entity_id }
+      : null;
+    req.organizationScope = loginScope;
+    let identityLinkProvenanceReference = null;
     if (providerSubject && user.employee_record_id) {
-      await client.query(`
+      const identityLink = await client.query(`
         insert into identity_provider_links (id, employee_id, provider, provider_subject, provider_upn, status)
         values ('identity-link-' || gen_random_uuid()::text, $1, 'entra', $2, $3, 'Linked')
         on conflict (employee_id, provider) do update set
@@ -1254,7 +1258,9 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
           provider_upn = excluded.provider_upn,
           status = 'Linked',
           updated_at = now()
+        returning provenance_reference
       `, [user.employee_record_id, providerSubject, upn || null]);
+      identityLinkProvenanceReference = identityLink.rows[0]?.provenance_reference || null;
       await client.query('update employees set entra_object_id = coalesce(entra_object_id, $2), updated_at = now() where id = $1', [user.employee_record_id, providerSubject]);
     }
     const mappedRoles = await mappedRolesFromEntraGroups(client, claims.groups || []);
@@ -1268,10 +1274,13 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
       responsePayload: {
         upn,
         providerSubject,
+        identityLinkProvenanceReference,
+        operationId: req.operationId,
         mappedRoles,
         groupCount: Array.isArray(claims.groups) ? claims.groups.length : 0,
         groupOverage: Boolean(claims._claim_names?.groups),
       },
+      organizationScope: loginScope,
     });
     req.user = { sub: user.id, username: user.username, activeRole: session.activeRole };
     await audit(client, req, {
@@ -1280,7 +1289,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
       entityType: 'User',
       entityId: user.id,
       details: `Signed in through Microsoft Entra as ${session.activeRole}`,
-      newValue: { upn, activeRole: session.activeRole, mappedRoles },
+      newValue: { upn, identityLinkProvenanceReference, activeRole: session.activeRole, mappedRoles },
       source: 'System',
     });
     await client.query('commit');
@@ -1390,14 +1399,14 @@ app.post('/api/auth/logout', (_req, res) => {
 
 // Scope discovery deliberately authenticates identity without resolving a
 // context first; it is the only endpoint used to choose among multiple scopes.
-app.get('/api/auth/organization-scopes', requireDatabase, requireIdentity, async (req, res) => {
+const listOrganizationScopes = async (req, res) => {
   try {
     res.json(await listAuthorizedOrganizationScopes(pool, req.user.sub));
   } catch (error) {
     console.error(error);
     res.status(503).json({ error: 'Authoritative organization scopes are unavailable', code: 'ORG_SCOPE_UNAVAILABLE' });
   }
-});
+};
 
 app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res) => {
   const schema = z.object({ role: z.string().min(1) });
@@ -1463,7 +1472,7 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
   }
 });
 
-app.get('/api/auth/me', requireDatabase, requireIdentity, async (req, res) => {
+const refreshIdentitySession = async (req, res) => {
   try {
     const result = await pool.query(`
       select u.id, u.username, u.employee_id, u.email, u.must_change_password, u.status,
@@ -1523,9 +1532,18 @@ app.get('/api/auth/me', requireDatabase, requireIdentity, async (req, res) => {
     console.error(error);
     res.status(500).json({ error: 'Session refresh failed' });
   }
-});
+};
 
-app.post('/api/auth/change-password', requireDatabase, requireAuth, async (req, res) => {
+const identityReadRouteDependencies = {
+  requireDatabase,
+  requireIdentity,
+  listOrganizationScopes,
+  refreshSession: refreshIdentitySession,
+};
+app.use('/api/auth', createIdentityReadRouter(identityReadRouteDependencies));
+app.use('/api/v1/auth', createIdentityReadRouter(identityReadRouteDependencies));
+
+app.post('/api/auth/change-password', requireDatabase, requireIdentity, async (req, res) => {
   const schema = z.object({
     currentPassword: z.string().min(1),
     newPassword: z.string().min(1),
@@ -1570,6 +1588,8 @@ app.post('/api/auth/change-password', requireDatabase, requireAuth, async (req, 
       entityType: 'User',
       entityId: user.id,
       details: `Changed password for ${user.username}`,
+      // Password changes affect the account across organization scopes.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json({ status: 'ok', mustChangePassword: false });
@@ -2113,9 +2133,25 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
       res.status(422).json({ error: 'Project manager must reference an active employee' });
       return;
     }
-    const previous = parsed.data.id
-      ? (await client.query('select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0]
+    const projectLookupParams = [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId];
+    const observedPrevious = parsed.data.id
+      ? (await client.query('select project_code from projects where id = $1 and organization_id = $2 and legal_entity_id = $3', projectLookupParams)).rows[0]
       : null;
+    const projectCodeLockKeys = [...new Set([
+      createProjectCodeLockKey({organizationId: req.organizationScope.organizationId, projectCode: parsed.data.project_code}),
+      ...(observedPrevious ? [createProjectCodeLockKey({organizationId: req.organizationScope.organizationId, projectCode: observedPrevious.project_code})] : []),
+    ])].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+    for (const projectCodeLockKey of projectCodeLockKeys) {
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [projectCodeLockKey]);
+    }
+    const previous = parsed.data.id
+      ? (await client.query('select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3 for update', projectLookupParams)).rows[0]
+      : null;
+    if (Boolean(observedPrevious) !== Boolean(previous) || (observedPrevious && observedPrevious.project_code !== previous.project_code)) {
+      await client.query('rollback');
+      res.status(409).json({error: 'Project changed while saving; retry the request'});
+      return;
+    }
     if (parsed.data.id && !previous) {
       const unavailableId = (await client.query('select 1 from projects where id = $1', [parsed.data.id])).rows[0];
       if (unavailableId) {
@@ -3212,704 +3248,29 @@ const ensureLeaveBalanceForRequest = async (client, employee, leaveTypeId, year,
   return { leaveType, policy, balance };
 };
 
-const leavePolicySelect = `
-  select lp.*,
-    coalesce(array_agg(lpt.leave_type_id order by lpt.leave_type_id) filter (where lpt.leave_type_id is not null), '{}') as leave_type_ids
-  from leave_policies lp
-  left join leave_policy_types lpt on lpt.policy_id = lp.id
-  group by lp.id
-`;
+app.use('/api', createLeaveRouter({
+  pool,
+  run,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  buildEmployeeScopeWhere,
+  audit,
+  getBusinessLeaveDays,
+  getLeaveYear,
+  ensureLeaveBalanceForRequest,
+  refreshLeaveBalancesForEmployee,
+  upsertApprovalRecord,
+  decideApprovalRecord,
+}));
 
-app.get('/api/leave/types', requireDatabase, requireAuth, requirePermission('leave.self_service'), (_req, res) => {
-  run(res, 'select * from leave_types order by active desc, name');
-});
-
-app.post('/api/leave/types', requireDatabase, requireAuth, requirePermission('leave.admin'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    code: z.string().min(1),
-    name: z.string().min(1),
-    paid: z.boolean().default(true),
-    requires_approval: z.boolean().default(true),
-    active: z.boolean().default(true),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = parsed.data.id ? (await client.query('select * from leave_types where id = $1', [parsed.data.id])).rows[0] : null;
-    const result = await client.query(`
-      insert into leave_types (id, code, name, paid, requires_approval, active)
-      values (coalesce($1, 'leave-type-' || gen_random_uuid()::text), upper($2), $3, $4, $5, $6)
-      on conflict (id) do update set code = upper(excluded.code), name = excluded.name, paid = excluded.paid,
-        requires_approval = excluded.requires_approval, active = excluded.active, updated_at = now()
-      returning *
-    `, [parsed.data.id || null, parsed.data.code, parsed.data.name, parsed.data.paid, parsed.data.requires_approval, parsed.data.active]);
-    await audit(client, req, {
-      module: 'Leave',
-      action: previous ? 'Update Leave Type' : 'Create Leave Type',
-      entityType: 'LeaveType',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `${previous ? 'Updated' : 'Created'} leave type ${result.rows[0].name}`,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Leave type save failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/leave/policies', requireDatabase, requireAuth, requirePermission('leave.self_service'), (_req, res) => {
-  run(res, `${leavePolicySelect} order by lp.status desc, lp.name`);
-});
-
-app.post('/api/leave/policies', requireDatabase, requireAuth, requirePermission('leave.admin'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    name: z.string().min(1),
-    country: z.string().min(1).default('Global'),
-    annual_allowance_days: z.number().min(0).max(366),
-    carry_forward_days: z.number().min(0).max(366).default(0),
-    accrual_method: z.string().default('Annual'),
-    status: z.enum(['Active', 'Inactive']).default('Active'),
-    leave_type_ids: z.array(z.string()).default([]),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = parsed.data.id ? (await client.query(`${leavePolicySelect} having lp.id = $1`, [parsed.data.id])).rows[0] : null;
-    const result = await client.query(`
-      insert into leave_policies (id, name, country, annual_allowance_days, carry_forward_days, accrual_method, status)
-      values (coalesce($1, 'leave-policy-' || gen_random_uuid()::text), $2, $3, $4, $5, $6, $7)
-      on conflict (id) do update set name = excluded.name, country = excluded.country,
-        annual_allowance_days = excluded.annual_allowance_days, carry_forward_days = excluded.carry_forward_days,
-        accrual_method = excluded.accrual_method, status = excluded.status, updated_at = now()
-      returning *
-    `, [parsed.data.id || null, parsed.data.name, parsed.data.country, parsed.data.annual_allowance_days, parsed.data.carry_forward_days, parsed.data.accrual_method, parsed.data.status]);
-    await client.query('delete from leave_policy_types where policy_id = $1', [result.rows[0].id]);
-    for (const leaveTypeId of parsed.data.leave_type_ids) {
-      await client.query('insert into leave_policy_types (policy_id, leave_type_id) values ($1, $2) on conflict do nothing', [result.rows[0].id, leaveTypeId]);
-    }
-    const next = (await client.query(`${leavePolicySelect} having lp.id = $1`, [result.rows[0].id])).rows[0];
-    await audit(client, req, {
-      module: 'Leave',
-      action: previous ? 'Update Leave Policy' : 'Create Leave Policy',
-      entityType: 'LeavePolicy',
-      entityId: next.id,
-      oldValue: previous,
-      newValue: next,
-      details: `${previous ? 'Updated' : 'Created'} leave policy ${next.name}`,
-    });
-    await client.query('commit');
-    res.json(next);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Leave policy save failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/holiday-calendars', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (_req, res) => {
-  try {
-    const result = await pool.query(`
-      select hc.*,
-        coalesce(json_agg(json_build_object('id', h.id, 'calendar_id', h.calendar_id, 'name', h.name, 'holiday_date', h.holiday_date, 'holiday_type', h.holiday_type) order by h.holiday_date)
-          filter (where h.id is not null), '[]') as holidays
-      from holiday_calendars hc
-      left join holidays h on h.calendar_id = hc.id
-      group by hc.id
-      order by hc.calendar_year desc, hc.country, hc.name
-    `);
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Holiday calendar load failed' });
-  }
-});
-
-app.post('/api/holiday-calendars', requireDatabase, requireAuth, requirePermission('leave.admin'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    name: z.string().min(1),
-    country: z.string().min(1).default('Global'),
-    year: z.number().int().min(2000).max(2100),
-    status: z.enum(['Active', 'Inactive']).default('Active'),
-    holidays: z.array(z.object({
-      id: z.string().optional(),
-      name: z.string().min(1),
-      date: z.string().min(10),
-      type: z.string().default('Public'),
-    })).default([]),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = parsed.data.id ? (await client.query('select * from holiday_calendars where id = $1', [parsed.data.id])).rows[0] : null;
-    const result = await client.query(`
-      insert into holiday_calendars (id, name, country, calendar_year, status)
-      values (coalesce($1, 'holiday-calendar-' || gen_random_uuid()::text), $2, $3, $4, $5)
-      on conflict (id) do update set name = excluded.name, country = excluded.country,
-        calendar_year = excluded.calendar_year, status = excluded.status, updated_at = now()
-      returning *
-    `, [parsed.data.id || null, parsed.data.name, parsed.data.country, parsed.data.year, parsed.data.status]);
-    await client.query('delete from holidays where calendar_id = $1', [result.rows[0].id]);
-    for (const holiday of parsed.data.holidays) {
-      await client.query(`
-        insert into holidays (id, calendar_id, name, holiday_date, holiday_type)
-        values (coalesce($1, 'holiday-' || gen_random_uuid()::text), $2, $3, $4, $5)
-      `, [holiday.id || null, result.rows[0].id, holiday.name, holiday.date, holiday.type]);
-    }
-    await audit(client, req, {
-      module: 'Leave',
-      action: previous ? 'Update Holiday Calendar' : 'Create Holiday Calendar',
-      entityType: 'HolidayCalendar',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: { ...result.rows[0], holidays: parsed.data.holidays },
-      details: `${previous ? 'Updated' : 'Created'} holiday calendar ${result.rows[0].name}`,
-    });
-    await client.query('commit');
-    res.json({ ...result.rows[0], holidays: parsed.data.holidays });
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Holiday calendar save failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/leave/balances', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
-  const params = [];
-  const where = buildEmployeeScopeWhere(req, params, 'e');
-  await run(res, `
-    select lb.*, e.name as employee_name, lt.name as leave_type_name
-    from leave_balances lb
-    join employees e on e.id = lb.employee_id
-    join leave_types lt on lt.id = lb.leave_type_id
-    where ${where}
-    order by lb.balance_year desc, e.name, lt.name
-  `, params);
-});
-
-app.post('/api/leave/balances', requireDatabase, requireAuth, requirePermission('leave.admin'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    employee_id: z.string().min(1),
-    leave_type_id: z.string().min(1),
-    policy_id: z.string().nullable().optional(),
-    year: z.number().int().min(2000).max(2100),
-    opening_days: z.number().min(0).max(366).default(0),
-    accrued_days: z.number().min(0).max(366).default(0),
-    adjusted_days: z.number().min(-366).max(366).default(0),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = parsed.data.id ? (await client.query('select * from leave_balances where id = $1', [parsed.data.id])).rows[0] : null;
-    const result = await client.query(`
-      insert into leave_balances (id, employee_id, leave_type_id, policy_id, balance_year, opening_days, accrued_days, adjusted_days, available_days)
-      values (
-        coalesce($1, 'leave-balance-' || gen_random_uuid()::text), $2, $3, $4, $5, $6, $7, $8,
-        greatest(0, $6 + $7 + $8)
-      )
-      on conflict (employee_id, leave_type_id, balance_year) do update set
-        policy_id = excluded.policy_id,
-        opening_days = excluded.opening_days,
-        accrued_days = excluded.accrued_days,
-        adjusted_days = excluded.adjusted_days,
-        available_days = greatest(0, excluded.opening_days + excluded.accrued_days + excluded.adjusted_days - leave_balances.used_days - leave_balances.pending_days),
-        updated_at = now()
-      returning *
-    `, [parsed.data.id || null, parsed.data.employee_id, parsed.data.leave_type_id, parsed.data.policy_id || null, parsed.data.year, parsed.data.opening_days, parsed.data.accrued_days, parsed.data.adjusted_days]);
-    await refreshLeaveBalancesForEmployee(client, parsed.data.employee_id, parsed.data.year);
-    await audit(client, req, {
-      module: 'Leave',
-      action: previous ? 'Update Leave Balance' : 'Create Leave Balance',
-      entityType: 'LeaveBalance',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `${previous ? 'Updated' : 'Created'} leave balance for ${parsed.data.employee_id}`,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Leave balance save failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/leave/requests', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
-  const params = [];
-  const where = buildEmployeeScopeWhere(req, params, 'e');
-  await run(res, `
-    select lr.*, e.name as employee_name, lt.name as leave_type_name
-    from leave_requests lr
-    join employees e on e.id = lr.employee_id
-    join leave_types lt on lt.id = lr.leave_type_id
-    where ${where}
-    order by lr.start_date desc, lr.created_at desc
-  `, params);
-});
-
-app.post('/api/leave/requests', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
-  const schema = z.object({
-    employee_id: z.string().min(1),
-    leave_type_id: z.string().min(1),
-    start_date: z.string().min(10),
-    end_date: z.string().min(10),
-    total_days: z.number().min(0).max(366).optional(),
-    reason: z.string().nullable().optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  if (parsed.data.end_date < parsed.data.start_date) {
-    res.status(422).json({ error: 'Leave end date must be on or after start date' });
-    return;
-  }
-  const startYear = getLeaveYear(parsed.data.start_date);
-  const endYear = getLeaveYear(parsed.data.end_date);
-  if (startYear !== endYear) {
-    res.status(422).json({ error: 'Leave requests that span calendar years must be split by year' });
-    return;
-  }
-  if (req.user.activeRole === 'Employee' && parsed.data.employee_id !== req.user.employeeRecordId && parsed.data.employee_id !== req.user.employeeId) {
-    res.status(403).json({ error: 'Employees can submit leave only for themselves' });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const employee = (await client.query('select * from employees where id = $1 or employee_id = $1', [parsed.data.employee_id])).rows[0];
-    if (!employee || employee.status === 'Exited') {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Leave request must reference an active employee' });
-      return;
-    }
-    const totalDays = await getBusinessLeaveDays(client, parsed.data.start_date, parsed.data.end_date, employee);
-    if (totalDays <= 0) {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Leave request must include at least one business day' });
-      return;
-    }
-    const scopeParams = [employee.id];
-    const scopedEmployee = (await client.query(`
-      select 1
-      from employees e
-      where e.id = $1 and ${buildEmployeeScopeWhere(req, scopeParams, 'e')}
-      limit 1
-    `, scopeParams)).rows[0];
-    if (!scopedEmployee) {
-      await client.query('rollback');
-      res.status(403).json({ error: 'Leave request is outside active-role data scope' });
-      return;
-    }
-    const overlapping = (await client.query(`
-      select id
-      from leave_requests
-      where employee_id = $1
-        and status in ('Draft', 'Submitted', 'Approved')
-        and start_date <= $3::date
-        and end_date >= $2::date
-      limit 1
-    `, [employee.id, parsed.data.start_date, parsed.data.end_date])).rows[0];
-    if (overlapping) {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Leave request overlaps an existing draft, submitted, or approved request' });
-      return;
-    }
-    const { leaveType, balance } = await ensureLeaveBalanceForRequest(client, employee, parsed.data.leave_type_id, startYear, parsed.data.start_date);
-    if (leaveType.paid && balance && Number(balance.available_days || 0) < totalDays) {
-      await client.query('rollback');
-      res.status(422).json({ error: `Insufficient leave balance. Available: ${Number(balance.available_days || 0)} day(s), requested: ${totalDays} day(s)` });
-      return;
-    }
-    const result = await client.query(`
-      insert into leave_requests (employee_id, leave_type_id, start_date, end_date, total_days, status, reason, submitted_at)
-      values ($1, $2, $3, $4, $5, 'Submitted', $6, now())
-      returning *
-    `, [employee.id, parsed.data.leave_type_id, parsed.data.start_date, parsed.data.end_date, totalDays, parsed.data.reason || null]);
-    await refreshLeaveBalancesForEmployee(client, employee.id, startYear);
-    await upsertApprovalRecord(client, req, {
-      entityType: 'LeaveRequest',
-      entityId: result.rows[0].id,
-      subjectEmployeeId: employee.id,
-      requesterId: employee.id,
-      requesterName: employee.name,
-      status: 'Pending',
-      source: 'Web',
-      dueAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-    });
-    await audit(client, req, {
-      module: 'Leave',
-      action: 'Submit Leave',
-      entityType: 'LeaveRequest',
-      entityId: result.rows[0].id,
-      newValue: result.rows[0],
-      details: `Submitted leave request for ${employee.employee_id}`,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(error.status || 500).json({ error: error.status ? error.message : 'Leave request submit failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.patch('/api/leave/requests/:id', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
-  const schema = z.object({
-    leave_type_id: z.string().min(1),
-    start_date: z.string().min(10),
-    end_date: z.string().min(10),
-    total_days: z.number().min(0).max(366).optional(),
-    reason: z.string().nullable().optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  if (parsed.data.end_date < parsed.data.start_date) {
-    res.status(422).json({ error: 'Leave end date must be on or after start date' });
-    return;
-  }
-  const startYear = getLeaveYear(parsed.data.start_date);
-  const endYear = getLeaveYear(parsed.data.end_date);
-  if (startYear !== endYear) {
-    res.status(422).json({ error: 'Leave requests that span calendar years must be split by year' });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
-    if (!previous) {
-      await client.query('rollback');
-      res.status(404).json({ error: 'Leave request not found' });
-      return;
-    }
-    if (previous.status !== 'Submitted') {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Only submitted leave requests can be edited' });
-      return;
-    }
-    const scopeParams = [previous.employee_id];
-    const scopedEmployee = (await client.query(`
-      select 1
-      from employees e
-      where e.id = $1 and ${buildEmployeeScopeWhere(req, scopeParams, 'e')}
-      limit 1
-    `, scopeParams)).rows[0];
-    if (!scopedEmployee) {
-      await client.query('rollback');
-      res.status(403).json({ error: 'Leave request is outside active-role data scope' });
-      return;
-    }
-    const overlapping = (await client.query(`
-      select id
-      from leave_requests
-      where employee_id = $1
-        and id <> $4
-        and status in ('Draft', 'Submitted', 'Approved')
-        and start_date <= $3::date
-        and end_date >= $2::date
-      limit 1
-    `, [previous.employee_id, parsed.data.start_date, parsed.data.end_date, req.params.id])).rows[0];
-    if (overlapping) {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Leave request overlaps an existing draft, submitted, or approved request' });
-      return;
-    }
-    const employee = (await client.query('select * from employees where id = $1', [previous.employee_id])).rows[0];
-    const totalDays = await getBusinessLeaveDays(client, parsed.data.start_date, parsed.data.end_date, employee);
-    if (totalDays <= 0) {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Leave request must include at least one business day' });
-      return;
-    }
-    const { leaveType, balance } = await ensureLeaveBalanceForRequest(client, employee, parsed.data.leave_type_id, startYear, parsed.data.start_date);
-    const previousDaysAdjustment = previous.leave_type_id === parsed.data.leave_type_id ? Number(previous.total_days || 0) : 0;
-    if (leaveType.paid && balance && Number(balance.available_days || 0) + previousDaysAdjustment < totalDays) {
-      await client.query('rollback');
-      res.status(422).json({ error: `Insufficient leave balance. Available: ${Number(balance.available_days || 0)} day(s), requested: ${totalDays} day(s)` });
-      return;
-    }
-    const result = await client.query(`
-      update leave_requests
-      set leave_type_id = $2,
-        start_date = $3,
-        end_date = $4,
-        total_days = $5,
-        reason = $6,
-        updated_at = now()
-      where id = $1
-      returning *
-    `, [req.params.id, parsed.data.leave_type_id, parsed.data.start_date, parsed.data.end_date, totalDays, parsed.data.reason || null]);
-    const previousYear = getLeaveYear(previous.start_date);
-    await refreshLeaveBalancesForEmployee(client, previous.employee_id, previousYear);
-    if (startYear !== previousYear) {
-      await refreshLeaveBalancesForEmployee(client, previous.employee_id, startYear);
-    }
-    await audit(client, req, {
-      module: 'Leave',
-      action: 'Update Leave',
-      entityType: 'LeaveRequest',
-      entityId: req.params.id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `Updated leave request ${req.params.id}`,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(error.status || 500).json({ error: error.status ? error.message : 'Leave request update failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.patch('/api/leave/requests/:id/cancel', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
-  const schema = z.object({
-    comments: z.string().optional(),
-  });
-  const parsed = schema.safeParse(req.body || {});
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
-    if (!previous) {
-      await client.query('rollback');
-      res.status(404).json({ error: 'Leave request not found' });
-      return;
-    }
-    if (!['Submitted', 'Approved'].includes(previous.status)) {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Only submitted or approved leave requests can be cancelled' });
-      return;
-    }
-    if (previous.employee_id !== req.user.employeeRecordId && previous.employee_id !== req.user.employeeId) {
-      await client.query('rollback');
-      res.status(403).json({ error: 'Employees can cancel only their own leave requests' });
-      return;
-    }
-    const result = await client.query(`
-      update leave_requests
-      set status = 'Cancelled',
-        comments = $2,
-        decided_at = now(),
-        updated_at = now()
-      where id = $1
-      returning *
-    `, [req.params.id, parsed.data.comments || null]);
-    await refreshLeaveBalancesForEmployee(client, previous.employee_id, getLeaveYear(previous.start_date));
-    await decideApprovalRecord(client, req, {
-      entityType: 'LeaveRequest',
-      entityId: req.params.id,
-      status: 'Cancelled',
-      comments: parsed.data.comments || null,
-    });
-    await audit(client, req, {
-      module: 'Leave',
-      action: 'Cancelled Leave',
-      entityType: 'LeaveRequest',
-      entityId: req.params.id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `Cancelled leave request ${req.params.id}`,
-      reason: parsed.data.comments,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Leave request cancellation failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.patch('/api/leave/requests/:id/status', requireDatabase, requireAuth, requirePermission('leave.approve'), async (req, res) => {
-  const schema = z.object({
-    status: z.enum(['Approved', 'Rejected', 'Cancelled']),
-    comments: z.string().optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  if (parsed.data.status === 'Rejected' && !parsed.data.comments?.trim()) {
-    res.status(422).json({ error: 'Rejected leave requests require comments' });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
-    if (!previous) {
-      await client.query('rollback');
-      res.status(404).json({ error: 'Leave request not found' });
-      return;
-    }
-    if (parsed.data.status !== 'Cancelled' && previous.status !== 'Submitted') {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Only submitted leave requests can be decided' });
-      return;
-    }
-    if (parsed.data.status === 'Cancelled' && !['Submitted', 'Approved'].includes(previous.status)) {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Only submitted or approved leave requests can be cancelled' });
-      return;
-    }
-    const decisionScopeParams = [previous.employee_id];
-    const decisionScopedEmployee = (await client.query(`
-      select 1
-      from employees e
-      where e.id = $1 and ${buildEmployeeScopeWhere(req, decisionScopeParams, 'e')}
-      limit 1
-    `, decisionScopeParams)).rows[0];
-    if (!decisionScopedEmployee) {
-      await client.query('rollback');
-      res.status(403).json({ error: 'Leave request is outside active-role data scope' });
-      return;
-    }
-    if (req.user.activeRole === 'CountryDirector') {
-      const scoped = (await client.query(`
-        select 1
-        from employees e
-        left join employee_country_director_map ecdm on ecdm.employee_id = e.id
-        where e.id = $1 and (e.primary_country_director_id = $2 or ecdm.country_director_id = $2)
-        limit 1
-      `, [previous.employee_id, req.user.countryDirectorId])).rows[0];
-      if (!scoped) {
-        await client.query('rollback');
-        res.status(403).json({ error: 'Country Directors can decide only scoped employee leave requests' });
-        return;
-      }
-    }
-    if (req.user.activeRole === 'TeamLead') {
-      const scoped = (await client.query('select 1 from employees where id = $1 and reporting_manager_id = $2', [previous.employee_id, req.user.employeeRecordId])).rows[0];
-      if (!scoped) {
-        await client.query('rollback');
-        res.status(403).json({ error: 'Team Leads can decide only direct-report leave requests' });
-        return;
-      }
-    }
-    const result = await client.query(`
-      update leave_requests
-      set status = $2,
-        comments = $3,
-        approver_id = $4,
-        approver_name = $5,
-        decided_at = now(),
-        updated_at = now()
-      where id = $1
-      returning *
-    `, [req.params.id, parsed.data.status, parsed.data.comments || null, req.user.employeeRecordId || req.user.sub, req.user.username]);
-    await refreshLeaveBalancesForEmployee(client, previous.employee_id, getLeaveYear(previous.start_date));
-    await audit(client, req, {
-      module: 'Leave',
-      action: `${parsed.data.status} Leave`,
-      entityType: 'LeaveRequest',
-      entityId: req.params.id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `${parsed.data.status} leave request ${req.params.id}`,
-      reason: parsed.data.comments,
-    });
-    await decideApprovalRecord(client, req, {
-      entityType: 'LeaveRequest',
-      entityId: req.params.id,
-      status: parsed.data.status,
-      comments: parsed.data.comments || null,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Leave request status update failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/reports/availability', requireDatabase, requireAuth, requirePermission('leave.self_service'), async (req, res) => {
-  const params = [];
-  const where = buildEmployeeScopeWhere(req, params, 'e');
-  params.push(new Date().getFullYear());
-  const yearParam = `$${params.length}`;
-  await run(res, `
-    select
-      e.id as employee_id,
-      e.name as employee_name,
-      e.standard_weekly_hours,
-      coalesce(l.approved_leave_days, 0)::numeric as approved_leave_days,
-      coalesce(h.holiday_days, 0)::numeric as holiday_days,
-      greatest(0, (e.standard_weekly_hours * 52) - ((coalesce(l.approved_leave_days, 0) + coalesce(h.holiday_days, 0)) * (e.standard_weekly_hours / 5)))::numeric as availability_hours
-    from employees e
-    left join (
-      select employee_id, sum(total_days) as approved_leave_days
-      from leave_requests
-      where status = 'Approved' and extract(year from start_date)::int = ${yearParam}
-      group by employee_id
-    ) l on l.employee_id = e.id
-    left join lateral (
-      select count(*) as holiday_days
-      from holiday_calendars hc
-      join holidays h on h.calendar_id = hc.id
-      where hc.status = 'Active'
-        and hc.calendar_year = ${yearParam}
-        and (hc.country = e.country or hc.country = 'Global')
-    ) h on true
-    where e.status <> 'Exited' and ${where}
-    order by e.name
-  `, params);
-});
+app.use('/api', createAvailabilityReportRouter({
+  run,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  buildEmployeeScopeWhere,
+}));
 
 const buildApprovalScopeWhere = (req, params) => {
   if (isGlobalRole(req)) return 'true';
@@ -4210,223 +3571,17 @@ app.get('/api/reports/approval-sla', requireDatabase, requireAuth, requirePermis
   }
 });
 
-app.get('/api/notifications', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
-  const params = [];
-  const where = buildEmployeeScopeWhere(req, params, 'e');
-  await run(res, `
-    select ne.*, e.name as recipient_name
-    from notification_events ne
-    left join employees e on e.id = ne.recipient_employee_id
-    where ${where}
-    order by ne.created_at desc
-    limit 300
-  `, params);
+const notificationRouter = createNotificationRouter({
+  pool,
+  run,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  buildEmployeeScopeWhere,
+  audit,
+  sendNotification,
 });
-
-app.patch('/api/notifications/:id/read', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
-  try {
-    const params = [req.params.id];
-    const where = buildEmployeeScopeWhere(req, params, 'e');
-    const result = await pool.query(`
-      update notification_events ne
-      set read_at = coalesce(read_at, now())
-      from employees e
-      where ne.id = $1 and e.id = ne.recipient_employee_id and ${where}
-      returning ne.*
-    `, params);
-    if (!result.rows[0]) {
-      res.status(404).json({ error: 'Notification not found' });
-      return;
-    }
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Notification read update failed' });
-  }
-});
-
-app.get('/api/notification-templates', requireDatabase, requireAuth, requirePermission('notifications.manage'), (_req, res) => {
-  run(res, 'select * from notification_templates order by event_type, channel');
-});
-
-app.post('/api/notification-templates', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    event_type: z.string().min(1),
-    channel: z.enum(['InApp', 'Email', 'Teams']),
-    subject: z.string().min(1),
-    body: z.string().min(1),
-    active: z.boolean().default(true),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const previous = parsed.data.id ? (await client.query('select * from notification_templates where id = $1', [parsed.data.id])).rows[0] : null;
-    const result = await client.query(`
-      insert into notification_templates (id, event_type, channel, subject, body, active)
-      values (coalesce($1, 'notification-template-' || gen_random_uuid()::text), $2, $3, $4, $5, $6)
-      on conflict (event_type, channel) do update set
-        subject = excluded.subject,
-        body = excluded.body,
-        active = excluded.active,
-        updated_at = now()
-      returning *
-    `, [parsed.data.id || null, parsed.data.event_type, parsed.data.channel, parsed.data.subject, parsed.data.body, parsed.data.active]);
-    await audit(client, req, {
-      module: 'Notifications',
-      action: previous ? 'Update Notification Template' : 'Create Notification Template',
-      entityType: 'NotificationTemplate',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `${previous ? 'Updated' : 'Created'} notification template ${result.rows[0].event_type}`,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Notification template save failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/notification-preferences', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
-  const params = [];
-  const where = buildEmployeeScopeWhere(req, params, 'e');
-  await run(res, `
-    select np.*, e.name as employee_name
-    from notification_preferences np
-    join employees e on e.id = np.employee_id
-    where ${where}
-    order by e.name, np.event_type
-  `, params);
-});
-
-app.post('/api/notification-preferences', requireDatabase, requireAuth, requirePermission('notifications.view'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    employee_id: z.string().min(1),
-    event_type: z.string().min(1),
-    in_app: z.boolean().default(true),
-    email: z.boolean().default(false),
-    teams: z.boolean().default(false),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  if (req.user.activeRole === 'Employee' && parsed.data.employee_id !== req.user.employeeRecordId && parsed.data.employee_id !== req.user.employeeId) {
-    res.status(403).json({ error: 'Employees can update only their own notification preferences' });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const scopeParams = [parsed.data.employee_id];
-    const scopeWhere = buildEmployeeScopeWhere(req, scopeParams, 'e');
-    const targetEmployee = (await client.query(`
-      select e.*
-      from employees e
-      where (e.id = $1 or e.employee_id = $1) and ${scopeWhere}
-      limit 1
-    `, scopeParams)).rows[0];
-    if (!targetEmployee) {
-      await client.query('rollback');
-      res.status(403).json({ error: 'Notification preference is outside active-role data scope' });
-      return;
-    }
-    const previous = (await client.query('select * from notification_preferences where employee_id = $1 and event_type = $2', [targetEmployee.id, parsed.data.event_type])).rows[0];
-    const result = await client.query(`
-      insert into notification_preferences (id, employee_id, event_type, in_app, email, teams)
-      values (coalesce($1, 'notification-preference-' || gen_random_uuid()::text), $2, $3, $4, $5, $6)
-      on conflict (employee_id, event_type) do update set
-        in_app = excluded.in_app,
-        email = excluded.email,
-        teams = excluded.teams,
-        updated_at = now()
-      returning *
-    `, [parsed.data.id || null, targetEmployee.id, parsed.data.event_type, parsed.data.in_app, parsed.data.email, parsed.data.teams]);
-    await audit(client, req, {
-      module: 'Notifications',
-      action: 'Update Notification Preference',
-      entityType: 'NotificationPreference',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `Updated notification preference ${result.rows[0].event_type}`,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Notification preference save failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.get('/api/notification-delivery-attempts', requireDatabase, requireAuth, requirePermission('notifications.manage'), (_req, res) => {
-  run(res, 'select * from notification_delivery_attempts order by attempted_at desc limit 300');
-});
-
-app.post('/api/notifications/test-delivery', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {
-  const schema = z.object({
-    employee_id: z.string().min(1),
-    channels: z.array(z.enum(['InApp', 'Email', 'Teams'])).min(1).default(['InApp']),
-    title: z.string().min(1).default('Configured product notification test'),
-    body: z.string().min(1).default('This validates configured notification delivery from Configured product.'),
-  });
-  const parsed = schema.safeParse(req.body || {});
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const scopeParams = [parsed.data.employee_id];
-    const scopeWhere = buildEmployeeScopeWhere(req, scopeParams, 'e');
-    const targetEmployee = (await client.query(`
-      select e.*
-      from employees e
-      where (e.id = $1 or e.employee_id = $1) and ${scopeWhere}
-      limit 1
-    `, scopeParams)).rows[0];
-    if (!targetEmployee) {
-      await client.query('rollback');
-      res.status(403).json({ error: 'Notification test recipient is outside active-role data scope' });
-      return;
-    }
-    const event = await sendNotification(client, req, {
-      recipientEmployeeId: targetEmployee.id,
-      eventType: 'TestDelivery',
-      title: parsed.data.title,
-      body: parsed.data.body,
-      entityType: 'NotificationTest',
-      entityId: targetEmployee.id,
-      severity: 'Info',
-      channels: parsed.data.channels,
-      actionUrl: process.env.APP_URL || null,
-    });
-    await client.query('commit');
-    res.json(event);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Notification test delivery failed' });
-  } finally {
-    client.release();
-  }
-});
+app.use('/api', notificationRouter);
 
 const logIntegrationEvent = async (client, {
   provider,
@@ -4436,12 +3591,18 @@ const logIntegrationEvent = async (client, {
   status = 'Success',
   requestPayload = null,
   responsePayload = null,
+  organizationScope = null,
 }) => {
   const result = await client.query(`
-    insert into integration_event_logs (provider, event_type, entity_type, entity_id, status, request_payload, response_payload)
-    values ($1,$2,$3,$4,$5,$6,$7)
+    insert into integration_event_logs (provider, event_type, entity_type, entity_id, status, request_payload, response_payload, organization_id, legal_entity_id)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     returning *
-  `, [provider, eventType, entityType, entityId, status, requestPayload ? JSON.stringify(requestPayload) : null, responsePayload ? JSON.stringify(responsePayload) : null]);
+  `, [provider, eventType, entityType, entityId, status,
+    requestPayload ? JSON.stringify(requestPayload) : null,
+    responsePayload ? JSON.stringify(responsePayload) : null,
+    organizationScope?.organizationId || null,
+    organizationScope?.legalEntityId || null,
+  ]);
   return result.rows[0];
 };
 
@@ -4559,22 +3720,38 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
       'update employees set entra_object_id = $2, updated_at = now() where id = $1 and organization_id = $3 and legal_entity_id = $4',
       [employee.id, parsed.data.provider_subject, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
     );
+    const providerIdentifierChanged = previous ? previous.provider_subject !== result.rows[0].provider_subject : true;
+    const providerAccountChanged = previous
+      ? previous.provider_upn !== result.rows[0].provider_upn
+      : Boolean(result.rows[0].provider_upn);
+    const safeLinkProvenance = {
+      provenanceReference: result.rows[0].provenance_reference,
+      provider: result.rows[0].provider,
+      mutation: previous ? 'Updated' : 'Created',
+      status: result.rows[0].status,
+      providerIdentifierChanged,
+      providerAccountChanged,
+    };
     await logIntegrationEvent(client, {
       provider: parsed.data.provider,
       eventType: 'IdentityLinkUpserted',
       entityType: 'IdentityProviderLink',
-      entityId: result.rows[0].id,
-      responsePayload: result.rows[0],
+      entityId: result.rows[0].provenance_reference,
+      requestPayload: {status: parsed.data.status},
+      responsePayload: safeLinkProvenance,
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
       action: previous ? 'Update Identity Link' : 'Create Identity Link',
       entityType: 'IdentityProviderLink',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
+      entityId: result.rows[0].provenance_reference,
+      oldValue: previous ? {provenanceReference: previous.provenance_reference, provider: previous.provider, status: previous.status} : null,
+      newValue: safeLinkProvenance,
       details: `${previous ? 'Updated' : 'Created'} ${parsed.data.provider} identity link`,
-      source: 'System',
+      source: parsed.data.provider === 'entra' ? 'Entra' : 'Local Identity',
+      sourceIdentifier: result.rows[0].provenance_reference,
+      importProcessingResult: 'Success',
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -4624,6 +3801,10 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
       entityType: 'EntraRoleMapping',
       entityId: result.rows[0].id,
       responsePayload: result.rows[0],
+      // Group-role mappings configure the isolated deployment, not one
+      // organization/legal entity. Keep their history as a null-scope system
+      // event so scoped history readers do not assign it to the caller's scope.
+      organizationScope: null,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4634,6 +3815,7 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
       newValue: result.rows[0],
       details: `${previous ? 'Updated' : 'Created'} Entra mapping for ${parsed.data.role_name}`,
       source: 'System',
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -4646,13 +3828,14 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
   }
 });
 
-app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), (_req, res) => {
+app.get('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), (req, res) => {
   run(res, `
     select tul.*, e.name as employee_name
     from teams_user_links tul
     join employees e on e.id = tul.employee_id
+    where e.organization_id=$1 and e.legal_entity_id=$2
     order by e.name
-  `);
+  `, [req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
 });
 
 app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, requirePermission('integrations.teams'), async (req, res) => {
@@ -4672,7 +3855,22 @@ app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, req
   const client = await pool.connect();
   try {
     await client.query('begin');
-    const previous = (await client.query('select * from teams_user_links where employee_id = $1', [parsed.data.employee_id])).rows[0];
+    const employee = (await client.query(`
+      select id from employees
+      where id=$1 and organization_id=$2 and legal_entity_id=$3
+      for update
+    `, [parsed.data.employee_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
+    if (!employee) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Employee not found' });
+      return;
+    }
+    const previous = (await client.query(`
+      select tul.* from teams_user_links tul
+      join employees e on e.id=tul.employee_id
+      where tul.employee_id=$1 and e.organization_id=$2 and e.legal_entity_id=$3
+      for update
+    `, [employee.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
     const result = await client.query(`
       insert into teams_user_links (id, employee_id, teams_user_id, teams_upn, teams_tenant_id, status)
       values (coalesce($1, 'teams-link-' || gen_random_uuid()::text), $2, $3, $4, $5, $6)
@@ -4683,14 +3881,18 @@ app.post('/api/integrations/teams-user-links', requireDatabase, requireAuth, req
         status = excluded.status,
         updated_at = now()
       returning *
-    `, [parsed.data.id || null, parsed.data.employee_id, parsed.data.teams_user_id, parsed.data.teams_upn || null, parsed.data.teams_tenant_id || null, parsed.data.status]);
-    await client.query('update employees set teams_user_id = $2, updated_at = now() where id = $1', [parsed.data.employee_id, parsed.data.teams_user_id]);
+    `, [parsed.data.id || null, employee.id, parsed.data.teams_user_id, parsed.data.teams_upn || null, parsed.data.teams_tenant_id || null, parsed.data.status]);
+    await client.query(`
+      update employees set teams_user_id=$2, updated_at=now()
+      where id=$1 and organization_id=$3 and legal_entity_id=$4
+    `, [employee.id, parsed.data.teams_user_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     await logIntegrationEvent(client, {
       provider: 'teams',
       eventType: 'TeamsUserLinkUpserted',
       entityType: 'TeamsUserLink',
       entityId: result.rows[0].id,
       responsePayload: result.rows[0],
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4737,10 +3939,12 @@ app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, 
     }
     const token = crypto.randomUUID();
     const result = await client.query(`
-      insert into teams_action_tokens (token, entity_type, entity_id, action, target_url, expires_at, created_by)
-      values ($1,$2,$3,$4,$5,$6,$7)
+      insert into teams_action_tokens (token, entity_type, entity_id, action, target_url, expires_at, created_by, organization_id, legal_entity_id)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       returning *
-    `, [token, parsed.data.entity_type, parsed.data.entity_id, parsed.data.action, parsed.data.target_url || null, parsed.data.expires_at, req.user.sub]);
+    `, [token, parsed.data.entity_type, parsed.data.entity_id, parsed.data.action,
+      parsed.data.target_url || null, parsed.data.expires_at, req.user.sub,
+      req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     const responseToken = { ...result.rows[0], action_url: buildTeamsActionUrl(token) };
     await logIntegrationEvent(client, {
       provider: 'teams',
@@ -4748,6 +3952,7 @@ app.post('/api/integrations/teams-action-tokens', requireDatabase, requireAuth, 
       entityType: parsed.data.entity_type,
       entityId: parsed.data.entity_id,
       responsePayload: { action: parsed.data.action, actionUrl: responseToken.action_url, deterministic: true },
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4782,6 +3987,13 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
     const lookup = await client.query('select * from teams_action_tokens where token = $1 for update', [req.params.token]);
     const actionToken = lookup.rows[0];
     if (!actionToken) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Teams action token not found' });
+      return;
+    }
+    if (!actionToken.organization_id || !actionToken.legal_entity_id
+      || actionToken.organization_id !== req.organizationScope?.organizationId
+      || actionToken.legal_entity_id !== req.organizationScope?.legalEntityId) {
       await client.query('rollback');
       res.status(404).json({ error: 'Teams action token not found' });
       return;
@@ -4824,6 +4036,7 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
       entityId: actionToken.entity_id,
       requestPayload: { action: actionToken.action },
       responsePayload: { deterministic: true },
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4861,6 +4074,13 @@ app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, r
     await client.query('begin');
     const actionToken = (await client.query('select * from teams_action_tokens where token = $1', [req.params.token])).rows[0];
     if (!actionToken) {
+      await client.query('rollback');
+      res.status(404).json({ error: 'Teams action token not found' });
+      return;
+    }
+    if (!actionToken.organization_id || !actionToken.legal_entity_id
+      || actionToken.organization_id !== req.organizationScope?.organizationId
+      || actionToken.legal_entity_id !== req.organizationScope?.legalEntityId) {
       await client.query('rollback');
       res.status(404).json({ error: 'Teams action token not found' });
       return;
@@ -4913,6 +4133,7 @@ app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, r
       entityId: actionToken.entity_id,
       requestPayload: { recipientEmployeeId: recipient.id, action: actionToken.action },
       responsePayload: { notificationId: event.id, actionUrl },
+      organizationScope: req.organizationScope,
     });
     await audit(client, req, {
       module: 'Integrations',
@@ -4934,11 +4155,11 @@ app.post('/api/integrations/teams-action-tokens/:token/send', requireDatabase, r
   }
 });
 
-app.get('/api/integrations/events', requireDatabase, requireAuth, requirePermission('integrations.identity'), (_req, res) => {
-  run(res, 'select * from integration_event_logs order by created_at desc limit 300');
-});
+const integrationHistoryRouter = createIntegrationHistoryRouter({pool, requireDatabase, requireAuth, requireIdentity, requirePermission});
+app.use('/api', integrationHistoryRouter);
+app.use('/api/v1', integrationHistoryRouter);
 
-app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermission('integrations.identity'), async (_req, res) => {
+app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermission('integrations.identity'), async (req, res) => {
   try {
     const graphReady = Boolean((process.env.GRAPH_TENANT_ID || process.env.ENTRA_TENANT_ID || process.env.TEAMS_TENANT_ID)
       && (process.env.GRAPH_CLIENT_ID || process.env.ENTRA_CLIENT_ID)
@@ -4949,21 +4170,38 @@ app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermiss
       || (graphReady && Boolean(process.env.TEAMS_APP_ID));
     const result = await pool.query(`
       with active_employees as (
-        select id from employees where status = 'Active'
+        select id from employees
+        where status = 'Active' and organization_id=$4 and legal_entity_id=$5
       )
       select
         $1::text as identity_provider,
         $2::text as teams_provider,
         $3::text as email_provider,
-        (select count(distinct employee_id)::int from identity_provider_links where status = 'Linked') as linked_identity_count,
-        (select count(distinct employee_id)::int from teams_user_links where status = 'Linked') as linked_teams_count,
+        (select count(distinct ipl.employee_id)::int
+         from identity_provider_links ipl join employees e on e.id=ipl.employee_id
+         where ipl.status = 'Linked' and e.organization_id=$4 and e.legal_entity_id=$5) as linked_identity_count,
+        (select count(distinct tul.employee_id)::int
+         from teams_user_links tul join employees e on e.id=tul.employee_id
+         where tul.status = 'Linked' and e.organization_id=$4 and e.legal_entity_id=$5) as linked_teams_count,
         (select count(*)::int from entra_group_role_mappings where active = true) as active_role_mappings,
-        (select count(*)::int from teams_action_tokens where used_at is null and expires_at > now()) as open_action_tokens,
-        (select count(*)::int from integration_event_logs where status = 'Failed') as recent_failures,
-        (select count(*)::int from active_employees ae where not exists (select 1 from identity_provider_links ipl where ipl.employee_id = ae.id and ipl.status = 'Linked')) as missing_identity_links,
-        (select count(*)::int from active_employees ae where not exists (select 1 from teams_user_links tul where tul.employee_id = ae.id and tul.status = 'Linked')) as missing_teams_links
-    `, [process.env.IDENTITY_PROVIDER || 'local', process.env.TEAMS_PROVIDER || 'mock', process.env.EMAIL_PROVIDER || 'mock']);
-    const events = await pool.query('select * from integration_event_logs order by created_at desc limit 25');
+        (select count(*)::int from teams_action_tokens
+         where used_at is null and expires_at > now()
+           and organization_id=$4 and legal_entity_id=$5) as open_action_tokens,
+        (select count(*)::int from integration_event_logs
+         where status = 'Failed' and organization_id=$4 and legal_entity_id=$5) as recent_failures,
+        (select count(*)::int from active_employees ae where not exists (
+          select 1 from identity_provider_links ipl where ipl.employee_id = ae.id and ipl.status = 'Linked'
+        )) as missing_identity_links,
+        (select count(*)::int from active_employees ae where not exists (
+          select 1 from teams_user_links tul where tul.employee_id = ae.id and tul.status = 'Linked'
+        )) as missing_teams_links
+    `, [process.env.IDENTITY_PROVIDER || 'local', process.env.TEAMS_PROVIDER || 'mock',
+      process.env.EMAIL_PROVIDER || 'mock', req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
+    const events = await pool.query(`
+      select * from integration_event_logs
+      where organization_id=$1 and legal_entity_id=$2
+      order by created_at desc limit 25
+    `, [req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     const row = result.rows[0] || {};
     res.json({
       generatedAt: new Date().toISOString(),
@@ -4992,7 +4230,7 @@ app.get('/api/integrations/health', requireDatabase, requireAuth, requirePermiss
       teamsCredentialReady: teamsReady,
       teamsActivityType: process.env.TEAMS_ACTIVITY_TYPE || 'systemDefault',
       credentialChecks: credentialChecks(),
-      events: events.rows,
+      events: redactIntegrationHistoryRows(events.rows),
     });
   } catch (error) {
     console.error(error);
@@ -5067,6 +4305,14 @@ app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requ
     res.status(400).json({ error: 'Unknown permission key' });
     return;
   }
+  if (parsed.data.permissionKey === deploymentAuditPermissionKey && parsed.data.enabled) {
+    res.status(422).json({ error: 'Deployment audit access can be granted only to individual users.' });
+    return;
+  }
+  if (parsed.data.permissionKey === organizationAuditPermissionKey && parsed.data.enabled) {
+    res.status(422).json({ error: 'Organization audit access can be granted only to an individual for a selected organization.' });
+    return;
+  }
   if (protectedPermissionKeys.has(parsed.data.permissionKey) && req.params.roleName !== 'Admin') {
     res.status(422).json({ error: 'Protected permissions can be enabled only for Admin.' });
     return;
@@ -5110,6 +4356,9 @@ app.patch('/api/permissions/roles/:roleName', requireDatabase, requireAuth, requ
       oldValue: previous,
       newValue: result.rows[0],
       details: `${parsed.data.enabled ? 'Enabled' : 'Disabled'} ${parsed.data.permissionKey} for ${req.params.roleName}`,
+      // Role permissions apply across this isolated deployment, not the
+      // organization/legal entity selected for this request.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5136,11 +4385,22 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
     res.status(400).json({ error: 'Unknown permission key' });
     return;
   }
+  if (parsed.data.permissionKey === organizationAuditPermissionKey) {
+    res.status(422).json({ error: 'Organization audit access must be designated for a specific organization.' });
+    return;
+  }
   const client = await pool.connect();
   try {
     await client.query('begin');
+    if (parsed.data.permissionKey === deploymentAuditPermissionKey
+        && !(await hasActiveAssignedRole(client, req.user.sub, req.user.activeRole))) {
+      await client.query('rollback');
+      res.status(403).json({ error: 'The permission manager active role is no longer assigned.' });
+      return;
+    }
     const target = (await client.query(`
-      select u.id, u.username, u.employee_id, coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
+      select u.id, u.username, u.employee_id, u.status,
+        coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
       from users u
       left join user_roles ur on ur.user_id = u.id
       left join roles r on r.id = ur.role_id
@@ -5152,7 +4412,15 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
       res.status(404).json({ error: 'User was not found' });
       return;
     }
-    if (protectedPermissionKeys.has(parsed.data.permissionKey) && !target.roles.includes('Admin')) {
+    if (parsed.data.permissionKey === deploymentAuditPermissionKey
+        && (target.status !== 'Active' || target.roles.length === 0 || target.id.toString() === req.user.sub)) {
+      await client.query('rollback');
+      res.status(422).json({ error: 'Deployment audit access requires a different active user with an assigned role.' });
+      return;
+    }
+    if (protectedPermissionKeys.has(parsed.data.permissionKey)
+        && parsed.data.permissionKey !== deploymentAuditPermissionKey
+        && !target.roles.includes('Admin')) {
       await client.query('rollback');
       res.status(422).json({ error: 'Protected permissions can be granted only to Admin users.' });
       return;
@@ -5174,6 +4442,8 @@ app.post('/api/permissions/user-grants', requireDatabase, requireAuth, requirePe
       entityId: result.rows[0].id,
       newValue: result.rows[0],
       details: `Granted ${parsed.data.permissionKey} to ${target.username}`,
+      // User-specific grants are effective for the account across this deployment.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5196,6 +4466,12 @@ app.delete('/api/permissions/user-grants/:id', requireDatabase, requireAuth, req
       res.status(404).json({ error: 'User permission grant was not found' });
       return;
     }
+    if (previous.permission_key === deploymentAuditPermissionKey
+        && !(await hasActiveAssignedRole(client, req.user.sub, req.user.activeRole))) {
+      await client.query('rollback');
+      res.status(403).json({ error: 'The permission manager active role is no longer assigned.' });
+      return;
+    }
     await client.query(`
       insert into permission_change_history (change_type, user_id, permission_key, old_value, changed_by, active_role)
       values ('UserGrantRevoked', $1, $2, $3::jsonb, $4, $5)
@@ -5207,6 +4483,8 @@ app.delete('/api/permissions/user-grants/:id', requireDatabase, requireAuth, req
       entityId: previous.id,
       oldValue: previous,
       details: `Revoked ${previous.permission_key}`,
+      // User-specific grants are effective for the account across this deployment.
+      organizationScope: null,
     });
     await client.query('commit');
     res.json({ status: 'ok' });
@@ -5255,6 +4533,8 @@ app.post('/api/settings', requireDatabase, requireAuth, requirePermission('setti
       oldValue: previous,
       newValue: parsed.data,
       details: 'Updated system settings',
+      // These settings govern the whole deployment and have no organization owner.
+      organizationScope: null,
     });
     await client.query('commit');
     const result = await pool.query('select key, value from system_settings order by key');
@@ -5338,6 +4618,7 @@ app.post('/api/catalogs/:catalogType', requireDatabase, requireAuth, requirePerm
       oldValue: previous,
       newValue: result.rows[0],
       details: `${previous ? 'Updated' : 'Created'} ${catalogModules[catalogType.data]} item ${result.rows[0].name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5380,6 +4661,7 @@ app.delete('/api/catalogs/:catalogType/:id', requireDatabase, requireAuth, requi
         oldValue: item,
         details: `Blocked deactivation of ${item.name}; it is still referenced`,
         reason: usage.reason,
+        organizationScope: null,
       });
       await client.query('commit');
       res.status(409).json({ error: 'Catalog item is still in use', reason: usage.reason });
@@ -5394,6 +4676,7 @@ app.delete('/api/catalogs/:catalogType/:id', requireDatabase, requireAuth, requi
       oldValue: item,
       newValue: result.rows[0],
       details: `Deactivated ${catalogModules[catalogType.data]} item ${item.name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5438,6 +4721,7 @@ app.post('/api/country-directors', requireDatabase, requireAuth, requirePermissi
       oldValue: previous || null,
       newValue: result.rows[0],
       details: `${previous ? 'Updated' : 'Created'} Country Director ${parsed.data.name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5475,6 +4759,7 @@ app.delete('/api/country-directors/:id', requireDatabase, requireAuth, requirePe
         oldValue: director,
         details: `Blocked deletion of ${director.name}; scope mappings still exist`,
         reason: `${employeeCount} employee mapping(s), ${clientCount} client mapping(s)`,
+        organizationScope: null,
       });
       await client.query('commit');
       res.status(409).json({ error: 'Country Director is still mapped to employees or clients', employeeCount, clientCount });
@@ -5488,6 +4773,7 @@ app.delete('/api/country-directors/:id', requireDatabase, requireAuth, requirePe
       entityId: req.params.id,
       oldValue: director,
       details: `Deleted Country Director ${director.name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5546,6 +4832,7 @@ app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePer
         oldValue: role,
         details: `Blocked deactivation of role ${role.name}; it is still in use`,
         reason: `${employeeCount} employee(s), ${allocationCount} allocation(s)`,
+        organizationScope: null,
       });
       await client.query('commit');
       res.status(409).json({ error: 'Role definition is still used by employees or allocations', employeeCount, allocationCount });
@@ -5560,6 +4847,7 @@ app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePer
       oldValue: role,
       newValue: result.rows[0],
       details: `Deactivated role definition ${role.name}`,
+      organizationScope: null,
     });
     await client.query('commit');
     res.json(result.rows[0]);
@@ -5571,7 +4859,26 @@ app.delete('/api/role-definitions/:id', requireDatabase, requireAuth, requirePer
     client.release();
   }
 });
-app.get('/api/audit-logs', requireDatabase, requireAuth, requirePermission('audit.view'), (_req, res) => run(res, 'select * from audit_logs order by created_at desc limit 500'));
+const auditHistoryRouter = createAuditHistoryRouter({
+  pool,
+  requireDatabase,
+  requireAuth,
+  requireIdentity,
+  requirePermission,
+});
+app.use('/api', auditHistoryRouter);
+app.use('/api/v1', auditHistoryRouter);
+const organizationAuditRouter = createOrganizationAuditRouter({
+  pool,
+  requireDatabase,
+  requireAuth,
+  requireIdentity,
+  requirePermission,
+  getEffectivePermissionsForUser,
+  audit,
+});
+app.use('/api', organizationAuditRouter);
+app.use('/api/v1', organizationAuditRouter);
 
 app.post('/api/audit-events', requireDatabase, requireAuth, async (req, res) => {
   const schema = z.object({
@@ -6210,45 +5517,54 @@ app.get('/api/reports/dashboard', requireDatabase, requireAuth, requirePermissio
   }
 });
 
-app.get('/api/import-export-logs', requireDatabase, requireAuth, requirePermission('employees.manage'), (_req, res) => run(res, 'select * from import_export_logs order by created_at desc limit 100'));
-app.post('/api/import-export-logs', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const schema = z.object({
-    operation: z.enum(['Import', 'Export']),
-    channel: z.string().min(1),
-    fileName: z.string().min(1),
-    status: z.enum(['Success', 'Partial', 'Failed', 'Dry Run']),
-    totalRows: z.number().int().min(0),
-    validRows: z.number().int().min(0),
-    errorRows: z.number().int().min(0),
-    errors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  await run(res, `
-    insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-    returning *
-  `, [
-    parsed.data.operation,
-    parsed.data.channel,
-    parsed.data.fileName,
-    parsed.data.status,
-    parsed.data.totalRows,
-    parsed.data.validRows,
-    parsed.data.errorRows,
-    parsed.data.errors ? JSON.stringify(parsed.data.errors) : null,
-    req.user.username,
-  ]);
+const importHistoryRouter = createImportHistoryRouter({pool, requireDatabase, requireAuth, requirePermission});
+app.use('/api', importHistoryRouter);
+app.use('/api/v1', importHistoryRouter);
+const projectImportRouter = createProjectImportRouter({
+  pool,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  audit,
+  importErrorRowSchema,
+  strictIsoDateSchema,
+  parseBoolean,
+  collectDuplicateImportRows,
+  resolveImportApplyRowNumbers,
+  attachImportErrorSourceIdentifiers,
 });
+app.use('/api', projectImportRouter);
+app.use('/api/v1', projectImportRouter);
 
-app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
+app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
+  const versioned = req.apiVersion === 'v1';
+  let idempotencyKey = null;
+  let actorId = null;
+  if (versioned) {
+    const rawKey = req.get?.('Idempotency-Key') ?? req.headers?.['idempotency-key'];
+    if (typeof rawKey !== 'string' || rawKey.length === 0) {
+      res.status(400).json({error: {code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'The Idempotency-Key header is required.'}});
+      return;
+    }
+    idempotencyKey = normalizeIdempotencyKey(rawKey);
+    if (!idempotencyKey) {
+      res.status(400).json({error: {code: 'INVALID_IDEMPOTENCY_KEY', message: 'The Idempotency-Key header is invalid.'}});
+      return;
+    }
+    if (!req.body?.schemaVersion) {
+      res.status(400).json({error: {code: 'SCHEMA_VERSION_REQUIRED', message: 'The Employee Master import schema version is required.'}});
+      return;
+    }
+    if (req.body.schemaVersion !== 'employee-master/1') {
+      res.status(400).json({error: {code: 'UNSUPPORTED_SCHEMA_VERSION', message: 'The Employee Master import schema version is not supported.'}});
+      return;
+    }
+    actorId = typeof req.user?.sub === 'string' || typeof req.user?.sub === 'number' ? String(req.user.sub) : '';
+    if (!actorId) {
+      res.status(401).json({error: {code: 'AUTHENTICATION_REQUIRED', message: 'An authenticated account is required.'}});
+      return;
+    }
+  }
   const rowSchema = z.object({
     employeeId: z.string().min(1),
     name: z.string().min(1),
@@ -6273,37 +5589,188 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
     roles: z.union([z.string(), z.array(z.string())]).optional(),
     initialPassword: z.string().optional(),
   });
-  const schema = z.object({
+  const versionedRowSchema = rowSchema.extend({initialPasswordPresent: z.boolean().optional()});
+  const legacySchema = z.object({
     fileName: z.string().min(1),
     rows: z.array(rowSchema).min(1),
     totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
   });
+  const versionedSchema = z.object({
+    schemaVersion: z.literal('employee-master/1'),
+    dryRun: z.boolean().default(false),
+    fileName: z.string().min(1),
+    rows: z.array(versionedRowSchema),
+    totalRows: z.number().int().min(0).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
+  }).superRefine((data, context) => {
+    if (!data.dryRun && data.rows.length === 0) {
+      context.addIssue({code: z.ZodIssueCode.custom, path: ['rows'], message: 'At least one valid row is required to apply an import.'});
+    }
+  });
+  const schema = versioned ? versionedSchema : legacySchema;
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+    res.status(400).json(versioned
+      ? {error: {code: 'INVALID_IMPORT_REQUEST', message: 'The Employee Master import request is invalid.'}}
+      : {error: parsed.error.flatten()});
     return;
   }
 
+  const dryRun = versioned && parsed.data.dryRun === true;
+  if (dryRun && parsed.data.rows.some(row => Object.hasOwn(row, 'initialPassword'))) {
+    res.status(400).json({error: {code: 'EMPLOYEE_DRY_RUN_CREDENTIAL_FORBIDDEN', message: 'Employee Master dry-run requests must not include credential values.'}});
+    return;
+  }
+  if (dryRun && parsed.data.fileName !== 'Employee Master import.csv') {
+    res.status(400).json({error: {code: 'EMPLOYEE_DRY_RUN_LABEL_REQUIRED', message: 'Employee Master dry-run requests must use the server-controlled import label.'}});
+    return;
+  }
+  if (versioned && !dryRun && parsed.data.rows.some(row => Object.hasOwn(row, 'initialPasswordPresent'))) {
+    res.status(400).json({error: {code: 'INVALID_IMPORT_REQUEST', message: 'The Employee Master import request is invalid.'}});
+    return;
+  }
+
+  const credentials = dryRun ? [] : parsed.data.rows.map(row => row.initialPassword).filter(Boolean);
+  const fileName = versioned
+    ? 'Employee Master import.csv'
+    : redactCredentialEchoes(parsed.data.fileName, credentials);
+  const redactedClientErrors = redactCredentialEchoes(parsed.data.clientErrors || [], credentials);
+  const clientErrors = versioned
+    ? normalizeEmployeeImportClientErrors(redactedClientErrors)
+    : redactedClientErrors;
+  const operationClientErrors = dryRun
+    ? clientErrors.map(({rowNumber, field}) => ({
+      rowNumber,
+      ...(field ? {field} : {}),
+      message: 'The Employee Master row failed preflight validation.',
+    }))
+    : clientErrors;
+  const requestHash = versioned ? hashEmployeeImportRequest({
+    schemaVersion: 'employee-master/1',
+    totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
+    clientErrors: operationClientErrors,
+    rows: parsed.data.rows,
+  }) : null;
   const client = await pool.connect();
+  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
+    rows: parsed.data.rows,
+    totalRows: parsed.data.totalRows,
+    clientErrors: operationClientErrors,
+  });
   const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
     { field: 'employeeId', value: row.employeeId, label: 'employee ID' },
     { field: 'email', value: row.email, label: 'email' },
-  ]);
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  ], index => rowNumbers[index]);
+  const errors = [...operationClientErrors, ...duplicateImportRows.errors];
+  const importBatchId = crypto.randomUUID();
   let saved = 0;
+  const idempotencyChannel = dryRun ? 'Employee Master Dry Run' : 'Employee Master';
   try {
     await client.query('begin');
+    if (versioned) {
+      const scope = req.organizationScope;
+      const lockKey = createScopedIdempotencyLockKey({
+        organizationId: scope.organizationId,
+        legalEntityId: scope.legalEntityId,
+        actorId,
+        channel: idempotencyChannel,
+        idempotencyKey,
+      });
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [lockKey]);
+      const existing = await client.query(
+        'select request_hash, batch_id from import_export_idempotency where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and channel=$4 and idempotency_key=$5',
+        [scope.organizationId, scope.legalEntityId, actorId, idempotencyChannel, idempotencyKey],
+      );
+      if (existing.rowCount > 0) {
+        if (existing.rows[0].request_hash !== requestHash) {
+          await client.query('rollback');
+          res.status(409).json({error: {code: 'IDEMPOTENCY_KEY_REUSED', message: 'This Idempotency-Key was already used with a different request.'}});
+          return;
+        }
+        const previousBatch = await client.query(
+          'select * from import_export_logs where id=$1 and organization_id=$2 and legal_entity_id=$3 and channel=$4 limit 1',
+          [existing.rows[0].batch_id, scope.organizationId, scope.legalEntityId, 'Employee Master'],
+        );
+        if (previousBatch.rowCount !== 1) throw new Error('Idempotency record has no matching scoped Employee Master batch.');
+        await client.query('commit');
+        const batch = previousBatch.rows[0];
+        res.json({
+          status: batch.status,
+          totalRows: batch.total_rows,
+          validRows: batch.valid_rows,
+          errorRows: batch.error_rows,
+          errors: Array.isArray(batch.errors) ? batch.errors : [],
+          replayed: true,
+          log: batch,
+        });
+        return;
+      }
+    }
+    if (dryRun) {
+      const scope = req.organizationScope;
+      const validation = await validateEmployeeImportDryRun({
+        client,
+        rows: parsed.data.rows,
+        rowNumbers,
+        duplicateRowNumbers: duplicateImportRows.duplicateRowNumbers,
+        duplicateErrors: duplicateImportRows.errors,
+        scope,
+        assertMayExit: assertWorkerMayExit,
+        assertMayReactivate: assertWorkerMayReactivate,
+      });
+      const safeErrors = safeEmployeeImportDryRunErrors([...operationClientErrors, ...validation.errors]);
+      const totalRows = parsed.data.totalRows ?? parsed.data.rows.length;
+      await audit(client, req, {
+        module: 'Import',
+        action: 'Dry Run Employee Master Import',
+        entityType: 'ImportBatch',
+        entityId: importBatchId,
+        oldValue: null,
+        newValue: {schemaVersion: 'employee-master/1', status: 'Dry Run', totalRows,
+          validRows: validation.validRows, errorRows: safeErrors.length},
+        details: 'Validated Employee Master import without applying employee, account, role, scope, lifecycle, or credential changes',
+        source: 'Employee Master CSV',
+        importBatchId,
+        importProcessingResult: 'Dry Run',
+      });
+      const logResult = await client.query(`
+        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run)
+        values ($1,'Import','Employee Master',$2,'Dry Run',$3,$4,$5,$6,$7,$8,$9,'employee-master/1',true)
+        returning *
+      `, [
+        importBatchId,
+        'Employee Master import.csv',
+        totalRows,
+        validation.validRows,
+        safeErrors.length,
+        safeErrors.length ? JSON.stringify(safeErrors) : null,
+        req.user.username,
+        scope.organizationId,
+        scope.legalEntityId,
+      ]);
+      await client.query(
+        'insert into import_export_idempotency (organization_id, legal_entity_id, actor_id, channel, idempotency_key, request_hash, batch_id) values ($1,$2,$3,$4,$5,$6,$7)',
+        [scope.organizationId, scope.legalEntityId, actorId, idempotencyChannel, idempotencyKey, requestHash, importBatchId],
+      );
+      await client.query('commit');
+      res.json({
+        status: 'Dry Run',
+        totalRows,
+        validRows: validation.validRows,
+        errorRows: safeErrors.length,
+        errors: safeErrors,
+        replayed: false,
+        log: logResult.rows[0],
+      });
+      return;
+    }
     const directorResult = await client.query('select id from country_directors');
     const directorIds = new Set(directorResult.rows.map(row => row.id));
     const employeeRole = (await client.query('select id from roles where name = $1', ['Employee'])).rows[0];
 
     for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
+      const rowNumber = rowNumbers[index];
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
       await client.query('select pg_advisory_xact_lock(hashtext($1))', [
         `employee:${req.organizationScope.organizationId}:${row.employeeId}`,
@@ -6510,7 +5977,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
             actorId: req.user.sub,
             effectiveFrom: new Date().toISOString().slice(0, 10),
             status: employee.status,
-            reason: `Reactivated through employee import ${parsed.data.fileName}`,
+            reason: `Reactivated through employee import ${fileName}`,
             source: 'Employee import',
           });
           await client.query(`release savepoint ${reactivationSavepoint}`);
@@ -6534,7 +6001,7 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         await client.query('insert into user_roles (user_id, role_id) values ($1,$2) on conflict do nothing', [userResult.rows[0].id, employeeRole.id]);
       }
       if (previous && previous.status !== 'Exited' && employee.status === 'Exited') {
-        await synchronizeWorkerExit(client, req, employee, row.exitDate || new Date().toISOString().slice(0, 10), `Employee import ${parsed.data.fileName}`);
+        await synchronizeWorkerExit(client, req, employee, row.exitDate || new Date().toISOString().slice(0, 10), `Employee import ${fileName}`);
       }
       await audit(client, req, {
         module: 'Import',
@@ -6543,33 +6010,56 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
         entityId: employee.id,
         oldValue: previous,
         newValue: employee,
-        details: `${previous ? 'Updated' : 'Created'} employee ${employee.employee_id} from ${parsed.data.fileName}`,
+        details: `${previous ? 'Updated' : 'Created'} employee master record from CSV import`,
+        source: 'Employee Master CSV',
+        importBatchId,
+        sourceIdentifier: employee.employee_id,
+        importProcessingResult: 'Success',
       });
       saved += 1;
     }
 
+    const responseErrors = attachImportErrorSourceIdentifiers({
+      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
+      sourceIdentifierForRow: row => row.employeeId,
+    });
+    const safeResponseErrors = redactCredentialEchoes(responseErrors, credentials);
     const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Employee Master',$1,$2,$3,$4,$5,$6,$7)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run)
+      values ($1,'Import','Employee Master',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false)
       returning *
     `, [
-      parsed.data.fileName,
+      importBatchId,
+      fileName,
       status,
       parsed.data.totalRows ?? parsed.data.rows.length,
       saved,
       errors.length,
-      errors.length ? JSON.stringify(errors) : null,
+      errors.length ? JSON.stringify(safeResponseErrors) : null,
       req.user.username,
+      req.organizationScope.organizationId,
+      req.organizationScope.legalEntityId,
+      versioned ? 'employee-master/1' : null,
     ]);
+    if (versioned) {
+      await client.query(
+        'insert into import_export_idempotency (organization_id, legal_entity_id, actor_id, channel, idempotency_key, request_hash, batch_id) values ($1,$2,$3,$4,$5,$6,$7)',
+        [req.organizationScope.organizationId, req.organizationScope.legalEntityId, actorId, 'Employee Master', idempotencyKey, requestHash, importBatchId],
+      );
+    }
     await client.query('commit');
+    const resultLog = versioned
+      ? logResult.rows[0]
+      : Object.fromEntries(Object.entries(logResult.rows[0]).filter(([key]) => !['schema_version', 'dry_run'].includes(key)));
     res.json({
       status,
       totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
       validRows: saved,
       errorRows: errors.length,
-      errors,
-      log: logResult.rows[0],
+      errors: safeResponseErrors,
+      ...(versioned ? {replayed: false} : {}),
+      log: resultLog,
     });
   } catch (error) {
     await client.query('rollback');
@@ -6584,45 +6074,148 @@ app.post('/api/imports/employees/apply', requireDatabase, requireAuth, requirePe
   }
 });
 
-app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const rowSchema = z.object({
-    id: z.string().min(1).optional(),
+const legacyClientImportLog = row => {
+  const {schema_version: _schemaVersion, dry_run: _dryRun, ...legacyRow} = row;
+  return legacyRow;
+};
+
+app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
+  const versioned = req.apiVersion === 'v1';
+  let idempotencyKey = null;
+  let actorId = null;
+  if (versioned) {
+    const rawKey = req.get?.('Idempotency-Key') ?? req.headers?.['idempotency-key'];
+    if (typeof rawKey !== 'string' || rawKey.length === 0) {
+      res.status(400).json({error: {code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'The Idempotency-Key header is required.'}});
+      return;
+    }
+    idempotencyKey = normalizeIdempotencyKey(rawKey);
+    if (!idempotencyKey) {
+      res.status(400).json({error: {code: 'INVALID_IDEMPOTENCY_KEY', message: 'The Idempotency-Key header is invalid.'}});
+      return;
+    }
+    if (!req.body?.schemaVersion) {
+      res.status(400).json({error: {code: 'SCHEMA_VERSION_REQUIRED', message: 'A client import schema version is required.'}});
+      return;
+    }
+    if (req.body.schemaVersion !== 'client-master/1') {
+      res.status(400).json({error: {code: 'UNSUPPORTED_SCHEMA_VERSION', message: 'The client import schema version is not supported.'}});
+      return;
+    }
+    actorId = typeof req.user?.sub === 'string' || typeof req.user?.sub === 'number'
+      ? String(req.user.sub)
+      : '';
+    if (!actorId) {
+      res.status(401).json({error: {code: 'AUTHENTICATION_REQUIRED', message: 'An authenticated account is required.'}});
+      return;
+    }
+  }
+  const optionalClientImportId = z.preprocess(
+    value => typeof value === 'string' && value.trim() === '' ? undefined : value,
+    z.string().min(1).optional(),
+  );
+  const optionalClientImportStatus = z.preprocess(
+    value => typeof value === 'string' && value.trim() === '' ? undefined : value,
+    z.enum(['Active', 'Inactive']).optional(),
+  );
+  const rowSchema = versioned => z.object({
+    id: versioned ? optionalClientImportId : z.string().min(1).optional(),
     name: z.string().min(1),
     industry: z.string().optional(),
     accountOwnerId: z.string().optional(),
     countryDirectorIds: z.union([z.string(), z.array(z.string())]).optional(),
-    status: z.enum(['Active', 'Inactive']).optional(),
+    status: versioned ? optionalClientImportStatus : z.enum(['Active', 'Inactive']).optional(),
   });
-  const schema = z.object({
+  const legacySchema = z.object({
     fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
+    rows: z.array(rowSchema(false)).min(1),
     totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
+    clientErrors: z.array(importErrorRowSchema).optional(),
   });
-  const parsed = schema.safeParse(req.body);
+  const versionedSchema = legacySchema.extend({
+    rows: z.array(rowSchema(true)),
+    schemaVersion: z.literal('client-master/1'),
+    dryRun: z.boolean().default(false),
+  }).superRefine((data, context) => {
+    if (!data.dryRun && data.rows.length === 0) {
+      context.addIssue({code: z.ZodIssueCode.custom, path: ['rows'], message: 'At least one valid row is required to apply an import.'});
+    }
+  });
+  const parsed = (versioned ? versionedSchema : legacySchema).safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+    if (versioned) {
+      res.status(400).json({error: {code: 'INVALID_IMPORT_REQUEST', message: 'The client import request is invalid.'}});
+    } else {
+      res.status(400).json({ error: parsed.error.flatten() });
+    }
     return;
   }
 
-  const client = await pool.connect();
+  let client;
+  const clientErrors = parsed.data.clientErrors || [];
+  const {rowNumbers, mappingIsReliable} = resolveImportApplyRowNumbers({
+    rows: parsed.data.rows,
+    totalRows: parsed.data.totalRows,
+    clientErrors,
+  });
   const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
     { field: 'id', value: row.id, label: 'client ID' },
     { field: 'name', value: row.name, label: 'client name' },
-  ]);
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
+  ], index => rowNumbers[index]);
+  const errors = [...clientErrors, ...duplicateImportRows.errors];
+  const importBatchId = crypto.randomUUID();
+  const dryRun = versioned && parsed.data.dryRun;
+  const scope = req.organizationScope;
+  const canonicalRequest = {
+    ...parsed.data,
+    totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
+    clientErrors,
+  };
+  const requestHash = versioned ? hashImportRequest(canonicalRequest) : null;
   let saved = 0;
+  let transactionOpen = false;
   try {
+    client = await pool.connect();
     await client.query('begin');
+    transactionOpen = true;
+    if (versioned) {
+      const lockKey = createScopedIdempotencyLockKey({
+        organizationId: scope.organizationId,
+        legalEntityId: scope.legalEntityId,
+        actorId,
+        channel: 'Client Master',
+        idempotencyKey,
+      });
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [lockKey]);
+      const existing = await client.query(
+        'select request_hash, batch_id from import_export_idempotency where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and channel=$4 and idempotency_key=$5',
+        [scope.organizationId, scope.legalEntityId, actorId, 'Client Master', idempotencyKey],
+      );
+      if (existing.rowCount > 0) {
+        if (existing.rows[0].request_hash !== requestHash) {
+          await client.query('rollback');
+          transactionOpen = false;
+          res.status(409).json({error: {code: 'IDEMPOTENCY_KEY_REUSED', message: 'This Idempotency-Key was already used with a different request.'}});
+          return;
+        }
+        const previousBatch = await client.query(
+          'select * from import_export_logs where id=$1 and organization_id=$2 and legal_entity_id=$3 and channel=$4 limit 1',
+          [existing.rows[0].batch_id, scope.organizationId, scope.legalEntityId, 'Client Master'],
+        );
+        if (previousBatch.rowCount !== 1) throw new Error('Idempotency record has no matching scoped import batch.');
+        await client.query('commit');
+        transactionOpen = false;
+        const row = previousBatch.rows[0];
+        res.json({status: row.status, totalRows: row.total_rows, validRows: row.valid_rows,
+          errorRows: row.error_rows, errors: Array.isArray(row.errors) ? row.errors : [], log: row});
+        return;
+      }
+    }
     const directorResult = await client.query('select id from country_directors');
     const directorIds = new Set(directorResult.rows.map(row => row.id));
 
     for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
+      const rowNumber = rowNumbers[index];
       if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
       const countryDirectorIds = splitPipeList(row.countryDirectorIds);
       const rowErrors = [];
@@ -6660,6 +6253,10 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
       `, [row.id || null, row.name])).rows[0];
       if (crossScopeClient) {
         errors.push({ rowNumber, field: row.id ? 'id' : 'name', message: 'Client is not available in the authorized organization and legal entity.' });
+        continue;
+      }
+      if (dryRun) {
+        saved += 1;
         continue;
       }
       const result = await client.query(`
@@ -6702,612 +6299,113 @@ app.post('/api/imports/clients/apply', requireDatabase, requireAuth, requirePerm
         oldValue: previous,
         newValue: savedClient,
         details: `${previous ? 'Updated' : 'Created'} client ${savedClient.name} from ${parsed.data.fileName}`,
+        source: 'Client Master CSV',
+        importBatchId,
+        sourceIdentifier: row.id ?? null,
+        importProcessingResult: 'Success',
       });
       saved += 1;
     }
 
-    const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
-    const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Client Master',$1,$2,$3,$4,$5,$6,$7)
-      returning *
-    `, [
-      parsed.data.fileName,
-      status,
-      parsed.data.totalRows ?? parsed.data.rows.length,
-      saved,
-      errors.length,
-      errors.length ? JSON.stringify(errors) : null,
-      req.user.username,
-    ]);
-    await client.query('commit');
-    res.json({
-      status,
-      totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-      validRows: saved,
-      errorRows: errors.length,
-      errors,
-      log: logResult.rows[0],
+    const responseErrors = attachImportErrorSourceIdentifiers({
+      errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
+      sourceIdentifierForRow: row => row.id ?? null,
     });
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Client import apply failed' });
-  } finally {
-    client.release();
-  }
-});
-
-app.post('/api/imports/projects/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const rowSchema = z.object({
-    projectCode: z.string().min(1),
-    name: z.string().min(1),
-    clientId: z.string().optional(),
-    client: z.string().min(1),
-    managerId: z.string().min(1),
-    startDate: strictIsoDateSchema,
-    endDate: strictIsoDateSchema,
-    status: z.enum(['Proposed', 'Active', 'On Hold', 'Completed']).optional(),
-    billable: z.union([z.boolean(), z.string()]).optional(),
-    projectType: z.string().optional(),
-    country: z.string().optional(),
-    notes: z.string().optional(),
-  });
-  const schema = z.object({
-    fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
-    totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-
-  const client = await pool.connect();
-  const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
-    { field: 'projectCode', value: row.projectCode, label: 'project code' },
-  ]);
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
-  let saved = 0;
-  try {
-    await client.query('begin');
-
-    for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
-      if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
-      const rowErrors = [];
-      if (row.endDate < row.startDate) {
-        rowErrors.push({ rowNumber, field: 'endDate', message: 'End date must be on or after start date.' });
-      }
-
-      const clientRecord = (await client.query(`
-        select id, name, status
-        from clients
-        where (($1::text is not null and id = $1) or lower(name) = lower($2))
-          and organization_id=$3 and legal_entity_id=$4
-        limit 1
-      `, [row.clientId || null, row.client, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (!clientRecord || clientRecord.status !== 'Active') {
-        rowErrors.push({ rowNumber, field: 'client', message: 'Project must reference an active client.' });
-      }
-
-      const manager = (await client.query(`
-        select id, name, status
-        from employees
-        where (id = $1 or employee_id = $1) and status = 'Active'
-          and organization_id=$2 and legal_entity_id=$3
-        limit 1
-      `, [row.managerId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (!manager) {
-        rowErrors.push({ rowNumber, field: 'managerId', message: 'Project manager employee record does not exist or is exited.' });
-      }
-
-      if (rowErrors.length > 0) {
-        errors.push(...rowErrors);
-        continue;
-      }
-
-      const previous = (await client.query(`select * from projects where project_code=$1 and organization_id=$2 and legal_entity_id=$3 limit 1`,
-        [row.projectCode, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      const crossLegalCollision = !previous && (await client.query(`select 1 from projects where project_code=$1 and organization_id=$2 and legal_entity_id<>$3 limit 1`,
-        [row.projectCode, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (crossLegalCollision) {
-        errors.push({ rowNumber, field: 'projectCode', message: 'Project code belongs to another legal entity in this organization.', code: 'PROJECT_SCOPE_CONFLICT' });
-        continue;
-      }
-      const result = await client.query(`
-        insert into projects (id, project_code, name, client_id, client, manager_id, manager_name, start_date, end_date, status, billable, project_type, country, notes, organization_id, legal_entity_id)
-        values (coalesce($1, 'p-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-        on conflict (organization_id,project_code) do update set
-          name = excluded.name,
-          client_id = excluded.client_id,
-          client = excluded.client,
-          manager_id = excluded.manager_id,
-          manager_name = excluded.manager_name,
-          start_date = excluded.start_date,
-          end_date = excluded.end_date,
-          status = excluded.status,
-          billable = excluded.billable,
-          project_type = excluded.project_type,
-          country = excluded.country,
-          notes = excluded.notes,
-          updated_at = now()
-        returning *
-      `, [
-        previous?.id || null,
-        row.projectCode,
-        row.name,
-        clientRecord.id,
-        clientRecord.name,
-        manager.id,
-        manager.name,
-        row.startDate,
-        row.endDate,
-        row.status || previous?.status || 'Proposed',
-        parseBoolean(row.billable, previous?.billable ?? true),
-        row.projectType || previous?.project_type || null,
-        row.country || previous?.country || null,
-        row.notes || previous?.notes || null,
-        req.organizationScope.organizationId, req.organizationScope.legalEntityId,
-      ]);
-      const project = result.rows[0];
+    const status = dryRun ? 'Dry Run' : saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
+    const totalRows = parsed.data.totalRows ?? parsed.data.rows.length;
+    if (dryRun) {
       await audit(client, req, {
         module: 'Import',
-        action: previous ? 'Import Update Project' : 'Import Create Project',
-        entityType: 'Project',
-        entityId: project.id,
-        oldValue: previous,
-        newValue: project,
-        details: `${previous ? 'Updated' : 'Created'} project ${project.project_code} from ${parsed.data.fileName}`,
+        action: 'Dry Run Client Import',
+        entityType: 'ImportBatch',
+        entityId: importBatchId,
+        oldValue: null,
+        newValue: {schemaVersion: parsed.data.schemaVersion, status, totalRows, validRows: saved, errorRows: errors.length},
+        details: 'Validated client import ' + parsed.data.fileName + ' without applying client rows',
+        source: 'Client Master CSV',
+        importBatchId,
+        importProcessingResult: 'Dry Run',
       });
-      saved += 1;
     }
-
-    const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
     const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Project Master',$1,$2,$3,$4,$5,$6,$7)
+      insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run)
+      values ($1,'Import','Client Master',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       returning *
     `, [
+      importBatchId,
       parsed.data.fileName,
       status,
-      parsed.data.totalRows ?? parsed.data.rows.length,
+      totalRows,
       saved,
       errors.length,
-      errors.length ? JSON.stringify(errors) : null,
+      errors.length ? JSON.stringify(responseErrors) : null,
       req.user.username,
+      scope.organizationId,
+      scope.legalEntityId,
+      versioned ? parsed.data.schemaVersion : null,
+      dryRun,
     ]);
+    if (versioned) {
+      await client.query(
+        'insert into import_export_idempotency (organization_id, legal_entity_id, actor_id, channel, idempotency_key, request_hash, batch_id) values ($1,$2,$3,\'Client Master\',$4,$5,$6)',
+        [scope.organizationId, scope.legalEntityId, actorId, idempotencyKey, requestHash, importBatchId],
+      );
+    }
     await client.query('commit');
-    res.json({
-      status,
-      totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-      validRows: saved,
-      errorRows: errors.length,
-      errors,
-      log: logResult.rows[0],
-    });
+    transactionOpen = false;
+    res.json({status, totalRows, validRows: saved, errorRows: errors.length,
+      errors: responseErrors, log: versioned ? logResult.rows[0] : legacyClientImportLog(logResult.rows[0])});
   } catch (error) {
-    await client.query('rollback');
+    if (client && transactionOpen) {
+      try { await client.query('rollback'); } catch { /* Preserve the original failure. */ }
+    }
     console.error(error);
-    res.status(500).json({ error: 'Project import apply failed' });
+    if (versioned) {
+      res.status(500).json({error: {code: 'CLIENT_IMPORT_FAILED', message: 'The client import could not be completed.'}});
+    } else {
+      res.status(500).json({ error: 'Client import apply failed' });
+    }
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
-app.post('/api/imports/allocations/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const rowSchema = z.object({
-    id: z.string().min(1).optional(),
-    employeeId: z.string().min(1),
-    projectId: z.string().min(1),
-    roleOnProject: z.string().optional(),
-    percentage: z.coerce.number().min(0).max(200),
-    startDate: strictIsoDateSchema,
-    endDate: strictIsoDateSchema,
-    billable: z.union([z.boolean(), z.string()]).optional(),
-    status: z.enum(['Active', 'Paused', 'Completed']).optional(),
-    comments: z.string().optional(),
-  });
-  const schema = z.object({
-    fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
-    totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
+const operationalImportRouter = createOperationalImportRouter({
+  pool,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  audit,
+  importErrorRowSchema,
+  strictIsoDateSchema,
+  parseBoolean,
+  collectDuplicateImportRows,
+  resolveImportApplyRowNumbers,
+  attachImportErrorSourceIdentifiers,
+  isAfterToday,
+  isWorkDateInsideWeek,
+  toIsoDate,
+  round1,
+  getSetting,
+  assertReportingPeriodAllows,
+  REPORTING_PERIOD_OPERATIONS,
+  ReportingPeriodError,
+  sendReportingPeriodError,
+});
+app.use('/api', operationalImportRouter);
+app.use('/api/v1', operationalImportRouter);
 
-  const client = await pool.connect();
-  const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [
-    { field: 'id', value: row.id, label: 'allocation ID' },
-  ]);
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
-  let saved = 0;
-  try {
-    await client.query('begin');
-    const blockOverAllocation = await getSetting('blockOverAllocation', false);
-
-    for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
-      if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
-      const rowErrors = [];
-      if (row.endDate < row.startDate) {
-        rowErrors.push({ rowNumber, field: 'endDate', message: 'End date must be on or after start date.' });
-      }
-
-      const employee = (await client.query(`
-        select *
-        from employees
-        where (id = $1 or employee_id = $1) and status <> 'Exited'
-          and organization_id=$2 and legal_entity_id=$3
-        limit 1
-      `, [row.employeeId,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
-      if (!employee) {
-        rowErrors.push({ rowNumber, field: 'employeeId', message: 'Allocation must reference an active employee.' });
-      }
-
-      const project = (await client.query(`
-        select *
-        from projects
-        where (id = $1 or project_code = $1) and status in ('Active', 'Proposed')
-          and organization_id=$2 and legal_entity_id=$3
-        limit 1
-      `, [row.projectId,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0];
-      if (!project) {
-        rowErrors.push({ rowNumber, field: 'projectId', message: 'Allocation must reference an active or proposed project.' });
-      } else if (row.startDate < toIsoDate(project.start_date) || row.endDate > toIsoDate(project.end_date)) {
-        rowErrors.push({ rowNumber, field: 'startDate', message: 'Allocation dates must stay within the project timeline.' });
-      }
-
-      if (blockOverAllocation && employee && row.status !== 'Paused' && row.status !== 'Completed') {
-        await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [employee.id]);
-        const loadResult = await client.query(`
-          select coalesce(sum(percentage), 0) as total
-          from project_allocations
-          where employee_id = $1
-            and organization_id = $5 and legal_entity_id = $6
-            and id <> coalesce($2, '')
-            and status = 'Active'
-            and daterange(start_date, end_date, '[]') && daterange($3::date, $4::date, '[]')
-        `, [employee.id, row.id || null, row.startDate, row.endDate, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
-        const total = parsePercent(loadResult.rows[0]?.total) + row.percentage;
-        if (total > 100) {
-          rowErrors.push({ rowNumber, field: 'percentage', message: `Allocation would exceed 100% for overlapping dates (${total}%).` });
-        }
-      }
-
-      if (rowErrors.length > 0) {
-        errors.push(...rowErrors);
-        continue;
-      }
-
-      const previous = row.id
-        ? (await client.query(`select pa.* from project_allocations pa
-          join projects p on p.id=pa.project_id and p.organization_id=pa.organization_id
-          join employees e on e.id=pa.employee_id and e.organization_id=pa.organization_id
-          where pa.id=$1 and pa.organization_id=$2 and pa.legal_entity_id=$3 and p.legal_entity_id=$3 and e.legal_entity_id=$3 limit 1`,
-        [row.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0]
-        : null;
-      if (row.id && !previous && (await client.query('select 1 from project_allocations where id=$1',[row.id])).rowCount) {
-        errors.push({rowNumber,field:'id',message:'Allocation is not available in the authorized organization and legal entity.'});
-        continue;
-      }
-      const result = await client.query(`
-        insert into project_allocations (id, employee_id, project_id, role_on_project, percentage, start_date, end_date, billable, status, comments, organization_id, legal_entity_id)
-        values (coalesce($1, 'a-' || gen_random_uuid()::text), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        on conflict (id) do update set
-          employee_id = excluded.employee_id,
-          project_id = excluded.project_id,
-          role_on_project = excluded.role_on_project,
-          percentage = excluded.percentage,
-          start_date = excluded.start_date,
-          end_date = excluded.end_date,
-          billable = excluded.billable,
-          status = excluded.status,
-          comments = excluded.comments,
-          updated_at = now()
-        where project_allocations.organization_id=excluded.organization_id and project_allocations.legal_entity_id=excluded.legal_entity_id
-        returning *
-      `, [
-        previous?.id || row.id || null,
-        employee.id,
-        project.id,
-        row.roleOnProject || previous?.role_on_project || employee.designation,
-        row.percentage,
-        row.startDate,
-        row.endDate,
-        parseBoolean(row.billable, previous?.billable ?? true),
-        row.status || previous?.status || 'Active',
-        row.comments || previous?.comments || null,
-        req.organizationScope.organizationId,
-        req.organizationScope.legalEntityId,
-      ]);
-      const allocation = result.rows[0];
-      await audit(client, req, {
-        module: 'Import',
-        action: previous ? 'Import Update Allocation' : 'Import Create Allocation',
-        entityType: 'Allocation',
-        entityId: allocation.id,
-        oldValue: previous,
-        newValue: allocation,
-        details: `${previous ? 'Updated' : 'Created'} allocation for ${employee.employee_id} on ${project.project_code} from ${parsed.data.fileName}`,
-      });
-      saved += 1;
-    }
-
-    const status = saved === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
-    const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Allocation Control',$1,$2,$3,$4,$5,$6,$7)
-      returning *
-    `, [
-      parsed.data.fileName,
-      status,
-      parsed.data.totalRows ?? parsed.data.rows.length,
-      saved,
-      errors.length,
-      errors.length ? JSON.stringify(errors) : null,
-      req.user.username,
-    ]);
-    await client.query('commit');
-    res.json({
-      status,
-      totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-      validRows: saved,
-      errorRows: errors.length,
-      errors,
-      log: logResult.rows[0],
-    });
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Allocation import apply failed' });
-  } finally {
-    client.release();
-  }
+registerOrganizationSetupRoutes({
+  app,
+  pool,
+  requireDatabase,
+  requireAuth,
+  requirePermission,
+  audit,
+  mountPaths: ['/api/organization-setup', '/api/v1/organization-setup'],
 });
 
-app.post('/api/imports/timesheets/apply', requireDatabase, requireAuth, requirePermission('imports.manage'), async (req, res) => {
-  const rowSchema = z.object({
-    employeeId: z.string().min(1),
-    weekEnding: strictIsoDateSchema,
-    workType: z.enum(['Project Work', 'Client Misc Task']),
-    projectId: z.string().optional(),
-    clientName: z.string().optional(),
-    category: z.string().optional(),
-    date: strictIsoDateSchema,
-    hours: z.coerce.number().min(0).max(24),
-    remark: z.string().optional(),
-    billable: z.union([z.boolean(), z.string()]).optional(),
-    status: z.enum(['Draft', 'Submitted', 'Approved', 'Rejected']).optional(),
-    rejectionReason: z.string().optional(),
-  });
-  const schema = z.object({
-    fileName: z.string().min(1),
-    rows: z.array(rowSchema).min(1),
-    totalRows: z.number().int().min(0).optional(),
-    clientErrors: z.array(z.object({
-      rowNumber: z.number().int(),
-      field: z.string().optional(),
-      message: z.string(),
-    })).optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-
-  const duplicateImportRows = collectDuplicateImportRows(parsed.data.rows, row => [{
-    field: 'timesheetEntryKey',
-    label: 'Timesheet entry key',
-    value: [row.employeeId, row.weekEnding, row.date, row.workType, row.projectId || row.clientName].join('|'),
-  }]);
-  const client = await pool.connect();
-  const errors = [...(parsed.data.clientErrors || []), ...duplicateImportRows.errors];
-  const groups = new Map();
-  let validEntryRows = 0;
-  try {
-    await client.query('begin');
-
-    for (const [index, row] of parsed.data.rows.entries()) {
-      const rowNumber = index + 2;
-      if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
-      const rowErrors = [];
-      if (isAfterToday(row.weekEnding) || isAfterToday(row.date)) {
-        rowErrors.push({ rowNumber, field: 'date', message: 'Future week timesheets and future-dated entries cannot be imported.' });
-      }
-
-      const employee = (await client.query(`
-        select id, employee_id, name, status
-        from employees
-        where (id = $1 or employee_id = $1)
-          and organization_id = $2 and legal_entity_id = $3
-          and status <> 'Exited'
-        limit 1
-      `, [row.employeeId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-      if (!employee) {
-        rowErrors.push({ rowNumber, field: 'employeeId', message: 'Timesheet must reference an active employee.' });
-      }
-
-      let project = null;
-      if (row.workType === 'Project Work') {
-        if (!row.projectId) {
-          rowErrors.push({ rowNumber, field: 'projectId', message: 'Project Work entries require a project.' });
-        } else {
-          project = (await client.query(`
-            select id, name, status
-            from projects
-            where (id = $1 or project_code = $1)
-              and organization_id = $2 and legal_entity_id = $3
-              and status <> 'Completed'
-            limit 1
-          `, [row.projectId, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
-          if (!project) {
-            rowErrors.push({ rowNumber, field: 'projectId', message: 'Project Work entries must reference active, proposed, or on-hold projects.' });
-          } else if (!(await client.query(`
-            select 1 from project_allocations
-            where employee_id = $1 and project_id = $2
-              and organization_id = $3 and legal_entity_id = $4
-              and status = 'Active' and $5::date between start_date and end_date
-            limit 1
-          `, [employee?.id || '', project.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId, row.date])).rows[0]) {
-            rowErrors.push({ rowNumber, field: 'projectId', message: 'Project work requires an active allocation covering the entry date.' });
-          }
-        }
-      }
-      if (row.workType === 'Client Misc Task' && !row.clientName) {
-        rowErrors.push({ rowNumber, field: 'clientName', message: 'Client Misc Task entries require a client name.' });
-      }
-
-      if (rowErrors.length > 0) {
-        errors.push(...rowErrors);
-        continue;
-      }
-
-      const status = row.status || 'Submitted';
-      const key = `${employee.id}:${row.weekEnding}`;
-      const group = groups.get(key) || {
-        employee,
-        weekEnding: row.weekEnding,
-        status,
-        rejectionReason: row.rejectionReason || null,
-        entries: [],
-      };
-      if (group.status !== status) {
-        errors.push({ rowNumber, field: 'status', message: 'Rows for the same employee/week must use the same timesheet status.' });
-        continue;
-      }
-      group.entries.push({
-        rowNumber,
-        projectId: project?.id || null,
-        workType: row.workType,
-        clientName: row.clientName || null,
-        category: row.category || null,
-        workDate: row.date,
-        hours: round1(row.hours),
-        remark: row.remark || null,
-        billable: parseBoolean(row.billable, row.workType === 'Project Work'),
-      });
-      groups.set(key, group);
-      validEntryRows += 1;
-    }
-
-    for (const group of groups.values()) {
-      try {
-        await assertReportingPeriodAllows(client, {
-          organizationId: req.organizationScope.organizationId,
-          legalEntityId: req.organizationScope.legalEntityId,
-          relevantDates: [group.weekEnding, ...group.entries.map(entry => entry.workDate)],
-          operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
-        });
-      } catch (error) {
-        if (!(error instanceof ReportingPeriodError)) throw error;
-        errors.push(...group.entries.map(entry => ({ rowNumber: entry.rowNumber, field: 'date', message: error.message, code: error.code })));
-        validEntryRows -= group.entries.length;
-        continue;
-      }
-      const totalHours = round1(group.entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
-      const billableHours = round1(group.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
-      const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, group.employee.id, group.weekEnding])).rows[0];
-      const timesheetResult = await client.query(`
-        insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id)
-        values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7,$8)
-        on conflict (organization_id, employee_id, week_ending) do update set
-          status = excluded.status,
-          total_hours = excluded.total_hours,
-          billable_hours = excluded.billable_hours,
-          rejection_reason = excluded.rejection_reason,
-          submitted_at = case when excluded.status = 'Submitted' then coalesce(timesheets.submitted_at, now()) else timesheets.submitted_at end,
-          updated_at = now()
-        returning *
-      `, [
-        group.employee.id,
-        group.weekEnding,
-        group.status,
-        totalHours,
-        billableHours,
-        group.rejectionReason,
-        req.organizationScope.organizationId,
-        req.organizationScope.legalEntityId,
-      ]);
-      const timesheet = timesheetResult.rows[0];
-      await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);
-      for (const entry of group.entries) {
-        await client.query(`
-          insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable)
-          values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        `, [
-          timesheet.id,
-          entry.projectId,
-          entry.workType,
-          entry.clientName,
-          entry.category,
-          entry.workDate,
-          entry.hours,
-          entry.remark,
-          entry.billable,
-        ]);
-      }
-      await audit(client, req, {
-        module: 'Import',
-        action: previous ? 'Import Update Timesheet' : 'Import Create Timesheet',
-        entityType: 'Timesheet',
-        entityId: String(timesheet.id),
-        oldValue: previous,
-        newValue: timesheet,
-        details: `${previous ? 'Updated' : 'Created'} ${group.status} timesheet for ${group.employee.employee_id}, week ending ${group.weekEnding} from ${parsed.data.fileName}`,
-        reason: group.rejectionReason,
-      });
-    }
-
-    const status = validEntryRows === 0 ? 'Failed' : errors.length > 0 ? 'Partial' : 'Success';
-    const logResult = await client.query(`
-      insert into import_export_logs (operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name)
-      values ('Import','Timesheet Import',$1,$2,$3,$4,$5,$6,$7)
-      returning *
-    `, [
-      parsed.data.fileName,
-      status,
-      parsed.data.totalRows ?? parsed.data.rows.length,
-      validEntryRows,
-      errors.length,
-      errors.length ? JSON.stringify(errors) : null,
-      req.user.username,
-    ]);
-    await client.query('commit');
-    res.json({
-      status,
-      totalRows: parsed.data.totalRows ?? parsed.data.rows.length,
-      validRows: validEntryRows,
-      errorRows: errors.length,
-      errors,
-      log: logResult.rows[0],
-    });
-  } catch (error) {
-    await client.query('rollback');
-    if (sendReportingPeriodError(res, error)) return;
-    console.error(error);
-    res.status(500).json({ error: 'Timesheet import apply failed' });
-  } finally {
-    client.release();
-  }
-});
-
-registerOrganizationSetupRoutes({ app, pool, requireDatabase, requireAuth, requirePermission, audit });
+app.use('/api/v1', versionedApiErrorHandler);
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });

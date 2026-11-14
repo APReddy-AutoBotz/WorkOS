@@ -35,16 +35,13 @@ const reactivationConflict = () => {
 
 const lifecycleDateOnly = value => value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
 
-// Call inside the same transaction as the employee and linked-identity writes.
-export const synchronizeWorkerReactivation = async (client, {
+/** Read-only lifecycle check shared by Employee Master preview and apply. */
+export const assertWorkerMayReactivate = async (client, {
   employeeId,
   organizationId,
   legalEntityId,
-  actorId,
   effectiveFrom,
   status,
-  reason,
-  source,
 }) => {
   if (!['Active', 'On Leave'].includes(status)) throw reactivationConflict();
   const effectiveDate = lifecycleDateOnly(effectiveFrom);
@@ -69,6 +66,25 @@ export const synchronizeWorkerReactivation = async (client, {
     latest.effective_to != null ||
     effectiveDate <= lifecycleDateOnly(latest.effective_from)
   ) throw reactivationConflict();
+
+  return {profile, latest};
+};
+
+// Call inside the same transaction as the employee and linked-identity writes.
+export const synchronizeWorkerReactivation = async (client, {
+  employeeId,
+  organizationId,
+  legalEntityId,
+  actorId,
+  effectiveFrom,
+  status,
+  reason,
+  source,
+}) => {
+  const effectiveDate = lifecycleDateOnly(effectiveFrom);
+  const {profile, latest} = await assertWorkerMayReactivate(client, {
+    employeeId, organizationId, legalEntityId, effectiveFrom: effectiveDate, status,
+  });
 
   try {
     const closed = await client.query(`
