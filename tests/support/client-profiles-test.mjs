@@ -96,7 +96,7 @@ export const withClientProfilesJourney = async test => withCommercialDatabase(as
   await withPreClientProfileMigrations(async rootDir => {
     const result = await runMigrations({pool, rootDir, logger: {log() {}}});assert.equal(result.status.currentVersion, '041_wos04_governed_lifecycle');
     const before = await clientProfileSnapshot(pool, preservedClientTables);
-    const upgraded = await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied, [clientProfileMigration]);
+    const upgraded = await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied, [clientProfileMigration, '043_wos04_governed_amendments']);
     assert.deepEqual(await clientProfileSnapshot(pool, preservedClientTables), before);
   }, {beforeCommercial: async rootDir => {
     const baseline = await runMigrations({pool, rootDir, logger: {log() {}}});assert.equal(baseline.status.currentVersion, '039_wos03_import_operation_contract');

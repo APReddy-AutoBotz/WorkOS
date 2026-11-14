@@ -1,3 +1,5 @@
+import {amendmentPreviewSchema,amendmentCommandSchema} from './amendment-contracts.mjs';
+import {getAmendmentWorkspace,previewAmendment,appendAmendment} from './amendment-service.mjs';
 import {lockCommercialLifecycle} from './project-mutation.mjs';
 import {lifecycleTransitionSchema,projectBindingSchema,lifecycleQuerySchema} from './lifecycle-contracts.mjs';
 import {transitionLifecycle,createGovernedProject,getLifecycleWorkspace,getLifecycleHistory,getClosureReadiness} from './lifecycle-service.mjs';
@@ -16,11 +18,12 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
     try{
       client=await pool.connect();
       await client.query(write?'begin':'begin isolation level repeatable read');begun=true;
-      if(write && permission==='commercial.lifecycle.manage')await lockCommercialLifecycle(client,req.organizationScope);
+      if(write)await lockCommercialLifecycle(client,req.organizationScope);
       // A mutation also requires view permission, preventing write-only clients
       // from receiving confidential result DTOs through a command response.
       await assertCommercialAuthority(client,req,'commercial.contracts.view');
       if(write)await assertCommercialAuthority(client,req,permission);
+      if(write && permission==='commercial.amendments.manage')await assertCommercialAuthority(client,req,'commercial.lifecycle.manage');
       const result=await command(client,req,parsed.data);
       await client.query('commit');begun=false;res.status(write?201:200).json(result);
     }catch(error){
@@ -32,6 +35,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       else{logError(error);res.status(503).json({error:{code:'COMMERCIAL_UNAVAILABLE',message:'Commercial drafts are unavailable. No successful save is confirmed.'}});}
     }finally{client?.release();}
   };
+  router.get('/amendments/:type/:id',handle(lifecycleQuerySchema,false,(client,req)=>getAmendmentWorkspace(client,req,req.params.type,req.params.id)));
+  router.post('/amendments/:type/:id/preview',handle(amendmentPreviewSchema,true,(client,req,data)=>previewAmendment(client,req,req.params.type,req.params.id,data),'commercial.amendments.manage'));
+  router.post('/amendments/:type/:id',handle(amendmentCommandSchema,true,(client,req,data)=>appendAmendment(client,req,req.params.type,req.params.id,data,audit),'commercial.amendments.manage'));
   router.get('/lifecycle/workspace',handle(lifecycleQuerySchema,false,(client,req)=>getLifecycleWorkspace(client,req)));
   router.get('/lifecycle/:type/:id/readiness',handle(lifecycleQuerySchema,false,(client,req)=>getClosureReadiness(client,req,req.params.type,req.params.id)));
   router.get('/lifecycle/:type/:id/history',handle(lifecycleQuerySchema,false,(client,req)=>getLifecycleHistory(client,req,req.params.type,req.params.id)));
