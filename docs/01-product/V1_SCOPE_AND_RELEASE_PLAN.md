@@ -42,6 +42,8 @@ A buyer can deploy an isolated WorkOS environment, configure organization and te
 
 ## Release-gate model
 
+The [enterprise delivery and integration roadmap](../05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md), updated 2026-11-14, prioritizes verified integration, consistent utilization, workflow recovery, scale/restore evidence and buyer acceptance within this existing scope. The [current implementation status](../00-control/IMPLEMENTATION_STATUS.md) distinguishes merged source from draft evidence. The milestone table above defines exit meanings, not a claim that those releases have been accepted.
+
 Engineering readiness and buyer/environment acceptance are separate. A module can be code-complete while still requiring buyer identity configuration, data reconciliation, operations ownership or UAT.
 
 No release may claim readiness solely from implementation-agent output. Exact-head CI, migration, authorization, browser, security and operational evidence must satisfy `docs/04-quality/RELEASE_ACCEPTANCE_CRITERIA.md`.

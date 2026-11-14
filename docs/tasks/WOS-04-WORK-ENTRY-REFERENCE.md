@@ -1,8 +1,18 @@
 # PR-008E: Optional task, ticket or milestone reference text
 
-**Status:** Dependent implementation candidate; acceptance plan was recorded before product edits in commit `040e02b`. Exact-head engineering receipts remain required. Optional independent/formal code and security reviews are deferred and outstanding.
+**Status:** Integration candidate; fresh local acceptance, independent exact-head review and hosted checks remain required. The original acceptance plan preceded implementation in commit `040e02b`.
 **Authority:** PRODUCT_REQUIREMENTS.md §10, WOS-TIM-003: a work entry supports an "optional task/ticket/milestone reference"; IMPLEMENTATION_BACKLOG.md PR-008 explicitly includes work references; WOS-04 issue #6.
-**Dependency:** Unchanged Draft PR58 head `39cf7e10537972e232498a6a99a1f89df05c765b`, tree `f042e173de542dc54845a2f73677072f87d35a05`.
+**Original development dependency:** Unchanged Draft PR58 head `39cf7e10537972e232498a6a99a1f89df05c765b`, tree `f042e173de542dc54845a2f73677072f87d35a05`.
+
+## Current integration checkpoint - 2026-11-15
+
+The owner subsequently authorized reviewed integration and eligible merges without routine approvals. The original development-only review deferral below is historical context. Original PR59 `c8fcafd6b61c7e9407aaf623a23001ad144b6ef1` now includes verified PR58 `a7d8da030d10686a8ca317df592a8c76670ba0c6` at merge `aa5c7bc4df2806278a782044ed540b6f654cd666`. PR58 merged at main `5534e999beab8e40cc1c9b2d49a96f96aaab3180` after independent exact-head review and every CI43630671029 step passed; every step of its post-merge CI43631361092 also passed.
+
+The integration preserves the accepted dependency baseline, scripts, strict response validation, keyed ownership and abandoned-save recovery. Package/document conflicts retain current parent controls and additive work-reference contracts. Fresh local tests, independent review and hosted acceptance are required for this candidate; older branch checks do not transfer. No deployment or full TIM003/PR008 acceptance is claimed.
+
+## Local integration evidence
+
+Fresh locked installation passed: 338 packages installed, 345 audited, zero reported vulnerabilities. Executable comparison confirms every accepted PR58 script and complete dependency/lockfile content is retained. The bootstrap and adversarial fixture scan passed. Type checking, lint and the full unit/contract aggregate passed on the integrated runtime. The real PostgreSQL suite passed fresh/047 upgrade/replay, manual save/read/clear, independent legacy omission preservation/conflicts, reference-only revision rejection, scope checks, immutable correction history and both import aliases. The production build passed in 18.70 seconds. The first browser attempt timed out at initial navigation before feature assertions and did not run downstream suites. The unchanged retry passed all four journeys: real work-reference, retained real evidence, ownership timing and real capture modes. Escaped text, short-viewport editor usability, metadata preservation and no external lookup were verified. No timeout or assertion was weakened. Independent review and hosted acceptance are not yet claimed. Accepted main ancestry was retained at `7e67682f4caec42f34f00cc5072019162ca151e0` without runtime changes.
 
 ## Selection, ownership and sequencing
 

@@ -1,10 +1,18 @@
 # WorkOS Release and Operations Runbook
 
+## WOS03 integration verification
+
+Run `node scripts/scan-bootstrap.mjs --self-test` as a required gate. It scans the candidate and checks adversarial fixtures; passing dependency audit alone does not satisfy it. Test credentials must remain ephemeral or explicitly approved placeholders. Keep the validation runner on Ubuntu24.04 while using the current Playwright lock; Ubuntu26.04 browser installation failed before tests in run43557067008. Changing the runner or browser version requires fresh browser acceptance.
+
+Before accepting PR41 against updated main, run its existing browser, migration, identity and API checks plus `npm run test:import-audit-journey` with a disposable local PostgreSQL service and installed Chromium. The journey uses two synthetic named accounts and the actual UI/API/database; it must not reach external providers. See [integration acceptance](../tasks/WOS-03-INTEGRATION-ACCEPTANCE.md). This increment adds no migration. A code rollback must preserve existing audit/import evidence and migration history; do not erase evidence to restore an older UI. Passing this journey does not establish retention-policy or buyer OIDC acceptance.
+
 ## Purpose
 
 Provide a repeatable buyer-owned release, deployment, verification, rollback and operating process. Provider-specific commands will be added with implementation artifacts; this document defines mandatory control flow.
 
 ## Release preparation
+
+The [main dependency repair](../tasks/WOS-03-MAIN-DEPENDENCY-REPAIR.md) documents the locked versions and negative regression checks required after the 2026-11-14 audit failure. Install with `npm ci`, run `npm run test:dependency-security` and the existing application/production/migration gates, and retain a current `npm audit` result. Do not disable the high/critical audit gate to merge documentation or reuse passing checks from an unmerged feature branch. Reverting the repaired lockfile reintroduces known advisory exposure; prefer a tested forward repair.
 
 - Freeze the exact candidate SHA and version.
 - Confirm changelog, requirements traceability, known limitations and migration notes.
@@ -195,7 +203,7 @@ With locked dependencies and Playwright Chromium installed in the hosted test en
 
 The [bounded journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md) covers actual Project Master CSV dry-run/apply, PostgreSQL project/batch/audit/idempotency witnesses, retained history after reload, independent named reviewer saved provenance and other-legal/denied-scope exclusion. Inspection performs no business/audit mutation or export. Both accounts use canonical migrated Admin permissions, with no new role or grants. This is not production OIDC, owner UAT, full WOS-03B or release acceptance. Product defects require separate disposition and are not repaired by this tests-only increment.
 
-`npm run test:import-audit-harness` runs guard/session-format unit checks without database/browser and is part of the aggregate suite. The hosted dedicated journey is additive to the twelve retained browser suites and all existing gates. Local Chromium remains NOT RUN under the established restriction, with no workaround; missing local PostgreSQL also means the integrated journey is NOT RUN locally, not passed. Require full exact-head hosted evidence and independent exact-tree review. Revert this isolated tests/CI/docs increment for rollback; no product/schema conversion is necessary.
+`npm run test:import-audit-harness` runs guard/session-format unit checks without database/browser and is part of the aggregate suite. The hosted dedicated journey is additive to the twelve retained browser suites and all existing gates. The original October local browser/database execution was NOT RUN; preserve that historical receipt. The journey was subsequently forwardported into accepted PR41 and passed real PostgreSQL/browser hosted execution. Current CI continues to run it; require exact-head evidence for each integration. PR50 now changes documentation only and preserves the newer accepted harness unchanged. Reverting this documentation reconciliation does not remove the accepted journey or require data conversion.
 
 ## Commercial drafting foundation (PR-007A)
 
@@ -217,21 +225,67 @@ Activate the contract on its currently effective immutable term version, then th
 
 Legacy project save/status/import and indirect client cascade/import operations return stable409 for governed rows; do not route around this guard through old APIs, CSV or demo seed/reset. Mixed attempted imports roll back atomically, including batch/idempotency/audit effects. Neutral-only/unmapped legacy rows retain existing behavior. Commercial lifecycle state is not full assignment/work-date policy convergence, a billing decision or an instruction to rewrite existing allocation/work evidence.
 
+Explicit Proposed promotion additionally requires one scoped creation event from a transactional project writer and exclusively Proposed status history. Resetting an Active/On Hold/Completed project to Proposed does not make it eligible. Retained pre-scope history, missing/malformed/ambiguous creation evidence or a non-Proposed neutral migration snapshot require separately governed conversion. Client-reported audit events cannot establish creation provenance. Do not fabricate history to enable promotion; ordinary legacy operation remains available for ungoverned records.
+
 Inspect closure dependencies for actual existing assignment/work/pending-approval/milestone/PO/owner evidence. Missing approved-unbilled/balance/PO-consumption/acceptance modules are labelled unavailable, never zero; closure stays unavailable even when existing counts are zero. Reconcile unknown network outcomes by reload and history before any repeat. Changing identity/role/permission/token/scope clears confidential view/draft ownership; an in-flight old-scope command may finish there but must not restore stale UI state.
 
 Migration041 adds immutable lifecycle/bindings/guards and retains040 untouched. Roll forward preferred; any rollback binary must be validated with040/041 manifest and all evidence/guards retained. Never drop bindings/ledger, erase migration history or re-enable unrestricted legacy writes as rollback. All prior unit/browser/PostgreSQL/identity/scan/container gates remain required, with new lifecycle strict-service, real PostgreSQL and real React/API/PostgreSQL tests additive. Local browser/DB absence is NOT RUN; require exact-head hosted evidence. No credentials, providers, production/customer data, denied repair/diagnostic, Ready/merge/deploy or formal release acceptance is involved.
 
+## Assignment and work-date authority (PR-008A)
+
+Allocation and work writers validate the worker timeline, selected scope, assignment policy and each governed hierarchy member's active state and independently adopted terms on the relevant dates. Parent amendments do not authorize a child implicitly. Non-billable policy cannot be overridden by an incoming billability value. Legacy unpinned work remains visibly unpinned; do not manufacture historical commercial evidence.
+
+New submissions retain immutable work/policy evidence under migration044. Correct only editable Draft/Rejected periods through the authorized workflow, preserving earlier submissions and decisions. On a period, history or lifecycle conflict, reload the source before correcting it. Source-aware approval controls remain authoritative; a Teams evidence-only action cannot decide a timesheet. For an uncertain import, reconcile the retained batch/history or reuse its existing operation key; do not create a second apply with a new key.
+
+Submission assurance describes retained operational evidence, not billing eligibility or invoice readiness. Do not bypass a locked period or inactive hierarchy through imports, demo reseeding or direct data edits. Rollback requires a forward-compatible binary retaining migration044, submission/decision ledgers and database immutability guards. A pre044 writer is unsupported. Configurable work capture, richer capacity policy and later financial controls remain separate work packages.
+
+MyTimesheet displays assurance only after the selected worker/week loads. Changing week or identity abandons the old view's presentation; an already-dispatched save can still complete on its original period. Return to that period and reload to reconcile its history before repeating an uncertain submission. A failed load keeps submission disabled; reload the current view to recover.
+
+## Daily and weekly work capture (PR-008C)
+
+An authorized scoped settings manager must explicitly enable weekly grid, daily entry or both; no default mode or permission is installed. Both presentations save the same complete weekly header. Daily entry reaches all seven Saturday-Friday dates and does not create daily approval. Hidden dates, distinct contexts and preserved entries remain part of the complete save.
+
+A stale work revision or changed mode policy rejects the command. Reload authoritative work before reconciling another edit; never manufacture a write token or retry an uncertain save as an unconditional legacy command. If scope changes during an in-flight operation, wait for settlement before using Reload work. Existing period locks, capture rules, approval and retained evidence still govern the whole header.
+
+Retain migration046 and immutable mode history on rollback, with the documented legacy API compatibility contract. This package does not add categories, evidence, overtime, deadline or reopen policy. Buyer configuration and full release acceptance remain separate.
+
+## Effective-dated capture policy (PR-008B)
+
+Authorized scoped settings managers append capture rules at a configured current or future UTC Weekly reporting-period boundary. Select an actual available boundary; do not infer a start date, backdate a policy or install a default. Rules govern exact time increments, optional daily/weekly totals and positive-entry comments across all of a worker's work headers in the period. Existing work and submission evidence are not silently rewritten.
+
+After an uncertain policy append or an expected-version conflict, reload current policy history before making another decision. Do not manufacture a replacement expected version or bypass old/new period protections through imports or direct data edits. Correct invalid quantities/comments only in editable work. The compatibility grid retains distinct contexts, comments, billability, weekends and off-grid entries; preserved read-only entries still count toward authoritative limits.
+
+If an organization switch fails while a timesheet save is pending, wait for the operation to settle, then select Reload work. Earlier replacement reads cannot establish its final outcome; editing stays disabled until this explicit reload succeeds. Do not repeat an uncertain command before reconciliation.
+
+Migration045 and its immutable policies, capture references and database guards must remain on rollback. Use a forward-compatible binary honoring both assignment and capture authority. Capture rules do not confer billing eligibility or approval authority. Daily-entry modes, full categories, evidence requirements, overtime exceptions, deadlines and protected reopen workflows remain separate packages.
+
+## Governed commercial amendments (PR-007D)
+
+Amendment operators need explicit `commercial.amendments.manage` enrollment through Permission Settings, plus commercial view and lifecycle management permissions and the applicable organization/legal-entity scope. Permission managers may grant or revoke amendment authority for eligible roles or individual accounts. No role, including Admin, receives this permission by default. Retain permission-change history; granting authority or requesting a preview does not adopt terms.
+
+Preview and explicitly adopt a selected immutable contract version for each governed entity separately. Parent adoption does not cascade to children. Reconcile uncertain command outcomes against current state and amendment history before resubmitting. Current terms are operational evidence, not authority to reprice historical work or determine billing eligibility. Migration043 and its append-only amendment ledger must survive rollback; use a forward-compatible binary and do not erase audit, historical pins or amendments.
+
+## Scoped client profiles (PR-007C)
+
+Migration042 adds customer profile and billing-unit histories without changing operational client identity, contractual pins or existing work. Buyer organization/legal-entity ownership is separate from customer billing entities. Missing legacy legal/display names, codes and currency defaults remain explicitly incomplete; enter verified commercial profile values rather than inferring them from operational labels.
+
+An authorized permission manager can explicitly grant `commercial.clients.view` and `commercial.clients.manage` to eligible roles or individual accounts through Permission Settings. These permissions have no default grants, including for Admin. They are not Admin-only recipient capabilities. Managing profiles also requires view access; ordinary client, contract or lifecycle permissions do not substitute. Existing organization/legal-entity scope enforcement still applies. Revoke grants through the same controls; recorded permission changes and audit evidence must be retained.
+
+Inspect current/as-of history before appending a version with a reason. New defaults do not rewrite earlier contracts, work or financial evidence. After an uncertain save, reload to reconcile before retrying; Cancel does not remove that requirement. Malformed response data must remain unavailable rather than being displayed as another customer-unit kind. No invoice routing, billing eligibility, tax/payment identifiers, retirement or cross-legal consolidation is supplied by this package.
+
+Rollback requires a validated forward-compatible binary retaining migration042 and immutable profile/version evidence. Disable affected UI/routes if needed; do not delete evidence or migration ledger entries. A pre042 binary is unsupported. Production OIDC, buyer-scale performance, role UAT and formal release acceptance remain separate gates.
+
 ## PR-008D evidence-link migration and rollback
 
-Migration047 adds nullable work-entry URLs without rewriting accepted work, grants or immutable histories. Run the feature unit, PostgreSQL upgrade/replay and real browser journey gates described in [PR-008D](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md). Review is deferred, not passed; the dependent Draft is not release acceptance. URLs are references only and are never automatically fetched. Preserve migration047/history on rollback. Pre047 binaries cannot preserve evidence during entry replacement: if restoring one, keep work writes disabled operationally and roll forward to an evidence-aware binary before resuming. No destructive down migration, running-environment change or deployment is authorized.
+Migration047 adds nullable work-entry URLs without rewriting accepted work, grants or immutable histories. Run the feature unit, PostgreSQL upgrade/replay and real browser journey gates described in [PR-008D](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md). Independent exact-head review and executable acceptance are required; the dependent Draft is not release acceptance. URLs are references only and are never automatically fetched. Preserve migration047/history on rollback. Pre047 binaries cannot preserve evidence during entry replacement: if restoring one, keep work writes disabled operationally and roll forward to an evidence-aware binary before resuming. No destructive down migration, running-environment change or deployment is authorized.
 
 ## PR-008E work-reference migration and rollback
 
-Migration048 adds nullable work-reference text without rewriting old entries, URLs, grants or immutable history. Validate the fresh/047-upgrade/replay and real API/browser gates in [PR-008E](../tasks/WOS-04-WORK-ENTRY-REFERENCE.md). Text is displayed as escaped content and is never looked up or interpreted as financial/source authority. Retain migration048/history on rollback. Pre048 binaries do not understand reference preservation; if restoring one, keep work writes operationally disabled until an aware binary is restored. This guidance grants no deployment/running-system change. Optional code/security reviews remain outstanding; Draft engineering evidence is not integrated or release acceptance.
+Migration048 adds nullable work-reference text without rewriting old entries, URLs, grants or immutable history. Validate the fresh/047-upgrade/replay and real API/browser gates in [PR-008E](../tasks/WOS-04-WORK-ENTRY-REFERENCE.md). Text is displayed as escaped content and is never looked up or interpreted as financial/source authority. Retain migration048/history on rollback. Pre048 binaries do not understand reference preservation; if restoring one, keep work writes operationally disabled until an aware binary is restored. This guidance grants no deployment/running-system change. Independent exact-head code/security review and executable acceptance remain required; Draft engineering evidence is not release acceptance.
 
 ## PR-008F required-evidence policy migration and rollback
 
-Migration049 adds nullable policy evidence configuration and extends existing append/deferred work guards. Existing policies remain optional; new omitted appends inherit the latest setting. No history, work, grant or default adoption is rewritten. Run [PR-008F's](../tasks/WOS-04-REQUIRED-EVIDENCE-POLICY.md) fresh/048 upgrade/replay, policy inheritance and real API/browser gates. Preserve migration049 and its guards/history on rollback. Pre049 binaries cannot project or prevalidate this option; use a forward-compatible binary before resuming work/policy writes. This grants no deployment or running-system change. Optional formal review remains outstanding; Draft engineering evidence is not release acceptance.
+Migration049 adds nullable policy evidence configuration and extends existing append/deferred work guards. Existing policies remain optional; new omitted appends inherit the latest setting. No history, work, grant or default adoption is rewritten. Run [PR-008F's](../tasks/WOS-04-REQUIRED-EVIDENCE-POLICY.md) fresh/048 upgrade/replay, policy inheritance and real API/browser gates. Preserve migration049 and its guards/history on rollback. Pre049 binaries cannot project or prevalidate this option; use a forward-compatible binary before resuming work/policy writes. This grants no deployment or running-system change. Independent exact-head review and executable acceptance remain required; Draft engineering evidence is not release acceptance.
 
 ## PR-008G identical-entry diagnostic migration and rollback
 

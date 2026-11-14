@@ -3,8 +3,8 @@ import {evidenceUrlIsValid,normalizeEvidenceUrl} from '../../shared/work-evidenc
 import {canonicalHours,sumHours,compareHours} from '../../shared/work-hours.mjs';
 import {hydrateWorkCaptureGrid,parseCaptureHourInput,canonicalCaptureHourInput,captureUtcDate,captureHeaderMonday,captureCellText,captureCellHours,captureCellPresent,setCaptureRowHours,patchVisibleCaptureRow,removeVisibleCaptureRow} from '../services/workCaptureGrid';
 import type {TimesheetEntry,DuplicateEntryCheck} from '../types';
-import {ApiClientError,resetBackendCheck} from '../services/apiClient';
-import { useState, useEffect, useRef } from 'react';
+import {getOrganizationScope,getToken,ApiClientError,resetBackendCheck} from '../services/apiClient';
+import { Fragment, useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
@@ -48,10 +48,24 @@ const EvidenceLink=({value}:{value?:string|null})=>{
   return <a href={normalizeEvidenceUrl(value)!} target="_blank" rel="noopener noreferrer" className="text-primary underline text-xs">Open evidence</a>;
 };
 
+const currentOwner = () => {
+  const user = authService.getCurrentUser();
+  const scope = getOrganizationScope();
+  return JSON.stringify([user?.id, user?.role, getToken(), scope?.organizationId, scope?.legalEntityId]);
+};
+
 export const MyTimesheet = () => {
+  const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
+  const owner = currentOwner();
+  const aligned = useRef(false);
+  return <Fragment key={`${owner}:${toIsoDate(currentWeek)}`}><TimesheetEditor aligned={aligned} owner={owner} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} /></Fragment>;
+};
+
+const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
+  aligned: {current: boolean}; owner: string; currentWeek: Date; setCurrentWeek: Dispatch<SetStateAction<Date>>;
+}) => {
   const navigate = useNavigate();
   const user = authService.getCurrentUser();
-  const [currentWeek, setCurrentWeek] = useState(getWeekStart(new Date()));
   const currentWeekKey = toIsoDate(currentWeek);
   const currentUserId = user?.id;
   const [serverDate,setServerDate]=useState(new Date().toISOString().slice(0,10));
@@ -62,7 +76,7 @@ export const MyTimesheet = () => {
   const [mode,setMode]=useState<CaptureMode|null>(null),[dailyIndex,setDailyIndex]=useState(2);
   const [writeToken,setWriteToken]=useState<string|null>(null);
   const [loadedOwner,setLoadedOwner]=useState<WorkCaptureContext|null>(null);
-  const loadedContext=useRef<WorkCaptureContext|null>(null),blocked=useRef(false),aligned=useRef(false);
+  const loadedContext=useRef<WorkCaptureContext|null>(null),blocked=useRef(false);
   const visibleIndices=mode==='daily'?[dailyIndex]:[2,3,4,5,6];
   const isFutureWeek = currentWeek > currentSystemWeek;
   const [status, setStatus] = useState<'Draft' | 'Submitted' | 'Approved' | 'Rejected'>('Draft');
@@ -79,20 +93,22 @@ export const MyTimesheet = () => {
   const [preservedEntries,setPreservedEntries]=useState<TimesheetEntry[]>([]);
   const [loaded,setLoaded]=useState(false);
   const [saving,setSaving]=useState(false);
-  const savePending=useRef(false),generation=useRef(0);
+  const savePending=useRef(false),generation=useRef(0),mounted=useRef(true);
+  const ownsView=()=>mounted.current&&currentOwner()===owner;
   const [scopeRevision,setScopeRevision]=useState(0);
   const blockWork=()=>{
-    blocked.current=true;++generation.current;loadedContext.current=null;savePending.current=false;
-    setLoaded(false);setLoadedOwner(null);setSaving(false);setRows([]);setHourDrafts({});setPreservedEntries([]);setActiveRemark(null);
+    blocked.current=true;++generation.current;loadedContext.current=null;
+    setLoaded(false);setLoadedOwner(null);setRows([]);setHourDrafts({});setPreservedEntries([]);setActiveRemark(null);
     setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
     setNotice({type:'warning',message:'Access or scope changed. Reload work explicitly for the selected legal entity.'});
   };
   useEffect(()=>{
+    mounted.current=true;
     const changed=()=>blockWork();
     const check=()=>{if(loadedContext.current&&!isWorkCaptureContextCurrent(loadedContext.current))blockWork();};
     window.addEventListener('workos:organization-scope-switch-requested',changed);
     window.addEventListener('workos:organization-scope-changed',changed);window.addEventListener('storage',check);window.addEventListener('focus',check);
-    return()=>{++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',changed);window.removeEventListener('workos:organization-scope-changed',changed);window.removeEventListener('storage',check);window.removeEventListener('focus',check);};
+    return()=>{mounted.current=false;++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',changed);window.removeEventListener('workos:organization-scope-changed',changed);window.removeEventListener('storage',check);window.removeEventListener('focus',check);};
   },[]);
   const [assignedProjects, setAssignedProjects] = useState<any[]>([]);
   const [notice, setNotice] = useState<{ type: 'success' | 'warning' | 'danger'; message: string } | null>(null);
@@ -102,11 +118,11 @@ export const MyTimesheet = () => {
   useEffect(() => {
     if(!user||blocked.current)return;
     const request=++generation.current;let cancelled=false;
-    const context=captureWorkCaptureContext(()=>!cancelled&&request===generation.current);
+    const context=captureWorkCaptureContext(()=>!cancelled&&request===generation.current&&ownsView());
     setLoaded(false);setLoadedOwner(null);loadedContext.current=null;setRows([]);setPreservedEntries([]);setHourDrafts({});setNotice(null);setActiveRemark(null);
     setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
     workCaptureWorkspaceService.get(context).then(({projects,allocations,timesheets,modes:projection})=>{
-      if(cancelled||request!==generation.current)return;
+      if(cancelled||request!==generation.current||!ownsView())return;
       if(!context||!isWorkCaptureContextCurrent(context)){blockWork();return;}
       setServerDate(projection.serverDate);
       if(!aligned.current){
@@ -131,16 +147,17 @@ export const MyTimesheet = () => {
         setStatus('Draft');setWriteToken(null);setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setRejectionNote(undefined);
       }
       loadedContext.current=context;setLoadedOwner(context);setLoaded(true);
-    }).catch(()=>{if(!cancelled&&request===generation.current)setNotice({type:'danger',message:'Work could not be loaded. Reload before editing.'});});
+    }).catch(()=>{if(!cancelled&&request===generation.current&&ownsView())setNotice({type:'danger',message:'Work could not be loaded. Reload before editing.'});});
     return()=>{cancelled=true;};
   },[currentUserId,currentWeekKey,scopeRevision,user?.role]);
-  const editable=()=>loaded&&!saving&&!savePending.current&&['Draft','Rejected'].includes(status)&&Boolean(mode&&loadedOwner&&isWorkCaptureContextCurrent(loadedOwner));
+  const editable=()=>ownsView()&&loaded&&!saving&&!savePending.current&&['Draft','Rejected'].includes(status)&&Boolean(mode&&loadedOwner&&isWorkCaptureContextCurrent(loadedOwner));
   const patchRow=(rowId:string,patch:Record<string,unknown>)=>{
     if(!editable())return;const next=patchVisibleCaptureRow(rows,hourDrafts,rowId,visibleIndices,patch,crypto.randomUUID());setRows(next.rows);setHourDrafts(next.drafts);
   };
 
   const changeWeek=(days:number)=>{
-    if(!loaded||saving||savePending.current||!loadedOwner||!isWorkCaptureContextCurrent(loadedOwner))return;
+    if(!ownsView())return;
+    aligned.current=true;
     ++generation.current;loadedContext.current=null;setLoaded(false);setLoadedOwner(null);setActiveRemark(null);
     setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
     setCurrentWeek(previous=>shiftDate(previous,days));
@@ -149,7 +166,7 @@ export const MyTimesheet = () => {
   const persistTimesheet = async (nextStatus: 'Draft' | 'Submitted') => {
     if (!user||!editable()||hasInvalidHours||hasInvalidEvidence||hasInvalidReference||!mode||!loadedOwner) return;
     const owner=generation.current,context=loadedOwner;
-    const current=()=>owner===generation.current&&isWorkCaptureContextCurrent(context);
+    const current=()=>ownsView()&&owner===generation.current&&isWorkCaptureContextCurrent(context);
     savePending.current=true;setSaving(true);setActiveRemark(null);
     try{
     const weekEnding = getWeekEnding(currentWeek);
@@ -232,7 +249,13 @@ export const MyTimesheet = () => {
         message: (error instanceof Error ? error.message : 'Timesheet could not be saved.')+(rejected?'':' Reload work before trying again.'),
       });
     }
-    }finally{if(owner===generation.current){savePending.current=false;setSaving(false);}}
+    } finally {
+      savePending.current=false;
+      if(ownsView()) {
+        if(!current())blockWork();
+        setSaving(false);
+      }
+    }
   };
 
   const handleSubmit = () => {
@@ -318,7 +341,7 @@ export const MyTimesheet = () => {
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
-      <WorkSubmissionAssurance assurance={workAssurance} status={status} entryCheck={duplicateEntryCheck} />
+      {loaded ? <WorkSubmissionAssurance assurance={workAssurance} status={status} entryCheck={duplicateEntryCheck} /> : <p role="status" className="text-sm text-slate-500">Loading current work assurance...</p>}
       <PageHeader
         title={user?.role === 'Admin' ? 'Admin Self-Log Test' : 'My Timesheet'}
         subtitle={headerSubtitle}
@@ -327,7 +350,7 @@ export const MyTimesheet = () => {
           <div className="flex items-center gap-3">
              <div className="flex items-center bg-white border border-border-light rounded-xl p-1 shadow-sm mr-2">
                 <button
-                  aria-label="Previous week" disabled={saving||!loaded} onClick={() => changeWeek(-7)}
+                  aria-label="Previous week" onClick={() => changeWeek(-7)}
                   className="p-1.5 hover:bg-slate-50 rounded-lg transition-colors"
                 ><ChevronLeft size={16} /></button>
                 <div className="px-4 flex items-center gap-2">
@@ -336,7 +359,7 @@ export const MyTimesheet = () => {
                 </div>
                  <button
                   onClick={() => changeWeek(7)}
-                  disabled={currentWeek >= currentSystemWeek||saving||!loaded}
+                  disabled={currentWeek >= currentSystemWeek}
                   className={cn(
                     "p-1.5 rounded-lg transition-colors",
                     currentWeek >= currentSystemWeek
