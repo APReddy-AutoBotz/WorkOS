@@ -584,3 +584,7 @@ WOS-APR-002, WOS-IAM-003/005/010 and WOS-NFR-SEC-004/012: [independent leave dec
 ## Current workforce bindings
 
 WOS-CORE-003, WOS-IAM-005/009/010, WOS-WKF-008 and WOS-NFR-SEC-004: [current workforce authority](../tasks/WOS-04-LIVE-WORKFORCE-BINDINGS.md) reloads worker and qualified director bindings for every authenticated request. Real issued-token tests cover supported reassignment, removed qualification, null linkage, cookie/bearer parity and legal-entity denial. No schema change or new permission grant.
+
+## Invoice action source authority
+
+WOS-CORE-003, WOS-IAM-005/010, WOS-INV-002, WOS-INT-002 and WOS-NFR-SEC-004/012: [invoice action source scope](../tasks/WOS-06-INVOICE-ACTION-SOURCE-SCOPE.md) applies milestone visibility to source, template, assessment, receipt/replay and recipient history. Migration 096 supplements insert/commit authority and preserves immutable records. Real API/SQL negatives and populated upgrade evidence distinguish current authorization from historical business state.

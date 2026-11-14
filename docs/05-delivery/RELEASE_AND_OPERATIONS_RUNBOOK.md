@@ -409,3 +409,7 @@ Migration 095 adds the indexed lookup for retained leave submitter identity. Sch
 ## Current workforce session scope
 
 Worker and qualified director relationships are resolved from current database records on each authenticated request. Administrative reassignment takes effect for retained sessions without waiting for token expiry; already admitted requests may finish. Missing identity storage fails closed. No new migration is required. Do not repair missing links by injecting token claims: correct the authorized identity records. Older binaries trust historical bindings; invalidate outstanding sessions before any controlled rollback. See [binding acceptance and limits](../tasks/WOS-04-LIVE-WORKFORCE-BINDINGS.md).
+
+## Invoice action source authority
+
+Apply migration 096 before deploying its API readers. Milestone action templates, assessments and retained notification reads require milestone viewing permission in addition to their existing operation permissions. Every mandatory recipient must retain source access through commit; refusal rolls back the entire notice. Existing event history is preserved and hidden when access is lost, not erased. Historical reads do not assert that an invoice is still an empty Draft. No grant or template is installed by this migration. Prefer forward repair: old reader code can expose metadata even while database write guards remain installed. See [source authorization evidence](../tasks/WOS-06-INVOICE-ACTION-SOURCE-SCOPE.md).

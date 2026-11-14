@@ -19,3 +19,12 @@ Real milestone-source denial and authorized positive cases; unauthorized source/
 ## Operations and limits
 
 Apply the additive migration before the new reader code. Preserve immutable historical events; loss of current permission hides them without erasure. Older code/guards reopen the authorization gap, so prefer forward repair. This package does not introduce a new notification policy, financial decision or source model. Integration, buyer UAT and deployment remain separate release gates.
+
+## Local evidence so far
+
+- Targeted real API/SQL tests pass missing-source-permission denial, authorized assessment, exact replay, subsequent receipt/replay/template/inbox/read denial, direct SQL event/read bypass refusal, and atomic initiating-actor, preparer, owner and template authority loss. Fixtures preserve owner authority until the intended transaction; an earlier fixture incorrectly recorded permanent owner loss and was corrected without changing product controls.
+- Populated 095-to-096 upgrade/replay preserves exact notice, recipient, invoice, identity and audit rows; retained receipts and inbox remain visible to authorized actors.
+- Full 92-entry migration suite passes fresh/concurrent/replay/upgrade/rollback. Existing T&M invoice-action API acceptance, typecheck, lint (537 modules) and full aggregate unit/contract suite pass.
+- Independent source review found no concrete bypass. Its historical-line and template/owner coverage gaps were addressed with passing tests. The extended milestone React/API/PostgreSQL journey proves retained notice reads after line reservation and cancellation; the existing T&M configuration/lost-response/inbox browser journey also passes.
+- Production build and signed enterprise identity/startup checks pass on the migrated disposable database. Dependency audit reports zero vulnerabilities; no dependency change. The inherited large-bundle warning remains. The first milestone browser run timed out during cold Vite navigation; the passing rerun uses bounded DOM-ready navigation and retains every interaction/state assertion.
+- Broader affected PostgreSQL acceptance is running. Exact-head hosted CI, integration and release acceptance remain outstanding; no completion is inferred from the targeted checks.
