@@ -422,6 +422,10 @@ Legacy approvals and SLA results now stay within the selected legal entity for e
 
 Settings controls show success only after the server response. An unconfirmed save retains the local edits; review connection and current authority before retrying. Network uncertainty can mean the server committed without a delivered response, so reload/reconcile when needed. Newer edits remain unsaved even if an earlier submitted snapshot succeeds. The alternate utilization action saves configuration without claiming an additional server-side recalculation. Initialization failure offers retry. No migration or new permission is introduced; preserve existing configuration/audit history and prefer forward repair over restoring misleading success messages. See [settings evidence](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md).
 
+## Project detail read recovery
+
+When project details cannot be loaded, check connection and workspace access and use Retry loading project. A failed request does not establish that the project is absent. Route changes close obsolete edit dialogs and do not retain the previous project's details. No schema or stored data changes are required; application rollback restores the stale-display issue. See [scope and evidence](../tasks/WOS-04-PROJECT-DETAIL-READ-RECOVERY.md).
+
 ## Preparing example employee imports
 
 Bundled employee CSV examples use reserved example.invalid email addresses and empty initial passwords. Replace examples with authorized buyer data and configure the referenced directors, managers and catalogs before validating an import. The examples are not a self-contained seed. Run `npm run test:import-templates` after editing templates; it checks every row width and employee column alignment. This correction does not alter existing database records or import permissions. See [template evidence and rollback](../tasks/WOS-02-IMPORT-TEMPLATE-INTEGRITY.md).

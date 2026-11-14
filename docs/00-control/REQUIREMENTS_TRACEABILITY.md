@@ -597,6 +597,10 @@ WOS-CORE-003/005, WOS-IAM-003/005/010, WOS-APR-004 and WOS-NFR-SEC-004/012: [leg
 
 WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-003/UX-005: [settings save outcomes](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md) awaits acknowledged writes for both settings actions, preserves edits after refusal, distinguishes newer edits, suppresses unmounted completion and offers initialization retry. The real React/API/PostgreSQL journey covers delayed/refused/successful responses and current permission loss without weakening server authority.
 
+## Project detail read recovery
+
+WOS-CORE-003, WOS-NFR-OBS-005 and WOS-NFR-UX-005: [project detail recovery](../tasks/WOS-04-PROJECT-DETAIL-READ-RECOVERY.md) clears obsolete project/edit state on navigation, ignores late responses and distinguishes failed reads from missing records with a retry action. The real React browser journey uses controlled service responses; existing server authorization remains unchanged.
+
 ## Import example integrity
 
 WOS-CORE-007, WOS-ORG-010 and WOS-GOV-005: [import template integrity](../tasks/WOS-02-IMPORT-TEMPLATE-INTEGRITY.md) aligns every example with its CSV headers, validates employee column meanings and uses non-deliverable synthetic email addresses. The existing five-template contract now checks example rows as well as headers. Buyer-specific references still require setup and server validation.

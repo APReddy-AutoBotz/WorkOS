@@ -4,6 +4,10 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+### Fixed — project detail recovery (draft implementation)
+
+- WOS-CORE-003, WOS-NFR-OBS-005 and WOS-NFR-UX-005: clear obsolete project/edit state on navigation, ignore late reads and provide distinct failed/denied read feedback with retry. Browser regression evidence and limits are recorded in `docs/tasks/WOS-04-PROJECT-DETAIL-READ-RECOVERY.md`. No schema migration; application rollback restores the stale-display defect. This entry does not imply merge or release acceptance.
+
 ### Added
 
 - WOS-00 programme charter, authoritative requirements and architecture baseline.
