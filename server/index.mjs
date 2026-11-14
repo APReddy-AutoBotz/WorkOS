@@ -1,3 +1,4 @@
+import {assertLegacyProjectMutationAllowed,lockCommercialLifecycle,sendGovernedProjectConflict} from './modules/commercial-drafting/project-mutation.mjs';
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -138,6 +139,7 @@ const permissionDefinitions = [
   ['clients.manage', 'Delivery', 'Manage Clients', false],
   ['commercial.contracts.view', 'Commercial', 'View commercial drafts', false],
   ['commercial.contracts.manage', 'Commercial', 'Manage commercial drafts', false],
+  ['commercial.lifecycle.manage', 'Commercial', 'Manage governed commercial lifecycle', false],
   ['allocations.view', 'Planning', 'Planning Workspace', false],
   ['allocations.manage', 'Planning', 'Manage Allocations', false],
   ['timesheets.submit', 'Timesheets', 'Submit Timesheets', false],
@@ -165,7 +167,7 @@ const permissionDefinitions = [
 ];
 const protectedPermissionKeys = new Set(permissionDefinitions.filter(([, , , protectedCore]) => protectedCore).map(([key]) => key));
 const defaultRolePermissions = {
-  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.contracts.view', 'commercial.contracts.manage'].includes(key)).map(([key]) => key),
+  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.contracts.view', 'commercial.contracts.manage', 'commercial.lifecycle.manage'].includes(key)).map(([key]) => key),
   HR: ['dashboard.view', 'employees.view', 'employees.manage', 'employees.password_reset', 'projects.view', 'projects.manage', 'projects.status_update', 'clients.view', 'clients.manage', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'leave.admin', 'approvals.view', 'notifications.view', 'notifications.manage', 'integrations.identity', 'integrations.teams', 'integrations.teams_actions', 'settings.manage'],
   CountryDirector: ['dashboard.view', 'employees.view', 'projects.view', 'clients.view', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
   ProjectManager: ['pm_workspace.view', 'employees.view', 'projects.view', 'projects.status_update', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
@@ -2122,6 +2124,8 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await lockCommercialLifecycle(client,req.organizationScope);
+    await assertLegacyProjectMutationAllowed(client,req.organizationScope,[parsed.data.id]);
     const clientResult = await client.query('select id, name, status from clients where id = $1 and organization_id = $2 and legal_entity_id = $3', [parsed.data.client_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]);
     const clientRecord = clientResult.rows[0];
     if (!clientRecord || clientRecord.status !== 'Active') {
@@ -2219,6 +2223,7 @@ app.post('/api/projects', requireDatabase, requireAuth, requirePermission('proje
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('rollback');
+    if(sendGovernedProjectConflict(res,error))return;
     console.error(error);
     res.status(500).json({ error: 'Project save failed' });
   } finally {
@@ -2239,6 +2244,7 @@ app.patch('/api/projects/:id/status', requireDatabase, requireAuth, requirePermi
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await lockCommercialLifecycle(client,req.organizationScope);
     const previous = (await client.query(
       'select * from projects where id = $1 and organization_id = $2 and legal_entity_id = $3 for update',
       [req.params.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
@@ -2257,6 +2263,7 @@ app.patch('/api/projects/:id/status', requireDatabase, requireAuth, requirePermi
       res.status(403).json({ error: 'Project managers can close only their own projects' });
       return;
     }
+    await assertLegacyProjectMutationAllowed(client,req.organizationScope,[req.params.id]);
     const result = await client.query(`
       update projects
       set status = $2,
@@ -2288,6 +2295,7 @@ app.patch('/api/projects/:id/status', requireDatabase, requireAuth, requirePermi
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('rollback');
+    if(sendGovernedProjectConflict(res,error))return;
     console.error(error);
     res.status(500).json({ error: 'Project status update failed' });
   } finally {
@@ -2347,6 +2355,7 @@ app.post('/api/clients', requireDatabase, requireAuth, requirePermission('client
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await lockCommercialLifecycle(client,req.organizationScope);
     if (parsed.data.id) await client.query('select pg_advisory_xact_lock(hashtext($1))', [`client:${parsed.data.id}`]);
     const previousBase = parsed.data.id
       ? (await client.query('select * from clients where id = $1 and organization_id=$2 and legal_entity_id=$3 for update', [parsed.data.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0]
@@ -2356,6 +2365,7 @@ app.post('/api/clients', requireDatabase, requireAuth, requirePermission('client
       res.status(404).json({ error: 'Client not found in the authorized organization and legal entity' });
       return;
     }
+    await assertLegacyProjectMutationAllowed(client,req.organizationScope,(await client.query('select id from projects where organization_id=$1 and legal_entity_id=$2 and (client_id=$3 or client=$4)',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.id||null,previousBase?.name||parsed.data.name])).rows.map(row=>row.id));
     if (parsed.data.account_owner_id) {
       const owner = (await client.query(`select id from employees where id=$1 and organization_id=$2 and legal_entity_id=$3 and status='Active'`,
         [parsed.data.account_owner_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
@@ -2395,6 +2405,7 @@ app.post('/api/clients', requireDatabase, requireAuth, requirePermission('client
         on conflict do nothing
       `, [saved.id, countryDirectorId]);
     }
+    await assertLegacyProjectMutationAllowed(client,req.organizationScope,(await client.query('select id from projects where organization_id=$1 and legal_entity_id=$2 and (client_id=$3 or client=$4)',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,saved.id,previous?.name||saved.name])).rows.map(row=>row.id));
     await client.query(
       'update projects set client_id = $1, client = $2, updated_at = now() where organization_id=$4 and legal_entity_id=$5 and (client_id = $1 or client = $3)',
       [saved.id, saved.name, previous?.name || saved.name, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
@@ -2412,6 +2423,7 @@ app.post('/api/clients', requireDatabase, requireAuth, requirePermission('client
     res.json(saved);
   } catch (error) {
     await client.query('rollback');
+    if(sendGovernedProjectConflict(res,error))return;
     console.error(error);
     res.status(500).json({ error: 'Client save failed' });
   } finally {
@@ -6180,6 +6192,7 @@ app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requir
   try {
     client = await pool.connect();
     await client.query('begin');
+    await lockCommercialLifecycle(client,req.organizationScope);
     transactionOpen = true;
     if (versioned) {
       const lockKey = createScopedIdempotencyLockKey({
@@ -6216,6 +6229,16 @@ app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requir
     }
     const directorResult = await client.query('select id from country_directors');
     const directorIds = new Set(directorResult.rows.map(row => row.id));
+
+    // Guard the whole attempted batch before row-level validation can skip a
+    // protected target and permit an unrelated earlier row to commit Partial.
+    const attemptedClientIds=parsed.data.rows.map(row=>row.id).filter(Boolean);
+    const attemptedClientNames=parsed.data.rows.map(row=>row.name);
+    const protectedProjectTargets=(await client.query(`select distinct p.id from projects p where p.organization_id=$1 and p.legal_entity_id=$2 and
+      (p.client_id=any($3::text[]) or p.client=any($4::text[]) or exists(select 1 from clients c where c.organization_id=$1 and c.legal_entity_id=$2
+        and (c.id=any($3::text[]) or lower(c.name)=any($5::text[])) and (p.client_id=c.id or p.client=c.name)))`,
+      [scope.organizationId,scope.legalEntityId,attemptedClientIds,attemptedClientNames,attemptedClientNames.map(name=>name.toLowerCase())])).rows.map(row=>row.id);
+    await assertLegacyProjectMutationAllowed(client,scope,protectedProjectTargets);
 
     for (const [index, row] of parsed.data.rows.entries()) {
       const rowNumber = rowNumbers[index];
@@ -6258,6 +6281,7 @@ app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requir
         errors.push({ rowNumber, field: row.id ? 'id' : 'name', message: 'Client is not available in the authorized organization and legal entity.' });
         continue;
       }
+      await assertLegacyProjectMutationAllowed(client,req.organizationScope,(await client.query('select id from projects where organization_id=$1 and legal_entity_id=$2 and (client_id=$3 or client=$4)',[req.organizationScope.organizationId,req.organizationScope.legalEntityId,previous?.id||row.id||null,previous?.name||row.name])).rows.map(project=>project.id));
       if (dryRun) {
         saved += 1;
         continue;
@@ -6362,6 +6386,7 @@ app.post(['/api/imports/clients/apply', '/api/v1/imports/clients/apply'], requir
     if (client && transactionOpen) {
       try { await client.query('rollback'); } catch { /* Preserve the original failure. */ }
     }
+    if(sendGovernedProjectConflict(res,error))return;
     console.error(error);
     if (versioned) {
       res.status(500).json({error: {code: 'CLIENT_IMPORT_FAILED', message: 'The client import could not be completed.'}});

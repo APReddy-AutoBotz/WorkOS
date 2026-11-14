@@ -1,3 +1,4 @@
+import {assertLegacyProjectMutationAllowed,lockCommercialLifecycle,sendGovernedProjectConflict} from '../commercial-drafting/project-mutation.mjs';
 import {randomUUID} from 'node:crypto';
 import {Router} from 'express';
 import {z} from 'zod';
@@ -162,6 +163,7 @@ export const createProjectImportRouter = ({
       client = await pool.connect();
       await client.query('begin');
       transactionOpen = true;
+      await lockCommercialLifecycle(client,scope);
 
       if (versioned) {
         const lockKey = createScopedIdempotencyLockKey({
@@ -194,6 +196,10 @@ export const createProjectImportRouter = ({
           return;
         }
       }
+
+      // Preflight every attempted target, even rows later rejected by business
+      // validation, so mixed batches cannot partially bypass governed conflicts.
+      await assertLegacyProjectMutationAllowed(client,scope,(await client.query('select id from projects where organization_id=$1 and legal_entity_id=$2 and project_code=any($3::text[])',[scope.organizationId,scope.legalEntityId,parsed.data.rows.map(row=>row.projectCode)])).rows.map(row=>row.id));
 
       const projectCodeLockKeys = [...new Set(parsed.data.rows
         .filter((_, index) => !duplicateImportRows.duplicateRowNumbers.has(rowNumbers[index]))
@@ -255,6 +261,7 @@ export const createProjectImportRouter = ({
           });
           continue;
         }
+        await assertLegacyProjectMutationAllowed(client,scope,[previous?.id]);
         if (dryRun) {
           saved += 1;
           continue;
@@ -363,6 +370,7 @@ export const createProjectImportRouter = ({
           // Preserve the original failure.
         }
       }
+      if(sendGovernedProjectConflict(res,error))return;
       logError(error);
       if (versioned) {
         res.status(500).json({error: {code: 'PROJECT_IMPORT_FAILED', message: 'The project import could not be completed.'}});

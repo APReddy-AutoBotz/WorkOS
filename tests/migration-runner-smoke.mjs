@@ -1775,6 +1775,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const crossRouteProjectCode = 'PROJECT-IMPORT-V1-CROSS-ROUTE-LOCK';
     const crossRouteBarrierKey = 'synthetic-cross-route-trigger-barrier';
     const crossRouteLockKey = createProjectCodeLockKey({organizationId: 'org-default', projectCode: crossRouteProjectCode});
+    const crossRouteLifecycleLockKey = 'commercial-lifecycle:org-default:legal-default';
     await pool.query('create sequence synthetic_project_cross_route_barrier start with 1');
     await pool.query(`create or replace function pause_synthetic_project_cross_route_insert()
       returns trigger language plpgsql as $$ begin
@@ -1816,16 +1817,18 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       }
       assert.equal(directInsertStarted, true, 'the direct projects writer must reach its controlled insert barrier');
 
-      const readProjectCodeLockCounts = async granted => (await pool.query(`
+      const readAdvisoryLockCounts = async (lockKey,granted) => (await pool.query(`
         select count(*)::int as count
         from pg_locks l
         cross join (select hashtextextended($1, 0) as lock_key) expected
         where l.locktype='advisory' and l.granted=$2 and l.objsubid=1
           and l.classid::bigint=((expected.lock_key >> 32) & 4294967295)
           and l.objid::bigint=(expected.lock_key & 4294967295)
-      `, [crossRouteLockKey, granted])).rows[0].count;
-      assert.equal(await readProjectCodeLockCounts(true), 1,
+      `, [lockKey, granted])).rows[0].count;
+      assert.equal(await readAdvisoryLockCounts(crossRouteLockKey,true), 1,
         'the direct project writer must hold the shared project-code lock before its insert proceeds');
+      assert.equal(await readAdvisoryLockCounts(crossRouteLifecycleLockKey,true),1,
+        'the direct writer must hold the common scope lifecycle lock before the project-code/insert barrier');
 
       concurrentProjectImport = applyProjectsV1({
         schemaVersion: 'project-master/1',
@@ -1841,16 +1844,18 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
           status: 'Active',
         }],
       }, 'synthetic-project-cross-route-key');
-      let importWaitingForProjectCodeLock = false;
+      let importWaitingForLifecycleLock = false;
       for (let attempt = 0; attempt < 200; attempt += 1) {
-        if (await readProjectCodeLockCounts(false) > 0) {
-          importWaitingForProjectCodeLock = true;
+        if (await readAdvisoryLockCounts(crossRouteLifecycleLockKey,false) > 0) {
+          importWaitingForLifecycleLock = true;
           break;
         }
         await delay(10);
       }
-      assert.equal(importWaitingForProjectCodeLock, true,
-        'the import request must reach and wait on the held project-code lock before the direct insert is released');
+      assert.equal(importWaitingForLifecycleLock, true,
+        'the import must wait on the earlier common lifecycle lock while the direct writer holds both lifecycle and project-code locks');
+      assert.equal(await readAdvisoryLockCounts(crossRouteLifecycleLockKey,false),1,
+        'exactly the concurrent import must wait on the scoped lifecycle key before the direct insert is released');
     } finally {
       await crossRouteBarrierClient.query('select pg_advisory_unlock(hashtextextended($1, 0))', [crossRouteBarrierKey]);
       await crossRouteBarrierClient.end();
@@ -5084,20 +5089,21 @@ await withDisposableDatabase(async (pool) => {
     '038_wos03_organization_audit_access',
     '039_wos03_import_operation_contract',
     '040_wos04_commercial_drafting_foundation',
+    '041_wos04_governed_lifecycle',
   ], 'PR-006 and PR-007A add request/provenance/history/import contracts and additive commercial drafting in order');
   assert.deepEqual([...preOrganizationAuditUpgrade.applied, ...upgrade.applied], candidateMigrations.map(item => item.id),
     'upgrade from merged main applies all additive PR-006/PR-007A migrations in order');
-  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation'],
+  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle'],
     'organization-scope and import-operation migrations apply after historical and legal-entity audit rows already exist');
-  assert.equal(upgrade.skipped.length, manifest.length - 3);
-  assert.equal(after.rows[0].count, before.rows[0].count + 3, 'the final upgrade appends migrations 038, 039 and 040 to its ledger');
+  assert.equal(upgrade.skipped.length, manifest.length - 4);
+  assert.equal(after.rows[0].count, before.rows[0].count + 4, 'the final upgrade appends migrations 038 through 041 to its ledger');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
   assert.deepEqual(status.legacyUnverifiedIds, manifest.filter(item => item.id < '033_').map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 8, 'all PR-006/PR-007A migrations are ledgered');
+  assert.equal(newMigrations.length, 9, 'all PR-006/PR-007 commercial migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),

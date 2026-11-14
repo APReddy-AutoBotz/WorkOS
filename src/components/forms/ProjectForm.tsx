@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils';
 import { Project, Employee, Client } from '../../types';
 import { projectService, employeeService, clientService } from '../../services/api';
 import { PROJECT_STATUSES } from '../../constants/statuses';
+import {ApiClientError} from '../../services/apiClient';
 import { termTitle } from '../../config/terminology';
 
 interface ProjectFormProps {
@@ -89,7 +90,7 @@ export const ProjectForm = ({ onClose, onSave, project }: ProjectFormProps) => {
       onSave();
       onClose();
     } catch (error) {
-      console.error(error);
+      setErrors({save:error instanceof ApiClientError && error.status===409 ? 'This project is governed or changed. Use the commercial lifecycle workspace for governed projects, or reload before editing.' : 'The project was not saved. Check access and reload before trying again.'});
     } finally {
       setLoading(false);
     }
@@ -116,6 +117,7 @@ export const ProjectForm = ({ onClose, onSave, project }: ProjectFormProps) => {
       </div>
 
       <form onSubmit={handleSubmit} className="p-8 overflow-y-auto space-y-8 custom-scrollbar">
+        {errors.save && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3">{errors.save}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* General Information */}
           <div className="space-y-4">

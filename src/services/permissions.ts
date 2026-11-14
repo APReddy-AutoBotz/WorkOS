@@ -17,6 +17,7 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'clients.manage', module: 'Delivery', label: 'Manage Clients', description: 'Create and update client portfolio records.' },
   { key: 'commercial.contracts.view', module: 'Commercial', label: 'View Commercial Drafts', description: 'Opt-in access to scoped confidential contracts, budgets, purchase orders and draft milestones.', optIn: true },
   { key: 'commercial.contracts.manage', module: 'Commercial', label: 'Manage Commercial Drafts', description: 'Opt-in creation of commercial drafts and immutable future contract revisions. Also requires commercial view access.', optIn: true },
+  { key: 'commercial.lifecycle.manage', module: 'Commercial', label: 'Manage Governed Lifecycle', description: 'Opt-in exact-version activation, Active/On Hold transitions and governed project creation. Also requires commercial view access.', optIn: true },
   { key: 'allocations.view', module: 'Planning', label: 'Planning Workspace', description: 'View planning signals and allocation records inside data scope.' },
   { key: 'allocations.manage', module: 'Planning', label: 'Manage Allocations', description: 'Create, edit, and end allocations inside data scope.' },
   { key: 'timesheets.submit', module: 'Timesheets', label: 'Submit Timesheets', description: 'Create and submit own or scoped timesheets.' },
@@ -44,7 +45,7 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, PermissionKey[]> = {
-  Admin: PERMISSION_DEFINITIONS.filter(permission => !permission.optIn && !['audit.deployment.view', 'audit.organization.view', 'commercial.contracts.view', 'commercial.contracts.manage'].includes(permission.key)).map(permission => permission.key),
+  Admin: PERMISSION_DEFINITIONS.filter(permission => !permission.optIn && !['audit.deployment.view', 'audit.organization.view', 'commercial.contracts.view', 'commercial.contracts.manage', 'commercial.lifecycle.manage'].includes(permission.key)).map(permission => permission.key),
   HR: [
     'dashboard.view',
     'employees.view',
