@@ -282,7 +282,7 @@ assert.match(timesheetImportRoute, /const importBatchId = randomUUID\(\)/,
   'timesheet imports must receive one server-generated batch ID after request validation');
 assert.match(timesheetImportRoute, /for \(const group of groups\.values\(\)\)[\s\S]*await audit\(client, req,[\s\S]*entityType: 'Timesheet'[\s\S]*source: 'Timesheet Import CSV',[\s\S]*importBatchId,[\s\S]*sourceIdentifier: null,[\s\S]*importProcessingResult: 'Success'/,
   'successful timesheet group audits must retain source, null unavailable source ID, batch and result once per group');
-assert.match(timesheetImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run\)[\s\S]*values \(\$1,'Import','Timesheet Import'/,
+assert.match(timesheetImportRoute, /insert into import_export_logs \(id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run, capture_warnings\)[\s\S]*values \(\$1,'Import','Timesheet Import'/,
   'timesheet batch history must use the same ID as group audits and retain the selected scope');
 assert.match(timesheetImportRoute, /await client\.query\('begin'\)[\s\S]*for \(const group of groups\.values\(\)\)[\s\S]*await audit\(client, req,[\s\S]*insert into import_export_logs[\s\S]*await client\.query\('commit'\)[\s\S]*await client\.query\('rollback'\)/,
   'timesheet updates, entries, group audits and import history must commit or roll back together');

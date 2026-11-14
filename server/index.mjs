@@ -2767,8 +2767,8 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
 app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('timesheets.submit'), async (req, res) => {
   const {params,where}=timesheetReadScope(req);
   await run(res, `
-    select
-      t.*,t.week_ending::text,work_capture_write_token(t.id) write_token,
+    with visible as (select
+      t header,t.id,t.updated_at,t.week_ending::text,work_capture_write_token(t.id) write_token,
       (select json_build_object('id',w.id,'sequence',w.sequence,'policyVersion',w.policy_version,'entryCount',jsonb_array_length(w.entries),'governedEntryCount',(select count(*) from jsonb_array_elements(w.entries) x where x->>'kind'='governed'),'duplicateCheck',case when w.duplicate_entry_check is not null then json_build_object('version',w.duplicate_entry_check->>'version','groupCount',jsonb_array_length(w.duplicate_entry_check->'groups')) else null end) from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id order by w.sequence desc limit 1) work_assurance,
       coalesce(json_agg(json_build_object(
         'id', te.id,
@@ -2794,7 +2794,10 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
     left join projects p on p.id = te.project_id
     ${where}
     group by t.id
-    order by t.week_ending desc, t.updated_at desc
+    order by t.week_ending desc, t.updated_at desc)
+    select (v.header).*,v.week_ending,v.write_token,v.work_assurance,v.entries,coalesce(w.value->v.id::text,'[]'::jsonb) capture_warnings from visible v
+    cross join (select work_capture_overtime_warnings(array_agg(id)) value from visible) w
+    order by v.week_ending desc,v.updated_at desc
   `, params, rows => rows.map(projectTimesheetDuplicateCheck));
 });
 app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('timesheets.submit'), async (req, res) => {
@@ -2954,8 +2957,9 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       reason: parsed.data.rejection_reason || null,
     });
     const writeToken=(await client.query('select work_capture_write_token($1) token',[timesheet.id])).rows[0].token;
+    const captureWarnings=(await client.query("select coalesce(work_capture_overtime_warnings(array[$1::uuid])->$1::text,'[]'::jsonb) warnings",[timesheet.id])).rows[0].warnings;
     await client.query('commit');
-    res.json({ ...timesheet, write_token:writeToken, work_assurance:workAssurance, duplicate_entry_check:duplicateEntryCheck, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>entry) });
+    res.json({ ...timesheet, capture_warnings:captureWarnings, write_token:writeToken, work_assurance:workAssurance, duplicate_entry_check:duplicateEntryCheck, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>entry) });
   } catch (error) {
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;

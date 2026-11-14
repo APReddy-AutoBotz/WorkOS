@@ -1,3 +1,4 @@
+import {normalizeOvertimeWarnings} from './overtimeCapture';
 import {normalizeDuplicateEntryCheck,normalizeDuplicateCheckSummary} from './duplicateEntryCheck';
 /**
  * apiClient.ts
@@ -393,6 +394,7 @@ export const normalizeTimesheetSummary = (
   return {
     workAssurance: normalizeWorkAssurance(r.work_assurance),
     duplicateEntryCheck: normalizeDuplicateEntryCheck(r.duplicate_entry_check),
+    captureWarnings: normalizeOvertimeWarnings(r.capture_warnings),
     writeToken: typeof r.write_token === 'string' ? r.write_token : undefined,
     id: r.id ? String(r.id) : undefined,
     employeeId: String(r.employee_id),

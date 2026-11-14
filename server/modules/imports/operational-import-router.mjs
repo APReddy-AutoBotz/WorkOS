@@ -1,3 +1,4 @@
+import {prospectiveImportOvertimeWarnings} from '../work-capture/overtime-policy.mjs';
 import {checkDuplicateEntries,readDuplicateEntryCheck} from '../work-capture/duplicate-entry-check.mjs';
 import {workReferenceInput} from '../work-capture/work-reference.mjs';
 import {evidenceUrlInput,resolveWorkEntryMetadataReplacement,readWorkEvidenceAudit} from '../work-capture/work-evidence.mjs';
@@ -27,6 +28,7 @@ const responseFromBatch = (row, versioned) => ({
   validRows: row.valid_rows,
   errorRows: row.error_rows,
   errors: Array.isArray(row.errors) ? row.errors : [],
+  ...(Array.isArray(row.capture_warnings)?{captureWarnings:row.capture_warnings}:{}),
   log: versioned ? row : legacyImportLog(row),
 });
 
@@ -569,6 +571,7 @@ export const createOperationalImportRouter = ({
         validEntryRows += 1;
       }
 
+      const overtimeGroups=[];
       for (const group of groups.values()) {
         let policyEntries;
         let previous,previousEvidence,previousDuplicateCheck;
@@ -596,6 +599,7 @@ export const createOperationalImportRouter = ({
           validEntryRows -= group.entries.length;
           continue;
         }
+        const overtimeGroup={employeeId:group.employee.id,weekEnding:group.weekEnding,timesheetId:previous?.id||null,entries:policyEntries};overtimeGroups.push(overtimeGroup);
         if (dryRun) {
           stagedCaptureReplacements.push({employeeId:group.employee.id,timesheetId:previous?.id||null,entries:policyEntries});
           continue;
@@ -616,6 +620,7 @@ export const createOperationalImportRouter = ({
           returning *
         `, [group.employee.id, group.weekEnding, group.status, totalHours, billableHours, group.rejectionReason, scope.organizationId, scope.legalEntityId]);
         let timesheet = timesheetResult.rows[0];
+        overtimeGroup.timesheetId=timesheet.id;
         await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);
         const savedEntries=[];
         for (const [index,entry] of group.entries.entries()) {
@@ -647,6 +652,7 @@ export const createOperationalImportRouter = ({
         });
       }
 
+      const captureWarnings=await prospectiveImportOvertimeWarnings(client,req,overtimeGroups);
       const responseErrors = attachImportErrorSourceIdentifiers({
         errors, clientErrors, rows: parsed.data.rows, rowNumbers, mappingIsReliable,
         sourceIdentifierForRow: () => null,
@@ -660,12 +666,12 @@ export const createOperationalImportRouter = ({
         channel, source: 'Timesheet Import CSV',
       });
       const logResult = await client.query(`
-        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run)
-        values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run, capture_warnings)
+        values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
         returning *
       `, [importBatchId, parsed.data.fileName, status, totalRows, validEntryRows, errors.length,
         errors.length ? JSON.stringify(responseErrors) : null, req.user.username, scope.organizationId,
-        scope.legalEntityId, versioned ? parsed.data.schemaVersion : null, dryRun]);
+        scope.legalEntityId, versioned ? parsed.data.schemaVersion : null, dryRun, JSON.stringify(captureWarnings)]);
       if (versioned) await persistIdempotency({client, scope, context: idempotency, channel, requestHash});
       await client.query('commit');
       transactionOpen = false;

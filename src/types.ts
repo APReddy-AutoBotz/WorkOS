@@ -696,6 +696,8 @@ export interface TimesheetEntry {
   weekEnding: string;
 }
 
+export type OvertimeWarning={version:'overtime-capture/1';policyId:string;action:'warn'|'block';kind:'daily'|'weekly';workDate:string|null;periodCode:string;threshold:string};
+
 export interface DuplicateEntryCheckSummary {
   version: 'exact-entry-content/1';
   groupCount: number;
@@ -715,6 +717,7 @@ export interface WorkSubmissionAssurance {
 
 export interface TimesheetSummary {
   duplicateEntryCheck?: DuplicateEntryCheck;
+  captureWarnings?: OvertimeWarning[];
   writeToken?: string;
   workAssurance?: WorkSubmissionAssurance;
   id?: string;

@@ -15,7 +15,7 @@ const modeSettings={...scope,latestId:null,versions:[],truncated:false},draft={e
 const input={employeeId:user.id,weekEnding:'2026-10-23',status:'Draft',entries:[{id:'entry-synthetic',date:'2026-10-22',workType:'Client Misc Task',clientName:'Synthetic context',category:'Synthetic category',hours:'0.25000000000000001',remark:'Synthetic comment',billable:false}]};
 const precondition={writeToken:token,mode:'daily',modePolicyId:'m1'};
 const modeVersion={id:'m1',sequence:1,policyVersion:'work-capture-modes/1',enabledModes:['daily'],createdAt:'2026-10-22T12:00:00.000Z'};
-const calls=[];let status=200,health='connected',gate=null,gatePath=null,projection=modes,history=modeSettings,appended=modeVersion;
+const calls=[];let status=200,health='connected',gate=null,gatePath=null,projection=modes,history=modeSettings,appended=modeVersion,warnings=undefined;
 const response=(body,code=200)=>new Response(JSON.stringify(body),{status:code,headers:{'Content-Type':'application/json'}});
 globalThis.fetch=async(url,init={})=>{
  calls.push({url,method:init.method||'GET',headers:{...init.headers},body:init.body});
@@ -25,13 +25,13 @@ globalThis.fetch=async(url,init={})=>{
  else if(url==='/api/projects')body=[{id:'project-synthetic',name:'Synthetic project',status:'Active',start_date:'2026-01-01',end_date:'2026-12-31'}];
  else if(url==='/api/allocations')body=[{id:'allocation-synthetic',employee_id:user.id,project_id:'project-synthetic',start_date:'2026-01-01',end_date:'2026-12-31',status:'Active'}];
  else if(url==='/api/settings')body=[];
- else if(url==='/api/timesheets')body=init.method==='POST'?{write_token:nextToken,work_assurance:null}:[{id:'header-synthetic',employee_id:user.id,week_ending:input.weekEnding,status:'Draft',write_token:token,entries:[]}];
+ else if(url==='/api/timesheets')body=init.method==='POST'?{write_token:nextToken,work_assurance:null,capture_warnings:warnings}:[{id:'header-synthetic',employee_id:user.id,week_ending:input.weekEnding,status:'Draft',write_token:token,entries:[]}];
  else if(url==='/api/v1/work-capture-modes/settings')body=init.method==='POST'?appended:history;
  else throw Error(`Unexpected transport ${url}`);
  const code=status,wait=gate&&url===gatePath?gate:null;if(wait)await wait.promise;
  return response(code>=400?{error:'Synthetic rejection'}:body,code);
 };
-const reset=()=>{values.clear();values.set('workos_session',JSON.stringify(user));values.set('workos_organization_scope',JSON.stringify(scope));values.set('workos_api_token','synthetic-original-token');calls.length=0;status=200;health='connected';gate=null;gatePath=null;projection=modes;history=modeSettings;appended=modeVersion;resetBackendCheck();};
+const reset=()=>{values.clear();values.set('workos_session',JSON.stringify(user));values.set('workos_organization_scope',JSON.stringify(scope));values.set('workos_api_token','synthetic-original-token');calls.length=0;status=200;health='connected';gate=null;gatePath=null;projection=modes;warnings=undefined;history=modeSettings;appended=modeVersion;resetBackendCheck();};
 const deferred=()=>{let resolve;return {promise:new Promise(r=>{resolve=r;}),resolve:()=>resolve()};};
 const replace=()=>{values.set('workos_session',JSON.stringify({...user,id:'worker-replacement'}));values.set('workos_organization_scope',JSON.stringify(other));values.set('workos_api_token','synthetic-replacement-token');};
 reset();const workspace=await work.get(capture());assert.equal(workspace.allocations[0].projectName,'Synthetic project');assert.equal(workspace.timesheets[0].writeToken,token);
@@ -49,6 +49,9 @@ for(const workReference of [undefined,null,'TASK-42 · Discovery checkpoint']){
  await work.save({...input,entries:[{...input.entries[0],evidenceUrl:'https://example.test/work/42',workReference}]},precondition,capture());
  const entry=JSON.parse(calls.at(-1).body).entries[0];assert.equal(entry.work_reference,workReference);assert.equal(Object.hasOwn(entry,'work_reference'),workReference!==undefined);assert.equal(entry.evidence_url,'https://example.test/work/42');
 }
+reset();warnings=[{version:'overtime-capture/1',policyId:'rule-synthetic',periodCode:'week-synthetic',action:'warn',kind:'daily',workDate:'2026-10-22',threshold:'8'}];
+assert.deepEqual((await work.save(input,precondition,capture())).captureWarnings,warnings);
+warnings={invalid:true};assert.equal((await work.save(input,precondition,capture())).captureWarnings,undefined,'unavailable diagnostics cannot become a false clean check');
 assert.deepEqual(await settings.get(captureSettings()),modeSettings);
 await settings.append({...draft,actorId:'forged'},captureSettings());assert.deepEqual(JSON.parse(calls.at(-1).body),draft);
 for(const mutate of [()=>values.set('workos_session','null'),()=>values.set('workos_organization_scope',JSON.stringify(other)),()=>values.set('workos_api_token','replacement'),()=>values.set('workos_session',JSON.stringify({...user,permissions:[]}))]){

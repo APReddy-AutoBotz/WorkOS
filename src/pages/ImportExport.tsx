@@ -1,3 +1,4 @@
+import {importOvertimeNotice} from '../services/overtimeCapture';
 import { useEffect, useRef, useState } from 'react';
 import { ImportHistoryPanel } from '../components/imports/ImportHistoryPanel';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -576,7 +577,7 @@ export const ImportExport = () => {
             ? {employeeImportOperation: {...basePending.employeeImportOperation, validationState: 'complete'}}
             : {}),
         });
-        setLastResult(`Server dry run complete for ${fileName}: ${serverValidRows.length}/${rows.length} rows are valid. Review saved errors before applying.`);
+        setLastResult(`Server dry run complete for ${fileName}: ${serverValidRows.length}/${rows.length} rows are valid. Review saved errors before applying.`+importOvertimeNotice(result.captureWarnings));
         refreshHistory();
       } catch (error) {
         if (!isCurrentRequest()) return;
@@ -669,7 +670,7 @@ export const ImportExport = () => {
           ? {employeeImportOperation: {...snapshot.employeeImportOperation, validationState: 'complete'}}
           : {}),
       });
-      setLastResult(`Server dry run complete for ${snapshot.fileName}: ${validRows.length}/${snapshot.totalRows} rows are valid. Review saved errors before applying.`);
+      setLastResult(`Server dry run complete for ${snapshot.fileName}: ${validRows.length}/${snapshot.totalRows} rows are valid. Review saved errors before applying.`+importOvertimeNotice(result.captureWarnings));
       refreshHistory();
     } catch (error) {
       if (!isCurrentRequest()) return;
@@ -738,7 +739,7 @@ export const ImportExport = () => {
         const resultText = backendResult.status === 'Success'
           ? `Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`
           : `${pendingImport.title} apply finished with ${backendResult.validRows} valid rows and ${backendResult.errorRows} errors for ${pendingImport.fileName}. View saved diagnostic details in Import History.`;
-        setLastResult(resultText);
+        setLastResult(resultText+importOvertimeNotice(backendResult.captureWarnings));
         setPendingImport(null);
         refreshHistory();
       } catch (error) {
@@ -848,7 +849,7 @@ export const ImportExport = () => {
       const backendResult = await adminService.applyTimesheetImport(pendingImport.fileName, pendingImport.validRows, pendingImport.errors, pendingImport.rows.length, pendingImport.scope);
       if (!isCurrentApply()) return;
       if (backendResult) {
-        setLastResult(`Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`);
+        setLastResult(`Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`+importOvertimeNotice(backendResult.captureWarnings));
         setPendingImport(null);
         refreshHistory();
         return;
