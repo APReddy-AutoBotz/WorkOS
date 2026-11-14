@@ -64,4 +64,4 @@ Rollback is application rollback with retained additive migration046 and immutab
 
 ## Separate PR-008D continuation
 
-The evidence-link exclusion above is now addressed only by the separate dependent [PR-008D evidence-link slice](WOS-04-WORK-ENTRY-EVIDENCE.md), based on unchanged PR57 `02c024d45621fe516e0a46f21657a37f2a1e4532`. This does not expand PR-008C or accept/integrate the stack. Optional review is deferred under the owner's 2026-10-24 development instruction and remains outstanding.
+The evidence-link exclusion above is addressed only by the separate dependent [PR-008D evidence-link slice](WOS-04-WORK-ENTRY-EVIDENCE.md). Its integration now includes corrected PR57 `01bb4fa6de46ddf210915a85f94381b81c6be5b9`, accepted at main `07967fddfe8ae0e6304d338db2f71b9f7e3a2198`. This does not expand PR-008C or accept the later stack. The owner's subsequent reviewed-integration authorization supersedes the original development-only review deferral; PR-008D requires independent review and its own executable acceptance.
