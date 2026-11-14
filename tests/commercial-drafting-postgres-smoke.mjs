@@ -128,8 +128,9 @@ await withCommercialDatabase(async ({pool}) => {
     await seedCommercialReferences(pool);
     await seedCommercialLegacyWork(pool);
     const before = await legacySnapshot(pool);
+    for(const row of before.timesheet_entries)row.evidence_url=null; // additive 047 column; all pre-existing fields still compare exactly
     const upgraded = await migrateCommercialDatabase(pool);
-    assert.deepEqual(upgraded.applied, [versionId,'041_wos04_governed_lifecycle','042_wos04_scoped_client_profiles','043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes'], 'upgrade must apply all ordered append-only commercial migrations');
+    assert.deepEqual(upgraded.applied, [versionId,'041_wos04_governed_lifecycle','042_wos04_scoped_client_profiles','043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence'], 'upgrade must apply all ordered append-only commercial migrations');
     assert.equal(upgraded.status.isCurrent, true);
     assert.deepEqual(await legacySnapshot(pool), before,
       'upgrade must preserve every project/client/employee/allocation/timesheet/work field, identity, date and commercial assumption');

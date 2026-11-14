@@ -688,6 +688,7 @@ export interface TimesheetEntry {
   date: string;
   hours: number;
   hoursExact?: string; // Retained decimal transport; numeric hours are display previews
+  evidenceUrl?: string | null; // Omission preserves; null explicitly clears
   remark?: string;
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
   billable: boolean; // Server-owned project/assignment policy may make work non-billable

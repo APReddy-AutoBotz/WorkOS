@@ -350,3 +350,8 @@ WOS-TIM-001 and the retained WOS-CORE-003–005 / WOS-TIM-004–006/008–009/01
 
 
 PR-008C integration adds WOS-NFR-UX-001/005 response-boundary evidence: malformed capture-mode histories/projections and append acknowledgements reject before editor publication, while empty and bounded truncated histories remain supported. Mode-aware timing coverage retains keyed week/identity isolation and explicit reload after abandoned-command settlement.
+
+### PR-008D bounded continuation: work-entry evidence links
+
+WOS-TIM-003 evidence-link dimension is implemented as an optional per-entry URL in [PR-008D](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md). The current integration includes corrected PR57 `01bb4fa6de46ddf210915a85f94381b81c6be5b9`, merged at `07967fddfe8ae0e6304d338db2f71b9f7e3a2198` after exact-head acceptance. Migration047, shared manual/import omitted-field preservation, evidence-only revisions, immutable correction snapshots and real React/API/PostgreSQL gates cover this bounded dimension. Remaining entry dimensions and full PR008 acceptance remain open. The owner subsequently authorized reviewed integration; the original development-only exception is historical. This Draft still requires its own local acceptance, independent exact-head review and hosted checks before an eligible merge. No release or deployment acceptance is inferred.
+

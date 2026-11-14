@@ -274,3 +274,8 @@ An authorized permission manager can explicitly grant `commercial.clients.view` 
 Inspect current/as-of history before appending a version with a reason. New defaults do not rewrite earlier contracts, work or financial evidence. After an uncertain save, reload to reconcile before retrying; Cancel does not remove that requirement. Malformed response data must remain unavailable rather than being displayed as another customer-unit kind. No invoice routing, billing eligibility, tax/payment identifiers, retirement or cross-legal consolidation is supplied by this package.
 
 Rollback requires a validated forward-compatible binary retaining migration042 and immutable profile/version evidence. Disable affected UI/routes if needed; do not delete evidence or migration ledger entries. A pre042 binary is unsupported. Production OIDC, buyer-scale performance, role UAT and formal release acceptance remain separate gates.
+
+## PR-008D evidence-link migration and rollback
+
+Migration047 adds nullable work-entry URLs without rewriting accepted work, grants or immutable histories. Run the feature unit, PostgreSQL upgrade/replay and real browser journey gates described in [PR-008D](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md). Independent exact-head review and executable acceptance are required; the dependent Draft is not release acceptance. URLs are references only and are never automatically fetched. Preserve migration047/history on rollback. Pre047 binaries cannot preserve evidence during entry replacement: if restoring one, keep work writes disabled operationally and roll forward to an evidence-aware binary before resuming. No destructive down migration, running-environment change or deployment is authorized.
+

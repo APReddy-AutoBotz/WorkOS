@@ -17,8 +17,9 @@ await withCommercialDatabase(async ({pool}) => {
     }
     await runMigrations({pool, rootDir, logger: quiet}); await seedCommercialReferences(pool); await seedCommercialLegacyWork(pool);
     const before = await tableSnapshot(pool, 'timesheet_entries'), headers = await tableSnapshot(pool, 'timesheets');
+    for(const row of before)row.value.evidence_url=null; // additive 047 column
     const grants = await tableSnapshot(pool, 'role_permissions');
-    const installed = await migrateCommercialDatabase(pool); assert.deepEqual(installed.applied, [migration,'046_wos04_work_capture_modes']);
+    const installed = await migrateCommercialDatabase(pool); assert.deepEqual(installed.applied, [migration,'046_wos04_work_capture_modes','047_wos04_work_entry_evidence']);
     assert.deepEqual(await tableSnapshot(pool, 'timesheet_entries'), before); assert.deepEqual(await tableSnapshot(pool, 'timesheets'), headers);
     assert.deepEqual(await tableSnapshot(pool, 'role_permissions'), grants);
     assert.equal((await pool.query('select count(*)::int n from work_capture_policy_versions')).rows[0].n, 0);
