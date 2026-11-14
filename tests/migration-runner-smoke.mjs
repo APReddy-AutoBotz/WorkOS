@@ -5091,20 +5091,21 @@ await withDisposableDatabase(async (pool) => {
     '040_wos04_commercial_drafting_foundation',
     '041_wos04_governed_lifecycle',
     '042_wos04_scoped_client_profiles',
-  ], 'PR-006 and PR-007A add request/provenance/history/import contracts and additive commercial drafting in order');
+    '043_wos04_governed_amendments',
+  ], 'PR-006 and PR-007A–D add request/provenance/history/import contracts and additive commercial modules in order');
   assert.deepEqual([...preOrganizationAuditUpgrade.applied, ...upgrade.applied], candidateMigrations.map(item => item.id),
-    'upgrade from merged main applies all additive PR-006/PR-007A migrations in order');
-  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle', '042_wos04_scoped_client_profiles'],
+    'upgrade from merged main applies all additive PR-006/PR-007A–D migrations in order');
+  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle', '042_wos04_scoped_client_profiles', '043_wos04_governed_amendments'],
     'organization-scope and import-operation migrations apply after historical and legal-entity audit rows already exist');
-  assert.equal(upgrade.skipped.length, manifest.length - 5);
-  assert.equal(after.rows[0].count, before.rows[0].count + 5, 'the final upgrade appends migrations 038 through 042 to its ledger');
+  assert.equal(upgrade.skipped.length, manifest.length - 6);
+  assert.equal(after.rows[0].count, before.rows[0].count + 6, 'the final upgrade appends migrations 038 through 043 to its ledger');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
   assert.deepEqual(status.legacyUnverifiedIds, manifest.filter(item => item.id < '033_').map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 10, 'all PR-006/PR-007 commercial migrations are ledgered');
+  assert.equal(newMigrations.length, 11, 'all PR-006/PR-007 commercial migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),

@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments]
   push:
     branches: [main]
   workflow_dispatch:
@@ -77,11 +77,17 @@ jobs:
       - name: Verify patched dependency security behavior
         run: npm run test:dependency-security
 
+      - name: Verify governed amendments PostgreSQL migration and API acceptance
+        run: npm run test:commercial-amendments-postgres
+
       - name: Verify scoped client profiles PostgreSQL migration and API acceptance
         run: npm run test:client-profiles-postgres
 
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
+
+      - name: Verify real governed amendments PostgreSQL browser journey
+        run: npm run test:commercial-amendments-journey
 
       - name: Verify import and audit history browser interactions
         env:
