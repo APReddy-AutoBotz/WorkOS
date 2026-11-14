@@ -6,9 +6,9 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
-Application source, organization/setup foundations and CI/migration/production-profile infrastructure are present on `main`. The verified baseline after dependency repair PR145 is `839dacf12222261161a93956b646d03ccc56af66`; source bootstrap entered the repository through PR16. The previous statement that application source was absent was stale.
+Application source, organization/setup foundations, CI/migration/production-profile infrastructure and the modular API/import/audit foundation are present on `main`. The verified integration baseline is `006c77a821e9e580a975cfb8b8de293429612352` (PR41), following dependency repair PR145 and product-direction documentation PR144. Its post-merge checks passed. Source bootstrap entered the repository through PR16.
 
-Substantial operational, commercial and security work remains in dependent Draft pull requests. Passing checks on those branches do not mean the changes are merged or that v1 is production-ready. The governed project-contribution replacement is still being implemented and must complete export and end-to-end acceptance before publication.
+Substantial operational, commercial and security work remains in dependent Draft pull requests. Passing checks on those branches do not mean the changes are merged or that v1 is production-ready. The governed project-contribution report and retained export are published in Draft PR146 with local API/database/browser evidence; current-head hosted checks and dependency-ordered integration remain required.
 
 Start with the [current implementation status](docs/00-control/IMPLEMENTATION_STATUS.md), [product vision](docs/01-product/PRODUCT_VISION_AND_POSITIONING.md), and [delivery and integration roadmap](docs/05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md).
 
