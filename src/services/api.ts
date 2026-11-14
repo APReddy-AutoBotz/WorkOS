@@ -1,3 +1,4 @@
+import {canonicalHours,sumHours} from '../../shared/work-hours.mjs';
 /**
  * api.ts — Dual-mode service layer.
  * AUTO-DETECTS backend: if /api/health returns database:connected → uses REST API.
@@ -591,16 +592,17 @@ export const timesheetService = {
     return DataStorage.get<TimesheetSummary[]>(STORAGE_KEYS.TIMESHEETS, []);
   },
   save: async (ts: TimesheetSummary): Promise<TimesheetSummary['workAssurance']> => {
-    const roundedEntries = ts.entries.map(e => ({ ...e, hours: roundMetric(e.hours) }));
-    const totalHours = roundMetric(roundedEntries.reduce((sum, entry) => sum + entry.hours, 0));
-    const billableHours = roundMetric(roundedEntries.filter(entry => entry.billable).reduce((sum, entry) => sum + entry.hours, 0));
+    const serializedEntries = ts.entries.map(e => ({ ...e, hours: canonicalHours(e.hours) }));
+    const roundedEntries = serializedEntries.map(e => ({ ...e, hours: Number(e.hours) }));
+    const totalHours = Number(sumHours(roundedEntries.map(entry => entry.hours)));
+    const billableHours = Number(sumHours(roundedEntries.filter(entry => entry.billable).map(entry => entry.hours)));
     if (await checkBackend()) {
       const saved = await api.post<Record<string, unknown>>('/api/timesheets', {
         employee_id: ts.employeeId,
         week_ending: ts.weekEnding,
         status: ts.status,
         rejection_reason: ts.rejectionReason || null,
-        entries: roundedEntries.map(e => ({
+        entries: serializedEntries.map(e => ({
           id: e.id,
           project_id: e.projectId || null,
           work_type: e.workType,

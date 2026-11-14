@@ -25,7 +25,7 @@ timesheetService.save = input => new Promise(resolve => saves.push({resolve,inpu
   releaseRead(index: number, sequence: number) {
     const request=reads[index];
     const monday=new Date();monday.setDate(monday.getDate()+((monday.getDay()+6)%7)*-1);monday.setHours(0,0,0,0);
-    request.resolve(Array.from({length:12},(_,i)=>{const day=new Date(monday);day.setDate(day.getDate()+4-i*7);return {id:`synthetic-week-${i}`,employeeId:request.identity,weekEnding:day.toISOString().split('T')[0],entries:[],status:'Draft',workAssurance:assurance(sequence)};}));
+    request.resolve(Array.from({length:12},(_,i)=>{const day=new Date(monday);day.setDate(day.getDate()+4-i*7);return {id:`synthetic-week-${i}`,employeeId:request.identity,weekEnding:[day.getFullYear(),String(day.getMonth()+1).padStart(2,'0'),String(day.getDate()).padStart(2,'0')].join('-'),entries:[],status:'Draft',workAssurance:assurance(sequence)};}));
   },
   releaseSave(index: number, sequence: number) {saves[index].resolve(assurance(sequence));},
 };

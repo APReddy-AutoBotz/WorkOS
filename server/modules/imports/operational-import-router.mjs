@@ -1,3 +1,5 @@
+import {validateCapturePolicy,captureHoursInput,assertCaptureReplacementPeriods} from '../work-capture/capture-policy.mjs';
+import {canonicalHours,sumHours} from '../work-capture/work-hours.mjs';
 import {lockWorkPolicy,validateAssignmentPolicy,validateWorkEntries,assertWorkActorScope,assertTimesheetEditable,validateImportWorkStatus,retainWorkSubmission,WorkPolicyError} from '../work-capture/assignment-work-policy.mjs';
 import {randomUUID} from 'node:crypto';
 import {Router} from 'express';
@@ -216,7 +218,7 @@ export const createOperationalImportRouter = ({
     clientName: z.string().optional(),
     category: z.string().optional(),
     date: strictIsoDateSchema,
-    hours: z.coerce.number().min(0).max(24),
+    hours: captureHoursInput,
     remark: z.string().optional(),
     billable: z.union([z.boolean(), z.string()]).optional(),
     status: versioned ? optionalImportEnum(['Draft', 'Submitted', 'Approved', 'Rejected']) : z.enum(['Draft', 'Submitted', 'Approved', 'Rejected']).optional(),
@@ -470,6 +472,7 @@ export const createOperationalImportRouter = ({
     const idempotency = context ? {...context, batchId: importBatchId} : null;
     const groups = new Map();
     const seenTimesheetEntryKeys = new Set();
+    const stagedCaptureReplacements = [];
     let validEntryRows = 0;
     let transactionOpen = false;
     try {
@@ -551,7 +554,7 @@ export const createOperationalImportRouter = ({
           clientName: row.clientName || null,
           category: row.category || null,
           workDate: row.date,
-          hours: round1(row.hours),
+          hours: canonicalHours(row.hours),
           remark: row.remark || null,
           billable: parseBoolean(row.billable, row.workType === 'Project Work'),
         });
@@ -567,8 +570,10 @@ export const createOperationalImportRouter = ({
           await lockWorkPolicy(client,req,[group.employee.id]);
           previous=(await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update',[scope.organizationId,scope.legalEntityId,group.employee.id,group.weekEnding])).rows[0];
           assertTimesheetEditable(previous);
-          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
-          group.entries=group.entries.map((entry,index)=>({...entry,billable:policyEntries[index].billable}));
+          await assertCaptureReplacementPeriods(client,req,previous?.id);
+          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,remark:entry.remark,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
+          policyEntries=await validateCapturePolicy(client,req,group.employee.id,policyEntries,{replacementTimesheetId:previous?.id,stagedReplacements:dryRun?stagedCaptureReplacements:[]});
+          group.entries=group.entries.map((entry,index)=>({...entry,hours:policyEntries[index].hours,billable:policyEntries[index].billable}));
           await assertReportingPeriodAllows(client, {
             organizationId: scope.organizationId,
             legalEntityId: scope.legalEntityId,
@@ -581,10 +586,13 @@ export const createOperationalImportRouter = ({
           validEntryRows -= group.entries.length;
           continue;
         }
-        if (dryRun) continue;
+        if (dryRun) {
+          stagedCaptureReplacements.push({employeeId:group.employee.id,timesheetId:previous?.id||null,entries:policyEntries});
+          continue;
+        }
 
-        const totalHours = round1(group.entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
-        const billableHours = round1(group.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
+        const totalHours=sumHours(group.entries.map(entry=>entry.hours));
+        const billableHours=sumHours(group.entries.filter(entry=>entry.billable).map(entry=>entry.hours));
         const timesheetResult = await client.query(`
           insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id)
           values ($1,$2,case when $3::text in ('Draft','Submitted') then 'Draft' end,$4,$5,$6,null,$7,$8)
@@ -605,7 +613,7 @@ export const createOperationalImportRouter = ({
             insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable)
             values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *,work_date::text
           `, [timesheet.id, entry.projectId, entry.workType, entry.clientName, entry.category, entry.workDate, entry.hours, entry.remark, entry.billable]);
-          savedEntries.push({...inserted.rows[0],policy:policyEntries[index].policy});
+          savedEntries.push({...inserted.rows[0],policy:policyEntries[index].policy,capturePolicyReference:policyEntries[index].capturePolicyReference});
         }
         if(group.status==='Submitted'){
           timesheet=(await client.query("update timesheets set status='Submitted',submitted_at=now(),updated_at=now() where id=$1 returning *",[timesheet.id])).rows[0];

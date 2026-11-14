@@ -294,8 +294,8 @@ assert.match(timesheetImportRoute, /const naturalTarget = row\.workType === 'Pro
   'versioned Timesheet Import must detect duplicate natural keys after resolving employee/project aliases');
 assert.match(timesheetImportRoute, /!isWorkDateInsideWeek\(row\.date, row\.weekEnding\)/,
   'versioned Timesheet Import must preserve the existing seven-day work-date rule');
-assert.match(timesheetImportRoute, /if \(dryRun\) continue;/,
-  'timesheet dry runs must validate grouped period content without mutating the timesheet or entries');
+assert.match(timesheetImportRoute, /if \(dryRun\) \{\s*stagedCaptureReplacements\.push\(\{employeeId:group\.employee\.id,timesheetId:previous\?\.id\|\|null,entries:policyEntries\}\);\s*continue;\s*\}\s*const totalHours=/,
+  'timesheet dry runs stage only prospective grouped capture state and continue before any timesheet or entry mutation');
 assert.match(operationalImportRouter, /ALLOCATION_IMPORT_SCHEMA_VERSION = 'allocation-control\/1'[\s\S]*TIMESHEET_IMPORT_SCHEMA_VERSION = 'timesheet-import\/1'/,
   'the new operational import schemas must be explicit and versioned');
 assert.doesNotMatch(timesheetImportRoute, /csvContents|rawCsv|parsed\.data\.csv/i,

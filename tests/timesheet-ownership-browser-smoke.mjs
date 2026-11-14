@@ -43,6 +43,39 @@ try {
  await page.getByRole('button',{name:'Submit for Approval',exact:true}).click();await count('saves',3);
  assert.equal(await page.getByRole('button',{name:'Submit for Approval',exact:true}).isDisabled(),true);
  await release('releaseSave',2,123);await shown(123);await page.getByText('Awaiting Review',{exact:true}).waitFor();
+ // A failed scope switch retains the same owner, but invalidates a pending command.
+ await previous();await count('reads',10);await release('releaseRead',9,130);await shown(130);
+ await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('saves',4);
+ await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+ await count('reads',11);await release('releaseRead',10,131);await shown(131);
+ await release('releaseSave',3,199);
+ const reload=page.getByRole('button',{name:'Reload work',exact:true});
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Reload work'&&!b.disabled));
+ assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true,'pre-commit replacement read must not authorize another save');
+ assert.equal(await page.getByRole('region',{name:'Work submission assurance',exact:true}).count(),0,'abandoned command must invalidate pre-commit assurance');
+ assert.equal(await page.getByText('Draft timesheet saved.',{exact:true}).count(),0);
+ await reload.click();await count('reads',12);await release('releaseRead',11,132);await shown(132);
+ // Scope invalidation during settings preflight must recover without dispatching POST.
+ await page.evaluate(()=>window.ownership.holdSettings());
+ await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('settings',2);
+ await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+ await count('reads',13);await release('releaseRead',12,133);await shown(133);
+ await page.evaluate(()=>window.ownership.releaseSettings(1));
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Reload work'&&!b.disabled));
+ assert.equal(await page.evaluate(()=>window.ownership.saves.length),4,'invalidated preflight sends no command');
+ assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
+ await reload.click();await count('reads',14);await release('releaseRead',13,134);await shown(134);
+ await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('saves',5);
+ await release('releaseSave',4,135);await shown(135);
+ // A replacement read arriving after the abandoned command must also stay stale.
+ await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('saves',6);
+ await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+ await count('reads',15);await release('releaseSave',5,136);
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Reload work'&&!b.disabled));
+ await release('releaseRead',14,137);await page.waitForTimeout(100);
+ assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
+ assert.equal(await page.getByRole('region',{name:'Work submission assurance',exact:true}).count(),0);
+ await reload.click();await count('reads',16);await release('releaseRead',15,138);await shown(138);
  assert.deepEqual(errors,[]);
  console.log('MyTimesheet ownership browser passed: held reads/saves, A-B-A navigation and identity replacement; synthetic timing, no database acceptance claim.');
 } finally {await browser?.close();await vite.close();}

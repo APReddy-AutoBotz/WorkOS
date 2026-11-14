@@ -1,3 +1,6 @@
+import {createCapturePolicyRouter} from './modules/work-capture/capture-policy-router.mjs';
+import {validateCapturePolicy,captureHoursInput,assertCaptureReplacementPeriods} from './modules/work-capture/capture-policy.mjs';
+import {canonicalHours,sumHours} from './modules/work-capture/work-hours.mjs';
 import {lockWorkPolicy,validateAssignmentPolicy,validateWorkEntries,assertWorkActorScope,assertTimesheetEditable,retainWorkSubmission,retainWorkDecision,assertWorkDecisionAllowed,workPolicyError} from './modules/work-capture/assignment-work-policy.mjs';
 import {assertLegacyProjectMutationAllowed,lockCommercialLifecycle,sendGovernedProjectConflict} from './modules/commercial-drafting/project-mutation.mjs';
 import 'dotenv/config';
@@ -2797,6 +2800,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
         'category', te.category,
         'work_date', te.work_date,
         'hours', te.hours,
+        'hours_exact', te.hours::text,
         'remark', te.remark,
         'status', t.status,
         'billable', te.billable,
@@ -2819,7 +2823,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     client_name: z.string().optional().nullable(),
     category: z.string().optional().nullable(),
     work_date: strictIsoDateSchema,
-    hours: z.number().min(0).max(24),
+    hours: captureHoursInput,
     remark: z.string().optional().nullable(),
     billable: z.boolean().default(true),
   });
@@ -2884,11 +2888,12 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     }
 
     const policyEntries=await validateWorkEntries(client,req,employee.id,parsed.data.entries);
-    parsed.data.entries=policyEntries;
-    const totalHours = round1(parsed.data.entries.reduce((sum, entry) => sum + entry.hours, 0));
-    const billableHours = round1(parsed.data.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + entry.hours, 0));
     const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [req.organizationScope.organizationId, req.organizationScope.legalEntityId, parsed.data.employee_id, parsed.data.week_ending])).rows[0];
     assertTimesheetEditable(previous);
+    await assertCaptureReplacementPeriods(client,req,previous?.id);
+    parsed.data.entries=await validateCapturePolicy(client,req,employee.id,policyEntries,{replacementTimesheetId:previous?.id});
+    const totalHours=sumHours(parsed.data.entries.map(entry=>entry.hours));
+    const billableHours=sumHours(parsed.data.entries.filter(entry=>entry.billable).map(entry=>entry.hours));
     const timesheetResult = await client.query(`
       insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id)
       values ($1,$2,case when $3::text in ('Draft','Submitted') then 'Draft' end,$4,$5,$6, null,$7,$8)
@@ -2923,11 +2928,11 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
         entry.client_name || null,
         entry.category || null,
         entry.work_date,
-        round1(entry.hours),
+        canonicalHours(entry.hours),
         entry.remark || null,
         entry.billable,
       ]);
-      savedEntries.push({...inserted.rows[0],policy:entry.policy});
+      savedEntries.push({...inserted.rows[0],policy:entry.policy,capturePolicyReference:entry.capturePolicyReference});
     }
     let workAssurance=null;
     if(parsed.data.status==='Submitted'){
@@ -2957,7 +2962,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       reason: parsed.data.rejection_reason || null,
     });
     await client.query('commit');
-    res.json({ ...timesheet, work_assurance:workAssurance, entries:parsed.data.entries.map(({policy,...entry})=>entry) });
+    res.json({ ...timesheet, work_assurance:workAssurance, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>entry) });
   } catch (error) {
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;
@@ -6435,6 +6440,7 @@ registerOrganizationSetupRoutes({
   mountPaths: ['/api/organization-setup', '/api/v1/organization-setup'],
 });
 
+app.use('/api/v1/work-capture-policy',createCapturePolicyRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
 app.use('/api/v1/commercial-drafting', createCommercialDraftingRouter({pool,requireDatabase,requireAuth,audit}));
 app.use('/api/v1/client-profiles', createClientProfilesRouter({pool,requireDatabase,requireAuth,audit}));
 

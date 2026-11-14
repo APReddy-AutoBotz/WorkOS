@@ -1,3 +1,7 @@
+import {canonicalHours,sumHours,compareHours} from '../../shared/work-hours.mjs';
+import {hydrateWorkCaptureGrid,parseCaptureHourInput,canonicalCaptureHourInput,captureCalendarDate} from '../services/workCaptureGrid';
+import type {TimesheetEntry} from '../types';
+import {getOrganizationScope,getToken,ApiClientError,resetBackendCheck} from '../services/apiClient';
 import { Fragment, useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -6,7 +10,6 @@ import { NoticeBanner } from '../components/ui/NoticeBanner';
 import { cn } from '../lib/utils';
 import { authService } from '../services/authService';
 import { timesheetService, adminService, projectService, allocationService } from '../services/api';
-import { getToken, getOrganizationScope } from '../services/apiClient';
 import {
   Calendar,
   ChevronLeft,
@@ -38,7 +41,7 @@ const getWeekStart = (date: Date) => {
   return next;
 };
 
-const toIsoDate = (date: Date) => date.toISOString().split('T')[0];
+const toIsoDate = captureCalendarDate;
 
 const getWeekEnding = (weekStart: Date) => {
   const friday = new Date(weekStart);
@@ -78,31 +81,39 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
 
   const [workAssurance, setWorkAssurance] = useState<Assurance | undefined>();
   const [rows, setRows] = useState<any[]>([]);
+  const [hourDrafts,setHourDrafts]=useState<Record<string,string>>({});
+  const hasInvalidHours=rows.some(row=>row.hours.some((_,index)=>{
+    const raw=hourDrafts[`${row.id}:${index}`];return raw!==undefined&&parseCaptureHourInput(raw)===null;
+  }));
+  const [preservedEntries,setPreservedEntries]=useState<TimesheetEntry[]>([]);
+  const [loaded,setLoaded]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const savePending=useRef(false),generation=useRef(0),mounted=useRef(true);
+  const ownsView=()=>mounted.current&&currentOwner()===owner;
+  const [scopeRevision,setScopeRevision]=useState(0);
+  useEffect(()=>{
+    mounted.current=true;
+    const changed=()=>{++generation.current;setLoaded(false);setRows([]);setPreservedEntries([]);setScopeRevision(value=>value+1);};
+    window.addEventListener('workos:organization-scope-switch-requested',changed);
+    window.addEventListener('workos:organization-scope-changed',changed);
+    return()=>{mounted.current=false;++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',changed);window.removeEventListener('workos:organization-scope-changed',changed);};
+  },[]);
   const [assignedProjects, setAssignedProjects] = useState<any[]>([]);
   const [notice, setNotice] = useState<{ type: 'success' | 'warning' | 'danger'; message: string } | null>(null);
 
   const [rejectionNote, setRejectionNote] = useState<string | undefined>(undefined);
-  const mounted = useRef(true);
-  const savingLock = useRef(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const ownsView = () => mounted.current && currentOwner() === owner;
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
 
   useEffect(() => {
     if (!user) return;
-    let active = true;
+    const request=++generation.current;let cancelled=false;
+    setLoaded(false);setRows([]);setPreservedEntries([]);setHourDrafts({});setNotice(null);
     const weekEnding = getWeekEnding(currentWeek);
     Promise.all([
       projectService.getAll(),
       allocationService.getAll(),
       timesheetService.getAll(),
     ]).then(([projects, allocations, timesheets]) => {
-      if (!active || !ownsView()) return;
+      if(cancelled||request!==generation.current||!ownsView())return;
       const assigned = allocations
         .filter(a => {
           const project = projects.find(p => p.id === a.projectId);
@@ -124,31 +135,8 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
       setAssignedProjects(assigned);
       const existing = timesheets.find(t => t.employeeId === user.id && t.weekEnding === weekEnding);
       if (existing) {
-        const rowMap: Record<string, any> = {};
-        existing.entries.forEach(entry => {
-          const key = entry.projectId || entry.clientName || 'other';
-          if (!rowMap[key]) {
-            rowMap[key] = {
-              id: key + Math.random(),
-              workType: entry.workType,
-              projectId: entry.projectId,
-              projectName: entry.projectName,
-              clientName: entry.clientName,
-              category: entry.category,
-              hours: [0, 0, 0, 0, 0],
-              remarks: ['', '', '', '', ''],
-              rowRemark: '',
-              billable: entry.billable
-            };
-          }
-          const date = new Date(entry.date);
-          const dayIdx = (date.getDay() + 6) % 7;
-          if (dayIdx >= 0 && dayIdx < 5) {
-            rowMap[key].hours[dayIdx] = entry.hours;
-            rowMap[key].remarks[dayIdx] = entry.remark || '';
-          }
-        });
-        setRows(Object.values(rowMap));
+        const hydrated=hydrateWorkCaptureGrid(existing.entries,currentWeekKey);
+        setRows(hydrated.rows);setPreservedEntries(hydrated.preservedEntries);
         setStatus(existing.status);
         setWorkAssurance(existing.workAssurance);
         setRejectionNote(existing.rejectionNote || existing.rejectionReason);
@@ -172,26 +160,25 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
         setWorkAssurance(undefined);
         setRejectionNote(undefined);
       }
-      setLoading(false);
-    }).catch(() => {
-      if (!active || !ownsView()) return;
-      setNotice({type:'danger', message:'Timesheet could not be loaded. Reload before editing or submitting.'});
-    });
-    return () => { active = false; };
-  }, [currentUserId, currentWeekKey]);
+      setLoaded(true);
+    }).catch(()=>{if(!cancelled&&request===generation.current&&ownsView())setNotice({type:'danger',message:'Work could not be loaded. Reload before editing.'});});
+    return()=>{cancelled=true;};
+  }, [currentUserId, currentWeekKey,scopeRevision,user?.role]);
 
   const persistTimesheet = async (nextStatus: 'Draft' | 'Submitted') => {
-    if (!user || !ownsView() || loading || savingLock.current) return;
+    if (!user||!ownsView()||!loaded||savePending.current||hasInvalidHours||!['Draft','Rejected'].includes(status)) return;
+    const owner=generation.current,scope=JSON.stringify(getOrganizationScope()),token=getToken();
+    const current=()=>ownsView()&&owner===generation.current&&scope===JSON.stringify(getOrganizationScope())&&token===getToken();
+    savePending.current=true;setSaving(true);
+    try{
     const weekEnding = getWeekEnding(currentWeek);
     if (isFutureWeek) {
       setNotice({ type: 'warning', message: 'Future week timesheets cannot be saved or submitted.' });
       return;
     }
-    savingLock.current = true;
-    setSaving(true);
-    try {
-    const systemSettings = await adminService.getSettings();
-    if (!ownsView()) return;
+    let systemSettings;
+    try{systemSettings=await adminService.getSettings();}catch{if(current())setNotice({type:'danger',message:'Submission settings could not be loaded. No save was sent.'});return;}
+    if(!current())return;
     if (nextStatus === 'Submitted' && user.role === 'Admin' && !systemSettings.demoSubmissionMode) {
       setNotice({ type: 'warning', message: "Self-submission is disabled for Admins." });
       return;
@@ -199,7 +186,8 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
 
     const hasFutureHours = rows.some(row =>
       row.hours.some((h: number, i: number) => {
-        if (h <= 0) return false;
+        const quantity=canonicalCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(h));
+        if (quantity===null||compareHours(quantity,'0')<=0) return false;
         const entryDate = startOfDay(new Date(currentWeek));
         entryDate.setDate(entryDate.getDate() + i);
         return entryDate > today;
@@ -217,7 +205,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
     // Validation: Client Misc Task requires remarks
     const missingRemarks = rows.some(row =>
       row.workType === 'Client Misc Task' &&
-      row.hours.some((h: number, i: number) => h > 0 && !row.remarks[i])
+      row.hours.some((h: number, i: number) => {const quantity=canonicalCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(h));return quantity!==null&&compareHours(quantity,'0')>0&&!row.remarks[i];})
     );
 
     if (nextStatus === 'Submitted' && missingRemarks) {
@@ -229,10 +217,11 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
     }
 
     // Flatten rows to entries
-    const entries: any[] = [];
+    const entries: any[] = preservedEntries.map(entry=>({...entry,hours:entry.hoursExact??entry.hours,status:nextStatus}));
     rows.forEach(row => {
       row.hours.forEach((h: number, i: number) => {
-        if (h > 0) {
+        const quantity=canonicalCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(h));
+        if (quantity!==null&&compareHours(quantity,'0')>0) {
           const d = new Date(currentWeek);
           d.setDate(d.getDate() + i);
           entries.push({
@@ -243,28 +232,30 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
             workType: row.workType,
             clientName: row.clientName,
             category: row.category,
-            date: d.toISOString().split('T')[0],
-            hours: h,
+            date: toIsoDate(d),
+            hours: quantity,
             remark: row.remarks[i],
             status: nextStatus,
-            billable: true,
+            billable: row.billable,
             weekEnding
           });
         }
       });
     });
 
+    if(!current())return;
+    try {
       const assurance = await timesheetService.save({
         employeeId: user.id,
         employeeName: user.name,
         weekEnding,
-        totalHours: entries.reduce((acc, e) => acc + e.hours, 0),
-        billableHours: entries.reduce((acc, e) => acc + e.hours, 0),
+        totalHours: Number(sumHours(entries.map(entry=>entry.hours))),
+        billableHours: Number(sumHours(entries.filter(entry=>entry.billable).map(entry=>entry.hours))),
         status: nextStatus,
         submittedAt: nextStatus === 'Submitted' ? new Date().toISOString() : undefined,
         entries
       });
-      if (!ownsView()) return;
+      if(!current())return;
       setStatus(nextStatus);
       setWorkAssurance(assurance);
       setRejectionNote(undefined);
@@ -273,14 +264,27 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
         message: nextStatus === 'Submitted' ? 'Timesheet submitted for review.' : 'Draft timesheet saved.',
       });
     } catch (error) {
-      if (!ownsView()) return;
+      if(!current())return;
+      const rejected=error instanceof ApiClientError&&[400,422].includes(error.status);
+      if(!rejected)setLoaded(false);
       setNotice({
         type: 'danger',
-        message: error instanceof Error ? error.message : 'Timesheet could not be saved.',
+        message: (error instanceof Error ? error.message : 'Timesheet could not be saved.')+(rejected?'':' Reload work before trying again.'),
       });
+    }
     } finally {
-      savingLock.current = false;
-      if (ownsView()) setSaving(false);
+      savePending.current=false;
+      if (ownsView()) {
+        if (!current()) {
+          // A failed scope attempt can retain this editor. Earlier reads cannot
+          // establish the outcome of the abandoned command after it settles.
+          ++generation.current;
+          setLoaded(false);
+          setWorkAssurance(undefined);
+          setNotice({type:'warning',message:'The work context changed during this operation. Reload work before trying again.'});
+        }
+        setSaving(false);
+      }
     }
   };
 
@@ -305,7 +309,9 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
 
   const updateHours = (rowId: string, dayIdx: number, val: string) => {
     if (status !== 'Draft' && status !== 'Rejected') return;
-    const num = parseFloat(val) || 0;
+    setHourDrafts(previous=>({...previous,[`${rowId}:${dayIdx}`]:val}));
+    const num = parseCaptureHourInput(val);
+    if(num===null)return; // Invalid text stays visible and cannot be saved.
     setRows(rows.map(r => r.id === rowId ? {
       ...r,
       hours: r.hours.map((h: number, i: number) => i === dayIdx ? num : h)
@@ -342,9 +348,9 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
     setRows(rows.filter(r => r.id !== id));
   };
 
-  const totalHours = rows.reduce((acc, r) => acc + r.hours.reduce((a: number, b: number) => a + b, 0), 0);
-  const projectHours = rows.filter(r => r.workType === 'Project Work').reduce((acc, r) => acc + r.hours.reduce((a: number, b: number) => a + b, 0), 0);
-  const miscHours = rows.filter(r => r.workType === 'Client Misc Task').reduce((acc, r) => acc + r.hours.reduce((a: number, b: number) => a + b, 0), 0);
+  const totalHours=Number(sumHours([...preservedEntries.map(entry=>entry.hours),...rows.flatMap(row=>row.hours)]));
+  const projectHours=Number(sumHours([...preservedEntries.filter(entry=>entry.workType==='Project Work').map(entry=>entry.hours),...rows.filter(row=>row.workType==='Project Work').flatMap(row=>row.hours)]));
+  const miscHours=Number(sumHours([...preservedEntries.filter(entry=>entry.workType==='Client Misc Task').map(entry=>entry.hours),...rows.filter(row=>row.workType==='Client Misc Task').flatMap(row=>row.hours)]));
 
   const workTypes: WorkType[] = [
     'Project Work',
@@ -361,7 +367,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
-      {loading ? <p role="status">Loading current timesheet...</p> : <WorkSubmissionAssurance assurance={workAssurance} status={status} />}
+      {loaded ? <WorkSubmissionAssurance assurance={workAssurance} status={status} /> : <p role="status">Loading current timesheet...</p>}
       <PageHeader
         title={user?.role === 'Admin' ? 'Admin Self-Log Test' : 'My Timesheet'}
         subtitle={headerSubtitle}
@@ -370,8 +376,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
           <div className="flex items-center gap-3">
              <div className="flex items-center bg-white border border-border-light rounded-xl p-1 shadow-sm mr-2">
                 <button
-                  aria-label="Previous week"
-                  onClick={() => setCurrentWeek(prev => {
+                  aria-label="Previous week" onClick={() => setCurrentWeek(prev => {
                     const next = new Date(prev);
                     next.setDate(next.getDate() - 7);
                     return next;
@@ -383,7 +388,6 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                    <span className="text-[10px] font-bold uppercase tracking-widest text-heading">{weekLabel}</span>
                 </div>
                  <button
-                  aria-label="Next week"
                   onClick={() => setCurrentWeek(prev => {
                     const next = new Date(prev);
                     next.setDate(next.getDate() + 7);
@@ -396,21 +400,22 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                       ? "text-slate-300 cursor-not-allowed"
                       : "hover:bg-slate-50"
                   )}
-                  title={currentWeek >= currentSystemWeek ? 'Future weeks are locked' : 'Next week'}
+                  aria-label="Next week" title={currentWeek >= currentSystemWeek ? 'Future weeks are locked' : 'Next week'}
                 ><ChevronRight size={16} /></button>
              </div>
+             <button className="btn-secondary px-3 py-2" disabled={saving} onClick={()=>{resetBackendCheck();++generation.current;setLoaded(false);setScopeRevision(value=>value+1);}}>Reload work</button>
              {(status === 'Draft' || status === 'Rejected') ? (
                <>
                  <button
                     onClick={handleSaveDraft}
-                    disabled={isFutureWeek || loading || saving}
+                    disabled={isFutureWeek||!loaded||saving||hasInvalidHours}
                     className="hidden sm:flex btn-secondary py-2.5 px-5 items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Save size={14} /> Save Draft
                  </button>
                  <button
                   onClick={handleSubmit}
-                  disabled={isFutureWeek || loading || saving}
+                  disabled={isFutureWeek||!loaded||saving||hasInvalidHours}
                   className="btn-primary py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Send size={14} /> Submit for Approval
@@ -450,6 +455,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
         </div>
       )}
 
+      <fieldset disabled={saving||!loaded||!['Draft','Rejected'].includes(status)} className="min-w-0">
       <div className="mt-8 bg-white border border-border-light rounded-3xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -544,7 +550,8 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                       <div className="relative">
                         <input
                           type="text"
-                          value={hour === 0 ? '' : hour}
+                          value={hourDrafts[`${row.id}:${i}`]??(row.exactHours?.[i]&&row.exactHours[i]!=='0'?row.exactHours[i]:hour === 0 ? '' : String(hour))}
+                          aria-invalid={parseCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(hour))===null}
                           placeholder="0.0"
                           onChange={(e) => updateHours(row.id, i, e.target.value)}
                           className={cn(
@@ -575,7 +582,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                     />
                   </td>
                   <td className="py-5 px-8 text-right font-mono font-bold text-primary bg-orange-50/10 border-l border-gray-100">
-                    {row.hours.reduce((a, b) => a + b, 0).toFixed(1)}
+                    {sumHours(row.hours)}
                   </td>
                 </tr>
               ))}
@@ -598,12 +605,12 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                 </td>
                 {days.map((_, i) => (
                   <td key={i} className="py-6 px-4 text-center text-heading border-l border-gray-100">
-                    {rows.reduce((acc, r) => acc + r.hours[i], 0).toFixed(1)}
+                    {sumHours(rows.map(row=>row.hours[i]))}
                   </td>
                 ))}
                 <td className="py-6 px-8 border-l border-gray-100 bg-slate-50/50"></td>
                 <td className="py-6 px-8 text-right text-xl text-primary border-l border-gray-100 bg-orange-50/30">
-                  {totalHours.toFixed(1)}
+                  {canonicalHours(totalHours)}
                 </td>
               </tr>
             </tfoot>
@@ -611,6 +618,11 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
         </div>
       </div>
 
+      </fieldset>
+      {hasInvalidHours&&<p role="alert">Correct invalid hours before saving. Use a decimal quantity from 0 to 24; invalid values have not changed the work totals.</p>}
+      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'}</p>)}</section>}
+      {!loaded&&<p role="status">Work is not ready for editing. Reload this page after checking connection and access.</p>}
+      {saving&&<p role="status">Saving work…</p>}
       {/* Remark Input Modal/Overlay */}
       {activeRemark && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
@@ -655,17 +667,17 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                <h4 className="text-sm font-bold tracking-tight">Total Client Hours</h4>
             </div>
             <div className="flex items-end gap-2">
-               <span className="text-3xl font-black text-heading leading-none tabular-nums">{totalHours.toFixed(1)}</span>
+               <span className="text-3xl font-black text-heading leading-none tabular-nums">{canonicalHours(totalHours)}</span>
                <span className="text-xs font-bold text-gray-400 mb-1">HOURS</span>
             </div>
             <div className="mt-4 space-y-2">
                <div className="flex justify-between items-end">
                   <p className="text-xs text-body">Project Hours</p>
-                  <p className="text-xs font-bold text-primary">{projectHours.toFixed(1)}h</p>
+                  <p className="text-xs font-bold text-primary">{canonicalHours(projectHours)}h</p>
                </div>
                <div className="flex justify-between items-end">
                   <p className="text-xs text-body">Client Misc Hours</p>
-                  <p className="text-xs font-bold text-blue-600">{miscHours.toFixed(1)}h</p>
+                  <p className="text-xs font-bold text-blue-600">{canonicalHours(miscHours)}h</p>
                </div>
                <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
                   <div
@@ -682,11 +694,11 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek}: {
                   <AlertCircle size={18} className="text-primary" />
                   <h4 className="text-sm font-bold tracking-tight">System Guidance</h4>
                </div>
-               <Badge variant="neutral" className="border-white/20 bg-white/10 text-white">Policy Ver. 4.0</Badge>
+               <Badge variant="neutral" className="border-white/20 bg-white/10 text-white">Server capture policy</Badge>
             </div>
             <p className="text-xs text-white/50 mt-4 leading-relaxed font-medium">{`
                Log only client/project-related effort. Internal ${productConfig.organizationName} activities should not be submitted here.
-               Remarks are mandatory for Client Misc Tasks and entries without an assigned project.
+               Effective capture increments, all-work daily/Weekly limits and required comments are validated by the server. Client Misc Task remarks remain required by this grid.
                Every timesheet is reviewed directly by your ${productConfig.terminology.regionalOwner} for actual utilization reporting.
             `}</p>
          </div>
