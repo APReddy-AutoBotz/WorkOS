@@ -196,7 +196,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             const row = (await pool.query(`select * from ${t} limit 1`)).rows[0];
             if (row) {
                 const idColumn = t === 'work_approval_reads' ? 'recipient_id' : 'id';
-                await assert.rejects(pool.query(`delete from ${t}where ${idColumn}=$1`, [row[idColumn]]));
+                const retained = await table(pool, t);
+                await assert.rejects(pool.query(`delete from ${t} where ${idColumn}=$1`, [row[idColumn]]), {code: '55000'});
+                assert.deepEqual(await table(pool, t), retained, `${t} must remain unchanged after immutable-history refusal`);
             }
         }
         console.log(JSON.stringify({ firstInstance: v.id, policyId: policy.id, sourceStatus: (await header(v.timesheetId)).status, coreAndAtomicFailureCasesPassed: true }));
