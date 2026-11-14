@@ -28,6 +28,8 @@ import { roundMetric } from '../lib/format';
 import { validateDeactivateManager, validateEmployeeHierarchy } from './orgChart';
 import { DEFAULT_ROLE_PERMISSIONS, PERMISSION_DEFINITIONS, SYSTEM_ROLES, hasPermission } from './permissions';
 
+import {captureOrganizationProfileContext, assertOrganizationProfileContext, type OrganizationProfileContext} from './organizationProfileScope';
+
 import { productConfig } from '../config/productConfig';
 import { displayEntityType } from '../config/terminology';
 const todayIso = () => new Date().toISOString().split('T')[0];
@@ -1696,11 +1698,18 @@ export const integrationService = {
   },
 };
 
+const normalizeOrganizationProfileDate = (value: unknown) => {
+  const text = String(value);
+  // The profile API returns PostgreSQL DATE as text. Retain only unambiguous
+  // legacy UTC-midnight compatibility, never truncate a timezone-shifted date.
+  if (/^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.000)?Z)?$/.test(text)) return text.slice(0, 10);
+  throw new ApiClientError('Organization profile effective date is invalid.', {status: 502});
+};
 const normalizeOrganizationProfile = (row: Record<string, unknown>): OrganizationProfile => ({
   organizationId:String(row.organization_id), code:String(row.organization_code), name:String(row.organization_name),
   legalName:String(row.legal_name), productDisplayName:String(row.product_display_name), supportContact:String(row.support_contact),
   defaultLocale:String(row.default_locale), defaultTimeZone:String(row.default_time_zone), baseCurrency:String(row.base_currency),
-  fiscalYearStart:String(row.fiscal_year_start), defaultWeekStart:Number(row.default_week_start), effectiveFrom:String(row.profile_effective_from),
+  fiscalYearStart:String(row.fiscal_year_start), defaultWeekStart:Number(row.default_week_start), effectiveFrom:normalizeOrganizationProfileDate(row.profile_effective_from),
 });
 const normalizeLegalEntityProfile = (row: Record<string, unknown>): LegalEntityProfile => ({
   id:String(row.id), organizationId:String(row.organization_id), code:String(row.code), legalName:String(row.legal_name),
@@ -1710,12 +1719,34 @@ const normalizeLegalEntityProfile = (row: Record<string, unknown>): LegalEntityP
 });
 
 export const adminService = {
-  getOrganizationProfile: async (): Promise<OrganizationProfile | null> => {
-    if (!(await checkBackend())) return null;
-    return normalizeOrganizationProfile(await api.get<Record<string, unknown>>('/api/organization-setup/profile'));
+  getOrganizationProfile: async (context: OrganizationProfileContext | null = captureOrganizationProfileContext()): Promise<OrganizationProfile> => {
+    const captured = assertOrganizationProfileContext(context);
+    const connected = await checkBackend();
+    assertOrganizationProfileContext(captured);
+    if (!connected) throw new ApiClientError('Organization profile requires the server.', {status: 503});
+    return normalizeOrganizationProfile(await api.getWithScope<Record<string, unknown>>('/api/organization-setup/profile', captured.scope));
   },
-  updateOrganizationProfile: async (profile: OrganizationProfile): Promise<OrganizationProfile> =>
-    normalizeOrganizationProfile(await api.put<Record<string, unknown>>('/api/organization-setup/profile', profile)),
+  updateOrganizationProfile: async (profile: OrganizationProfile, context: OrganizationProfileContext | null = captureOrganizationProfileContext()): Promise<OrganizationProfile> => {
+    const captured = assertOrganizationProfileContext(context);
+    if (profile.organizationId !== captured.scope.organizationId) {
+      throw new ApiClientError('Organization profile does not match the selected scope.', {status: 403});
+    }
+    // Only ordinary metadata is writable. Code and any extra caller fields are
+    // deliberately omitted; organization identity must match the captured scope.
+    const {name, legalName, productDisplayName, supportContact, defaultLocale, defaultTimeZone,
+      baseCurrency, fiscalYearStart, defaultWeekStart, effectiveFrom} = profile;
+    return normalizeOrganizationProfile(await api.putWithScope<Record<string, unknown>>('/api/organization-setup/profile', {
+      organizationId: captured.scope.organizationId, name, legalName, productDisplayName, supportContact,
+      defaultLocale, defaultTimeZone, baseCurrency, fiscalYearStart, defaultWeekStart, effectiveFrom,
+    }, captured.scope));
+  },
+  getOrganizationSetupReadinessForProfile: async (context: OrganizationProfileContext | null = captureOrganizationProfileContext()): Promise<OrganizationSetupReadiness> => {
+    const captured = assertOrganizationProfileContext(context);
+    const connected = await checkBackend();
+    assertOrganizationProfileContext(captured);
+    if (!connected) throw new ApiClientError('Organization readiness requires the server.', {status: 503});
+    return api.getWithScope<OrganizationSetupReadiness>('/api/organization-setup/readiness', captured.scope);
+  },
   getLegalEntities: async (): Promise<LegalEntityProfile[]> => {
     if (!(await checkBackend())) return [];
     return (await api.get<Record<string, unknown>[]>('/api/organization-setup/legal-entities')).map(normalizeLegalEntityProfile);
