@@ -596,3 +596,7 @@ WOS-CORE-003/005, WOS-IAM-003/005/010, WOS-APR-004 and WOS-NFR-SEC-004/012: [leg
 ## Settings persistence feedback
 
 WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-003/UX-005: [settings save outcomes](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md) awaits acknowledged writes for both settings actions, preserves edits after refusal, distinguishes newer edits, suppresses unmounted completion and offers initialization retry. The real React/API/PostgreSQL journey covers delayed/refused/successful responses and current permission loss without weakening server authority.
+
+## Uncertain commercial save recovery
+
+WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-005: [commercial save recovery](../tasks/WOS-06-COMMERCIAL-UNCERTAIN-SAVE.md) keeps the existing uncertainty guard through discard and retained callbacks until successful scoped reload. Actual React/service browser tests cover503, network loss, malformed acknowledgement and409, failed reload, corrected reload and ordinary discard. No automatic write retry or calculation/history change.
