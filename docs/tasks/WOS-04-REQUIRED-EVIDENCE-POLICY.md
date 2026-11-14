@@ -1,8 +1,18 @@
 # PR-008F: Buyer-configurable required evidence URLs
 
-**Status:** Dependent implementation candidate; acceptance plan was recorded before product edits in commit `680088e`. Exact-head engineering receipts remain required. Dependent development only; optional independent/formal code and security reviews are deferred and outstanding.
+**Status:** Integration candidate; fresh local acceptance, independent exact-head review and hosted gates remain required. The original acceptance plan preceded implementation in `680088e`.
 **Authority:** WOS-TIM-005 requires buyer-configurable comment/evidence requirements. WORK_CAPTURE_AND_TIMESHEET_SPEC.md defines buyer-configurable evidence policies and rejection of missing required evidence. PR-008 includes evidence policy. This is selected from those approved sources, not a security/gap review.
-**Dependency:** Unchanged Draft PR59 `c8fcafd6b61c7e9407aaf623a23001ad144b6ef1`, tree `2c261f67740c702e52ad345e82c3599e92de0d18`.
+**Original development dependency:** Unchanged Draft PR59 `c8fcafd6b61c7e9407aaf623a23001ad144b6ef1`, tree `2c261f67740c702e52ad345e82c3599e92de0d18`.
+
+## Current integration checkpoint - 2026-11-15
+
+The owner subsequently authorized reviewed integration and eligible merges without routine approvals. The development-only review deferral below is historical context. Original PR60 `a283b7d9e0fc5ac23536e12f1b914a9a91a78fad` now includes locally verified PR59 candidate `c0a62519f544d752da2678e29eb8da50df4f679b` at `d35f2a220aa46ce81dc38e508a17011c819356a6`. PR59 subsequently passed independent exact-head review and every CI43632315613 step, then merged at `372e209188a147aff2423ad3029a5b1c926b948e`. Every PR59 main CI43633106384 step also passed; PR60 is not accepted.
+
+Package/document conflicts retain all current parent controls and additive required-evidence contracts. Executable comparison confirms every parent script and complete dependency/lockfile content. Fresh locked installation and bootstrap/adversarial scan passed; local integration acceptance is in progress. The real PostgreSQL fresh/048-upgrade/replay suite passed, including neutral history/grants, explicit/inherited policy choices, direct SQL guards, manual/import parity, prospective opt-out, races, periods and immutable correction/decision evidence. Accepted main and documentation ancestry was integrated at `2030fd73337c1fae85af19f922330f009f974938` without runtime changes. New independent exact-head review and hosted checks are required before an eligible merge. No deployment, default evidence requirement or historical policy rewrite is authorized.
+
+## Response-boundary correction and local evidence
+
+The integrated typecheck, lint and full unit/contract aggregate passed. Parent inspection then found that a missing/malformed `evidenceRequired` response could be displayed as optional and explicitly submitted as false by the new editor. A regression test first failed with a missing expected rejection. The service now requires an explicit boolean on every returned policy and append acknowledgement, and verifies that the workspace latest ID matches its first retained version. Unknown configuration rejects with 503/reload guidance rather than becoming an opt-out. Failed acknowledgement validation does not retry the command. Focused negative tests cover missing/null/string/numeric/array/object flags, malformed history and latest mismatch; valid true/false and empty history remain supported. The corrected service suite, typecheck and lint passed; production build passed in 21.06 seconds. The first local browser attempt timed out at initial fixture navigation before feature assertions; downstream suites did not run. The unchanged retry passed all four journeys: required-evidence policy, retained capture policy, work references and ownership timing. This recurring local fixture-startup timing limitation is retained, not converted into a product-performance claim; no timeout or assertion was weakened. Independent exact-head review and hosted acceptance remain outstanding.
 
 ## Ownership and development sequencing
 

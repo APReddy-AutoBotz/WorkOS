@@ -53,4 +53,4 @@ The task/ticket/milestone model exclusion above is addressed only as descriptive
 
 ## Separate PR-008F policy continuation
 
-The mandatory-evidence-policy exclusion above is addressed only as the buyer's optional positive-entry capture-policy choice in separate [PR-008F](WOS-04-REQUIRED-EVIDENCE-POLICY.md), based on unchanged PR59. Existing PR-008D URL storage remains unchanged. No global default mandate, upload, URL lookup, category/group exception or integrated acceptance is introduced.
+The mandatory-evidence-policy exclusion above is addressed only as the buyer's optional positive-entry capture-policy choice in separate [PR-008F](WOS-04-REQUIRED-EVIDENCE-POLICY.md), integrated with accepted PR59. Existing PR-008D URL storage remains unchanged. No global default mandate, upload, URL lookup, category/group exception or integrated acceptance is introduced.
