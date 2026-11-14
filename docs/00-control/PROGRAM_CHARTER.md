@@ -1,6 +1,6 @@
 # WorkOS Commercial Productization Programme Charter
 
-**Document status:** Programme-initiation baseline; product-owner Gate B approved 2026-08-23; clean exact-head review and merge pending  
+**Document status:** Governing programme charter; product-owner Gate B approved 2026-08-23. Historical initiation status is superseded by the [current implementation status](IMPLEMENTATION_STATUS.md), updated 2026-11-14; release and buyer acceptance remain separate gates.  
 **Programme code:** WOS  
 **Product working name:** WorkOS  
 **Repository:** `APReddy-AutoBotz/WorkOS`  

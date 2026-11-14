@@ -33,6 +33,9 @@ await withImportAuditJourney(async ({pool, browserUrl, producerId, reviewerId, p
     }, bootstrap);
     const page = await context.newPage();
     page.setDefaultTimeout(15_000);
+    // A fresh local Vite dependency transform is setup work, not a business
+    // response. Keep interaction assertions short while allowing cold startup.
+    page.setDefaultNavigationTimeout(60_000);
     page.on('pageerror', error => errors.push(error.message));
     page.on('download', () => downloads.push('unexpected download'));
     page.on('request', request => {

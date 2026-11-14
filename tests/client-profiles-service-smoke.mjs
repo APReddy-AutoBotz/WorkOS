@@ -12,7 +12,11 @@ const {clientProfilesService: service, captureClientProfilesContext: capture, is
   assertClientProfilesContext: assertContext, normalizeClientProfilesWorkspace: normalizeWorkspace,
   normalizeClientProfileDetail: normalizeDetail} = await import('../src/services/clientProfiles.ts');
 const {api, ApiClientError, getOrganizationScope, getToken, isDemoFallbackAllowed} = await import('../src/services/apiClient.ts');
-const {getDefaultPermissionsForRole} = await import('../src/services/permissions.ts');
+const {getDefaultPermissionsForRole, PERMISSION_DEFINITIONS, PROTECTED_PERMISSION_KEYS} = await import('../src/services/permissions.ts');
+for(const key of ['commercial.clients.view','commercial.clients.manage']) {
+  assert.equal(PERMISSION_DEFINITIONS.find(item=>item.key===key)?.optIn,true);
+  assert.equal(PROTECTED_PERMISSION_KEYS.has(key),false,'explicit client-profile grants are not restricted to Admin recipients');
+}
 assert.equal(isDemoFallbackAllowed(), false);
 const scope = {organizationId: 'synthetic-org-a', legalEntityId: 'synthetic-legal-a'};
 const otherScope = {organizationId: 'synthetic-org-b', legalEntityId: 'synthetic-legal-b'};
@@ -237,7 +241,7 @@ for (const delta of [{asOf:'2026-02-30'}, {versions:null}, {versions:{}}, {versi
   {versions:[{...profile2,effectiveFrom:'2025-01-01'},profile1]}, {versions:Array(201).fill(profile1)}, {latestProfile:{...profile2,legalName:'not the historical snapshot'}},
   {currentProfile:{...profile1,displayName:'not the historical snapshot'}}, {currentProfile:null}, {currentProfile:profile2}, {billingUnits:null}, {billingUnits:{}},
   {billingUnits:[unit,unit]}, {billingUnits:[unit,{...unit,id:'synthetic-other-unit'}]}, {billingUnits:Array(201).fill(unit)}, {limit:199}, {truncated:undefined}]) assertMalformedDetail({...detail,...delta}, 'malformed detail or version linkage');
-for (const delta of [{id:''}, {clientId:'foreign-client'}, {code:'lowercase'}, {code:'A'.repeat(81)}, {kind:'legal_entity'}, {latestVersion:0}, {latestVersion:3}, {latestVersion:'2'},
+for (const delta of [{id:''}, {clientId:'foreign-client'}, {code:'lowercase'}, {code:'A'.repeat(81)}, {kind:'legal_entity'}, {kind:['billing_entity']}, {kind:['business_unit']}, {kind:[]}, {kind:null}, {kind:{}}, {latestVersion:0}, {latestVersion:3}, {latestVersion:'2'},
   {versions:[]}, {versions:[unitProfile2,unitProfile2]}, {versions:[unitProfile2,{...unitProfile1,id:unitProfile2.id}]}, {versions:[{...unitProfile2,effectiveFrom:unitProfile1.effectiveFrom},unitProfile1]},
   {versions:[{...unitProfile2,effectiveFrom:'2025-01-01'},unitProfile1]}, {versions:Array(201).fill(unitProfile1)}, {currentProfile:null}, {currentProfile:unitProfile2},
   {currentProfile:{...unitProfile1,displayName:'forged-current-unit'}}, {currentProfile:undefined}]) assertMalformedDetail({...detail,billingUnits:[{...unit,...delta}]}, 'malformed billing unit or ownership/current linkage');
