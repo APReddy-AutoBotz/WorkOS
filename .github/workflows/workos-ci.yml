@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor]
   push:
     branches: [main]
   workflow_dispatch:
@@ -105,6 +105,7 @@ jobs:
           npm run test:actual-utilization-browser
           npm run test:forecast-utilization-browser
           npm run test:organization-profile-browser
+          npm run test:terminology-configuration-browser
 
       - name: Verify real import-to-audit browser and PostgreSQL journey
         env:

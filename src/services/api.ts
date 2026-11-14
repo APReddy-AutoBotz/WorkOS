@@ -28,7 +28,8 @@ import { roundMetric } from '../lib/format';
 import { validateDeactivateManager, validateEmployeeHierarchy } from './orgChart';
 import { DEFAULT_ROLE_PERMISSIONS, PERMISSION_DEFINITIONS, SYSTEM_ROLES, hasPermission } from './permissions';
 
-import {captureOrganizationProfileContext, assertOrganizationProfileContext, type OrganizationProfileContext} from './organizationProfileScope';
+import {normalizeTerminologyConfiguration, rememberTerminologySave, TERMINOLOGY_KEYS, type TerminologyConfiguration} from './terminologyConfiguration';
+import {captureOrganizationProfileContext, assertOrganizationProfileContext, isOrganizationProfileContextCurrent, type OrganizationProfileContext} from './organizationProfileScope';
 
 import { productConfig } from '../config/productConfig';
 import { displayEntityType } from '../config/terminology';
@@ -1719,6 +1720,26 @@ const normalizeLegalEntityProfile = (row: Record<string, unknown>): LegalEntityP
 });
 
 export const adminService = {
+  getTerminologyConfiguration: async (context: OrganizationProfileContext | null = captureOrganizationProfileContext()): Promise<TerminologyConfiguration> => {
+    const captured = assertOrganizationProfileContext(context);
+    const connected = await checkBackend();
+    assertOrganizationProfileContext(captured);
+    if (!connected) throw new ApiClientError('Terminology configuration requires the server.', {status: 503});
+    return normalizeTerminologyConfiguration(await api.getWithScope<Record<string, unknown>>('/api/organization-setup/terminology', captured.scope));
+  },
+  saveTerminologyConfiguration: async (configuration: TerminologyConfiguration, context: OrganizationProfileContext | null = captureOrganizationProfileContext()): Promise<TerminologyConfiguration> => {
+    const captured = assertOrganizationProfileContext(context);
+    const terms = Object.fromEntries(TERMINOLOGY_KEYS.map(key => {
+      const {singular, plural, helpText} = configuration.terms[key];
+      return [key, {singular, plural, helpText}];
+    }));
+    const saved = normalizeTerminologyConfiguration(await api.postTerminologyWithScope<Record<string, unknown>>({terms, effectiveFrom: configuration.effectiveFrom}, captured.scope));
+    if (isOrganizationProfileContextCurrent(captured)) {
+      rememberTerminologySave(captured, saved);
+      window.dispatchEvent(new Event('workos:organization-scope-changed'));
+    }
+    return saved;
+  },
   getOrganizationProfile: async (context: OrganizationProfileContext | null = captureOrganizationProfileContext()): Promise<OrganizationProfile> => {
     const captured = assertOrganizationProfileContext(context);
     const connected = await checkBackend();
