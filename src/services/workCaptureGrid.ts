@@ -31,11 +31,11 @@ export const hydrateWorkCaptureGrid = (entries: TimesheetEntry[], startsOn: stri
     if (!Number.isInteger(day) || day < 0 || day >= dayCount || compareHours(quantity,'0') <= 0) {
       preservedEntries.push({...entry}); continue;
     }
-    const hours = Array(dayCount).fill(0), exactHours=Array(dayCount).fill('0'), remarks = Array(dayCount).fill(''), evidenceUrls = Array(dayCount).fill(null), workReferences=Array(dayCount).fill(null);
-    hours[day] = Number(quantity);exactHours[day]=quantity; remarks[day] = entry.remark || '';evidenceUrls[day]=entry.evidenceUrl??null;workReferences[day]=entry.workReference??null;
+    const hours = Array(dayCount).fill(0), exactHours=Array(dayCount).fill('0'), remarks = Array(dayCount).fill(''), evidenceUrls = Array(dayCount).fill(null), workReferences=Array(dayCount).fill(null),sourceIdentities=Array(dayCount).fill(null),sourceIdentityRecorded=Array(dayCount).fill(false);
+    hours[day] = Number(quantity);exactHours[day]=quantity; remarks[day] = entry.remark || '';evidenceUrls[day]=entry.evidenceUrl??null;workReferences[day]=entry.workReference??null;sourceIdentities[day]=entry.sourceIdentity??null;sourceIdentityRecorded[day]=Boolean(entry.sourceIdentity);
     rows.push({id: `retained-${entry.id}`, workType: entry.workType, projectId: entry.projectId,
       projectName: entry.projectName, clientName: entry.clientName, category: entry.category,
-      hours, exactHours, remarks, evidenceUrls, workReferences, rowRemark: '', billable: entry.billable});
+      hours, exactHours, remarks, evidenceUrls, workReferences, sourceIdentities,sourceIdentityRecorded,rowRemark: '', billable: entry.billable});
   }
   return {rows, preservedEntries};
 };
@@ -57,9 +57,11 @@ export const setCaptureRowHours=(row:any,index:number,value:string)=>{
 };
 export const captureCellPresent=(row:any,index:number,drafts:Record<string,string>)=>{
   const raw=drafts[`${row.id}:${index}`];
-  return (raw!==undefined&&raw!=='')||compareHours(captureCellHours(row,index,drafts),'0')>0||Boolean(row.remarks[index])||Boolean(row.evidenceUrls?.[index])||Boolean(row.workReferences?.[index]);
+  return (raw!==undefined&&raw!=='')||compareHours(captureCellHours(row,index,drafts),'0')>0||Boolean(row.remarks[index])||Boolean(row.evidenceUrls?.[index])||Boolean(row.workReferences?.[index])||Boolean(row.sourceIdentities?.[index]);
 };
 const clearCells=(row:any,indices:number[])=>({...row,
+  sourceIdentities:row.hours.map((_:number,index:number)=>indices.includes(index)?null:row.sourceIdentities?.[index]??null),
+  sourceIdentityRecorded:row.hours.map((_:number,index:number)=>indices.includes(index)?false:row.sourceIdentityRecorded?.[index]??false),
   hours:row.hours.map((value:number,index:number)=>indices.includes(index)?0:value),
   exactHours:row.hours.map((value:number,index:number)=>indices.includes(index)?'0':row.exactHours?.[index]??String(value)),
   remarks:row.remarks.map((value:string,index:number)=>indices.includes(index)?'':value),

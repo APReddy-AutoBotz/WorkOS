@@ -89,8 +89,8 @@ await withCommercialDatabase(async({pool})=>{
       await createEngagement(client,req,amendmentEngagementInput('SYN-AMENDMENT-UPGRADE-E',contract),async()=>{});await client.query('commit');
     }catch(error){await client.query('rollback');throw error;}finally{client.release();}
     const preserved=await amendmentSnapshot(pool);const projects=await amendmentSnapshot(pool,['projects']);
-    for(const row of preserved.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;} // additive 047/048 column; existing fields remain exact
-    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration043,'044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline']);assert.equal(upgraded.status.isCurrent,true);
+    for(const row of preserved.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;row.value.source_identity=null;} // additive 047/048 column; existing fields remain exact
+    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration043,'044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity']);assert.equal(upgraded.status.isCurrent,true);
     await defaults(pool);assert.deepEqual(await amendmentSnapshot(pool),preserved);assert.deepEqual(await amendmentSnapshot(pool,['projects']),projects);
     const replay=await migrateCommercialDatabase(pool);assert.deepEqual(replay.applied,[]);assert.deepEqual(await amendmentSnapshot(pool),preserved);
   });

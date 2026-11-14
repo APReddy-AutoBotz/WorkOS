@@ -1,3 +1,5 @@
+import {resolveWorkSourceIdentityAliases} from '../../../shared/work-source-identity.mjs';
+import {workSourceIdentityInput,validateWorkSourceReplacement} from '../work-capture/work-source-identity.mjs';
 import {readSubmissionTiming,assertSubmissionTiming} from '../work-capture/submission-deadline.mjs';
 import {prospectiveImportOvertimeWarnings} from '../work-capture/overtime-policy.mjs';
 import {checkDuplicateEntries,readDuplicateEntryCheck} from '../work-capture/duplicate-entry-check.mjs';
@@ -29,6 +31,7 @@ const responseFromBatch = (row, versioned) => ({
   validRows: row.valid_rows,
   errorRows: row.error_rows,
   errors: Array.isArray(row.errors) ? row.errors : [],
+  ...(row.source_identity_check?{sourceIdentityCheck:row.source_identity_check}:{}),
   ...(Array.isArray(row.submission_timing)?{submissionTiming:row.submission_timing}:{}),
   ...(Array.isArray(row.capture_warnings)?{captureWarnings:row.capture_warnings}:{}),
   log: versioned ? row : legacyImportLog(row),
@@ -229,6 +232,7 @@ export const createOperationalImportRouter = ({
     remark: z.string().optional(),
     evidenceUrl: evidenceUrlInput,
     workReference: workReferenceInput,
+    sourceIdentity:workSourceIdentityInput,sourceNamespace:z.string().optional(),externalWorklogId:z.string().optional(),
     billable: z.union([z.boolean(), z.string()]).optional(),
     status: versioned ? optionalImportEnum(['Draft', 'Submitted', 'Approved', 'Rejected']) : z.enum(['Draft', 'Submitted', 'Approved', 'Rejected']).optional(),
     rejectionReason: z.string().optional(),
@@ -495,7 +499,8 @@ export const createOperationalImportRouter = ({
       for (const [index, row] of parsed.data.rows.entries()) {
         const rowNumber = rowNumbers[index];
         if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
-        const rowErrors = [];
+        const rowErrors = [];let sourceIdentity;
+        try{sourceIdentity=resolveWorkSourceIdentityAliases(row);}catch(error){rowErrors.push({rowNumber,field:'sourceIdentity',message:error.message,code:'WORK_SOURCE_IDENTITY_INVALID'});}
         if (((row.status || 'Submitted') === 'Submitted' && isAfterToday(row.weekEnding)) || isAfterToday(row.date)) rowErrors.push({rowNumber, field: 'date', message: 'Future work dates cannot be imported; Submitted headers must also end no later than today.'});
         if (!isWorkDateInsideWeek(row.date, row.weekEnding)) {
           rowErrors.push({rowNumber, field: 'date', message: `Entry work date ${row.date} must fall within the seven-day period ending ${row.weekEnding}.`});
@@ -556,7 +561,7 @@ export const createOperationalImportRouter = ({
           errors.push({rowNumber, field: 'status', message: 'Rows for the same employee/week must use the same timesheet status.'});
           continue;
         }
-        group.entries.push({
+        group.entries.push({sourceIdentity,
           rowNumber,
           projectId: project?.id || null,
           workType: row.workType,
@@ -573,9 +578,9 @@ export const createOperationalImportRouter = ({
         validEntryRows += 1;
       }
 
-      const overtimeGroups=[],deadlineGroups=[];
+      const overtimeGroups=[],deadlineGroups=[],stagedSourceKeys=new Set();
       for (const group of groups.values()) {
-        let policyEntries,submissionTiming;
+        let policyEntries,submissionTiming,sourceKeys;
         let previous,previousEvidence,previousDuplicateCheck;
         try {
           if(group.entries.length>100)throw new WorkPolicyError('WORK_ENTRY_LIMIT','A work period may contain at most 100 entries.');
@@ -585,12 +590,13 @@ export const createOperationalImportRouter = ({
           previousEvidence=await readWorkEvidenceAudit(client,previous?.id);
           previousDuplicateCheck=await readDuplicateEntryCheck(client,previous?.id);
           await assertCaptureReplacementPeriods(client,req,previous?.id);
-          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,remark:entry.remark,evidence_url:entry.evidenceUrl,work_reference:entry.workReference,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
+          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,remark:entry.remark,evidence_url:entry.evidenceUrl,work_reference:entry.workReference,source_identity:entry.sourceIdentity,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
           policyEntries=await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries);
           policyEntries=await validateCapturePolicy(client,req,group.employee.id,policyEntries,{replacementTimesheetId:previous?.id,stagedReplacements:dryRun?stagedCaptureReplacements:[]});
+          sourceKeys=await validateWorkSourceReplacement(client,req,group.employee.id,group.weekEnding,policyEntries,previous?.id||null,stagedSourceKeys);
           submissionTiming=await readSubmissionTiming(client,req,[group.weekEnding,...policyEntries.map(entry=>entry.work_date)]);
           if(group.status==='Submitted')assertSubmissionTiming(submissionTiming);
-          group.entries=group.entries.map((entry,index)=>({...entry,hours:policyEntries[index].hours,billable:policyEntries[index].billable,evidenceUrl:policyEntries[index].evidence_url,workReference:policyEntries[index].work_reference}));
+          group.entries=group.entries.map((entry,index)=>({...entry,hours:policyEntries[index].hours,billable:policyEntries[index].billable,evidenceUrl:policyEntries[index].evidence_url,workReference:policyEntries[index].work_reference,sourceIdentity:policyEntries[index].source_identity}));
           await assertReportingPeriodAllows(client, {
             organizationId: scope.organizationId,
             legalEntityId: scope.legalEntityId,
@@ -599,10 +605,11 @@ export const createOperationalImportRouter = ({
           });
         } catch (error) {
           if (!(error instanceof ReportingPeriodError)&&!(error instanceof WorkPolicyError)&&!['WDL01','WDL02'].includes(error?.code)) throw error;
-          errors.push(...group.entries.map(entry => ({rowNumber: entry.rowNumber, field: 'date', message: error.message, code:error.code==='WDL01'?'WORK_SUBMISSION_DEADLINE_BLOCKED':error.code==='WDL02'?'WORK_SUBMISSION_DEADLINE_AUTHORITY':error.code})));
+          errors.push(...group.entries.map(entry => ({rowNumber: entry.rowNumber, field:error.code?.startsWith('WORK_SOURCE_')?'sourceIdentity':'date',message:error.message,code:error.code==='WDL01'?'WORK_SUBMISSION_DEADLINE_BLOCKED':error.code==='WDL02'?'WORK_SUBMISSION_DEADLINE_AUTHORITY':error.code})));
           validEntryRows -= group.entries.length;
           continue;
         }
+        sourceKeys.forEach(key=>stagedSourceKeys.add(key));
         if(submissionTiming?.length)deadlineGroups.push({employeeId:group.employee.id,weekEnding:group.weekEnding,checks:submissionTiming});
         const overtimeGroup={employeeId:group.employee.id,weekEnding:group.weekEnding,timesheetId:previous?.id||null,entries:policyEntries};overtimeGroups.push(overtimeGroup);
         if (dryRun) {
@@ -630,9 +637,9 @@ export const createOperationalImportRouter = ({
         const savedEntries=[];
         for (const [index,entry] of group.entries.entries()) {
           const inserted=await client.query(`
-            insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference)
-            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *,work_date::text
-          `, [timesheet.id, entry.projectId, entry.workType, entry.clientName, entry.category, entry.workDate, entry.hours, entry.remark, entry.billable, entry.evidenceUrl, entry.workReference]);
+            insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference, source_identity)
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) returning *,work_date::text
+          `, [timesheet.id, entry.projectId, entry.workType, entry.clientName, entry.category, entry.workDate, entry.hours, entry.remark, entry.billable, entry.evidenceUrl, entry.workReference,entry.sourceIdentity?JSON.stringify(entry.sourceIdentity):null]);
           savedEntries.push({...inserted.rows[0],policy:policyEntries[index].policy,capturePolicyReference:policyEntries[index].capturePolicyReference});
         }
         if(group.status==='Submitted'){
@@ -647,7 +654,7 @@ export const createOperationalImportRouter = ({
           entityType: 'Timesheet',
           entityId: String(timesheet.id),
           oldValue: previous?{...previous,entryEvidence:previousEvidence,duplicateEntryCheck:previousDuplicateCheck}:null,
-          newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference})),duplicateEntryCheck:checkDuplicateEntries(savedEntries)},
+          newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference,source_identity:entry.source_identity})),duplicateEntryCheck:checkDuplicateEntries(savedEntries)},
           details: `${previous ? 'Updated' : 'Created'} ${group.status} timesheet for ${group.employee.employee_id}, week ending ${group.weekEnding} from ${parsed.data.fileName}`,
           reason: group.rejectionReason,
           source: 'Timesheet Import CSV',
@@ -671,12 +678,12 @@ export const createOperationalImportRouter = ({
         channel, source: 'Timesheet Import CSV',
       });
       const logResult = await client.query(`
-        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run, capture_warnings, submission_timing)
-        values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb)
+        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run, capture_warnings, submission_timing, source_identity_check)
+        values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb)
         returning *
       `, [importBatchId, parsed.data.fileName, status, totalRows, validEntryRows, errors.length,
         errors.length ? JSON.stringify(responseErrors) : null, req.user.username, scope.organizationId,
-        scope.legalEntityId, versioned ? parsed.data.schemaVersion : null, dryRun, JSON.stringify(captureWarnings),JSON.stringify(deadlineGroups)]);
+        scope.legalEntityId, versioned ? parsed.data.schemaVersion : null, dryRun, JSON.stringify(captureWarnings),JSON.stringify(deadlineGroups),JSON.stringify({version:'work-source/1',mode:dryRun?'preview':'apply',linkedEntries:stagedSourceKeys.size})]);
       if (versioned) await persistIdempotency({client, scope, context: idempotency, channel, requestHash});
       await client.query('commit');
       transactionOpen = false;
@@ -686,6 +693,7 @@ export const createOperationalImportRouter = ({
         try { await client.query('rollback'); } catch { /* Preserve the original failure. */ }
       }
       if (sendReportingPeriodError(res, error)) return;
+      if(['WSI01','WSI02'].includes(error?.code)){res.status(409).json({error:'Source identity conflict at commit. No work in this command was applied.',code:error.code==='WSI01'?'WORK_SOURCE_IDENTITY_CONFLICT':'WORK_SOURCE_IDENTITY_IMMUTABLE'});return;}
       if(['WDL01','WDL02'].includes(error?.code)){res.status(error.code==='WDL01'?422:409).json({error:'Submission timing changed before commit. No work in this command was applied; revalidate before retrying.',code:error.code==='WDL01'?'WORK_SUBMISSION_DEADLINE_BLOCKED':'WORK_SUBMISSION_DEADLINE_AUTHORITY'});return;}
       logError(error);
       if (versioned) res.status(500).json({error: {code: 'TIMESHEET_IMPORT_FAILED', message: 'The timesheet import could not be completed.'}});

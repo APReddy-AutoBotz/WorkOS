@@ -1,3 +1,4 @@
+import {workSourceIdentityKey} from '../../../shared/work-source-identity.mjs';
 import {readSubmissionTiming,assertSubmissionTiming} from './submission-deadline.mjs';
 import {checkDuplicateEntries,duplicateCheckSummary} from './duplicate-entry-check.mjs';
 import {randomUUID} from 'node:crypto';
@@ -15,6 +16,7 @@ const shift=(value,days)=>{const d=new Date(`${value}T00:00:00Z`);d.setUTCDate(d
 export const workPolicyError=(res,error)=>{
   if(error?.code==='WDL01'){res.status(422).json({error:'The configured submission deadline and grace period have elapsed. Save a Draft or follow the authorized policy process.',code:'WORK_SUBMISSION_DEADLINE_BLOCKED'});return true;}
   if(error?.code==='WDL02'){res.status(409).json({error:'Submission timing requires unambiguous Weekly period authority.',code:'WORK_SUBMISSION_DEADLINE_AUTHORITY'});return true;}
+  if(['WSI01','WSI02'].includes(error?.code)){res.status(409).json({error:'Source-linked work is already captured or its content differs. This create/conflict command cannot change, clear or rebind it.',code:error.code==='WSI01'?'WORK_SOURCE_IDENTITY_CONFLICT':'WORK_SOURCE_IDENTITY_IMMUTABLE'});return true;}
   if(error?.code==='WWP01'){res.status(409).json({error:'Retained submitted work cannot be rewritten.',code:'WORK_HISTORY_IMMUTABLE'});return true;}
   if(error?.code==='WOT01'){res.status(422).json({error:'Recorded work exceeds a buyer-selected overtime threshold configured to block capture.',code:'WORK_CAPTURE_OVERTIME_BLOCKED'});return true;}
   if(error?.code==='WCR06'){res.status(422).json({error:'An evidence URL is required for each positive work entry on this work date.',code:'WORK_CAPTURE_EVIDENCE_REQUIRED'});return true;}
@@ -152,7 +154,7 @@ export const retainWorkSubmission=async(client,req,timesheet,entries,source)=>{
   const submissionTiming=await readSubmissionTiming(client,req,[timesheet.week_ending,...entries.map(entry=>entry.work_date)]);assertSubmissionTiming(submissionTiming);
   const duplicateEntryCheck=checkDuplicateEntries(entries);
   const evidence=entries.map(entry=>({entryId:entry.id,projectId:entry.project_id||null,workType:entry.work_type,workDate:date(entry.work_date),hours:String(entry.hours),billable:entry.billable,
-    clientName:entry.client_name||null,category:entry.category||null,remark:entry.remark||null,evidenceUrl:entry.evidence_url||null,workReference:entry.work_reference||null,kind:entry.policy.kind,bindingId:entry.policy.bindingId||null,assignmentIds:entry.policy.assignmentIds||[],assignmentSnapshots:entry.policy.assignmentSnapshots||[],references:entry.policy.references}));
+    clientName:entry.client_name||null,category:entry.category||null,remark:entry.remark||null,evidenceUrl:entry.evidence_url||null,workReference:entry.work_reference||null,sourceIdentity:entry.source_identity||null,kind:entry.policy.kind,bindingId:entry.policy.bindingId||null,assignmentIds:entry.policy.assignmentIds||[],assignmentSnapshots:entry.policy.assignmentSnapshots||[],references:entry.policy.references}));
   await client.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id,capture_policy_references,duplicate_entry_check,submission_timing)
     values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16::jsonb)`,[id,...scope(req),timesheet.id,sequence,WORK_POLICY_VERSION,JSON.stringify(evidence),JSON.stringify(periodReferences),req.user.sub,req.user.activeRole,source,req.correlationId,req.operationId,JSON.stringify(entries.map(entry=>({entryId:entry.id,reference:entry.capturePolicyReference||null}))),duplicateEntryCheck===null?null:JSON.stringify(duplicateEntryCheck),JSON.stringify(submissionTiming)]);
   return {id,sequence,policyVersion:WORK_POLICY_VERSION,entryCount:evidence.length,governedEntryCount:evidence.filter(x=>x.kind==='governed').length,duplicateCheck:duplicateCheckSummary(duplicateEntryCheck),submissionTiming};
@@ -169,8 +171,8 @@ export const assertWorkDecisionAllowed=async(client,req,timesheet)=>{
   // Do not narrow delegation to the work-entry editor's reporting hierarchy.
   const retained=(await client.query('select entries from work_submission_evidence where organization_id=$1 and legal_entity_id=$2 and timesheet_id=$3 order by sequence desc limit 1',[...scope(req),timesheet.id])).rows[0];
   if(retained){
-    const expected=entries.map(x=>({entryId:x.id,projectId:x.project_id||null,workType:x.work_type,workDate:x.work_date,hours:String(x.hours),billable:x.billable,clientName:x.client_name||null,category:x.category||null,remark:x.remark||null,evidenceUrl:x.evidence_url||null,workReference:x.work_reference||null}));
-    if(retained.entries.length!==expected.length||expected.some(x=>!retained.entries.some(y=>Object.entries(x).every(([key,value])=>(['evidenceUrl','workReference'].includes(key)?(y[key]??null):y[key])===value))))fail('WORK_SUBMISSION_CHANGED','Submitted work no longer matches its retained evidence.',409);
+    const expected=entries.map(x=>({entryId:x.id,projectId:x.project_id||null,workType:x.work_type,workDate:x.work_date,hours:String(x.hours),billable:x.billable,clientName:x.client_name||null,category:x.category||null,remark:x.remark||null,evidenceUrl:x.evidence_url||null,workReference:x.work_reference||null,sourceIdentity:x.source_identity||null}));
+    if(retained.entries.length!==expected.length||expected.some(x=>!retained.entries.some(y=>Object.entries(x).every(([key,value])=>key==='sourceIdentity'?workSourceIdentityKey(y[key])===workSourceIdentityKey(value):(['evidenceUrl','workReference'].includes(key)?(y[key]??null):y[key])===value))))fail('WORK_SUBMISSION_CHANGED','Submitted work no longer matches its retained evidence.',409);
   }
 };
 

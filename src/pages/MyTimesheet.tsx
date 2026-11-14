@@ -1,3 +1,5 @@
+import {WorkSourceIdentity} from '../components/WorkSourceIdentity';
+import {normalizeWorkSourceIdentity,workSourceIdentityIsValid} from '../../shared/work-source-identity.mjs';
 import {SubmissionDeadlinePreview} from '../components/SubmissionTiming';
 import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
 import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
@@ -93,6 +95,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   const hasInvalidHours=rows.some(row=>row.hours.some((_,index)=>{
     const raw=hourDrafts[`${row.id}:${index}`];return raw!==undefined&&parseCaptureHourInput(raw)===null;
   }));
+  const hasInvalidSource=rows.some(row=>row.sourceIdentities?.some(value=>!workSourceIdentityIsValid(value)));
   const hasInvalidReference=rows.some(row=>row.workReferences?.some(value=>!workReferenceIsValid(value)));
   const hasInvalidEvidence=rows.some(row=>row.evidenceUrls?.some(value=>!evidenceUrlIsValid(value)));
   const [preservedEntries,setPreservedEntries]=useState<TimesheetEntry[]>([]);
@@ -157,7 +160,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   },[currentUserId,currentWeekKey,scopeRevision,user?.role]);
   const editable=()=>ownsView()&&loaded&&!saving&&!savePending.current&&['Draft','Rejected'].includes(status)&&Boolean(mode&&loadedOwner&&isWorkCaptureContextCurrent(loadedOwner));
   const patchRow=(rowId:string,patch:Record<string,unknown>)=>{
-    if(!editable())return;const next=patchVisibleCaptureRow(rows,hourDrafts,rowId,visibleIndices,patch,crypto.randomUUID());setRows(next.rows);setHourDrafts(next.drafts);
+    if(!editable()||visibleIndices.some(index=>rows.find(row=>row.id===rowId)?.sourceIdentityRecorded?.[index]))return;const next=patchVisibleCaptureRow(rows,hourDrafts,rowId,visibleIndices,patch,crypto.randomUUID());setRows(next.rows);setHourDrafts(next.drafts);
   };
 
   const changeWeek=(days:number)=>{
@@ -169,7 +172,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   };
 
   const persistTimesheet = async (nextStatus: 'Draft' | 'Submitted') => {
-    if (!user||!editable()||hasInvalidHours||hasInvalidEvidence||hasInvalidReference||!mode||!loadedOwner) return;
+    if (!user||!editable()||hasInvalidHours||hasInvalidEvidence||hasInvalidReference||hasInvalidSource||!mode||!loadedOwner) return;
     const owner=generation.current,context=loadedOwner;
     const current=()=>ownsView()&&owner===generation.current&&isWorkCaptureContextCurrent(context);
     savePending.current=true;setSaving(true);setActiveRemark(null);
@@ -211,7 +214,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
     rows.forEach(row => {
       row.hours.forEach((h: number, i: number) => {
         const quantity=canonicalCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(h));
-        if (quantity!==null&&(compareHours(quantity,'0')>0||Boolean(row.evidenceUrls?.[i])||Boolean(row.workReferences?.[i]))) {
+        if (quantity!==null&&(compareHours(quantity,'0')>0||Boolean(row.evidenceUrls?.[i])||Boolean(row.workReferences?.[i])||Boolean(row.sourceIdentities?.[i]))) {
           const d = shiftDate(currentWeek,i-2);
           entries.push({
             id: Math.random().toString(),
@@ -226,6 +229,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
             remark: row.remarks[i],
             evidenceUrl: normalizeEvidenceUrl(row.evidenceUrls?.[i]??null),
             workReference: normalizeWorkReference(row.workReferences?.[i]??null),
+            sourceIdentity:normalizeWorkSourceIdentity(row.sourceIdentities?.[i]??null),
             status: nextStatus,
             billable: row.billable,
             weekEnding
@@ -240,6 +244,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
         {writeToken,mode,modePolicyId:modes?.latestId||null},context);
       if(!current())return;
       setWriteToken(saved.writeToken);setStatus(nextStatus);setWorkAssurance(saved.workAssurance);setDuplicateEntryCheck(saved.duplicateEntryCheck);setHistoryHeader(saved.timesheetId);setCaptureWarnings(saved.captureWarnings);
+      setRows(currentRows=>currentRows.map(row=>({...row,sourceIdentityRecorded:row.hours.map((_:number,index:number)=>Boolean(row.sourceIdentities?.[index]))})));
       setRejectionNote(undefined);
       setNotice({
         type: 'success',
@@ -247,7 +252,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
       });
     } catch (error) {
       if(!current())return;
-      const rejected=error instanceof ApiClientError&&[400,422].includes(error.status);
+      const rejected=error instanceof ApiClientError&&([400,422].includes(error.status)||(error.status===409&&error.code?.startsWith('WORK_SOURCE_')));
       if(!rejected)setLoaded(false);
       setNotice({
         type: 'danger',
@@ -280,24 +285,28 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   const hiddenCells=rows.flatMap(row=>row.hours.map((_:number,index:number)=>({row,index})).filter(({index})=>!visibleIndices.includes(index)&&captureCellPresent(row,index,hourDrafts)));
 
   const updateHours = (rowId: string, dayIdx: number, val: string) => {
-    if (!editable()) return;
+    if (!editable()||rows.find(row=>row.id===rowId)?.sourceIdentityRecorded?.[dayIdx]) return;
     setHourDrafts(previous=>({...previous,[`${rowId}:${dayIdx}`]:val}));
     const num = parseCaptureHourInput(val);
     if(num===null)return; // Invalid text stays visible and cannot be saved.
     setRows(rows.map(row=>row.id===rowId?setCaptureRowHours(row,dayIdx,val):row));
   };
 
+  const updateSource=(rowId:string,dayIdx:number,field:'namespace'|'externalId',value:string)=>{
+    if(!editable()||rows.find(row=>row.id===rowId)?.sourceIdentityRecorded?.[dayIdx])return;
+    setRows(rows.map(row=>{if(row.id!==rowId)return row;const next={namespace:row.sourceIdentities?.[dayIdx]?.namespace??'',externalId:row.sourceIdentities?.[dayIdx]?.externalId??'',[field]:value};return {...row,sourceIdentities:row.hours.map((_:number,index:number)=>index===dayIdx?(!next.namespace&&!next.externalId?null:next):row.sourceIdentities?.[index]??null)};}));
+  };
   const updateReference=(rowId:string,dayIdx:number,value:string)=>{
-    if(!editable())return;
+    if(!editable()||rows.find(row=>row.id===rowId)?.sourceIdentityRecorded?.[dayIdx])return;
     setRows(rows.map(row=>row.id===rowId?{...row,workReferences:row.hours.map((_:number,index:number)=>index===dayIdx?value:row.workReferences?.[index]??null)}:row));
   };
   const updateEvidence = (rowId:string,dayIdx:number,value:string)=>{
-    if(!editable())return;
+    if(!editable()||rows.find(row=>row.id===rowId)?.sourceIdentityRecorded?.[dayIdx])return;
     setRows(rows.map(row=>row.id===rowId?{...row,evidenceUrls:row.hours.map((_:number,index:number)=>index===dayIdx?value:row.evidenceUrls?.[index]??null)}:row));
   };
 
   const updateRemark = (rowId: string, dayIdx: number, val: string) => {
-    if (!editable()) return;
+    if (!editable()||rows.find(row=>row.id===rowId)?.sourceIdentityRecorded?.[dayIdx]) return;
     setRows(rows.map(r => r.id === rowId ? {
       ...r,
       remarks: r.remarks.map((rm: string, i: number) => i === dayIdx ? val : rm)
@@ -322,7 +331,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   };
 
   const removeRow = (id: string) => {
-    if (!editable()) return;
+    if (!editable()||visibleIndices.some(index=>rows.find(row=>row.id===id)?.sourceIdentityRecorded?.[index])) return;
     const next=removeVisibleCaptureRow(rows,hourDrafts,id,visibleIndices);setRows(next.rows);setHourDrafts(next.drafts);
   };
 
@@ -382,14 +391,14 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                <>
                  <button
                     onClick={handleSaveDraft}
-                    disabled={isFutureWeek||!editable()||hasInvalidHours||hasInvalidEvidence||hasInvalidReference}
+                    disabled={isFutureWeek||!editable()||hasInvalidHours||hasInvalidEvidence||hasInvalidReference||hasInvalidSource}
                     className="hidden sm:flex btn-secondary py-2.5 px-5 items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Save size={14} /> Save Draft
                  </button>
                  <button
                   onClick={handleSubmit}
-                  disabled={isFutureWeek||getWeekEnding(currentWeek)>serverDate||!editable()||hasInvalidHours||hasInvalidEvidence||hasInvalidReference}
+                  disabled={isFutureWeek||getWeekEnding(currentWeek)>serverDate||!editable()||hasInvalidHours||hasInvalidEvidence||hasInvalidReference||hasInvalidSource}
                   className="btn-primary py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Send size={14} /> Submit for Approval
@@ -483,7 +492,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                         {row.workType === 'Project Work' ? (
                           <select
                             className="w-full bg-transparent text-sm font-bold text-heading focus:outline-none cursor-pointer appearance-none"
-                            value={row.projectId}
+                            value={row.projectId} disabled={visibleIndices.some(index=>row.sourceIdentityRecorded?.[index])}
                             onChange={(e) => {
                               const p = assignedProjects.find(pr => pr.id === e.target.value);
                               patchRow(row.id,{projectId:e.target.value,projectName:p?.name||''});
@@ -496,14 +505,14 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                           <div className="space-y-1">
                             <input
                               type="text"
-                              placeholder="Client Name..."
+                              readOnly={visibleIndices.some(index=>row.sourceIdentityRecorded?.[index])} placeholder="Client Name..."
                               className="w-full bg-transparent text-sm font-bold text-heading outline-none"
                               value={(row as any).clientName || ''}
                               onChange={(e) => patchRow(row.id,{clientName:e.target.value})}
                             />
                             <input
                               type="text"
-                              placeholder="Misc Task (e.g. Call, Escalation)..."
+                              readOnly={visibleIndices.some(index=>row.sourceIdentityRecorded?.[index])} placeholder="Misc Task (e.g. Call, Escalation)..."
                               className="w-full bg-transparent text-[10px] text-slate-400 font-medium outline-none"
                               value={row.category || ''}
                               onChange={(e) => patchRow(row.id,{category:e.target.value})}
@@ -515,7 +524,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                         </p>
                       </div>
                       <button
-                        aria-label="Remove visible entry" onClick={() => removeRow(row.id)}
+                        disabled={visibleIndices.some(index=>row.sourceIdentityRecorded?.[index])} aria-label="Remove visible entry" onClick={() => removeRow(row.id)}
                         className="opacity-0 group-hover:opacity-100 p-2 text-gray-300 hover:text-danger transition-all"
                       >
                         <Trash2 size={14} />
@@ -529,7 +538,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                           type="text"
                           value={hourDrafts[`${row.id}:${i}`]??(row.exactHours?.[i]&&row.exactHours[i]!=='0'?row.exactHours[i]:hour === 0 ? '' : String(hour))}
                           aria-invalid={parseCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(hour))===null}
-                          placeholder="0.0"
+                          readOnly={Boolean(row.sourceIdentityRecorded?.[i])} placeholder="0.0"
                           onChange={(e) => updateHours(row.id, i, e.target.value)}
                           className={cn(
                             "w-full bg-white border border-slate-200 rounded-lg py-3 text-center text-sm font-bold text-heading focus:ring-2 focus:ring-primary/20 outline-none transition-all shadow-sm pr-6",
@@ -547,7 +556,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                           <MessageSquare size={12} />
                         </button>
                       </div>
-                      <WorkReference value={row.workReferences?.[i]}/><EvidenceLink value={row.evidenceUrls?.[i]}/>
+                      <WorkSourceIdentity value={row.sourceIdentities?.[i]}/><WorkReference value={row.workReferences?.[i]}/><EvidenceLink value={row.evidenceUrls?.[i]}/>
                     </td>
                   );})}
                   <td className="py-5 px-4 border-l border-gray-100">
@@ -598,10 +607,11 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
 
       </fieldset>
       {hasInvalidHours&&<p role="alert">Correct invalid hours before saving. Use a decimal quantity from 0 to 24; invalid values have not changed the work totals.</p>}
+      {hasInvalidSource&&<p role="alert">Provide both exact source identity fields, or leave both blank before capture. Recorded source-linked content is create-only.</p>}
       {hasInvalidReference&&<p role="alert">Use a single-line work reference of at most 200 characters without control characters.</p>}
       {hasInvalidEvidence&&<p role="alert">Use an absolute HTTP or HTTPS evidence URL of at most 2048 characters without embedded credentials.</p>}
-      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hoursExact??entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'} <WorkReference value={entry.workReference}/><EvidenceLink value={entry.evidenceUrl}/></p>)}</section>}
-      {hiddenCells.length>0&&<section aria-label="Preserved unseen entries" className="mt-4 rounded-xl border p-4"><p>These cells are outside the current view and remain in the same whole-header save. Change their context only in a view that includes their dates.</p>{hiddenCells.map(({row,index})=><p key={`${row.id}:${index}`}>{toIsoDate(shiftDate(currentWeek,index-2))}: {captureCellText(row,index,hourDrafts)}h, {row.projectName||row.clientName||row.workType}, {row.category||'No category'}, {row.remarks[index]||'No comment'} <WorkReference value={row.workReferences?.[index]}/><EvidenceLink value={row.evidenceUrls?.[index]}/></p>)}</section>}
+      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hoursExact??entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'} <WorkSourceIdentity value={entry.sourceIdentity}/><WorkReference value={entry.workReference}/><EvidenceLink value={entry.evidenceUrl}/></p>)}</section>}
+      {hiddenCells.length>0&&<section aria-label="Preserved unseen entries" className="mt-4 rounded-xl border p-4"><p>These cells are outside the current view and remain in the same whole-header save. Change their context only in a view that includes their dates.</p>{hiddenCells.map(({row,index})=><p key={`${row.id}:${index}`}>{toIsoDate(shiftDate(currentWeek,index-2))}: {captureCellText(row,index,hourDrafts)}h, {row.projectName||row.clientName||row.workType}, {row.category||'No category'}, {row.remarks[index]||'No comment'} <WorkSourceIdentity value={row.sourceIdentities?.[index]}/><WorkReference value={row.workReferences?.[index]}/><EvidenceLink value={row.evidenceUrls?.[index]}/></p>)}</section>}
       {!loaded&&<p role="status">Work is not ready for editing. Reload this page after checking connection and access.</p>}
       {saving&&<p role="status">Saving work…</p>}
       {/* Remark Input Modal/Overlay */}
@@ -622,14 +632,14 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
             <div className="p-4">
               <p className="text-[9px] font-bold text-rose-500 uppercase mb-2">Remarks mandatory for Client Misc Tasks</p>
               <textarea
-                autoFocus disabled={!editable()}
+                autoFocus disabled={!editable()||Boolean(rows.find(row=>row.id===activeRemark.rowId)?.sourceIdentityRecorded?.[activeRemark.dayIdx])}
                 className="w-full h-32 bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-heading placeholder:text-slate-300 focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none shadow-inner"
                 placeholder="Describe your work for this day in detail..."
                 value={rows.find(r => r.id === activeRemark.rowId)?.remarks[activeRemark.dayIdx] || ''}
                 onChange={(e) => updateRemark(activeRemark.rowId, activeRemark.dayIdx, e.target.value)}
               />
               <label className="block mt-3 text-sm">Task / ticket / milestone reference (optional)
-                <input type="text" maxLength={400} disabled={!editable()} placeholder="Task ID, ticket ID or milestone label"
+                <input type="text" maxLength={400} disabled={!editable()||Boolean(rows.find(row=>row.id===activeRemark.rowId)?.sourceIdentityRecorded?.[activeRemark.dayIdx])} placeholder="Task ID, ticket ID or milestone label"
                   className="w-full border rounded-lg p-2 mt-1 text-sm"
                   value={rows.find(row=>row.id===activeRemark.rowId)?.workReferences?.[activeRemark.dayIdx]??''}
                   aria-invalid={!workReferenceIsValid(rows.find(row=>row.id===activeRemark.rowId)?.workReferences?.[activeRemark.dayIdx]??null)}
@@ -637,13 +647,19 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
               </label>
               <p className="text-xs mt-1">Up to 200 characters. An empty reference clears it.</p>
               <label className="block mt-3 text-sm">Evidence URL (optional)
-                <input type="url" maxLength={2048} disabled={!editable()} placeholder="https://example.test/work-reference"
+                <input type="url" maxLength={2048} disabled={!editable()||Boolean(rows.find(row=>row.id===activeRemark.rowId)?.sourceIdentityRecorded?.[activeRemark.dayIdx])} placeholder="https://example.test/work-reference"
                   className="w-full border rounded-lg p-2 mt-1 text-sm"
                   value={rows.find(row=>row.id===activeRemark.rowId)?.evidenceUrls?.[activeRemark.dayIdx]??''}
                   aria-invalid={!evidenceUrlIsValid(rows.find(row=>row.id===activeRemark.rowId)?.evidenceUrls?.[activeRemark.dayIdx]??null)}
                   onChange={event=>updateEvidence(activeRemark.rowId,activeRemark.dayIdx,event.target.value)}/>
               </label>
               <p className="text-xs mt-1">An empty URL clears this entry's link. The link is stored without a preview.</p>
+              <fieldset disabled={!editable()||Boolean(rows.find(row=>row.id===activeRemark.rowId)?.sourceIdentityRecorded?.[activeRemark.dayIdx])} className="mt-3 space-y-2">
+                <legend className="text-sm font-semibold">Source identity (optional)</legend>
+                <label className="block text-sm">Source namespace<input className="w-full border rounded-lg p-2 mt-1" maxLength={128} value={rows.find(row=>row.id===activeRemark.rowId)?.sourceIdentities?.[activeRemark.dayIdx]?.namespace??''} onChange={event=>updateSource(activeRemark.rowId,activeRemark.dayIdx,'namespace',event.target.value)}/></label>
+                <label className="block text-sm">External worklog ID<input className="w-full border rounded-lg p-2 mt-1" maxLength={400} value={rows.find(row=>row.id===activeRemark.rowId)?.sourceIdentities?.[activeRemark.dayIdx]?.externalId??''} onChange={event=>updateSource(activeRemark.rowId,activeRemark.dayIdx,'externalId',event.target.value)}/></label>
+              </fieldset>
+              <p className="text-xs mt-1">Enter exact, case-sensitive values. These are user-entered keys without provider verification. After saving, linked work cannot be changed, cleared or moved here. Leave both blank for ordinary editable work.</p>
               <button
                 onClick={() => setActiveRemark(null)}
                 className="w-full mt-4 btn-primary py-3 text-xs font-bold shadow-lg shadow-primary/20"

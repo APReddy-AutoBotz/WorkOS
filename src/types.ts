@@ -677,7 +677,9 @@ export interface Allocation {
 
 export type WorkType = 'Project Work' | 'Client Misc Task';
 
+export type WorkSourceIdentity={namespace:string;externalId:string};
 export interface TimesheetEntry {
+  sourceIdentity?:WorkSourceIdentity|null;
   id: string;
   employeeId: string;
   projectId?: string;
