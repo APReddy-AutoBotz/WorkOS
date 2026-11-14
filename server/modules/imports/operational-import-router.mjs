@@ -1,3 +1,4 @@
+import {checkDuplicateEntries,readDuplicateEntryCheck} from '../work-capture/duplicate-entry-check.mjs';
 import {workReferenceInput} from '../work-capture/work-reference.mjs';
 import {evidenceUrlInput,resolveWorkEntryMetadataReplacement,readWorkEvidenceAudit} from '../work-capture/work-evidence.mjs';
 import {validateCapturePolicy,captureHoursInput,assertCaptureReplacementPeriods} from '../work-capture/capture-policy.mjs';
@@ -570,13 +571,14 @@ export const createOperationalImportRouter = ({
 
       for (const group of groups.values()) {
         let policyEntries;
-        let previous,previousEvidence;
+        let previous,previousEvidence,previousDuplicateCheck;
         try {
           if(group.entries.length>100)throw new WorkPolicyError('WORK_ENTRY_LIMIT','A work period may contain at most 100 entries.');
           await lockWorkPolicy(client,req,[group.employee.id]);
           previous=(await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update',[scope.organizationId,scope.legalEntityId,group.employee.id,group.weekEnding])).rows[0];
           assertTimesheetEditable(previous);
           previousEvidence=await readWorkEvidenceAudit(client,previous?.id);
+          previousDuplicateCheck=await readDuplicateEntryCheck(client,previous?.id);
           await assertCaptureReplacementPeriods(client,req,previous?.id);
           policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,remark:entry.remark,evidence_url:entry.evidenceUrl,work_reference:entry.workReference,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
           policyEntries=await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries);
@@ -634,8 +636,8 @@ export const createOperationalImportRouter = ({
           action: previous ? 'Import Update Timesheet' : 'Import Create Timesheet',
           entityType: 'Timesheet',
           entityId: String(timesheet.id),
-          oldValue: previous?{...previous,entryEvidence:previousEvidence}:null,
-          newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference}))},
+          oldValue: previous?{...previous,entryEvidence:previousEvidence,duplicateEntryCheck:previousDuplicateCheck}:null,
+          newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference})),duplicateEntryCheck:checkDuplicateEntries(savedEntries)},
           details: `${previous ? 'Updated' : 'Created'} ${group.status} timesheet for ${group.employee.employee_id}, week ending ${group.weekEnding} from ${parsed.data.fileName}`,
           reason: group.rejectionReason,
           source: 'Timesheet Import CSV',

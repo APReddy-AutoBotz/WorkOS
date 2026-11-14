@@ -1,3 +1,4 @@
+import {checkDuplicateEntries,projectTimesheetDuplicateCheck,readDuplicateEntryCheck} from './modules/work-capture/duplicate-entry-check.mjs';
 import {workReferenceInput} from './modules/work-capture/work-reference.mjs';
 import {evidenceUrlInput,resolveWorkEntryMetadataReplacement,readWorkEvidenceAudit} from './modules/work-capture/work-evidence.mjs';
 import {createCaptureModesRouter} from './modules/work-capture/capture-modes-router.mjs';
@@ -318,10 +319,10 @@ const requireDatabase = (req, res, next) => {
   next();
 };
 
-const run = async (res, query, params = []) => {
+const run = async (res, query, params = [], projectRows = rows => rows) => {
   try {
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    res.json(projectRows(result.rows));
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Database operation failed' });
@@ -2793,7 +2794,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
   await run(res, `
     select
       t.*,t.week_ending::text,work_capture_write_token(t.id) write_token,
-      (select json_build_object('id',w.id,'sequence',w.sequence,'policyVersion',w.policy_version,'entryCount',jsonb_array_length(w.entries),'governedEntryCount',(select count(*) from jsonb_array_elements(w.entries) x where x->>'kind'='governed')) from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id order by w.sequence desc limit 1) work_assurance,
+      (select json_build_object('id',w.id,'sequence',w.sequence,'policyVersion',w.policy_version,'entryCount',jsonb_array_length(w.entries),'governedEntryCount',(select count(*) from jsonb_array_elements(w.entries) x where x->>'kind'='governed'),'duplicateCheck',case when w.duplicate_entry_check is not null then json_build_object('version',w.duplicate_entry_check->>'version','groupCount',jsonb_array_length(w.duplicate_entry_check->'groups')) else null end) from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id order by w.sequence desc limit 1) work_assurance,
       coalesce(json_agg(json_build_object(
         'id', te.id,
         'employee_id', t.employee_id,
@@ -2819,7 +2820,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
     ${where}
     group by t.id
     order by t.week_ending desc, t.updated_at desc
-  `, params);
+  `, params, rows => rows.map(projectTimesheetDuplicateCheck));
 });
 app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('timesheets.submit'), async (req, res) => {
   const entrySchema = z.object({
@@ -2901,6 +2902,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     await assertCaptureModeWrite(client,req,parsed.data,previous);
     assertTimesheetEditable(previous);
     const previousEvidence=await readWorkEvidenceAudit(client,previous?.id);
+    const previousDuplicateCheck=await readDuplicateEntryCheck(client,previous?.id);
     const evidenceEntries=await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries);
     await assertCaptureReplacementPeriods(client,req,previous?.id);
     parsed.data.entries=await validateCapturePolicy(client,req,employee.id,evidenceEntries,{replacementTimesheetId:previous?.id});
@@ -2948,6 +2950,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       ]);
       savedEntries.push({...inserted.rows[0],policy:entry.policy,capturePolicyReference:entry.capturePolicyReference});
     }
+    const duplicateEntryCheck=checkDuplicateEntries(savedEntries);
     let workAssurance=null;
     if(parsed.data.status==='Submitted'){
       timesheet=(await client.query("update timesheets set status='Submitted',submitted_at=now(),updated_at=now() where id=$1 returning *,week_ending::text",[timesheet.id])).rows[0];
@@ -2970,14 +2973,14 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       action: previous ? 'Update Timesheet' : 'Create Timesheet',
       entityType: 'Timesheet',
       entityId: String(timesheet.id),
-      oldValue: previous?{...previous,entryEvidence:previousEvidence}:null,
-      newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference}))},
+      oldValue: previous?{...previous,entryEvidence:previousEvidence,duplicateEntryCheck:previousDuplicateCheck}:null,
+      newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference})),duplicateEntryCheck},
       details: `${previous ? 'Updated' : 'Created'} ${parsed.data.status} timesheet for ${employee.employee_id}, week ending ${parsed.data.week_ending}`,
       reason: parsed.data.rejection_reason || null,
     });
     const writeToken=(await client.query('select work_capture_write_token($1) token',[timesheet.id])).rows[0].token;
     await client.query('commit');
-    res.json({ ...timesheet, write_token:writeToken, work_assurance:workAssurance, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>entry) });
+    res.json({ ...timesheet, write_token:writeToken, work_assurance:workAssurance, duplicate_entry_check:duplicateEntryCheck, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>entry) });
   } catch (error) {
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;

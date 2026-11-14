@@ -401,7 +401,7 @@ export const TimesheetApproval = () => {
                       {selectedTimesheet.employeeName.split(' ').map(n => n[0]).join('')}
                    </div>
                    <div>
-                     <WorkSubmissionAssurance assurance={selectedTimesheet.workAssurance} status={selectedTimesheet.status} />
+                     <WorkSubmissionAssurance assurance={selectedTimesheet.workAssurance} status={selectedTimesheet.status} entryCheck={selectedTimesheet.duplicateEntryCheck} />
                      <h4 className="font-bold text-heading">{selectedTimesheet.employeeName}</h4>
                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Period: {selectedTimesheet.weekEnding}</p>
                    </div>

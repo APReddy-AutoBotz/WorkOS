@@ -1,0 +1,68 @@
+import assert from 'node:assert/strict';
+import {copyFile,readdir} from 'node:fs/promises';
+import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {runMigrations} from '../server/migrate.mjs';
+import {commercialFixture as f,commercialServerDir,withCommercialDatabase,withPreCommercialMigrations,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
+import {amendmentToday} from './support/commercial-amendments-test.mjs';
+import {grantWorkPermissions,workSnapshot,seedWorkPeriods} from './support/work-assignment-test.mjs';
+const migration='050_wos04_identical_entry_check',version='exact-entry-content/1';
+const table=async(pool,name)=>(await pool.query(`select to_jsonb(t) value from ${name} t order by to_jsonb(t)::text`)).rows;
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ await withPreCommercialMigrations(async rootDir=>{
+  for(const file of (await readdir(join(commercialServerDir,'migrations'))).filter(file=>/^04[0-9]_/.test(file)))await copyFile(join(commercialServerDir,'migrations',file),join(rootDir,'migrations',file));
+  await runMigrations({pool,rootDir,logger:{log(){}}});await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);const identities=await seedCommercialIdentities(pool);
+  await pool.query("update timesheets set status='Submitted' where id=$1",[f.timesheetId]);
+  await pool.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id)
+   select 'synthetic-pre050-submission',$1,$2,$3,1,'assignment-work-date/1',jsonb_build_array(jsonb_build_object('entryId',e.id,'projectId',e.project_id,'workType',e.work_type,'workDate',e.work_date::text,'hours',e.hours::text,'billable',e.billable,'clientName',e.client_name,'category',e.category,'remark',e.remark,'evidenceUrl',e.evidence_url,'workReference',e.work_reference)),
+   '[]'::jsonb,$4,'Admin','Web','synthetic-pre050-correlation','synthetic-pre050-operation' from timesheet_entries e where e.timesheet_id=$3`,[f.organizationId,f.legalEntityId,f.timesheetId,identities.manager.id]);
+  const before=await workSnapshot(pool),grants=await table(pool,'role_permissions');for(const row of before.work_submission_evidence)row.value.duplicate_entry_check=null;
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration]);assert.deepEqual(await workSnapshot(pool),before);assert.deepEqual(await table(pool,'role_permissions'),grants);
+  assert.equal((await pool.query('select count(*)::int n from work_submission_evidence where duplicate_entry_check is not null')).rows[0].n,0,'no inferred historical check');assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);assert.deepEqual(await workSnapshot(pool),before);
+  await grantWorkPermissions(pool);await pool.query(`insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
+   values('duplicate-legacy-first',$1,$2,'SYN-DUP-LEGACY-1','Synthetic legacy first','2020-03-08','2020-03-14','Open','Weekly'),('duplicate-legacy-second',$1,$2,'SYN-DUP-LEGACY-2','Synthetic legacy second','2020-03-15','2020-03-21','Open','Weekly')`,[f.organizationId,f.legalEntityId]);
+  await withCommercialApi({databaseUrl,identities},async({request})=>{
+   const raw=(await request('/api/timesheets')).body.find(row=>row.id===f.timesheetId);assert.equal(raw.work_assurance.duplicateCheck,null);assert.equal(raw.duplicate_entry_check.version,version);assert.deepEqual(raw.duplicate_entry_check.groups,[]);
+   assert.equal((await request(`/api/timesheets/${f.timesheetId}/status`,{method:'PATCH',body:{status:'Approved'}})).status,200);assert.equal((await pool.query('select duplicate_entry_check from work_submission_evidence where timesheet_id=$1',[f.timesheetId])).rows[0].duplicate_entry_check,null);
+  });
+ });
+});
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ assert((await migrateCommercialDatabase(pool)).applied.includes(migration));await seedCommercialReferences(pool);await seedCommercialLegacyWork(pool);const identities=await seedCommercialIdentities(pool);await grantWorkPermissions(pool);const today=await amendmentToday(pool);await seedWorkPeriods(pool,today);
+ const worker=async()=>{const id=`worker-duplicate-${randomUUID()}`;await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+  values($1,$1,'Synthetic duplicate worker',$2,'Consultant','Delivery','US','director-commercial','Active',$3,$4)`,[id,`${id}@example.test`,f.organizationId,f.legalEntityId]);return id;};
+ const entry={id:'caller-selected-id',work_type:'Client Misc Task',client_name:'Synthetic duplicate context',category:'Synthetic duplicate category',work_date:today,hours:'0.2500',remark:'Synthetic identical comment',billable:false,evidence_url:'https://example.test/work/42',work_reference:'TASK-42'};
+ await withCommercialApi({databaseUrl,identities},async({request})=>{
+  const id=await worker(),entries=[entry,{...entry,hours:'0.25'},{...entry,work_reference:'TASK-DISTINCT'}];
+  const input=(rows=entries,status='Draft',token)=>({employee_id:id,week_ending:today,status,entries:rows,duplicate_entry_check:{version,groups:[]},...(token===undefined?{}:{expected_write_token:token})});
+  const post=body=>request('/api/timesheets',{method:'POST',body});let saved=await post(input(entries,'Draft',null));assert.equal(saved.status,200,JSON.stringify(saved.body));
+  let check=saved.body.duplicate_entry_check;assert.equal(check.version,version);assert.equal(check.groups.length,1);assert.equal(check.groups[0].entryIds.length,2);assert.equal(check.groups[0].hoursExact,'0.25');assert(check.groups[0].entryIds.every(value=>value!==entry.id));
+  const actual=(await pool.query('select id from timesheet_entries where timesheet_id=$1',[saved.body.id])).rows.map(row=>row.id);assert(check.groups[0].entryIds.every(value=>actual.includes(value)),'flags use actual stored identities');
+  const read=async()=>(await request('/api/timesheets')).body.find(row=>row.id===saved.body.id);const beforeRead=await workSnapshot(pool),readBack=await read();assert.deepEqual(readBack.duplicate_entry_check,check);assert.equal(readBack.write_token,saved.body.write_token);assert.deepEqual(await workSnapshot(pool),beforeRead,'diagnostic reads do not mutate rows/revisions');
+  const oldToken=saved.body.write_token,changed=[entry,{...entry,work_reference:'TASK-CHANGED'},{...entry,work_reference:'TASK-DISTINCT'}];saved=await post(input(changed,'Draft',oldToken));assert.equal(saved.status,200);assert.deepEqual(saved.body.duplicate_entry_check.groups,[]);assert.equal(saved.body.total_hours,'0.75');assert.equal((await pool.query('select count(*)::int n from timesheet_entries where timesheet_id=$1',[saved.body.id])).rows[0].n,3);
+  const winner=await workSnapshot(pool);const stale=await post(input(entries,'Draft',oldToken));assert.equal(stale.status,409);assert.equal(stale.body.code,'WORK_CAPTURE_WRITE_CONFLICT');assert.deepEqual(await workSnapshot(pool),winner);assert.deepEqual((await read()).duplicate_entry_check.groups,[]);
+  assert.equal((await request('/api/timesheets',{method:'POST',scope:{organizationId:f.organizationId,legalEntityId:f.otherLegalEntityId},body:input()})).status,403);assert.deepEqual(await workSnapshot(pool),winner);
+  saved=await post(input(entries,'Submitted',saved.body.write_token));assert.equal(saved.status,200,JSON.stringify(saved.body));assert.equal(saved.body.work_assurance.duplicateCheck.groupCount,1,'advisory does not block submission');
+  const snapshots=async()=>(await pool.query('select id,entries,duplicate_entry_check from work_submission_evidence where timesheet_id=$1 order by sequence',[saved.body.id])).rows;const original=(await snapshots())[0];assert.deepEqual(original.duplicate_entry_check,saved.body.duplicate_entry_check);assert.equal(original.entries.length,3);assert.equal((await read()).work_assurance.duplicateCheck.groupCount,1);
+  for(const sql of ["update work_submission_evidence set duplicate_entry_check=null where id=$1",'delete from work_submission_evidence where id=$1'])await assert.rejects(pool.query(sql,[original.id]),error=>Boolean(error.code));
+  assert.equal((await request(`/api/timesheets/${saved.body.id}/status`,{method:'PATCH',body:{status:'Rejected',reason:'Synthetic identical-entry correction'}})).status,200);
+  saved=await post(input(changed));assert.equal(saved.status,200);assert.deepEqual(saved.body.duplicate_entry_check.groups,[]);const correctedRead=await read();assert.equal(correctedRead.work_assurance.duplicateCheck.groupCount,1,'earlier retained diagnostic is not recomputed from correction content');assert.equal(correctedRead.duplicate_entry_check.groups.length,0);assert.deepEqual((await snapshots())[0],original);
+  saved=await post(input(changed,'Submitted',saved.body.write_token));assert.equal(saved.status,200);const corrected=await snapshots();assert.equal(corrected.length,2);assert.deepEqual(corrected[0],original);assert.deepEqual(corrected[1].duplicate_entry_check.groups,[]);
+  assert.equal((await request(`/api/timesheets/${saved.body.id}/status`,{method:'PATCH',body:{status:'Approved'}})).status,200);assert.equal((await pool.query('select total_hours::text from timesheets where id=$1',[saved.body.id])).rows[0].total_hours,'0.75');
+  const flaggedWorker=await worker(),flagged=await post({...input(entries,'Submitted'),employee_id:flaggedWorker});assert.equal(flagged.status,200);assert.equal((await request(`/api/timesheets/${flagged.body.id}/status`,{method:'PATCH',body:{status:'Approved'}})).status,200,'approvals remain available with identical-content flags');
+  for(const versioned of [false,true]){
+   const employeeId=await worker(),path=versioned?'/api/v1/imports/timesheets/apply':'/api/imports/timesheets/apply';const row={employeeId,weekEnding:today,workType:entry.work_type,clientName:entry.client_name,category:entry.category,date:today,hours:'0.25',remark:entry.remark,billable:false,status:'Submitted'};
+   const imported=(rows,dryRun=false,key=randomUUID())=>request(path,{method:'POST',headers:versioned?{'Idempotency-Key':key}:{},body:{fileName:'synthetic-duplicate-content.csv',rows,...(versioned?{schemaVersion:'timesheet-import/1',dryRun}:{})}});
+   const duplicateWorker=await worker(),duplicateRow={...row,employeeId:duplicateWorker},beforeDuplicate=await workSnapshot(pool),duplicate=await imported([duplicateRow,duplicateRow],versioned);
+   assert.equal(duplicate.body.validRows,1,'the existing first-row/partial-result contract is retained');assert(duplicate.body.errors.some(error=>error.field==='timesheetEntryKey'));
+   if(versioned)assert.deepEqual(await workSnapshot(pool),beforeDuplicate,'versioned duplicate preview remains nonmutating');
+   const duplicateApply=versioned?await imported([duplicateRow,duplicateRow]):duplicate;assert.equal(duplicateApply.body.validRows,1);assert.equal(duplicateApply.body.status,'Partial');
+   assert.equal((await pool.query('select count(*)::int n from timesheet_entries e join timesheets t on t.id=e.timesheet_id where t.employee_id=$1',[duplicateWorker])).rows[0].n,1,'duplicate row is flagged and only the original accepted row is persisted');
+   const before=await workSnapshot(pool);if(versioned){assert.equal((await imported([row],true)).body.validRows,1);assert.deepEqual(await workSnapshot(pool),before);}
+   const key=randomUUID();assert.equal((await imported([row],false,key)).body.status,'Success');if(versioned){const accepted=await workSnapshot(pool);assert.equal((await imported([row],false,key)).body.status,'Success');assert.deepEqual(await workSnapshot(pool),accepted);}
+   const retained=(await pool.query('select w.duplicate_entry_check from work_submission_evidence w join timesheets t on t.id=w.timesheet_id where t.employee_id=$1',[employeeId])).rows[0].duplicate_entry_check;assert.deepEqual(retained,{version,groups:[]});
+  }
+  const snapshot=await workSnapshot(pool),closedWorker=await worker();await pool.query("update reporting_periods set status='Closed' where id='period-work-current'");assert.equal((await post({...input(),employee_id:closedWorker})).body.code,'REPORTING_PERIOD_CLOSED');assert.deepEqual(await workSnapshot(pool),snapshot);
+ });
+});
+console.log('Identical-entry actual PostgreSQL/API fresh/049 upgrade/replay, legacy neutrality, server flags/actual IDs, exact content, unchanged totals/scope/CAS, immutable checks/corrections/approval and both import contracts passed.');
