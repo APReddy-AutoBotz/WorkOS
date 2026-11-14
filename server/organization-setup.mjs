@@ -344,7 +344,7 @@ export const registerOrganizationSetupRoutes = ({
 
   router.get('/calendars', async (req,res) => {
     const asOf=String(req.query.asOf||new Date().toISOString().slice(0,10));
-    const result=await pool.query(`select c.* from working_calendars c
+    const result=await pool.query(`select c.*,c.effective_from::text effective_from,c.effective_to::text effective_to from working_calendars c
       left join organization_catalog_items wg on wg.id=c.worker_group_id and wg.organization_id=c.organization_id
       join legal_entities scope_le on scope_le.id=$2 and scope_le.organization_id=c.organization_id
       where c.organization_id=$1 and (
@@ -407,7 +407,7 @@ export const registerOrganizationSetupRoutes = ({
         or (c.applicability_type='worker_group' and (wg.legal_entity_id is null or wg.legal_entity_id=$3)))`,
     [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId]);
     if(!authorized.rowCount)return res.status(404).json({error:'Working calendar not found'});
-    const result=await pool.query(`select h.* from working_calendar_holidays h
+    const result=await pool.query(`select h.*,h.holiday_date::text holiday_date,h.effective_from::text effective_from,h.effective_to::text effective_to from working_calendar_holidays h
       where h.organization_id=$1 and h.calendar_id=$2 and (h.active=true or h.effective_to is not null)
       and $3::date between h.effective_from and coalesce(h.effective_to,'infinity'::date)
       order by h.holiday_date,h.label limit $4`,[req.organizationScope.organizationId,req.params.id,asOf,MAX_SETUP_ROWS]);
