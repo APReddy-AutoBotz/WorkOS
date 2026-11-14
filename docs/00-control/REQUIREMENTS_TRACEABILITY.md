@@ -597,6 +597,10 @@ WOS-CORE-003/005, WOS-IAM-003/005/010, WOS-APR-004 and WOS-NFR-SEC-004/012: [leg
 
 WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-003/UX-005: [settings save outcomes](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md) awaits acknowledged writes for both settings actions, preserves edits after refusal, distinguishes newer edits, suppresses unmounted completion and offers initialization retry. The real React/API/PostgreSQL journey covers delayed/refused/successful responses and current permission loss without weakening server authority.
 
+## Import example integrity
+
+WOS-CORE-007, WOS-ORG-010 and WOS-GOV-005: [import template integrity](../tasks/WOS-02-IMPORT-TEMPLATE-INTEGRITY.md) aligns every example with its CSV headers, validates employee column meanings and uses non-deliverable synthetic email addresses. The existing five-template contract now checks example rows as well as headers. Buyer-specific references still require setup and server validation.
+
 ## Uncertain commercial save recovery
 
 WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-005: [commercial save recovery](../tasks/WOS-06-COMMERCIAL-UNCERTAIN-SAVE.md) keeps the existing uncertainty guard through discard and retained callbacks until successful scoped reload. Actual React/service browser tests cover503, network loss, malformed acknowledgement and409, failed reload, corrected reload and ordinary discard. No automatic write retry or calculation/history change.

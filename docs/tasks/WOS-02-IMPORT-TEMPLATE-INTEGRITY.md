@@ -1,0 +1,11 @@
+# Import template integrity
+
+Requirements: WOS-CORE-007, WOS-ORG-010 and WOS-GOV-005. Scope: bundled CSV examples, their existing executable contract, CI and operating guidance. No application, permission, calculation, dependency or schema change.
+
+The employee template has 22 headers, but the manager and administrator examples have only 20 cells. Missing cells in the organizational columns shift utilization eligibility, dates, capacity, roles and status into unrelated columns. The old test only checked headers and the presence of examples. Examples also used a non-reserved email domain.
+
+Restore all 22 positions, retain explicit empty optional fields and use reserved example.invalid identities. Extend the five-template contract to check every row width and employee field meaning, including empty initial passwords. These remain illustrative records: configure or replace organization, director, manager and catalog references before import. They are not a self-contained production seed or approved access grant.
+
+Evidence: baseline widths were 22/22/20/20 (header plus three rows); the strengthened check failed on the original email-domain assertion. After correction, `node tests/import-template-smoke.mjs` passes all five templates and all example rows. `node scripts/lint.mjs` passes all 542 JavaScript modules; whitespace and final diff review pass. Existing npm test already executes this contract. No dependency installation is needed by this Node-built-in-only test; lint reuses the verified parent installation and the lockfile is unchanged. Hosted CI remains pending. Runtime typecheck, production build, API and migration suites are unchanged from the parent and are not rerun for this template-only correction.
+
+Security and rollback: examples contain no password and cannot deliver mail to real recipients. Server import validation and authorization remain unchanged. Revert only these example/test/docs changes if necessary; do not modify already imported employee records automatically. Database migration and browser execution are not applicable to this static template correction. Full-product readiness and import acceptance in an arbitrary buyer configuration are not claimed.
