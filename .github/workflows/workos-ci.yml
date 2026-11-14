@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles]
   push:
     branches: [main]
   workflow_dispatch:
@@ -77,6 +77,9 @@ jobs:
       - name: Verify patched dependency security behavior
         run: npm run test:dependency-security
 
+      - name: Verify scoped client profiles PostgreSQL migration and API acceptance
+        run: npm run test:client-profiles-postgres
+
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
@@ -108,6 +111,7 @@ jobs:
           npm run test:terminology-configuration-browser
           npm run test:working-calendar-browser
           npm run test:commercial-drafting-browser
+          npm run test:client-profiles-browser
 
       - name: Verify real import-to-audit browser and PostgreSQL journey
         env:
@@ -125,6 +129,9 @@ jobs:
 
       - name: Verify real governed lifecycle PostgreSQL browser journey
         run: npm run test:commercial-lifecycle-journey
+
+      - name: Verify real scoped client profiles PostgreSQL browser journey
+        run: npm run test:client-profiles-journey
 
       - name: Prepare disposable schema for production identity tests
         env:
