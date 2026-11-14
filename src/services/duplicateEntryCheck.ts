@@ -8,7 +8,7 @@ export const normalizeDuplicateEntryCheck=(value:unknown):DuplicateEntryCheck|un
  for(const item of value.groups){
   if(!object(item)||typeof item.key!=='string'||!/^[a-f0-9]{64}$/.test(item.key)||keys.has(item.key)
    ||typeof item.workDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(item.workDate)
-   ||!['Project Work','Client Misc Task'].includes(String(item.workType))||!Array.isArray(item.entryIds)||item.entryIds.length<2
+   ||typeof item.workType!=='string'||!['Project Work','Client Misc Task'].includes(item.workType)||!Array.isArray(item.entryIds)||item.entryIds.length<2
    ||item.entryIds.some(id=>typeof id!=='string'||!id||ids.has(id))||new Set(item.entryIds).size!==item.entryIds.length
    ||!nullableText(item.projectId)||!nullableText(item.clientName)||!nullableText(item.category)||typeof item.hoursExact!=='string')return undefined;
   let hoursExact:string;

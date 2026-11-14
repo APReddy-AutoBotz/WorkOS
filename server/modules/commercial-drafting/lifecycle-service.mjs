@@ -133,6 +133,26 @@ export const createGovernedProject=async(client,req,input,audit)=>{
       fail(409,'COMMERCIAL_LEGACY_PROMOTION_MISMATCH','Explicit promotion requires an unchanged Proposed project with exact code, name, manager, dates, client and billability.');
     const dependencies=(await client.query(`select exists(select 1 from project_allocations where project_id=$1) or exists(select 1 from timesheet_entries where project_id=$1) used`,[project.id])).rows[0];
     if(dependencies.used)fail(409,'COMMERCIAL_LEGACY_HISTORY_PRESENT','A project with assignment or work history needs a later governed conversion, not silent promotion.');
+    // Current Proposed status cannot erase earlier operational use. Only the
+    // transactional project writers supply creation provenance; client-reported
+    // Export/Import/Notify audit events are not authority. Missing or ambiguous
+    // legacy evidence requires conversion, including pre-scope audit history.
+    const provenance=(await client.query(`with history as (
+      select * from audit_logs where entity_type='Project' and entity_id=$3
+        and action in('Create Project','Update Project','Update Project Status','Import Create Project','Import Update Project')
+    ) select
+      count(*) filter(where action in('Create Project','Import Create Project'))=1
+      and count(*) filter(where old_value is null and new_value->>'id'=$3 and new_value->>'status'='Proposed'
+        and ((action='Create Project' and source='Web') or (action='Import Create Project' and source='Project Master CSV' and import_processing_result='Success')))=1
+      and coalesce(bool_and(organization_id=$1 and legal_entity_id=$2
+        and new_value->>'id'=$3 and new_value->>'status'='Proposed'
+        and (old_value is null or (old_value->>'id'=$3 and old_value->>'status'='Proposed'))),false)
+      and not exists(select 1 from history where organization_id is null or legal_entity_id is null
+        or new_value->>'id' is null or new_value->>'status' is null
+        or (old_value is not null and (old_value->>'id' is null or old_value->>'status' is null)))
+      and not exists(select 1 from project_engagement_mappings where project_id=$3
+        and (source_snapshot->>'status' is distinct from 'Proposed')) as eligible from history`,[...scope(req),project.id])).rows[0];
+    if(!provenance.eligible)fail(409,'COMMERCIAL_LEGACY_PROVENANCE_REQUIRED','Promotion requires scoped creation evidence and exclusively Proposed history. Previously operational or unverifiable records need a separately governed conversion.');
     origin='explicit-legacy-promotion';
   }else{
     const clientName=engagement.client_id?(await client.query(`select name from clients where ${where} and id=$3 and status='Active'`,[...scope(req),engagement.client_id])).rows[0]?.name:null;
