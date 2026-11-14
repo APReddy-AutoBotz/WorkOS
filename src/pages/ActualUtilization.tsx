@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { KPIStrip } from '../components/ui/KPIStrip';
 import { Badge } from '../components/ui/Badge';
 import { timesheetService, adminService, utilizationReportService } from '../services/api';
-import { Employee, TimesheetSummary, KPIData } from '../types';
+import type { Employee, TimesheetSummary, KPIData, SystemSettings } from '../types';
+import { ApiClientError, resetBackendCheck } from '../services/apiClient';
 import {
   Download,
   Filter,
@@ -13,41 +14,95 @@ import {
   CheckCircle2,
   ArrowUpRight,
   BarChart3,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getUtilizationEligibleEmployees } from '../services/calculations';
 import { formatHours, formatPercent, roundMetric } from '../lib/format';
 import { downloadAuditedCsv } from '../lib/reportExport';
 
+type ActualStatus = 'loading' | 'ready' | 'access' | 'unavailable' | 'error';
+type ActualSnapshot = { employees: Employee[]; timesheets: TimesheetSummary[]; settings: SystemSettings };
+type ActualResult = {
+  generation: number;
+} & ({ status: 'ready'; snapshot: ActualSnapshot } | { status: Exclude<ActualStatus, 'ready'>; snapshot: null });
+
+// Keep the existing report, timesheet (including employee names) and settings readers.
+export const readActualUtilization = async (): Promise<ActualSnapshot> => {
+  // Retry must recover a cached failed backend availability check as well.
+  resetBackendCheck();
+  const [report, timesheets, settings] = await Promise.all([
+    utilizationReportService.getActual(),
+    timesheetService.getAll(),
+    adminService.getSettings(),
+  ]);
+  if (!report || !Array.isArray(report.rows) || !Array.isArray(timesheets) || !settings) {
+    throw new TypeError('Report response unavailable');
+  }
+  return { employees: report.rows, timesheets, settings };
+};
+
+export const ActualUtilizationStatus = ({ status, retry }: { status: ActualStatus; retry: () => void }) => {
+  if (status === 'ready') return null;
+  if (status === 'loading') return (
+    <div role="status" className="flex items-center justify-center gap-3 rounded-2xl border border-border-light bg-white p-8">
+      <Loader2 aria-hidden="true" className="animate-spin text-primary" size={24} />
+      <p className="text-sm font-bold text-heading">Loading actual utilization…</p>
+    </div>
+  );
+  const message = status === 'access' ? 'Access to actual utilization could not be confirmed.'
+    : status === 'unavailable' ? 'Actual utilization is unavailable.'
+    : 'Actual utilization could not be loaded.';
+  return (
+    <div role="alert" className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50 p-5 text-heading">
+      <p className="text-sm font-bold">{message}</p>
+      <p className="text-sm">{status === 'access'
+        ? 'Check your sign-in and report access, then retry.'
+        : 'Check your connection and retry. If the problem continues, contact your administrator.'}</p>
+      <button type="button" onClick={retry} className="btn-secondary px-4 py-2 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+        Retry actual utilization
+      </button>
+    </div>
+  );
+};
+
 export const ActualUtilization = () => {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [timesheets, setTimesheets] = useState<TimesheetSummary[]>([]);
-  const [settings, setSettings] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [result, setResult] = useState<ActualResult>({ status: 'loading', generation: 0, snapshot: null });
+  const requestVersion = useRef(0);
+  const mounted = useRef(false);
+  const loadReport = useCallback(() => {
+    // Invalidate before rerender so previously captured export callbacks also fail closed.
+    const generation = ++requestVersion.current;
+    setResult({ status: 'loading', generation, snapshot: null });
+    const current = () => mounted.current && generation === requestVersion.current;
+    void Promise.resolve().then(() => current() ? readActualUtilization() : null).then(snapshot => {
+      if (current() && snapshot) setResult({ status: 'ready', generation, snapshot });
+    }).catch(error => {
+      if (!current()) return;
+      const status = error instanceof ApiClientError
+        ? [401, 403].includes(error.status) ? 'access'
+          : [404, 502, 503, 504].includes(error.status) ? 'unavailable' : 'error'
+        : 'error';
+      setResult({ status, generation, snapshot: null });
+    });
+  }, []);
+  const { status } = result;
+  const snapshot = status === 'ready' ? result.snapshot : null;
+  const employees = snapshot?.employees || [];
+  const timesheets = snapshot?.timesheets || [];
+  const settings = snapshot?.settings || null;
+  const hasData = status === 'ready' && (employees.length > 0 || timesheets.length > 0);
+  const canExport = status === 'ready' && mounted.current && result.generation === requestVersion.current;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [statusFilter, setStatusFilter] = useState<'Consolidated' | 'Approved Only' | 'Pending Review'>('Consolidated');
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [empData, tsData, setts] = await Promise.all([
-          utilizationReportService.getActual(),
-          timesheetService.getAll(),
-          adminService.getSettings(),
-        ]);
-        setEmployees(empData.rows);
-        setTimesheets(tsData);
-        setSettings(setts);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+    mounted.current = true;
+    loadReport();
+    return () => { mounted.current = false; requestVersion.current += 1; };
+  }, [loadReport]);
 
   const monthOptions = useMemo(() => {
     return Array.from(new Set<string>(timesheets.map(timesheet => timesheet.weekEnding.slice(0, 7))))
@@ -187,10 +242,12 @@ export const ActualUtilization = () => {
     : 0;
 
   const exportActualRows = (fileName: string, rows: object[]) => {
+    if (status !== 'ready' || !mounted.current || result.generation !== requestVersion.current) return;
     void downloadAuditedCsv(fileName, rows, 'Actual Utilization');
   };
 
   const handleGlobalReport = () => {
+    if (status !== 'ready' || !mounted.current || result.generation !== requestVersion.current) return;
     exportActualRows(
       'actual-utilization-global-report.csv',
       scopedTimesheets.map(timesheet => ({
@@ -210,6 +267,7 @@ export const ActualUtilization = () => {
   };
 
   const handleAuditExport = () => {
+    if (status !== 'ready' || !mounted.current || result.generation !== requestVersion.current) return;
     exportActualRows(
       'actual-utilization-visible-logs.csv',
       filteredLogs.map(timesheet => ({
@@ -224,14 +282,6 @@ export const ActualUtilization = () => {
     );
   };
 
-  if (loading) {
-    return (
-      <div className="h-[60vh] flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={32} />
-      </div>
-    );
-  }
-
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       <PageHeader
@@ -239,7 +289,10 @@ export const ActualUtilization = () => {
         subtitle="Historical reporting based on submitted timesheet effort and service delivery logs."
         breadcrumb={['Reports', 'Utilization']}
         actions={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+             <button type="button" onClick={loadReport} aria-label="Refresh actual utilization" className="btn-secondary py-2.5 px-4 flex items-center gap-2 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                <RefreshCw aria-hidden="true" size={14} /> Refresh
+             </button>
              <div className="flex items-center bg-white border border-border-light rounded-xl p-1 shadow-sm mr-2 font-bold uppercase tracking-widest text-[10px]">
                 <label className="px-4 flex items-center gap-2 border-r border-gray-100 h-full py-1.5 cursor-pointer hover:bg-slate-50 transition-colors rounded-l-lg">
                    <Calendar size={14} className="text-primary" />
@@ -270,8 +323,10 @@ export const ActualUtilization = () => {
                 </label>
              </div>
              <button
+               type="button"
                onClick={handleGlobalReport}
-               className="btn-secondary py-2.5 px-5 flex items-center gap-2 shadow-sm font-bold text-xs uppercase tracking-wider"
+               disabled={!canExport}
+               className="btn-secondary py-2.5 px-5 flex items-center gap-2 shadow-sm font-bold text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
              >
                 <Download size={14} /> Global Report
              </button>
@@ -279,6 +334,22 @@ export const ActualUtilization = () => {
         }
       />
 
+      <ActualUtilizationStatus status={status} retry={loadReport} />
+      {status === 'ready' && !hasData && (
+        <div className="space-y-4 rounded-2xl border border-border-light bg-white p-8 text-center text-sm font-bold text-slate-600">
+          <p role="status">No actual utilization data was returned.</p>
+          <button
+            type="button"
+            onClick={handleAuditExport}
+            disabled={!canExport}
+            className="btn-secondary mx-auto py-1.5 px-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            <Download size={12} /> Audit Trail
+          </button>
+        </div>
+      )}
+
+      {hasData && <>
       <KPIStrip kpis={kpis} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -344,7 +415,7 @@ export const ActualUtilization = () => {
             })}
             {weeklyReconciliation.length === 0 && (
               <div className="h-[260px] flex items-center justify-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">No weekly utilization logs available</p>
+                <p role="status" className="text-xs font-bold text-gray-400 uppercase tracking-widest">No weekly utilization logs available</p>
               </div>
             )}
           </div>
@@ -382,7 +453,7 @@ export const ActualUtilization = () => {
             ))}
             {varianceWatchlist.length === 0 && (
               <div className="h-full min-h-[260px] flex items-center justify-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest text-center">No approved variance data yet</p>
+                <p role="status" className="text-xs font-bold text-gray-400 uppercase tracking-widest text-center">No approved variance data yet</p>
               </div>
             )}
           </div>
@@ -452,8 +523,10 @@ export const ActualUtilization = () => {
            </div>
            <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={handleAuditExport}
-                className="btn-secondary py-1.5 px-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider font-bold"
+                disabled={!canExport}
+                className="btn-secondary py-1.5 px-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                  <Download size={12} /> Audit Trail
               </button>
@@ -521,13 +594,16 @@ export const ActualUtilization = () => {
               })}
               {filteredLogs.length === 0 && (
                 <tr>
-                   <td colSpan={6} className="py-12 text-center text-gray-400 font-bold uppercase tracking-widest text-xs">No service delivery logs recorded</td>
+                   <td colSpan={6} className="py-12 text-center text-gray-400 font-bold uppercase tracking-widest text-xs">
+                     <p role="status">{timesheets.length === 0 ? 'No service delivery logs recorded' : 'No service delivery logs match the selected filters.'}</p>
+                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+      </>}
     </div>
   );
 };
