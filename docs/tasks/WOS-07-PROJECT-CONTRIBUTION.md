@@ -79,3 +79,8 @@ The source-overflow PostgreSQL/API regression now **passes**. The initial single
 Final controller inspection covered service/router authority, retained-scope and audit transactions, migration guards, strict report/artifact clients, React request lifecycle, CSV controls, capacity-loader extraction and application/CI wiring. All48 existing test-file diffs were mechanically verified as only migration097 inventory/count updates. Staged paths contain no generated build output, local environment files, logs or key files. Bootstrap scan debt, full hosted checks and dependency-ordered integration remain explicit gates.
 
 Fresh lockfile installation passed in an isolated directory using the unchanged package manifests: npm ci installed338 packages and audited345 in11 seconds, with zero reported vulnerabilities. The shared dependency junction used by the acceptance suites was not modified.
+
+### Hosted CI migration inventory correction
+
+Hosted run43555983950 at48f563ca648ead0baa716540b833cc055e75a5e7 failed the commercial drafting upgrade assertion: the runner correctly applied097, but that single exact expected list still ended at096. The assertion now explicitly includes097; no migration, database guard or product behavior changed. The corrected npm run test:commercial-drafting-postgres passed locally against PostgreSQL16, including fresh/upgrade/replay, all seven engagement models, immutable terms, concurrent versioning, decimal/date integrity, scope/permission rejection and transactional audit. Full hosted checks must run again at the corrected head; the earlier failure remains recorded. No release or merge acceptance is claimed.
+
