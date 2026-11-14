@@ -1,9 +1,23 @@
 # WorkOS Requirements Traceability
 
+PR-007D integration correction (WOS-CTR-003, WOS-CORE-003/005, WOS-NFR-SEC-004/005): amendment authority is discoverable and explicitly configurable through the server permission catalog, with no default grants. Real PostgreSQL/API regression evidence covers denied enrollment, role and individual grant/revoke behavior and actor-attributed permission history without term adoption. See the governed-amendments task receipt for executed results and remaining acceptance gates.
+
+## WOS03 current-main integration candidate
+
+Bootstrap hygiene follow-up: the integration candidate replaces static synthetic test credentials with ephemeral values, preserves malformed-input and redaction assertions, and fixes Windows file-URL conversion in scanner self-tests. The unchanged scanner passes240 files and all adversarial fixtures; required CI now runs both on an Ubuntu24.04 validation runner compatible with the locked browser. The prior30-finding checkpoint and Ubuntu26.04 installation failure remain recorded in the integration task. Fresh hosted acceptance is still required.
+
+WOS-CORE-003/005 and WOS-GOV-001/002/004: [PR41 integration acceptance](../tasks/WOS-03-INTEGRATION-ACCEPTANCE.md) reconciles the existing modular/API/audit package with accepted main documentation and dependency repairs. Existing real import-to-audit browser/API/PostgreSQL tests are brought forward from PR50's later stack to test the actual combined candidate. Fresh install and pre-journey unit/type/lint checks pass; combined journey, remaining runtime checks, current-head hosted acceptance and review remain pending. This does not close configurable retention, buyer authentication, deployment or full release gates.
+
 **Status:** Blueprint mapping; PR/test/evidence columns are populated as implementation proceeds.  
 **Authoritative requirements:** `PRODUCT_REQUIREMENTS.md` and `NON_FUNCTIONAL_REQUIREMENTS.md`
 
+## Current product-direction refresh
+
+WOS-GOV-005: [current product-direction task](../tasks/WOS-00-CURRENT-PRODUCT-DIRECTION.md) reconciles README, vision, roadmap, provenance and current status to observed GitHub main/draft evidence. This is documentation traceability, not acceptance of the runtime requirements described by the vision. The [retained-authority clarification](../tasks/WOS-00-RETAINED-REQUIREMENTS-AUTHORITY.md) preserves the legacy text while identifying current requirements and blocking-review authority. The prior status report is retained as dated historical evidence.
+
 ## 1. Traceability rules
+
+WOS-NFR-SEC-011 and WOS-GOV-005: [main dependency audit repair](../tasks/WOS-03-MAIN-DEPENDENCY-REPAIR.md) updates advisory-affected locked dependencies and adds negative parser, proxy-scope and application-schema regression evidence. This prerequisite does not accept the unmerged feature stack.
 
 Every accepted requirement must link to:
 
@@ -284,7 +298,7 @@ The read-only calendar portion of WOS-ORG-008 and only the calendar entry point 
 
 ## Integrated import-to-audit acceptance increment
 
-The [tests-only integrated journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md), dependent on unchanged Draft PR49, adds coherent evidence for WOS-CORE-003/005 and WOS-GOV-002/004: actual React Import / Export, versioned API, disposable migrated PostgreSQL, retained history after reload and a second named account's actual Audit Trail provenance. It distinguishes saved dry-run/success event context from later GET traces, checks another legal entity and denied unassigned scope, and asserts no inspection mutation. No production behavior/schema/permission/grant/dependency change or whole-requirement acceptance is implied. All twelve existing browser suites and formal dependency/review/UAT/release gates remain retained.
+The [integrated journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md), forwardported and accepted in PR41 with PR50 retaining historical evidence after PR49 acceptance, provides coherent evidence for WOS-CORE-003/005 and WOS-GOV-002/004: actual React Import / Export, versioned API, disposable migrated PostgreSQL, retained history after reload and a second named account's actual Audit Trail provenance. It distinguishes saved dry-run/success event context from later GET traces, checks another legal entity and denied unassigned scope, and asserts no inspection mutation. No production behavior/schema/permission/grant/dependency change or whole-requirement acceptance is implied. All twelve existing browser suites and formal dependency/review/UAT/release gates remain retained.
 
 ## PR-007A commercial drafting evidence (development-only exception)
 
@@ -298,11 +312,15 @@ The [bounded lifecycle task](../tasks/WOS-04-GOVERNED-LIFECYCLE.md) maps additio
 
 Draft snapshots and immutable contract pins remain unchanged; full material lifecycle evidence is commercially protected and shared audit receives opaque pointers only. The new lifecycle-management permission is opt-in, with no default/live grants. Actual existing closure blockers can be inspected, but terminal close/delete is explicitly unavailable because unbilled/balance/consumption/acceptance evidence is not yet implemented. Client hierarchy, amendments, term rollover, work-date integration and remaining financial lifecycle remain open. This is not whole PR-007 acceptance, prerequisite completion or release authority.
 
+The integration review's WOS-ENG-003 historical-promotion correction requires trusted scoped creation provenance and exclusively Proposed history, preserving the exclusion of previously operational or unverifiable legacy records. The PostgreSQL suite exercises real legacy POST/PATCH and both CSV aliases resetting state, pre-scope audit history, neutral snapshots, missing/ambiguous/malformed/client-reported evidence, unchanged rejection snapshots and valid scoped Proposed creation. This gate does not infer historical eligibility from the current status or absence of work rows alone.
+
 ## PR-007C scoped client and customer billing profiles (development-only exception)
 
 The [bounded customer-profile task](../tasks/WOS-04-SCOPED-CLIENT-PROFILES.md) addresses WOS-CLI-001–002 through additive migration042, protected client-profile routes/service, an actual scope-owned React workspace, explicit stable client codes, separate nullable legal/display identity, independent customer billing entities/business units and effective-dated acyclic parent-account links. Existing operational industry/status/account owner/organization ownership remain canonical and unchanged. Append-only profile histories use expected versions and current/future dates; no missing legacy legal name/currency is guessed and no contract pin, project/work identity or neutral history is rewritten.
 
 `test:client-profiles-contract` covers strict schema/permission/transaction/error boundaries; `test:client-profiles-service` covers captured frontend identity/scope/transport and stale state; `test:client-profiles-postgres` covers fresh/upgrade/replay, scope/date/version/cycle races, confidential projection/audit isolation and legacy writer/seed compatibility; fixture and actual PostgreSQL React browser journeys are additive. Exact executed results belong to the Draft PR receipt. Protected material evidence and opt-in view/manage permissions introduce no default/live grants; shared audit remains opaque. No retirement, tax/payment identifier, invoice routing, cross-legal consolidation or billing authority is provided. This is bounded development, not whole programme acceptance, independent release review, merge or deployment authority.
+
+Integration correction evidence for WOS-CLI-001–002 also covers real permission configuration discovery, authorized non-Admin role and individual enrollment, revocation, unauthorized grant rejection and unchanged absence of defaults. Frontend permission metadata matches migration042: confidential scoped capabilities are opt-in, not restricted to Admin recipients. Strict billing-unit response validation rejects arrays rather than coercing them into enum strings; service and browser negatives cover both valid enum spellings wrapped in arrays.
 
 ## PR-007D governed material amendments (development-only exception)
 
@@ -311,6 +329,8 @@ The [bounded amendment task](../tasks/WOS-04-GOVERNED-AMENDMENTS.md) advances WO
 Strict contract/service checks and real PostgreSQL/HTTP/React acceptance are additive; all prior fixtures and journeys remain mandatory. Exact executed results belong in the Draft PR receipt. Current governed terms are not historical financial snapshots, consumption, balances or billing authority. Work-date/assignment-policy convergence remains PR-008; whole PR-007 acceptance, terminal closure, formal release review, Ready, merge and deployment remain unavailable/not authorized by this slice.
 
 ## PR-008A bounded development evidence
+
+MyTimesheet assurance ownership correction supports WOS-CORE-003/005 and WOS-NFR-UX-001/005: current-week/identity editor ownership prevents delayed reads or save outcomes from relabeling another period's evidence. `test:timesheet-ownership-browser` covers controlled delayed read/save, return-to-week and identity replacement races, with loading/save guards and current-owner completion. This complements, rather than replaces, real PostgreSQL and work-assignment browser acceptance.
 
 | Requirement portions | Implementation | Required executable evidence | Status |
 |---|---|---|---|
@@ -322,17 +342,22 @@ Strict contract/service checks and real PostgreSQL/HTTP/React acceptance are add
 |---|---|---|---|
 | WOS-CORE-003–005; bounded WOS-TIM-005/008/009/011/012; UX-001/005 | Scoped append-only Weekly-boundary increments/aggregate limits/comments; decimal-safe manual/import authority and replacement overlays; separate capture references; old/new content-date guards; policy editor and lossless compatibility grid | `test:work-capture-policy`, `test:work-capture-grid`, `test:work-capture-service`, `test:work-capture-postgres`, `test:work-capture-journey`; migration045 fresh/044 upgrade/replay; all retained exact-head gates | Bounded development only. Exact execution belongs in the dependent Draft PR. Full categories/evidence/modes/overtime/deadlines/reopen and whole PR-008/formal acceptance remain open. |
 
+PR-008B scope-recovery correction supports WOS-NFR-UX-001/005: delayed-response browser evidence covers a failed organization switch during preflight or POST, replacement reads before and after settlement, stale assurance suppression and explicit authoritative reload before editing resumes. The retained original candidate and independently reviewed correction are distinct evidence.
+
 ### PR-008C bounded continuation: explicit daily/weekly presentation
 
 WOS-TIM-001 and the retained WOS-CORE-003–005 / WOS-TIM-004–006/008–009/011–012 controls are addressed by the fresh dependent candidate in `docs/tasks/WOS-04-WORK-CAPTURE-MODES.md`. Additive migration046 and scoped append-only settings enable daily/weekly presentation explicitly, with no default/grants or approval/calendar re-keying. The complete-header revision contract, deliberate legacy omission behavior, manual/import timing parity, OLD/NEW period guards and lossless exact/unseen entries have dedicated `work-capture-modes` unit, transport, PostgreSQL/API and real React journey test sources. This is implementation traceability, not executed acceptance proof: fresh exact-tree local/independent review and exact-head hosted gates must pass. Unavailable earlier local evidence is not reused; PR008A/B and whole-PR/formal acceptance statuses remain unchanged.
 
+
+PR-008C integration adds WOS-NFR-UX-001/005 response-boundary evidence: malformed capture-mode histories/projections and append acknowledgements reject before editor publication, while empty and bounded truncated histories remain supported. Mode-aware timing coverage retains keyed week/identity isolation and explicit reload after abandoned-command settlement.
+
 ### PR-008D bounded continuation: work-entry evidence links
 
-WOS-TIM-003 evidence-link dimension is implemented as an optional per-entry URL in [PR-008D](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md), dependent on unchanged PR57 `02c024d45621fe516e0a46f21657a37f2a1e4532`. Migration047, shared manual/import omitted-field preservation, evidence-only revisions, immutable correction snapshots and real React/API/PostgreSQL gates cover this bounded dimension. Remaining entry dimensions and full PR008 acceptance remain open. This development-only sequencing exception defers optional reviews; it accepts/integrates no prerequisite and authorizes no merge/release/deployment. New exact-head results and deferred review status must accompany the Draft.
+WOS-TIM-003 evidence-link dimension is implemented as an optional per-entry URL in [PR-008D](../tasks/WOS-04-WORK-ENTRY-EVIDENCE.md). The current integration includes corrected PR57 `01bb4fa6de46ddf210915a85f94381b81c6be5b9`, merged at `07967fddfe8ae0e6304d338db2f71b9f7e3a2198` after exact-head acceptance. Migration047, shared manual/import omitted-field preservation, evidence-only revisions, immutable correction snapshots and real React/API/PostgreSQL gates cover this bounded dimension. Remaining entry dimensions and full PR008 acceptance remain open. The owner subsequently authorized reviewed integration; the original development-only exception is historical. This Draft still requires its own local acceptance, independent exact-head review and hosted checks before an eligible merge. No release or deployment acceptance is inferred.
 
 ### PR-008E bounded continuation: descriptive work references
 
-WOS-TIM-003's optional task/ticket/milestone reference text is implemented in [PR-008E](../tasks/WOS-04-WORK-ENTRY-REFERENCE.md), based on unchanged PR58 `39cf7e10537972e232498a6a99a1f89df05c765b`. Additive migration048, manual/both import contracts, independent metadata omission/clear preservation, reference-only revisions and immutable history have dedicated unit/PostgreSQL/React gates. This text is not an authoritative milestone binding, source identity or duplicate/financial key. Optional reviews remain deferred/outstanding; full TIM003/PR008, prerequisites and integrated acceptance remain open.
+WOS-TIM-003's optional task/ticket/milestone reference text is implemented in [PR-008E](../tasks/WOS-04-WORK-ENTRY-REFERENCE.md), integrated with accepted PR58 `a7d8da030d10686a8ca317df592a8c76670ba0c6`. Additive migration048, manual/both import contracts, independent metadata omission/clear preservation, reference-only revisions and immutable history have dedicated unit/PostgreSQL/React gates. This text is not an authoritative milestone binding, source identity or duplicate/financial key. Independent exact-head review and new integration acceptance remain required; the original review deferral is historical. Full TIM003/PR008 and release acceptance remain open.
 
 ### PR-008F bounded continuation: buyer-configurable required evidence
 
