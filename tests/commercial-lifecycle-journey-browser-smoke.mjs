@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {createServer} from 'vite';
 import {runMigrations} from '../server/migrate.mjs';
+import {recordAuditEvent} from '../server/modules/audit/audit-record.mjs';
 import {withCommercialDatabase, withPreCommercialMigrations, seedCommercialReferences, seedCommercialLegacyWork,
   migrateCommercialDatabase, seedCommercialIdentities, withCommercialApi, commercialFixture} from './support/commercial-drafting-test.mjs';
 
@@ -40,6 +41,9 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     await pool.query(`insert into projects(id,project_code,name,client_id,client,manager_id,manager_name,project_type,billable,start_date,end_date,status,country,notes,organization_id,legal_entity_id)
       values($1,$2,$3,$4,'Synthetic commercial local client',$5,'Synthetic commercial owner','Synthetic legacy model',true,$6,$7,'Proposed','US','Synthetic no-history promotion fixture',$8,$9)`,
     [proposed.id,proposed.code,proposed.name,commercialFixture.clientId,commercialFixture.ownerId,proposed.startsOn,proposed.endsOn,commercialFixture.organizationId,commercialFixture.legalEntityId]);
+    await recordAuditEvent(pool,{organizationScope:{organizationId:commercialFixture.organizationId,legalEntityId:commercialFixture.legalEntityId}},
+      {module:'Projects',action:'Create Project',entityType:'Project',entityId:proposed.id,oldValue:null,
+        newValue:(await pool.query('select * from projects where id=$1',[proposed.id])).rows[0],details:'Synthetic original Proposed creation provenance'});
     await migrateCommercialDatabase(pool);
   });
   const identities = await seedCommercialIdentities(pool);
