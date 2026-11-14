@@ -70,6 +70,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Verify patched dependency security behavior
+        run: npm run test:dependency-security
+
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
@@ -93,6 +96,11 @@ jobs:
           npm run test:scoped-audit-browser
           npm run test:organization-audit-browser
           npm run test:deployment-audit-browser
+
+      - name: Verify real import-to-audit browser and PostgreSQL journey
+        env:
+          WORKOS_TEST_DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
+        run: npm run test:import-audit-journey
 
       - name: Prepare disposable schema for production identity tests
         env:

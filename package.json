@@ -59,7 +59,8 @@
     "test:wos00-baseline": "node scripts/verify-baseline.mjs",
     "test:bootstrap-scan": "node scripts/scan-bootstrap.mjs",
     "test:document-metadata": "node tests/document-metadata-smoke.mjs",
-    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:leave-router && npm run test:availability-report-router && npm run test:backend && npm run test:organization-setup && npm run test:organization-setup-v1 && npm run test:authorization-convergence && npm run test:identity-access && npm run test:audit-record && npm run test:audit-provenance && npm run test:scoped-history-view && npm run test:scoped-audit-history && npm run test:organization-audit-view && npm run test:deployment-audit-view && npm run test:audit-history-router && npm run test:organization-audit-router && npm run test:import-history-router && npm run test:import-history-view && npm run test:import-idempotency && npm run test:employee-import-dry-run && npm run test:project-import-ui && npm run test:import-error-provenance && npm run test:integration-history-router && npm run test:deployment-integration-history-router && npm run test:api-v1-contract && npm run test:approvals && npm run test:notification-router && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging",
+    "test:dependency-security": "node --test tests/dependency-security-smoke.mjs",
+    "test": "npm run test:requirements && npm run test:access && npm run test:ess && npm run test:leave && npm run test:leave-router && npm run test:availability-report-router && npm run test:backend && npm run test:organization-setup && npm run test:organization-setup-v1 && npm run test:authorization-convergence && npm run test:identity-access && npm run test:audit-record && npm run test:audit-provenance && npm run test:scoped-history-view && npm run test:scoped-audit-history && npm run test:organization-audit-view && npm run test:deployment-audit-view && npm run test:audit-history-router && npm run test:organization-audit-router && npm run test:import-history-router && npm run test:import-history-view && npm run test:import-idempotency && npm run test:employee-import-dry-run && npm run test:project-import-ui && npm run test:import-error-provenance && npm run test:integration-history-router && npm run test:deployment-integration-history-router && npm run test:api-v1-contract && npm run test:approvals && npm run test:notification-router && npm run test:notifications && npm run test:integrations && npm run test:planning && npm run test:phase7-scope && npm run test:org-chart && npm run test:permissions && npm run test:import-templates && npm run test:document-metadata && npm run test:identity-discovery && npm run test:environment && npm run test:health && npm run test:migration-manifest && npm run test:migration-error-logging && npm run test:import-audit-harness",
     "test:import-history-view": "node --import tsx tests/import-history-view-smoke.mjs",
     "test:import-history-browser": "node tests/import-history-browser-smoke.mjs",
     "test:project-import-ui": "node --import tsx tests/project-import-ui-contract-smoke.mjs",
@@ -73,7 +74,9 @@
     "test:organization-audit-browser": "node tests/organization-audit-history-browser-smoke.mjs",
     "test:deployment-audit-view": "node --import tsx tests/deployment-audit-view-smoke.mjs",
     "test:deployment-audit-browser": "node tests/deployment-audit-history-browser-smoke.mjs",
-    "test:audit-provenance": "node --import tsx tests/audit-provenance-smoke.mjs"
+    "test:audit-provenance": "node --import tsx tests/audit-provenance-smoke.mjs",
+    "test:import-audit-harness": "node tests/import-audit-journey-harness-smoke.mjs",
+    "test:import-audit-journey": "node tests/import-audit-journey-browser-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -101,7 +104,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "6.4.6"
   },
   "description": "Buyer-owned professional-services operations platform"
 }

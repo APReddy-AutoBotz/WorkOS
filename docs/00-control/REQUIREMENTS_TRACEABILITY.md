@@ -1,9 +1,19 @@
 # WorkOS Requirements Traceability
 
+## WOS03 current-main integration candidate
+
+WOS-CORE-003/005 and WOS-GOV-001/002/004: [PR41 integration acceptance](../tasks/WOS-03-INTEGRATION-ACCEPTANCE.md) reconciles the existing modular/API/audit package with accepted main documentation and dependency repairs. Existing real import-to-audit browser/API/PostgreSQL tests are brought forward from PR50's later stack to test the actual combined candidate. Fresh install and pre-journey unit/type/lint checks pass; combined journey, remaining runtime checks, current-head hosted acceptance and review remain pending. This does not close configurable retention, buyer authentication, deployment or full release gates.
+
 **Status:** Blueprint mapping; PR/test/evidence columns are populated as implementation proceeds.  
 **Authoritative requirements:** `PRODUCT_REQUIREMENTS.md` and `NON_FUNCTIONAL_REQUIREMENTS.md`
 
+## Current product-direction refresh
+
+WOS-GOV-005: [current product-direction task](../tasks/WOS-00-CURRENT-PRODUCT-DIRECTION.md) reconciles README, vision, roadmap, provenance and current status to observed GitHub main/draft evidence. This is documentation traceability, not acceptance of the runtime requirements described by the vision. The [retained-authority clarification](../tasks/WOS-00-RETAINED-REQUIREMENTS-AUTHORITY.md) preserves the legacy text while identifying current requirements and blocking-review authority. The prior status report is retained as dated historical evidence.
+
 ## 1. Traceability rules
+
+WOS-NFR-SEC-011 and WOS-GOV-005: [main dependency audit repair](../tasks/WOS-03-MAIN-DEPENDENCY-REPAIR.md) updates advisory-affected locked dependencies and adds negative parser, proxy-scope and application-schema regression evidence. This prerequisite does not accept the unmerged feature stack.
 
 Every accepted requirement must link to:
 

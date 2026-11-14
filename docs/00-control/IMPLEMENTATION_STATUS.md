@@ -1,156 +1,38 @@
-# WorkOS Implementation Status
+# WorkOS implementation status
 
-**Status date:** 2026-08-25  
-**Status authority:** Accepted capability on `main`, with active corrective work shown separately  
-**Current target:** Corrected WOS-00 governing baseline before WOS-01 source bootstrap
+Status date: 2026-11-14. This page separates observed merged source from draft engineering evidence and release acceptance. The previous 2026-08-25 status is preserved unchanged as [historical evidence](../evidence/2026-11-14/IMPLEMENTATION_STATUS_2026-08-25.md); its pre-import statements and corrective-hold narrative are not a current-state report.
 
-## 1. Status rules
+## Verified main baseline
 
-- Accepted progress is earned only by merged code/documents and required evidence on `main`.
-- Open branch/PR work is active, not accepted.
-- Percentages are weighted by workstream, not files, commits or lines.
-- A workstream earns weight only after its definition of done and exact-head gates pass.
-- A previously merged baseline may be placed under corrective hold when a later independent review finds a release-blocking governing defect; no dependent workstream receives acceptance while that hold is active.
+GitHub main was initially fetched at `b9a57f8a462d8585bb3f73129080d6fae5173343` for this refresh. Dependency repair PR145 subsequently merged at `839dacf12222261161a93956b646d03ccc56af66` after both jobs passed in [CI43549286444](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43549286444), including dependency audit, negative security tests, migrations, production identity and container checks. The tree contains `src/`, `server/`, tests, migrations, container/environment configuration and CI. Git history identifies source bootstrap at `3070c80a71640fa4275477d0d2f1538cc8d2a819` (PR16), organization/setup integration at `8450e9f8816d95dffb3a0784f2e63e3b7b57a172` (PR37), and the current CI/migration/production-profile foundation commit above.
 
-## 2. Executive status
+This establishes that application source and foundations have been merged. It does not retrospectively certify every requirement, resolve every historical review finding, or demonstrate current production readiness. No numeric readiness score is asserted without a reconstructed requirement-by-requirement acceptance basis.
 
-```text
-Overall accepted WorkOS readiness: 0%
+## Draft work and observed checks
 
-Product capability:        0%
-Commercial capability:     0%
-Enterprise platform:       0%
-Quality and evidence:      0%
-Buyer handover readiness:  0%
-```
+The two-page GitHub inventory contained 104 open PRs before the independent documentation and dependency-repair packages were published. Most implementation work after the modular/API foundation remains in dependent Draft branches. Separate controller branches require their own disposition; open does not mean mergeable or required.
 
-PR #1 was squash-merged to `main@880b3dc244bf516c4e535fb68e455e6153aec395`, but the post-merge Round-14 review published one P1 and one P2. The merged WOS-00 baseline is therefore under **WOS-00F corrective hold** and does not currently earn the 8% WOS-00 accepted weight. Product-owner Gate B remains approved; it authorizes the bounded correction but does not waive exact-head review or merge controls.
-
-## 3. Active work
-
-| Field | Current value |
-|---|---|
-| Workstream | WOS-00F — Post-merge governing correction |
-| Governing WOS-00 issue | #2 — reopened under corrective hold |
-| Corrective issue | #13 |
-| Branch | `controller/wos-00f-approval-controls` |
-| Pull request | Draft PR #14 |
-| Base | `main@880b3dc244bf516c4e535fb68e455e6153aec395` |
-| Historical merged PR | PR #1, merged head `e8e05e0f17e78e7ef19a35c078601ebda5881a45` |
-| Exact corrective head | Use live PR #14 metadata; every moved head requires a fresh independent exact-head review before acceptance |
-| Latest independently reviewed head | `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6` via review `PRR_kwDOUAv8Lc8AAAABKqRg4w` |
-| State | Two P2 authority/traceability findings from the latest review are under controller convergence; no clean final review is claimed |
-| Current activity | Align the WOS-01A primary traceability row to the complete five-part dependency law and replace stale implementation-status/review scope; then require one fresh independent review of the resulting published head |
-| Product-owner Gate B | Approved; bounded WOS-00F correction authorized |
-| WOS-01A | Draft PR #12 is dependency-blocked and earns no implementation credit |
-| Application source | Not accepted/imported into `main`; reference repository remains read-only |
-| Acceptance blocker | Fresh clean exact-head independent review of the moved PR #14 head, controlled merge and corrected baseline recording; WOS-01A additionally requires explicit controller reauthorization and PR #12 recreate/rebase |
-
-## 4. Workstream status
-
-| Workstream | Weight | State | Accepted weight | Notes |
-|---|---:|---|---:|---|
-| WOS-00 | 8% | Corrective hold | 0% | PR #1 merged, then Round-14 defects triggered WOS-00F PR #14 |
-| WOS-01 | 10% | Dependency-blocked | 0% | Issue #3 / Draft PR #12; no source-bootstrap acceptance before corrected WOS-00 baseline and full five-part reauthorization gate |
-| WOS-02 | 10% | Not started | 0% | Issue #4; organization/setup |
-| WOS-03 | 10% | Not started | 0% | Issue #5; modular platform and CI/migrations |
-| WOS-04 | 16% | Not started | 0% | Issue #6; engagements/work capture |
-| WOS-05 | 8% | Not started | 0% | Issue #7; approval/policy engine |
-| WOS-06 | 20% | Not started | 0% | Issue #8; commercial/invoice readiness |
-| WOS-07 | 6% | Not started | 0% | Issue #9; reporting/leakage/notifications/integrations |
-| WOS-08 | 8% | Not started | 0% | Issue #10; security/operations |
-| WOS-09 | 4% | Not started | 0% | Issue #11; release/handover |
-| **Total** | **100%** |  | **0%** |  |
-
-## 5. Release status
-
-| Release | State | Exit criteria |
+| Package | Observed evidence | Acceptance boundary |
 |---|---|---|
-| v0.1.0 | Corrective hold | Gate B approved; WOS-00F PR #14 must be clean-reviewed/merged and corrected exact `main` baseline recorded |
-| v0.2.0 | Blocked | WOS-01 clean source and neutral configurable brand after corrected v0.1.0 baseline plus explicit controller reauthorization/recreate-or-rebase gate |
-| v0.4.0 | Not started | Organization and platform foundation |
-| v0.5.0 | Not started | Engagements, work capture and policy engine |
-| v0.7.0 | Not started | Commercial and invoice-readiness engine |
-| v0.8.0 | Not started | Reports, leakage, notifications and integrations |
-| v0.9.0 | Not started | Enterprise security/operations release candidate |
-| v1.0.0 | Not started | Sellable buyer-owned release |
+| [PR136 legacy approval scope](https://github.com/APReddy-AutoBotz/WorkOS/pull/136) | All three jobs passed in [CI43539905582](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43539905582) | Draft head `8df0d51840206540e219c84d67f87089aab18374`, not main |
+| [PR137 settings persistence](https://github.com/APReddy-AutoBotz/WorkOS/pull/137) | All three jobs passed in [CI43539970689](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43539970689) | Draft head `861056d0b96871fc62bf447a2545b0644c37f6da`, not main |
+| [PR138 uncertain commercial saves](https://github.com/APReddy-AutoBotz/WorkOS/pull/138) | All three jobs passed in [CI43539981405](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43539981405) | Draft head `d7b9aa0b723bf14812e1d7d8994760a52c5a187f`, not main |
+| [PR139 import-template integrity](https://github.com/APReddy-AutoBotz/WorkOS/pull/139) | All three jobs passed in [CI43541100440](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43541100440) | Draft head `c4096297a65b3d7c5a67f24648e5b616d91779cd`, not main |
+| [PR140 project-detail recovery](https://github.com/APReddy-AutoBotz/WorkOS/pull/140) | All three jobs passed in [CI43542566269](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43542566269) | Draft head `463c6da588d2c4859e889057bb964152c47616ab`, not main |
+| [PR141 planning recovery](https://github.com/APReddy-AutoBotz/WorkOS/pull/141) | All three jobs passed in [CI43543417277](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43543417277) | Draft head `d17826115ac0667986cf507cfda44867cb3f3f0c`, not main |
+| Project-contribution replacement | Local pure, scoped PostgreSQL/API, strict-client, controlled-browser, type and production-build checks passed | Unpublished unfinished implementation; export retention and complete real database/browser acceptance outstanding |
 
-## 6. Active controls
+These examples are not an exhaustive acceptance register for the entire stack. Each package still needs prerequisite reconciliation, actual-diff review and exact-head merge eligibility. No PR is accepted merely because this table mentions passing CI.
 
-- Preserve the authorized reference source unchanged and read-only.
-- Do not resume, rebase, merge or award credit to WOS-01A PR #12 until WOS-00F is clean-reviewed and merged, the corrected `main` SHA is recorded, and the controller explicitly reauthorizes and recreates or rebases PR #12 from that baseline.
-- Import only the pinned authorized source commit after the corrected WOS-00 baseline is accepted and the complete WOS-01A resume gate is satisfied.
-- Do not merge company-branded imported runtime content; neutralize it in the controlled WOS-01 boundary before any clean-source merge.
-- Keep transaction-specific pricing, valuation, licensing, assignment and negotiation strategy outside the product repository.
-- Treat WorkOS as a temporary configurable name.
-- Keep financial calculations deterministic and server authoritative.
-- Keep operational earned-management metrics explicitly non-statutory, effective-dated and policy-gated.
-- Separate valuation, source-specific billing eligibility, approved-unbilled registration, batching and export. Earned-management output never grants billing eligibility or invoice readiness.
-- Make the approved-unbilled item the only batchable object and retain database-enforced unique current occupancy.
-- Use canonical invoice-batch states/occupancy; failed provider/CSV export remains `Approved`.
-- Invoice-batch approval is final for a batch version once the batch reaches `Approved`; generic reopen is prohibited for `Approved`, `Exported`, `Billed/Confirmed` and `Cancelled`.
-- Pre-export material correction of an approved batch uses protected cancellation plus replacement/new approval; post-export/billing correction uses versioned reversal/supersession plus a new correction batch/approval.
-- Require PR-012 engineering acceptance independently proven at an exact head before product-owner Gate C. PR-011 alone cannot satisfy Gate C and Gate C cannot replace engineering evidence.
-- Implement PR-013 against four notification policy classes and thirteen canonical event/template rows.
-- For `approval.rejected_or_correction_required`, resolve requester, affected worker where applicable, commercial change owner for commercial sources, and invoice-batch owner/finance preparer where applicable from authoritative scoped relationships; deduplicate identities while retaining reasons.
-- Mandatory stale/out-of-scope/partial protected-recipient resolution fails closed visibly; callers cannot redirect or omit protected recipients.
-- Generic rejection/correction is mutually exclusive with `commercial.approval_required` and `invoice_batch.action_required` for the same generic decision.
-- Require configured OIDC and named accounts for every production deployment; missing, invalid or unavailable OIDC fails closed with no WorkOS local-auth fallback.
-- Leave/absence is availability-only and cannot become productive/billable work or reduce capacity twice.
+## Remaining release work
 
-## 7. Review history
+- Finish the full-source security review and disposition findings against the intended integration head; verify fixes rather than transferring evidence from unrelated revisions.
+- Complete consistent project utilization/contribution reporting and governed exports; identify remaining legacy compatibility surfaces and their parity gates.
+- Close remaining workflow failure/recovery gaps and verify affected roles end-to-end.
+- Produce Standard-profile performance/query-plan evidence, production-like backup/restore and operational recovery evidence.
+- Resolve remaining branding-scan and release-document inconsistencies, then run the full acceptance matrix at one immutable head.
+- Complete buyer identity/configuration, operational ownership, reconciliation, UAT and handover. Engineering integration is not buyer acceptance or deployment approval.
 
-1. `492715dc8a40de6431365b6e52378d317721f617`: five P1, two P2.
-2. `c2e3dbb74bc7c78a8f946222497850ac0c49ac78`: two P1.
-3. `1f36b49461b86516b5855dbf9930a75f234b58e1`: one P1.
-4. `9fc70babdf7c4d5c72f9d18a54f8c2318c903b3b`: one P1.
-5. `649db270e8d43af152076e1f99e07c7204c575fc`: two P1.
-6. `7124709e4f6682ded0321c58d22a6851a5e32b9d`: four P1, two P2.
-7. `76f05c9da71d21b1f774afc91e13dad4323d6358`, review `PRR_kwDOUAv8Lc8AAAABKh3paA`: two P1.
-8. `b30ec6f921262602edcab9e9d96a2dbb1c8571b2`, review `PRR_kwDOUAv8Lc8AAAABKh6Tsg`: two P1.
-9. `be42c047f6bcf2d4aa3476a7368bea04ebff1e70`, review `PRR_kwDOUAv8Lc8AAAABKh-0NA`: one P1, one P2.
-10. `d0e20c82c9ff3e9df4cfd14668024f7a4663c5a8`, review `PRR_kwDOUAv8Lc8AAAABKh_5pA`: three P2.
-11. `cd45de9181858d722e2974e92d6aaa53ba04ec17`, review `PRR_kwDOUAv8Lc8AAAABKiBoBw`: two P1, one P2.
-12. `a023ebef80fad7aea354f3759801a430de18cb6e`, review/timeline `PRR_kwDOUAv8Lc8AAAABKiJB1g`: one P1.
-13. `86484cde78f1350a4a0a3f55f368f2e919353663`, review `PRR_kwDOUAv8Lc8AAAABKiIDxA`: one P1, one P2.
-14. Post-merge review of PR #1 head `e8e05e0f17e78e7ef19a35c078601ebda5881a45`, review `PRR_kwDOUAv8Lc8AAAABKiPf2w`: one P1 (`PRRT_kwDOUAv8Lc6beCXL`) and one P2 (`PRRT_kwDOUAv8Lc6beCXQ`), triggering WOS-00F.
-15. Review `PRR_kwDOUAv8Lc8AAAABKkn3EA` of WOS-00F head `039789b7860d38115c7dfbd39dd26c0a36314a6a`: three P2 covering canonical recipient matrices, issue ownership and stale implementation status; corrected.
-16. Review `PRR_kwDOUAv8Lc8AAAABKlyssg` of exact head `78d89bc3a4cda87354eb3e494ea8c816bd2f5bbf`: P2 `PRRT_kwDOUAv8Lc6bneWi` for stale primary traceability and P2 `PRRT_kwDOUAv8Lc6bneWu` for missing atomic protected-recipient persistence; corrected.
-17. Review `PRR_kwDOUAv8Lc8AAAABKl2Ozw` of the same exact head: P2 `PRRT_kwDOUAv8Lc6bnl_f` for missing actual verification outcomes and P2 `PRRT_kwDOUAv8Lc6bnl_i` for rollback wording that did not preserve the corrective hold; corrected.
-18. Review `PRR_kwDOUAv8Lc8AAAABKnPSiQ` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264`: three P2 findings covering stale WOS-01 authorization, a forbidden-term evidence contradiction and unsupported Mermaid-validation PASS evidence; corrected.
-19. Review `PRR_kwDOUAv8Lc8AAAABKnm5YA` of exact head `c6185a7f5b39dda71c4198c305263e65e85f8264`: two P2 findings covering missing corrected-main baseline recording in backlog authority and incomplete A–I adversarial evidence; corrected.
-20. Review `PRR_kwDOUAv8Lc8AAAABKpzHEw` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed`: two P2 current-authority findings; corrected.
-21. Review `PRR_kwDOUAv8Lc8AAAABKp-K9w` of exact head `81f58a01d980031c87415bf5ba5347ec39877eed`: one P2 current-authority finding; corrected.
-22. Review `PRR_kwDOUAv8Lc8AAAABKqRg4w` of exact head `1efca7ad2dcc4c7d2b8a0cb298a829e98fd385c6`: two P2 findings — `PRRT_kwDOUAv8Lc6bx0dl` for the incomplete primary WOS-01A traceability gate and `PRRT_kwDOUAv8Lc6bx0du` for stale implementation-status/review scope. This controller convergence addresses both but does not claim a clean final review.
+## Integration now authorized
 
-The detailed resolution authority is `docs/evidence/v0.1.0/DOC-WOS-00-002-REVIEW-RESOLUTION.md` plus the WOS-00F correction report. No clean final WOS-00F review is claimed yet.
-
-## 8. Next controller actions
-
-1. Verify the authority/traceability convergence is fully published on the existing Draft PR #14 branch and re-read the exact moved head.
-2. Revalidate the two Round-22 P2 threads against that published head; resolve them only when the corrected content is present and the threads are outdated or demonstrably addressed.
-3. Request exactly one fresh independent Codex/Sol review of the exact moved PR #14 head against the frozen WOS-00F A–I closure matrix.
-4. Any new P0/P1/P2 blocks Ready/merge and must be corrected on the same PR followed by another exact-head review.
-5. If the fresh review is clean, mark PR #14 ready only under repository-defined authority, re-read the head and squash-merge with an expected-head guard.
-6. Record the corrected exact `main` baseline; close issue #13 and return issue #2 to completed only after merge verification.
-7. Only after the corrected baseline is recorded may the controller explicitly reauthorize WOS-01A; PR #12 must then be recreated or rebased from that corrected baseline before source import resumes.
-
-## 9. Status update template
-
-```text
-Overall accepted readiness: XX%
-Product capability: XX%
-Commercial capability: XX%
-Enterprise platform: XX%
-Quality and evidence: XX%
-Buyer handover: XX%
-
-Current workstream:
-Current PR:
-Exact head:
-CI status:
-Review status:
-Blocking findings:
-Owner decision required:
-Next controller action:
-```
+The owner requested updated product vision, plan and README, and merging eligible changes. Follow the [enterprise delivery roadmap](../05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md) and [merge policy](../05-delivery/PR_REVIEW_AND_MERGE_POLICY.md). Independent documentation can merge ahead of unfinished features; dependent implementation cannot bypass prerequisites or blocking findings. Record resulting main SHAs and main checks after every integration step.
