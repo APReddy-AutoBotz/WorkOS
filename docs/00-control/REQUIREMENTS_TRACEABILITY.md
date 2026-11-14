@@ -372,3 +372,11 @@ PR-008F integration adds bounded WOS-NFR-UX-001/005 response validation: unknown
 Current owner authorization supersedes the historical review/merge deferral above. Fresh local acceptance, independent exact-head review and hosted gates are required before integration; release and buyer acceptance remain open.
 
 PR-008G integration also addresses bounded WOS-NFR-UX-001/005 response integrity: work-type diagnostics require a literal allowed string; malformed coercible arrays cannot enter the typed projection. The unused-field edge has regression evidence and separate correction review requirements.
+
+### PR-008H bounded continuation: retained submission and correction history
+
+[PR-008H](../tasks/WOS-04-WORK-SUBMISSION-HISTORY.md) makes WOS-TIM-008/specification retained evidence inspectable from existing worker/approver workspaces, dependent on unchanged PR61 `5b301346688b324af6913ae2ef4d66d2be31b7de`. Pre-implementation plan commit `2b4d596` defines the read-only bounded contract. Existing header-list permission and role/scope predicates are shared verbatim by the paginated history reader; stored exact work dimensions and recorded decisions are allowlisted, with absent legacy metadata and missing history explicit. No workflow, policy, grant, schema, work or financial behavior changes. Unit/transport, real PostgreSQL/API and React/API/PostgreSQL tests cover all header-role branches, immutable correction/approval/import histories, legacy empty/omitted fields, cursor bounds, read neutrality, retry and late owner/header responses. Broader reopen/correction workflow, TIM008/PR008 and integrated acceptance remain open; optional formal reviews are deferred and outstanding.
+
+Current owner authorization supersedes PR-008H historical development-only review/merge deferrals. Integration uses accepted PR61 correction `e7439e3f8e57e39b925c10e316c5b7ce18fb2d40`; fresh local evidence, independent exact-head review and hosted checks remain required. Full TIM008/PR008 and release acceptance remain open.
+
+PR-008H integration adds bounded WOS-NFR-UX-001/005 strict response validation: historical work type and decision status must be literal allowed strings; malformed coercible values fail closed with negative regression coverage.

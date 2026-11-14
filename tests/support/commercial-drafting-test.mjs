@@ -204,7 +204,7 @@ export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UT
     const identity = typeof value === 'string' ? Object.values(identities).find(item => item.id === value) : value;
     assert.ok(identity, 'session bootstrap must identify a synthetic fixture account');
     return signJourneySession({sub: identity.id, username: identity.username,
-      activeRole: role || identity.role, exp: Date.now() + 15 * 60_000}, secret);
+      activeRole: role || identity.role, employeeRecordId: identity.employeeRecordId, employeeId: identity.employeeId, countryDirectorId: identity.countryDirectorId, exp: Date.now() + 15 * 60_000}, secret);
   };
   const request = async (path, {method = 'GET', body, identity = identities.manager,
     role, scope = commercialFixture, authenticated = true, headers = {}} = {}) => {

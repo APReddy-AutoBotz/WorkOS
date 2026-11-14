@@ -1,3 +1,4 @@
+import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
 import { WorkSubmissionAssurance } from '../components/WorkSubmissionAssurance';
 import { useState, useEffect, useMemo } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -402,6 +403,7 @@ export const TimesheetApproval = () => {
                    </div>
                    <div>
                      <WorkSubmissionAssurance assurance={selectedTimesheet.workAssurance} status={selectedTimesheet.status} entryCheck={selectedTimesheet.duplicateEntryCheck} />
+              {selectedTimesheet.id&&<div key={`${selectedTimesheet.id}:${selectedTimesheet.writeToken}`}><WorkSubmissionHistory timesheetId={selectedTimesheet.id}/></div>}
                      <h4 className="font-bold text-heading">{selectedTimesheet.employeeName}</h4>
                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Period: {selectedTimesheet.weekEnding}</p>
                    </div>
