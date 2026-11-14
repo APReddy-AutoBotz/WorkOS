@@ -1,5 +1,7 @@
 # Configured product BRD and Technical Plan
 
+> **Historical reference — not current WorkOS authority.** On 2026-11-14 the product owner approved this classification while preserving the retained text below. [PRODUCT_REQUIREMENTS.md](../00-control/PRODUCT_REQUIREMENTS.md) is authoritative for current WorkOS product scope and acceptance, in the document order established by the repository operating contract. The original authority, implementation-status, release-target and supersession statements below describe the retained source baseline only. Its billing exclusions do not override current WorkOS commercial requirements. Its allowance for release with known P1 defects does not override the current [blocking-review policy](../05-delivery/CODEX_EXECUTION_PLAYBOOK.md). Historical completion statements are not current executable acceptance evidence.
+
 **Single source of truth for product scope, production-core requirements, implementation status, and next technical plan.**
 
 **Product:** Configured product Workforce Operations Core

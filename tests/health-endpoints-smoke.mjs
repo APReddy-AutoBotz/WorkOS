@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
+import {syntheticDatabaseUrl} from './support/synthetic-values.mjs';
 import express from 'express';
 import {registerHealthRoutes} from '../server/health.mjs';
 import {createIdentityProviderReadinessMonitor} from '../server/identity-readiness.mjs';
@@ -53,7 +54,7 @@ const healthEnvironment = {
   NODE_ENV: 'production',
   APP_VERSION: '1.2.3',
   BUILD_SHA: 'abcdef0123456789',
-  DATABASE_URL: 'postgresql://workos:synthetic-password@localhost/workos_test',
+  DATABASE_URL: syntheticDatabaseUrl('localhost', 'workos_test'),
 };
 registerHealthRoutes({
   app,
