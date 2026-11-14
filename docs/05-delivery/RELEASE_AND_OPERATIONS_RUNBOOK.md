@@ -231,6 +231,16 @@ Inspect closure dependencies for actual existing assignment/work/pending-approva
 
 Migration041 adds immutable lifecycle/bindings/guards and retains040 untouched. Roll forward preferred; any rollback binary must be validated with040/041 manifest and all evidence/guards retained. Never drop bindings/ledger, erase migration history or re-enable unrestricted legacy writes as rollback. All prior unit/browser/PostgreSQL/identity/scan/container gates remain required, with new lifecycle strict-service, real PostgreSQL and real React/API/PostgreSQL tests additive. Local browser/DB absence is NOT RUN; require exact-head hosted evidence. No credentials, providers, production/customer data, denied repair/diagnostic, Ready/merge/deploy or formal release acceptance is involved.
 
+## Assignment and work-date authority (PR-008A)
+
+Allocation and work writers validate the worker timeline, selected scope, assignment policy and each governed hierarchy member's active state and independently adopted terms on the relevant dates. Parent amendments do not authorize a child implicitly. Non-billable policy cannot be overridden by an incoming billability value. Legacy unpinned work remains visibly unpinned; do not manufacture historical commercial evidence.
+
+New submissions retain immutable work/policy evidence under migration044. Correct only editable Draft/Rejected periods through the authorized workflow, preserving earlier submissions and decisions. On a period, history or lifecycle conflict, reload the source before correcting it. Source-aware approval controls remain authoritative; a Teams evidence-only action cannot decide a timesheet. For an uncertain import, reconcile the retained batch/history or reuse its existing operation key; do not create a second apply with a new key.
+
+Submission assurance describes retained operational evidence, not billing eligibility or invoice readiness. Do not bypass a locked period or inactive hierarchy through imports, demo reseeding or direct data edits. Rollback requires a forward-compatible binary retaining migration044, submission/decision ledgers and database immutability guards. A pre044 writer is unsupported. Configurable work capture, richer capacity policy and later financial controls remain separate work packages.
+
+MyTimesheet displays assurance only after the selected worker/week loads. Changing week or identity abandons the old view's presentation; an already-dispatched save can still complete on its original period. Return to that period and reload to reconcile its history before repeating an uncertain submission. A failed load keeps submission disabled; reload the current view to recover.
+
 ## Governed commercial amendments (PR-007D)
 
 Amendment operators need explicit `commercial.amendments.manage` enrollment through Permission Settings, plus commercial view and lifecycle management permissions and the applicable organization/legal-entity scope. Permission managers may grant or revoke amendment authority for eligible roles or individual accounts. No role, including Admin, receives this permission by default. Retain permission-change history; granting authority or requesting a preview does not adopt terms.

@@ -1,3 +1,4 @@
+import {lockWorkPolicy,validateAssignmentPolicy,validateWorkEntries,assertWorkActorScope,assertTimesheetEditable,validateImportWorkStatus,retainWorkSubmission,WorkPolicyError} from '../work-capture/assignment-work-policy.mjs';
 import {randomUUID} from 'node:crypto';
 import {Router} from 'express';
 import {z} from 'zod';
@@ -181,6 +182,7 @@ export const createOperationalImportRouter = ({
   REPORTING_PERIOD_OPERATIONS,
   ReportingPeriodError,
   sendReportingPeriodError,
+  upsertWorkApproval,
   logError = error => console.error(error),
 }) => {
   const requiredFunctions = [requireDatabase, requireAuth, requirePermission, audit, parseBoolean,
@@ -256,6 +258,7 @@ export const createOperationalImportRouter = ({
       const transaction = await beginImportOperation({client, req, res, channel, versioned, context, requestHash});
       transactionOpen = transaction.transactionOpen;
       if (transaction.handled) return;
+      await lockWorkPolicy(client,req);
       const blockOverAllocation = await getSetting('blockOverAllocation', false);
 
       for (const [index, row] of parsed.data.rows.entries()) {
@@ -266,7 +269,7 @@ export const createOperationalImportRouter = ({
 
         const employee = (await client.query(`
           select * from employees
-          where (id = $1 or employee_id = $1) and status <> 'Exited'
+          where (id = $1 or employee_id = $1)
             and organization_id=$2 and legal_entity_id=$3
           limit 1
         `, [row.employeeId,scope.organizationId,scope.legalEntityId])).rows[0];
@@ -274,14 +277,12 @@ export const createOperationalImportRouter = ({
 
         const project = (await client.query(`
           select * from projects
-          where (id = $1 or project_code = $1) and status in ('Active', 'Proposed')
+          where (id = $1 or project_code = $1)
             and organization_id=$2 and legal_entity_id=$3
           limit 1
         `, [row.projectId,scope.organizationId,scope.legalEntityId])).rows[0];
         if (!project) {
           rowErrors.push({rowNumber, field: 'projectId', message: 'Allocation must reference an active or proposed project.'});
-        } else if (row.startDate < toIsoDate(project.start_date) || row.endDate > toIsoDate(project.end_date)) {
-          rowErrors.push({rowNumber, field: 'startDate', message: 'Allocation dates must stay within the project timeline.'});
         }
 
         const previous = row.id
@@ -306,6 +307,12 @@ export const createOperationalImportRouter = ({
         }
 
         const nextStatus = row.status || previous?.status || 'Active';
+        if(employee&&project&&row.endDate>=row.startDate){
+          try{
+            if(previous)await assertWorkActorScope(client,req,previous.employee_id,previous.project_id,{assignment:true});
+            await validateAssignmentPolicy(client,req,{employee_id:employee.id,project_id:project.id,start_date:row.startDate,end_date:row.endDate,billable:parseBoolean(row.billable,previous?.billable??true)});
+          }catch(error){if(!(error instanceof WorkPolicyError))throw error;rowErrors.push({rowNumber,field:'projectId',message:error.message,code:error.code});}
+        }
 
         if (blockOverAllocation && employee && nextStatus === 'Active') {
           await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [employee.id]);
@@ -471,13 +478,14 @@ export const createOperationalImportRouter = ({
       const transaction = await beginImportOperation({client, req, res, channel, versioned, context, requestHash});
       transactionOpen = transaction.transactionOpen;
       if (transaction.handled) return;
+      await lockWorkPolicy(client,req);
 
       for (const [index, row] of parsed.data.rows.entries()) {
         const rowNumber = rowNumbers[index];
         if (duplicateImportRows.duplicateRowNumbers.has(rowNumber)) continue;
         const rowErrors = [];
         if (isAfterToday(row.weekEnding) || isAfterToday(row.date)) rowErrors.push({rowNumber, field: 'date', message: 'Future week timesheets and future-dated entries cannot be imported.'});
-        if (versioned && !isWorkDateInsideWeek(row.date, row.weekEnding)) {
+        if (!isWorkDateInsideWeek(row.date, row.weekEnding)) {
           rowErrors.push({rowNumber, field: 'date', message: `Entry work date ${row.date} must fall within the seven-day period ending ${row.weekEnding}.`});
         }
 
@@ -486,7 +494,7 @@ export const createOperationalImportRouter = ({
           from employees
           where (id = $1 or employee_id = $1)
             and organization_id = $2 and legal_entity_id = $3
-            and status <> 'Exited'
+
           limit 1
         `, [row.employeeId, scope.organizationId, scope.legalEntityId])).rows[0];
         if (!employee) rowErrors.push({rowNumber, field: 'employeeId', message: 'Timesheet must reference an active employee.'});
@@ -500,19 +508,11 @@ export const createOperationalImportRouter = ({
               from projects
               where (id = $1 or project_code = $1)
                 and organization_id = $2 and legal_entity_id = $3
-                and status <> 'Completed'
+
               limit 1
             `, [row.projectId, scope.organizationId, scope.legalEntityId])).rows[0];
             if (!project) rowErrors.push({rowNumber, field: 'projectId', message: 'Project Work entries must reference active, proposed, or on-hold projects.'});
-            else if (!(await client.query(`
-              select 1 from project_allocations
-              where employee_id = $1 and project_id = $2
-                and organization_id = $3 and legal_entity_id = $4
-                and status = 'Active' and $5::date between start_date and end_date
-              limit 1
-            `, [employee?.id || '', project.id, scope.organizationId, scope.legalEntityId, row.date])).rows[0]) {
-              rowErrors.push({rowNumber, field: 'projectId', message: 'Project work requires an active allocation covering the entry date.'});
-            }
+
           }
         }
         if (row.workType === 'Client Misc Task' && !row.clientName) rowErrors.push({rowNumber, field: 'clientName', message: 'Client Misc Task entries require a client name.'});
@@ -531,6 +531,7 @@ export const createOperationalImportRouter = ({
         }
 
         const status = row.status || 'Submitted';
+        try{validateImportWorkStatus(status);}catch(error){errors.push({rowNumber,field:'status',message:error.message,code:error.code});continue;}
         const key = `${employee.id}:${row.weekEnding}`;
         const group = groups.get(key) || {
           employee,
@@ -559,7 +560,15 @@ export const createOperationalImportRouter = ({
       }
 
       for (const group of groups.values()) {
+        let policyEntries;
+        let previous;
         try {
+          if(group.entries.length>100)throw new WorkPolicyError('WORK_ENTRY_LIMIT','A work period may contain at most 100 entries.');
+          await lockWorkPolicy(client,req,[group.employee.id]);
+          previous=(await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update',[scope.organizationId,scope.legalEntityId,group.employee.id,group.weekEnding])).rows[0];
+          assertTimesheetEditable(previous);
+          policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
+          group.entries=group.entries.map((entry,index)=>({...entry,billable:policyEntries[index].billable}));
           await assertReportingPeriodAllows(client, {
             organizationId: scope.organizationId,
             legalEntityId: scope.legalEntityId,
@@ -567,7 +576,7 @@ export const createOperationalImportRouter = ({
             operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
           });
         } catch (error) {
-          if (!(error instanceof ReportingPeriodError)) throw error;
+          if (!(error instanceof ReportingPeriodError)&&!(error instanceof WorkPolicyError)) throw error;
           errors.push(...group.entries.map(entry => ({rowNumber: entry.rowNumber, field: 'date', message: error.message, code: error.code})));
           validEntryRows -= group.entries.length;
           continue;
@@ -576,10 +585,9 @@ export const createOperationalImportRouter = ({
 
         const totalHours = round1(group.entries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
         const billableHours = round1(group.entries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.hours || 0), 0));
-        const previous = (await client.query('select * from timesheets where organization_id = $1 and legal_entity_id = $2 and employee_id = $3 and week_ending = $4 for update', [scope.organizationId, scope.legalEntityId, group.employee.id, group.weekEnding])).rows[0];
         const timesheetResult = await client.query(`
           insert into timesheets (employee_id, week_ending, status, total_hours, billable_hours, rejection_reason, submitted_at, organization_id, legal_entity_id)
-          values ($1,$2,$3,$4,$5,$6, case when $3 = 'Submitted' then now() else null end,$7,$8)
+          values ($1,$2,case when $3::text in ('Draft','Submitted') then 'Draft' end,$4,$5,$6,null,$7,$8)
           on conflict (organization_id, employee_id, week_ending) do update set
             status = excluded.status,
             total_hours = excluded.total_hours,
@@ -589,13 +597,21 @@ export const createOperationalImportRouter = ({
             updated_at = now()
           returning *
         `, [group.employee.id, group.weekEnding, group.status, totalHours, billableHours, group.rejectionReason, scope.organizationId, scope.legalEntityId]);
-        const timesheet = timesheetResult.rows[0];
+        let timesheet = timesheetResult.rows[0];
         await client.query('delete from timesheet_entries where timesheet_id = $1', [timesheet.id]);
-        for (const entry of group.entries) {
-          await client.query(`
+        const savedEntries=[];
+        for (const [index,entry] of group.entries.entries()) {
+          const inserted=await client.query(`
             insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable)
-            values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *,work_date::text
           `, [timesheet.id, entry.projectId, entry.workType, entry.clientName, entry.category, entry.workDate, entry.hours, entry.remark, entry.billable]);
+          savedEntries.push({...inserted.rows[0],policy:policyEntries[index].policy});
+        }
+        if(group.status==='Submitted'){
+          timesheet=(await client.query("update timesheets set status='Submitted',submitted_at=now(),updated_at=now() where id=$1 returning *",[timesheet.id])).rows[0];
+          await retainWorkSubmission(client,req,{...timesheet,week_ending:group.weekEnding},savedEntries,'Timesheet Import CSV');
+          if(typeof upsertWorkApproval!=='function')throw new Error('Work import submission requires an approval writer.');
+          await upsertWorkApproval(client,req,{entityType:'Timesheet',entityId:String(timesheet.id),subjectEmployeeId:group.employee.id,requesterId:group.employee.id,requesterName:group.employee.name,status:'Pending',source:'Timesheet Import CSV'});
         }
         await audit(client, req, {
           module: 'Import',

@@ -89,7 +89,7 @@ await withCommercialDatabase(async({pool})=>{
       await createEngagement(client,req,amendmentEngagementInput('SYN-AMENDMENT-UPGRADE-E',contract),async()=>{});await client.query('commit');
     }catch(error){await client.query('rollback');throw error;}finally{client.release();}
     const preserved=await amendmentSnapshot(pool);const projects=await amendmentSnapshot(pool,['projects']);
-    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration043]);assert.equal(upgraded.status.isCurrent,true);
+    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration043,'044_wos04_work_submission_evidence']);assert.equal(upgraded.status.isCurrent,true);
     await defaults(pool);assert.deepEqual(await amendmentSnapshot(pool),preserved);assert.deepEqual(await amendmentSnapshot(pool,['projects']),projects);
     const replay=await migrateCommercialDatabase(pool);assert.deepEqual(replay.applied,[]);assert.deepEqual(await amendmentSnapshot(pool),preserved);
   });

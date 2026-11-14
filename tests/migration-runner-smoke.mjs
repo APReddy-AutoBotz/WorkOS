@@ -1008,6 +1008,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         },
         {
           employeeId: 'EMP-IMPORT-SUCCESS',
+          joiningDate: '2025-01-01',
           name: 'Synthetic Success Row',
           email: 'employee-import-success@example.test',
           primaryCountryDirectorId: 'cd-import-provenance-test',
@@ -2822,7 +2823,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
           hours: 8,
           remark: 'Synthetic project delivery',
           billable: true,
-          status: 'Submitted',
+          status: 'Draft',
         },
         {
           employeeId: 'EMP-IMPORT-SUCCESS',
@@ -2834,7 +2835,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
           hours: 4,
           remark: 'Synthetic client workshop',
           billable: false,
-          status: 'Submitted',
+          status: 'Draft',
         },
         {
           employeeId: 'EMP-IMPORT-SUCCESS',
@@ -2902,7 +2903,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         source_identifier: null,
         import_batch_id: timesheetPartialBody.log.id,
         import_processing_result: 'Success',
-        details: 'Created Submitted timesheet for EMP-IMPORT-SUCCESS, week ending 2026-02-06 from synthetic-timesheet-partial.csv',
+        details: 'Created Draft timesheet for EMP-IMPORT-SUCCESS, week ending 2026-02-06 from synthetic-timesheet-partial.csv',
       },
       {
         action: 'Import Create Timesheet',
@@ -2923,7 +2924,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       where e.employee_id='EMP-IMPORT-SUCCESS' and t.week_ending in (date '2026-02-06',date '2026-02-13')
       group by t.id,e.employee_id order by t.week_ending`);
     assert.deepEqual(timesheetPartialState.rows.map(({id, ...row}) => row), [
-      {employee_id:'EMP-IMPORT-SUCCESS',week_ending:'2026-02-06',status:'Submitted',total_hours:'12',billable_hours:'8',entries:2},
+      {employee_id:'EMP-IMPORT-SUCCESS',week_ending:'2026-02-06',status:'Draft',total_hours:'12',billable_hours:'8',entries:2},
       {employee_id:'EMP-IMPORT-SUCCESS',week_ending:'2026-02-13',status:'Submitted',total_hours:'3',billable_hours:'0',entries:1},
     ], 'timesheet provenance must preserve one grouped timesheet per employee/week and its input entries');
     const rejectedScopeTimesheet = await pool.query(`select
@@ -2951,7 +2952,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     });
     assert.equal(timesheetUpdateResponse.status, 200);
     const timesheetUpdateBody = await timesheetUpdateResponse.json();
-    assert.equal(timesheetUpdateBody.status, 'Success', 'same-scope timesheet imports must retain their group upsert behavior');
+    assert.equal(timesheetUpdateBody.status, 'Success', 'same-scope editable Draft imports retain group upsert behavior and may submit the replacement');
     assert.equal(timesheetUpdateBody.validRows, 1);
     assert.equal(timesheetUpdateBody.errorRows, 0);
     const timesheetUpdateState = await pool.query(`select t.id::text as id,t.status,t.total_hours::text as total_hours,
@@ -2966,7 +2967,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       total_hours: '6',
       billable_hours: '0',
       entries: 1,
-    }], 'same-scope timesheet upserts must preserve the group ID while replacing its entries');
+    }], 'editable Draft-to-Submitted upsert preserves the group ID while replacing its entries');
     const timesheetUpdateAudit = await pool.query(`select action,source,source_identifier,import_batch_id,import_processing_result
       from audit_logs where import_batch_id=$1`, [timesheetUpdateBody.log.id]);
     assert.deepEqual(timesheetUpdateAudit.rows, [{
@@ -2976,6 +2977,29 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
       import_batch_id: timesheetUpdateBody.log.id,
       import_processing_result: 'Success',
     }], 'same-scope timesheet group updates must preserve provenance and update audit behavior');
+
+    const retainedTimesheetSnapshot = async () => (await pool.query(`select jsonb_build_object(
+        'header',to_jsonb(t),
+        'entries',(select jsonb_agg(to_jsonb(e) order by e.id) from timesheet_entries e where e.timesheet_id=t.id),
+        'submissions',(select jsonb_agg(to_jsonb(w) order by w.sequence) from work_submission_evidence w where w.timesheet_id=t.id),
+        'decisions',(select jsonb_agg(to_jsonb(d) order by d.id) from work_submission_decisions d join work_submission_evidence w on w.id=d.submission_id where w.timesheet_id=t.id),
+        'approvals',(select jsonb_agg(to_jsonb(a) order by a.id) from approval_records a where a.entity_type='Timesheet' and a.entity_id=t.id::text)
+      ) value from timesheets t where t.id=$1`, [timesheetUpdateState.rows[0].id])).rows;
+    const retainedSubmitted = await retainedTimesheetSnapshot();
+    const protectedTimesheetResponse = await applyTimesheets({
+      fileName:'synthetic-timesheet-protected-replacement.csv', rows:[{
+        employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-06',workType:'Client Misc Task',
+        clientName:'Synthetic forbidden replacement',date:'2026-02-04',hours:1,status:'Draft',
+      }],
+    });
+    assert.equal(protectedTimesheetResponse.status,200);
+    const protectedTimesheetBody = await protectedTimesheetResponse.json();
+    assert.equal(protectedTimesheetBody.status,'Failed');assert.equal(protectedTimesheetBody.validRows,0);
+    assert.equal(protectedTimesheetBody.errors[0]?.code,'WORK_HISTORY_IMMUTABLE');
+    assert.deepEqual(await retainedTimesheetSnapshot(),retainedSubmitted,
+      'Submitted replacement denial preserves the complete header, entries, immutable submissions, decisions and source approvals');
+    assert.equal((await pool.query('select count(*)::int n from audit_logs where import_batch_id=$1 and entity_type=\'Timesheet\'', [protectedTimesheetBody.log.id])).rows[0].n,0,
+      'denied Submitted replacement has no successful group audit');
 
     const timesheetFutureResponse = await applyTimesheets({
       fileName: 'synthetic-timesheet-future.csv',
@@ -3180,8 +3204,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     const timesheetConcurrencyBody = {
       schemaVersion:'timesheet-import/1',dryRun:false,fileName:'synthetic-timesheet-v1-concurrent.csv',
       totalRows:2,clientErrors:[],rows:[
-        {employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-27',workType:'Client Misc Task',clientName:'Synthetic Concurrent Client',date:'2026-02-25',hours:2,status:'Submitted'},
-        {employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-27',workType:'Client Misc Task',clientName:'Synthetic Concurrent Client',date:'2026-02-26',hours:3,status:'Submitted'},
+        {employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-27',workType:'Client Misc Task',clientName:'Synthetic Concurrent Client',date:'2026-02-25',hours:2,status:'Draft'},
+        {employeeId:'EMP-IMPORT-SUCCESS',weekEnding:'2026-02-27',workType:'Client Misc Task',clientName:'Synthetic Concurrent Client',date:'2026-02-26',hours:3,status:'Draft'},
       ],
     };
     const concurrentTimesheetResponses = await Promise.all([
@@ -3223,7 +3247,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(replacedTimesheetEntries.rows.map(row => ({
       total_hours:Number(row.total_hours), entry_count:row.entry_count, hours:Number(row.hours),
     })),[{total_hours:4,entry_count:1,hours:4}],
-      'a distinct timesheet import key preserves existing per-week replacement semantics rather than appending entries');
+      'a distinct timesheet import key preserves editable Draft per-week replacement semantics rather than appending entries');
 
     const timesheetScopeBody = {...timesheetConcurrencyBody, fileName:'synthetic-timesheet-scope-isolation.csv',dryRun:true};
     const timesheetScopeDefault = await applyOperationalImportV1('timesheets',timesheetScopeBody,'timesheet-v1-scope-key',{
@@ -5092,20 +5116,21 @@ await withDisposableDatabase(async (pool) => {
     '041_wos04_governed_lifecycle',
     '042_wos04_scoped_client_profiles',
     '043_wos04_governed_amendments',
+    '044_wos04_work_submission_evidence',
   ], 'PR-006 and PR-007A–D add request/provenance/history/import contracts and additive commercial modules in order');
   assert.deepEqual([...preOrganizationAuditUpgrade.applied, ...upgrade.applied], candidateMigrations.map(item => item.id),
     'upgrade from merged main applies all additive PR-006/PR-007A–D migrations in order');
-  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle', '042_wos04_scoped_client_profiles', '043_wos04_governed_amendments'],
+  assert.deepEqual(upgrade.applied, ['038_wos03_organization_audit_access', '039_wos03_import_operation_contract', '040_wos04_commercial_drafting_foundation', '041_wos04_governed_lifecycle', '042_wos04_scoped_client_profiles', '043_wos04_governed_amendments', '044_wos04_work_submission_evidence'],
     'organization-scope and import-operation migrations apply after historical and legal-entity audit rows already exist');
-  assert.equal(upgrade.skipped.length, manifest.length - 6);
-  assert.equal(after.rows[0].count, before.rows[0].count + 6, 'the final upgrade appends migrations 038 through 043 to its ledger');
+  assert.equal(upgrade.skipped.length, manifest.length - 7);
+  assert.equal(after.rows[0].count, before.rows[0].count + 7, 'the final upgrade appends migrations 038 through 044 to its ledger');
   const status = await getMigrationStatus(pool, {rootDir: serverDir});
   assert.equal(status.isCurrent, true);
   assert.deepEqual(status.legacyUnverifiedIds, manifest.filter(item => item.id < '033_').map(item => item.id),
     'old migration rows without a recorded digest remain explicitly marked unverifiable');
   const ledger = await pool.query('select id, checksum from schema_migrations');
   const newMigrations = ledger.rows.filter(row => candidateMigrations.some(migration => migration.id === row.id));
-  assert.equal(newMigrations.length, 11, 'all PR-006/PR-007 commercial migrations are ledgered');
+  assert.equal(newMigrations.length, 12, 'all PR-006/PR-007 commercial migrations are ledgered');
   assert(newMigrations.every(row => /^[0-9a-f]{64}$/.test(row.checksum)),
     'each new migration records its actual SHA-256 checksum');
   assert(ledger.rows.filter(row => !candidateMigrations.some(migration => migration.id === row.id)).every(row => row.checksum === null),

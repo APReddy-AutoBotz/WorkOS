@@ -292,7 +292,7 @@ assert.match(timesheetImportRoute, /const status = dryRun \? 'Dry Run' : validEn
   'timesheet import success, partial and failed counts must retain their existing row semantics');
 assert.match(timesheetImportRoute, /const naturalTarget = row\.workType === 'Project Work' \? project\?\.id : row\.clientName[\s\S]*seenTimesheetEntryKeys/,
   'versioned Timesheet Import must detect duplicate natural keys after resolving employee/project aliases');
-assert.match(timesheetImportRoute, /versioned && !isWorkDateInsideWeek\(row\.date, row\.weekEnding\)/,
+assert.match(timesheetImportRoute, /!isWorkDateInsideWeek\(row\.date, row\.weekEnding\)/,
   'versioned Timesheet Import must preserve the existing seven-day work-date rule');
 assert.match(timesheetImportRoute, /if \(dryRun\) continue;/,
   'timesheet dry runs must validate grouped period content without mutating the timesheet or entries');
