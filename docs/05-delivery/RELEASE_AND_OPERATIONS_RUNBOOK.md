@@ -241,6 +241,14 @@ Submission assurance describes retained operational evidence, not billing eligib
 
 MyTimesheet displays assurance only after the selected worker/week loads. Changing week or identity abandons the old view's presentation; an already-dispatched save can still complete on its original period. Return to that period and reload to reconcile its history before repeating an uncertain submission. A failed load keeps submission disabled; reload the current view to recover.
 
+## Daily and weekly work capture (PR-008C)
+
+An authorized scoped settings manager must explicitly enable weekly grid, daily entry or both; no default mode or permission is installed. Both presentations save the same complete weekly header. Daily entry reaches all seven Saturday-Friday dates and does not create daily approval. Hidden dates, distinct contexts and preserved entries remain part of the complete save.
+
+A stale work revision or changed mode policy rejects the command. Reload authoritative work before reconciling another edit; never manufacture a write token or retry an uncertain save as an unconditional legacy command. If scope changes during an in-flight operation, wait for settlement before using Reload work. Existing period locks, capture rules, approval and retained evidence still govern the whole header.
+
+Retain migration046 and immutable mode history on rollback, with the documented legacy API compatibility contract. This package does not add categories, evidence, overtime, deadline or reopen policy. Buyer configuration and full release acceptance remain separate.
+
 ## Effective-dated capture policy (PR-008B)
 
 Authorized scoped settings managers append capture rules at a configured current or future UTC Weekly reporting-period boundary. Select an actual available boundary; do not infer a start date, backdate a policy or install a default. Rules govern exact time increments, optional daily/weekly totals and positive-entry comments across all of a worker's work headers in the period. Existing work and submission evidence are not silently rewritten.

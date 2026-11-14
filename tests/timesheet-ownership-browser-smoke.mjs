@@ -8,6 +8,7 @@ try {
  await vite.listen();const base=`http://127.0.0.1:${vite.httpServer.address().port}`;
  browser=await chromium.launch({headless:true});const page=await browser.newPage();page.setDefaultTimeout(20000);
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.clock.setFixedTime(new Date('2026-11-13T12:00:00Z'));
  await page.goto(`${base}/tests/fixtures/timesheet-ownership.html`,{timeout:60000});
  const count=async(kind,n)=>page.waitForFunction(({kind,n})=>window.ownership[kind].length===n,{kind,n});
  const release=async(kind,index,sequence)=>page.evaluate(({kind,index,sequence})=>window.ownership[kind](index,sequence),{kind,index,sequence});
@@ -43,39 +44,42 @@ try {
  await page.getByRole('button',{name:'Submit for Approval',exact:true}).click();await count('saves',3);
  assert.equal(await page.getByRole('button',{name:'Submit for Approval',exact:true}).isDisabled(),true);
  await release('releaseSave',2,123);await shown(123);await page.getByText('Awaiting Review',{exact:true}).waitFor();
- // A failed scope switch retains the same owner, but invalidates a pending command.
+ // Failed scope switches clear work immediately and never reload before command settlement.
  await previous();await count('reads',10);await release('releaseRead',9,130);await shown(130);
+ const reload=page.getByRole('button',{name:'Reload work',exact:true});
+ const readyToReload=()=>page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Reload work'&&!b.disabled));
  await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('saves',4);
  await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
- await count('reads',11);await release('releaseRead',10,131);await shown(131);
- await release('releaseSave',3,199);
- const reload=page.getByRole('button',{name:'Reload work',exact:true});
- await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Reload work'&&!b.disabled));
- assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true,'pre-commit replacement read must not authorize another save');
- assert.equal(await page.getByRole('region',{name:'Work submission assurance',exact:true}).count(),0,'abandoned command must invalidate pre-commit assurance');
+ assert.equal(await reload.isDisabled(),true,'wait for dispatched command before reconciling');
+ assert.equal(await page.getByRole('region',{name:'Work submission assurance',exact:true}).count(),0);
+ assert.equal(await page.evaluate(()=>window.ownership.reads.length),10,'scope invalidation must not start a pre-commit read');
+ await release('releaseSave',3,199);await readyToReload();
+ assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
  assert.equal(await page.getByText('Draft timesheet saved.',{exact:true}).count(),0);
- await reload.click();await count('reads',12);await release('releaseRead',11,132);await shown(132);
- // Scope invalidation during settings preflight must recover without dispatching POST.
+ await reload.click();await count('reads',11);await release('releaseRead',10,132);await shown(132);
+ // Invalidated settings preflight must send no POST, then permit explicit reload.
  await page.evaluate(()=>window.ownership.holdSettings());
  await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('settings',2);
  await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
- await count('reads',13);await release('releaseRead',12,133);await shown(133);
- await page.evaluate(()=>window.ownership.releaseSettings(1));
- await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Reload work'&&!b.disabled));
- assert.equal(await page.evaluate(()=>window.ownership.saves.length),4,'invalidated preflight sends no command');
+ assert.equal(await reload.isDisabled(),true);
+ await page.evaluate(()=>window.ownership.releaseSettings(1));await readyToReload();
+ assert.equal(await page.evaluate(()=>window.ownership.saves.length),4);
  assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
- await reload.click();await count('reads',14);await release('releaseRead',13,134);await shown(134);
+ await reload.click();await count('reads',12);await release('releaseRead',11,134);await shown(134);
  await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('saves',5);
  await release('releaseSave',4,135);await shown(135);
- // A replacement read arriving after the abandoned command must also stay stale.
- await page.getByRole('button',{name:'Save Draft',exact:true}).click();await count('saves',6);
- await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
- await count('reads',15);await release('releaseSave',5,136);
- await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Reload work'&&!b.disabled));
- await release('releaseRead',14,137);await page.waitForTimeout(100);
- assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
- assert.equal(await page.getByRole('region',{name:'Work submission assurance',exact:true}).count(),0);
- await reload.click();await count('reads',16);await release('releaseRead',15,138);await shown(138);
+ // Scope-invalidated reads cannot restore metadata or readiness, in either timing order.
+ for (const before of [true,false]) {
+   await reload.click();const pending=await page.evaluate(()=>window.ownership.reads.length);
+   if(before)await release('releaseRead',pending-1,137);
+   await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+   if(!before)await release('releaseRead',pending-1,137);
+   await page.waitForTimeout(100);
+   assert.equal(await page.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
+   assert.equal(await page.getByRole('region',{name:'Work submission assurance',exact:true}).count(),0);
+   await reload.click();const fresh=await page.evaluate(()=>window.ownership.reads.length);
+   await release('releaseRead',fresh-1,138);await shown(138);
+ }
  assert.deepEqual(errors,[]);
  console.log('MyTimesheet ownership browser passed: held reads/saves, A-B-A navigation and identity replacement; synthetic timing, no database acceptance claim.');
 } finally {await browser?.close();await vite.close();}
