@@ -11,7 +11,7 @@ const {getToken,getOrganizationScope,resetBackendCheck}=await import('../src/ser
 const scope={organizationId:'org-synthetic',legalEntityId:'legal-synthetic'},other={organizationId:'org-other',legalEntityId:'legal-other'};
 const user={id:'worker-synthetic',employeeId:'worker-synthetic',name:'Synthetic operator',role:'Admin',permissionRole:'Admin',permissions:['settings.manage']};
 const draft={expectedLatestId:null,effectiveFrom:'2026-10-21',minimumIncrement:'0.25',dailyMaximum:'8',weeklyMaximum:'40',commentRequired:true};
-const policy={id:'capture-synthetic',sequence:1,policyVersion:'work-capture-rules/1',...draft,evidenceRequired:false,overtime:null};delete policy.expectedLatestId;
+const policy={id:'capture-synthetic',sequence:1,policyVersion:'work-capture-rules/1',...draft,evidenceRequired:false,overtime:null,submissionDeadline:null};delete policy.expectedLatestId;
 const workspace={...scope,serverDate:'2026-10-21',latestId:null,versions:[],truncated:false,activationDates:['2026-10-21']};
 const calls=[];let health='connected',status=200,gate=null,payload=null;
 const response=(body,code=200)=>new Response(JSON.stringify(body),{status:code,headers:{'Content-Type':'application/json'}});
@@ -51,6 +51,15 @@ for(const overtime of [undefined,null,{action:'warn',dailyThreshold:'8',weeklyTh
  reset();await service.append({...draft,overtime},capture());const command=JSON.parse(calls.at(-1).body);assert.deepEqual(command.overtime,overtime);assert.equal(Object.hasOwn(command,'overtime'),overtime!==undefined);
 }
 for(const submissionDeadline of [undefined,null,{anchor:'weekly-end-date',timezone:'UTC',daysAfterPeriodEnd:1,time:'12:30',graceMinutes:0,lateTreatment:'block'}]){reset();await service.append({...draft,submissionDeadline},capture());const command=JSON.parse(calls.at(-1).body);assert.deepEqual(command.submissionDeadline,submissionDeadline);assert.equal(Object.hasOwn(command,'submissionDeadline'),submissionDeadline!==undefined);}
+const deadlineRule={anchor:'weekly-end-date',timezone:'UTC',daysAfterPeriodEnd:1,time:'12:30',graceMinutes:0,lateTreatment:'block'};
+for(const submissionDeadline of [undefined,false,[],{}, {...deadlineRule,anchor:['weekly-end-date']},{...deadlineRule,timezone:'Europe/London'},{...deadlineRule,daysAfterPeriodEnd:'1'},{...deadlineRule,daysAfterPeriodEnd:-1},{...deadlineRule,daysAfterPeriodEnd:367},{...deadlineRule,graceMinutes:0.5},{...deadlineRule,graceMinutes:527041},{...deadlineRule,time:'24:00'},{...deadlineRule,lateTreatment:['warn']},{...deadlineRule,unexpected:true}]){
+ reset();payload={...workspace,latestId:policy.id,versions:[{...policy,submissionDeadline}]};await assert.rejects(service.get(capture()),{status:503},'unknown deadline must not become off');
+ reset();payload={...policy,submissionDeadline};await assert.rejects(service.append(draft,capture()),{status:503},'uncertain deadline acknowledgement requires reconciliation');assert.equal(calls.filter(c=>c.method==='POST').length,1);
+}
+for(const submissionDeadline of [null,deadlineRule,{...deadlineRule,daysAfterPeriodEnd:0,time:'00:00',graceMinutes:527040,lateTreatment:'warn'},{...deadlineRule,daysAfterPeriodEnd:366,time:'23:59'}]){
+ reset();payload={...workspace,latestId:policy.id,versions:[{...policy,submissionDeadline}]};assert.deepEqual((await service.get(capture())).versions[0].submissionDeadline,submissionDeadline);
+ reset();payload={...policy,submissionDeadline};assert.deepEqual((await service.append(draft,capture())).submissionDeadline,submissionDeadline);
+}
 const invalidOvertime=[undefined,false,[],{}, {action:['warn'],dailyThreshold:'8',weeklyThreshold:null},{action:'off',dailyThreshold:null,weeklyThreshold:null},{action:'warn',dailyThreshold:null,weeklyThreshold:null},{action:'warn',dailyThreshold:'0',weeklyThreshold:null},{action:'warn',dailyThreshold:'24.0001',weeklyThreshold:null},{action:'warn',dailyThreshold:'8.00001',weeklyThreshold:null},{action:'warn',dailyThreshold:8,weeklyThreshold:null},{action:'block',dailyThreshold:null,weeklyThreshold:'168.0001'},{action:'warn',dailyThreshold:'8'}];
 for(const overtime of invalidOvertime){
  reset();payload={...workspace,latestId:policy.id,versions:[{...policy,overtime}]};await assert.rejects(service.get(capture()),{status:503},'unknown overtime must not become an off editor');
