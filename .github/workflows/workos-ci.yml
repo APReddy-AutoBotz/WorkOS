@@ -2,7 +2,7 @@ name: WorkOS CI
 
 on:
   pull_request:
-    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments, codex/wos-04-flexible-work-capture, codex/wos-04-work-capture-policy, codex/wos-04-daily-weekly-work-capture, codex/wos-04-work-entry-evidence, codex/wos-04-work-entry-reference, codex/wos-04-required-evidence-policy, codex/wos-04-identical-entry-flags, codex/wos-04-work-submission-history, codex/wos-04-capture-role-acceptance, codex/wos-04-overtime-capture-policy, codex/wos-04-submission-deadline-policy]
+    branches: [main, codex/wos-03-modular-api-foundation, codex/utilization-overview-read-recovery, codex/planned-utilization-read-recovery, codex/actual-utilization-read-recovery, codex/forecast-utilization-read-recovery, codex/organization-profile-editor, codex/terminology-configuration-editor, codex/working-calendar-inspector, codex/import-audit-acceptance-journey, codex/wos-04-commercial-drafting-foundation, codex/wos-04-governed-lifecycle, codex/wos-04-scoped-client-profiles, codex/wos-04-governed-amendments, codex/wos-04-flexible-work-capture, codex/wos-04-work-capture-policy, codex/wos-04-daily-weekly-work-capture, codex/wos-04-work-entry-evidence, codex/wos-04-work-entry-reference, codex/wos-04-required-evidence-policy, codex/wos-04-identical-entry-flags, codex/wos-04-work-submission-history, codex/wos-04-capture-role-acceptance, codex/wos-04-overtime-capture-policy, codex/wos-04-submission-deadline-policy, codex/wos-04-work-source-identity]
   push:
     branches: [main]
   workflow_dispatch:
@@ -116,6 +116,9 @@ jobs:
       - name: Verify scoped client profiles PostgreSQL migration and API acceptance
         run: npm run test:client-profiles-postgres
 
+      - name: Verify structured workforce capabilities PostgreSQL/API acceptance
+        run: npm run test:workforce-capabilities-postgres
+
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
@@ -160,6 +163,9 @@ jobs:
 
       - name: Verify real governed amendments PostgreSQL browser journey
         run: npm run test:commercial-amendments-journey
+
+      - name: Verify workforce capabilities React/API/PostgreSQL journey
+        run: npm run test:workforce-capabilities-journey
 
       - name: Verify import and audit history browser interactions
         env:

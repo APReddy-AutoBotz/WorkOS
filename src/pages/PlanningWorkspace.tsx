@@ -1,3 +1,4 @@
+import {CapabilityPlanner} from '../components/CapabilityPlanner';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, Gauge, Layers3, ShieldCheck, UsersRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -258,6 +259,8 @@ export const PlanningWorkspace = () => {
         subtitle="Review capacity signals and update allocation plans in one workspace. Allocation edits remain the source of record."
         breadcrumb={['Planning']}
       />
+
+      <CapabilityPlanner/>
 
       <ResourcePlanningSignals embedded onFocusAllocation={canEditAllocations ? focusAllocationControl : undefined} />
 

@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {validCapabilities,validCapabilityCriteria,matchesCapabilities,capabilityLabel,validCapabilityDate,compareCapabilityIds} from '../shared/workforce-capabilities.mjs';
+const skill='Synthetic <strong>雪🚀</strong>',profile={skills:[{skill,proficiency:'Buyer vocabulary β'}],certifications:[{certification:'Synthetic certificate',validFrom:'2026-01-01',validThrough:'2026-10-24',noExpiry:false}],availabilityNote:'Synthetic note\nNot a capacity calculation'};
+assert(validCapabilities(profile));assert(validCapabilities({skills:[],certifications:[],availabilityNote:null}));
+for(const label of ['', ' edge','edge ', 'bad\nline','bad\u0085','bad\ufeff','bad\ud800','x'.repeat(101)])assert.equal(capabilityLabel(label),false);
+for(const date of ['2026-02-29','0000-01-01','2026-1-01','not a date'])assert.equal(validCapabilityDate(date),false);assert(validCapabilityDate('2024-02-29'));
+for(const value of [null,{}, {...profile,skills:[...profile.skills,...profile.skills]}, {...profile,skills:[{skill}]}, {...profile,extra:true}, {...profile,certifications:[{...profile.certifications[0],noExpiry:true}]}, {...profile,certifications:[{...profile.certifications[0],validThrough:'2025-01-01'}]}, {...profile,availabilityNote:' bad'}])assert.equal(validCapabilities(value),false);
+const criteria={skill,proficiency:null,certification:'Synthetic certificate',validOn:'2026-10-24'};assert(validCapabilityCriteria(criteria));assert(matchesCapabilities(profile,criteria));
+for(const change of [{skill:skill.toLowerCase()},{proficiency:'Different'},{validOn:'2026-10-25'},{validOn:'2025-12-31'},{certification:'synthetic certificate'}])assert.equal(matchesCapabilities(profile,{...criteria,...change}),false);
+assert(matchesCapabilities({...profile,certifications:[{...profile.certifications[0],validThrough:null,noExpiry:true}]},{...criteria,validOn:'2099-01-01'}));
+assert.equal(validCapabilityCriteria({...criteria,validOn:null}),false);assert.equal(validCapabilityCriteria({...criteria,skill:null,proficiency:'Buyer vocabulary β'}),false);
+assert.equal(validCapabilityCriteria({...criteria,certification:null}),false);assert.equal(compareCapabilityIds('id-\uE000','id-🚀'),-1);
+assert.equal(matchesCapabilities({skills:[{skill:'é',proficiency:null}],certifications:[],availabilityNote:null},{skill:'e\u0301',proficiency:null,certification:null,validOn:null}),false);
+console.log('Structured capability validation, explicit certification dates/no-expiry, exact Unicode/proficiency AND filtering and C-order IDs passed.');
