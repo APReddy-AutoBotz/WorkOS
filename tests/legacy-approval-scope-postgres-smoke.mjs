@@ -59,6 +59,15 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     }
   };
   await assertDelegated(true);
+  await pool.query("update approval_delegations set start_date=current_date-2,end_date=current_date-1 where id=$1",[created.body.id]);await assertDelegated(false);
+  await pool.query("update approval_delegations set start_date=current_date,end_date=current_date where id=$1",[created.body.id]);
+  await pool.query("update employees set reporting_manager_id=null where id='synthetic-delegated-worker'");await assertDelegated(false);
+  await pool.query("update employees set reporting_manager_id=$1 where id='synthetic-delegated-worker'",[f.ownerId]);
+  await pool.query("update employees set status='Exited' where id=$1",[employee]);await assertDelegated(false);
+  const revokeExited=await request('/api/approval-delegations',{method:'POST',body:{...body,id:created.body.id,status:'Inactive'}});
+  assert.equal(revokeExited.status,200,'Scoped administration can revoke delegation after a participant exits');
+  await pool.query("update employees set status='Active' where id=$1",[employee]);
+  await pool.query("update approval_delegations set status='Active' where id=$1",[created.body.id]);await assertDelegated(true);
   await pool.query("update users set status='Disabled' where id=$1",[ids.reader.id]);await assertDelegated(false);
   await pool.query("update users set status='Active' where id=$1",[ids.reader.id]);await assertDelegated(true);
   await pool.query("delete from user_roles where user_id=$1 and role_id=(select id from roles where name='TeamLead')",[ids.reader.id]);await assertDelegated(false);

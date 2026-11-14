@@ -84,7 +84,7 @@ app.post('/api/approval-delegations', requireDatabase, requireAuth, requirePermi
     `, [parsed.data.delegator_id, parsed.data.delegate_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows;
     const delegator = people.find(row => row.id === parsed.data.delegator_id);
     const delegate = people.find(row => row.id === parsed.data.delegate_id);
-    if (!delegator || !delegate || delegator.status === 'Exited' || delegate.status === 'Exited') {
+    if (!delegator || !delegate || (parsed.data.status === 'Active' && (delegator.status === 'Exited' || delegate.status === 'Exited'))) {
       await client.query('rollback');
       res.status(422).json({ error: 'Delegation requires active delegator and delegate employees' });
       return;
