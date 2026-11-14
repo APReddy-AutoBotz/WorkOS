@@ -1,3 +1,4 @@
+import {decimalQuantity,compareHours} from '../../shared/work-hours.mjs';
 import {api, checkBackend, ApiClientError} from './apiClient';
 import {assertOrganizationProfileContext, type OrganizationProfileContext} from './organizationProfileScope';
 
@@ -12,8 +13,24 @@ export type CapturePolicyWorkspace = {
   versions: CapturePolicy[]; truncated: boolean; activationDates: string[];
 };
 export type CapturePolicyDraft = Pick<CapturePolicy, 'effectiveFrom' | 'minimumIncrement' | 'dailyMaximum' | 'weeklyMaximum' | 'commentRequired'> & {expectedLatestId: string | null; evidenceRequired?: boolean;overtime?:OvertimeCaptureRule|null};
+const hasOvertimeRule = (value: unknown) => {
+  if (value === null) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const rule = value as Record<string, unknown>;
+  if ((rule.action !== 'warn' && rule.action !== 'block')
+    || Object.keys(rule).sort().join(',') !== 'action,dailyThreshold,weeklyThreshold'
+    || (rule.dailyThreshold === null && rule.weeklyThreshold === null)) return false;
+  return [['dailyThreshold', '24'], ['weeklyThreshold', '168']].every(([key, maximum]) => {
+    const threshold = rule[key];
+    if (threshold === null) return true;
+    if (typeof threshold !== 'string') return false;
+    try { const quantity = decimalQuantity(threshold); return quantity.units > 0n && quantity.scale <= 4 && compareHours(threshold, maximum) <= 0; }
+    catch { return false; }
+  });
+};
 const hasEvidencePolicy = (value: unknown) => value !== null && typeof value === 'object' && !Array.isArray(value)
-  && typeof (value as Record<string, unknown>).evidenceRequired === 'boolean';
+  && typeof (value as Record<string, unknown>).evidenceRequired === 'boolean'
+  && hasOvertimeRule((value as Record<string, unknown>).overtime);
 const invalidPolicyResponse = () => new ApiClientError('Capture policy response could not be verified. Reload before making another change.', {status: 503});
 export const workCapturePolicyService = {
   get: async (context: OrganizationProfileContext | null): Promise<CapturePolicyWorkspace> => {
@@ -23,7 +40,7 @@ export const workCapturePolicyService = {
     const result = await api.requestWithContext<CapturePolicyWorkspace>('GET', '/api/v1/work-capture-policy', undefined, owner);
     assertOrganizationProfileContext(owner);
     if (result.organizationId !== owner.scope.organizationId || result.legalEntityId !== owner.scope.legalEntityId) throw new ApiClientError('Capture policy scope changed. Reload.', {status: 403});
-    // Missing evidence configuration is unknown, never an implicit opt-out.
+    // Missing evidence or overtime configuration is unknown, never an implicit opt-out.
     if (!Array.isArray(result.versions) || !result.versions.every(hasEvidencePolicy)
       || result.latestId !== (result.versions[0]?.id ?? null)) throw invalidPolicyResponse();
     return result;
