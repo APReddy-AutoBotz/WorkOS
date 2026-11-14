@@ -588,3 +588,7 @@ WOS-CORE-003, WOS-IAM-005/009/010, WOS-WKF-008 and WOS-NFR-SEC-004: [current wor
 ## Invoice action source authority
 
 WOS-CORE-003, WOS-IAM-005/010, WOS-INV-002, WOS-INT-002 and WOS-NFR-SEC-004/012: [invoice action source scope](../tasks/WOS-06-INVOICE-ACTION-SOURCE-SCOPE.md) applies milestone visibility to source, template, assessment, receipt/replay and recipient history. Migration 096 supplements insert/commit authority and preserves immutable records. Real API/SQL negatives and populated upgrade evidence distinguish current authorization from historical business state.
+
+## Legacy approval scope and delegation ownership
+
+WOS-CORE-003/005, WOS-IAM-003/005/010, WOS-APR-004 and WOS-NFR-SEC-004/012: [legacy approval boundaries](../tasks/WOS-05-LEGACY-APPROVAL-SCOPE.md) applies selected-entity scope to inbox, SLA and decisions; protects retained delegator ownership; and revalidates participant role, account, permission and lifecycle. Real API tests cover denial without protected mutation, valid delegation, revocation, overlap concurrency and audit rollback. Canonical source-specific approval guards remain authoritative. No migration or automatic historical adoption.

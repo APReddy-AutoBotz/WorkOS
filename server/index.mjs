@@ -1,3 +1,5 @@
+import {legacyApprovalScope} from './modules/approvals/legacy-approval-scope.mjs';
+import {registerLegacyDelegationRoutes} from './modules/approvals/legacy-delegation-router.mjs';
 import {saveWorkerLogin} from './modules/identity-access/worker-login.mjs';
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
 import {assertIndependentLeaveDecision} from './modules/leave/decision-independence.mjs';
@@ -3335,24 +3337,7 @@ app.use('/api', createAvailabilityReportRouter({
   buildEmployeeScopeWhere,
 }));
 
-const buildApprovalScopeWhere = (req, params) => {
-  if (isGlobalRole(req)) return 'true';
-  params.push(req.user.employeeRecordId);
-  const delegateParam = `$${params.length}`;
-  const delegatedScope = `exists (
-    select 1
-    from approval_delegations ad
-    where ad.delegate_id = ${delegateParam}
-      and ad.status = 'Active'
-      and current_date between ad.start_date and ad.end_date
-      and (e.id = ad.delegator_id or e.reporting_manager_id = ad.delegator_id)
-  )`;
-  if (req.user.activeRole === 'TeamLead') {
-    params.push(req.user.employeeRecordId, req.user.employeeId);
-    return `((e.id = $${params.length - 1} or e.employee_id = $${params.length} or e.reporting_manager_id = $${params.length - 1}) or ${delegatedScope})`;
-  }
-  return `(${buildEmployeeScopeWhere(req, params, 'e')} or ${delegatedScope})`;
-};
+const buildApprovalScopeWhere = (req, params) => legacyApprovalScope(req, params, {isGlobalRole, buildEmployeeScopeWhere});
 
 const workApprovalOptions={getSetting,buildProjectScopeWhere,fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord,upsertApprovalRecord,getBusinessLeaveDays,getLeaveYear,ensureLeaveBalanceForRequest,refreshLeaveBalancesForEmployee};
 
@@ -3519,117 +3504,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
   }
 });
 
-app.get('/api/approval-delegations', requireDatabase, requireAuth, requirePermission('approvals.view'), async (req, res) => {
-  const params = [];
-  let where = 'true';
-  if (!isGlobalRole(req)) {
-    params.push(req.user.employeeRecordId);
-    where = '(ad.delegator_id = $1 or ad.delegate_id = $1)';
-  }
-  await run(res, `
-    select ad.*, delegator.name as delegator_name, delegate.name as delegate_name
-    from approval_delegations ad
-    left join employees delegator on delegator.id = ad.delegator_id
-    left join employees delegate on delegate.id = ad.delegate_id
-    where ${where}
-    order by ad.status desc, ad.start_date desc
-  `, params);
-});
-
-app.post('/api/approval-delegations', requireDatabase, requireAuth, requirePermission('approvals.view'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    delegator_id: z.string().min(1),
-    delegate_id: z.string().min(1),
-    role: z.string().min(1),
-    start_date: z.string().min(10),
-    end_date: z.string().min(10),
-    status: z.enum(['Active', 'Inactive']).default('Active'),
-    reason: z.string().nullable().optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  if (parsed.data.end_date < parsed.data.start_date) {
-    res.status(422).json({ error: 'Delegation end date must be on or after start date' });
-    return;
-  }
-  if (parsed.data.delegator_id === parsed.data.delegate_id) {
-    res.status(422).json({ error: 'Delegator and delegate must be different employees' });
-    return;
-  }
-  if (!isGlobalRole(req) && parsed.data.delegator_id !== req.user.employeeRecordId) {
-    res.status(403).json({ error: 'Users can create delegations only for themselves' });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const people = (await client.query(`
-      select id, status
-      from employees
-      where id in ($1, $2)
-    `, [parsed.data.delegator_id, parsed.data.delegate_id])).rows;
-    const delegator = people.find(row => row.id === parsed.data.delegator_id);
-    const delegate = people.find(row => row.id === parsed.data.delegate_id);
-    if (!delegator || !delegate || delegator.status === 'Exited' || delegate.status === 'Exited') {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Delegation requires active delegator and delegate employees' });
-      return;
-    }
-    const overlapping = (await client.query(`
-      select id
-      from approval_delegations
-      where id <> coalesce($1, '')
-        and delegator_id = $2
-        and delegate_id = $3
-        and status = 'Active'
-        and start_date <= $5::date
-        and end_date >= $4::date
-      limit 1
-    `, [parsed.data.id || null, parsed.data.delegator_id, parsed.data.delegate_id, parsed.data.start_date, parsed.data.end_date])).rows[0];
-    if (overlapping && parsed.data.status === 'Active') {
-      await client.query('rollback');
-      res.status(422).json({ error: 'An active approval delegation already overlaps this date range' });
-      return;
-    }
-    const previous = parsed.data.id ? (await client.query('select * from approval_delegations where id = $1', [parsed.data.id])).rows[0] : null;
-    const result = await client.query(`
-      insert into approval_delegations (id, delegator_id, delegate_id, role, start_date, end_date, status, reason)
-      values (coalesce($1, 'approval-delegation-' || gen_random_uuid()::text), $2, $3, $4, $5, $6, $7, $8)
-      on conflict (id) do update set
-        delegator_id = excluded.delegator_id,
-        delegate_id = excluded.delegate_id,
-        role = excluded.role,
-        start_date = excluded.start_date,
-        end_date = excluded.end_date,
-        status = excluded.status,
-        reason = excluded.reason,
-        updated_at = now()
-      returning *
-    `, [parsed.data.id || null, parsed.data.delegator_id, parsed.data.delegate_id, parsed.data.role, parsed.data.start_date, parsed.data.end_date, parsed.data.status, parsed.data.reason || null]);
-    await audit(client, req, {
-      module: 'Approvals',
-      action: previous ? 'Update Approval Delegation' : 'Create Approval Delegation',
-      entityType: 'ApprovalDelegation',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `${previous ? 'Updated' : 'Created'} approval delegation ${result.rows[0].id}`,
-      reason: parsed.data.reason,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Approval delegation save failed' });
-  } finally {
-    client.release();
-  }
-});
+registerLegacyDelegationRoutes({app, pool, run, requireDatabase, requireAuth, requirePermission, isGlobalRole, audit});
 
 app.get('/api/reports/approval-sla', requireDatabase, requireAuth, requirePermission('approvals.view'), async (req, res) => {
   const params = [];
@@ -3637,7 +3512,7 @@ app.get('/api/reports/approval-sla', requireDatabase, requireAuth, requirePermis
   try {
     const rows = (await pool.query(`
       ${approvalSelect}
-      where ${where}
+      where (${where}) and ar.entity_type not in ('CommercialCandidateApproval','TmBillingEligibilityApproval','InvoiceBatchApproval','MilestoneBillingEligibilityApproval')
       order by ar.created_at desc
     `, params)).rows;
     const pending = rows.filter(row => row.status === 'Pending');
