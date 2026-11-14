@@ -12,6 +12,9 @@ export type CapturePolicyWorkspace = {
   versions: CapturePolicy[]; truncated: boolean; activationDates: string[];
 };
 export type CapturePolicyDraft = Pick<CapturePolicy, 'effectiveFrom' | 'minimumIncrement' | 'dailyMaximum' | 'weeklyMaximum' | 'commentRequired'> & {expectedLatestId: string | null; evidenceRequired?: boolean;overtime?:OvertimeCaptureRule|null};
+const hasEvidencePolicy = (value: unknown) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  && typeof (value as Record<string, unknown>).evidenceRequired === 'boolean';
+const invalidPolicyResponse = () => new ApiClientError('Capture policy response could not be verified. Reload before making another change.', {status: 503});
 export const workCapturePolicyService = {
   get: async (context: OrganizationProfileContext | null): Promise<CapturePolicyWorkspace> => {
     const owner = assertOrganizationProfileContext(context);
@@ -20,6 +23,9 @@ export const workCapturePolicyService = {
     const result = await api.requestWithContext<CapturePolicyWorkspace>('GET', '/api/v1/work-capture-policy', undefined, owner);
     assertOrganizationProfileContext(owner);
     if (result.organizationId !== owner.scope.organizationId || result.legalEntityId !== owner.scope.legalEntityId) throw new ApiClientError('Capture policy scope changed. Reload.', {status: 403});
+    // Missing evidence configuration is unknown, never an implicit opt-out.
+    if (!Array.isArray(result.versions) || !result.versions.every(hasEvidencePolicy)
+      || result.latestId !== (result.versions[0]?.id ?? null)) throw invalidPolicyResponse();
     return result;
   },
   append: async (input: CapturePolicyDraft, context: OrganizationProfileContext | null): Promise<CapturePolicy> => {
@@ -28,6 +34,7 @@ export const workCapturePolicyService = {
     const result = await api.requestWithContext<CapturePolicy>('POST', '/api/v1/work-capture-policy', {expectedLatestId, effectiveFrom,
       minimumIncrement, dailyMaximum, weeklyMaximum, commentRequired, evidenceRequired, overtime}, owner);
     assertOrganizationProfileContext(owner);
+    if (!hasEvidencePolicy(result)) throw invalidPolicyResponse();
     return result;
   },
 };

@@ -67,7 +67,8 @@ const pending = async (kind, after = 0) => {
   }, {kind, after});
 };
 const settle = (request, result, status) => page.evaluate(({id, result, status}) => window.organizationProfileHarness.settle(id, result, status), {id: request.id, result, status});
-const headers = (request, organizationId = 'org-a', legalEntityId = 'legal-a', token = 'synthetic-profile-token-a') => {
+let fixtureToken;
+const headers = (request, organizationId = 'org-a', legalEntityId = 'legal-a', token = fixtureToken) => {
   assert.deepEqual(request.headers, {
     authorization: `Bearer ${token}`, 'content-type': 'application/json',
     'x-organization-id': organizationId, 'x-legal-entity-id': legalEntityId,
@@ -122,6 +123,7 @@ const open = async ({strict = false} = {}) => {
   await page.goto(`${baseUrl}/tests/fixtures/organization-profile.html${strict ? '?strict=1' : ''}`);
   await page.getByRole('heading', {name: 'Organization profile', exact: true}).waitFor();
   await page.getByText('Loading organization profile…', {exact: false}).waitFor();
+  fixtureToken = await page.evaluate(() => window.organizationProfileHarness.syntheticToken);
 };
 const boot = async (value = profile(), readinessStatus) => {
   await open();

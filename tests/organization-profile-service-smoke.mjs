@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 
 // Import only after fixing production configuration: no test/demo fallback is permitted.
 process.env.APP_MODE = 'production';
@@ -37,7 +38,7 @@ const profilePath = '/api/organization-setup/profile';
 const readinessPath = '/api/organization-setup/readiness';
 const originalScope = {organizationId: 'org-synthetic-one', legalEntityId: 'legal-synthetic-one'};
 const nextScope = {organizationId: 'org-synthetic-two', legalEntityId: 'legal-synthetic-two'};
-const originalToken = 'synthetic-profile-session-one';
+const originalToken = syntheticCredential();
 const originalUser = {
   id: 'worker-synthetic-one', employeeId: 'SYN-PROFILE-ONE', role: 'HR', permissionRole: 'HR',
   permissions: ['settings.manage', 'employees.view'], name: 'Synthetic Profile Operator',
