@@ -8,6 +8,10 @@ GitHub main was initially fetched at `b9a57f8a462d8585bb3f73129080d6fae5173343` 
 
 This establishes that application source and foundations have been merged. It does not retrospectively certify every requirement, resolve every historical review finding, or demonstrate current production readiness. No numeric readiness score is asserted without a reconstructed requirement-by-requirement acceptance basis.
 
+Product vision, roadmap, README and historical-requirement authority were refreshed through [PR144](https://github.com/APReddy-AutoBotz/WorkOS/pull/144), merged at `bbce9753f151c28f54500fa676ebb9fce502b8df`. [PR41](https://github.com/APReddy-AutoBotz/WorkOS/pull/41) then merged at `006c77a821e9e580a975cfb8b8de293429612352`. Both jobs passed on its exact candidate in [CI43558124217](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43558124217) and on resulting main in [CI43559995432](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43559995432). No required step was skipped. Checks include full unit/contracts, six browser journeys (five controlled suites and real import-to-audit), production identity/startup, 35-entry fresh/upgrade/concurrent migration acceptance, dependency/secret/bootstrap scans and container checks.
+
+PR41's exact-head security diff review accounted for all 56 changed source items with no new reportable finding. It does not close the separate completed frozen-source audit's 18 findings or their unmerged remediation dependencies. The merge used a merge commit to preserve ancestry for the dependent implementation stack, rather than duplicating that history through a squash. Requirements WOS-CORE-003/005 and WOS-GOV-001/002/004 receive bounded implementation evidence; configurable retention, full observability, buyer identity/UAT and release acceptance remain open.
+
 ## Draft work and observed checks
 
 The two-page GitHub inventory contained 104 open PRs before the independent documentation and dependency-repair packages were published. Most implementation work after the modular/API foundation remains in dependent Draft branches. Separate controller branches require their own disposition; open does not mean mergeable or required.
@@ -20,13 +24,13 @@ The two-page GitHub inventory contained 104 open PRs before the independent docu
 | [PR139 import-template integrity](https://github.com/APReddy-AutoBotz/WorkOS/pull/139) | All three jobs passed in [CI43541100440](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43541100440) | Draft head `c4096297a65b3d7c5a67f24648e5b616d91779cd`, not main |
 | [PR140 project-detail recovery](https://github.com/APReddy-AutoBotz/WorkOS/pull/140) | All three jobs passed in [CI43542566269](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43542566269) | Draft head `463c6da588d2c4859e889057bb964152c47616ab`, not main |
 | [PR141 planning recovery](https://github.com/APReddy-AutoBotz/WorkOS/pull/141) | All three jobs passed in [CI43543417277](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43543417277) | Draft head `d17826115ac0667986cf507cfda44867cb3f3f0c`, not main |
-| Project-contribution replacement | Local pure, scoped PostgreSQL/API, strict-client, controlled-browser, type and production-build checks passed | Unpublished unfinished implementation; export retention and complete real database/browser acceptance outstanding |
+| [PR146 project contribution and retained export](https://github.com/APReddy-AutoBotz/WorkOS/pull/146) | Local unit/contracts, scoped PostgreSQL/API, immutable retained CSV, strict client, controlled browser and real React/API/database journey passed. A hosted stale migration expectation was corrected; the affected commercial upgrade/API suite passed locally. | Draft head `0656b09a6571b73ec29f0ddb3167da790251a6f0`; [CI43558923305](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43558923305) running at this checkpoint. Inherited bootstrap scan debt and dependency integration remain open. |
 
 These examples are not an exhaustive acceptance register for the entire stack. Each package still needs prerequisite reconciliation, actual-diff review and exact-head merge eligibility. No PR is accepted merely because this table mentions passing CI.
 
 ## Remaining release work
 
-- Finish the full-source security review and disposition findings against the intended integration head; verify fixes rather than transferring evidence from unrelated revisions.
+- Integrate and verify the completed frozen-source security audit's findings against the intended release head; do not transfer fix evidence from unrelated revisions or interpret a clean bounded diff as a clean product.
 - Complete consistent project utilization/contribution reporting and governed exports; identify remaining legacy compatibility surfaces and their parity gates.
 - Close remaining workflow failure/recovery gaps and verify affected roles end-to-end.
 - Produce Standard-profile performance/query-plan evidence, production-like backup/restore and operational recovery evidence.

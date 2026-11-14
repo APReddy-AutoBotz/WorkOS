@@ -24,9 +24,9 @@ This order preserves the existing backlog's work-package dependencies. It is not
 
 ## Current working evidence
 
-At this refresh, main was `b9a57f8a462d8585bb3f73129080d6fae5173343`. GitHub returned104 open PRs in the complete two-page inventory, mostly a dependent Draft chain; that count is a dated observation, not a progress metric. Later work includes scoped approved-work/capacity reporting, commercial controls, and security/recovery corrections. See [current status](../00-control/IMPLEMENTATION_STATUS.md) for specific observed evidence and limits.
+The initial refresh observed main at `b9a57f8a462d8585bb3f73129080d6fae5173343` and 104 open PRs, mostly a dependent Draft chain; that count is a dated observation, not a progress metric. Dependency repair PR145, documentation PR144 and modular API/import/audit foundation PR41 are now merged. The verified integration baseline is `006c77a821e9e580a975cfb8b8de293429612352`, with passing post-merge checks. PR41 used a merge commit to preserve dependent-stack ancestry. Later work includes scoped approved-work/capacity reporting, commercial controls and security/recovery corrections. See [current status](../00-control/IMPLEMENTATION_STATUS.md) for exact evidence and limits.
 
-The project-contribution replacement is unfinished local work: server/strict-client/controlled-browser checks have passed, but retained export and complete real database/browser acceptance remain. It must not be merged or described as delivered yet. Broader performance, restore, branding and release evidence also remain open.
+The project-contribution replacement and retained export are published in Draft PR146. Local server, strict-client, immutable export and real React/API/PostgreSQL acceptance passed. Corrected-head hosted checks, inherited bootstrap scanner debt and prerequisite integration remain open; publication does not establish delivery on main. Broader performance, restore, branding and release evidence also remain open.
 
 ## Keeping documents current
 
