@@ -14,5 +14,12 @@ assert.deepEqual(evaluateOvertime([week],[policy],entries,[entries.at(-1)]).map(
 const checked=validateEntryCaptureRules(entries[0],policy);assert.deepEqual(checked.capturePolicyReference.overtime,rule);assert(!Object.hasOwn(validateEntryCaptureRules(entries[0],{...policy,overtime_rule:null}).capturePolicyReference,'overtime'));
 const draft={expectedLatestId:null,effectiveFrom:week.starts_on,minimumIncrement:'0.25',dailyMaximum:null,weeklyMaximum:null,commentRequired:false};assert.equal(Object.hasOwn(capturePolicyInput.parse(draft),'overtime'),false);assert.equal(capturePolicyInput.parse({...draft,overtime:null}).overtime,null);assert.deepEqual(capturePolicyView({...policy,sequence:1,evidence_required:null}).overtime,rule);
 assert.deepEqual(normalizeOvertimeWarnings(result),result);assert.equal(normalizeOvertimeWarnings(null),undefined);assert.equal(normalizeOvertimeWarnings([result[0],result[0]]),undefined);for(const value of [{...result[0],workDate:'2026-02-30'},{...result[0],threshold:'-1'},{...result[0],action:'pay'},{...result[0],version:'unknown'}])assert.equal(normalizeOvertimeWarnings([value]),undefined);
+for (const field of ['action','kind']) {
+ for (const malformed of [[result[1][field]],null,1,{},true]) {
+  const warning={...result[1],[field]:malformed};
+  assert.equal(normalizeOvertimeWarnings([warning]),undefined,`${field} must be a literal enum string`);
+  assert.equal(normalizeImportOvertimeWarnings([{employeeId:'worker-synthetic',weekEnding:'2026-10-30',warnings:[warning]}]),undefined,`import ${field} must be a literal enum string`);
+ }
+}
 const batch=[{employeeId:'worker-synthetic',weekEnding:'2026-10-30',warnings:result}];assert.deepEqual(normalizeImportOvertimeWarnings(batch),batch);assert.equal(normalizeImportOvertimeWarnings([...batch,...batch]),undefined);assert(importOvertimeNotice(batch).includes('2 threshold conditions'));assert.equal(importOvertimeNotice(undefined),'');
 console.log('Optional explicit overtime warn/block configuration, exact equality/precision, separate daily/Weekly conditions, target-only disclosure, compatible references and strict warning DTOs passed.');

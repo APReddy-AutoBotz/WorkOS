@@ -13,7 +13,8 @@ let sequence = 0;
 const session = (id='synthetic-calendar-admin',role='HR',allowed=true) => ({id,employeeId:id,name:'Synthetic Calendar Operator',role,permissionRole:role,permissions:allowed?['settings.manage']:[]});
 sessionStorage.setItem('workos_session',JSON.stringify(session(undefined,undefined,params.get('access')!=='none')));
 sessionStorage.setItem('workos_organization_scope',JSON.stringify({organizationId:'org-a',legalEntityId:'legal-a'}));
-sessionStorage.setItem('workos_api_token','synthetic-calendar-token-a');
+const token = crypto.randomUUID();
+sessionStorage.setItem('workos_api_token',token);
 window.fetch = (input, init={}) => {
   const url = new URL(typeof input==='string'?input:input.url,location.origin);
   const method = String(init.method || 'GET').toUpperCase();
@@ -37,7 +38,7 @@ const emit = event => {if(event==='storage')window.dispatchEvent(new StorageEven
 const invoke = labels => labels.forEach(label=>{if(!captured.has(label))throw new Error(`Missing captured callback ${label}`);captured.get(label)();});
 const render = () => root.render(React.createElement(params.get('strict')==='1'?React.StrictMode:React.Fragment,null,
   React.createElement(BrowserRouter,null,React.createElement(WorkingCalendarInspector))));
-window.workingCalendarHarness = {pending,calls,unexpectedFetches,
+window.workingCalendarHarness = {pending,calls,unexpectedFetches,syntheticToken:token,
   settle(id,result,status){const index=pending.findIndex(item=>item.id===id);if(index<0)throw new Error('Missing pending calendar request');const [call]=pending.splice(index,1);
     if(status==='network')call.reject(new TypeError('synthetic-private-token /internal/provider'));
     else if(status==='malformed-json')call.resolve(new Response('synthetic-private-invalid-json',{status:200}));
