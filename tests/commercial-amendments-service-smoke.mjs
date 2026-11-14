@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticHexDigest} from './support/synthetic-values.mjs';
 
 // Pure transport/context tests: no listener, browser, database or local fallback.
 process.env.APP_MODE=process.env.VITE_APP_MODE='production';
@@ -29,7 +30,7 @@ const entityId='synthetic/contract ?';
 const workspace={asOf:'2026-10-20',entityType:'Contract',entityId,lifecycle,sequence:0,currentTerms:before,activationTerms:before,
   identity:{name:'SYN-AMENDMENT',model:'fixed_fee',currency:'GBP',clientId:'synthetic-client'},latestContractVersion:2,versions:[version2,version1],history:[],pending:false};
 const input={expectedSequence:0,expectedLifecycleSequence:1,expectedContractVersion:2,...after,effectiveOn:'2026-10-20',reason:'Synthetic governed amendment',approvalReference:'SYN-APPROVAL'};
-const preview={previewToken:'a'.repeat(64),asOf:workspace.asOf,entityType:'Contract',entityId,before,after,effectiveOn:input.effectiveOn,
+const preview={previewToken:syntheticHexDigest(),asOf:workspace.asOf,entityType:'Contract',entityId,before,after,effectiveOn:input.effectiveOn,
   dependencies:{projects:2},warnings:['No automatic cascade or billing change.']};
 const event={id:'synthetic-amendment-1',sequence:1,...after,effectiveOn:input.effectiveOn,reason:input.reason,approvalReference:input.approvalReference,
   actorId:user.id,activeRole:user.role,correlationId:'synthetic-amendment-correlation',operationId:'synthetic-amendment-operation'};
@@ -121,7 +122,7 @@ for(const operation of operations.slice(0,2))for(const delta of [{entityType:'Pr
   reset();payload={...operation.result,...delta};await assert.rejects(operation.run(capture()),invalid);assertRequest(operation);
 }
 for(const delta of [{effectiveOn:'2026-10-21'},{after:{...after,budget:'199.0000'}},{after:{...after,contractVersionId:'synthetic-foreign'}},
-  {previewToken:''},{previewToken:'a'.repeat(63)},{previewToken:'A'.repeat(64)},{previewToken:42}]){
+  {previewToken:''},{previewToken:syntheticHexDigest().slice(1)},{previewToken:syntheticHexDigest().replace(/^./,'A').toUpperCase()},{previewToken:42}]){
   reset();payload={...preview,...delta};await assert.rejects(operations[1].run(capture()),invalid);assertRequest(operations[1]);
 }
 for(const delta of [{sequence:2},{effectiveOn:'2026-10-21'},{contractVersionId:version1.id},{budget:'199.0000'},

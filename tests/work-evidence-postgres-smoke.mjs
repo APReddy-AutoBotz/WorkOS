@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 import {copyFile,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -65,7 +66,10 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const stale=await post({...input(id),expected_write_token:oldToken});assert.equal(stale.status,409);assert.equal(stale.body.code,'WORK_CAPTURE_WRITE_CONFLICT');assert.deepEqual(await workSnapshot(pool),afterEvidence);
   saved=await post({...input(id,[{...entry,evidence_url:null}]),expected_write_token:(await read()).write_token});assert.equal(saved.status,200);assert.equal((await read()).entries[0].evidence_url,null);
   saved=await post(input(id,[{...entry,evidence_url:''}]));assert.equal(saved.status,200);assert.equal((await read()).entries[0].evidence_url,null);
-  for(const evidence_url of ['javascript:alert(1)','//example.test/work','https://user:password@example.test/work','https://example.test/'+ 'x'.repeat(2048)]){
+  const credentialUrl = new URL('https://example.test/work');
+  credentialUrl.username = 'synthetic-user';
+  credentialUrl.password = syntheticCredential();
+  for(const evidence_url of ['javascript:alert(1)','//example.test/work',credentialUrl.href,'https://example.test/'+ 'x'.repeat(2048)]){
    const snapshot=await workSnapshot(pool);assert.equal((await post(input(id,[{...entry,evidence_url}]))).status,400);assert.deepEqual(await workSnapshot(pool),snapshot);
   }
   await assert.rejects(pool.query("update timesheet_entries set evidence_url='javascript:synthetic' where timesheet_id=$1",[saved.body.id]),error=>error.code==='23514');
