@@ -1,5 +1,7 @@
 # WorkOS Implementation Backlog
 
+**Current execution direction (2026-11-14):** Follow the [enterprise delivery and integration roadmap](ENTERPRISE_DELIVERY_ROADMAP.md) for verified integration, consistent utilization, workflow recovery and remaining release evidence within the work-package dependencies below. Current merged/draft state is recorded in [implementation status](../00-control/IMPLEMENTATION_STATUS.md); historical controller notes below are not a substitute for live exact-head acceptance evidence.
+
 **Status:** Controller baseline  
 **Delivery model:** Outcome-based work packages implemented through Draft pull requests  
 **Default merge method:** Squash  

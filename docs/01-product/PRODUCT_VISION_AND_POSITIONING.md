@@ -8,6 +8,16 @@ Project-based service organizations should be able to control people, engagement
 
 > WorkOS connects workforce capacity, client engagements, work evidence, approvals, utilization, revenue and project margin in one governed operational layer.
 
+## Enterprise product direction — 2026-11-14
+
+Make utilization useful for decisions and explainable to the person accountable for them. A planner should see who is available, which demand is committed, where capacity is constrained, and how approved actual work differs from the plan. A worker should understand their own work and capacity. Commercial and finance users should follow controlled evidence into billing eligibility and invoice readiness without treating utilization as financial authority.
+
+Premium quality means dependable behavior throughout the workflow: clear period and source context, scoped drilldown, accessible controls, useful failure recovery, safe retries, consistent terminology, and tested operational recovery. Visual polish complements these controls; it cannot replace them.
+
+The product will distinguish approved actual work from pending work and forecasts, full-worker utilization from project contribution, and billable share from capacity utilization. Unknown authority remains unavailable instead of becoming a reassuring zero. Historical evidence remains reproducible when later calendars, rates, assignments or policies change.
+
+Market reference practices inform presentation and usability; governing WorkOS requirements determine calculation, authorization and financial policy. No claim of market leadership, complete feature parity or production readiness is made by this vision. See the [delivery roadmap](../05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md) for verification and integration gates.
+
 ## Ideal customer profile
 
 WorkOS v1 targets approximately 25–500 project-based workers in consulting, software/IT services, AI and automation services, engineering, agencies, managed services, CRO/regulatory services and internal transformation groups.

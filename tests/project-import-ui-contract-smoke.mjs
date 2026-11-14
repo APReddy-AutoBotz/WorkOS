@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 import {readFileSync} from 'node:fs';
 import {adminService, employeeService} from '../src/services/api.ts';
 import {resetBackendCheck} from '../src/services/apiClient.ts';
@@ -119,7 +120,7 @@ const timesheetPreview = await adminService.runVersionedTimesheetImport({
   fileName: 'timesheets.csv', rows: [{employeeId: 'EMP-101', weekEnding: '2026-09-27', date: '2026-09-25', workType: 'Client Misc Task', clientName: 'Synthetic Client', hours: 7.5}],
   clientErrors: [], totalRows: 1, dryRun: true, idempotencyKey: 'timesheet-dry-run-key',
 });
-const employeePreviewCredential = 'Synthetic-Preview-Credential-19af';
+const employeePreviewCredential = syntheticCredential();
 const extraPasswordColumn = 'Synthetic-Extra-Password-Column-4d1';
 const extraTokenColumn = 'Synthetic-Extra-Token-Column-8b2';
 const employeePreview = await adminService.runVersionedEmployeeImport({
@@ -209,7 +210,7 @@ assert.deepEqual(filterAcceptedImportRows([rowOne, rowTwo, rowThree], [rowOne, r
   'server errors filter only submitted rows using their original CSV row numbers');
 assert.deepEqual(filterAcceptedImportRows([rowOne], [], [{rowNumber: 1}]), [],
   'a header-level error does not reintroduce rows excluded from the server dry run');
-const employeeCredential = 'Synthetic-Initial-Password-7ac43';
+const employeeCredential = syntheticCredential();
 assert.deepEqual(redactCredentialEchoes({
   fileName: `employees-${employeeCredential}.csv`,
   errors: [{message: `Country director ${employeeCredential} does not exist.`}],
