@@ -141,7 +141,8 @@
     "test:duplicate-entry-check-journey": "node tests/duplicate-entry-check-journey-browser-smoke.mjs",
     "test:work-submission-history": "node --import tsx tests/work-submission-history-smoke.mjs",
     "test:work-submission-history-postgres": "node tests/work-submission-history-postgres-smoke.mjs",
-    "test:work-submission-history-journey": "node tests/work-submission-history-journey-browser-smoke.mjs"
+    "test:work-submission-history-journey": "node tests/work-submission-history-journey-browser-smoke.mjs",
+    "test:work-capture-role-journey": "node tests/work-capture-role-journey-browser-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
