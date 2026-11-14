@@ -1,9 +1,21 @@
 # WorkOS Requirements Traceability
 
+## WOS03 current-main integration candidate
+
+Bootstrap hygiene follow-up: the integration candidate replaces static synthetic test credentials with ephemeral values, preserves malformed-input and redaction assertions, and fixes Windows file-URL conversion in scanner self-tests. The unchanged scanner passes240 files and all adversarial fixtures; required CI now runs both on an Ubuntu24.04 validation runner compatible with the locked browser. The prior30-finding checkpoint and Ubuntu26.04 installation failure remain recorded in the integration task. Fresh hosted acceptance is still required.
+
+WOS-CORE-003/005 and WOS-GOV-001/002/004: [PR41 integration acceptance](../tasks/WOS-03-INTEGRATION-ACCEPTANCE.md) reconciles the existing modular/API/audit package with accepted main documentation and dependency repairs. Existing real import-to-audit browser/API/PostgreSQL tests are brought forward from PR50's later stack to test the actual combined candidate. Fresh install and pre-journey unit/type/lint checks pass; combined journey, remaining runtime checks, current-head hosted acceptance and review remain pending. This does not close configurable retention, buyer authentication, deployment or full release gates.
+
 **Status:** Blueprint mapping; PR/test/evidence columns are populated as implementation proceeds.  
 **Authoritative requirements:** `PRODUCT_REQUIREMENTS.md` and `NON_FUNCTIONAL_REQUIREMENTS.md`
 
+## Current product-direction refresh
+
+WOS-GOV-005: [current product-direction task](../tasks/WOS-00-CURRENT-PRODUCT-DIRECTION.md) reconciles README, vision, roadmap, provenance and current status to observed GitHub main/draft evidence. This is documentation traceability, not acceptance of the runtime requirements described by the vision. The [retained-authority clarification](../tasks/WOS-00-RETAINED-REQUIREMENTS-AUTHORITY.md) preserves the legacy text while identifying current requirements and blocking-review authority. The prior status report is retained as dated historical evidence.
+
 ## 1. Traceability rules
+
+WOS-NFR-SEC-011 and WOS-GOV-005: [main dependency audit repair](../tasks/WOS-03-MAIN-DEPENDENCY-REPAIR.md) updates advisory-affected locked dependencies and adds negative parser, proxy-scope and application-schema regression evidence. This prerequisite does not accept the unmerged feature stack.
 
 Every accepted requirement must link to:
 
@@ -284,7 +296,7 @@ The read-only calendar portion of WOS-ORG-008 and only the calendar entry point 
 
 ## Integrated import-to-audit acceptance increment
 
-The [tests-only integrated journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md), dependent on unchanged Draft PR49, adds coherent evidence for WOS-CORE-003/005 and WOS-GOV-002/004: actual React Import / Export, versioned API, disposable migrated PostgreSQL, retained history after reload and a second named account's actual Audit Trail provenance. It distinguishes saved dry-run/success event context from later GET traces, checks another legal entity and denied unassigned scope, and asserts no inspection mutation. No production behavior/schema/permission/grant/dependency change or whole-requirement acceptance is implied. All twelve existing browser suites and formal dependency/review/UAT/release gates remain retained.
+The [integrated journey](../tasks/IMPORT-AUDIT-ACCEPTANCE-JOURNEY.md), forwardported and accepted in PR41 with PR50 retaining historical evidence after PR49 acceptance, provides coherent evidence for WOS-CORE-003/005 and WOS-GOV-002/004: actual React Import / Export, versioned API, disposable migrated PostgreSQL, retained history after reload and a second named account's actual Audit Trail provenance. It distinguishes saved dry-run/success event context from later GET traces, checks another legal entity and denied unassigned scope, and asserts no inspection mutation. No production behavior/schema/permission/grant/dependency change or whole-requirement acceptance is implied. All twelve existing browser suites and formal dependency/review/UAT/release gates remain retained.
 
 ## PR-007A commercial drafting evidence (development-only exception)
 
@@ -298,11 +310,15 @@ The [bounded lifecycle task](../tasks/WOS-04-GOVERNED-LIFECYCLE.md) maps additio
 
 Draft snapshots and immutable contract pins remain unchanged; full material lifecycle evidence is commercially protected and shared audit receives opaque pointers only. The new lifecycle-management permission is opt-in, with no default/live grants. Actual existing closure blockers can be inspected, but terminal close/delete is explicitly unavailable because unbilled/balance/consumption/acceptance evidence is not yet implemented. Client hierarchy, amendments, term rollover, work-date integration and remaining financial lifecycle remain open. This is not whole PR-007 acceptance, prerequisite completion or release authority.
 
+The integration review's WOS-ENG-003 historical-promotion correction requires trusted scoped creation provenance and exclusively Proposed history, preserving the exclusion of previously operational or unverifiable legacy records. The PostgreSQL suite exercises real legacy POST/PATCH and both CSV aliases resetting state, pre-scope audit history, neutral snapshots, missing/ambiguous/malformed/client-reported evidence, unchanged rejection snapshots and valid scoped Proposed creation. This gate does not infer historical eligibility from the current status or absence of work rows alone.
+
 ## PR-007C scoped client and customer billing profiles (development-only exception)
 
 The [bounded customer-profile task](../tasks/WOS-04-SCOPED-CLIENT-PROFILES.md) addresses WOS-CLI-001–002 through additive migration042, protected client-profile routes/service, an actual scope-owned React workspace, explicit stable client codes, separate nullable legal/display identity, independent customer billing entities/business units and effective-dated acyclic parent-account links. Existing operational industry/status/account owner/organization ownership remain canonical and unchanged. Append-only profile histories use expected versions and current/future dates; no missing legacy legal name/currency is guessed and no contract pin, project/work identity or neutral history is rewritten.
 
 `test:client-profiles-contract` covers strict schema/permission/transaction/error boundaries; `test:client-profiles-service` covers captured frontend identity/scope/transport and stale state; `test:client-profiles-postgres` covers fresh/upgrade/replay, scope/date/version/cycle races, confidential projection/audit isolation and legacy writer/seed compatibility; fixture and actual PostgreSQL React browser journeys are additive. Exact executed results belong to the Draft PR receipt. Protected material evidence and opt-in view/manage permissions introduce no default/live grants; shared audit remains opaque. No retirement, tax/payment identifier, invoice routing, cross-legal consolidation or billing authority is provided. This is bounded development, not whole programme acceptance, independent release review, merge or deployment authority.
+
+Integration correction evidence for WOS-CLI-001–002 also covers real permission configuration discovery, authorized non-Admin role and individual enrollment, revocation, unauthorized grant rejection and unchanged absence of defaults. Frontend permission metadata matches migration042: confidential scoped capabilities are opt-in, not restricted to Admin recipients. Strict billing-unit response validation rejects arrays rather than coercing them into enum strings; service and browser negatives cover both valid enum spellings wrapped in arrays.
 
 ## PR-007D governed material amendments (development-only exception)
 

@@ -1,6 +1,10 @@
 # Integrated Project Master import-to-audit acceptance
 
-## Authority, exact baseline and non-overlap
+## Current integration checkpoint — 2026-11-14
+
+The original journey below was forwardported into accepted PR41 and has already passed the real PostgreSQL/browser hosted gate. PR50 now reconciles its retained evidence with accepted main `81d3113abd451ddd9cb62e23833f256f40b8e69f` (PR49). Its remaining diff is documentation only: runtime code, package scripts, CI, browser assertions and disposable-pool cleanup are identical to main. Preserve the newer main harness, including cold-navigation setup allowance and bounded disposable-pool cleanup. The owner has authorized eligible merges; historical no-merge and local-environment restrictions below describe the original October checkpoint, not current authorization or infrastructure. Existing audit findings and production OIDC/UAT/release acceptance remain open. Rollback of this reconciliation is documentation only.
+
+## Historical authority, exact baseline and non-overlap
 
 This tests/CI/docs-only WOS-03 acceptance increment addresses the existing PR-006 WOS-CORE-003/005 and WOS-GOV-002/004 requirement basis. It is stacked on unchanged Draft PR49, head `764ba7fce13e683bfa7fb6274565a2400ef8b4ea`, tree `bc38df71335780a92e878fffaad407dba3e7d31f`. The isolated local snapshot was taken from the prior writer's index and has that exact tree; earlier snapshots and receipts remain untouched. Sole WorkOS ownership was released to this increment by the parent before edits.
 
@@ -29,3 +33,5 @@ No production behavior, schema, permissions, grants or dependencies change. Prod
 Additional legacy bootstrap scan is not clean: both the isolated accepted PR49 baseline and candidate report the same 38 existing findings, with identical finding text and no new finding from this increment. Preserve both failed scan receipts; do not suppress or broaden scanner policy in this test-only task. This extra legacy scan is distinct from the supported aggregate and required hosted CI gates.
 
 Retain failed hosted CI39369823571 at initial head `2b368ba029ae2e269f827baf5e667f61403412ed`: all twelve existing browser suites passed, but the new journey stopped at its first CSV-selection action, with a pending response waiter's cleanup rejection masking the primary action error. Source review found the broad white-card locator also matched the actual outer AppLayout. The test-only correction selects the bordered rounded Project Master card, asserts uniqueness, and handles each action and response waiter together so primary failures remain visible. No product behavior was changed. Downstream skipped gates are not successes; require a fresh full exact-head run.
+
+Current reconciliation validation: all four remaining documentation files reviewed; all 31 local Markdown links resolve; worktree and staged whitespace checks pass. Runtime, tests, package and CI have zero diff from accepted main. Fresh hosted checks are required on the published reconciliation head before merge.
