@@ -4,6 +4,10 @@ const {chromium} = await import(process.env.WORKOS_PLAYWRIGHT_MODULE || 'playwri
 const baseUrl = process.env.WORKOS_BROWSER_BASE_URL || 'http://127.0.0.1:4177';
 const browser = await chromium.launch({headless: true, ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {})});
 const page = await browser.newPage({viewport: {width: 1100, height: 900}});page.setDefaultTimeout(10000);
+// Vite document/module loading is harness setup. Keep business interactions on
+// the 10-second deadline while allowing the same cold-navigation budget as the
+// accepted real import journey on slower local and CI machines.
+page.setDefaultNavigationTimeout(60000);
 const errors = [], unexpectedApi = [], unexpectedRemote = [], allCalls = [], allUnexpected = [];let downloads = 0;
 page.on('pageerror', error => errors.push(error.message));page.on('download', () => downloads++);
 page.on('request', request => {if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== new URL(baseUrl).origin) unexpectedRemote.push(request.url());});
