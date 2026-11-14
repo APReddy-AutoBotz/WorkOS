@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Download, Loader2, PieChart, TrendingUp } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BarChart3, Download, Loader2, PieChart, RefreshCw, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { utilizationReportService } from '../services/api';
+import { ApiClientError, resetBackendCheck } from '../services/apiClient';
 import type { UtilizationReport } from '../types';
 import { formatPercent } from '../lib/format';
 import { cn } from '../lib/utils';
@@ -50,39 +51,86 @@ const reportLenses: Array<{
 ];
 
 const getPrimaryMetric = (lens: ReportLens, report?: UtilizationReport) => {
-  if (!report) return '--';
+  if (!report || report.rows.length === 0) return '--';
   if (lens === 'actual') return formatPercent(report.summary.averageActual);
   return formatPercent(report.summary.averagePlanned);
 };
 
 const getExceptionCount = (lens: ReportLens, report?: UtilizationReport) => {
-  if (!report) return '--';
+  if (!report || report.rows.length === 0) return '--';
   if (lens === 'actual') return report.summary.underutilized + report.summary.bench;
   return report.summary.overloaded;
 };
 
+type OverviewStatus = 'loading' | 'ready' | 'access' | 'unavailable' | 'error';
+type OverviewResult = { status: OverviewStatus; reports: Partial<Record<ReportLens, UtilizationReport>> };
+
+// Keep successful reports, normalizers and calculations on their existing service path.
+export const readUtilizationOverview = async () => {
+  // A retry must recheck availability after an earlier cached health failure.
+  resetBackendCheck();
+  const [planned, actual, forecast] = await Promise.all([
+    utilizationReportService.getPlanned(),
+    utilizationReportService.getActual(),
+    utilizationReportService.getForecast(3),
+  ]);
+  if (!planned || !actual || !forecast) throw new TypeError('Report response unavailable');
+  return { planned, actual, forecast };
+};
+
+export const UtilizationOverviewStatus = ({ status, retry }: {status: OverviewStatus; retry: () => void}) => {
+  if (status === 'ready') return null;
+  if (status === 'loading') return (
+    <div role="status" className="flex items-center justify-center gap-3 rounded-2xl border border-border-light bg-white p-8">
+      <Loader2 aria-hidden="true" className="animate-spin text-primary" size={24} />
+      <p className="text-sm font-bold text-heading">Loading utilization reports…</p>
+    </div>
+  );
+  const message = status === 'access' ? 'Access to utilization reports could not be confirmed.'
+    : status === 'unavailable' ? 'Utilization reports are unavailable.'
+    : 'Utilization reports could not be loaded.';
+  return (
+    <div role="alert" className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50 p-5 text-heading">
+      <p className="text-sm font-bold">{message}</p>
+      <p className="text-sm">{status === 'access'
+        ? 'Check your sign-in and report access, then retry.'
+        : 'Check your connection and retry. If the problem continues, contact your administrator.'}</p>
+      <button type="button" onClick={retry} className="btn-secondary px-4 py-2 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+        Retry utilization reports
+      </button>
+    </div>
+  );
+};
+
 export const UtilizationReports = () => {
   const [selectedLens, setSelectedLens] = useState<ReportLens>('planned');
-  const [reports, setReports] = useState<Partial<Record<ReportLens, UtilizationReport>>>({});
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadReports = async () => {
-      try {
-        const [planned, actual, forecast] = await Promise.all([
-          utilizationReportService.getPlanned(),
-          utilizationReportService.getActual(),
-          utilizationReportService.getForecast(3),
-        ]);
-        setReports({ planned, actual, forecast });
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadReports();
+  const [result, setResult] = useState<OverviewResult>({ status: 'loading', reports: {} });
+  const requestVersion = useRef(0);
+  const mounted = useRef(false);
+  const loadReports = useCallback(() => {
+    const request = ++requestVersion.current;
+    setResult({ status: 'loading', reports: {} });
+    const current = () => mounted.current && request === requestVersion.current;
+    void Promise.resolve().then(() => current() ? readUtilizationOverview() : null).then(reports => {
+      if (current() && reports) setResult({ status: 'ready', reports });
+    }).catch(error => {
+      if (!current()) return;
+      const status = error instanceof ApiClientError
+        ? [401, 403].includes(error.status) ? 'access'
+          : [404, 502, 503, 504].includes(error.status) ? 'unavailable' : 'error'
+        : 'error';
+      setResult({ status, reports: {} });
+    });
   }, []);
 
-  const selectedReport = reports[selectedLens];
+  useEffect(() => {
+    mounted.current = true;
+    loadReports();
+    return () => { mounted.current = false; requestVersion.current += 1; };
+  }, [loadReports]);
+
+  const { reports, status } = result;
+  const selectedReport = status === 'ready' ? reports[selectedLens] : undefined;
   const selectedConfig = reportLenses.find(report => report.id === selectedLens) || reportLenses[0];
   const exceptionRows = useMemo(() => {
     if (!selectedReport) return [];
@@ -100,14 +148,6 @@ export const UtilizationReports = () => {
       .map(row => ({ ...row, value: row.plannedUtilization }));
   }, [selectedLens, selectedReport]);
 
-  if (loading) {
-    return (
-      <div className="flex h-[60vh] items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={32} />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
@@ -115,13 +155,20 @@ export const UtilizationReports = () => {
         subtitle="Planned, current, and forecast utilization in one reporting workspace."
         breadcrumb={['Reports', 'Utilization']}
         actions={
-          <Link to={selectedConfig.path} className="btn-primary flex items-center gap-2 px-5 py-2.5 text-xs">
-            <Download size={14} /> Open {selectedConfig.title}
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={loadReports} aria-label="Refresh utilization reports" className="btn-secondary flex items-center gap-2 px-4 py-2.5 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+              <RefreshCw aria-hidden="true" size={14} /> Refresh
+            </button>
+            <Link to={selectedConfig.path} className="btn-primary flex items-center gap-2 px-5 py-2.5 text-xs">
+              <Download aria-hidden="true" size={14} /> Open {selectedConfig.title}
+            </Link>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <UtilizationOverviewStatus status={status} retry={loadReports} />
+
+      {status === 'ready' && <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         {reportLenses.map(report => {
           const Icon = report.icon;
           const data = reports[report.id];
@@ -129,9 +176,11 @@ export const UtilizationReports = () => {
           return (
             <button
               key={report.id}
+              type="button"
+              aria-pressed={isSelected}
               onClick={() => setSelectedLens(report.id)}
               className={cn(
-                'rounded-2xl border bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md',
+                'rounded-2xl border bg-white p-5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md',
                 isSelected ? 'border-primary/40 ring-2 ring-primary/10' : 'border-border-light'
               )}
             >
@@ -155,16 +204,22 @@ export const UtilizationReports = () => {
             </button>
           );
         })}
-      </div>
+      </div>}
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+      {selectedReport?.rows.length === 0 && (
+        <div role="status" className="rounded-2xl border border-border-light bg-white p-8 text-center text-sm font-bold text-slate-600">
+          No utilization data was returned for the selected report.
+        </div>
+      )}
+
+      {selectedReport && selectedReport.rows.length > 0 && <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <Card title={`${selectedConfig.title} Snapshot`}>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             {[
-              { label: 'Population', value: selectedReport?.summary.rows ?? 0 },
-              { label: 'Avg Planned', value: selectedReport ? formatPercent(selectedReport.summary.averagePlanned) : '--' },
-              { label: 'Avg Current', value: selectedReport ? formatPercent(selectedReport.summary.averageActual) : '--' },
-              { label: 'Bench', value: selectedReport?.summary.bench ?? 0 },
+              { label: 'Population', value: selectedReport.summary.rows },
+              { label: 'Avg Planned', value: formatPercent(selectedReport.summary.averagePlanned) },
+              { label: 'Avg Current', value: formatPercent(selectedReport.summary.averageActual) },
+              { label: 'Bench', value: selectedReport.summary.bench },
             ].map(item => (
               <div key={item.label} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{item.label}</p>
@@ -201,7 +256,7 @@ export const UtilizationReports = () => {
             )}
           </div>
         </Card>
-      </div>
+      </div>}
     </div>
   );
 };
