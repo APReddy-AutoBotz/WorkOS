@@ -169,7 +169,7 @@ export const CommercialDraftingWorkspace = () => {
   };
   const closeDraft = () => {
     const owner = live.current;
-    if (owner.generation !== state.generation || owner.draft?.lease !== state.draft?.lease || owner.saving || discardStale(owner)) return;
+    if (owner.generation !== state.generation || owner.draft?.lease !== state.draft?.lease || owner.saving || owner.uncertain || discardStale(owner)) return;
     ++draftLease.current;
     publish({...owner, draft: undefined, uncertain: false, saveError: undefined});
   };
@@ -343,7 +343,7 @@ export const CommercialDraftingWorkspace = () => {
             <p className="mt-4 text-xs text-slate-600">Amounts are entered and sent as decimal strings with up to 14 whole digits and 4 decimal places. No browser financial totals are calculated.</p>
             <button className={`${buttonClass} mt-4 bg-primary text-white`} type="submit">{state.saving ? 'Saving draft…' : draft.kind === 'revision' ? 'Append contract revision' : 'Save draft'}</button>
           </fieldset>
-          <button className={`${buttonClass} mt-3 sm:ml-3`} type="button" disabled={state.saving} onClick={closeDraft}>Discard draft</button>
+          <button className={`${buttonClass} mt-3 sm:ml-3`} type="button" disabled={state.saving || state.uncertain} onClick={closeDraft}>Discard draft</button>
         </form>
       </section>}
       <div className="grid min-w-0 gap-6 lg:grid-cols-2">

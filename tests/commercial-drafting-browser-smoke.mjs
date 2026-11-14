@@ -109,8 +109,19 @@ try {
   // Save lock protects native double submit, retained callbacks and uncertain outcomes.
   await boot();await startContract();await capture('old-submit', 'submit');after = await lastId();await page.evaluate(() => window.commercialHarness.submitTwice());request = await pending('create-contract', after);assert.equal((await calls()).filter(call => call.method === 'POST').length, 1);const beforeDuplicate = await calls();await invoke(['old-submit']);await noDispatch(beforeDuplicate, 'in-flight duplicate submit stays locked');
   await settle(request, undefined, 400);await button('Save draft').waitFor();assert.equal(await button('Save draft').isDisabled(), false);await noPrivate();after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await settle(request, undefined, 409);await page.getByRole('alert').getByText('Draft not saved because the latest server version', {exact: false}).waitFor();assert.equal(await button('Save draft').isDisabled(), true);const conflictCalls = await calls();await invoke(['old-submit']);await noDispatch(conflictCalls, 'conflict disables implicit retries');
-  await button('Discard draft').click();assert.equal(await page.locator('form').count(), 0);await startContract();await capture('discarded-submit', 'submit');await button('Discard draft').click();await button('New draft milestone').click();const beforeOldForm = await calls();await invoke(['discarded-submit']);await noDispatch(beforeOldForm, 'discarded form lease cannot submit a replacement draft');
-  for (const failure of [503,'network','malformed-json']) {await boot();await startContract();after = await lastId();await button('Save draft').click();request = await pending('create-contract', after);await settle(request, undefined, failure);await page.getByRole('alert').getByText('Save outcome could not be confirmed.', {exact: false}).waitFor();assert.equal(await button('Save draft').isDisabled(), true);await noPrivate();}
+  assert.equal(await button('Discard draft').isDisabled(), true);after=await lastId();await button('Reload workspace').click();request=await pending('workspace',after);await settle(request,workspace());await ready();await startContract();await capture('discarded-submit', 'submit');await button('Discard draft').click();await button('New draft milestone').click();const beforeOldForm = await calls();await invoke(['discarded-submit']);await noDispatch(beforeOldForm, 'discarded form lease cannot submit a replacement draft');
+  for (const failure of [503,'network','malformed-json']) {
+    await boot();await startContract();await capture('uncertain-discard','Discard draft');after=await lastId();
+    await button('Save draft').click();request=await pending('create-contract',after);await settle(request,undefined,failure);
+    await page.getByRole('alert').getByText('Save outcome could not be confirmed.',{exact:false}).waitFor();
+    assert.equal(await button('Save draft').isDisabled(),true);assert.equal(await button('Discard draft').isDisabled(),true,'uncertain save cannot be discarded before reconciliation');
+    const lockedCalls=await calls();await invoke(['uncertain-discard']);await noDispatch(lockedCalls,'retained discard cannot clear uncertain outcome');
+    assert.equal(await page.locator('form').count(),1);assert.equal(await button('New contract / SOW').isDisabled(),true);
+    after=await lastId();await button('Reload workspace').click();request=await pending('workspace',after);await settle(request,undefined,503);
+    await button('Retry workspace').waitFor();assert.equal(await page.locator('form').count(),0);assert.equal(await button('New contract / SOW').count(),0);
+    after=await lastId();await button('Retry workspace').click();request=await pending('workspace',after);await settle(request,workspace());await ready();
+    await startContract();await button('Discard draft').click();assert.equal(await page.locator('form').count(),0);await noPrivate();
+  }
 
   // No completed read or save may restore content after a scope/access switch.
   const changes = [() => page.evaluate(() => window.commercialHarness.scope({organizationId: 'org-b', legalEntityId: 'legal-b'})),
