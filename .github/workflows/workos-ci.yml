@@ -70,6 +70,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Verify patched dependency security behavior
+        run: npm run test:dependency-security
+
       - name: Prepare disposable schema for production identity tests
         env:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
