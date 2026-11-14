@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+PR-007D integration correction (WOS-CTR-003, WOS-CORE-003/005, WOS-NFR-SEC-004/005): amendment authority is discoverable and explicitly configurable through the server permission catalog, with no default grants. Real PostgreSQL/API regression evidence covers denied enrollment, role and individual grant/revoke behavior and actor-attributed permission history without term adoption. See the governed-amendments task receipt for executed results and remaining acceptance gates.
+
 ## WOS03 current-main integration candidate
 
 Bootstrap hygiene follow-up: the integration candidate replaces static synthetic test credentials with ephemeral values, preserves malformed-input and redaction assertions, and fixes Windows file-URL conversion in scanner self-tests. The unchanged scanner passes240 files and all adversarial fixtures; required CI now runs both on an Ubuntu24.04 validation runner compatible with the locked browser. The prior30-finding checkpoint and Ubuntu26.04 installation failure remain recorded in the integration task. Fresh hosted acceptance is still required.

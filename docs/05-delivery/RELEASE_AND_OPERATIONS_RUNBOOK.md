@@ -231,6 +231,12 @@ Inspect closure dependencies for actual existing assignment/work/pending-approva
 
 Migration041 adds immutable lifecycle/bindings/guards and retains040 untouched. Roll forward preferred; any rollback binary must be validated with040/041 manifest and all evidence/guards retained. Never drop bindings/ledger, erase migration history or re-enable unrestricted legacy writes as rollback. All prior unit/browser/PostgreSQL/identity/scan/container gates remain required, with new lifecycle strict-service, real PostgreSQL and real React/API/PostgreSQL tests additive. Local browser/DB absence is NOT RUN; require exact-head hosted evidence. No credentials, providers, production/customer data, denied repair/diagnostic, Ready/merge/deploy or formal release acceptance is involved.
 
+## Governed commercial amendments (PR-007D)
+
+Amendment operators need explicit `commercial.amendments.manage` enrollment through Permission Settings, plus commercial view and lifecycle management permissions and the applicable organization/legal-entity scope. Permission managers may grant or revoke amendment authority for eligible roles or individual accounts. No role, including Admin, receives this permission by default. Retain permission-change history; granting authority or requesting a preview does not adopt terms.
+
+Preview and explicitly adopt a selected immutable contract version for each governed entity separately. Parent adoption does not cascade to children. Reconcile uncertain command outcomes against current state and amendment history before resubmitting. Current terms are operational evidence, not authority to reprice historical work or determine billing eligibility. Migration043 and its append-only amendment ledger must survive rollback; use a forward-compatible binary and do not erase audit, historical pins or amendments.
+
 ## Scoped client profiles (PR-007C)
 
 Migration042 adds customer profile and billing-unit histories without changing operational client identity, contractual pins or existing work. Buyer organization/legal-entity ownership is separate from customer billing entities. Missing legacy legal/display names, codes and currency defaults remain explicitly incomplete; enter verified commercial profile values rather than inferring them from operational labels.
