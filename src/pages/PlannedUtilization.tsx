@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Link } from 'react-router-dom';
 import { KPIStrip } from '../components/ui/KPIStrip';
 import { Badge } from '../components/ui/Badge';
 import { adminService, utilizationReportService } from '../services/api';
-import { Employee, CountryDirector, KPIData } from '../types';
+import type { Employee, CountryDirector, KPIData, SystemSettings } from '../types';
+import { ApiClientError, resetBackendCheck } from '../services/apiClient';
 import {
   BarChart,
   Bar,
@@ -27,7 +28,8 @@ import {
   ArrowUpRight,
   ChevronRight,
   Info,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getUtilizationEligibleEmployees } from '../services/calculations';
@@ -37,11 +39,78 @@ import { downloadAuditedCsv } from '../lib/reportExport';
 import { productConfig } from '../config/productConfig';
 const COLORS = ['#EF7D00', '#1E293B', '#64748B', '#94A3B8', '#CBD5E1'];
 
+type PlannedStatus = 'loading' | 'ready' | 'access' | 'unavailable' | 'error';
+type PlannedSnapshot = { employees: Employee[]; directors: CountryDirector[]; settings: SystemSettings };
+type PlannedResult = {
+  generation: number;
+} & ({ status: 'ready'; snapshot: PlannedSnapshot } | { status: Exclude<PlannedStatus, 'ready'>; snapshot: null });
+
+// Retain all three existing readers and their normalization/calculation behavior.
+export const readPlannedUtilization = async (): Promise<PlannedSnapshot> => {
+  // A retry must also recover from a cached failed backend availability check.
+  resetBackendCheck();
+  const [report, directors, settings] = await Promise.all([
+    utilizationReportService.getPlanned(),
+    adminService.getCountryDirectors(),
+    adminService.getSettings(),
+  ]);
+  if (!report || !Array.isArray(report.rows) || !Array.isArray(directors) || !settings) {
+    throw new TypeError('Report response unavailable');
+  }
+  return { employees: report.rows, directors, settings };
+};
+
+export const PlannedUtilizationStatus = ({ status, retry }: { status: PlannedStatus; retry: () => void }) => {
+  if (status === 'ready') return null;
+  if (status === 'loading') return (
+    <div role="status" className="flex items-center justify-center gap-3 rounded-2xl border border-border-light bg-white p-8">
+      <Loader2 aria-hidden="true" className="animate-spin text-primary" size={24} />
+      <p className="text-sm font-bold text-heading">Loading planned utilization…</p>
+    </div>
+  );
+  const message = status === 'access' ? 'Access to planned utilization could not be confirmed.'
+    : status === 'unavailable' ? 'Planned utilization is unavailable.'
+    : 'Planned utilization could not be loaded.';
+  return (
+    <div role="alert" className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50 p-5 text-heading">
+      <p className="text-sm font-bold">{message}</p>
+      <p className="text-sm">{status === 'access'
+        ? 'Check your sign-in and report access, then retry.'
+        : 'Check your connection and retry. If the problem continues, contact your administrator.'}</p>
+      <button type="button" onClick={retry} className="btn-secondary px-4 py-2 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+        Retry planned utilization
+      </button>
+    </div>
+  );
+};
+
 export const PlannedUtilization = () => {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [directors, setDirectors] = useState<CountryDirector[]>([]);
-  const [settings, setSettings] = useState<any>({});
-  const [loading, setLoading] = useState(true);
+  const [result, setResult] = useState<PlannedResult>({ status: 'loading', generation: 0, snapshot: null });
+  const requestVersion = useRef(0);
+  const mounted = useRef(false);
+  const loadReport = useCallback(() => {
+    // Invalidate synchronously, including callbacks captured before React rerenders.
+    const generation = ++requestVersion.current;
+    setResult({ status: 'loading', generation, snapshot: null });
+    const current = () => mounted.current && generation === requestVersion.current;
+    void Promise.resolve().then(() => current() ? readPlannedUtilization() : null).then(snapshot => {
+      if (current() && snapshot) setResult({ status: 'ready', generation, snapshot });
+    }).catch(error => {
+      if (!current()) return;
+      const status = error instanceof ApiClientError
+        ? [401, 403].includes(error.status) ? 'access'
+          : [404, 502, 503, 504].includes(error.status) ? 'unavailable' : 'error'
+        : 'error';
+      setResult({ status, generation, snapshot: null });
+    });
+  }, []);
+  const { status } = result;
+  const snapshot = status === 'ready' ? result.snapshot : null;
+  const employees = snapshot?.employees || [];
+  const directors = snapshot?.directors || [];
+  const settings: Partial<SystemSettings> = snapshot?.settings || {};
+  const hasData = status === 'ready' && employees.length > 0;
+  const canExport = status === 'ready' && mounted.current && result.generation === requestVersion.current;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState('All Departments');
@@ -49,24 +118,10 @@ export const PlannedUtilization = () => {
   const [bandFilter, setBandFilter] = useState('All Bands');
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [empData, cdData, setts] = await Promise.all([
-          utilizationReportService.getPlanned(),
-          adminService.getCountryDirectors(),
-          adminService.getSettings(),
-        ]);
-        setEmployees(empData.rows);
-        setDirectors(cdData);
-        setSettings(setts);
-      } catch (error) {
-        console.error('Failed to fetch data', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+    mounted.current = true;
+    loadReport();
+    return () => { mounted.current = false; requestVersion.current += 1; };
+  }, [loadReport]);
 
   const filteredEmployees = useMemo(() => {
     const eligibleEmployees = getUtilizationEligibleEmployees(employees);
@@ -143,6 +198,7 @@ export const PlannedUtilization = () => {
   const currentYear = new Date().getFullYear();
 
   const handleExport = () => {
+    if (status !== 'ready' || !mounted.current || result.generation !== requestVersion.current) return;
     void downloadAuditedCsv('planned-utilization-export.csv', filteredEmployees.map(emp => ({
       employeeId: emp.employeeId,
       name: emp.name,
@@ -157,14 +213,6 @@ export const PlannedUtilization = () => {
     })), 'Planned Utilization');
   };
 
-  if (loading) {
-    return (
-      <div className="h-[60vh] flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary" size={32} />
-      </div>
-    );
-  }
-
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       <PageHeader
@@ -172,7 +220,10 @@ export const PlannedUtilization = () => {
         subtitle="Forward-looking operational planning based on established project allocations."
         breadcrumb={['Reports', 'Utilization']}
         actions={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+             <button type="button" onClick={loadReport} aria-label="Refresh planned utilization" className="btn-secondary py-2.5 px-4 flex items-center gap-2 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                <RefreshCw aria-hidden="true" size={14} /> Refresh
+             </button>
              <div className="flex items-center bg-white border border-border-light rounded-xl p-1 shadow-sm mr-2">
                 <div className="px-4 flex items-center gap-2 border-r border-gray-100 h-full py-1.5 cursor-pointer hover:bg-slate-50 transition-colors rounded-l-lg">
                    <Calendar size={14} className="text-primary" />
@@ -186,13 +237,22 @@ export const PlannedUtilization = () => {
                    `}</div>
                 </div>
              </div>
-             <button onClick={handleExport} className="btn-secondary py-2.5 px-5 flex items-center gap-2 shadow-sm font-bold text-xs uppercase tracking-wider">
+             <button type="button" onClick={handleExport} disabled={!canExport} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed py-2.5 px-5 flex items-center gap-2 shadow-sm font-bold text-xs uppercase tracking-wider">
                 <Download size={14} /> Export Plan
              </button>
           </div>
         }
       />
 
+      <PlannedUtilizationStatus status={status} retry={loadReport} />
+
+      {status === 'ready' && employees.length === 0 && (
+        <div role="status" className="rounded-2xl border border-border-light bg-white p-8 text-center text-sm font-bold text-slate-600">
+          No planned utilization data was returned.
+        </div>
+      )}
+
+      {hasData && <>
       <KPIStrip kpis={kpis} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -368,7 +428,7 @@ export const PlannedUtilization = () => {
                 <option>80-100%</option>
                 <option>Under 80%</option>
               </select>
-              <button onClick={handleExport} className="btn-secondary py-1.5 px-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
+              <button type="button" onClick={handleExport} disabled={!canExport} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed py-1.5 px-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
                  <Download size={12} /> CSV
               </button>
            </div>
@@ -429,13 +489,14 @@ export const PlannedUtilization = () => {
               ))}
               {filteredEmployees.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-gray-400 font-bold uppercase tracking-widest text-xs">No resources match defined criteria</td>
+                  <td colSpan={5} className="py-12 text-center text-gray-400 font-bold uppercase tracking-widest text-xs"><span role="status">No resources match defined criteria</span></td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+      </>}
     </div>
   );
 };
