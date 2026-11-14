@@ -1,6 +1,6 @@
 # WorkOS Source Provenance
 
-**Status:** Pre-import provenance declaration  
+**Status:** Source bootstrap is present on main; original permission and reuse controls remain applicable. Git history records bootstrap commit `3070c80a71640fa4275477d0d2f1538cc8d2a819` (PR16). This technical observation does not establish legal commercialization rights or certify every import exclusion.  
 **Commercial repository:** `APReddy-AutoBotz/WorkOS`  
 **Reference repository:** `APReddy-AutoBotz/Boundaryless-WorkOS`  
 **Approved technical baseline:** `f2de1d85126f5d64f0e2e21b085b0303ca1d8417`

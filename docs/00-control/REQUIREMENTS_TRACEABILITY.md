@@ -3,6 +3,10 @@
 **Status:** Blueprint mapping; PR/test/evidence columns are populated as implementation proceeds.  
 **Authoritative requirements:** `PRODUCT_REQUIREMENTS.md` and `NON_FUNCTIONAL_REQUIREMENTS.md`
 
+## Current product-direction refresh
+
+WOS-GOV-005: [current product-direction task](../tasks/WOS-00-CURRENT-PRODUCT-DIRECTION.md) reconciles README, vision, roadmap, provenance and current status to observed GitHub main/draft evidence. This is documentation traceability, not acceptance of the runtime requirements described by the vision. The [retained-authority clarification](../tasks/WOS-00-RETAINED-REQUIREMENTS-AUTHORITY.md) preserves the legacy text while identifying current requirements and blocking-review authority. The prior status report is retained as dated historical evidence.
+
 ## 1. Traceability rules
 
 Every accepted requirement must link to:
