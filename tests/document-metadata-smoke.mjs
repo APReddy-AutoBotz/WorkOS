@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {readFileSync, readdirSync, rmSync, statSync} from 'node:fs';
 import path from 'node:path';
+import {createRequire} from 'node:module';
+
+const require = createRequire(import.meta.url);
+const viteCli = path.join(path.dirname(require.resolve('vite/package.json')), 'bin', 'vite.js');
 
 const sourceDocument = readFileSync('index.html', 'utf8');
 assert.doesNotMatch(sourceDocument, /import\.meta\.env\.VITE_PRODUCT_(?:NAME|LOGO_URL)/);
@@ -27,7 +31,7 @@ const walkText = root => {
 
 const build = environment => {
   rmSync('dist', {force: true, recursive: true});
-  execFileSync('npm', ['run', 'build'], {
+  execFileSync(process.execPath, [viteCli, 'build'], {
     env: environment,
     stdio: 'inherit',
   });

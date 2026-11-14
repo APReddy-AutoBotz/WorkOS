@@ -7,6 +7,7 @@ import {createServer as createSocketServer} from 'node:net';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import pg from 'pg';
+import {createDisposablePool,closeDisposablePool} from './disposable-postgres.mjs';
 import {runMigrations} from '../../server/migrate.mjs';
 
 export const localDatabaseUrl = value => {
@@ -113,7 +114,7 @@ export const withImportAuditJourney = async test => {
     created = true;
     const databaseUrl = new URL(adminUrl);
     databaseUrl.pathname = `/${name}`;
-    pool = new pg.Pool({connectionString: databaseUrl.toString(), max: 4});
+    pool = createDisposablePool({connectionString: databaseUrl.toString(), max: 4});
     await runMigrations({pool, rootDir: serverDir, logger: {log() {}}});
     const identities = await seedJourney(pool);
     const secret = randomBytes(48).toString('base64url');
@@ -193,7 +194,7 @@ export const withImportAuditJourney = async test => {
     // Stop every client before dropping only the randomized database we created.
     try { if (vite) await vite.close(); } finally {
       try { if (api) await stopApi(api); } finally {
-        try { if (pool) await pool.end(); } finally {
+        try { if (pool) await closeDisposablePool(pool); } finally {
           try {
             if (created) {
               await admin.query('select pg_terminate_backend(pid) from pg_stat_activity where datname=$1 and pid<>pg_backend_pid()', [name]);
