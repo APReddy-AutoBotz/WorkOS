@@ -37,6 +37,7 @@
     "test:authorization-convergence": "node tests/authorization-convergence-smoke.mjs",
     "test:identity-access": "node tests/identity-access-middleware-smoke.mjs",
     "test:current-role-postgres": "node tests/current-role-authority-postgres-smoke.mjs",
+    "test:live-workforce-bindings-postgres": "node tests/live-workforce-bindings-postgres-smoke.mjs",
     "test:audit-record": "node tests/audit-record-smoke.mjs",
     "test:scoped-history-view": "node tests/scoped-history-view-smoke.mjs",
     "test:audit-history-router": "node tests/audit-history-router-smoke.mjs",

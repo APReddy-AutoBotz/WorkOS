@@ -3289,8 +3289,10 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         case when id='availability-exited' then 'Exited' else 'Active' end,'org-default','legal-default'
       from unnest($1::text[]) as fixture(id)`, [availabilityIds]);
     await pool.query(`update employees set reporting_manager_id='availability-self' where id='availability-report'`);
+    await pool.query(`update employees set designation='Country Director' where id='availability-self'`);
     await pool.query(`insert into users (id,username,employee_id,email,status)
       values ($1,'synthetic-availability-user','AVAILABILITY-SELF','availability-user@example.test','Active')`, [availabilityActorId]);
+    await pool.query(`update users set employee_record_id='availability-self' where id=$1`, [availabilityActorId]);
     await pool.query(`insert into user_roles (user_id,role_id)
       select $1,id from roles where name in ('Employee','TeamLead','ProjectManager','CountryDirector')`, [availabilityActorId]);
     await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
