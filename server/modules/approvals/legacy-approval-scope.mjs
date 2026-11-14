@@ -43,4 +43,3 @@ export const legacyApprovalScope = (req, params, {isGlobalRole, buildEmployeeSco
   }
   return `(${ownership}) and (${buildEmployeeScopeWhere(req, params, 'e')} or ${delegatedScope})`;
 };
-
