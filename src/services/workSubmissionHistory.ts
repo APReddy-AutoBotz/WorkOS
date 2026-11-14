@@ -1,10 +1,11 @@
+import {normalizeSubmissionTiming,type SubmissionTiming} from './submissionDeadline';
 import {api,ApiClientError} from './apiClient';
 import {assertWorkCaptureContext,type WorkCaptureContext} from './workCaptureModes';
 import {canonicalHours} from '../../shared/work-hours.mjs';
 import {normalizeEvidenceUrl,evidenceUrlIsValid} from '../../shared/work-evidence.mjs';
 import {workReferenceIsValid} from '../../shared/work-reference.mjs';
 export type HistoricalWorkEntry={entryId:string;projectId:string|null;workType:'Project Work'|'Client Misc Task';workDate:string;hoursExact:string;billable:boolean;clientName:string|null;category:string|null;remark:string|null;evidenceUrl?:string|null;workReference?:string|null};
-export type WorkHistorySubmission={id:string;sequence:number;createdAt:string;activeRole:string;source:string;entries:HistoricalWorkEntry[];decision:null|{status:'Approved'|'Rejected'|'Cancelled';reason:string|null;createdAt:string;activeRole:string;source:string}};
+export type WorkHistorySubmission={submissionTiming?:SubmissionTiming[];id:string;sequence:number;createdAt:string;activeRole:string;source:string;entries:HistoricalWorkEntry[];decision:null|{status:'Approved'|'Rejected'|'Cancelled';reason:string|null;createdAt:string;activeRole:string;source:string}};
 export type WorkHistoryPage={organizationId:string;legalEntityId:string;timesheetId:string;employeeId:string;weekEnding:string;submissions:WorkHistorySubmission[];nextBeforeSequence:number|null};
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v&&typeof v==='object'&&!Array.isArray(v));
 const text=(v:unknown):v is string=>typeof v==='string'&&v.length>0;
@@ -30,7 +31,8 @@ export const decodeWorkHistoryPage=(value:unknown,before:number|null=null):WorkH
   });
   let decision:WorkHistorySubmission['decision']=null;
   if(row.decision!==null){const d=row.decision;if(!object(d)||typeof d.status!=='string'||!['Approved','Rejected','Cancelled'].includes(d.status)||!optionalText(d.reason)||!instant(d.createdAt)||!text(d.activeRole)||!text(d.source))fail();const decisionRow=d as Record<string,unknown>;decision={status:decisionRow.status,reason:decisionRow.reason,createdAt:decisionRow.createdAt,activeRole:decisionRow.activeRole,source:decisionRow.source} as WorkHistorySubmission['decision'];}
-  return {id:row.id,sequence:row.sequence,createdAt:row.createdAt,activeRole:row.activeRole,source:row.source,entries,decision} as WorkHistorySubmission;
+  if(row.submissionTiming!==undefined&&!normalizeSubmissionTiming(row.submissionTiming))fail();
+  return {...(row.submissionTiming!==undefined?{submissionTiming:normalizeSubmissionTiming(row.submissionTiming)}:{}),id:row.id,sequence:row.sequence,createdAt:row.createdAt,activeRole:row.activeRole,source:row.source,entries,decision} as WorkHistorySubmission;
  });
  const next=page.nextBeforeSequence;if(next!==null&&(!Number.isInteger(next)||submissions.length!==10||next!==submissions.at(-1)?.sequence))fail();
  return {organizationId:page.organizationId,legalEntityId:page.legalEntityId,timesheetId:page.timesheetId,employeeId:page.employeeId,weekEnding:page.weekEnding,submissions,nextBeforeSequence:next} as WorkHistoryPage;

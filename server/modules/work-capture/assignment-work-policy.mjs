@@ -1,3 +1,4 @@
+import {readSubmissionTiming,assertSubmissionTiming} from './submission-deadline.mjs';
 import {checkDuplicateEntries,duplicateCheckSummary} from './duplicate-entry-check.mjs';
 import {randomUUID} from 'node:crypto';
 import {lockCommercialLifecycle} from '../commercial-drafting/project-mutation.mjs';
@@ -12,6 +13,8 @@ const scope=req=>[req.organizationScope.organizationId,req.organizationScope.leg
 const date=value=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
 const shift=(value,days)=>{const d=new Date(`${value}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
 export const workPolicyError=(res,error)=>{
+  if(error?.code==='WDL01'){res.status(422).json({error:'The configured submission deadline and grace period have elapsed. Save a Draft or follow the authorized policy process.',code:'WORK_SUBMISSION_DEADLINE_BLOCKED'});return true;}
+  if(error?.code==='WDL02'){res.status(409).json({error:'Submission timing requires unambiguous Weekly period authority.',code:'WORK_SUBMISSION_DEADLINE_AUTHORITY'});return true;}
   if(error?.code==='WWP01'){res.status(409).json({error:'Retained submitted work cannot be rewritten.',code:'WORK_HISTORY_IMMUTABLE'});return true;}
   if(error?.code==='WOT01'){res.status(422).json({error:'Recorded work exceeds a buyer-selected overtime threshold configured to block capture.',code:'WORK_CAPTURE_OVERTIME_BLOCKED'});return true;}
   if(error?.code==='WCR06'){res.status(422).json({error:'An evidence URL is required for each positive work entry on this work date.',code:'WORK_CAPTURE_EVIDENCE_REQUIRED'});return true;}
@@ -146,12 +149,13 @@ export const retainWorkSubmission=async(client,req,timesheet,entries,source)=>{
   const id=`work-submission-${randomUUID()}`;
   const periods=await assertReportingPeriodAllows(client,{organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,relevantDates:[timesheet.week_ending,...entries.map(entry=>entry.work_date)],operation:REPORTING_PERIOD_OPERATIONS.CONTENT});
   const periodReferences=[...new Map(periods.map(p=>[p.id,{id:p.id,frequency:p.frequency,status:p.status}])).values()];
+  const submissionTiming=await readSubmissionTiming(client,req,[timesheet.week_ending,...entries.map(entry=>entry.work_date)]);assertSubmissionTiming(submissionTiming);
   const duplicateEntryCheck=checkDuplicateEntries(entries);
   const evidence=entries.map(entry=>({entryId:entry.id,projectId:entry.project_id||null,workType:entry.work_type,workDate:date(entry.work_date),hours:String(entry.hours),billable:entry.billable,
     clientName:entry.client_name||null,category:entry.category||null,remark:entry.remark||null,evidenceUrl:entry.evidence_url||null,workReference:entry.work_reference||null,kind:entry.policy.kind,bindingId:entry.policy.bindingId||null,assignmentIds:entry.policy.assignmentIds||[],assignmentSnapshots:entry.policy.assignmentSnapshots||[],references:entry.policy.references}));
-  await client.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id,capture_policy_references,duplicate_entry_check)
-    values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb)`,[id,...scope(req),timesheet.id,sequence,WORK_POLICY_VERSION,JSON.stringify(evidence),JSON.stringify(periodReferences),req.user.sub,req.user.activeRole,source,req.correlationId,req.operationId,JSON.stringify(entries.map(entry=>({entryId:entry.id,reference:entry.capturePolicyReference||null}))),duplicateEntryCheck===null?null:JSON.stringify(duplicateEntryCheck)]);
-  return {id,sequence,policyVersion:WORK_POLICY_VERSION,entryCount:evidence.length,governedEntryCount:evidence.filter(x=>x.kind==='governed').length,duplicateCheck:duplicateCheckSummary(duplicateEntryCheck)};
+  await client.query(`insert into work_submission_evidence(id,organization_id,legal_entity_id,timesheet_id,sequence,policy_version,entries,period_references,actor_id,active_role,source,correlation_id,operation_id,capture_policy_references,duplicate_entry_check,submission_timing)
+    values($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16::jsonb)`,[id,...scope(req),timesheet.id,sequence,WORK_POLICY_VERSION,JSON.stringify(evidence),JSON.stringify(periodReferences),req.user.sub,req.user.activeRole,source,req.correlationId,req.operationId,JSON.stringify(entries.map(entry=>({entryId:entry.id,reference:entry.capturePolicyReference||null}))),duplicateEntryCheck===null?null:JSON.stringify(duplicateEntryCheck),JSON.stringify(submissionTiming)]);
+  return {id,sequence,policyVersion:WORK_POLICY_VERSION,entryCount:evidence.length,governedEntryCount:evidence.filter(x=>x.kind==='governed').length,duplicateCheck:duplicateCheckSummary(duplicateEntryCheck),submissionTiming};
 };
 // Decision-time period checks cover every stored work date, not just week end.
 // New submissions are evaluated against their immutable evidence, not today's

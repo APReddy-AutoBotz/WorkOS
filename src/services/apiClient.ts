@@ -1,3 +1,4 @@
+import {normalizeSubmissionTiming} from './submissionDeadline';
 import {normalizeOvertimeWarnings} from './overtimeCapture';
 import {normalizeDuplicateEntryCheck,normalizeDuplicateCheckSummary} from './duplicateEntryCheck';
 /**
@@ -380,10 +381,10 @@ export const normalizeWorkAssurance = (value: unknown): TimesheetSummary['workAs
     || !Number.isInteger(r.entryCount) || Number(r.entryCount) < 1
     || !Number.isInteger(r.governedEntryCount) || Number(r.governedEntryCount) < 0
     || Number(r.governedEntryCount) > Number(r.entryCount)) return undefined;
-  const duplicateCheck=normalizeDuplicateCheckSummary(r.duplicateCheck,Number(r.entryCount));
+  const duplicateCheck=normalizeDuplicateCheckSummary(r.duplicateCheck,Number(r.entryCount)),submissionTiming=normalizeSubmissionTiming(r.submissionTiming);
   return {id: r.id, sequence: Number(r.sequence), policyVersion: r.policyVersion,
     entryCount: Number(r.entryCount), governedEntryCount: Number(r.governedEntryCount),
-    ...(duplicateCheck?{duplicateCheck}:{})};
+    ...(duplicateCheck?{duplicateCheck}:{}),...(submissionTiming?{submissionTiming}:{})};
 };
 
 export const normalizeTimesheetSummary = (

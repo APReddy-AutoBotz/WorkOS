@@ -1,3 +1,4 @@
+import {SubmissionTiming} from './SubmissionTiming';
 import type {WorkSubmissionAssurance as Assurance,DuplicateEntryCheck} from '../types';
 
 export const WorkSubmissionAssurance = ({assurance,status,entryCheck}:{assurance?:Assurance;status:string;entryCheck?:DuplicateEntryCheck}) => (
@@ -8,6 +9,7 @@ export const WorkSubmissionAssurance = ({assurance,status,entryCheck}:{assurance
       <ul>{entryCheck.groups.map(group=><li key={group.key} className="break-words">{group.entryIds.length} entries on {group.workDate}, {group.hoursExact}h each{group.clientName?`, ${group.clientName}`:''}{group.category?`, ${group.category}`:''}.</li>)}</ul>
     </div> : null}
     {assurance ? <>
+      <SubmissionTiming checks={assurance.submissionTiming} retained/>
       <p>Submission {assurance.sequence}: {assurance.entryCount} work entries retained, including {assurance.governedEntryCount} governed entries.</p>
       {assurance.duplicateCheck ? <p>At submission, {assurance.duplicateCheck.groupCount} identical-entry {assurance.duplicateCheck.groupCount===1?'group was':'groups were'} recorded by the within-header content check.</p> : null}
       <p>Policy: {assurance.policyVersion}. Dates, assignment and applicable adopted terms were checked at submission.</p>

@@ -1,3 +1,4 @@
+import {normalizeImportSubmissionTiming,type ImportSubmissionTiming} from './submissionDeadline';
 import {normalizeImportOvertimeWarnings,type ImportOvertimeWarnings} from './overtimeCapture';
 import {canonicalHours,sumHours} from '../../shared/work-hours.mjs';
 /**
@@ -57,6 +58,7 @@ type ImportApplyError = {
 };
 type ImportApplyResult = {
   captureWarnings?: ImportOvertimeWarnings[];
+  submissionTiming?: ImportSubmissionTiming[];
   status: ImportExportLog['status'];
   totalRows: number;
   validRows: number;
@@ -2151,7 +2153,7 @@ export const adminService = {
     }, {'Idempotency-Key': request.idempotencyKey});
     const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
     return {
-      captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),
+      captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),submissionTiming:normalizeImportSubmissionTiming(raw.submissionTiming),
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? request.totalRows),
       validRows: Number(raw.validRows ?? 0),
@@ -2190,7 +2192,7 @@ export const adminService = {
       clientErrors,
     });
     return {
-      captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),
+      captureWarnings:normalizeImportOvertimeWarnings(raw.captureWarnings),submissionTiming:normalizeImportSubmissionTiming(raw.submissionTiming),
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? rows.length),
       validRows: Number(raw.validRows ?? 0),

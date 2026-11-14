@@ -97,7 +97,7 @@ export const withClientProfilesJourney = async test => withCommercialDatabase(as
     const result = await runMigrations({pool, rootDir, logger: {log() {}}});assert.equal(result.status.currentVersion, '041_wos04_governed_lifecycle');
     const before = await clientProfileSnapshot(pool, preservedClientTables);
     for(const row of before.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;} // additive 047/048 column
-    const upgraded = await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied, [clientProfileMigration, '043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy']);
+    const upgraded = await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied, [clientProfileMigration, '043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline']);
     assert.deepEqual(await clientProfileSnapshot(pool, preservedClientTables), before);
   }, {beforeCommercial: async rootDir => {
     const baseline = await runMigrations({pool, rootDir, logger: {log() {}}});assert.equal(baseline.status.currentVersion, '039_wos03_import_operation_contract');

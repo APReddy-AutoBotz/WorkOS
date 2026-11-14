@@ -1,3 +1,4 @@
+import {readSubmissionTiming,assertSubmissionTiming} from '../work-capture/submission-deadline.mjs';
 import {prospectiveImportOvertimeWarnings} from '../work-capture/overtime-policy.mjs';
 import {checkDuplicateEntries,readDuplicateEntryCheck} from '../work-capture/duplicate-entry-check.mjs';
 import {workReferenceInput} from '../work-capture/work-reference.mjs';
@@ -28,6 +29,7 @@ const responseFromBatch = (row, versioned) => ({
   validRows: row.valid_rows,
   errorRows: row.error_rows,
   errors: Array.isArray(row.errors) ? row.errors : [],
+  ...(Array.isArray(row.submission_timing)?{submissionTiming:row.submission_timing}:{}),
   ...(Array.isArray(row.capture_warnings)?{captureWarnings:row.capture_warnings}:{}),
   log: versioned ? row : legacyImportLog(row),
 });
@@ -571,9 +573,9 @@ export const createOperationalImportRouter = ({
         validEntryRows += 1;
       }
 
-      const overtimeGroups=[];
+      const overtimeGroups=[],deadlineGroups=[];
       for (const group of groups.values()) {
-        let policyEntries;
+        let policyEntries,submissionTiming;
         let previous,previousEvidence,previousDuplicateCheck;
         try {
           if(group.entries.length>100)throw new WorkPolicyError('WORK_ENTRY_LIMIT','A work period may contain at most 100 entries.');
@@ -586,6 +588,8 @@ export const createOperationalImportRouter = ({
           policyEntries=await validateWorkEntries(client,req,group.employee.id,group.entries.map(entry=>({project_id:entry.projectId,work_type:entry.workType,client_name:entry.clientName,category:entry.category,remark:entry.remark,evidence_url:entry.evidenceUrl,work_reference:entry.workReference,work_date:entry.workDate,hours:entry.hours,billable:entry.billable})));
           policyEntries=await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries);
           policyEntries=await validateCapturePolicy(client,req,group.employee.id,policyEntries,{replacementTimesheetId:previous?.id,stagedReplacements:dryRun?stagedCaptureReplacements:[]});
+          submissionTiming=await readSubmissionTiming(client,req,[group.weekEnding,...policyEntries.map(entry=>entry.work_date)]);
+          if(group.status==='Submitted')assertSubmissionTiming(submissionTiming);
           group.entries=group.entries.map((entry,index)=>({...entry,hours:policyEntries[index].hours,billable:policyEntries[index].billable,evidenceUrl:policyEntries[index].evidence_url,workReference:policyEntries[index].work_reference}));
           await assertReportingPeriodAllows(client, {
             organizationId: scope.organizationId,
@@ -594,11 +598,12 @@ export const createOperationalImportRouter = ({
             operation: REPORTING_PERIOD_OPERATIONS.CONTENT,
           });
         } catch (error) {
-          if (!(error instanceof ReportingPeriodError)&&!(error instanceof WorkPolicyError)) throw error;
-          errors.push(...group.entries.map(entry => ({rowNumber: entry.rowNumber, field: 'date', message: error.message, code: error.code})));
+          if (!(error instanceof ReportingPeriodError)&&!(error instanceof WorkPolicyError)&&!['WDL01','WDL02'].includes(error?.code)) throw error;
+          errors.push(...group.entries.map(entry => ({rowNumber: entry.rowNumber, field: 'date', message: error.message, code:error.code==='WDL01'?'WORK_SUBMISSION_DEADLINE_BLOCKED':error.code==='WDL02'?'WORK_SUBMISSION_DEADLINE_AUTHORITY':error.code})));
           validEntryRows -= group.entries.length;
           continue;
         }
+        if(submissionTiming?.length)deadlineGroups.push({employeeId:group.employee.id,weekEnding:group.weekEnding,checks:submissionTiming});
         const overtimeGroup={employeeId:group.employee.id,weekEnding:group.weekEnding,timesheetId:previous?.id||null,entries:policyEntries};overtimeGroups.push(overtimeGroup);
         if (dryRun) {
           stagedCaptureReplacements.push({employeeId:group.employee.id,timesheetId:previous?.id||null,entries:policyEntries});
@@ -666,12 +671,12 @@ export const createOperationalImportRouter = ({
         channel, source: 'Timesheet Import CSV',
       });
       const logResult = await client.query(`
-        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run, capture_warnings)
-        values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+        insert into import_export_logs (id, operation, channel, file_name, status, total_rows, valid_rows, error_rows, errors, user_name, organization_id, legal_entity_id, schema_version, dry_run, capture_warnings, submission_timing)
+        values ($1,'Import','Timesheet Import',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb)
         returning *
       `, [importBatchId, parsed.data.fileName, status, totalRows, validEntryRows, errors.length,
         errors.length ? JSON.stringify(responseErrors) : null, req.user.username, scope.organizationId,
-        scope.legalEntityId, versioned ? parsed.data.schemaVersion : null, dryRun, JSON.stringify(captureWarnings)]);
+        scope.legalEntityId, versioned ? parsed.data.schemaVersion : null, dryRun, JSON.stringify(captureWarnings),JSON.stringify(deadlineGroups)]);
       if (versioned) await persistIdempotency({client, scope, context: idempotency, channel, requestHash});
       await client.query('commit');
       transactionOpen = false;
@@ -681,6 +686,7 @@ export const createOperationalImportRouter = ({
         try { await client.query('rollback'); } catch { /* Preserve the original failure. */ }
       }
       if (sendReportingPeriodError(res, error)) return;
+      if(['WDL01','WDL02'].includes(error?.code)){res.status(error.code==='WDL01'?422:409).json({error:'Submission timing changed before commit. No work in this command was applied; revalidate before retrying.',code:error.code==='WDL01'?'WORK_SUBMISSION_DEADLINE_BLOCKED':'WORK_SUBMISSION_DEADLINE_AUTHORITY'});return;}
       logError(error);
       if (versioned) res.status(500).json({error: {code: 'TIMESHEET_IMPORT_FAILED', message: 'The timesheet import could not be completed.'}});
       else res.status(500).json({error: 'Timesheet import apply failed'});

@@ -20,12 +20,12 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     'entryId',e.id,'projectId',e.project_id,'workType',e.work_type,'workDate',e.work_date::text,'hours',e.hours::text,'billable',e.billable,'clientName',e.client_name,'category',e.category,'remark',e.remark)),
     '[]'::jsonb,$4,'Admin','Web','synthetic-pre047-correlation','synthetic-pre047-operation' from timesheet_entries e where e.timesheet_id=$3`,[f.organizationId,f.legalEntityId,f.timesheetId,identities.manager.id]);
   const oldHistory=(await pool.query('select to_jsonb(w) value from work_submission_evidence w')).rows;
-  for(const row of oldHistory)row.value.duplicate_entry_check=null; // additive 050; no historical diagnostic is inferred
+  for(const row of oldHistory){row.value.duplicate_entry_check=null;row.value.submission_timing=null;} // additive 050; no historical diagnostic is inferred
   assert.equal(Object.hasOwn(oldHistory[0].value.entries[0],'evidenceUrl'),false);
 
   const before=(await pool.query('select to_jsonb(e) value from timesheet_entries e order by id')).rows;
   const grants=(await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows;
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy']);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline']);
   assert.deepEqual((await pool.query("select to_jsonb(e)-array['evidence_url','work_reference'] value from timesheet_entries e order by id")).rows,before);
   assert.equal((await pool.query('select count(*)::int n from timesheet_entries where evidence_url is not null')).rows[0].n,0);
   assert.deepEqual((await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows,grants);

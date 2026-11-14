@@ -1,3 +1,4 @@
+import {SubmissionDeadlinePreview} from '../components/SubmissionTiming';
 import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
 import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
 import {workReferenceIsValid,normalizeWorkReference} from '../../shared/work-reference.mjs';
@@ -346,6 +347,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       {loaded&&<WorkCaptureWarnings warnings={captureWarnings}/>}
+      {loaded&&!saving&&!['Submitted','Approved'].includes(status)&&<SubmissionDeadlinePreview dates={[getWeekEnding(currentWeek),...preservedEntries.map(entry=>entry.date),...rows.flatMap(row=>row.hours.flatMap((_,index)=>captureCellPresent(row,index,hourDrafts)?[toIsoDate(shiftDate(currentWeek,index-2))]:[]))]}/>}
       {loaded ? <WorkSubmissionAssurance assurance={workAssurance} status={status} entryCheck={duplicateEntryCheck} /> : <p role="status" className="text-sm text-slate-500">Loading current work assurance...</p>}
       {loaded&&historyHeader&&!saving&&<div key={`${historyHeader}:${writeToken}`}><WorkSubmissionHistory timesheetId={historyHeader}/></div>}
       <PageHeader

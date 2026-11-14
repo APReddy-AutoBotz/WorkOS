@@ -45,6 +45,7 @@ const fixture=()=>{
     if(sql.includes('from commercial_amendments'))return result(state.loaded.entities.find(x=>x.type===values[2]).amendments);
     if(sql.includes('from commercial_contract_versions'))return result([root('version-1')]);
     if(sql.includes('from project_allocations where employee_id=$1'))return result(state.assignments);
+    if(sql.startsWith('select work_submission_timing'))return result([{checks:[]}]);
     if(sql.includes('coalesce(max(sequence),0)+1'))return result([{sequence:1}]);
     if(sql.startsWith('insert into work_submission_evidence')){state.inserts.push(values);return result([]);}
     if(sql.includes('from timesheet_entries'))return result(state.entries||[]);
@@ -67,6 +68,7 @@ assert.equal(entries[0].policy.kind,'legacy-neutral','ordinary permitted non-pro
 await assert.rejects(validateWorkEntries(f.client,{...req,user:{...req.user,activeRole:'ProjectManager'}},'worker-unrelated',[{work_type:'Client Misc Task',client_name:'Synthetic',work_date:at,hours:1,billable:false}]),{code:'WORK_SCOPE_DENIED'});
 f.worker.status='Exited';await assert.rejects(validateWorkEntries(f.client,{...req,user:{...req.user,activeRole:'ProjectManager'}},'worker-unrelated',[{work_type:'Client Misc Task',client_name:'Synthetic',work_date:at,hours:1,billable:false}]),{code:'WORK_SCOPE_DENIED'},'scope denial must not reveal an unrelated worker lifecycle');f.worker.status='Active';
 const summary=await retainWorkSubmission(f.client,req,{id:'period-synthetic',week_ending:at},[{...entries[0],id:'entry-synthetic',hours:'2.00',remark:'Synthetic submitted note',category:'Synthetic category'}],'Synthetic test');
+assert.deepEqual(summary.submissionTiming,[]);assert.deepEqual(JSON.parse(f.inserts[0][15]),[]);
 assert.equal(summary.policyVersion,WORK_POLICY_VERSION);assert.equal(summary.governedEntryCount,0);assert.equal(summary.entryCount,1);
 const material=JSON.parse(f.inserts[0][6]);assert.equal(material[0].remark,'Synthetic submitted note');assert.equal(material[0].category,'Synthetic category');assert.equal(material[0].clientName,'Synthetic ordinary client');
 assert.doesNotMatch(JSON.stringify(summary),/contractVersion|budget|currency|billingTerms|reason|remark/,'broad assurance summary contains no protected commercial values or work text');
