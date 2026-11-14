@@ -79,9 +79,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await pool.query(`insert into approval_records(id,entity_type,entity_id,subject_employee_id,requester_name,status)
     values('synthetic-delegated-approval','LeaveRequest','synthetic-delegated-source','synthetic-delegated-worker','Synthetic requester','Pending')`);
   await pool.query("update approval_delegations set status='Active' where id=$1",[created.body.id]);
-  const assertDelegated=async expected=>{
+  const assertDelegated=async (expected,role=ids.denied.role)=>{
     for(const path of ['/api/approvals','/api/reports/approval-sla']){
-      const result=await request(path,{identity:ids.denied});assert.equal(result.status,200,JSON.stringify(result.body));
+      const result=await request(path,{identity:{...ids.denied,role}});assert.equal(result.status,200,JSON.stringify(result.body));
       assert.equal((Array.isArray(result.body)?result.body:result.body.rows).some(x=>x.id==='synthetic-delegated-approval'),expected,path);
     }
   };
@@ -109,6 +109,27 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await pool.query("insert into user_permission_grants(user_id,permission_key) values($1,'approvals.view'),($2,'approvals.view') on conflict do nothing",[ids.reader.id,ids.denied.id]);
   await pool.query("update role_permissions set enabled=false where role_name='TeamLead' and permission_key='approvals.view'");await assertDelegated(true);
   await pool.query("delete from user_permission_grants where user_id=$1 and permission_key='approvals.view'",[ids.reader.id]);await assertDelegated(false);
+  await pool.query("insert into country_directors(id,name,region)values('synthetic-other-director','Synthetic other director','Synthetic other region')");
+  for(const role of ['CountryDirector','ProjectManager']){
+    for(const uid of [ids.reader.id,ids.denied.id])await pool.query('insert into user_roles(user_id,role_id)select $1,id from roles where name=$2 on conflict do nothing',[uid,role]);
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled)values($1,'approvals.view',true) on conflict(role_name,permission_key)do update set enabled=true",[role]);
+    await pool.query('update approval_delegations set role=$2 where id=$1',[created.body.id,role]);
+    if(role==='CountryDirector'){
+      await pool.query("update employees set designation='Country Director' where id=$1",[f.ownerId]);await assertDelegated(true,role);
+      await pool.query("update employees set designation='Analyst' where id=$1",[f.ownerId]);await assertDelegated(false,role);
+      await pool.query("update employees set designation='Country Director' where id=$1",[f.ownerId]);await assertDelegated(true,role);
+      await pool.query("update employees set primary_country_director_id='synthetic-other-director' where id='synthetic-delegated-worker'");await assertDelegated(false,role);
+      await pool.query("update employees set primary_country_director_id='director-commercial' where id='synthetic-delegated-worker'");
+    }else{
+      await assertDelegated(false,role);
+      await pool.query(`insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,billable,status,organization_id,legal_entity_id)
+        values('synthetic-delegated-project-allocation','synthetic-delegated-worker',$1,10,'2020-03-08','2021-11-07',true,'Completed','org-default','legal-default')`,[f.projectId]);
+      await assertDelegated(true,role);
+      await pool.query('update projects set manager_id=null where id=$1',[f.projectId]);await assertDelegated(false,role);
+      await pool.query('update projects set manager_id=$2 where id=$1',[f.projectId,f.ownerId]);await assertDelegated(true,role);
+    }
+    await pool.query('delete from user_roles where user_id=$1 and role_id=(select id from roles where name=$2)',[ids.reader.id,role]);await assertDelegated(false,role);
+  }
   console.log('Legacy approval selected-entity scope, immutable delegation owner, owner/admin edits, calendar dates and concurrent overlap denial passed.');
  });
 });
