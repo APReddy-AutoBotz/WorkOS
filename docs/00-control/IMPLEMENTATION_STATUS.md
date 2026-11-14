@@ -1,6 +1,6 @@
 # WorkOS implementation status
 
-Status date: 2026-11-14. This page separates observed merged source from draft engineering evidence and release acceptance. The previous 2026-08-25 status is preserved unchanged as [historical evidence](../evidence/2026-11-14/IMPLEMENTATION_STATUS_2026-08-25.md); its pre-import statements and corrective-hold narrative are not a current-state report.
+Status date: 2026-11-15. This page separates observed merged source from draft engineering evidence and release acceptance. The previous 2026-08-25 status is preserved unchanged as [historical evidence](../evidence/2026-11-14/IMPLEMENTATION_STATUS_2026-08-25.md); its pre-import statements and corrective-hold narrative are not a current-state report.
 
 ## Verified main baseline
 
@@ -54,7 +54,11 @@ Assignment and work-date convergence [PR55](https://github.com/APReddy-AutoBotz/
 
 The original-candidate security scan covered all15 source entries and supporting changed files with no introduced security findings; it explicitly withheld merge clearance for the correctness defect above. The separate corrected-head review and delayed-response browser proof support the fix. Retain migration044, evidence ledgers and guards on rollback and use a compatible binary. Full capture modes, capacity/financial acceptance, existing audit findings and production readiness remain open.
 
-Effective-dated capture policy [PR56](https://github.com/APReddy-AutoBotz/WorkOS/pull/56) is the next Draft package. Candidate `3529d065ec25ee5256265f5c6d3299c8c83f1451` passed local locked installation, type/lint/aggregate, scanner, PostgreSQL migration/API, production build, delayed-response and real capture browser checks. Independent exact-head review and fresh hosted CI remain pending; this is not merged acceptance.
+Effective-dated capture policy [PR56](https://github.com/APReddy-AutoBotz/WorkOS/pull/56) merged at `b6d1f760265aefc21e073a071a0eb2740ca61227`, addressing bounded WOS-CORE-003 through WOS-CORE-005, WOS-TIM-005/008/009/011/012 and WOS-NFR-UX-001/005. Migration045 provides scoped append-only increments, aggregate limits and comment rules, exact manual/import quantities, separate capture references and old/new period guards. The editor preserves distinct/off-grid work and exposes policy configuration without inferred defaults.
+
+Independent review found a recovery defect in original candidate `3529d065ec25ee5256265f5c6d3299c8c83f1451`: a failed organization switch during a save could leave the editor busy. Corrected head `88bf1636d3361e64afe347a4ea44944229f73ee2` restores explicit reload after settlement and rejects pre-settlement read results. Local install, type/lint/aggregate, scanner (357 files)/adversarial fixtures, production build, expanded delayed-response and real PostgreSQL/browser acceptance passed; independent exact-head review approved. [CI43626627379](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43626627379) passed all 39 application/migration/container and all 5 full-history secret steps. [Post-merge CI43627395475](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43627395475) is running at this checkpoint.
+
+The original-candidate security review accounted for all 22 source entries and supporting changed files with no introduced security findings, but explicitly withheld merge clearance for the recovery blocker. The later correction has separate review/test evidence. Rollback retains migration045, immutable policies, capture references and guards in a compatible binary. Existing audit findings, full capture modes, evidence, overtime, capacity/finance and production acceptance remain open. Daily/weekly capture and optimistic saves PR57 are the next dependent package; current integration validation is not acceptance on main.
 
 The two-page GitHub inventory contained 104 open PRs before the independent documentation and dependency-repair packages were published. Most later implementation remains in dependent Draft branches. Separate controller branches require their own disposition; open does not mean mergeable or required.
 
