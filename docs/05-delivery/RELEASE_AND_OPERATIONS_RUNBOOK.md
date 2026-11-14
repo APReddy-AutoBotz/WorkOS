@@ -352,3 +352,12 @@ Run worker-capacity unit/transport, PostgreSQL fresh/055 upgrade/replay and real
 ### PR-008O reviewed integration checkpoint — 2026-11-15
 
 Current owner authorization supersedes this package's historical fixed-Draft and review/scan/merge restrictions. Integration includes accepted PR68/main `b4beea218d5bd46c0396f5149dd05531420523ac`; local acceptance, independent exact-head review and hosted gates remain required. See [the package evidence](../tasks/WOS-04-EFFECTIVE-WORKER-CAPACITY.md#reviewed-integration-checkpoint--2026-11-15) for bounded WKF-003/005/007/008, ORG-008, RES-003/004/005, TIM-010 and CORE-004/005. Preserve migration056 profiles, result/source evidence, guards and audit on rollback. Unavailable legacy authority, broader reconciliation and buyer/release acceptance remain open.
+
+
+### Capacity integration corrections — 2026-11-15
+
+Independent review of frozen candidate `a7a8c40e58df2d8352b67b28930be3e03e49ee69` found three correctness gaps despite its passing hosted checks. The correction preserves that reviewed tree and migration056 unchanged. Additive migration056a replaces numeric division with exact multiplication by 0.01 in the capacity-profile consistency constraint. PostgreSQL regression first reproduced rejection of a valid 20-decimal schedule; exact-positive and rounded-negative cases now pass on fresh, 055-upgrade and original056-upgrade/replay paths. No existing profile, evidence or audit row is rewritten.
+
+Profile-save and evidence-retention uncertainty now have separate recovery states. Loading profiles or recalculating cannot unlock an uncertain evidence save; an owned latest evidence-history read is required and clears the reason so any subsequent write is deliberate. Status and calendar-tier DTOs require literal strings instead of coercing arrays. Regression coverage includes malformed enumeration values and a real committed evidence write whose acknowledgement is replaced with an invalid response, followed by unrelated reads and explicit evidence read-back. Broader corrected-head acceptance and independent review remain pending until recorded in the PR.
+
+Rollback must retain migrations056/056a, exact validation, immutable profiles/results/source proof and audit. Do not restore the rounding constraint or drop historical records. Buyer UAT, remaining utilization reconciliation and prior full-repository security findings remain open.

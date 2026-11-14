@@ -6,16 +6,31 @@ import {commercialFixture as f,commercialServerDir,withCommercialDatabase,withPr
 import {runMigrations} from '../server/migrate.mjs';
 import {workSnapshot} from './support/work-assignment-test.mjs';
 import {capacityDefinition as definition,seedCapacity,approveCapacityLeave,insertLegacyCapacityLeave} from './support/worker-capacity-test.mjs';
-import {shiftCapacityDate} from '../shared/worker-capacity.mjs';
+import {shiftCapacityDate,validCapacityProfile} from '../shared/worker-capacity.mjs';
 import {calculateScopedCapacity} from '../server/modules/planning/worker-capacity-service.mjs';
+const precisionProfile={...definition,fullTimeWeeklyHoursExact:'10.1234567890123456789',partTimePercentExact:'50',hoursByWeekdayExact:['0','5.06172839450617283945','0','0','0','0','0']};
+const roundedProfile={...precisionProfile,hoursByWeekdayExact:['0','5.0617283945061728395','0','0','0','0','0']};
+const assertPrecision=async pool=>{
+ assert.equal(validCapacityProfile(precisionProfile),true);
+ assert.equal(validCapacityProfile(roundedProfile),false);
+ for(const [profile,expected] of [[precisionProfile,true],[roundedProfile,false]])assert.equal((await pool.query('select valid_capacity_profile($1::jsonb) valid',[JSON.stringify(profile)])).rows[0].valid,expected,'SQL and server preserve exact percentage multiplication');
+};
 const migration='056_wos04_effective_worker_capacity',prefix='/api/v1/worker-capacity/workers/',table=async(p,t)=>(await p.query(`select to_jsonb(t) value from ${t} t order by to_jsonb(t)::text`)).rows;
 await withCommercialDatabase(async({pool})=>withPreCommercialMigrations(async rootDir=>{
  for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-5])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));await runMigrations({pool,rootDir,logger:{log(){}}});await seedCapacity(pool);
  const keep=['employees','working_calendars','working_calendar_holidays','organization_catalog_items','legal_entity_profile_versions','worker_history','leave_requests','role_permissions','resource_demands','resource_demand_versions','workforce_capability_versions','commercial_contract_versions','approval_records'],before=Object.fromEntries(await Promise.all(keep.map(async t=>[t,await table(pool,t)]))),work=await workSnapshot(pool);
- assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration]);assert.deepEqual(await table(pool,'worker_capacity_versions'),[]);assert.deepEqual(await table(pool,'worker_capacity_evidence'),[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);assert.deepEqual(await workSnapshot(pool),work);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'056a_wos04_capacity_exact_percentage']);await assertPrecision(pool);assert.deepEqual(await table(pool,'worker_capacity_versions'),[]);assert.deepEqual(await table(pool,'worker_capacity_evidence'),[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);assert.deepEqual(await workSnapshot(pool),work);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);for(const t of keep)assert.deepEqual(await table(pool,t),before[t]);
+}));
+await withCommercialDatabase(async({pool})=>withPreCommercialMigrations(async rootDir=>{
+ for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-6])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));
+ await runMigrations({pool,rootDir,logger:{log(){}}});
+ assert.equal((await pool.query('select valid_capacity_profile($1::jsonb) valid',[JSON.stringify(precisionProfile)])).rows[0].valid,false,'original056 exhibits precision defect');
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['056a_wos04_capacity_exact_percentage']);
+ await assertPrecision(pool);
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
 }));
 await withCommercialDatabase(async({pool,databaseUrl})=>{
- assert.equal((await migrateCommercialDatabase(pool)).status.isCurrent,true);const{identities,today,monday,dates,calendarId}=await seedCapacity(pool),path=prefix+f.ownerId;
+ assert.equal((await migrateCommercialDatabase(pool)).status.isCurrent,true);await assertPrecision(pool);const{identities,today,monday,dates,calendarId}=await seedCapacity(pool),path=prefix+f.ownerId;
  await withCommercialApi({databaseUrl,identities},async({request})=>{
   const period=(from=monday,to=dates[4],options={})=>request(path+'/period?'+new URLSearchParams({startsOn:from,endsOn:to}),options),profiles=()=>request(path+'/profiles'),adopt=(expectedLatestId=null,effectiveFrom=monday,def=definition,options={})=>request(path+'/profiles',{method:'POST',body:{expectedLatestId,effectiveFrom,definition:def,reason:'Synthetic explicit capacity adoption'},...options}),retain=(result,options={})=>request(path+'/evidence',{method:'POST',body:{startsOn:result.startsOn,endsOn:result.endsOn,expectedSourceToken:result.sourceToken,reason:'Synthetic retained capacity'},...options});
   assert.equal((await request(path+'/profiles',{authenticated:false})).status,401);assert.equal((await request(path+'/profiles',{identity:identities.denied})).status,404);assert.equal((await request(prefix+f.otherOwnerId+'/profiles')).status,404);assert.equal((await request(path+'/profiles',{scope:{organizationId:f.organizationId,legalEntityId:f.otherLegalEntityId}})).status,403);
@@ -35,6 +50,17 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const direct=(def=definition,sequence=3,effective=dates[3],employee=f.ownerId,legal=f.legalEntityId)=>pool.query(`insert into worker_capacity_versions(id,organization_id,legal_entity_id,employee_id,sequence,effective_from,contract_version,definition,weekly_hours,actor_id,active_role,source,reason)values($1,$2,$3,$4,$5,$6,'worker-capacity/1',$7,20,'synthetic','Admin','Web','Synthetic SQL assertion')`,[randomUUID(),f.organizationId,legal,employee,sequence,effective,JSON.stringify(def)]);
   await assert.rejects(direct({...definition,partTimePercentExact:'60'}),e=>e.code==='23514');await assert.rejects(direct(definition,2),e=>e.code==='WCP01');await assert.rejects(direct(definition,3,dates[3],f.otherOwnerId),e=>e.code==='23503'||e.code==='WCP01');
   const audit=(await pool.query("select * from audit_logs where action in('Adopt Worker Capacity','Retain Worker Capacity Evidence')")).rows;assert.equal(audit.length,3);assert(audit.every(a=>a.user_id===identities.manager.id&&a.active_role==='Admin'&&a.source==='Web'&&a.reason));assert.deepEqual(await table(pool,'role_permissions'),grants);assert.deepEqual(await table(pool,'organization_catalog_items'),catalogs);assert.deepEqual(await table(pool,'working_calendars'),calendars);
+ });
+});
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ await migrateCommercialDatabase(pool);const{identities,monday}=await seedCapacity(pool);
+ await withCommercialApi({databaseUrl,identities},async({request})=>{
+  const body={expectedLatestId:null,effectiveFrom:monday,definition:precisionProfile,reason:'Synthetic exact percentage regression'};
+  const rejected=await request(prefix+f.ownerId+'/profiles',{method:'POST',body:{...body,definition:roundedProfile}});assert.equal(rejected.status,400);
+  const accepted=await request(prefix+f.ownerId+'/profiles',{method:'POST',body});assert.equal(accepted.status,201,JSON.stringify(accepted.body));
+  assert.equal(accepted.body.version.weeklyHoursExact,'5.06172839450617283945');
+  assert.equal((await pool.query('select weekly_hours::text hours from worker_capacity_versions where id=$1',[accepted.body.version.id])).rows[0].hours,'5.06172839450617283945');
+  const result=await request(prefix+f.ownerId+'/period?'+new URLSearchParams({startsOn:monday,endsOn:monday}));assert.equal(result.status,200);assert.equal(result.body.result.totals.availableHoursExact,'5.06172839450617283945');
  });
 });
 console.log('Capacity fresh/055 upgrade/replay neutrality, real PostgreSQL/API explicit profiles, calendar authority, leave approval and exact totals, immutable retained results/source CAS, concurrency, audit, scope and demand integration passed. Legacy multiday and partial overlap remain unavailable.');

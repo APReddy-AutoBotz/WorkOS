@@ -434,3 +434,6 @@ WKF003/005/007/008, ORG008, RES003/004/005, TIM010 and CORE004/005 continue thro
 ### PR-008O reviewed integration checkpoint — 2026-11-15
 
 Current owner authorization supersedes this package's historical fixed-Draft and review/scan/merge restrictions. Integration includes accepted PR68/main `b4beea218d5bd46c0396f5149dd05531420523ac`; local acceptance, independent exact-head review and hosted gates remain required. See [the package evidence](../tasks/WOS-04-EFFECTIVE-WORKER-CAPACITY.md#reviewed-integration-checkpoint--2026-11-15) for bounded WKF-003/005/007/008, ORG-008, RES-003/004/005, TIM-010 and CORE-004/005. Preserve migration056 profiles, result/source evidence, guards and audit on rollback. Unavailable legacy authority, broader reconciliation and buyer/release acceptance remain open.
+
+
+PR-008O correction evidence for WOS-WKF-003/005, RES-003/004/005 and CORE-004/005: additive migration056a preserves exact percentage validation; independent UI uncertainty recovery and strict status/calendar-tier decoding close reviewed correctness gaps. See the capacity package correction checkpoint; corrected-head acceptance remains required.

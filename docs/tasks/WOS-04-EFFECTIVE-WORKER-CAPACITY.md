@@ -45,3 +45,17 @@ Bounded requirements: WOS-WKF-003/005/007/008, ORG-008, RES-003/004/005, TIM-010
 
 
 Integration fixture correction: the retained bootstrap scanner rejected four literal `sourceToken` assignments across two synthetic service tests. Replaced digest-shaped literals with the existing `syntheticHexDigest` helper and retained malformed-string rejection through `rejectedConfigurationValues.short`. No runtime rule, scanner exception or assertion was weakened. The initial failed scanner log remains retained; both focused services and the final scanner/adversarial fixtures passed. Final malformed-string helper coverage was rerun explicitly after its edit.
+
+
+### Capacity integration corrections — 2026-11-15
+
+Independent review of frozen candidate `a7a8c40e58df2d8352b67b28930be3e03e49ee69` found three correctness gaps despite its passing hosted checks. The correction preserves that reviewed tree and migration056 unchanged. Additive migration056a replaces numeric division with exact multiplication by 0.01 in the capacity-profile consistency constraint. PostgreSQL regression first reproduced rejection of a valid 20-decimal schedule; exact-positive and rounded-negative cases now pass on fresh, 055-upgrade and original056-upgrade/replay paths. No existing profile, evidence or audit row is rewritten.
+
+Profile-save and evidence-retention uncertainty now have separate recovery states. Loading profiles or recalculating cannot unlock an uncertain evidence save; an owned latest evidence-history read is required and clears the reason so any subsequent write is deliberate. Status and calendar-tier DTOs require literal strings instead of coercing arrays. Regression coverage includes malformed enumeration values and a real committed evidence write whose acknowledgement is replaced with an invalid response, followed by unrelated reads and explicit evidence read-back. Broader corrected-head acceptance and independent review remain pending until recorded in the PR.
+
+Rollback must retain migrations056/056a, exact validation, immutable profiles/results/source proof and audit. Do not restore the rounding constraint or drop historical records. Buyer UAT, remaining utilization reconciliation and prior full-repository security findings remain open.
+
+
+Correction acceptance receipt: locked install, type checking, lint and the full aggregate passed. Real PostgreSQL capacity acceptance passed including fresh/055/original056 upgrade/replay, exact API adoption/storage/calculation and rounded-value rejection. The complete migration harness passed all53 entries with fresh/concurrent/replay/upgrade/rollback checks. The real capacity browser journey passed the uncertain committed-acknowledgement recovery and retained late-owner assertions on an unchanged retry after initial fixture navigation timeout. Production build, 464-file bootstrap scan and adversarial scanner fixtures passed. Original migration056, UTF-8, local document links and diff whitespace were verified. Accepted docs-only main `8f8e6957e91651a7a6ddef5bd0150ba511460d0a` is integrated; no runtime change came from that merge. Corrected-head independent review and hosted acceptance remain required.
+
+The original frozen review's finalization failed because its draft omitted required coverage fields; the draft was repaired without retrying completion. Do not claim that scan sealed successfully or transfer it as acceptance of this corrected head. Its independent source reviews identified the three correctness issues above; a separate corrected-head review remains required.
