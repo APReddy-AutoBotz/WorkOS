@@ -88,27 +88,27 @@ export const AdminSettings = () => {
       setLoading(true);
       setLoadError('');
       try {
-      const [setts, roles, cds, depts, ctrs, inds, employeeRows, clientRows, readiness] = await Promise.all([
-        adminService.getSettings(),
-        adminService.getRoleDefinitions(),
-        adminService.getCountryDirectors(),
-        adminService.getDepartments(),
-        adminService.getCountries(),
-        adminService.getIndustries(),
-        employeeService.getAll(),
-        clientService.getAll(),
-        adminService.getOrganizationSetupReadiness(),
-      ]);
-      if (!active) return;
-      setSettings(setts);
-      setRoleDefinitions(roles);
-      setCountryDirectors(cds);
-      setDepartments(depts);
-      setCountries(ctrs);
-      setIndustries(inds);
-      setEmployees(employeeRows);
-      setClients(clientRows);
-      setSetupReadiness(readiness);
+        const [setts, roles, cds, depts, ctrs, inds, employeeRows, clientRows, readiness] = await Promise.all([
+          adminService.getSettings(),
+          adminService.getRoleDefinitions(),
+          adminService.getCountryDirectors(),
+          adminService.getDepartments(),
+          adminService.getCountries(),
+          adminService.getIndustries(),
+          employeeService.getAll(),
+          clientService.getAll(),
+          adminService.getOrganizationSetupReadiness(),
+        ]);
+        if (!active) return;
+        setSettings(setts);
+        setRoleDefinitions(roles);
+        setCountryDirectors(cds);
+        setDepartments(depts);
+        setCountries(ctrs);
+        setIndustries(inds);
+        setEmployees(employeeRows);
+        setClients(clientRows);
+        setSetupReadiness(readiness);
       } catch {
         if (active) setLoadError('Governance settings could not be loaded. Retry to continue.');
       } finally {
