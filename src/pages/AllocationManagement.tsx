@@ -1,3 +1,5 @@
+import {AssignmentVersions} from '../components/AssignmentVersions';
+import {captureAssignmentContext} from '../services/assignmentVersions';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
@@ -47,6 +49,8 @@ export const AllocationControlPanel = ({ embedded = false, focus, onClearFocus }
   const canEditAllocations = canManageAllocations(currentUser);
   const [view, setView] = useState<'employee' | 'project'>('employee');
   const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [versionAssignmentId,setVersionAssignmentId]=useState<string|null>(null);
+  const canReadVersions=Boolean(captureAssignmentContext());
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [cds, setCds] = useState<CountryDirector[]>([]);
@@ -364,6 +368,7 @@ export const AllocationControlPanel = ({ embedded = false, focus, onClearFocus }
         />
       )}
 
+      {versionAssignmentId&&<AssignmentVersions key={versionAssignmentId} assignmentId={versionAssignmentId} onClose={()=>setVersionAssignmentId(null)} onChanged={()=>refreshData()}/>}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {allocationSummary.map(item => (
           <div key={item.label} className="bg-white border border-border-light rounded-2xl p-4 shadow-sm">
@@ -589,6 +594,7 @@ export const AllocationControlPanel = ({ embedded = false, focus, onClearFocus }
                       <th className="pb-4 font-bold w-1/4">Planned Load</th>
                       <th className="pb-4 font-bold">Planned Timeline</th>
                       <th className="pb-4 font-bold">Billing Status</th>
+                          {canReadVersions&&<th>Version history</th>}
                           {canEditAllocations && <th className="pb-4 font-bold text-right">Actions</th>}
                     </tr>
                   </thead>
@@ -649,6 +655,7 @@ export const AllocationControlPanel = ({ embedded = false, focus, onClearFocus }
                                 {alc.billable ? 'Billable' : 'Internal'}
                              </Badge>
                           </td>
+                          {canReadVersions&&<td><button aria-label={"Assignment versions for "+alc.id} onClick={()=>setVersionAssignmentId(alc.id)}>Versions / exact edit</button></td>}
                           {canEditAllocations && (
                             <td className="py-4 text-right">
                                <div className="flex items-center justify-end gap-2">

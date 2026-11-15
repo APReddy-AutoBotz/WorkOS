@@ -141,8 +141,15 @@ export const validateWorkEntries=async(client,req,employeeId,entries)=>{
     const assignments=(await client.query(`select id,billable,start_date::text,end_date::text,status,percentage::text,role_on_project from project_allocations where employee_id=$1 and project_id=$2 and organization_id=$3 and legal_entity_id=$4
       and status='Active' and $5::date between start_date and end_date order by id for share`,[employeeId,entry.project_id,...scope(req),at])).rows;
     if(!assignments.length)fail('WORK_ASSIGNMENT_REQUIRED','Project work requires an active assignment covering the work date.');
+    // Finish waiting for source-row locks before taking the ledger snapshot.
+    // A direct SQL writer may commit while the preceding SELECT is waiting.
+    const versions=(await client.query(`select distinct on (assignment_id) assignment_id,id from assignment_versions
+      where assignment_id=any($1::text[]) and organization_id=$2 and legal_entity_id=$3 order by assignment_id,sequence desc`,[assignments.map(a=>a.id),...scope(req)])).rows;
+    const versionIds=new Map(versions.map(v=>[v.assignment_id,v.id]));
+    for(const assignment of assignments)assignment.assignment_version_id=versionIds.get(assignment.id)??null;
+
     const billable=Boolean(entry.billable)&&policy.billable&&assignments.some(x=>x.billable);
-    output.push({...entry,billable,policy:{...policy,billable,assignmentIds:assignments.map(x=>x.id),assignmentSnapshots:assignments.map(x=>({id:x.id,workerId:employeeId,projectId:entry.project_id,startsOn:x.start_date,endsOn:x.end_date,status:x.status,billable:x.billable,percentage:x.percentage,roleOnProject:x.role_on_project||null}))}});
+    output.push({...entry,billable,policy:{...policy,billable,assignmentIds:assignments.map(x=>x.id),assignmentSnapshots:assignments.map(x=>({id:x.id,...(x.assignment_version_id?{assignmentVersionId:x.assignment_version_id}:{}),workerId:employeeId,projectId:entry.project_id,startsOn:x.start_date,endsOn:x.end_date,status:x.status,billable:x.billable,percentage:x.percentage,roleOnProject:x.role_on_project||null}))}});
   }
   return output;
 };
