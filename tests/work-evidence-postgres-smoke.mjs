@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticCredential} from './support/synthetic-values.mjs';
 import {copyFile,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -24,7 +25,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
 
   const before=(await pool.query('select to_jsonb(e) value from timesheet_entries e order by id')).rows;
   const grants=(await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows;
-  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand','056_wos04_effective_worker_capacity','057_wos04_assignment_versions']);
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[migration,'048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand','056_wos04_effective_worker_capacity','056a_wos04_capacity_exact_percentage','057_wos04_assignment_versions']);
   assert.deepEqual((await pool.query("select to_jsonb(e)-array['evidence_url','work_reference','source_identity'] value from timesheet_entries e order by id")).rows,before);
   assert.equal((await pool.query('select count(*)::int n from timesheet_entries where evidence_url is not null')).rows[0].n,0);
   assert.deepEqual((await pool.query('select to_jsonb(r) value from role_permissions r order by to_jsonb(r)::text')).rows,grants);
@@ -65,7 +66,10 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const stale=await post({...input(id),expected_write_token:oldToken});assert.equal(stale.status,409);assert.equal(stale.body.code,'WORK_CAPTURE_WRITE_CONFLICT');assert.deepEqual(await workSnapshot(pool),afterEvidence);
   saved=await post({...input(id,[{...entry,evidence_url:null}]),expected_write_token:(await read()).write_token});assert.equal(saved.status,200);assert.equal((await read()).entries[0].evidence_url,null);
   saved=await post(input(id,[{...entry,evidence_url:''}]));assert.equal(saved.status,200);assert.equal((await read()).entries[0].evidence_url,null);
-  for(const evidence_url of ['javascript:alert(1)','//example.test/work','https://user:password@example.test/work','https://example.test/'+ 'x'.repeat(2048)]){
+  const credentialUrl = new URL('https://example.test/work');
+  credentialUrl.username = 'synthetic-user';
+  credentialUrl.password = syntheticCredential();
+  for(const evidence_url of ['javascript:alert(1)','//example.test/work',credentialUrl.href,'https://example.test/'+ 'x'.repeat(2048)]){
    const snapshot=await workSnapshot(pool);assert.equal((await post(input(id,[{...entry,evidence_url}]))).status,400);assert.deepEqual(await workSnapshot(pool),snapshot);
   }
   await assert.rejects(pool.query("update timesheet_entries set evidence_url='javascript:synthetic' where timesheet_id=$1",[saved.body.id]),error=>error.code==='23514');

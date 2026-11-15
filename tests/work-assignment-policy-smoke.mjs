@@ -45,6 +45,7 @@ const fixture=()=>{
     if(sql.includes('from commercial_amendments'))return result(state.loaded.entities.find(x=>x.type===values[2]).amendments);
     if(sql.includes('from commercial_contract_versions'))return result([root('version-1')]);
     if(sql.includes('from project_allocations where employee_id=$1'))return result(state.assignments);
+    if(sql.includes('from assignment_versions'))return result(state.assignments.filter(a=>a.assignment_version_id).map(a=>({assignment_id:a.id,id:a.assignment_version_id})));
     if(sql.startsWith('select work_submission_timing'))return result([{checks:[]}]);
     if(sql.includes('coalesce(max(sequence),0)+1'))return result([{sequence:1}]);
     if(sql.startsWith('insert into work_submission_evidence')){state.inserts.push(values);return result([]);}

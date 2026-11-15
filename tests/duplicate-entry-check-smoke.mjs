@@ -1,3 +1,4 @@
+import {syntheticHexDigest} from './support/synthetic-values.mjs';
 import assert from 'node:assert/strict';
 import {checkDuplicateEntries,duplicateCheckSummary,projectTimesheetDuplicateCheck,DUPLICATE_ENTRY_VERSION} from '../server/modules/work-capture/duplicate-entry-check.mjs';
 import {normalizeDuplicateEntryCheck,normalizeDuplicateCheckSummary} from '../src/services/duplicateEntryCheck.ts';
@@ -15,9 +16,10 @@ assert.equal(checkDuplicateEntries([base,{...other,hours:'0.25000000000000001'}]
 assert.equal(checkDuplicateEntries([{...base,hours:'0'},{...other,hours:'0.000'}]).groups.length,1,'identical zero records are advisory too');
 assert.deepEqual(checkDuplicateEntries([]),{version:DUPLICATE_ENTRY_VERSION,groups:[]});assert.equal(checkDuplicateEntries([base]).groups.length,0);
 for(const entries of [null,[base,{...other,id:base.id}],[{...base,hours:'not-a-quantity'}],[{...base,work_date:'2026-02-30'}],[{...base,work_type:'Unknown legacy kind'}]])assert.equal(checkDuplicateEntries(entries),null,'unknown legacy data is unavailable, never a fabricated clean check');
-assert.equal(projectTimesheetDuplicateCheck({entries:input,write_token:'revision'}).write_token,'revision');assert.deepEqual(duplicateCheckSummary(check),{version:DUPLICATE_ENTRY_VERSION,groupCount:1});assert.equal(duplicateCheckSummary(null),null);
+const revision=syntheticHexDigest();assert.equal(projectTimesheetDuplicateCheck({entries:input,write_token:revision}).write_token,revision);assert.deepEqual(duplicateCheckSummary(check),{version:DUPLICATE_ENTRY_VERSION,groupCount:1});assert.equal(duplicateCheckSummary(null),null);
 assert.deepEqual(normalizeDuplicateEntryCheck(check),check);assert.deepEqual(normalizeDuplicateEntryCheck({version:DUPLICATE_ENTRY_VERSION,groups:[]}),{version:DUPLICATE_ENTRY_VERSION,groups:[]});
 for(const value of [null,{},[],{version:'unknown',groups:[]},{...check,groups:[{...check.groups[0],key:'bad'}]},{...check,groups:[{...check.groups[0],entryIds:['same','same']}]},{...check,groups:[{...check.groups[0],workDate:'2026-02-30'}]},{...check,groups:[{...check.groups[0],hoursExact:'-1'}]}])assert.equal(normalizeDuplicateEntryCheck(value),undefined);
+for(const workType of [['Project Work'],['Client Misc Task'],null,1,{}])assert.equal(normalizeDuplicateEntryCheck({...check,groups:[{...check.groups[0],workType}]}),undefined,'work type must be a literal string, not a coercible value');
 assert.equal(normalizeDuplicateCheckSummary({version:DUPLICATE_ENTRY_VERSION,groupCount:2},2),undefined);assert.equal(normalizeDuplicateCheckSummary(null,2),undefined);
 const assurance={id:'submission',sequence:1,policyVersion:'assignment-work-date/1',entryCount:2,governedEntryCount:0};assert.equal(Object.hasOwn(normalizeWorkAssurance(assurance),'duplicateCheck'),false,'legacy history is not assigned an inferred clean result');
 assert.deepEqual(normalizeWorkAssurance({...assurance,duplicateCheck:duplicateCheckSummary(check)}).duplicateCheck,{version:DUPLICATE_ENTRY_VERSION,groupCount:1});

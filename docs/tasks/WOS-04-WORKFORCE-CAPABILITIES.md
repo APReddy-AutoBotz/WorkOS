@@ -1,6 +1,6 @@
 # PR-008M: Structured workforce capabilities and deterministic filtering
 
-**Status:** Acceptance plan committed before implementation as `3866a451c8dbbf48edbf104c0b25b3509597e0d4`. Focused shared/production-transport, real PostgreSQL/API fresh/053-upgrade/replay and real HR/Employee React/API/PostgreSQL journeys passed; exact frozen-source retained/local/hosted receipts remain required. Dependent development on fixed Draft PR66 `2585b0a0d6dc03285d85155c091376b317c71839`, tree `287027d041369414b4fe46e92cf742ab55fabcf0`. Optional independent/formal reviews remain deferred/outstanding, not passed. No milestone or integration acceptance.
+**Historical implementation status (superseded by the integration checkpoint below):** Acceptance plan committed before implementation as `3866a451c8dbbf48edbf104c0b25b3509597e0d4`. Focused shared/production-transport, real PostgreSQL/API fresh/053-upgrade/replay and real HR/Employee React/API/PostgreSQL journeys passed; exact frozen-source retained/local/hosted receipts remain required. Dependent development on fixed Draft PR66 `2585b0a0d6dc03285d85155c091376b317c71839`, tree `287027d041369414b4fe46e92cf742ab55fabcf0`. Optional independent/formal reviews remain deferred/outstanding, not passed. No milestone or integration acceptance.
 
 ## Authoritative lineage and selected outcome
 
@@ -35,3 +35,13 @@ Pre-write reconciliation on2026-10-24 found only root active, all five Actions q
 ## Remaining limits
 
 Source identities stay user-entered and source-linked amendments unsupported. R3 remains UTC-only with notification/integration handoff outstanding. R1/R4/R6/R7/R9/R10 and remaining demand/assignment integration in R8 remain finite open outcomes. No denied cumulative review/security repair retry or manual scan, access/grants/spend, protection/monitoring changes, force push, destructive cleanup, merge or deployment.
+
+## Reviewed integration checkpoint — 2026-11-15
+
+The owner's subsequent authorization supersedes this package's historical fixed-Draft dependency and review/scan/merge deferrals. Integrate against accepted PR66/main `2a8828f9b0762cef514ab670882d12e6dffd2c0f`. Original implementation and acceptance-plan history above remain preserved; current authorization permits independent review and an eligible merge after all gates pass, without deployment or full milestone acceptance.
+
+The integration preserves accepted source identity, policy/history validation, ownership controls, dependency lock and all retained test scripts. Four documentation/package merge conflicts were resolved by retaining the accepted parent and appending this package's scoped additions. Local merge commits are `63052fb` and `e6b8e1c55ccd98d7d683a2a4381b9815ad47388e`.
+
+Current evidence: installation from the merged lock passed (338 packages, 345 audited, zero reported vulnerabilities); type checking and both focused capability suites passed. Dedicated PostgreSQL/API acceptance passed fresh installation, migration053 upgrade/replay neutrality, immutable versions, compare-and-swap/concurrency, audit, exact inclusive-date AND matching and pagination, existing role/scope denials and retained work. Full type/lint/aggregate passed after that locked install. The production build passed in20.88seconds, and bootstrap scanning passed440files plus adversarial fixtures. Browser acceptance passed the workforce HR editor/Employee reader, source identity, named Employee/distinct approver cycle and retained ownership journeys on an unchanged retry. The first attempt timed out on the initial Vite page.goto after20seconds before assertions; its log is retained, and no timeout/assertion was relaxed. The controlled ownership fixture has no live deadline-preview API and its connection errors are not deadline evidence. Synthetic sessions are not buyer OIDC or performance acceptance. Independent exact-head review and hosted acceptance remain required.
+
+Requirements: bounded WOS-WKF-004/008, WOS-CORE-004/005 and WOS-NFR-DAT-005. Migration054 retains append-only capability versions; rollback preserves schema/history/audit and requires a compatible binary for edits. No verification, rank, capacity or financial authority is inferred. Earlier repository audit findings and full R8/release acceptance remain open.

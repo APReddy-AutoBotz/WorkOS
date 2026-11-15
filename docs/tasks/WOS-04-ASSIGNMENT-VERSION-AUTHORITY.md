@@ -1,6 +1,6 @@
 # PR-008P: Versioned percentage assignments with capacity context
 
-**Status:** Acceptance plan `9f497ca486d3bcb7ff2e7c23289d0a253055062a` committed before implementation. Focused unit/production-transport, actual fresh/056-upgrade/replay API/SQL and named Employee/Allocation Control React/API/PostgreSQL journeys pass; final frozen-source retained/local/hosted receipts remain required. Development-only dependency on fixed Draft PR69 `72d53d0a003cc0cf0cf880ce781b1d42cebe3f03`, tree `41087c0026c1cd1fca19d0f2c55168548b20b817`. Optional independent/formal code/security reviews remain deferred and outstanding. No R6/R7/milestone, integration, UAT or release acceptance.
+**Historical implementation status (superseded by the integration checkpoint below):** Acceptance plan `9f497ca486d3bcb7ff2e7c23289d0a253055062a` committed before implementation. Focused unit/production-transport, actual fresh/056-upgrade/replay API/SQL and named Employee/Allocation Control React/API/PostgreSQL journeys pass; final frozen-source retained/local/hosted receipts remain required. Development-only dependency on fixed Draft PR69 `72d53d0a003cc0cf0cf880ce781b1d42cebe3f03`, tree `41087c0026c1cd1fca19d0f2c55168548b20b817`. Optional independent/formal code/security reviews remain deferred and outstanding. No R6/R7/milestone, integration, UAT or release acceptance.
 
 ## Requirement lineage and exact boundary
 
@@ -34,3 +34,28 @@ Pre-write2026-10-24: only root active; all five Actions queues empty; PR55–69/
 4. Frozen exact-source locked installation, type/lint/aggregate and all applicable retained PostgreSQL/migration/browser/production gates. Reconcile root-only ownership/controller/protected queues and unchanged prior heads before original authorized dependent Draft publication. Follow exact-head hosted gates to terminal; record actual log/step evidence limits. Optional formal reviews remain outstanding, not passed; no merge/deploy or overall completion claim.
 
 The assignment reader projects only observed model and project-binding ID. Full observed contract/engagement/version pins remain in the immutable server ledger; the reader does not disclose them through work/assignment-read permission. A real governed-assignment owned-read test and strict client projection contract cover this boundary.
+
+
+## Reviewed integration checkpoint — 2026-11-15
+
+Current owner authorization supersedes historical fixed-Draft and review/scan/merge deferrals. This integration includes accepted capacity/main `f68d605d364941893836060f541ae021c70d654f`; independent exact-head review and hosted acceptance remain required. Original implementation history remains preserved. No deployment or full milestone acceptance is claimed.
+
+Merge `5cb6847dcfef6dc1d180ee63acd0905b8b800c14` resolved23 documentation/package/migration-test conflicts by preserving reviewed parent dependencies, lockfile, scripts and capacity corrections while appending original assignment-version behavior. Migration056a remains before057; the assignment upgrade fixture now includes the corrected capacity prerequisite. Dedicated assignment and retained-capacity PostgreSQL/API suites passed. The initial hygiene failure identified a static synthetic sourceToken in one transport fixture; the existing ephemeral digest helper replaces it without weakening validation or scanner rules. Final correction and retained gates remain required.
+
+Bounded requirements: WOS-RES-001/002/003/009 and CORE-004/005. Migration057 retains immutable observed assignment source history, genuine provenance and work-version pins. No percentage/hour conversion, effective rate or configurable approval policy is inferred. Rollback preserves056/056a/057, versions, pins, guards and audit and requires compatible binaries for attributed writes. Earlier repository findings and buyer/release acceptance remain open.
+
+
+Source-review correction: assignment snapshot status, binding-observation status, history change kind and source now require literal strings. New null/number/object/singleton-array negatives reproduced the prior coercion gap before the fix. The initial aggregate encountered this new red regression before the correction; its log remains retained and a full corrected aggregate is required. No server authority or accepted literal response changes.
+
+Integration evidence so far: merged-lock installation, focused type/domain/transport, assignment and retained-capacity PostgreSQL/API, and54-entry migration fresh/concurrent/replay/upgrade/rollback passed. Assignment, capacity and demand real browser journeys passed unchanged retry after initial20-second page.goto timeout before assertions. No timeout/assertion relaxation. Accepted-main ancestry merge `f195e6ab8f83995f8ba237b6baf6457f21722e38` changed no runtime files. Final strict-decoder aggregate/build/hygiene and independent/hosted gates remain pending.
+
+
+Focused correction validation passed: type checking, assignment transport negatives, hygiene and adversarial scanner fixtures. The corrected full aggregate and production build remain in progress/pending at this frozen review checkpoint; exact results must be recorded in the PR before merge.
+
+### Assignment review corrections — 2026-11-15
+
+Review of frozen candidate `d97da3442dde573d666dc49cc8f6f197fd785938` confirmed a low-severity commercial metadata disclosure through allocation approval comments and a concurrent work-version consistency defect. The correction passes only the ordinary allocation source row to approval/audit writers; query-only revision, snapshot and protected binding observations remain outside those records. Full commercial pins remain in the protected immutable ledger. A real API regression explicitly denies commercial read while permitting scoped approval read and verifies that approval comments and allocation audit do not contain the commercial version pin.
+
+Work capture now obtains source row locks before issuing a fresh ledger-version query. This prevents a READ COMMITTED lock wait on a direct SQL writer from combining the newly committed source percentage with an older version ID. A real PostgreSQL/API regression observes the blocked request, commits the concurrent writer and verifies that submitted evidence contains matching source quantity and latest immutable version. The retained unit fixture supports the separate ledger query. No lock, scope or authorization control was weakened.
+
+Corrected locked installation reported zero vulnerabilities; dedicated assignment PostgreSQL/API regressions and the 54-entry migration fresh/concurrent/replay/upgrade/rollback suite passed. Full aggregate, browser, production build and corrected-head review/hosted gates remain pending at this checkpoint. Initial aggregate failure identified the old synthetic query fixture; browser failures before assertions included cold page navigation and restricted listener startup. Retain those logs; no timeout or assertion relaxation. Rollback retains056/056a/057 and all versions, work pins, guards and audit; use a compatible corrected binary. No new migration or historical evidence rewrite.

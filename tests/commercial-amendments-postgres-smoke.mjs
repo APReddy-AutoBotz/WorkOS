@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {syntheticHexDigest} from './support/synthetic-values.mjs';
 import {randomUUID} from 'node:crypto';
 import {copyFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -35,6 +36,42 @@ const cloneEvent=async(pool,row,overrides={})=>{
   return pool.query(`insert into commercial_amendments(${columns.map(key=>`"${key}"`).join(',')}) values(${columns.map((_,index)=>`$${index+1}`).join(',')})`,values);
 };
 
+// Explicit enrollment must work through the product's permission APIs, without
+// seeding the new authority directly or granting it to any role by default.
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+  await migrateCommercialDatabase(pool);await seedCommercialReferences(pool);
+  const identities=await seedCommercialIdentities(pool);await defaults(pool);
+  const permissionKey='commercial.amendments.manage';
+  await withCommercialApi({databaseUrl,identities},async({request})=>{
+    const config=await request('/api/permissions/config');assert.equal(config.status,200);
+    const definition=config.body.permissions.find(item=>item.key===permissionKey);
+    assert.ok(definition,'amendment authority must be discoverable for explicit enrollment');assert.equal(definition.protected,false);
+    for(const identity of [identities.reader,identities.denied]){
+      assert.equal((await request('/api/permissions/roles/Admin',{method:'PATCH',identity,body:{permissionKey,enabled:true}})).status,403);
+      assert.equal((await request('/api/permissions/user-grants',{method:'POST',identity,body:{userId:identity.id,permissionKey}})).status,403);
+    }
+    await defaults(pool);
+    assert.equal((await request('/api/permissions/roles/Admin',{method:'PATCH',body:{permissionKey:'commercial.lifecycle.manage',enabled:true}})).status,200);
+    const root=await createAmendmentHierarchy(request,'SYN-PERMISSION-ENROLLMENT');
+    const today=await amendmentToday(pool),version=await seedApplicableAmendmentVersion(pool,identities.manager,root.contract,today);
+    const input=amendmentInput(await amendmentWorkspace(request,'Contract',root.contract.id),version);
+    const preview=()=>previewRequest(request,'Contract',root.contract.id,input);
+    assertAmendmentError(await preview(),403);
+    const roleGrant=async enabled=>assert.equal((await request('/api/permissions/roles/Admin',{method:'PATCH',body:{permissionKey,enabled}})).status,200);
+    await roleGrant(true);assert.equal((await preview()).status,201);
+    await roleGrant(false);assertAmendmentError(await preview(),403);
+    const granted=await request('/api/permissions/user-grants',{method:'POST',body:{userId:identities.manager.id,permissionKey}});
+    assert.equal(granted.status,200);assert.equal((await preview()).status,201);
+    assert.equal((await request(`/api/permissions/user-grants/${granted.body.id}`,{method:'DELETE'})).status,200);
+    assertAmendmentError(await preview(),403);
+    assert.equal((await pool.query('select count(*)::int count from role_permissions where permission_key=$1 and enabled',[permissionKey])).rows[0].count,0);
+    assert.equal((await pool.query('select count(*)::int count from user_permission_grants where permission_key=$1',[permissionKey])).rows[0].count,0);
+    assert.equal((await amendmentCounts(pool)).events,0,'permission enrollment and preview do not adopt terms');
+    const changes=(await pool.query('select * from permission_change_history where permission_key=$1',[permissionKey])).rows;
+    assert.equal(changes.length,4);assert(changes.every(row=>row.changed_by===identities.manager.id&&row.active_role==='Admin'));
+  });
+});
+
 // Exact 042 upgrade with pre-existing manual drafts and approved historical
 // evidence, then replay. No backfill silently adopts terms or modifies pins.
 await withCommercialDatabase(async({pool})=>{
@@ -53,7 +90,7 @@ await withCommercialDatabase(async({pool})=>{
     }catch(error){await client.query('rollback');throw error;}finally{client.release();}
     const preserved=await amendmentSnapshot(pool);const projects=await amendmentSnapshot(pool,['projects']);
     for(const row of preserved.timesheet_entries){row.value.evidence_url=null;row.value.work_reference=null;row.value.source_identity=null;} // additive 047/048 column; existing fields remain exact
-    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration043,'044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand','056_wos04_effective_worker_capacity','057_wos04_assignment_versions']);assert.equal(upgraded.status.isCurrent,true);
+    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration043,'044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand','056_wos04_effective_worker_capacity','056a_wos04_capacity_exact_percentage','057_wos04_assignment_versions']);assert.equal(upgraded.status.isCurrent,true);
     await defaults(pool);assert.deepEqual(await amendmentSnapshot(pool),preserved);assert.deepEqual(await amendmentSnapshot(pool,['projects']),projects);
     const replay=await migrateCommercialDatabase(pool);assert.deepEqual(replay.applied,[]);assert.deepEqual(await amendmentSnapshot(pool),preserved);
   });
@@ -101,7 +138,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     assertAmendmentError(await request(`/amendments/PurchaseOrder/${root.contract.id}`),404,'COMMERCIAL_NOT_FOUND');
     for(const permission of ['commercial.contracts.view','commercial.lifecycle.manage','commercial.amendments.manage']){
       await pool.query('update role_permissions set enabled=false where role_name=$1 and permission_key=$2',['Admin',permission]);
-      for(const [path,body] of [[`/amendments/Contract/${root.contract.id}/preview`,contractInput],[`/amendments/Contract/${root.contract.id}`,{...contractInput,previewToken:'a'.repeat(64)}]])
+      for(const [path,body] of [[`/amendments/Contract/${root.contract.id}/preview`,contractInput],[`/amendments/Contract/${root.contract.id}`,{...contractInput,previewToken:syntheticHexDigest()}]])
         await unchangedAfter(pool,()=>request(path,{method:'POST',body}),403,'COMMERCIAL_PERMISSION_DENIED');
       await pool.query('update role_permissions set enabled=true where role_name=$1 and permission_key=$2',['Admin',permission]);
     }
@@ -118,7 +155,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const beforePreview=await amendmentCounts(pool);const preview=await amendmentPreview(request,'Contract',root.contract.id,contractInput);
     assert.equal(preview.asOf,today);assert.equal(preview.before.contractVersionId,root.pin);assert.equal(preview.after.contractVersionId,v2.id);
     assert.deepEqual(await amendmentCounts(pool),beforePreview,'preview is a zero-write operation');
-    for(const patch of [{previewToken:'b'.repeat(64)},{reason:'Synthetic changed reason'},{approvalReference:'Synthetic changed approval'},{budget:'30000.0001'}]){
+    for(const patch of [{previewToken:preview.previewToken.replace(/^./,preview.previewToken[0]==='0'?'1':'0')},{reason:'Synthetic changed reason'},{approvalReference:'Synthetic changed approval'},{budget:'30000.0001'}]){
       const result=await commitRequest(request,'Contract',root.contract.id,{...contractInput,previewToken:preview.previewToken,...patch});
       assert(result.status===409||result.status===422,JSON.stringify(result.body));assert.deepEqual(await amendmentCounts(pool),beforePreview);
     }
