@@ -51,3 +51,11 @@ Integration evidence so far: merged-lock installation, focused type/domain/trans
 
 
 Focused correction validation passed: type checking, assignment transport negatives, hygiene and adversarial scanner fixtures. The corrected full aggregate and production build remain in progress/pending at this frozen review checkpoint; exact results must be recorded in the PR before merge.
+
+### Assignment review corrections — 2026-11-15
+
+Review of frozen candidate `d97da3442dde573d666dc49cc8f6f197fd785938` confirmed a low-severity commercial metadata disclosure through allocation approval comments and a concurrent work-version consistency defect. The correction passes only the ordinary allocation source row to approval/audit writers; query-only revision, snapshot and protected binding observations remain outside those records. Full commercial pins remain in the protected immutable ledger. A real API regression explicitly denies commercial read while permitting scoped approval read and verifies that approval comments and allocation audit do not contain the commercial version pin.
+
+Work capture now obtains source row locks before issuing a fresh ledger-version query. This prevents a READ COMMITTED lock wait on a direct SQL writer from combining the newly committed source percentage with an older version ID. A real PostgreSQL/API regression observes the blocked request, commits the concurrent writer and verifies that submitted evidence contains matching source quantity and latest immutable version. The retained unit fixture supports the separate ledger query. No lock, scope or authorization control was weakened.
+
+Corrected locked installation reported zero vulnerabilities; dedicated assignment PostgreSQL/API regressions and the 54-entry migration fresh/concurrent/replay/upgrade/rollback suite passed. Full aggregate, browser, production build and corrected-head review/hosted gates remain pending at this checkpoint. Initial aggregate failure identified the old synthetic query fixture; browser failures before assertions included cold page navigation and restricted listener startup. Retain those logs; no timeout or assertion relaxation. Rollback retains056/056a/057 and all versions, work pins, guards and audit; use a compatible corrected binary. No new migration or historical evidence rewrite.

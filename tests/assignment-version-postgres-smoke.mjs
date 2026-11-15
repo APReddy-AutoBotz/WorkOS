@@ -35,7 +35,40 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   await assert.rejects(pool.query('update assignment_versions set reason=$1 where id=$2',['rewrite',first.id]),e=>e.code==='55000');await assert.rejects(pool.query('delete from assignment_versions where id=$1',[first.id]),e=>e.code==='55000');await assert.rejects(pool.query(`insert into assignment_versions select gen_random_uuid(),organization_id,legal_entity_id,assignment_id,999,contract_version,change_kind,source_revision,snapshot,binding_observation,actor_id,active_role,source,reason,import_batch_id,source_identifier,recorded_at from assignment_versions limit 1`),e=>e.code==='ASV01');
   const former='synthetic-version-former-worker';await pool.query("insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values($1,$1,'Synthetic former worker','assignment-former@example.test','Consultant','Delivery','US','director-commercial','Active',$2,$3)",[former,f.organizationId,f.legalEntityId]);const oldOwner=await request('/api/allocations',{method:'POST',body:legacy(today,dates[4],{employee_id:former})});assert.equal(oldOwner.status,200);assert.equal((await request(prefix+oldOwner.body.id,{identity:identities.reader})).status,404);assert.equal((await request('/api/allocations',{method:'POST',body:legacy(today,dates[4],{id:oldOwner.body.id})})).status,200);const moved=await request(prefix+oldOwner.body.id,{identity:identities.reader});assert.equal(moved.status,200);assert.deepEqual(moved.body.versions[1],{id:moved.body.versions[1].id,sequence:1,visible:false});assert.equal(JSON.stringify(moved.body).includes(former),false);await pool.query('delete from project_allocations where id=$1',[oldOwner.body.id]);assert.equal((await pool.query('select change_kind from assignment_versions where assignment_id=$1 order by sequence desc limit 1',[oldOwner.body.id])).rows[0].change_kind,'Deleted');assert.equal((await request(prefix+oldOwner.body.id)).status,404);
   const governed=await createAmendmentHierarchy(request,'SYN-ASV-READ-SCOPE'),governedAllocation=await request('/api/allocations',{method:'POST',body:legacy(today,dates[4],{project_id:governed.project.id})});assert.equal(governedAllocation.status,200,JSON.stringify(governedAllocation.body));const governedRead=await request(prefix+governedAllocation.body.id,{identity:identities.reader});assert.equal(governedRead.status,200);assert.deepEqual(Object.keys(governedRead.body.current.bindingObservation).sort(),['bindingId','model','status']);assert.doesNotMatch(JSON.stringify(governedRead.body),/contractVersionId|contractId|engagementId|billing_terms|budget_allocation/);assert.equal(JSON.stringify(governedRead.body).includes(governed.pin),false);assert.equal((await pool.query('select binding_observation from assignment_versions where assignment_id=$1',[governedAllocation.body.id])).rows[0].binding_observation.contractVersionId,governed.pin,'full observed commercial pins remain in server evidence');
+  await pool.query("update role_permissions set enabled=false where role_name='Employee' and permission_key like 'commercial.%'");
+  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Employee','approvals.view',true) on conflict(role_name,permission_key) do update set enabled=true");
+  const governedCurrent=(await request(prefix+governedAllocation.body.id)).body.current;
+  const governedChange=await request(prefix+governedAllocation.body.id+'/versions',{method:'POST',body:{expectedRevision:governedCurrent.revision,expectedLatestId:governedCurrent.versionId,definition:{...def(governedCurrent.snapshot),quantityExact:'21'},reason:'Synthetic private binding boundary'}});assert.equal(governedChange.status,201,JSON.stringify(governedChange.body));
+  assert.equal((await request('/contracts/'+governed.contract.id,{identity:identities.reader})).status,403);
+  const approvals=await request('/api/approvals',{identity:identities.reader});assert.equal(approvals.status,200);
+  assert.equal(JSON.stringify(approvals.body).includes(governed.pin),false,'approval comments must not disclose commercial version pins');
+  assert.doesNotMatch(JSON.stringify(approvals.body),/bindingObservation|contractVersionId|engagementId/);
+  const auditBoundary=(await pool.query('select to_jsonb(a) value from audit_logs a where entity_id=$1',[governedAllocation.body.id])).rows;
+  assert.equal(JSON.stringify(auditBoundary).includes(governed.pin),false,'ordinary allocation audit excludes private query enrichment');
   const rows=(await pool.query("select * from assignment_versions where assignment_id=$1 and source='Web'",[id])).rows;assert(rows.every(v=>v.actor_id===identities.manager.id&&v.active_role==='Admin'));assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and reason='Synthetic guarded assignment change'",[id])).rows[0].n,2);
+ });
+});
+await withCommercialDatabase(async({pool,databaseUrl})=>{
+ await migrateCommercialDatabase(pool);const{identities,today,dates}=await seedCapacity(pool);await seedWorkPeriods(pool,today);await pool.query('update projects set start_date=$1 where id=$2',[today,f.projectId]);
+ await withCommercialApi({databaseUrl,identities},async({request})=>{
+  const made=await request('/api/allocations',{method:'POST',body:legacy(today,dates[4])});assert.equal(made.status,200);const id=made.body.id;
+  const writer=await pool.connect();let pending;
+  try{
+   await writer.query('begin');const pid=(await writer.query('select pg_backend_pid() pid')).rows[0].pid;
+   await writer.query('update project_allocations set percentage=21 where id=$1',[id]);
+   pending=request('/api/timesheets',{method:'POST',body:workInput(f.projectId,today,{entries:[{...workInput(f.projectId,today).entries[0],billable:false}]})});
+   let waiting=false;
+   for(let i=0;i<100&&!waiting;i++){
+    waiting=(await pool.query("select exists(select 1 from pg_stat_activity where datname=current_database() and $1=any(pg_blocking_pids(pid)) and query like '%from project_allocations%') waiting",[pid])).rows[0].waiting;
+    if(!waiting)await new Promise(resolve=>setTimeout(resolve,25));
+   }
+   assert.equal(waiting,true,'work submission must wait on the direct SQL assignment writer');
+   await writer.query('commit');const submitted=await pending;pending=null;assert.equal(submitted.status,200,JSON.stringify(submitted.body));
+   const latest=(await pool.query('select id,snapshot from assignment_versions where assignment_id=$1 order by sequence desc limit 1',[id])).rows[0];
+   const evidence=(await pool.query('select entries from work_submission_evidence where timesheet_id=$1',[submitted.body.id])).rows[0];
+   const observed=evidence.entries[0].assignmentSnapshots.find(a=>a.id===id);
+   assert.equal(observed.percentage,'21');assert.equal(observed.assignmentVersionId,latest.id,'work pins the version matching the locked source after a concurrent SQL commit');assert.equal(latest.snapshot.quantityExact,observed.percentage);
+  }finally{await writer.query('rollback');writer.release();if(pending)await pending;}
  });
 });
 console.log('Assignment versions real PostgreSQL/API fresh/056 upgrade/replay, honest baseline, exact guarded edits/capacity, actual work pins, manual/both imports/end/SQL parity, rollback/CAS/concurrency/audit/scope and immutable prior evidence passed.');

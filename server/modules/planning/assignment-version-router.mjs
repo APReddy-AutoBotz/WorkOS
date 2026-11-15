@@ -35,8 +35,9 @@ export const createAssignmentVersionRouter=({pool,requireDatabase,requireAuth,re
   }
   await setAssignmentVersionContext(c,req,{employeeId:a.employee_id,projectId:a.project_id,reason:input.reason});
   const saved=(await c.query(`update project_allocations set role_on_project=$1,percentage=$2::numeric,start_date=$3::date,end_date=$4::date,billable=$5,status=$6,comments=$7,updated_at=clock_timestamp() where id=$8 and organization_id=$9 and legal_entity_id=$10 returning *`,[d.role,d.quantityExact,d.startsOn,d.endsOn,d.billable,d.status,d.comment,a.id,a.organization_id,a.legal_entity_id])).rows[0];
-  await audit(c,req,{module:'Allocations',action:'Update Allocation',entityType:'Allocation',entityId:a.id,oldValue:a,newValue:saved,reason:input.reason,details:'Updated the existing percentage assignment with exact source/ledger CAS; no inferred conversion or approval authority.'});
-  const employee=(await c.query('select * from employees where id=$1',[a.employee_id])).rows[0],project=(await c.query('select * from projects where id=$1',[a.project_id])).rows[0];await recordAllocationChangeApproval(c,req,{action:'Update',allocation:saved,previous:a,employee,project});
+  const previousSource={...a};delete previousSource.revision;delete previousSource.snapshot;delete previousSource.bindingObservation;
+  await audit(c,req,{module:'Allocations',action:'Update Allocation',entityType:'Allocation',entityId:a.id,oldValue:previousSource,newValue:saved,reason:input.reason,details:'Updated the existing percentage assignment with exact source/ledger CAS; no inferred conversion or approval authority.'});
+  const employee=(await c.query('select * from employees where id=$1',[a.employee_id])).rows[0],project=(await c.query('select * from projects where id=$1',[a.project_id])).rows[0];await recordAllocationChangeApproval(c,req,{action:'Update',allocation:saved,previous:previousSource,employee,project});
   const refreshed=await current(c,req,a.id),next=await latest(c,refreshed),retained=(await c.query('select * from assignment_versions where id=$1',[next.id])).rows[0];return{...scope(req),assignmentId:a.id,current:view(refreshed,next),version:versionView(retained)};
  }));
  return router;

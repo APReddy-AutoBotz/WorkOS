@@ -448,3 +448,6 @@ The assignment reader projects only observed model and project-binding ID. Full 
 ### PR-008P reviewed integration checkpoint — 2026-11-15
 
 Current owner authorization supersedes historical fixed-Draft and review/scan/merge restrictions. Integration retains accepted capacity/main `f68d605d364941893836060f541ae021c70d654f`, including exact056a validation and owned evidence recovery. See [the assignment package evidence](../tasks/WOS-04-ASSIGNMENT-VERSION-AUTHORITY.md#reviewed-integration-checkpoint--2026-11-15) for bounded WOS-RES-001/002/003/009 and CORE-004/005. Local acceptance, independent exact-head review and hosted gates remain required. Preserve057 versions/pins/guards/audit on rollback; no inferred conversion, approval or full R7/release acceptance.
+
+
+PR-008P correction for WOS-RES-003/009 and CORE-004/005: allocation approval/audit writers exclude private commercial query enrichment, and work capture reads the ledger after obtaining source locks so concurrent SQL updates cannot mismatch quantity and version. Real scoped API disclosure negatives and blocked-writer work-submission regression pass. See the assignment task's correction checkpoint for retained evidence and pending acceptance. Preserve migration057 and historical ledger/work/audit records on rollback; no new migration, conversion or broader release acceptance.
