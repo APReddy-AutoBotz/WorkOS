@@ -20,7 +20,9 @@ export const assertIndependentLeaveDecision = async (client, req, leave, buildEm
   const scoped = (await client.query(`select e.id from employees e where e.id=$1
     and ${buildEmployeeScopeWhere(currentReq, params, 'e')} for share of e`, params)).rows[0];
   const delegations = !scoped && worker && getEffectivePermissions ? (await client.query(`
-    select ad.id,u.id as user_id from approval_delegations ad
+    select ad.id,u.id as user_id,delegator.id as worker_id,
+      delegator.employee_id as worker_code,delegator.primary_country_director_id as director_id
+    from approval_delegations ad
     join employees delegator on delegator.id=ad.delegator_id and delegator.status='Active'
     join employees delegate on delegate.id=ad.delegate_id and delegate.status='Active'
     join employees target on target.id=$1 and target.reporting_manager_id=delegator.id
@@ -37,7 +39,13 @@ export const assertIndependentLeaveDecision = async (client, req, leave, buildEm
   [leave.employee_id, worker.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId, req.user.activeRole])).rows : [];
   const authorizedDelegators = new Set();
   for (const delegation of delegations) {
-    if ((await getEffectivePermissions(client, delegation.user_id, req.user.activeRole)).includes('leave.approve')) authorizedDelegators.add(delegation.user_id);
+    if (!(await getEffectivePermissions(client, delegation.user_id, req.user.activeRole)).includes('leave.approve')) continue;
+    const delegatorRequest = {...req,user:{...req.user,sub:delegation.user_id,
+      employeeRecordId:delegation.worker_id,employeeId:delegation.worker_code,countryDirectorId:delegation.director_id}};
+    const delegatorParams = [leave.employee_id];
+    const authority = (await client.query(`select e.id from employees e where e.id=$1
+      and ${buildEmployeeScopeWhere(delegatorRequest,delegatorParams,'e')} for share of e`,delegatorParams)).rows[0];
+    if (authority) authorizedDelegators.add(delegation.user_id);
   }
   if (!scoped && !authorizedDelegators.size) deny(403, 'LEAVE_DECISION_FORBIDDEN', 'Leave request is outside active-role data scope');
   if (cancellation) return;

@@ -93,6 +93,22 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     assert.equal((await generic(delegatorSubmitted,delegate)).status,403,'delegation cannot pass on forbidden submitter authority');
     assert.deepEqual(await snapshot(),beforeDelegatorSubmitted);
     assert.equal((await decide(delegatorSubmitted,owner,'Cancelled')).status,200);
+    await pool.query("insert into roles(name)values('ProjectManager') on conflict do nothing");
+    for (const id of [third.id,independent.id]) await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='ProjectManager' on conflict do nothing",[id]);
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('ProjectManager','approvals.view',true),('ProjectManager','leave.approve',true) on conflict(role_name,permission_key) do update set enabled=true");
+    await pool.query("update approval_delegations set role='ProjectManager' where id='synthetic-leave-delegation'");
+    const projectLeave=await create(),beforeProjectScope=await snapshot();
+    const projectDelegate={...delegate,role:'ProjectManager'};
+    const projectDelegator={...third,role:'ProjectManager',employeeRecordId:'synthetic-leave-lead-a',employeeId:'SYNTHETIC-LEAD-A'};
+    assert.equal((await decide(projectLeave,projectDelegator)).status,403,'direct-report relation does not confer ProjectManager scope');
+    assert.equal((await generic(projectLeave,projectDelegate)).status,403,'delegation cannot exceed delegator project scope');
+    assert.deepEqual(await snapshot(),beforeProjectScope);
+    await pool.query(`insert into projects(id,project_code,name,client_id,client,manager_id,manager_name,start_date,end_date,status,organization_id,legal_entity_id)
+      values('synthetic-leave-project','SYNTHETIC-LEAVE-PROJECT','Synthetic delegated project',$1,'Synthetic client','synthetic-leave-lead-a','Synthetic lead','2026-01-01','2026-12-31','Active',$2,$3)`,[f.clientId,f.organizationId,f.legalEntityId]);
+    await pool.query(`insert into project_allocations(employee_id,project_id,percentage,start_date,end_date,status,organization_id,legal_entity_id)
+      values($1,'synthetic-leave-project',10,'2026-01-01','2026-12-31','Active',$2,$3)`,[f.ownerId,f.organizationId,f.legalEntityId]);
+    assert.equal((await generic(projectLeave,projectDelegate)).status,200,'delegation retains actual ProjectManager worker authority');
+    assert.equal((await decide(projectLeave,owner,'Cancelled')).status,200);
     const conflicting=await create();
     await pool.query(`insert into audit_logs(user_id,user_name,user_role,details,active_role,module,action,entity_type,entity_id,organization_id,legal_entity_id)
       values($1,'Synthetic submitter','Admin','Synthetic conflicting provenance','Admin','Leave','Submit Leave','LeaveRequest',$2,$3,$4)`,[independent.id,conflicting.id,f.organizationId,f.legalEntityId]);

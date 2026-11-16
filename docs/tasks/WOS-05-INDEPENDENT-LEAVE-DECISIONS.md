@@ -22,6 +22,8 @@ The real Team Leave Calendar browser journey shows owner denial with Submitted s
 
 The retained own-planning browser initially failed because its capacity fixture used one manager for both submission and approval. The shared capacity fixture and every caller now use the named affected Employee as submitter and a separate manager as approver; capacity/assignment assertions are unchanged. The dedicated leave and import/audit browser journeys passed before that fixture correction; affected planning regressions are rerun before acceptance.
 
+The frozen first candidate `f92bd127546f6d0b040aafdad2563b0287af7ad1` received one medium-severity finding in scan85726d08-d920-4b3e-9641-9a3629b47716: ProjectManager direct approval returned403, but creating a delegation and approving through it returned200 without managed-project worker authority. The correction checks the delegator through the shared current role-specific employee-scope predicate. A regression proves denial before an actual managed-project allocation and successful delegated approval after it; TeamLead delegation remains valid. The frozen original tree and proof are retained. Its production identity attempt failed local discovery readiness and is not passing evidence; the corrected revision must pass fresh production and exact-head checks.
+
 ## Release and rollback
 
 Preserve audit evidence and the index. Prefer forward correction; older application code restores the vulnerabilities. No production deployment, buyer UAT, full-repository security clearance or completion of all delegated-approval domains is claimed. Current relationship authority, remaining commercial/export/diagnostic findings, persistent production throttling and release acceptance remain separate work.
