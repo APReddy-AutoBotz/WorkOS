@@ -146,6 +146,28 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     result=await save({...base,employee_id:'SYNTHETIC-WEAK',email:'weak@example.test',initial_password:weakPassword});
     assert.equal(result.status,422,JSON.stringify(result.body));
     assert.equal((await pool.query("select 1 from employees where employee_id='SYNTHETIC-WEAK'")).rowCount,0,'Rejected account creation rolls back profile writes');
+    const unlinkProfile={...profile,employee_id:'SYNTHETIC-UNLINK-CORRECTION',email:'unlink-correction@example.test'};
+    const unlinkCreated=await save({...unlinkProfile,initial_password:initialPassword});
+    assert.equal(unlinkCreated.status,200);
+    for (const legacy of ['both','employee','user']) {
+      await pool.query('delete from identity_provider_links where employee_id=$1',[unlinkCreated.body.id]);
+      await pool.query('update employees set entra_object_id=$2 where id=$1',[unlinkCreated.body.id,legacy==='user'?null:'synthetic-cleared-subject']);
+      await pool.query('update users set entra_object_id=$2 where employee_record_id=$1',[unlinkCreated.body.id,legacy==='employee'?null:'synthetic-cleared-subject']);
+      assert.equal((await save(unlinkProfile)).status,200,'Omitted binding leaves legacy identity unchanged');
+      assert.equal((await pool.query('select entra_object_id from users where employee_record_id=$1',[unlinkCreated.body.id])).rows[0].entra_object_id,legacy==='employee'?null:'synthetic-cleared-subject');
+      assert.equal((await save({...unlinkProfile,entra_object_id:''},identities.manager)).status,200);
+      const state=(await pool.query(`select e.entra_object_id as employee_subject,u.entra_object_id as user_subject,l.status,l.provider_subject
+        from employees e join users u on u.employee_record_id=e.id left join identity_provider_links l on l.employee_id=e.id and l.provider='entra' where e.id=$1`,[unlinkCreated.body.id])).rows[0];
+      assert.deepEqual(state,{employee_subject:null,user_subject:null,status:'Disabled',provider_subject:'synthetic-cleared-subject'},'Explicit clear revokes every legacy representation and persists a Disabled binding');
+      const unlinkAudit=(await pool.query(`select user_id,active_role,source,old_value,new_value from audit_logs
+        where action='Clear Identity Binding' order by created_at desc limit 1`)).rows[0];
+      assert.equal(unlinkAudit.user_id,identities.manager.id);
+      assert.equal(unlinkAudit.active_role,'Admin');
+      assert.equal(unlinkAudit.source,'Entra');
+      assert.deepEqual(unlinkAudit.old_value,{status:'Legacy',hasEmployeeSubject:legacy!=='user',hasUserSubject:legacy!=='employee'});
+      assert.deepEqual(unlinkAudit.new_value,{status:'Disabled',hasEmployeeSubject:false,hasUserSubject:false});
+      assert.equal(JSON.stringify(unlinkAudit).includes('synthetic-cleared-subject'),false,'Unlink audit uses safe state evidence, not raw provider identity');
+    }
     await pool.query("delete from user_roles where user_id=$1 and role_id=(select id from roles where name='Admin')",[identities.manager.id]);
     const targetIdentity={id:target.id,username:profile.employee_id.toLowerCase(),role:'Admin'};
     result=await save({...profile,roles:['Employee']},targetIdentity);

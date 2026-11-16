@@ -105,7 +105,7 @@ const cleanEnvironment = (overrides = {}) => {
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
     IDENTITY_DISCOVERY_RECHECK_MS: '5000',
     // This fixture makes exactly nine callback requests in one loopback-IP bucket.
-    LOGIN_RATE_LIMIT: '11',
+    LOGIN_RATE_LIMIT: '13',
     EMAIL_PROVIDER: 'mock',
     TEAMS_PROVIDER: 'mock',
     ...overrides,
@@ -587,6 +587,56 @@ try {
     assert.equal((await pool.query("select status from identity_provider_links where employee_id=$1 and provider='entra'", [syntheticEmployee.rows[0].id])).rows[0].status, linkStatus,
       'Rejected login must not reactivate a disabled or pending binding through legacy subject columns');
   }
+  await pool.query('delete from identity_provider_links where employee_id=$1', [syntheticEmployee.rows[0].id]);
+  await pool.query("update users set entra_object_id='synthetic-provider-subject' where id=$1", [syntheticUser.rows[0].id]);
+  await pool.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active)
+    values ($1,'org-default','legal-default',true) on conflict do nothing`, [syntheticUser.rows[0].id]);
+  for (const key of ['employees.manage','permissions.manage','integrations.identity']) {
+    await pool.query(`insert into role_permissions(role_name,permission_key,enabled) values ('Admin',$1,true)
+      on conflict(role_name,permission_key) do update set enabled=true`, [key]);
+  }
+  const clearProfile=(await pool.query(`select employee_id,name,email,designation,department,country,primary_country_director_id
+    from employees where id=$1`,[syntheticEmployee.rows[0].id])).rows[0];
+  const clearBinding=await fetchWithTimeout(`${serviceOrigin}/api/employees`,{method:'POST',headers:{cookie:issuedSession,'content-type':'application/json'},
+    body:JSON.stringify({...clearProfile,entra_object_id:''})},2000);
+  assert.equal(clearBinding.status,200,'Authorized profile clear must revoke a legacy binding');
+  const clearState=(await pool.query(`select e.entra_object_id as employee_subject,u.entra_object_id as user_subject,l.status
+    from employees e join users u on u.employee_record_id=e.id left join identity_provider_links l on l.employee_id=e.id and l.provider='entra'
+    where e.id=$1`,[syntheticEmployee.rows[0].id])).rows[0];
+  assert.deepEqual(clearState,{employee_subject:null,user_subject:null,status:'Disabled'});
+  await assertCallbackRejected({name:'legacy-profile-unlinked',expectedLocation:'/login?error=entra_unlinked_user'});
+
+  // Exercise a callback that observed legacy identity before waiting for a
+  // concurrent unlink transaction: it must re-read authority after the lock.
+  await pool.query('delete from identity_provider_links where employee_id=$1',[syntheticEmployee.rows[0].id]);
+  await pool.query("update employees set entra_object_id='synthetic-provider-subject' where id=$1",[syntheticEmployee.rows[0].id]);
+  await pool.query("update users set entra_object_id='synthetic-provider-subject' where id=$1",[syntheticUser.rows[0].id]);
+  const unlinkClient=await pool.connect();
+  try {
+    await unlinkClient.query('begin');
+    await unlinkClient.query('update employees set entra_object_id=null where id=$1',[syntheticEmployee.rows[0].id]);
+    await unlinkClient.query('update users set entra_object_id=null where id=$1',[syntheticUser.rows[0].id]);
+    const overlapping=await beginAuthorization();
+    const pendingCallback=fetchWithTimeout(`${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(overlapping.state)}`,
+      {redirect:'manual',headers:{cookie:overlapping.stateCookie}},10000).then(response=>({response}),error=>({error}));
+    let waiting=false;
+    const deadline=Date.now()+5000;
+    while(Date.now()<deadline) {
+      waiting=(await pool.query(`select 1 from pg_stat_activity where datname=current_database() and wait_event_type='Lock'
+        and query like 'select id from employees where id=%for update'`)).rowCount>0;
+      if(waiting) break;
+      await new Promise(resolve=>setTimeout(resolve,25));
+    }
+    assert.equal(waiting,true,'The callback must actually overlap the held worker lock');
+    await unlinkClient.query('commit');
+    const completed=await pendingCallback;
+    if(completed.error) throw completed.error;
+    assert.equal(completed.response.status,302);
+    assert.equal(completed.response.headers.get('location'),'/login?error=entra_unlinked_user');
+    assert.equal(hasSetCookie(completed.response.headers,'workos_session'),false);
+    assert.equal((await pool.query('select 1 from identity_provider_links where employee_id=$1',[syntheticEmployee.rows[0].id])).rowCount,0,
+      'A stale callback must not recreate a cleared legacy link');
+  } finally { await unlinkClient.query('rollback'); unlinkClient.release(); }
   await pool.query('delete from identity_provider_links where employee_id=$1', [syntheticEmployee.rows[0].id]);
   await pool.query("delete from users where username = 'synthetic-user'");
   await pool.query('delete from employees where id=$1', [syntheticEmployee.rows[0].id]);

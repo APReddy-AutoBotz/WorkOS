@@ -1271,7 +1271,11 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
     if (user?.employee_record_id) {
       await client.query('select id from employees where id=$1 for update', [user.employee_record_id]);
       const binding = (await client.query("select status,provider_subject from identity_provider_links where employee_id=$1 and provider='entra'", [user.employee_record_id])).rows[0];
-      if (binding && (binding.status !== 'Linked' || binding.provider_subject !== providerSubject)) user = null;
+      const current = (await client.query(`select u.status,u.entra_object_id as user_subject,e.entra_object_id as employee_subject
+        from users u join employees e on e.id=u.employee_record_id where u.id=$1 and e.id=$2 for share of u`, [user.id, user.employee_record_id])).rows[0];
+      if (!current || current.status !== 'Active' || (binding
+        ? binding.status !== 'Linked' || binding.provider_subject !== providerSubject
+        : current.user_subject !== providerSubject && current.employee_subject !== providerSubject)) user = null;
     }
     if (!user || user.status !== 'Active') {
       await logIntegrationEvent(client, {
@@ -2025,7 +2029,8 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
     await synchronizeEntraBinding(client, req, {
       employeeId: employee.id, userId: userResult.rows[0].id,
       previousSubject: previous?.entra_object_id, nextSubject: employee.entra_object_id,
-      getPermissions: getEffectivePermissionsForUser,
+      subjectSpecified: parsed.data.entra_object_id !== undefined,
+      getPermissions: getEffectivePermissionsForUser, audit,
     });
     if (previous && previous.status !== 'Exited' && employee.status === 'Exited') {
       await synchronizeWorkerExit(client, req, employee, parsed.data.exit_date || new Date().toISOString().slice(0, 10), 'Employee save');
@@ -6063,7 +6068,8 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
       await synchronizeEntraBinding(client, req, {
         employeeId: employee.id, userId: userResult.rows[0].id,
         previousSubject: previous?.entra_object_id, nextSubject: employee.entra_object_id,
-        getPermissions: getEffectivePermissionsForUser,
+        subjectSpecified: row.entraObjectId !== undefined && row.entraObjectId !== '',
+        getPermissions: getEffectivePermissionsForUser, audit,
       });
       if (previous && previous.status !== 'Exited' && employee.status === 'Exited') {
         await synchronizeWorkerExit(client, req, employee, row.exitDate || new Date().toISOString().slice(0, 10), `Employee import ${fileName}`);

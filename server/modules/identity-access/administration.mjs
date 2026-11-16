@@ -79,10 +79,14 @@ export const assignEmployeeRoles = async (client, req, {
 };
 
 export const synchronizeEntraBinding = async (client, req, {
-  employeeId, previousSubject, nextSubject, getPermissions,
+  employeeId, userId, previousSubject, nextSubject, subjectSpecified, getPermissions, audit,
 }) => {
+  if (!subjectSpecified) return;
   const before = previousSubject || null, after = nextSubject || null;
-  if (before === after) return;
+  if (after && before === after) return;
+  const user = (await client.query('select entra_object_id from users where id=$1 and employee_record_id=$2 for update', [userId, employeeId])).rows[0];
+  const link = (await client.query("select provider_subject,status from identity_provider_links where employee_id=$1 and provider='entra' for update", [employeeId])).rows[0];
+  if (!after && !before && !user?.entra_object_id && (!link || link.status === 'Disabled')) return;
   if (!(await getPermissions(client, req.user.sub, req.user.activeRole)).includes('integrations.identity')) {
     throw denied('Identity integration authority is required to change a login binding.');
   }
@@ -93,6 +97,18 @@ export const synchronizeEntraBinding = async (client, req, {
       on conflict(employee_id,provider) do update set provider_subject=excluded.provider_subject,status='Linked',updated_at=now()`,
     [employeeId, after]);
   } else {
-    await client.query("update identity_provider_links set status='Disabled',updated_at=now() where employee_id=$1 and provider='entra'", [employeeId]);
+    // A durable revocation record must also cover pre-link legacy identities.
+    // Otherwise callbacks can bootstrap the old user subject back into Linked.
+    const revokedSubject = link?.provider_subject || before || user?.entra_object_id;
+    if (revokedSubject) {
+      const revoked = await client.query(`insert into identity_provider_links(id,employee_id,provider,provider_subject,status)
+      values ('identity-link-'||gen_random_uuid()::text,$1,'entra',$2,'Disabled')
+      on conflict(employee_id,provider) do update set status='Disabled',updated_at=now() returning provenance_reference`, [employeeId, revokedSubject]);
+      await audit(client, req, {module:'Identity',action:'Clear Identity Binding',entityType:'IdentityProviderLink',entityId:revoked.rows[0].provenance_reference,
+        oldValue:{status:link?.status || 'Legacy',hasEmployeeSubject:Boolean(before),hasUserSubject:Boolean(user?.entra_object_id)},
+        newValue:{status:'Disabled',hasEmployeeSubject:false,hasUserSubject:false},
+        details:'Explicit identity unlink revokes legacy fallback authority.',source:'Entra',sourceIdentifier:revoked.rows[0].provenance_reference});
+    }
   }
+  await client.query('update users set entra_object_id=$2,updated_at=now() where id=$1 and employee_record_id=$3', [userId, after, employeeId]);
 };
