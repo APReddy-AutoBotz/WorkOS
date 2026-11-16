@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import express from 'express';
 import pg from 'pg';
+import {databaseConnectionOptions} from './database-connection.mjs';
 import { z } from 'zod';
 import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from './identity-discovery.mjs';
 import {validateRuntimeEnvironment} from './environment.mjs';
@@ -65,10 +66,8 @@ const sessionSecret = process.env.API_SESSION_SECRET || 'dev-only-change-me';
 
 const app = express();
 const port = runtimeEnvironment.port;
-const pool = new Pool({
-  connectionString: runtimeEnvironment.databaseUrl,
-  ssl: runtimeEnvironment.pgSslMode === 'require' ? { rejectUnauthorized: false } : undefined,
-});
+const pool = new Pool(databaseConnectionOptions({databaseUrl: runtimeEnvironment.databaseUrl,
+  sslMode: runtimeEnvironment.pgSslMode, sslRootCert: runtimeEnvironment.pgSslRootCert}));
 const round1 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
 
 app.set('trust proxy', 1);

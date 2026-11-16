@@ -32,6 +32,7 @@ services:
       APP_MODE: production
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the db service in .env.production}
       PGSSLMODE: ${PGSSLMODE:-disable}
+      PGSSLROOTCERT: ${PGSSLROOTCERT:-}
 
   app:
     build:
@@ -51,6 +52,7 @@ services:
       PORT: 4000
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the db service in .env.production}
       PGSSLMODE: ${PGSSLMODE:-disable}
+      PGSSLROOTCERT: ${PGSSLROOTCERT:-}
       API_SESSION_SECRET: ${API_SESSION_SECRET:?Set API_SESSION_SECRET in .env.production}
       APP_URL: ${APP_URL:?Set APP_URL to the public HTTPS origin}
       IDENTITY_PROVIDER: entra
