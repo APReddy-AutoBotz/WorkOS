@@ -1,6 +1,6 @@
 # WorkOS implementation status
 
-Status date: 2026-11-15. This page separates observed merged source from draft engineering evidence and release acceptance. The previous 2026-08-25 status is preserved unchanged as [historical evidence](../evidence/2026-11-14/IMPLEMENTATION_STATUS_2026-08-25.md); its pre-import statements and corrective-hold narrative are not a current-state report.
+Status date: 2026-11-16. This page separates observed merged source from draft engineering evidence and release acceptance. The previous 2026-08-25 status is preserved unchanged as [historical evidence](../evidence/2026-11-14/IMPLEMENTATION_STATUS_2026-08-25.md); its pre-import statements and corrective-hold narrative are not a current-state report.
 
 ## Verified main baseline
 
@@ -164,3 +164,10 @@ Documentation PR160 merged at `8f8e6957e91651a7a6ddef5bd0150ba511460d0a` after e
 ## Integration now authorized
 
 The owner requested updated product vision, plan and README, and merging eligible changes. Follow the [enterprise delivery roadmap](../05-delivery/ENTERPRISE_DELIVERY_ROADMAP.md) and [merge policy](../05-delivery/PR_REVIEW_AND_MERGE_POLICY.md). Independent documentation can merge ahead of unfinished features; dependent implementation cannot bypass prerequisites or blocking findings. Record resulting main SHAs and main checks after every integration step.
+
+
+## Own-work and role-security checkpoint — 2026-11-16
+
+[PR71](https://github.com/APReddy-AutoBotz/WorkOS/pull/71) merged at `bcb48656e589c2520693a0cbf41eedb9c4956307`. Its exact candidate `4db36ec326ad91064d810a22ff35b3cae3a06580` passed all 68 application/migration/container and 5 full-history secret steps in [CI43794841837](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43794841837), plus independent exact-head security review with no introduced findings. The own-worker period view connects canonical account identity, effective capacity, original-unit assignments and retained work history. No migration, grant, unit conversion, source writer or financial/approval authority was added. Resulting [main CI43796753871](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43796753871) is tracked separately; merge alone is not evidence of its completion.
+
+The next independent security increment is [current selected-role authority](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md), ported from the later Draft stack without importing unrelated packages. It rejects removed roles and disabled accounts through shared identity guards while retaining legitimate direct roles and all verified group-mapping alternatives. Focused database/provider/migration regressions pass; final integrated checks and independent exact-head review remain prerequisites to acceptance. Other security findings, protected identity administration, session revocation, TLS, remaining commercial/reporting integration, buyer UAT and release acceptance remain open. No deployment is authorized by this checkpoint.
