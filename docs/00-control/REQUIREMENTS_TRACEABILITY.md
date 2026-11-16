@@ -472,10 +472,13 @@ WOS-IAM-003/005/008/010 and WOS-NFR-SEC-003/004 receive bounded evidence through
 Protected identity correction: IAM-003/005/006/010 and CORE-003/005 include explicit legacy unlink across both subject columns, durable Disabled binding, safe state audit and current locked callback revalidation. Candidate32f9026's passing hosted CI is insufficient because independent review reproduced incomplete revocation. See the protected identity task correction checkpoint; corrected-head acceptance remains required.
 
 
-Verified database TLS candidate: WOS-NFR-SEC-001/007/008/013, MNT-005 and DPL-003 map to `server/database-connection.mjs`, API/migration/seed callers, `tests/database-tls-smoke.mjs`, environment and production-startup tests; see [task](../tasks/WOS-03-VERIFIED-DATABASE-TLS.md). Final acceptance pending.
+Verified database TLS candidate: WOS-NFR-SEC-001/007/008/013, MNT-005 and DPL-003 map to `server/database-connection.mjs`, API/migration/seed callers, `tests/database-tls-smoke.mjs`, environment and production-startup tests; see [task](../tasks/WOS-03-VERIFIED-DATABASE-TLS.md). Accepted in PR164 after independent review and exact-head/main CI each passed all 76 steps.
 
 
-Setup read security: CORE-003, IAM-003/004/005/010, WKF-006/007/008, ORG-010, NFR-SEC-004/008/013 and PRV-001 map to [setup read boundaries](../tasks/WOS-02-SETUP-READ-BOUNDARIES.md), shared setup routes/async handler, real PostgreSQL read negatives and v1 failure-envelope tests. Final acceptance pending.
+Setup read security: CORE-003, IAM-003/004/005/010, WKF-006/007/008, ORG-010, NFR-SEC-004/008/013 and PRV-001 map to [setup read boundaries](../tasks/WOS-02-SETUP-READ-BOUNDARIES.md), shared setup routes/async handler, real PostgreSQL read negatives and v1 failure-envelope tests. Accepted in PR165 after exact-head and main CI each passed all 77 steps and independent review passed.
 
 
 Bounded authentication throttling: WOS-IAM-001; WOS-CORE-003/005; WOS-NFR-SEC-001/002/008/013, MNT-005 and DPL-003 receive bounded evidence through [the task](../tasks/WOS-04-BOUNDED-AUTH-THROTTLE.md). Shared limiter/proxy modules, environment validation, actual HTTP negative tests and authoritative audit IP selection address memory retention, malformed limits and forwarded-header spoofing. Persistent/distributed throttling remains open; final exact-head acceptance is required.
+
+
+The [security evidence ledger](../05-delivery/SECURITY_ACCEPTANCE_LEDGER.md) consolidates accepted bounded corrections and remaining release work. PR166's final documentation delta retains the independently reviewed authentication runtime and tests unchanged; exact final-head acceptance remains recorded in its PR.

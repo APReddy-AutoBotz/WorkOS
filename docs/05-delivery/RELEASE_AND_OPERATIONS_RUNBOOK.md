@@ -423,3 +423,14 @@ Setup configuration inspection now requires settings.manage; do not broadly gran
 `TRUSTED_PROXY_CIDRS` defaults empty (no proxy trust). Set a comma-separated list of the actual immediate reverse-proxy IPs or CIDRs only when deploying behind a proxy. At most 64 entries and 4096 characters are accepted. Host aliases, boolean/hop-count shortcuts, universal /0 ranges, scoped IPv6 and malformed prefixes fail startup. The proxy must strip/replace untrusted forwarding headers; firewall application access so only approved proxies connect. Express walks the chain from the socket to the first untrusted hop. Throttling and audit records use this same resolved IP, not a raw forwarded-header value. An omitted proxy configuration groups proxied users by the proxy's socket address; verify the buyer topology before enabling external traffic. Compose forwards this setting to the application.
 
 Counters are process-local and reset on restart; replicas do not share them. Persistent/distributed throttling is still a release requirement. This increment does not change OIDC policy, enable production local credentials or add session revocation. Rollback would restore retention and spoofing risks; prefer a tested forward correction, or restrict ingress and disable affected authentication routes while recovering. No data migration or rollback SQL is needed.
+
+
+### Authentication environment reference
+
+| Setting | Purpose | Sensitivity | Required / default | Allowed values |
+|---|---|---|---|---|
+| `LOGIN_RATE_LIMIT` | Per-input local-login and per-IP callback attempt budget | Public configuration | Optional; 8 | Integer 1 through 1,000,000 |
+| `LOGIN_IP_RATE_LIMIT` | Shared client-IP budget across authentication flows | Public configuration | Optional; 64 | Integer 1 through 1,000,000 |
+| `TRUSTED_PROXY_CIDRS` | Explicit ingress peers trusted to supply forwarding addresses | Public configuration; topology-sensitive operational access | Optional; empty means direct peer only | Up to 64 comma-separated IP/CIDR entries, 4096 characters; no /0, aliases or hop counts |
+
+Changing these settings requires application restart. Test proxy-chain resolution and NAT sign-in behavior before buyer rollout. Never substitute these limits for the separately required persistent production protection.
