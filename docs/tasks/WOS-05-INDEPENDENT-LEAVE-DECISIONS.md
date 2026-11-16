@@ -35,3 +35,7 @@ The stale-session trigger was reproduced before correction using an actual issue
 ## Release and rollback
 
 Preserve audit evidence and the index. Prefer forward correction; older application code restores the vulnerabilities. No production deployment, buyer UAT, full-repository security clearance or completion of all delegated-approval domains is claimed. Remaining legacy delegation domains, commercial/export/diagnostic findings, persistent production throttling and release acceptance remain separate work.
+
+## Final integration evidence
+
+Runtime candidate `0156d7b7357eadd6392ca92a01305bd16ee6fb26` passed independent review of all 51 changed paths in scan `96af60c5-317c-4809-b29f-48daca5c462b`, with no security candidates or correctness blockers. Local typecheck, 259-module lint, aggregate unit/contracts, 56-entry migration suite, focused PostgreSQL negatives/positive controls, leave/own-planning/import-audit browser journeys and 505-file hygiene/adversarial scan passed. A separate final revision removes one nonfunctional trailing blank line from the new identity regression and records this evidence; application and migration code remain byte-identical. The production build and signed-provider/fail-closed startup suite also passed. Final exact-head hosted results are recorded in PR168 before merge.

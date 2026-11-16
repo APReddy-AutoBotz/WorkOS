@@ -66,4 +66,3 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     console.log('Current workforce binding PostgreSQL acceptance passed: issued token loses prior director scope after supported reassignment.');
   });
 });
-
