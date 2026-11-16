@@ -2,6 +2,7 @@ import {assertLegacyProjectMutationAllowed} from './modules/commercial-drafting/
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import pg from 'pg';
+import {databaseConnectionOptions} from './database-connection.mjs';
 import {
   DEFAULT_COUNTRIES,
   DEFAULT_DEPARTMENTS,
@@ -26,10 +27,8 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.PGSSLMODE === 'require' ? { rejectUnauthorized: false } : undefined,
-});
+const pool = new Pool(databaseConnectionOptions({databaseUrl: process.env.DATABASE_URL,
+  sslMode: process.env.PGSSLMODE || 'disable', sslRootCert: process.env.PGSSLROOTCERT}));
 
 const scryptHash = async (value) => {
   const salt = crypto.randomBytes(16).toString('hex');

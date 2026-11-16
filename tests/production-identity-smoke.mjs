@@ -56,6 +56,7 @@ const testKeys = [
   'RESET_DEMO_DATA',
   'DATABASE_URL',
   'PGSSLMODE',
+  'PGSSLROOTCERT',
   'API_SESSION_SECRET',
   'IDENTITY_PROVIDER',
   'ENTRA_TENANT_ID',
@@ -307,6 +308,12 @@ let productionChild = null;
 const pool = new Pool({connectionString: databaseUrl, ssl: undefined});
 
 try {
+  results.push(await assertStartupFailure({
+    name: 'unreadable-database-ca',
+    port: positivePort + 20,
+    overrides: {PGSSLMODE: 'require', PGSSLROOTCERT: join(certificateDirectory, 'missing-database-ca.pem')},
+    expected: /Production startup blocked: database or migration failure/,
+  }));
   results.push(await assertStartupFailure({
     name: 'missing-app-url',
     port: positivePort + 7,

@@ -10,7 +10,7 @@ const modulePath = fileURLToPath(import.meta.url);
 if (invokedPath === modulePath) {
   try {
     const environment = validateRuntimeEnvironment(process.env, {purpose: 'migration'});
-    const result = await runMigrations({databaseUrl: environment.databaseUrl, sslMode: environment.pgSslMode});
+    const result = await runMigrations({databaseUrl: environment.databaseUrl, sslMode: environment.pgSslMode, sslRootCert: environment.pgSslRootCert});
     if (result.applied.length === 0) console.log('Database schema is current.');
   } catch (error) {
     console.error(`Migration failed: ${formatSafeMigrationFailure(error)}`);

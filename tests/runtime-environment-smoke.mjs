@@ -83,7 +83,10 @@ rejects({...productionEnvironment, ALLOW_TEST_FALLBACK: 'true'}, 'Test fallback'
 rejects({...productionEnvironment, VITE_ALLOW_TEST_FALLBACK: 'true'}, 'Test fallback');
 rejects({...productionEnvironment, LOCAL_LOGIN_ENABLED: 'true'}, 'LOCAL_LOGIN_ENABLED');
 rejects({...productionEnvironment, PORT: '4000abc'}, 'PORT');
-rejects({...productionEnvironment, PGSSLMODE: 'verify-full'}, 'PGSSLMODE');
+rejects({...productionEnvironment, PGSSLMODE: 'no-verify'}, 'PGSSLMODE');
+const verifiedDatabase = validateRuntimeEnvironment({...productionEnvironment, PGSSLMODE: 'verify-full', PGSSLROOTCERT: '/synthetic/ca.pem'});
+assert.equal(verifiedDatabase.pgSslMode, 'verify-full');
+assert.equal(verifiedDatabase.pgSslRootCert, '/synthetic/ca.pem');
 
 const secret = syntheticCredential().slice(0, 8);
 assert.throws(() => validateRuntimeEnvironment({...productionEnvironment, API_SESSION_SECRET: secret}), error => {

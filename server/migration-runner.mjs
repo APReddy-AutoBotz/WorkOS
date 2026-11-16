@@ -3,6 +3,7 @@ import {readdir, readFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import pg from 'pg';
+import {databaseConnectionOptions} from './database-connection.mjs';
 
 const {Pool} = pg;
 const serverDir = dirname(fileURLToPath(import.meta.url));
@@ -82,16 +83,14 @@ export const getMigrationStatus = async (queryable, {rootDir = serverDir} = {}) 
 export const runMigrations = async ({
   databaseUrl = process.env.DATABASE_URL,
   sslMode = process.env.PGSSLMODE,
+  sslRootCert = process.env.PGSSLROOTCERT,
   pool: suppliedPool,
   rootDir = serverDir,
   logger = console,
 } = {}) => {
   if (!suppliedPool && !databaseUrl) throw new Error('DATABASE_URL is required to run database migrations.');
 
-  const pool = suppliedPool || new Pool({
-    connectionString: databaseUrl,
-    ssl: sslMode === 'require' ? {rejectUnauthorized: false} : undefined,
-  });
+  const pool = suppliedPool || new Pool(databaseConnectionOptions({databaseUrl, sslMode, sslRootCert}));
   const ownsPool = !suppliedPool;
   let client;
   let transactionOpen = false;
