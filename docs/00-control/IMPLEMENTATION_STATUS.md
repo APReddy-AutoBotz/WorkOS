@@ -182,7 +182,7 @@ PR162's candidate `f41fab11e7af506116d4c7e161977b44573c8fbe` passed independent 
 [Protected identity administration](../tasks/WOS-04-PROTECTED-IDENTITY-ADMINISTRATION.md) is the next bounded security candidate. It includes independently reproduced username-collision and mapped-only maintenance corrections alongside role, credential and binding guards. Its own final review and all applicable checks remain required. Broader security, commercial/reporting integration, buyer UAT and release acceptance remain open; no readiness percentage or deployment is claimed.
 
 
-## Protected identity accepted; verified database transport in progress — 2026-11-16
+## Protected identity accepted; verified database transport in progress - 2026-11-16
 
 [PR163](https://github.com/APReddy-AutoBotz/WorkOS/pull/163) merged at `134031bf43cf2b934759dcfec629f697bd82d203`. Corrected candidate `01ffda83fe501b95db5a300ebf40fba890c48a86` passed all 75 hosted steps in [CI43801592175](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43801592175), local aggregate, 54-entry migration acceptance, production identity/startup and retained browser journeys. Independent corrected-head review found no remaining introduced findings. The original candidate was rejected after review exposed incomplete legacy unlink; explicit unlink now retains Disabled identity state and prevents concurrent callback recreation. Requirements: IAM-003/005/006/010, CORE-003/005 and NFR-SEC-002/004/005. No migration or dependency change. Post-merge [CI43802724124](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43802724124) also passed all 75 steps, with no skipped or failed steps.
 

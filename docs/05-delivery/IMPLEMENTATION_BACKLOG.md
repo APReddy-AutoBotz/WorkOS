@@ -446,7 +446,7 @@ The owner's continuing authorization permits the bounded [current-role repair](.
 After PR162 current-role authority, integrate the bounded [protected identity administration repair](../tasks/WOS-04-PROTECTED-IDENTITY-ADMINISTRATION.md) independently of later Draft feature dependencies. Include the independently reproduced credential-target, username-collision and mapped-only compatibility corrections. All applicable exact-head local/hosted checks and independent review precede merge. No new schema, grants or production fallback; broader security, commercial/reporting and buyer/release gates remain open.
 
 
-## Protected identity accepted; verified database transport in progress — 2026-11-16
+## Protected identity accepted; verified database transport in progress - 2026-11-16
 
 [PR163](https://github.com/APReddy-AutoBotz/WorkOS/pull/163) merged at `134031bf43cf2b934759dcfec629f697bd82d203`. Corrected candidate `01ffda83fe501b95db5a300ebf40fba890c48a86` passed all 75 hosted steps in [CI43801592175](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43801592175), local aggregate, 54-entry migration acceptance, production identity/startup and retained browser journeys. Independent corrected-head review found no remaining introduced findings. The original candidate was rejected after review exposed incomplete legacy unlink; explicit unlink now retains Disabled identity state and prevents concurrent callback recreation. Requirements: IAM-003/005/006/010, CORE-003/005 and NFR-SEC-002/004/005. No migration or dependency change. Post-merge [CI43802724124](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43802724124) also passed all 75 steps, with no skipped or failed steps.
 
