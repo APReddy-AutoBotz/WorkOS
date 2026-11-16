@@ -57,7 +57,7 @@ if (!process.env.WORKOS_CALENDAR_DATE_CHILD) {
       const sql = (await db.query("select '2026-10-20'::date raw_date,'2026-10-20'::date::text calendar_date")).rows[0];
       assert.equal(JSON.stringify(sql.raw_date),expected[process.env.TZ]);assert.equal(sql.calendar_date,'2026-10-20');
       const baseline = async () => (await db.query('select (select count(*) from working_calendars) calendars,(select count(*) from working_calendar_holidays) holidays')).rows[0];
-      let audits = 0, connects = 0;const requests = [];
+      let audits = 0, connects = 0, readPermissionChecks = 0;const requests = [];
       const pool = {async query(query,values) {
         assert.match(query.trim(),/^select\b/i,'explicit no business SQL mutation assertion');requests.push({query,values});
         if (query.includes('from user_organization_scopes s')) {
@@ -69,7 +69,7 @@ if (!process.env.WORKOS_CALENDAR_DATE_CHILD) {
       },async connect() {connects++;throw new Error('GET cannot open mutation transaction');}};
       const app = express();app.use(express.json());
       registerOrganizationSetupRoutes({app,pool,requireDatabase:(_q,_s,next)=>next(),requireAuth:(req,_res,next)=>{req.user={sub:'synthetic-calendar-reader'};next();},
-        requirePermission:()=>()=>{throw new Error('existing calendar GET permission surface must not be expanded');},audit:()=>{audits++;throw new Error('read cannot audit mutation');}});
+        requirePermission:permission=>(_req,_res,next)=>{assert.equal(permission,'settings.manage');readPermissionChecks++;next();},audit:()=>{audits++;throw new Error('read cannot audit mutation');}});
       server=app.listen(0,'127.0.0.1');await new Promise((resolve,reject)=>{server.once('listening',resolve);server.once('error',reject);});
       const endpoint=`http://127.0.0.1:${server.address().port}/api/organization-setup/calendars`;
       const get = (suffix='',headers={}) => fetch(`${endpoint}${suffix}${suffix.includes('?') ? '&' : '?'}asOf=2026-10-20`,{headers});
@@ -88,13 +88,13 @@ if (!process.env.WORKOS_CALENDAR_DATE_CHILD) {
         for (const suffix of ['', '/calendar-a/holidays']) {res=await get(suffix,headers);assert.equal(res.status,403);assert.equal((await res.json()).code,'ORG_SCOPE_DENIED');}
       }
       res=await get('',{'x-legal-entity-id':'legal-b'});assert.deepEqual((await res.json()).map(row=>row.id),['calendar-group','calendar-other-legal','calendar-other-group']);
-      assert.deepEqual(await baseline(),before);assert.equal(audits,0);assert.equal(connects,0);
+      assert.deepEqual(await baseline(),before);assert.equal(audits,0);assert.equal(connects,0);assert.ok(readPermissionChecks>0,'calendar inspection requires protected settings permission');
       await db.query(`insert into working_calendars select 'cap-calendar-'||n,'org-a','legal-a','legal_entity',null,null,null,'Z_CAP_'||lpad(n::text,3,'0'),'Synthetic capped calendar','UTC','{1}'::int[],8,'2020-01-01',null,true from generate_series(1,205) n;
         insert into working_calendar_holidays select 'cap-holiday-'||n,'cap-logical-'||n,'calendar-group','org-a','2026-10-20'::date,'Synthetic capped holiday '||lpad(n::text,3,'0'),'Public','2020-01-01',null,true from generate_series(1,205) n;`);
       res=await get();calendars=await res.json();assert.equal(calendars.length,200);assert.equal(calendars[0].id,'calendar-a');
       res=await get('/calendar-group/holidays');holidays=await res.json();assert.equal(holidays.length,200);assert.equal(holidays[0].label,'Synthetic capped holiday 001');
       for (const request of requests.filter(item=>item.values?.length===4 && !item.query.includes('user_organization_scopes'))) assert.equal(request.values.at(-1),200);
-      assert.equal(audits,0);assert.equal(connects,0);
+      assert.equal(audits,0);assert.equal(connects,0);assert.ok(readPermissionChecks>0,'calendar inspection requires protected settings permission');
       console.log(`Working calendar actual PostgreSQL GET dates/applicability/ownership/holiday bounds/inactive/empty/cap/no-mutation acceptance passed in ${process.env.TZ}.`);
     } finally {if(server) await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));await db.end();}
   }

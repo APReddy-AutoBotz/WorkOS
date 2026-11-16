@@ -32,6 +32,7 @@
     "test:permissions": "node --import tsx tests/dynamic-permissions-smoke.mjs",
     "test:browser-ux": "node tests/browser-ux-smoke.cjs",
     "test:import-templates": "node tests/import-template-smoke.mjs",
+    "test:setup-read-boundaries": "node tests/setup-read-boundaries-postgres-smoke.mjs",
     "test:database-tls": "node tests/database-tls-smoke.mjs",
     "test:production-identity": "node tests/production-identity-smoke.mjs",
     "test:identity-discovery": "node tests/identity-discovery-smoke.mjs",

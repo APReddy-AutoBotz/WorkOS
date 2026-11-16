@@ -74,6 +74,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Verify setup read permissions and error containment
+        run: npm run test:setup-read-boundaries
+
       - name: Verify database TLS trust and hostname enforcement
         run: npm run test:database-tls
 

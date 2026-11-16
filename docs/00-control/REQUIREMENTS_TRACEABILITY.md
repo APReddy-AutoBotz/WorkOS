@@ -473,3 +473,6 @@ Protected identity correction: IAM-003/005/006/010 and CORE-003/005 include expl
 
 
 Verified database TLS candidate: WOS-NFR-SEC-001/007/008/013, MNT-005 and DPL-003 map to `server/database-connection.mjs`, API/migration/seed callers, `tests/database-tls-smoke.mjs`, environment and production-startup tests; see [task](../tasks/WOS-03-VERIFIED-DATABASE-TLS.md). Final acceptance pending.
+
+
+Setup read security: CORE-003, IAM-003/004/005/010, WKF-006/007/008, ORG-010, NFR-SEC-004/008/013 and PRV-001 map to [setup read boundaries](../tasks/WOS-02-SETUP-READ-BOUNDARIES.md), shared setup routes/async handler, real PostgreSQL read negatives and v1 failure-envelope tests. Final acceptance pending.
