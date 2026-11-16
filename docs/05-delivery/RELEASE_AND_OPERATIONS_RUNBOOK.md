@@ -434,3 +434,12 @@ Counters are process-local and reset on restart; replicas do not share them. Per
 | `TRUSTED_PROXY_CIDRS` | Explicit ingress peers trusted to supply forwarding addresses | Public configuration; topology-sensitive operational access | Optional; empty means direct peer only | Up to 64 comma-separated IP/CIDR entries, 4096 characters; no /0, aliases or hop counts |
 
 Changing these settings requires application restart. Test proxy-chain resolution and NAT sign-in behavior before buyer rollout. Never substitute these limits for the separately required persistent production protection.
+
+
+## Durable session rollout and recovery
+
+Apply ordered migration `057a_wos04_session_revocations.sql` before serving the new API. It appends after accepted057 and retains the later Draft migration058 number. All pre-upgrade sessions must sign in again; announce this intentional reauthentication boundary. New sign-ins keep a single unpredictable family through refresh and role switching. `API_SESSION_TTL_HOURS` remains the configured lifetime, but refresh no longer extends that lifetime indefinitely. This package does not add an audited configuration-change interface.
+
+Successful logout records durable revocation and audit atomically. Presented bearer and cookie credentials can differ across tabs, so both are revoked; independent sessions not presented remain active. Missing storage returns SESSION_AUTHORITY_UNAVAILABLE for protected reads; failed logout persistence/audit returns SESSION_REVOCATION_UNCONFIRMED. The browser immediately clears local credentials/scope, suppresses late responses and warns when server sign-out cannot be confirmed. A delivery failure may leave the server session active until expiry. Monitor these failures; preserve the revocation and audit ledgers in backups.
+
+Do not delete or rewrite the ledger during rollback. An older binary can ignore revocation and may reject the newer migration ledger at startup. Prefer forward correction or keep the service unavailable. Any controlled older-code recovery requires compatible migration handling and signing-secret rotation to expire all credentials, while preserving revocation/audit evidence and required production OIDC. No such production recovery or deployment is authorized by this package.

@@ -556,6 +556,22 @@ try {
   const revokedMapping = await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers:{cookie:issuedSession}}, 2000);
   assert.equal(revokedMapping.status, 403, 'A callback-issued cookie loses a removed mapping immediately');
   assert.equal((await revokedMapping.json()).code, 'SESSION_ROLE_REVOKED');
+  // The preceding test intentionally removes both mapped roles. Restore one
+  // verified mapping while testing the independent session-revocation boundary.
+  await pool.query("update entra_group_role_mappings set active=true where group_id='mock-entra-group-secondary'");
+  const productionSessionCookie = (callback.headers.getSetCookie?.() || [callback.headers.get('set-cookie') || ''])
+    .flatMap(value => value.split(/,\s*(?=workos_session=)/))
+    .find(value => value.startsWith('workos_session='))?.split(';')[0];
+  assert.ok(productionSessionCookie, 'signed provider callback must expose the exact session cookie');
+  const providerSession = await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers: {cookie: productionSessionCookie}});
+  assert.equal(providerSession.status, 200);
+  const providerSessionBody = await providerSession.json();
+  const providerClaims = JSON.parse(Buffer.from(productionSessionCookie.slice('workos_session='.length).split('.')[0], 'base64url').toString());
+  const refreshedClaims = JSON.parse(Buffer.from(providerSessionBody.token.split('.')[0], 'base64url').toString());
+  assert.match(providerClaims.sid, /^[a-f0-9-]{36}$/);
+  assert.equal(refreshedClaims.sid, providerClaims.sid);
+  assert.equal(refreshedClaims.exp, providerClaims.exp, 'production refresh retains the original absolute expiry');
+  await pool.query("update entra_group_role_mappings set active=false where group_id='mock-entra-group-secondary'");
   const callbackOperationId = callback.headers.get('x-operation-id');
   assert.match(callbackOperationId || '', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     'the side-effecting Entra callback must expose its server-generated operation ID');
@@ -646,6 +662,13 @@ try {
     assert.equal((await pool.query('select 1 from identity_provider_links where employee_id=$1',[syntheticEmployee.rows[0].id])).rowCount,0,
       'A stale callback must not recreate a cleared legacy link');
   } finally { await unlinkClient.query('rollback'); unlinkClient.release(); }
+  // Complete all retained binding-administration checks before revoking their actor.
+  assert.equal((await fetchWithTimeout(`${serviceOrigin}/api/auth/logout`, {method: 'POST', headers: {cookie: productionSessionCookie}})).status, 200);
+  assert.equal((await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers: {cookie: productionSessionCookie}})).status, 401,
+    'the copied signed-provider cookie must be rejected after logout');
+  assert.equal((await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers: {authorization: `Bearer ${providerSessionBody.token}`}})).status, 401,
+    'the refreshed signed-provider token must be rejected after logout');
+
   await pool.query('delete from identity_provider_links where employee_id=$1', [syntheticEmployee.rows[0].id]);
   await pool.query("delete from users where username = 'synthetic-user'");
   await pool.query('delete from employees where id=$1', [syntheticEmployee.rows[0].id]);

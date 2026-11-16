@@ -24,7 +24,12 @@ const execute = async (middleware, request) => {
 
 let currentRole = true;
 let identityStorageAvailable = true;
-const database = {query: async (_sql, parameters) => {
+let sessionRevoked = false;
+const database = {query: async (sql, parameters) => {
+  if (sql.includes('session_revocations')) {
+    assert.match(parameters[0], /^[a-f0-9]{64}$/);
+    return {rowCount: sessionRevoked ? 1 : 0};
+  }
   assert.deepEqual(parameters, ['user-test', 'Admin', []]);
   if (!identityStorageAvailable) throw new Error('synthetic storage failure');
   return {rowCount: currentRole ? 1 : 0};
@@ -44,7 +49,7 @@ const resolveOrganizationScope = async (_database, request) => {
   return {organizationId: 'org-test', legalEntityId: 'legal-test'};
 };
 const verifyToken = token => token === 'valid-session'
-  ? {sub: 'user-test', username: 'synthetic', activeRole: 'Admin'}
+  ? {sid: 'synthetic-session-family', sub: 'user-test', username: 'synthetic', activeRole: 'Admin'}
   : null;
 
 assert.equal(readCookie(createRequest({cookie: 'other=value; workos_session=valid-session'}), 'workos_session'),
@@ -121,6 +126,14 @@ for (const middleware of [normal.requireIdentity, normal.requireAuth, explicitTe
 }
 
 console.log('Identity access middleware and current-role revocation smoke tests passed.');
+
+sessionRevoked = true;
+for (const request of [createRequest({authorization: 'Bearer valid-session'}), createRequest({cookie: 'workos_session=valid-session'})]) {
+  const revoked = await execute(normal.requireIdentity, request);
+  assert.equal(revoked.nextCalled, false);
+  assert.equal(revoked.response.statusCode, 401);
+  assert.equal(revoked.response.body.code, 'SESSION_REVOKED');
+}
 
 assert.deepEqual(sessionEntraGroups({identityProvider: 'local', entraGroups: ['group']}), []);
 assert.deepEqual(sessionEntraGroups({identityProvider: 'entra', entraGroups: ['group', 'group']}), ['group']);

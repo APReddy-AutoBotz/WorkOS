@@ -24,7 +24,7 @@ export const localDatabaseUrl = value => {
 };
 
 export const signJourneySession = (payload, secret) => {
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const body = Buffer.from(JSON.stringify({sid: randomUUID(), ...payload})).toString('base64url');
   return `${body}.${createHmac('sha256', secret).update(body).digest('base64url')}`;
 };
 
