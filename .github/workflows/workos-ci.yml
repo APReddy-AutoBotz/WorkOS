@@ -80,6 +80,9 @@ jobs:
       - name: Verify current selected-role PostgreSQL authority
         run: npm run test:current-role-postgres
 
+      - name: Verify protected identity administration
+        run: npm run test:protected-identity-postgres
+
       - name: Verify assignment version PostgreSQL migration and API acceptance
         run: npm run test:assignment-versions-postgres
 

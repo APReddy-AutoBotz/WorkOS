@@ -27,3 +27,8 @@ Local locked installation, focused middleware, expanded PostgreSQL role authorit
 Each authenticated request adds a current identity/role lookup; there is no revocation cache delay. No schema conversion is needed. A rollback of this guard reopens stale-role access: prefer a tested forward correction, or keep affected access unavailable while repairing. Preserve production OIDC enforcement and all audit/history records.
 
 This repairs current account/role authority only. Per-session logout revocation, absolute session lifetime, protected identity administration, other frozen-audit findings, buyer identity/UAT and release acceptance remain separate work. No deployment is performed.
+
+
+## Accepted checkpoint — 2026-11-16
+
+PR162 merged at `0ad02ab3611d9720eb226b481ae68e6cbbd68ec4`. Candidate `f41fab11e7af506116d4c7e161977b44573c8fbe` passed full local integrated type/lint/aggregate, browser, build, PostgreSQL and independent review. Exact-head CI43797328102 and resulting main CI43798387297 each passed all 74 steps, including production identity, 54-entry migrations, dependency/secret scans and container checks. This supersedes earlier pending acceptance statements for this candidate, not the broader limitations above.

@@ -34,6 +34,7 @@ import { listAuthorizedOrganizationScopes, registerOrganizationSetupRoutes, reso
 import {createRequestContextMiddleware} from './api/request-context.mjs';
 import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/error-contract.mjs';
 import {createIdentityAccessMiddleware, readCookie, sessionEntraGroups} from './modules/identity-access/middleware.mjs';
+import {assignEmployeeRoles, assertCredentialTarget, assertSecurityAdministrator, synchronizeEntraBinding} from './modules/identity-access/administration.mjs';
 import {createIdentityReadRouter} from './modules/identity-access/read-router.mjs';
 import {recordAuditEvent} from './modules/audit/audit-record.mjs';
 import {createAuditHistoryRouter} from './modules/audit/audit-history-router.mjs';
@@ -1263,11 +1264,15 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
     }
     await client.query('begin');
     let user = await fetchUserAuthRowByWhere(client, `
-      left join identity_provider_links ipl on ipl.employee_id = e.id and ipl.provider = 'entra' and ipl.status = 'Linked'
-      where ipl.provider_subject = $1
-        or u.entra_object_id = $1
-        or e.entra_object_id = $1
+      left join identity_provider_links ipl on ipl.employee_id = e.id and ipl.provider = 'entra'
+      where (ipl.status = 'Linked' and ipl.provider_subject = $1)
+        or (ipl.id is null and (u.entra_object_id = $1 or e.entra_object_id = $1))
     `, [providerSubject]);
+    if (user?.employee_record_id) {
+      await client.query('select id from employees where id=$1 for update', [user.employee_record_id]);
+      const binding = (await client.query("select status,provider_subject from identity_provider_links where employee_id=$1 and provider='entra'", [user.employee_record_id])).rows[0];
+      if (binding && (binding.status !== 'Linked' || binding.provider_subject !== providerSubject)) user = null;
+    }
     if (!user || user.status !== 'Active') {
       await logIntegrationEvent(client, {
         provider: 'entra',
@@ -1672,6 +1677,7 @@ app.post('/api/users/:id/password-reset', requireDatabase, requireAuth, requireP
       res.status(404).json({ error: 'User was not found' });
       return;
     }
+    await assertCredentialTarget(client, req, user.id, getEffectivePermissionsForUser);
     const temporaryPassword = parsed.data.newPassword || generateTemporaryPassword();
     const passwordError = validateNewPassword(temporaryPassword, [user.username, user.employee_id, user.email]);
     if (passwordError) {
@@ -1707,6 +1713,7 @@ app.post('/api/users/:id/password-reset', requireDatabase, requireAuth, requireP
   } catch (error) {
     await client.query('rollback');
     console.error(error);
+    if ([403, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
     res.status(500).json({ error: 'Password reset failed' });
   } finally {
     client.release();
@@ -1937,7 +1944,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       parsed.data.capacity_type || (utilizationEligible ? 'Delivery' : 'Governance'),
       parsed.data.contract_type || 'Permanent',
       parsed.data.leave_policy_id || null,
-      parsed.data.entra_object_id || null,
+      parsed.data.entra_object_id === undefined ? (previous?.entra_object_id || null) : (parsed.data.entra_object_id || null),
       parsed.data.teams_user_id || null,
       req.organizationScope.organizationId, req.organizationScope.legalEntityId,
     ]);
@@ -1963,9 +1970,14 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
     if (!existingUser && !parsed.data.initial_password) {
       throw new Error('initial_password is required when creating a new user.');
     }
-    const passwordHash = existingUser && !parsed.data.initial_password
-      ? null
-      : await scryptHash(parsed.data.initial_password);
+    if (existingUser && parsed.data.initial_password !== undefined) {
+      throw Object.assign(new Error('Use the authorized password-reset action for an existing account.'), {statusCode: 422, code: 'INITIAL_PASSWORD_CREATE_ONLY'});
+    }
+    if (!existingUser) {
+      const passwordError = validateNewPassword(parsed.data.initial_password, [parsed.data.employee_id, parsed.data.email]);
+      if (passwordError) throw Object.assign(new Error(passwordError), {statusCode: 422, code: 'PASSWORD_POLICY_INVALID'});
+    }
+    const passwordHash = existingUser ? null : await scryptHash(parsed.data.initial_password);
     const baseUsername = parsed.data.employee_id.toLowerCase();
     const username = (existingUser?.username || !(await client.query('select 1 from users where lower(username) = lower($1)', [baseUsername])).rowCount)
       ? (existingUser?.username || baseUsername)
@@ -1980,6 +1992,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
         password_hash = coalesce($5, users.password_hash),
         status = excluded.status,
         updated_at = now()
+      where users.id = $7::uuid and users.employee_record_id = $3
       returning id
     `, [
       username,
@@ -1988,7 +2001,9 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       parsed.data.email,
       passwordHash,
       parsed.data.status === 'Exited' ? 'Disabled' : 'Active',
+      existingUser?.id || null,
     ]);
+    if (!userResult.rowCount) throw Object.assign(new Error('The generated login name is already bound to another account.'), {statusCode: 409, code: 'LOGIN_BINDING_CONFLICT'});
     await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,$4) on conflict(user_id,organization_id,legal_entity_id) do update set active=excluded.active`,[userResult.rows[0].id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,employee.status !== 'Exited']);
     if (previous?.status === 'Exited' && employee.status !== 'Exited') {
       await synchronizeWorkerReactivation(client, {
@@ -2002,21 +2017,16 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
         source: 'Employee save',
       });
     }
-    const defaultRoleNames = employeeCode.startsWith('ADMIN-')
-      ? ['Admin']
-      : employeeCode.startsWith('HR-')
-        ? ['HR']
-        : employeeCode.startsWith('CD-')
-          ? ['CountryDirector']
-          : employeeCode.startsWith('PM-')
-            ? ['ProjectManager', 'Employee']
-            : ['Employee'];
-    const roleNames = parsed.data.roles || defaultRoleNames;
-    const roleResult = await client.query('select id, name from roles where name = any($1::text[])', [roleNames]);
-    await client.query('delete from user_roles where user_id = $1', [userResult.rows[0].id]);
-    for (const role of roleResult.rows) {
-      await client.query('insert into user_roles (user_id, role_id) values ($1,$2) on conflict do nothing', [userResult.rows[0].id, role.id]);
-    }
+    await assignEmployeeRoles(client, req, {
+      userId: userResult.rows[0].id, requestedRoles: parsed.data.roles, newAccount: !existingUser,
+      supportedRoles: ['Employee', 'TeamLead', 'ProjectManager', 'CountryDirector', 'HR', 'Admin'],
+      getPermissions: getEffectivePermissionsForUser, audit,
+    });
+    await synchronizeEntraBinding(client, req, {
+      employeeId: employee.id, userId: userResult.rows[0].id,
+      previousSubject: previous?.entra_object_id, nextSubject: employee.entra_object_id,
+      getPermissions: getEffectivePermissionsForUser,
+    });
     if (previous && previous.status !== 'Exited' && employee.status === 'Exited') {
       await synchronizeWorkerExit(client, req, employee, parsed.data.exit_date || new Date().toISOString().slice(0, 10), 'Employee save');
     }
@@ -2038,6 +2048,7 @@ app.post('/api/employees', requireDatabase, requireAuth, requirePermission('empl
       return;
     }
     console.error(error);
+    if ([403, 409, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
     res.status(500).json({ error: 'Employee save failed' });
   } finally {
     client.release();
@@ -3725,6 +3736,7 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
       res.status(404).json({ error: 'Employee not found' });
       return;
     }
+    await assertSecurityAdministrator(client, req, getEffectivePermissionsForUser);
     const previous = (await client.query(
       `select ipl.* from identity_provider_links ipl
        join employees e on e.id = ipl.employee_id
@@ -3756,7 +3768,7 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
         updated_at = now()
       returning *
     `, [parsed.data.id || null, employee.id, parsed.data.provider, parsed.data.provider_subject, parsed.data.provider_upn || null, parsed.data.status]);
-    await client.query(
+    if (parsed.data.provider === 'entra') await client.query(
       'update employees set entra_object_id = $2, updated_at = now() where id = $1 and organization_id = $3 and legal_entity_id = $4',
       [employee.id, parsed.data.provider_subject, req.organizationScope.organizationId, req.organizationScope.legalEntityId]
     );
@@ -3798,6 +3810,7 @@ app.post('/api/integrations/identity-links', requireDatabase, requireAuth, requi
   } catch (error) {
     await client.query('rollback');
     console.error(error);
+    if ([403, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
     res.status(500).json({ error: 'Identity link save failed' });
   } finally {
     client.release();
@@ -3824,6 +3837,7 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
   const client = await pool.connect();
   try {
     await client.query('begin');
+    await assertSecurityAdministrator(client, req, getEffectivePermissionsForUser);
     const previous = (await client.query('select * from entra_group_role_mappings where group_id = $1', [parsed.data.group_id])).rows[0];
     const result = await client.query(`
       insert into entra_group_role_mappings (id, group_id, group_name, role_name, active)
@@ -3862,6 +3876,7 @@ app.post('/api/integrations/entra-role-mappings', requireDatabase, requireAuth, 
   } catch (error) {
     await client.query('rollback');
     console.error(error);
+    if ([403, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
     res.status(500).json({ error: 'Entra role mapping save failed' });
   } finally {
     client.release();
@@ -5811,7 +5826,6 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
     }
     const directorResult = await client.query('select id from country_directors');
     const directorIds = new Set(directorResult.rows.map(row => row.id));
-    const employeeRole = (await client.query('select id from roles where name = $1', ['Employee'])).rows[0];
 
     for (const [index, row] of parsed.data.rows.entries()) {
       const rowNumber = rowNumbers[index];
@@ -5987,6 +6001,10 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
       if (!existingUser && !row.initialPassword) {
         throw new Error(`initialPassword is required for new user ${row.employeeId}`);
       }
+      if (!existingUser) {
+        const passwordError = validateNewPassword(row.initialPassword, [row.employeeId, row.email]);
+        if (passwordError) throw Object.assign(new Error(passwordError), {statusCode: 422, code: 'PASSWORD_POLICY_INVALID'});
+      }
       const passwordHash = existingUser ? null : await scryptHash(row.initialPassword);
       const baseUsername = row.employeeId.toLowerCase();
       const username = (existingUser?.username || !(await client.query('select 1 from users where lower(username) = lower($1)', [baseUsername])).rowCount)
@@ -6002,6 +6020,7 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
           password_hash = coalesce($5, users.password_hash),
           status = excluded.status,
           updated_at = now()
+        where users.id = $7::uuid and users.employee_record_id = $3
         returning id
       `, [
         username,
@@ -6010,7 +6029,9 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
         row.email,
         passwordHash,
         employee.status === 'Exited' ? 'Disabled' : 'Active',
+        existingUser?.id || null,
       ]);
+      if (!userResult.rowCount) throw Object.assign(new Error('The generated login name is already bound to another account.'), {statusCode: 409, code: 'LOGIN_BINDING_CONFLICT'});
       await client.query(`insert into user_organization_scopes(user_id,organization_id,legal_entity_id,active) values($1,$2,$3,$4) on conflict(user_id,organization_id,legal_entity_id) do update set active=excluded.active`,[userResult.rows[0].id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,employee.status !== 'Exited']);
       if (previous?.status === 'Exited' && employee.status !== 'Exited') {
         try {
@@ -6034,16 +6055,16 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
         }
       }
       const roleNames = splitPipeList(row.roles);
-      const requestedRoles = roleNames.length > 0 ? roleNames : ['Employee'];
-      const rolesResult = await client.query('select id, name from roles where name = any($1::text[])', [requestedRoles]);
-      if (rolesResult.rows.length > 0) {
-        await client.query('delete from user_roles where user_id = $1', [userResult.rows[0].id]);
-        for (const role of rolesResult.rows) {
-          await client.query('insert into user_roles (user_id, role_id) values ($1,$2) on conflict do nothing', [userResult.rows[0].id, role.id]);
-        }
-      } else if (employeeRole) {
-        await client.query('insert into user_roles (user_id, role_id) values ($1,$2) on conflict do nothing', [userResult.rows[0].id, employeeRole.id]);
-      }
+      await assignEmployeeRoles(client, req, {
+        userId: userResult.rows[0].id, requestedRoles: roleNames.length ? roleNames : undefined,
+        newAccount: !existingUser, supportedRoles: ['Employee', 'TeamLead', 'ProjectManager', 'CountryDirector', 'HR', 'Admin'],
+        getPermissions: getEffectivePermissionsForUser, audit,
+      });
+      await synchronizeEntraBinding(client, req, {
+        employeeId: employee.id, userId: userResult.rows[0].id,
+        previousSubject: previous?.entra_object_id, nextSubject: employee.entra_object_id,
+        getPermissions: getEffectivePermissionsForUser,
+      });
       if (previous && previous.status !== 'Exited' && employee.status === 'Exited') {
         await synchronizeWorkerExit(client, req, employee, row.exitDate || new Date().toISOString().slice(0, 10), `Employee import ${fileName}`);
       }
@@ -6112,6 +6133,7 @@ app.post(['/api/imports/employees/apply', '/api/v1/imports/employees/apply'], re
       return;
     }
     console.error(error);
+    if ([403, 409, 422].includes(error.statusCode)) { res.status(error.statusCode).json({error: error.message, code: error.code}); return; }
     res.status(500).json({ error: 'Employee import apply failed' });
   } finally {
     client.release();

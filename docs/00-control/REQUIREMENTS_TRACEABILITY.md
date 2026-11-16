@@ -464,3 +464,7 @@ Current owner authorization supersedes historical fixed-Draft/review/merge defer
 ## Current selected-role security integration — 2026-11-16
 
 WOS-IAM-003/005/008/010 and WOS-NFR-SEC-003/004 receive bounded evidence through [current role authority](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md). Shared identity guards reject removed selected roles and disabled accounts before scoped and identity-only routes. Signed provider provenance preserves all active mapped-group alternatives; permission and data scope remain independently enforced. Middleware, real PostgreSQL/API, signed-provider callback, commercial and migration regressions accompany the change. Exact integrated review and hosted acceptance remain required; per-session logout revocation and broader security findings remain open.
+
+## Protected identity administration security increment — 2026-11-16
+
+[Protected identity administration](../tasks/WOS-04-PROTECTED-IDENTITY-ADMINISTRATION.md) addresses bounded WOS-IAM-003/005/006/010, CORE-003/005 and NFR-SEC-002/004/005. Workforce profile/import and identity integration cannot implicitly grant security authority. Real API tests cover code-derived roles, explicit roles, credential replacement/reset, organization-audit and provider-bound targets, disabled/pending provider links, both import aliases, batch rollback and existing-account username collision safety. Mapped-only account maintenance preserves omitted local roles. No schema migration, new grant or production fallback; exact-head review and full acceptance remain required.

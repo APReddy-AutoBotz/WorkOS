@@ -105,7 +105,7 @@ const cleanEnvironment = (overrides = {}) => {
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
     IDENTITY_DISCOVERY_RECHECK_MS: '5000',
     // This fixture makes exactly nine callback requests in one loopback-IP bucket.
-    LOGIN_RATE_LIMIT: '9',
+    LOGIN_RATE_LIMIT: '11',
     EMAIL_PROVIDER: 'mock',
     TEAMS_PROVIDER: 'mock',
     ...overrides,
@@ -580,6 +580,13 @@ try {
   const replay = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {cookie: stateCookie}}, 2000);
   assert.equal(replay.status, 302, 'consumed callback replay must reach the OAuth state handler');
   assert.equal(replay.headers.get('location'), '/login?error=entra_invalid_state', 'consumed callback state must not replay');
+  await pool.query("update entra_group_role_mappings set active=true where group_id='mock-entra-group-employee'");
+  for (const linkStatus of ['Disabled', 'Pending']) {
+    await pool.query("update identity_provider_links set status=$1 where employee_id=$2 and provider='entra'", [linkStatus, syntheticEmployee.rows[0].id]);
+    await assertCallbackRejected({name: `binding-${linkStatus.toLowerCase()}`, expectedLocation: '/login?error=entra_unlinked_user'});
+    assert.equal((await pool.query("select status from identity_provider_links where employee_id=$1 and provider='entra'", [syntheticEmployee.rows[0].id])).rows[0].status, linkStatus,
+      'Rejected login must not reactivate a disabled or pending binding through legacy subject columns');
+  }
   await pool.query('delete from identity_provider_links where employee_id=$1', [syntheticEmployee.rows[0].id]);
   await pool.query("delete from users where username = 'synthetic-user'");
   await pool.query('delete from employees where id=$1', [syntheticEmployee.rows[0].id]);
