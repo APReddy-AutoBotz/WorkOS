@@ -1,5 +1,6 @@
 import {Router} from 'express';
 import {z} from 'zod';
+import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './decision-independence.mjs';
 
 export const createLeaveRouter = ({
   pool,
@@ -696,6 +697,7 @@ export const createLeaveRouter = ({
           return;
         }
       }
+      if (parsed.data.status !== 'Cancelled') await assertIndependentLeaveDecision(client, req, previous, buildEmployeeScopeWhere);
       const result = await client.query(`
         update leave_requests
         set status = $2,
@@ -728,6 +730,7 @@ export const createLeaveRouter = ({
       res.json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
+      if (sendLeaveDecisionError(res, error)) return;
       console.error(error);
       res.status(500).json({ error: 'Leave request status update failed' });
     } finally {
