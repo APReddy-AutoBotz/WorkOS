@@ -1,3 +1,4 @@
+import {OwnWorkPlanning} from '../components/OwnWorkPlanning';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
@@ -358,6 +359,8 @@ export const ESSHome = ({ initialSection = 'overview' }: { initialSection?: EssS
           </Link>
         )}
       />
+      {(activeSection==='overview'||activeSection==='work')&&<OwnWorkPlanning/>}
+      {(activeSection==='overview'||activeSection==='work')&&<p className="text-sm text-body/70">The overview figures below use existing compatibility calculations. Use the selected-period view above for dated capacity; unified utilization reconciliation remains pending.</p>}
       {loading ? <Card>Loading employee self-service data...</Card> : !employee ? (
         <Card>
           <div className="py-8 text-center">
