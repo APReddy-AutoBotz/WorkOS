@@ -74,6 +74,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Verify durable session revocation and absolute expiry
+        run: npm run test:session-revocation-postgres
+
       - name: Verify setup read permissions and error containment
         run: npm run test:setup-read-boundaries
 
@@ -145,6 +148,9 @@ jobs:
 
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
+
+      - name: Verify actual sign-in and durable logout browser journey
+        run: npm run test:session-logout-browser
 
       - name: Verify work source identity React/API/PostgreSQL journey
         run: npm run test:work-source-identity-journey

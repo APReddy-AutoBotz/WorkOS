@@ -11,9 +11,13 @@ Updated 2026-11-16. This ledger records bounded accepted corrections, not blanke
 | Verified PostgreSQL TLS | PR164, `a6b1cc249f5266ee41896245927cfe52f5f557cf` | CI43804406594 / CI43805538159: 76 steps each | API, migration and seed share certificate/hostname checks. Buyer CA mounts and transport configuration require deployment acceptance. |
 | Setup reads and error containment | PR165, `0489b181b0f5c3fc3e4825a662cecbf3987b98d8` | CI43807321480 / CI43809000917: 77 steps each | Administrative reads require capability; worker history/dependencies enforce current row scope. Minimal history, strict dates and contained async errors. Existing lifecycle mutation policy remains separate. |
 
-## Authentication correction in this revision
+## Authentication correction accepted
 
-PR166 candidate `4d103df312a3a6bda92c2359d6ce0f9e9cd073fc` bounds authentication map retention, validates rate limits and makes proxy trust explicit. It shares authoritative client IP with audit. Local locked install, type/lint/full aggregate, nine limiter tests, authorization PostgreSQL negatives, TLS, 54 migration entries, both retained browser journeys and production signed-identity/startup passed. Independent exact-head review passed all 23 changed paths with no introduced findings. The final documentation-only revision preserves these runtime/test bytes; its exact-head hosted acceptance is recorded in PR166. Process-local limits do not satisfy persistent/distributed throttling requirements.
+PR166 merged at `06516367ec9f452032b3d1a65658a22011448147` after final candidate `b9e82f8e256d5546d974e8fadd11a57d692c63f1` passed all 77 hosted steps in CI43810482651. Post-merge CI43811695312 also passed all 77 steps. Independent runtime/test and final documentation reviews passed. Local install, type/lint/aggregate, nine limiter tests, authorization PostgreSQL negatives, TLS, 54 migration entries, both retained browser journeys and production signed-identity/startup passed. Process-local limits do not satisfy persistent/distributed throttling requirements.
+
+## Durable session candidate
+
+The [session revocation task](../tasks/WOS-04-DURABLE-SESSION-REVOCATION.md) records the reproduced logout replay, independently identified legacy-sibling upgrade gap, migration057a and mandatory fresh sign-in for old sessions. The candidate introduces durable family revocation, fixed absolute expiry and honest browser logout failure states. It remains subject to all final checks and exact-head review; no acceptance credit is assigned here yet.
 
 ## Remaining priority work
 

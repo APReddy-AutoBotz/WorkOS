@@ -482,3 +482,6 @@ Bounded authentication throttling: WOS-IAM-001; WOS-CORE-003/005; WOS-NFR-SEC-00
 
 
 The [security evidence ledger](../05-delivery/SECURITY_ACCEPTANCE_LEDGER.md) consolidates accepted bounded corrections and remaining release work. PR166's final documentation delta retains the independently reviewed authentication runtime and tests unchanged; exact final-head acceptance remains recorded in its PR.
+
+
+Durable session revocation: WOS-IAM-008/010, CORE-003/005, NFR-SEC-001/003/004/012/013, MNT-005 and DPL-004 map to [the session task](../tasks/WOS-04-DURABLE-SESSION-REVOCATION.md), shared identity/logout controls, browser logout recovery, migration057a and real PostgreSQL/browser/provider negatives. Existing active-account/role/scope authority remains independently enforced. Configuration-change auditing, administrative revoke-all and broader security acceptance remain separate.

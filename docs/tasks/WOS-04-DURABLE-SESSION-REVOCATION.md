@@ -1,0 +1,27 @@
+# Durable current-session logout and absolute expiry
+
+Requirements: WOS-IAM-008/010; WOS-CORE-003/005; WOS-NFR-SEC-001/003/004/012/013, MNT-005 and DPL-004.
+
+## Boundary and behavior
+
+Baseline actual PostgreSQL/API testing returned200 before logout,200 from logout and200 when replaying the same signed credential. Shared account/role validation did not establish session revocation. New sign-ins receive an unpredictable family; refresh and role switch preserve it and original expiry. The shared identity guards check a durable revocation ledger for both cookie and bearer access, including identity-only and versioned aliases. Logout records each presented valid bearer/cookie family and an actor/role/source audit event in one transaction. Replays then return401, storage failures503; independent sessions remain usable. Repeated logout is idempotent. Mixed and duplicate-path cookies are included, and stable insertion order avoids lock-order deadlocks.
+
+Fresh candidate review reproduced a legacy transition bypass: pre-upgrade refresh/switch siblings have no shared family and hashing their distinct tokens cannot revoke both. The correction rejects every pre-upgrade session without a valid family, requiring fresh sign-in. No legacy fallback is retained. Invalid token segments or unsafe explicit family values fail authentication. Already admitted requests may complete after logout; independent new sign-ins and administrator revoke-all remain separate.
+
+The browser clears local credentials and scope before network acknowledgement, includes its bearer alongside the cookie and suppresses late authentication responses. All logout controls show an honest unconfirmed-server warning after failed delivery. Changing a password retains the current session as the existing UI promises; this package does not introduce password-change session invalidation.
+
+## Migration and compatibility
+
+Migration057a adds an append-only session_revocations table, user/time index and rewrite guard. Ownership is by authenticated user across their authorized organization scopes; no cascading user foreign key can erase evidence. Only a family hash is retained, never reusable credentials. It follows accepted057 and avoids consuming the unmerged058 sequence. No backfill, default grant, dependency or financial change. Existing migrations retain their checksums and historical business snapshots; expected upgrade manifests include only the one additive entry.
+
+Synthetic acceptance fixtures now mint explicit new-family credentials. Legacy negatives explicitly omit the family. No production or historical-schema fallback is added. The focused suite starts from accepted057, proves missing-authority denial with a new-family fixture, applies only057a, then tests actual current issuance and old-token rejection. The generic migration suite remains responsible for fresh, concurrent, replay, upgrade and rollback behavior.
+
+## Evidence and acceptance
+
+Locked installation passed with zero vulnerabilities. The original HTTP replay trigger is now denied. Expanded real PostgreSQL/API tests cover family preservation, absolute expiry, both API aliases, bearer/cookie replay, mixed/duplicate cookies, independent sessions, legacy-sibling reauthentication, malformed family identifiers, restart/second-instance persistence, append-only evidence, idempotence and atomic audit/storage failure. Candidate review found the legacy gap above; it was corrected and its negative added. The first fixture assertion expected no family field and was updated to verify the new UUID while retaining exact payload/signature checks.
+
+The initial browser run timed out on cold development navigation before assertions. An explicit module-readiness phase now precedes the unchanged 15-second interaction deadlines; this is workflow evidence, not a cold-start performance claim. The corrected dedicated logout journey and both retained real PostgreSQL browser journeys passed. All 55 migration entries and current-role, protected-identity and setup-read PostgreSQL gates passed. Corrected type checking, lint and full unit/contract aggregate passed, including all nine real PostgreSQL configuration timezone suites. Hygiene/adversarial scanning passed 497 files. The first signed-provider run reached an obsolete test ordering assumption: the retained current-role negative had already disabled both provider mappings. The new session test now temporarily restores one verified mapping, proves actual session denial independently, then restores the prior fixture state; the original403 role-removal assertions remain. A subsequent run correctly denied the intentionally logged-out actor when a later retained binding test reused it; logout now runs after those unchanged binding/concurrency checks. The production build passed in 25.35 seconds and the corrected signed-provider/fail-closed startup suite passed, retaining mapped-role revocation and durable/concurrent unlink negatives. Frozen-head review and hosted acceptance remain tracked in the PR and must pass before merge. No complete-security or production-release claim is made.
+
+## Rollback
+
+Preserve migration and audit/revocation ledgers. Older code may fail migration readiness and can ignore durable revocations. Prefer forward correction; any controlled rollback needs compatible schema handling and signing-secret rotation while retaining production OIDC. Configuration-change auditing, buyer UAT, restore drills and broader security findings remain open.

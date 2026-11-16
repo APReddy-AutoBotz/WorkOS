@@ -55,3 +55,10 @@ Each protected module includes positive and negative authorization tests, cross-
 The current implementation uses fixed monotonic 15-minute windows, at most 10,000 live hashed entries, per-IP aggregate protection and per-input local-login or fixed callback buckets. Expired entries are reclaimed; capacity exhaustion fails closed without evicting active protections. Local login is rejected before limiter/database work when disabled or in production. Rate configuration must be a positive integer within the documented range.
 
 Express trusts forwarded addresses only through explicitly configured IP/CIDR peers; default direct socket identity ignores forwarded headers. The same resolved address supplies throttle and audit context. Buyer ingress must sanitize forwarding headers and restrict direct access. Process restarts reset counters and replicas do not share them: the persistent/distributed production strategy above remains required and is not accepted by this incremental fix.
+
+
+## Durable current-session revocation
+
+New sign-ins receive an unpredictable server-generated family identifier. Refresh and role switching retain that family and its original absolute expiry; cookies carry only the remaining lifetime. Shared identity guards check the current account/role and PostgreSQL revocation ledger before authenticated handlers. Logout transactionally records each presented valid family and its audit event, including differing bearer and shared-cookie sessions. Records contain a hash and user ownership across organization scopes, never a reusable token. Missing authority fails closed.
+
+Pre-upgrade tokens lack family provenance across historical refreshes and require fresh sign-in. Deriving a family from a legacy token would leave earlier copied siblings usable, so there is no legacy acceptance fallback. Independent sessions not presented to logout remain active. Already admitted requests may finish; this is not an administrator revoke-all or password-change invalidation interface.

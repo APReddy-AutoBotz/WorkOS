@@ -121,7 +121,7 @@ export const OrganizationScopeGate = ({
         <section className="mx-auto max-w-xl rounded-2xl border border-border-light bg-white p-8 shadow-sm">
           <h1 className="text-2xl font-black text-heading">No active organization access</h1>
           <p className="mt-3 text-sm text-body/70">Your account does not have an active organization and legal-entity scope. Contact your administrator to request access.</p>
-          <button type="button" className="btn-primary mt-6 px-5 py-2.5" onClick={() => { void authService.logout().finally(() => { window.location.href = '/login'; }); }}>
+          <button type="button" className="btn-primary mt-6 px-5 py-2.5" onClick={() => { void authService.logout().then(result => { window.location.href = result.serverRevoked ? '/login' : '/login?logout=unconfirmed'; }); }}>
             Sign out
           </button>
         </section>

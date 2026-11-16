@@ -12,6 +12,10 @@ for (const value of [undefined, '', 'https://localhost/db', 'postgresql://databa
 }
 const payload = {sub: 'synthetic-account', username: 'synthetic-named-producer', activeRole: 'Admin', exp: 123};
 const [body, signature] = signJourneySession(payload, 'synthetic-unit-test-secret').split('.');
-assert.deepEqual(JSON.parse(Buffer.from(body, 'base64url')), payload);
+const {sid, ...claims} = JSON.parse(Buffer.from(body, 'base64url'));
+assert.match(sid, /^[a-f0-9-]{36}$/);
+assert.deepEqual(claims, payload);
+const legacy = signJourneySession({...payload, sid: undefined}, 'synthetic-unit-test-secret');
+assert.equal(JSON.parse(Buffer.from(legacy.split('.')[0], 'base64url')).sid, undefined, 'legacy negatives must explicitly omit session identity');
 assert.equal(signature, createHmac('sha256', 'synthetic-unit-test-secret').update(body).digest('base64url'));
 console.log('Import/audit harness local-database guards and synthetic session format passed (no database/browser started).');

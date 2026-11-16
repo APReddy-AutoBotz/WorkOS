@@ -463,3 +463,10 @@ The next bounded security increment protects organization-setup reads: administr
 ## Bounded authentication security increment - 2026-11-16
 
 After accepted setup read security PR165, [bounded authentication throttling](../tasks/WOS-04-BOUNDED-AUTH-THROTTLE.md) repairs the independently reproduced unbounded map and malformed-limit bypass. Explicit proxy peer validation also closes forwarded-IP rotation and audit spoofing at the shared trust boundary. No schema, dependencies, grants or commercial policy changes; fresh review and full applicable checks precede merge. Persistent/distributed production throttling, remaining security findings and dependent work packages remain separate acceptance gates.
+
+
+## Bounded authentication accepted; durable sessions in verification - 2026-11-16
+
+[PR166](https://github.com/APReddy-AutoBotz/WorkOS/pull/166) merged at `06516367ec9f452032b3d1a65658a22011448147`. Final candidate `b9e82f8e256d5546d974e8fadd11a57d692c63f1` passed all 77 steps in [CI43810482651](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43810482651), followed by all 77 steps in [main CI43811695312](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43811695312), with no skips or failures. Independent runtime/test and final documentation reviews passed. Bounded authentication memory, strict limits, explicit proxy trust and authoritative audit IP are accepted; persistent/distributed throttling remains a separate requirement.
+
+The next security increment makes session logout durable across API processes, refreshed tokens and role switches. Migration057a appends a user-owned revocation ledger after accepted057 without consuming later Draft migration058. Pre-upgrade credentials require a fresh sign-in because old sibling tokens cannot be grouped safely. Current-session logout preserves independent sessions; both presented bearer and cookie families are revoked. Final integrated tests, frozen-head review and hosted acceptance remain required. Broader security, commercial/reporting, operations and buyer/release gates remain open.

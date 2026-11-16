@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { authService } from '../services/authService';
 import { UserAccount, UserRole } from '../types';
@@ -27,6 +27,7 @@ export const Login = () => {
   const [employees, setEmployees] = useState<any[]>([]);
   const [account, setAccount] = useState<UserAccount | undefined>(undefined);
   const [loginError, setLoginError] = useState('');
+  const logoutUnconfirmed = new URLSearchParams(useLocation().search).get('logout') === 'unconfirmed';
   const [entraEnabled, setEntraEnabled] = useState(false);
   const showDemoShortcuts = isDemoFallbackAllowed();
 
@@ -176,6 +177,8 @@ export const Login = () => {
             </div>
 
             <form onSubmit={handleLogin} className="space-y-6">
+              {logoutUnconfirmed && <NoticeBanner type="warning" title="Signed out on this device"
+                message="Server sign-out could not be confirmed. Your server session may remain active until it expires." />}
               {loginError && (
                 <NoticeBanner
                   type="danger"

@@ -185,14 +185,15 @@ const stopApi = async child => {
   }
 };
 
-export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UTC'}, test) => {
+export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UTC',
+  sessionTtlHours = '0.25', sessionSecret = null}, test) => {
   const port = await availablePort();
-  const secret = randomBytes(48).toString('base64url');
+  const secret = sessionSecret || randomBytes(48).toString('base64url');
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ['server/index.mjs'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
     PATH: process.env.PATH, TZ: timeZone, NODE_ENV: 'test', APP_MODE: 'test', PORT: String(port),
     DATABASE_URL: databaseUrl, PGSSLMODE: 'disable', API_SESSION_SECRET: secret, APP_URL: baseUrl,
-    IDENTITY_PROVIDER: 'local', API_SESSION_TTL_HOURS: '0.25', AUTO_SEED_DEMO: 'false', RESET_DEMO_DATA: 'false',
+    IDENTITY_PROVIDER: 'local', API_SESSION_TTL_HOURS: sessionTtlHours, AUTO_SEED_DEMO: 'false', RESET_DEMO_DATA: 'false',
     ALLOW_TEST_FALLBACK: 'false', VITE_ALLOW_TEST_FALLBACK: 'false', ENTRA_ENABLED: 'false', TEAMS_ENABLED: 'false',
     NOTIFICATION_PROVIDER: 'mock', TEAMS_PROVIDER: 'mock',
   }});
