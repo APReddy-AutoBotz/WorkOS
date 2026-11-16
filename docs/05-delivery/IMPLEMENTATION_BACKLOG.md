@@ -440,3 +440,7 @@ Current owner authorization supersedes historical fixed-Draft/review/merge defer
 ## Priority security increment — current selected-role authority
 
 The owner's continuing authorization permits the bounded [current-role repair](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md) to be integrated independently of the later feature stack. Requirements IAM-003/005/008/010 and NFR-SEC-003/004 require current account/role validation in shared middleware, compatible provider mapping provenance and negative evidence for legacy/versioned cookie/bearer routes. No migration or new permission grant. Independent exact-head review and all applicable local/hosted gates precede merge; other security findings and product/release gates remain open.
+
+## Priority security increment — protected identity administration
+
+After PR162 current-role authority, integrate the bounded [protected identity administration repair](../tasks/WOS-04-PROTECTED-IDENTITY-ADMINISTRATION.md) independently of later Draft feature dependencies. Include the independently reproduced credential-target, username-collision and mapped-only compatibility corrections. All applicable exact-head local/hosted checks and independent review precede merge. No new schema, grants or production fallback; broader security, commercial/reporting and buyer/release gates remain open.
