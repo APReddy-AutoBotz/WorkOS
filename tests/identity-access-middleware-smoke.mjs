@@ -25,6 +25,7 @@ const execute = async (middleware, request) => {
 let currentRole = true;
 let identityStorageAvailable = true;
 let sessionRevoked = false;
+let workforce = {employee_record_id:'current-worker',employee_id:'CURRENT-CODE',country_director_id:'current-director'};
 const database = {query: async (sql, parameters) => {
   if (sql.includes('session_revocations')) {
     assert.match(parameters[0], /^[a-f0-9]{64}$/);
@@ -32,7 +33,8 @@ const database = {query: async (sql, parameters) => {
   }
   assert.deepEqual(parameters, ['user-test', 'Admin', []]);
   if (!identityStorageAvailable) throw new Error('synthetic storage failure');
-  return {rowCount: currentRole ? 1 : 0};
+  assert.match(sql,/left join employees e on e.id=u.employee_record_id/);
+  return {rowCount: currentRole ? 1 : 0,rows:currentRole?[workforce]:[]};
 }};
 const resolveOrganizationScope = async (_database, request) => {
   if (request.failScope) {
@@ -49,7 +51,8 @@ const resolveOrganizationScope = async (_database, request) => {
   return {organizationId: 'org-test', legalEntityId: 'legal-test'};
 };
 const verifyToken = token => token === 'valid-session'
-  ? {sid: 'synthetic-session-family', sub: 'user-test', username: 'synthetic', activeRole: 'Admin'}
+  ? {sid: 'synthetic-session-family', sub: 'user-test', username: 'synthetic', activeRole: 'Admin',
+    employeeRecordId:'stale-worker',employeeId:'STALE-CODE',countryDirectorId:'stale-director',cdId:'stale-alias'}
   : null;
 
 assert.equal(readCookie(createRequest({cookie: 'other=value; workos_session=valid-session'}), 'workos_session'),
@@ -67,6 +70,10 @@ assert.deepEqual(missing.response.body, {error: 'Authentication required'});
 const identityOnly = await execute(normal.requireIdentity, createRequest({authorization: 'Bearer valid-session'}));
 assert.equal(identityOnly.nextCalled, true, 'identity-only routes may run without a selected data scope');
 assert.equal(identityOnly.request.user.sub, 'user-test');
+assert.equal(identityOnly.request.user.employeeRecordId,'current-worker');
+assert.equal(identityOnly.request.user.employeeId,'CURRENT-CODE');
+assert.equal(identityOnly.request.user.countryDirectorId,'current-director');
+assert.equal(identityOnly.request.user.cdId,'current-director');
 assert.equal(identityOnly.request.organizationScope, undefined,
   'scope discovery must not implicitly resolve an organization scope');
 
@@ -75,6 +82,12 @@ assert.equal(scoped.nextCalled, true);
 assert.deepEqual(scoped.request.organizationScope, {organizationId: 'org-test', legalEntityId: 'legal-test'});
 assert.equal(scoped.request.user.organizationId, 'org-test');
 assert.equal(scoped.request.user.legalEntityId, 'legal-test');
+workforce = {employee_record_id:null,employee_id:null,country_director_id:null};
+for (const guard of [normal.requireIdentity,normal.requireAuth]) {
+  const unlinked=await execute(guard,createRequest({cookie:'workos_session=valid-session'}));
+  assert.equal(unlinked.nextCalled,true,'Unlinked Admin retains account and organization authority');
+  for(const key of ['employeeRecordId','employeeId','countryDirectorId','cdId']) assert.equal(unlinked.request.user[key],null,'Current null replaces every historical workforce claim');
+}
 
 const deniedRequest = createRequest({authorization: 'Bearer valid-session'});
 deniedRequest.failScope = true;

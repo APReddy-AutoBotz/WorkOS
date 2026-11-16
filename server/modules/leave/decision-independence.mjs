@@ -1,3 +1,5 @@
+import {qualifiedDirectorSql} from '../identity-access/workforce-authority.mjs';
+
 const deny = (status, code, message) => {
   throw Object.assign(new Error(message), {status, code});
 };
@@ -11,17 +13,16 @@ export const assertIndependentLeaveDecision = async (client, req, leave, buildEm
   const actor = (await client.query(`select employee_record_id, employee_id from users
     where id=$1 and status='Active' for share`, [req.user.sub])).rows[0];
   if (!actor) deny(403, 'LEAVE_DECISION_FORBIDDEN', 'Current decision identity is unavailable.');
-  const worker = (await client.query(`select id,employee_id,primary_country_director_id from employees
-    where id=$1 or ($1::text is null and employee_id=$2) for share`,
-  [actor.employee_record_id, actor.employee_id])).rows[0];
+  const worker = (await client.query(`select id,employee_id,${qualifiedDirectorSql('employees')} as director_id from employees
+    where id=$1 for share`, [actor.employee_record_id])).rows[0];
   const currentReq = {...req, user:{...req.user, employeeRecordId:worker?.id,
-    employeeId:worker?.employee_id, countryDirectorId:worker?.primary_country_director_id}};
+    employeeId:worker?.employee_id, countryDirectorId:worker?.director_id}};
   const params = [leave.employee_id];
   const scoped = (await client.query(`select e.id from employees e where e.id=$1
     and ${buildEmployeeScopeWhere(currentReq, params, 'e')} for share of e`, params)).rows[0];
   const delegations = !scoped && worker && getEffectivePermissions ? (await client.query(`
     select ad.id,u.id as user_id,delegator.id as worker_id,
-      delegator.employee_id as worker_code,delegator.primary_country_director_id as director_id
+      delegator.employee_id as worker_code,${qualifiedDirectorSql('delegator')} as director_id
     from approval_delegations ad
     join employees delegator on delegator.id=ad.delegator_id and delegator.status='Active'
     join employees delegate on delegate.id=ad.delegate_id and delegate.status='Active'

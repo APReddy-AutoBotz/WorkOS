@@ -1,6 +1,6 @@
 # Independent leave decisions and Teams source integrity
 
-Requirements: WOS-IAM-003/005/010; WOS-APR-001/002/004/006; WOS-CORE-005; WOS-NFR-SEC-004/012.
+Requirements: WOS-IAM-003/005/009/010; WOS-APR-001/002/004/006; WOS-CORE-003/005; WOS-NFR-SEC-004/012.
 
 ## Boundary
 
@@ -24,6 +24,14 @@ The retained own-planning browser initially failed because its capacity fixture 
 
 The frozen first candidate `f92bd127546f6d0b040aafdad2563b0287af7ad1` received one medium-severity finding in scan85726d08-d920-4b3e-9641-9a3629b47716: ProjectManager direct approval returned403, but creating a delegation and approving through it returned200 without managed-project worker authority. The correction checks the delegator through the shared current role-specific employee-scope predicate. A regression proves denial before an actual managed-project allocation and successful delegated approval after it; TeamLead delegation remains valid. The frozen original tree and proof are retained. Its production identity attempt failed local discovery readiness and is not passing evidence; the corrected revision must pass fresh production and exact-head checks.
 
+## Current identity and director qualification correction
+
+The next frozen candidate `0141c2aeb80bb64e9582b5f7ff58e400cf6aea2e` received a medium-severity director-qualification finding in scan bb34c925-2e4d-494d-9bf7-5899fe7308c7. The actual API denied an unqualified director's direct decision but allowed the delegated equivalent. The current correction applies the existing designation/department qualification to both current actor and delegator; negative tests retain every protected-state snapshot, and a qualified delegator remains a positive control. Frozen candidates and evidence remain unchanged.
+
+The owner's expanded PR168 scope also corrects stale workforce claims at the shared identity guard. Both bearer and cookie requests replace worker ID, employee code, director ID and the legacy director alias with current canonical database values, including null. Identity-only, legacy and versioned routes share this guard. Issuance and refresh read the canonical worker's employee code. Unlinked Admin/HR account authority remains supported; a legacy employee-code copy alone cannot infer a canonical worker. Existing role, verified provider mapping, organization selection and durable session-revocation checks remain enforced.
+
+The stale-session trigger was reproduced before correction using an actual issued token and supported worker reassignment. PostgreSQL API regression now verifies reassignment, qualification removal, null linkage, legacy-code-only denial, current Employee/TeamLead/ProjectManager access, canonical code changes, mapped-role qualification denial and unlinked Admin compatibility. Unit checks cover both guards, all historical aliases, null replacement and unavailable authority. Setup and availability fixtures now establish real canonical links and qualifications instead of relying on signed historical claims. A fresh independent candidate review found no concrete surviving bypass or introduced regression. The final full checks, immutable-head review and hosted acceptance are required before merge and recorded in PR168.
+
 ## Release and rollback
 
-Preserve audit evidence and the index. Prefer forward correction; older application code restores the vulnerabilities. No production deployment, buyer UAT, full-repository security clearance or completion of all delegated-approval domains is claimed. Current relationship authority, remaining commercial/export/diagnostic findings, persistent production throttling and release acceptance remain separate work.
+Preserve audit evidence and the index. Prefer forward correction; older application code restores the vulnerabilities. No production deployment, buyer UAT, full-repository security clearance or completion of all delegated-approval domains is claimed. Remaining legacy delegation domains, commercial/export/diagnostic findings, persistent production throttling and release acceptance remain separate work.

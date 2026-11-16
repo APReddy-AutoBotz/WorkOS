@@ -41,7 +41,7 @@ export const assertWorkActorScope=async(client,req,employeeId,projectId=null,{as
     if(!own&&!report)fail('WORK_SCOPE_DENIED','The worker is outside active-role data scope.',403);
   }
   if(role==='CountryDirector'&&!(await client.query(`select 1 from employees e where e.id=$1 and e.organization_id=$2 and e.legal_entity_id=$3
-    and (e.primary_country_director_id=$4 or exists(select 1 from employee_country_director_map m where m.employee_id=e.id and m.country_director_id=$4))`,[employeeId,...scope(req),req.user.countryDirectorId||req.user.cdId])).rowCount)
+    and (e.primary_country_director_id=$4 or exists(select 1 from employee_country_director_map m where m.employee_id=e.id and m.country_director_id=$4))`,[employeeId,...scope(req),req.user.countryDirectorId])).rowCount)
     fail('WORK_SCOPE_DENIED','The worker is outside active-role data scope.',403);
   if(role==='ProjectManager'&&!assignment&&!projectId&&!ids.includes(employeeId)&&!(await client.query(`select 1 from project_allocations a join projects p on p.id=a.project_id and p.organization_id=a.organization_id and p.legal_entity_id=a.legal_entity_id where a.employee_id=$1 and a.organization_id=$2 and a.legal_entity_id=$3 and p.manager_id=any($4::text[]) limit 1`,[employeeId,...scope(req),ids])).rowCount)fail('WORK_SCOPE_DENIED','The worker is outside active-role data scope.',403);
   if(role==='ProjectManager'&&projectId&&!(await client.query('select 1 from projects where id=$1 and organization_id=$2 and legal_entity_id=$3 and manager_id=any($4::text[])',[projectId,...scope(req),ids])).rowCount)

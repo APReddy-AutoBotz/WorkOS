@@ -109,6 +109,18 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
       values($1,'synthetic-leave-project',10,'2026-01-01','2026-12-31','Active',$2,$3)`,[f.ownerId,f.organizationId,f.legalEntityId]);
     assert.equal((await generic(projectLeave,projectDelegate)).status,200,'delegation retains actual ProjectManager worker authority');
     assert.equal((await decide(projectLeave,owner,'Cancelled')).status,200);
+    for (const id of [third.id,independent.id]) await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='CountryDirector' on conflict do nothing",[id]);
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('CountryDirector','approvals.view',true),('CountryDirector','leave.approve',true) on conflict(role_name,permission_key) do update set enabled=true");
+    await pool.query("update approval_delegations set role='CountryDirector' where id='synthetic-leave-delegation'");
+    const directorLeave=await create(),beforeDirector=await snapshot();
+    const directorDelegator={...projectDelegator,role:'CountryDirector',countryDirectorId:'director-commercial'};
+    const directorDelegate={...delegate,role:'CountryDirector',countryDirectorId:'director-commercial'};
+    assert.equal((await decide(directorLeave,directorDelegator)).status,403,'assigned role and primary director do not confer director qualification');
+    assert.equal((await generic(directorLeave,directorDelegate)).status,403,'delegation cannot bypass delegator director qualification');
+    assert.deepEqual(await snapshot(),beforeDirector);
+    await pool.query("update employees set designation='Country Director',primary_country_director_id='director-commercial' where id='synthetic-leave-lead-a'");
+    assert.equal((await generic(directorLeave,directorDelegate)).status,200,'qualified delegator retains independent delegated authority');
+    assert.equal((await decide(directorLeave,owner,'Cancelled')).status,200);
     const conflicting=await create();
     await pool.query(`insert into audit_logs(user_id,user_name,user_role,details,active_role,module,action,entity_type,entity_id,organization_id,legal_entity_id)
       values($1,'Synthetic submitter','Admin','Synthetic conflicting provenance','Admin','Leave','Submit Leave','LeaveRequest',$2,$3,$4)`,[independent.id,conflicting.id,f.organizationId,f.legalEntityId]);

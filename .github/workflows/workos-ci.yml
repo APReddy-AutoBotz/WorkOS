@@ -76,6 +76,8 @@ jobs:
 
       - name: Verify independent leave decisions and Teams boundary
         run: npm run test:leave-decision-independence
+      - name: Current workforce identity bindings
+        run: npm run test:live-workforce-bindings
 
       - name: Verify durable session revocation and absolute expiry
         run: npm run test:session-revocation-postgres

@@ -856,7 +856,7 @@ const verifyEntraIdToken = async (idToken, { nonce, config }) => {
 };
 
 const userAuthSelect = `
-  select u.id, u.username, u.employee_id, u.email, u.must_change_password, u.status,
+  select u.id, u.username, e.employee_id, u.email, u.must_change_password, u.status,
     e.id as employee_record_id, e.organization_id as employee_organization_id,
     e.legal_entity_id as employee_legal_entity_id, e.name, cd.id as country_director_id,
     coalesce(json_agg(distinct r.name) filter (where r.name is not null), '[]') as roles
@@ -1363,7 +1363,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDat
           and lower(u2.employee_id)=lower($1)
           and u2.status='Active' and e2.status<>'Exited'
       )
-      select u.id, u.username, u.employee_id, u.email, u.password_hash, u.must_change_password, u.status, e.id as employee_record_id, e.name, cd.id as country_director_id,
+      select u.id, u.username, e.employee_id, u.email, u.password_hash, u.must_change_password, u.status, e.id as employee_record_id, e.name, cd.id as country_director_id,
         coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
       from users u
       left join employees e on e.id = u.employee_record_id
@@ -1507,7 +1507,7 @@ app.post('/api/auth/switch-role', requireDatabase, requireAuth, async (req, res)
 const refreshIdentitySession = async (req, res) => {
   try {
     const result = await pool.query(`
-      select u.id, u.username, u.employee_id, u.email, u.must_change_password, u.status,
+      select u.id, u.username, e.employee_id, u.email, u.must_change_password, u.status,
         e.id as employee_record_id, e.name, cd.id as country_director_id,
         coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
       from users u
@@ -2611,7 +2611,7 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
         from employees
         where id = $1 and primary_country_director_id = $2
         limit 1
-      `, [parsed.data.employee_id, req.user.countryDirectorId || req.user.cdId])).rows[0];
+      `, [parsed.data.employee_id, req.user.countryDirectorId])).rows[0];
       if (!scoped) {
         await client.query('rollback');
         res.status(403).json({ error: 'Country Directors can allocate only scoped employees' });

@@ -53,7 +53,7 @@ const pool = {
         transactionQueries.push({sql, params});
         if (['begin', 'commit', 'rollback'].includes(sql)) return {rows: []};
         if (sql.includes('from users') && sql.includes('for share')) return {rows:[{employee_record_id:'employee-row-1',employee_id:'SYNTHETIC-1'}]};
-        if (sql.includes('select id,employee_id,primary_country_director_id')) return {rows:[{id:'employee-row-1',employee_id:'SYNTHETIC-1'}]};
+        if (sql.includes('select id,employee_id,case when')) return {rows:[{id:'employee-row-1',employee_id:'SYNTHETIC-1',director_id:null}]};
         if (sql.includes('select distinct user_id from audit_logs')) return {rows:[{user_id:'independent-submitter'}]};
         if (sql.includes('for share of e')) return {rows:inScopeEmployeeIds.has(params[0])?[{id:params[0]}]:[]};
         if (sql.includes('select * from leave_types where id = $1')) {
