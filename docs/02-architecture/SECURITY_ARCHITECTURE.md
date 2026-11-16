@@ -48,3 +48,10 @@ Ordinary organization/legal-entity audit reads remain restricted to the exact se
 ## Verification
 
 Each protected module includes positive and negative authorization tests, cross-organization scope tests, direct API tests and browser journeys. Production-mode tests prove that missing, invalid or unavailable required OIDC configuration fails closed and never enables local authentication. Security review and vulnerability disposition are release gates; buyer-specific penetration testing remains part of deployment acceptance.
+
+
+## Bounded process-local authentication protection
+
+The current implementation uses fixed monotonic 15-minute windows, at most 10,000 live hashed entries, per-IP aggregate protection and per-input local-login or fixed callback buckets. Expired entries are reclaimed; capacity exhaustion fails closed without evicting active protections. Local login is rejected before limiter/database work when disabled or in production. Rate configuration must be a positive integer within the documented range.
+
+Express trusts forwarded addresses only through explicitly configured IP/CIDR peers; default direct socket identity ignores forwarded headers. The same resolved address supplies throttle and audit context. Buyer ingress must sanitize forwarding headers and restrict direct access. Process restarts reset counters and replicas do not share them: the persistent/distributed production strategy above remains required and is not accepted by this incremental fix.

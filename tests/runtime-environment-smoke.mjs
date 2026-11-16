@@ -95,4 +95,15 @@ assert.throws(() => validateRuntimeEnvironment({...productionEnvironment, API_SE
   return true;
 });
 
+
+assert.equal(testEnvironment.loginRateLimit,8);
+assert.equal(testEnvironment.loginIpRateLimit,64);
+assert.equal(testEnvironment.trustedProxies,false);
+for(const value of ['NaN','Infinity','0','-1','1.5','1000001','8x']) {
+ rejects({...productionEnvironment,LOGIN_RATE_LIMIT:value},'LOGIN_RATE_LIMIT');
+ rejects({...productionEnvironment,LOGIN_IP_RATE_LIMIT:value},'LOGIN_IP_RATE_LIMIT');
+}
+rejects({...productionEnvironment,TRUSTED_PROXY_CIDRS:'true'},'TRUSTED_PROXY_CIDRS');
+assert.deepEqual(validateRuntimeEnvironment({...productionEnvironment,TRUSTED_PROXY_CIDRS:'127.0.0.1/32,::1/128'}).trustedProxies,['127.0.0.1/32','::1/128']);
+
 console.log('Runtime environment smoke tests passed.');

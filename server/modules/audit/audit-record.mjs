@@ -1,6 +1,5 @@
-const getRequestIp = (req = {}) => String(req.headers?.['x-forwarded-for'] || req.ip || req.socket?.remoteAddress || '')
-  .split(',')[0]
-  .trim();
+// Express resolves req.ip using the configured trusted-peer boundary. Raw forwarding headers are not authority.
+const getRequestIp = (req = {}) => String(req.ip || req.socket?.remoteAddress || '').trim();
 
 export const AUDIT_INSERT_SQL = `
   insert into audit_logs (

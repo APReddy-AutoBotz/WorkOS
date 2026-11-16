@@ -29,7 +29,7 @@ assert.equal(captured.sql, AUDIT_INSERT_SQL);
 assert.deepEqual(captured.values, [
   'user-test', 'synthetic', 'Admin', 'Admin', 'Web', 'Organization Setup', 'Update Profile',
   'Organization', 'org-test', JSON.stringify({name: 'Before'}), JSON.stringify({name: 'After'}),
-  'Versioned organization profile', 'Synthetic test correction', '203.0.113.14', 'user-test',
+  'Versioned organization profile', 'Synthetic test correction', '127.0.0.1', 'user-test',
   'trace-test-01', 'operation-test-01', null, null, null, null, null,
 ]);
 

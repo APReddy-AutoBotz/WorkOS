@@ -476,3 +476,6 @@ Verified database TLS candidate: WOS-NFR-SEC-001/007/008/013, MNT-005 and DPL-00
 
 
 Setup read security: CORE-003, IAM-003/004/005/010, WKF-006/007/008, ORG-010, NFR-SEC-004/008/013 and PRV-001 map to [setup read boundaries](../tasks/WOS-02-SETUP-READ-BOUNDARIES.md), shared setup routes/async handler, real PostgreSQL read negatives and v1 failure-envelope tests. Final acceptance pending.
+
+
+Bounded authentication throttling: WOS-IAM-001; WOS-CORE-003/005; WOS-NFR-SEC-001/002/008/013, MNT-005 and DPL-003 receive bounded evidence through [the task](../tasks/WOS-04-BOUNDED-AUTH-THROTTLE.md). Shared limiter/proxy modules, environment validation, actual HTTP negative tests and authoritative audit IP selection address memory retention, malformed limits and forwarded-header spoofing. Persistent/distributed throttling remains open; final exact-head acceptance is required.
