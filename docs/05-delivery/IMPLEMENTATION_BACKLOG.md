@@ -427,3 +427,12 @@ From fixed PR69, [PR-008P](../tasks/WOS-04-ASSIGNMENT-VERSION-AUTHORITY.md) clos
 ### PR-008P reviewed integration checkpoint — 2026-11-15
 
 Current owner authorization supersedes historical fixed-Draft and review/scan/merge restrictions. Integration retains accepted capacity/main `f68d605d364941893836060f541ae021c70d654f`, including exact056a validation and owned evidence recovery. See [the assignment package evidence](../tasks/WOS-04-ASSIGNMENT-VERSION-AUTHORITY.md#reviewed-integration-checkpoint--2026-11-15) for bounded WOS-RES-001/002/003/009 and CORE-004/005. Local acceptance, independent exact-head review and hosted gates remain required. Preserve057 versions/pins/guards/audit on rollback; no inferred conversion, approval or full R7/release acceptance.
+
+### PR-008Q — Own-worker selected-period integration
+
+[Plan and acceptance](../tasks/WOS-04-OWN-WORK-PLANNING.md): bounded R10/WKF007 capacity/assignment/current-work/history integration on fixed PR70. Canonical server account binding, exact R6 daily/period totals, bounded original-unit assignments with R7 version references, saved-versus-retained work states and actual Employee Workspace read-only inspection/work-capture handoff. No migration, defaults, grants, conversion, writer or protected-reopen change. Required production-transport/API/real Employee React/PostgreSQL journeys and retained gates precede dependent Draft publication; exact-head receipts belong to that Draft. Optional independent/formal reviews remain deferred, not passed. R1/R3/R4/R6/R7/R8/R9 and R10's planner/hierarchy/unified utilization/actions, E2/E3 remain finite outstanding outcomes. No merge/deploy or milestone acceptance.
+
+
+### PR-008Q reviewed integration checkpoint — 2026-11-16
+
+Current owner authorization supersedes historical fixed-Draft/review/merge deferrals. Own-work planning integrates accepted main019aa52cb0e7e1ff35c0a8984672edd1c9bb6d58 and retains the corrected assignment/capacity controls. See the own-work planning task for WOS-WKF-007 and CORE-003/004/005 scope, literal-state regression and acceptance receipts. Final independent/hosted acceptance remains required. No new migration, grants, source writes, unit conversion or financial/approval authority. Rollback preserves all prior ledgers and hides the new view; broader reconciliation, security and buyer/release acceptance remain open.

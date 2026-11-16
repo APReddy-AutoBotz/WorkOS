@@ -5,7 +5,7 @@ import {ApiClientError} from '../services/apiClient';
 import {captureWorkCaptureContext,isWorkCaptureContextCurrent,type WorkCaptureContext} from '../services/workCaptureModes';
 import {workSubmissionHistoryService,type WorkHistoryPage} from '../services/workSubmissionHistory';
 const formatInstant=(value:string)=>new Date(value).toLocaleString();
-export const WorkSubmissionHistory=({timesheetId}:{timesheetId:string})=>{
+export const WorkSubmissionHistory=({timesheetId,expectedEmployeeId}:{timesheetId:string;expectedEmployeeId?:string;key?:string})=>{
  const [open,setOpen]=useState(false),[page,setPage]=useState<WorkHistoryPage|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const generation=useRef(0),owner=useRef<WorkCaptureContext|null>(null),cursor=useRef<number|null>(null);
  useEffect(()=>{
@@ -16,7 +16,7 @@ export const WorkSubmissionHistory=({timesheetId}:{timesheetId:string})=>{
  },[]);
  const load=async(before:number|null)=>{
   const request=++generation.current;cursor.current=before;const context=captureWorkCaptureContext(()=>request===generation.current);owner.current=context;setOpen(true);setPage(null);setError('');setBusy(true);
-  try{const result=await workSubmissionHistoryService.get(timesheetId,before,context);if(request===generation.current)setPage(result);}
+  try{const result=await workSubmissionHistoryService.get(timesheetId,before,context,expectedEmployeeId);if(request===generation.current)setPage(result);}
   catch(failure){if(request===generation.current)setError(failure instanceof ApiClientError&&[401,403,404].includes(failure.status)?'Retained work history is unavailable for this account, scope or work period. Reload work before trying again.':'Retained work history could not be loaded. Retry for the current work period.');}
   finally{if(request===generation.current)setBusy(false);}
  };
