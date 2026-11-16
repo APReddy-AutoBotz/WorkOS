@@ -47,9 +47,12 @@ const insertedProfile = {...profile, id: 'profile-updated'};
 const auditInserts = [];
 const clientQueries = [];
 let connectCount = 0;
+let injectedFailure = '';
+const privateFailure = () => new Error('synthetic-private-database-detail');
 const pool = {
   async query(sql, values = []) {
     if (sql.includes('from user_organization_scopes s')) {
+      if(injectedFailure==='scope')throw privateFailure();
       const [userId, organizationId, legalEntityId] = values;
       if (userId !== 'user-test'
           || (organizationId && organizationId !== 'org-test')
@@ -57,11 +60,13 @@ const pool = {
       return {rows: [{organization_id: 'org-test', legal_entity_id: 'legal-test'}]};
     }
     if (sql.includes('select o.id organization_id,o.code organization_code')) {
+      if(injectedFailure==='query')throw privateFailure();
       return values[0] === 'org-test' && values[1] === 'legal-test' ? {rows: [context]} : {rows: []};
     }
     throw new Error(`Unexpected organization setup test query: ${sql.slice(0, 120)}`);
   },
   async connect() {
+    if(injectedFailure==='connect')throw privateFailure();
     connectCount += 1;
     return {
       async query(sql, values = []) {
@@ -243,8 +248,8 @@ try {
   assert.deepEqual(acceptedBodies[1], profile, 'versioned mutation response matches the shared handler result');
   assert.equal(connectCount, 2, 'each accepted request opens exactly one mutation transaction');
   assert.equal(auditInserts.length, 2, 'each accepted request writes exactly one shared audit event');
-  assert.deepEqual(permissionChecks, ['settings.manage', 'settings.manage', 'settings.manage', 'settings.manage'],
-    'legacy and versioned mutation routes use the same settings permission');
+  assert.deepEqual(permissionChecks, Array(6).fill('settings.manage'),
+    'legacy and versioned context reads and denied/accepted mutations use the same settings permission');
 
   for (const [index, response] of acceptedMutations.entries()) {
     const audit = auditInserts[index];
@@ -270,6 +275,23 @@ try {
   }
   assert.equal(clientQueries.filter(query => query.sql === AUDIT_INSERT_SQL).length, 2,
     'the accepted aliases each invoke the same append-only audit insert contract');
+  for(const prefix of ['/api/organization-setup','/api/v1/organization-setup']) {
+    for(const failure of ['scope','query','connect']) {
+      injectedFailure=failure;
+      const response=await fetch(`${baseUrl}${prefix}/${failure==='connect'?'profile':'context'}`, failure==='connect'
+        ? {method:'PUT',headers:mutationHeaders,body:JSON.stringify(mutation)} : {headers});
+      assert.equal(response.status,500);
+      const body=await response.json();
+      assert.equal(JSON.stringify(body).includes('synthetic-private-database-detail'),false);
+      if(prefix.includes('/v1/')) {
+        assert.equal(body.error.code,'ORGANIZATION_SETUP_FAILED');
+        assert.equal(body.error.correlationId,response.headers.get('x-correlation-id'));
+      } else assert.equal(body.code,'ORGANIZATION_SETUP_FAILED');
+    }
+    injectedFailure='';
+    assert.equal((await fetch(`${baseUrl}${prefix}/context`,{headers})).status,200,'API remains available after asynchronous failures');
+  }
+
 } finally {
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 }

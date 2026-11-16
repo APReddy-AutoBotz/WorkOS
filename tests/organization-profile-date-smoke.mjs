@@ -98,7 +98,7 @@ if (!process.env.WORKOS_PROFILE_DATE_CHILD) {
       assert.equal(current.profile_effective_to,expectedEnd.toISOString().slice(0,10));
       response = await fetch(`${endpoint}?asOf=${future}`);
       assert.equal((await response.json()).profile_effective_from,future);
-      assert.equal(guardChecks,3);
+      assert.equal(guardChecks,6,'three reads and three writes enforce settings permission');
       console.log(`Profile actual PostgreSQL GET/same-date PUT/earlier409/future/current/asOf/audit acceptance passed in ${process.env.TZ}.`);
     } finally {
       if (server) await new Promise(resolve => server.close(resolve));

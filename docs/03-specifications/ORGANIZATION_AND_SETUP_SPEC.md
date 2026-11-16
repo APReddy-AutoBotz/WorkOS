@@ -59,3 +59,9 @@ Negative:
 ## Migration and rollback
 
 WOS-02 migrates imported records to a deterministic default organization/legal entity and reconciles counts/relationships. Rollback before data use may remove the foundation; after dependent data exists, use forward migrations and preserve ownership history.
+
+## Protected setup read contract
+
+Administrative context, organization/legal profiles, catalogs, calendars/holidays, periods and readiness require settings.manage. Organization-scoped runtime terminology remains available to authenticated roles. Lifecycle history requires employees.view and current worker relationship scope at data retrieval; return only lifecycle identifiers/ownership/dates/status and a status-only snapshot, not raw employee snapshots, actor identity or free-text reasons. Exit-impact dependency inspection is a lifecycle operator capability requiring employees.manage and worker scope. Neither endpoint changes source records or grants financial/approval authority.
+
+Explicit asOf query input must be one valid ISO date; this applies even when supplied to a mutation. Unexpected asynchronous failures use sanitized errors and preserve the API process and versioned correlation contract.
