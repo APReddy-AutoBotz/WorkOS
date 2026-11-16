@@ -34,3 +34,10 @@ These are work priorities, not a claim that every historical candidate still rep
 ## Rollback and release boundary
 
 Prefer tested forward corrections. Reverting these security changes can restore access, spoofing, trust or availability defects. Preserve identity tombstones and all existing migration/history ledgers. No package here authorizes production deployment, new default grants, destructive data conversion or a claim of zero remaining defects.
+
+
+## Independent leave/current identity accepted; operational CSV safety next — 2026-11-16
+
+[PR168](https://github.com/APReddy-AutoBotz/WorkOS/pull/168) merged at `0d65ab6313d4a26bcc2d14702f7ce6d6e7ab88eb`. Final candidate `0e544a7623d5f349d71f8db1d4aab0570a3d66c9` passed all 82 steps in [CI43830710558](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43830710558); [main CI43832282956](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43832282956) also passed all 82, without skips or failures. Independent runtime and final cleanup reviews passed. Leave decisions now enforce submitting-account/affected-worker independence and qualified role-specific delegation; Teams cannot bypass the source transition. Authenticated requests refresh canonical workforce bindings, including null links and changed employee codes.
+
+The next bounded package is [operational CSV literal-text safety](../tasks/WOS-07-OPERATIONAL-CSV-SAFETY.md), covering the shared exporter and Timesheet Approval Ops Export. This safely precedes the invoice-action source correction, whose commercial modules are absent from current main. Preserve existing scope, filters, audit and source records; no dependency or migration changes. Fresh local acceptance, independent exact-head review and hosted gates are required before merge. Other delegation domains, commercial source authorization, diagnostic disclosure, persistent throttling and buyer/release evidence remain open.
