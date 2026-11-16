@@ -154,6 +154,9 @@ jobs:
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
+      - name: Verify operational timesheet CSV safety
+        run: npm run test:timesheet-export-browser
+
       - name: Verify independent leave decision browser journey
         run: npm run test:leave-decision-browser
 
