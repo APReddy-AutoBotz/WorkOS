@@ -77,6 +77,9 @@ jobs:
       - name: Verify own-worker period PostgreSQL API acceptance
         run: npm run test:own-work-planning-postgres
 
+      - name: Verify current selected-role PostgreSQL authority
+        run: npm run test:current-role-postgres
+
       - name: Verify assignment version PostgreSQL migration and API acceptance
         run: npm run test:assignment-versions-postgres
 

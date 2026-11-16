@@ -436,3 +436,7 @@ Current owner authorization supersedes historical fixed-Draft and review/scan/me
 ### PR-008Q reviewed integration checkpoint — 2026-11-16
 
 Current owner authorization supersedes historical fixed-Draft/review/merge deferrals. Own-work planning integrates accepted main019aa52cb0e7e1ff35c0a8984672edd1c9bb6d58 and retains the corrected assignment/capacity controls. See the own-work planning task for WOS-WKF-007 and CORE-003/004/005 scope, literal-state regression and acceptance receipts. Final independent/hosted acceptance remains required. No new migration, grants, source writes, unit conversion or financial/approval authority. Rollback preserves all prior ledgers and hides the new view; broader reconciliation, security and buyer/release acceptance remain open.
+
+## Priority security increment — current selected-role authority
+
+The owner's continuing authorization permits the bounded [current-role repair](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md) to be integrated independently of the later feature stack. Requirements IAM-003/005/008/010 and NFR-SEC-003/004 require current account/role validation in shared middleware, compatible provider mapping provenance and negative evidence for legacy/versioned cookie/bearer routes. No migration or new permission grant. Independent exact-head review and all applicable local/hosted gates precede merge; other security findings and product/release gates remain open.

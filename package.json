@@ -171,7 +171,8 @@
     "test:assignment-versions-journey": "node tests/assignment-version-journey-browser-smoke.mjs",
     "test:own-work-planning-service": "node --import tsx tests/own-work-planning-service-smoke.mjs",
     "test:own-work-planning-postgres": "node tests/own-work-planning-postgres-smoke.mjs",
-    "test:own-work-planning-journey": "node tests/own-work-planning-journey-browser-smoke.mjs"
+    "test:own-work-planning-journey": "node tests/own-work-planning-journey-browser-smoke.mjs",
+    "test:current-role-postgres": "node tests/current-role-authority-postgres-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

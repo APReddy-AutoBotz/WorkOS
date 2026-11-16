@@ -460,3 +460,7 @@ WOS-WKF-007 and CORE003–005, retaining IAM003/005/010, WKF003/005 and RES001/0
 ### PR-008Q reviewed integration checkpoint — 2026-11-16
 
 Current owner authorization supersedes historical fixed-Draft/review/merge deferrals. Own-work planning integrates accepted main019aa52cb0e7e1ff35c0a8984672edd1c9bb6d58 and retains the corrected assignment/capacity controls. See the own-work planning task for WOS-WKF-007 and CORE-003/004/005 scope, literal-state regression and acceptance receipts. Final independent/hosted acceptance remains required. No new migration, grants, source writes, unit conversion or financial/approval authority. Rollback preserves all prior ledgers and hides the new view; broader reconciliation, security and buyer/release acceptance remain open.
+
+## Current selected-role security integration — 2026-11-16
+
+WOS-IAM-003/005/008/010 and WOS-NFR-SEC-003/004 receive bounded evidence through [current role authority](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md). Shared identity guards reject removed selected roles and disabled accounts before scoped and identity-only routes. Signed provider provenance preserves all active mapped-group alternatives; permission and data scope remain independently enforced. Middleware, real PostgreSQL/API, signed-provider callback, commercial and migration regressions accompany the change. Exact integrated review and hosted acceptance remain required; per-session logout revocation and broader security findings remain open.

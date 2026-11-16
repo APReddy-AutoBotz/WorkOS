@@ -1,6 +1,6 @@
 # Enterprise delivery and integration roadmap
 
-Updated 2026-11-15. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
+Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
 
 ## Delivery priorities
 
@@ -31,3 +31,10 @@ The project-contribution replacement and retained export are published in Draft 
 ## Keeping documents current
 
 After each accepted package, record the merge SHA, requirement IDs, applicable exact-head evidence and remaining limitations. Update the current status and README when their user-facing claims change. Preserve historical task and review records; do not rewrite them into a claim that later fixes had already existed. Never publish a readiness percentage without an auditable requirement-by-requirement basis.
+
+
+## Own-work and role-security checkpoint — 2026-11-16
+
+[PR71](https://github.com/APReddy-AutoBotz/WorkOS/pull/71) merged at `bcb48656e589c2520693a0cbf41eedb9c4956307`. Its exact candidate `4db36ec326ad91064d810a22ff35b3cae3a06580` passed all 68 application/migration/container and 5 full-history secret steps in [CI43794841837](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43794841837), plus independent exact-head security review with no introduced findings. The own-worker period view connects canonical account identity, effective capacity, original-unit assignments and retained work history. No migration, grant, unit conversion, source writer or financial/approval authority was added. Resulting [main CI43796753871](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43796753871) is tracked separately; merge alone is not evidence of its completion.
+
+The next independent security increment is [current selected-role authority](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md), ported from the later Draft stack without importing unrelated packages. It rejects removed roles and disabled accounts through shared identity guards while retaining legitimate direct roles and all verified group-mapping alternatives. Focused database/provider/migration regressions pass; final integrated checks and independent exact-head review remain prerequisites to acceptance. Other security findings, protected identity administration, session revocation, TLS, remaining commercial/reporting integration, buyer UAT and release acceptance remain open. No deployment is authorized by this checkpoint.
