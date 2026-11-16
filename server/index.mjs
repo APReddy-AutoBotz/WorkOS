@@ -1,3 +1,4 @@
+import {createLoginRateLimit,requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createOwnWorkPlanningRouter} from './modules/planning/own-work-planning-router.mjs';
 import {createAssignmentVersionRouter} from './modules/planning/assignment-version-router.mjs';
 import {setAssignmentVersionContext} from './modules/planning/assignment-version-context.mjs';
@@ -70,7 +71,7 @@ const pool = new Pool(databaseConnectionOptions({databaseUrl: runtimeEnvironment
   sslMode: runtimeEnvironment.pgSslMode, sslRootCert: runtimeEnvironment.pgSslRootCert}));
 const round1 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
 
-app.set('trust proxy', 1);
+app.set('trust proxy', runtimeEnvironment.trustedProxies);
 app.use(cors({
   origin: process.env.APP_URL || 'http://localhost:3000',
   credentials: true,
@@ -111,27 +112,8 @@ const {requireIdentity, requireAuth} = createIdentityAccessMiddleware({
   allowTestFallback: () => process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true',
 });
 
-const loginAttempts = new Map();
-const loginRateLimit = (req, res, next) => {
-  const windowMs = 15 * 60 * 1000;
-  const maxAttempts = Number(process.env.LOGIN_RATE_LIMIT || 8);
-  const username = String(req.body?.username || '').toLowerCase().trim();
-  const key = `${req.ip || req.socket.remoteAddress || 'unknown'}:${username}`;
-  const now = Date.now();
-  const attempt = loginAttempts.get(key) || { count: 0, resetAt: now + windowMs };
-  if (attempt.resetAt <= now) {
-    attempt.count = 0;
-    attempt.resetAt = now + windowMs;
-  }
-  attempt.count += 1;
-  loginAttempts.set(key, attempt);
-  if (attempt.count > maxAttempts) {
-    res.setHeader('Retry-After', String(Math.ceil((attempt.resetAt - now) / 1000)));
-    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
-    return;
-  }
-  next();
-};
+const loginRateLimit = createLoginRateLimit({maxAttempts: runtimeEnvironment.loginRateLimit,
+  maxIpAttempts: runtimeEnvironment.loginIpRateLimit});
 
 const requireRoles = (...roles) => (req, res, next) => {
   const activeRole = req.user?.activeRole;
@@ -1221,7 +1203,7 @@ app.get('/api/auth/entra/start', requireDatabase, async (req, res) => {
   }
 });
 
-app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req, res) => {
+app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit.callback, async (req, res) => {
   // This OAuth callback is a GET for protocol compatibility, but consumes state
   // and may synchronize an identity link. Give this side-effect boundary its
   // own server-generated operation ID without changing GET handling globally.
@@ -1351,8 +1333,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit, async (req,
   }
 });
 
-app.post('/api/auth/login', loginRateLimit, requireDatabase, async (req, res) => {
-  if (process.env.NODE_ENV === 'production' || process.env.LOCAL_LOGIN_ENABLED === 'false') return res.status(404).json({ error: 'Not found' });
+app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDatabase, async (req, res) => {
   const schema = z.object({
     username: z.string().min(1),
     password: z.string().min(1),

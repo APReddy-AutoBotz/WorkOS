@@ -14,7 +14,7 @@ const trailing = Buffer.alloc(1024, 0x58);
 let lateClient;
 let lateReached = false;
 const app = express();
-app.set('trust proxy', 1); // Preserve the application's existing setting.
+app.set('trust proxy', false); // Preserve the application's direct-peer default.
 app.use(express.json({limit:'1mb'}));
 app.post('/echo', (req, res) => res.json(req.body));
 app.post('/late', (req, res) => {

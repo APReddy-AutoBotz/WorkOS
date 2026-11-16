@@ -414,3 +414,23 @@ Rotate trust by mounting a bundle containing the current and replacement issuer,
 ## Setup read security operations
 
 Setup configuration inspection now requires settings.manage; do not broadly grant it to restore ordinary runtime terminology (which remains independently readable). Worker lifecycle history uses employees.view plus current worker scope and returns minimal status/date evidence; private legacy snapshots remain retained in storage. Exit-impact identifiers require employees.manage and worker scope. Unexpected database failures return ORGANIZATION_SETUP_FAILED without internal details; investigate infrastructure through protected operations logs. Invalid explicit asOf values return400. No migration is required. Rollback restores disclosure and unhandled-failure risks; prefer forward correction.
+
+
+## Authentication limits and trusted proxies
+
+`LOGIN_RATE_LIMIT` defaults to 8 attempts per normalized local-login input and trusted client IP per fixed 15-minute window; callbacks use one fixed bucket per IP, ignoring GET bodies. `LOGIN_IP_RATE_LIMIT` defaults to 64 attempts across both flows per IP/window. Both settings accept integers from 1 through 1,000,000; invalid settings fail startup. Compose forwards both. The process holds at most 10,000 live hashed entries and returns 429 with a positive Retry-After when a bucket or capacity is exhausted. Active buckets are never evicted to admit another caller. Different login aliases remain separate inputs but share the IP budget. A full map can temporarily deny new clients; do not restart repeatedly to evade limits. Tune limits for buyer NAT usage only after testing expected concurrent sign-in and abuse resistance.
+
+`TRUSTED_PROXY_CIDRS` defaults empty (no proxy trust). Set a comma-separated list of the actual immediate reverse-proxy IPs or CIDRs only when deploying behind a proxy. At most 64 entries and 4096 characters are accepted. Host aliases, boolean/hop-count shortcuts, universal /0 ranges, scoped IPv6 and malformed prefixes fail startup. The proxy must strip/replace untrusted forwarding headers; firewall application access so only approved proxies connect. Express walks the chain from the socket to the first untrusted hop. Throttling and audit records use this same resolved IP, not a raw forwarded-header value. An omitted proxy configuration groups proxied users by the proxy's socket address; verify the buyer topology before enabling external traffic. Compose forwards this setting to the application.
+
+Counters are process-local and reset on restart; replicas do not share them. Persistent/distributed throttling is still a release requirement. This increment does not change OIDC policy, enable production local credentials or add session revocation. Rollback would restore retention and spoofing risks; prefer a tested forward correction, or restrict ingress and disable affected authentication routes while recovering. No data migration or rollback SQL is needed.
+
+
+### Authentication environment reference
+
+| Setting | Purpose | Sensitivity | Required / default | Allowed values |
+|---|---|---|---|---|
+| `LOGIN_RATE_LIMIT` | Per-input local-login and per-IP callback attempt budget | Public configuration | Optional; 8 | Integer 1 through 1,000,000 |
+| `LOGIN_IP_RATE_LIMIT` | Shared client-IP budget across authentication flows | Public configuration | Optional; 64 | Integer 1 through 1,000,000 |
+| `TRUSTED_PROXY_CIDRS` | Explicit ingress peers trusted to supply forwarding addresses | Public configuration; topology-sensitive operational access | Optional; empty means direct peer only | Up to 64 comma-separated IP/CIDR entries, 4096 characters; no /0, aliases or hop counts |
+
+Changing these settings requires application restart. Test proxy-chain resolution and NAT sign-in behavior before buyer rollout. Never substitute these limits for the separately required persistent production protection.

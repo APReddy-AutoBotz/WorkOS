@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {parseTrustedProxies} from './modules/identity-access/proxy-trust.mjs';
 import {isLoopbackHostname} from './identity-discovery.mjs';
 
 const optionalText = z.preprocess((value) => {
@@ -20,6 +21,11 @@ const portText = z.preprocess((value) => {
   return Number(value);
 }, z.number().int().min(1).max(65535).optional());
 
+const loginLimit = fallback => z.preprocess(value => {
+  if(value === undefined || value === '')return fallback;
+  return typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value;
+},z.number().int().min(1).max(1000000));
+
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_MODE: z.enum(['development', 'test', 'production']).default('development'),
@@ -29,6 +35,9 @@ const environmentSchema = z.object({
   PGSSLMODE: z.preprocess((value) => value === '' || value === undefined ? 'disable' : value,
     z.enum(['disable', 'require', 'verify-full'])),
   PGSSLROOTCERT: optionalText,
+  LOGIN_RATE_LIMIT: loginLimit(8),
+  LOGIN_IP_RATE_LIMIT: loginLimit(64),
+  TRUSTED_PROXY_CIDRS: optionalText.refine(value=>{try{parseTrustedProxies(value);return true;}catch{return false;}},'must contain explicit trusted proxy IP addresses or CIDRs'),
   API_SESSION_SECRET: optionalText,
   APP_URL: optionalText,
   IDENTITY_PROVIDER: z.preprocess((value) => value === '' || value === undefined ? 'local' : value,
@@ -168,6 +177,9 @@ export const validateRuntimeEnvironment = (source = process.env, {purpose = 'ser
     databaseUrl: environment.DATABASE_URL,
     pgSslMode: environment.PGSSLMODE,
     pgSslRootCert: environment.PGSSLROOTCERT,
+    loginRateLimit: environment.LOGIN_RATE_LIMIT,
+    loginIpRateLimit: environment.LOGIN_IP_RATE_LIMIT,
+    trustedProxies: parseTrustedProxies(environment.TRUSTED_PROXY_CIDRS),
     production,
   };
 };
