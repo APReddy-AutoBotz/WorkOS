@@ -485,3 +485,6 @@ The [security evidence ledger](../05-delivery/SECURITY_ACCEPTANCE_LEDGER.md) con
 
 
 Durable session revocation: WOS-IAM-008/010, CORE-003/005, NFR-SEC-001/003/004/012/013, MNT-005 and DPL-004 map to [the session task](../tasks/WOS-04-DURABLE-SESSION-REVOCATION.md), shared identity/logout controls, browser logout recovery, migration057a and real PostgreSQL/browser/provider negatives. Existing active-account/role/scope authority remains independently enforced. Configuration-change auditing, administrative revoke-all and broader security acceptance remain separate.
+
+
+Independent leave decisions: WOS-IAM-003/005/010, WOS-APR-001/002/004/006, WOS-CORE-005 and WOS-NFR-SEC-004/012 map to [the leave decision task](../tasks/WOS-05-INDEPENDENT-LEAVE-DECISIONS.md), shared transactional authority, Teams rejection, migration057b and actual PostgreSQL/browser negatives. Valid current scoped delegation and cancellation remain supported. Other delegation domains remain separate.

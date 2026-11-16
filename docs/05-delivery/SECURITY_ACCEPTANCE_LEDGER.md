@@ -15,13 +15,15 @@ Updated 2026-11-16. This ledger records bounded accepted corrections, not blanke
 
 PR166 merged at `06516367ec9f452032b3d1a65658a22011448147` after final candidate `b9e82f8e256d5546d974e8fadd11a57d692c63f1` passed all 77 hosted steps in CI43810482651. Post-merge CI43811695312 also passed all 77 steps. Independent runtime/test and final documentation reviews passed. Local install, type/lint/aggregate, nine limiter tests, authorization PostgreSQL negatives, TLS, 54 migration entries, both retained browser journeys and production signed-identity/startup passed. Process-local limits do not satisfy persistent/distributed throttling requirements.
 
-## Durable session candidate
+## Durable sessions accepted; leave correction in verification
 
-The [session revocation task](../tasks/WOS-04-DURABLE-SESSION-REVOCATION.md) records the reproduced logout replay, independently identified legacy-sibling upgrade gap, migration057a and mandatory fresh sign-in for old sessions. The candidate introduces durable family revocation, fixed absolute expiry and honest browser logout failure states. It remains subject to all final checks and exact-head review; no acceptance credit is assigned here yet.
+Durable session revocation PR167 merged at `b1822ca9f9683c5eeaf40db6db1d6450ca214fb6`. All 79 exact-head steps in CI43814919022 and all 79 post-merge steps in CI43816509128 passed with no skips or failures. Independent frozen-head review covered all 48 changed paths.
+
+This revision adds [independent leave decisions](../tasks/WOS-05-INDEPENDENT-LEAVE-DECISIONS.md): affected-worker and submitting-account separation, current identity and scoped delegation checks, and a Teams source-workspace boundary. Migration057b adds only a scoped submission-evidence index. Missing or conflicting historical submitter evidence requires cancellation/resubmission; historical decisions are not rewritten. Final exact-head review and hosted acceptance are recorded in the PR. Current relationship bindings, other legacy delegation domains, commercial source eligibility, exports/diagnostics, persistent throttling and buyer/release evidence remain open.
 
 ## Remaining priority work
 
-1. Reproduce remaining session-lifecycle findings on accepted main; implement durable logout/revocation with correctly ordered additive migrations and fresh/upgrade evidence. Do not transplant later-stack migration094 ahead of its prerequisites.
+1. Reconcile original session findings against accepted PR167. Administrative revoke-all and audited duration configuration remain separate.
 2. Verify independent leave decisions, current director/relationship bindings and delegation authority against accepted behavior. Retain negative self-approval and stale-authority cases.
 3. Verify invoice source eligibility and alternate-source protections in the commercial integration sequence. Financial policy and immutable snapshots must remain authoritative.
 4. Integrate remaining timesheet/export safety and notification diagnostic controls with actual scope, CSV and redaction tests.

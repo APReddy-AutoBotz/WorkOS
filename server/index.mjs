@@ -1,4 +1,5 @@
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
+import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
 import {createLoginRateLimit,requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createOwnWorkPlanningRouter} from './modules/planning/own-work-planning-router.mjs';
 import {createAssignmentVersionRouter} from './modules/planning/assignment-version-router.mjs';
@@ -3387,7 +3388,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     approval.subject_employee_name = scoped.subject_employee_name;
     const actorEmployeeIds = new Set([req.user.employeeRecordId, req.user.employeeId].filter(Boolean).map(String));
     if (
-      parsed.data.status !== 'Cancelled' &&
+      approval.entity_type !== 'LeaveRequest' && parsed.data.status !== 'Cancelled' &&
       (actorEmployeeIds.has(String(approval.requester_id)) || actorEmployeeIds.has(String(approval.subject_employee_id)))
     ) {
       await client.query('rollback');
@@ -3426,12 +3427,17 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     }
 
     if (approval.entity_type === 'LeaveRequest') {
+      if (!req.user.permissions.includes('leave.approve')) { await client.query('rollback'); res.status(403).json({error:'Insufficient permission privileges'}); return; }
       const previous = (await client.query('select * from leave_requests where id = $1 for update', [approval.entity_id])).rows[0];
       if (!previous || previous.status !== 'Submitted') {
         await client.query('rollback');
         res.status(422).json({ error: 'Linked leave request is not submitted' });
         return;
       }
+      if (previous.employee_id !== approval.subject_employee_id) { await client.query('rollback'); res.status(409).json({error:'Approval does not match the leave worker'}); return; }
+      await assertIndependentLeaveDecision(client, req, previous, buildEmployeeScopeWhere, {
+        getEffectivePermissions:getEffectivePermissionsForUser, cancellation:parsed.data.status === 'Cancelled',
+      });
       await client.query(`
         update leave_requests
         set status = $2,
@@ -3467,6 +3473,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;
     if (workPolicyError(res,error)) return;
+    if (sendLeaveDecisionError(res,error)) return;
     console.error(error);
     res.status(500).json({ error: 'Approval status update failed' });
   } finally {
@@ -4068,6 +4075,10 @@ app.post('/api/integrations/teams-action-tokens/:token/execute', requireDatabase
       if(approval.rows[0].entity_type==='Timesheet'){
         await client.query('rollback');
         res.status(409).json({error:'Decide submitted work in the scoped work approval workspace.',code:'WORK_SOURCE_DECISION_REQUIRED'});return;
+      }
+      if (approval.rows[0].entity_type === 'LeaveRequest') {
+        await client.query('rollback');
+        res.status(409).json({error:'Decide leave in the scoped leave approval workspace.',code:'LEAVE_SOURCE_DECISION_REQUIRED'}); return;
       }
       await decideApprovalRecord(client, req, {
         entityType: approval.rows[0].entity_type,

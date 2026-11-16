@@ -178,7 +178,9 @@
     "test:current-role-postgres": "node tests/current-role-authority-postgres-smoke.mjs",
     "test:protected-identity-postgres": "node tests/protected-identity-administration-postgres-smoke.mjs",
     "test:session-revocation-postgres": "node tests/session-revocation-postgres-smoke.mjs",
-    "test:session-logout-browser": "node tests/session-logout-browser-smoke.mjs"
+    "test:session-logout-browser": "node tests/session-logout-browser-smoke.mjs",
+    "test:leave-decision-independence": "node tests/leave-decision-independence-postgres-smoke.mjs",
+    "test:leave-decision-browser": "node tests/leave-decision-independence-browser-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
