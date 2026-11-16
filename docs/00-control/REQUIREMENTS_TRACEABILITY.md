@@ -451,3 +451,7 @@ Current owner authorization supersedes historical fixed-Draft and review/scan/me
 
 
 PR-008P correction for WOS-RES-003/009 and CORE-004/005: allocation approval/audit writers exclude private commercial query enrichment, and work capture reads the ledger after obtaining source locks so concurrent SQL updates cannot mismatch quantity and version. Real scoped API disclosure negatives and blocked-writer work-submission regression pass. See the assignment task's correction checkpoint for retained evidence and pending acceptance. Preserve migration057 and historical ledger/work/audit records on rollback; no new migration, conversion or broader release acceptance.
+
+## Current selected-role security integration — 2026-11-16
+
+WOS-IAM-003/005/008/010 and WOS-NFR-SEC-003/004 receive bounded evidence through [current role authority](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md). Shared identity guards reject removed selected roles and disabled accounts before scoped and identity-only routes. Signed provider provenance preserves all active mapped-group alternatives; permission and data scope remain independently enforced. Middleware, real PostgreSQL/API, signed-provider callback, commercial and migration regressions accompany the change. Exact integrated review and hosted acceptance remain required; per-session logout revocation and broader security findings remain open.

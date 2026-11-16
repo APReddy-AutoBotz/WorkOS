@@ -427,3 +427,7 @@ From fixed PR69, [PR-008P](../tasks/WOS-04-ASSIGNMENT-VERSION-AUTHORITY.md) clos
 ### PR-008P reviewed integration checkpoint — 2026-11-15
 
 Current owner authorization supersedes historical fixed-Draft and review/scan/merge restrictions. Integration retains accepted capacity/main `f68d605d364941893836060f541ae021c70d654f`, including exact056a validation and owned evidence recovery. See [the assignment package evidence](../tasks/WOS-04-ASSIGNMENT-VERSION-AUTHORITY.md#reviewed-integration-checkpoint--2026-11-15) for bounded WOS-RES-001/002/003/009 and CORE-004/005. Local acceptance, independent exact-head review and hosted gates remain required. Preserve057 versions/pins/guards/audit on rollback; no inferred conversion, approval or full R7/release acceptance.
+
+## Priority security increment — current selected-role authority
+
+The owner's continuing authorization permits the bounded [current-role repair](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md) to be integrated independently of the later feature stack. Requirements IAM-003/005/008/010 and NFR-SEC-003/004 require current account/role validation in shared middleware, compatible provider mapping provenance and negative evidence for legacy/versioned cookie/bearer routes. No migration or new permission grant. Independent exact-head review and all applicable local/hosted gates precede merge; other security findings and product/release gates remain open.

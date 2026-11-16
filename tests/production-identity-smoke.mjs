@@ -513,9 +513,13 @@ try {
     returning id`, [syntheticEmployee.rows[0].id]);
   await pool.query(`insert into user_organization_scopes (user_id,organization_id,legal_entity_id)
     values ($1,'org-default','legal-default')`, [syntheticUser.rows[0].id]);
-  await pool.query('insert into user_roles (user_id, role_id) select $1, id from roles order by name limit 1', [syntheticUser.rows[0].id]);
+  await pool.query(`insert into entra_group_role_mappings(id,group_id,group_name,role_name,active)
+    values ('synthetic-production-role-map','mock-entra-group-employee','Synthetic mapped administrator','Admin',true)
+    on conflict(group_id) do update set role_name='Admin',active=true`);
+  await pool.query(`insert into entra_group_role_mappings(id,group_id,group_name,role_name,active)
+    values ('synthetic-production-role-alternative','mock-entra-group-secondary','Synthetic alternative administrator','Admin',true)`);
   const {state, stateCookie} = await beginAuthorization();
-  nextTokenClaimOverrides = {};
+  nextTokenClaimOverrides = {groups:['mock-entra-group-employee','mock-entra-group-secondary']};
   const callbackUrl = `${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`;
   const callback = await fetchWithTimeout(callbackUrl, {redirect: 'manual', headers: {
     cookie: stateCookie,
@@ -528,6 +532,21 @@ try {
     `signed callback must complete through the governed application origin; production output:\n${production.output()}`,
   );
   assert.equal(hasSetCookie(callback.headers, 'workos_session'), true, 'valid linked callback must create a WorkOS session');
+  const issuedSession = callback.headers.getSetCookie().find(value=>value.startsWith('workos_session=')).split(';',1)[0];
+  const issuedToken = issuedSession.slice('workos_session='.length);
+  const issuedClaims = JSON.parse(Buffer.from(issuedToken.split('.')[0], 'base64url').toString());
+  assert.equal(issuedClaims.identityProvider, 'entra');
+  assert.deepEqual(issuedClaims.entraGroups, ['mock-entra-group-employee','mock-entra-group-secondary']);
+  const mappedIdentity = await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers:{cookie:issuedSession}}, 2000);
+  assert.equal(mappedIdentity.status, 200, 'A callback-issued mapped-only account remains authorized');
+  assert.equal((await mappedIdentity.json()).activeRole, 'Admin');
+  await pool.query("update entra_group_role_mappings set active=false where group_id='mock-entra-group-employee'");
+  const alternativeMapping = await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers:{cookie:issuedSession}}, 2000);
+  assert.equal(alternativeMapping.status, 200, 'Another verified mapped group preserves the same assigned role');
+  await pool.query("update entra_group_role_mappings set active=false where group_id='mock-entra-group-secondary'");
+  const revokedMapping = await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers:{cookie:issuedSession}}, 2000);
+  assert.equal(revokedMapping.status, 403, 'A callback-issued cookie loses a removed mapping immediately');
+  assert.equal((await revokedMapping.json()).code, 'SESSION_ROLE_REVOKED');
   const callbackOperationId = callback.headers.get('x-operation-id');
   assert.match(callbackOperationId || '', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     'the side-effecting Entra callback must expose its server-generated operation ID');

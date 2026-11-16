@@ -168,7 +168,8 @@
     "test:assignment-versions": "node tests/assignment-version-smoke.mjs",
     "test:assignment-versions-service": "node --import tsx tests/assignment-version-service-smoke.mjs",
     "test:assignment-versions-postgres": "node tests/assignment-version-postgres-smoke.mjs",
-    "test:assignment-versions-journey": "node tests/assignment-version-journey-browser-smoke.mjs"
+    "test:assignment-versions-journey": "node tests/assignment-version-journey-browser-smoke.mjs",
+    "test:current-role-postgres": "node tests/current-role-authority-postgres-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

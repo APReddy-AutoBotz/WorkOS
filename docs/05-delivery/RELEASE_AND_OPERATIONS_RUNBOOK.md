@@ -377,3 +377,7 @@ Current owner authorization supersedes historical fixed-Draft and review/scan/me
 
 
 PR-008P correction for WOS-RES-003/009 and CORE-004/005: allocation approval/audit writers exclude private commercial query enrichment, and work capture reads the ledger after obtaining source locks so concurrent SQL updates cannot mismatch quantity and version. Real scoped API disclosure negatives and blocked-writer work-submission regression pass. See the assignment task's correction checkpoint for retained evidence and pending acceptance. Preserve migration057 and historical ledger/work/audit records on rollback; no new migration, conversion or broader release acceptance.
+
+## Current role validation operations — 2026-11-16
+
+See [current selected-role authority](../tasks/WOS-04-CURRENT-ROLE-AUTHORITY.md). Every authenticated request checks an active account and current selected-role assignment/mapping. A removed role returns 403 SESSION_ROLE_REVOKED; authority storage failure returns 503 IDENTITY_AUTHORITY_UNAVAILABLE without fallback. Older mapped-only provider sessions require fresh authentication. Multiple verified groups mapping to one role remain valid until no granting mapping remains; directory membership itself remains the authenticated provider snapshot. No migration or new grant is required. Reverting the guard reopens stale-role access, so use a tested forward correction or keep affected access unavailable. This does not implement per-session logout revocation or close release acceptance.

@@ -74,6 +74,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres
         run: npm test
 
+      - name: Verify current selected-role PostgreSQL authority
+        run: npm run test:current-role-postgres
+
       - name: Verify assignment version PostgreSQL migration and API acceptance
         run: npm run test:assignment-versions-postgres
 
