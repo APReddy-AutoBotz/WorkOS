@@ -4,7 +4,7 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
-The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. Auditing lifetime changes across deployments remains open.
+The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. The next package must identify the authorized policy writer and atomically record each effective change. [Acceptance criteria](../tasks/WOS-04-SESSION-LIFETIME-AUDIT.md)
 
 The November 18 review verified current-session logout and absolute expiry against the merged application. The remaining WOS-IAM-008 work is to record session lifetime changes with actor, timestamp, and old and new values. Administrative revoke-all needs separate authorization tests. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
 
