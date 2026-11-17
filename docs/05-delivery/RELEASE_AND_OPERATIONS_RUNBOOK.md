@@ -463,3 +463,8 @@ Set `API_SESSION_TTL_HOURS` in the production Compose environment before recreat
 ### Shared login throttling candidate
 
 Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in the buyer database. API replicas share the per-IP and per-input limits, including the Entra callback limit. Apply migrations before switching traffic, drain old API processes, and configure identical limits and trusted proxy settings on all replicas. Counters start empty on first upgrade. Storage failure returns HTTP 503 before authentication. Reverting to the previous application restores process-local counters and its readiness check rejects the newer migration ledger. Prefer forward correction and retain the migration.
+
+
+## Notification diagnostic visibility
+
+Delivery history uses current recipient organization/entity and worker visibility; events without a recipient cannot establish scoped ownership and remain hidden. Metadata is an allowlist of typed mode, deterministic flag, valid HTTP status code and fixed failure code. Provider response bodies, arbitrary nested errors and recipient addresses are not public diagnostic fields. Historical notification integration/audit copies are projected safely without rewriting evidence. Use NOTIFICATION_DELIVERY_FAILED plus channel/provider/time/status for triage. No migration is required. Preserve history and prefer forward correction; older readers can disclose retained raw metadata.

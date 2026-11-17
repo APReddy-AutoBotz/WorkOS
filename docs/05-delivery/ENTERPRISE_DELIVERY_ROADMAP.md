@@ -106,3 +106,19 @@ The next bounded package is [operational CSV literal-text safety](../tasks/WOS-0
 ### Shared login throttling
 
 Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in the buyer database. API replicas share the per-IP and per-input limits, including the Entra callback limit. Apply migrations before switching traffic, drain old API processes, and configure identical limits and trusted proxy settings on all replicas. Counters start empty on first upgrade. Storage failure returns HTTP 503 before authentication. Reverting to the previous application restores process-local counters and its readiness check rejects the newer migration ledger. Prefer forward correction and retain the migration.
+
+
+## Operational CSV safety accepted; notification diagnostics next — 2026-11-17
+
+[PR169](https://github.com/APReddy-AutoBotz/WorkOS/pull/169) merged at `88262c87a260529c00a680b22d2f021ff7d8cba4`. Candidate `907f02bb897adb4ad962d62d09647b4c67b776c7` passed all 83 steps in [CI43856156210](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43856156210); [main CI43857837218](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43857837218) also passed all 83 with no skips or failures. Independent exact-head review covered all 18 paths with no findings. Shared and Timesheet Approval exports now use consistent literal-text cell encoding; spreadsheet interoperability limitations remain documented.
+
+The next bounded security package is [scoped and sanitized notification diagnostics](../tasks/WOS-05-NOTIFICATION-DIAGNOSTIC-BOUNDARY.md). It restricts delivery attempts to current recipient organization/entity and worker visibility before the result limit, excludes orphan ownership, and sanitizes provider metadata in new writes and historical attempt/integration/audit readers. Preserve delivery outcome, legitimate operational fields and immutable history. Fresh local, browser, independent exact-head and hosted checks remain mandatory before merge. Commercial-source authorization prerequisites, other delegation domains, persistent throttling and buyer/release evidence remain open.
+
+## PR170 acceptance blocked by upstream dependency advisory — 2026-11-17
+
+Notification diagnostics runtime candidate `5ddb26a15970e34af1e2dbdb198ce21397d5ad9c` passed local typecheck, lint (266 modules), full aggregate, real PostgreSQL/API and NotificationCenter browser checks, 56 migration entries, production build/signed-identity/startup and bootstrap/adversarial scans. Independent immutable-head review `7484bf28-df01-47c9-bfe2-facc801e28d2` covered all 23 paths with zero findings.
+
+[PR170 CI44132858216](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/44132858216) passed all preceding application/API/browser/production-identity/migration steps, then failed the full dependency audit. `GHSA-fc5q-39xc-vjpf` flags repeated-extglob ReDoS in picomatch through the latest published version 4.0.7, propagating through fdir/tinyglobby/Vite. The subsequent Compose/container checks were skipped, so this run is not acceptance. The full-history secret scan passed. A fresh production-only audit reported zero vulnerabilities; that does not waive the full audit gate.
+
+The frontend toolchain correction merged in PR #176. The notification diagnostics journey now runs on the same compiled fixture server as the other database-backed browser checks.
+

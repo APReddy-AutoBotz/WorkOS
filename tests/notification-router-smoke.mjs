@@ -21,7 +21,7 @@ const pool = {
     }
     if (sql.includes('select * from notification_templates order by')) return {rows: [{id: 'template-a'}]};
     if (sql.includes('select np.*, e.name as employee_name')) return {rows: [{id: 'preference-a'}]};
-    if (sql.includes('select * from notification_delivery_attempts')) return {rows: [{id: 'delivery-a'}]};
+    if (sql.includes('from notification_delivery_attempts nda')) return {rows: [{id: 'delivery-a'}]};
     throw new Error(`Unexpected notification query: ${sql}`);
   },
   async connect() {
