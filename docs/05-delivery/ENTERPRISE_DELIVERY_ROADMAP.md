@@ -97,4 +97,6 @@ The next bounded package is [operational CSV literal-text safety](../tasks/WOS-0
 
 ### Shared login throttling candidate
 
+The November 18 dependency review found that Vite 6.4.6 resolves picomatch 4.0.7 after a lockfile refresh. The full audit still reports four high findings from one advisory. Vite 8.3.8 also depends on the affected matcher, and the npm-suggested downgrade falls below the repository’s reviewed Vite security floor. Acceptance requires a supported, unaffected dependency graph followed by a passing full audit and complete CI run. [PR #173](https://github.com/APReddy-AutoBotz/WorkOS/pull/173) · [Security advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+
 Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in the buyer database. API replicas share the per-IP and per-input limits, including the Entra callback limit. Apply migrations before switching traffic, drain old API processes, and configure identical limits and trusted proxy settings on all replicas. Counters start empty on first upgrade. Storage failure returns HTTP 503 before authentication. Reverting to the previous application restores process-local counters and its readiness check rejects the newer migration ledger. Prefer forward correction and retain the migration.

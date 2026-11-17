@@ -73,4 +73,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [AGENTS.
 
 ### Shared login throttling candidate
 
+The full dependency audit blocks [PR #173](https://github.com/APReddy-AutoBotz/WorkOS/pull/173). As of November 18, 2026, the latest published picomatch release (4.0.7) is affected through the Vite build chain. [Security advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+
 Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in the buyer database. API replicas share the per-IP and per-input limits, including the Entra callback limit. Apply migrations before switching traffic, drain old API processes, and configure identical limits and trusted proxy settings on all replicas. Counters start empty on first upgrade. Storage failure returns HTTP 503 before authentication. Reverting to the previous application restores process-local counters and its readiness check rejects the newer migration ledger. Prefer forward correction and retain the migration.
