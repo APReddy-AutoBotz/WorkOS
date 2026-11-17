@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+The November 18 review verified current-session logout and absolute expiry against the merged application. The remaining WOS-IAM-008 work is to record session lifetime changes with actor, timestamp, and old and new values. Administrative revoke-all needs separate authorization tests. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
+
 Twenty-one React-to-PostgreSQL browser journeys now compile their fixture pages in memory and forward API traffic to each journey’s disposable database-backed server. Session logout, independent leave decisions, timesheet ownership and export, and the import/audit harness use the same compiler. The fourteen browser interaction suites have a dedicated fixture server.
 
 The frontend toolchain migration replaces Vite in the production build, preview server, browser fixtures and development server. Browser coverage includes branding, styles, API proxying and preserving unsaved login input on a page edit. The release workflow checks lockfile installation, the full dependency audit and container startup. The shared login throttling checks exercise replica budgets, persistence and database failure. [Frontend toolchain](https://github.com/APReddy-AutoBotz/WorkOS/pull/176) and [Login throttling](https://github.com/APReddy-AutoBotz/WorkOS/pull/173)
