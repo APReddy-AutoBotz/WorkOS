@@ -492,6 +492,7 @@ Independent leave decisions: WOS-IAM-003/005/010, WOS-APR-001/002/004/006, WOS-C
 Current workforce identity in PR168: WOS-IAM-003/005/009/010, WOS-CORE-003 and WOS-NFR-SEC-004 map to the shared identity guard, qualified director SQL, canonical issuance/refresh and `tests/live-workforce-bindings-postgres-smoke.mjs`. Retained sessions cannot preserve obsolete worker/director scope; canonical null bindings deny worker scope without denying unlinked administrator authority. Provider membership refresh and unrelated delegation domains remain separate.
 
 Operational CSV safety: WOS-NFR-SEC-008 maps to the shared cell encoder, generic/Timesheet Approval consumers, hostile header/value regressions and real browser downloads. WOS-RPT-006 and WOS-NFR-PRV-005 retain existing export scope, filtered output and audit behavior; this package does not claim full export-governance acceptance. See [the task](../tasks/WOS-07-OPERATIONAL-CSV-SAFETY.md).
+Production Compose wiring for WOS-IAM-008 is checked with a fractional session lifetime. Runtime environment tests cover invalid settings and the default. The real PostgreSQL session suite checks the issued expiry and denial after expiry. Auditing changes to this setting remains open.
 
 WOS-IAM-001 and WOS-NFR-SEC-001/002/013: shared auth throttle migration 057c, API middleware and `test:persistent-auth-throttle` verify durable replica budgets and safe storage failure.
 

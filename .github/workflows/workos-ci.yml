@@ -313,7 +313,10 @@ jobs:
           ENTRA_CLIENT_ID: 00000000-0000-0000-0000-000000000002
           ENTRA_CLIENT_SECRET: synthetic-client-secret
           ENTRA_REDIRECT_URI: https://workos.example.test/api/auth/entra/callback
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          API_SESSION_TTL_HOURS=0.25 docker compose config --format json |
+            node -e "const config = JSON.parse(require('node:fs').readFileSync(0, 'utf8')); require('node:assert/strict').equal(config.services.app.environment.API_SESSION_TTL_HOURS, '0.25')"
 
       - name: Build production container
         run: |

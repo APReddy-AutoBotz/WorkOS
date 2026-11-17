@@ -57,8 +57,8 @@ assert.match(server, /getCatalogUsage/, 'catalog delete usage guard must exist')
 
 assert.match(server, /loginRateLimit/, 'login rate limiter must exist');
 assert.match(server, /getPasswordMinLength/, 'password policy helper must exist');
-assert.match(server, /getSessionTtlMs/, 'session TTL helper must exist');
-assert.match(server, /API_SESSION_TTL_HOURS/, 'session TTL must be configurable through environment');
+assert.equal((server.match(/const sessionExpiresAt = Date\.now\(\) \+ runtimeEnvironment\.sessionTtlMs/g) || []).length, 2,
+  'local and provider sign-in must both use the validated deployment lifetime');
 assert.match(server, /maxAge: Math\.max\(0, expiresAt - Date\.now\(\)\)/, 'session cookie must retain the remaining absolute lifetime');
 assert.doesNotMatch(server, /Date\.now\(\) \+ 8 \* 60 \* 60 \* 1000/, 'session expiry must not be hardcoded at token issuance');
 assert.match(server, /sessionExpiresAt/, 'login and role switching must expose session expiry metadata');

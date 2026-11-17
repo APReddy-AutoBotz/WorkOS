@@ -279,12 +279,6 @@ const getPasswordMinLength = () => {
   return Number.isFinite(configured) && configured >= 6 ? configured : 6;
 };
 
-const getSessionTtlMs = () => {
-  const configuredHours = Number(process.env.API_SESSION_TTL_HOURS || 8);
-  const safeHours = Number.isFinite(configuredHours) && configuredHours > 0 ? configuredHours : 8;
-  return safeHours * 60 * 60 * 1000;
-};
-
 const getSessionCookieOptions = (expiresAt) => ({
   httpOnly: true,
   sameSite: 'lax',
@@ -909,7 +903,7 @@ const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null,
     select distinct group_id from entra_group_role_mappings
     where active = true and group_id = any($1::text[]) and role_name = any($2::text[])
     order by group_id`, [groups, systemRoles])).rows.map(row => row.group_id) : [];
-  const sessionExpiresAt = Date.now() + getSessionTtlMs();
+  const sessionExpiresAt = Date.now() + runtimeEnvironment.sessionTtlMs;
   const token = signToken({
     sid: crypto.randomUUID(),
     sub: user.id,
@@ -1392,7 +1386,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, requireDatabase, loginRate
       ? parsed.data.requestedRole
       : user.roles[0];
     const permissions = await getEffectivePermissionsForUser(pool, user.id, activeRole);
-    const sessionExpiresAt = Date.now() + getSessionTtlMs();
+    const sessionExpiresAt = Date.now() + runtimeEnvironment.sessionTtlMs;
     const token = signToken({
       sid: crypto.randomUUID(),
       sub: user.id,

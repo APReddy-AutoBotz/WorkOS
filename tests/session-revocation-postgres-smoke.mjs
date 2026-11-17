@@ -130,10 +130,13 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
       'revocation must survive API restart');
   });
   await withCommercialApi({databaseUrl, identities, sessionTtlHours: '0.0003'}, async ({request}) => {
+    const started = Date.now();
     const login = await request('/api/auth/login', {method: 'POST', authenticated: false,
       body: {username: identities.manager.username, password, requestedRole: 'Admin'}});
     assert.equal(login.status, 200);
-    await delay(Math.max(0, claims(login.body.token).exp - Date.now() + 60));
+    const expires = claims(login.body.token).exp;
+    assert.ok(expires >= started + 1079 && expires <= Date.now() + 1080, 'token expiry must match the configured fractional lifetime');
+    await delay(Math.max(0, expires - Date.now() + 60));
     assert.equal((await request('/api/auth/me', {headers: {Authorization: `Bearer ${login.body.token}`}})).status, 401);
   });
 });
