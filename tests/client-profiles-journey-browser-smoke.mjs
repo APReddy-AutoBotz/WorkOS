@@ -30,7 +30,7 @@ await withClientProfilesJourney(async ({pool, baseUrl: apiUrl, request: apiReque
   const engagement = await command('/engagements', {code: 'SYN-CLIENT-PIN-ENGAGEMENT', name: 'Synthetic preserved browser delivery', model: 'fixed_fee', ownerId,
     startsOn: '2020-01-01', endsOn: '2099-12-31', currency: 'USD', budget: '10000.0001', clientId, contractId: contract.id, contractVersionId: pinned, attributionId: null, reason: 'Synthetic fixture engagement setup'});
   const preserved = await snapshot(pool, preservedClientTables);
-  const fixtureServer = await startFixtureServer({root, fixtures: ['client-profiles'], apiUrl});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['client-profiles'], application: true, apiUrl});
   let browser;
   try {
     const baseUrl = fixtureServer.url;

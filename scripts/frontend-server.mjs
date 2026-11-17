@@ -3,7 +3,6 @@ import express from 'express';
 import {createProxyServer} from 'httpxy';
 
 export function createFrontendApp(hostnameToAllow, apiUrl) {
-  const proxy = createProxyServer({target: apiUrl, changeOrigin: true});
   const app = express();
   app.disable('x-powered-by');
   app.use((req, res, next) => {
@@ -13,7 +12,9 @@ export function createFrontendApp(hostnameToAllow, apiUrl) {
         hostname !== hostnameToAllow.toLowerCase()) return res.sendStatus(403);
     next();
   });
+  const proxy = apiUrl && createProxyServer({target: apiUrl, changeOrigin: true});
   app.all(['/api', '/api/*'], (req, res) => {
+    if (!proxy) return res.sendStatus(404);
     proxy.web(req, res).catch(() => {
       if (res.headersSent) res.destroy();
       else res.sendStatus(502);
