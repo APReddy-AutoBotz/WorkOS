@@ -119,7 +119,7 @@ const {requireIdentity, requireAuth} = createIdentityAccessMiddleware({
 
 const authenticationThrottlePool = new Pool({...databaseConnectionOptions({databaseUrl: runtimeEnvironment.databaseUrl,
   sslMode: runtimeEnvironment.pgSslMode, sslRootCert: runtimeEnvironment.pgSslRootCert}),
-  max: 4, connectionTimeoutMillis: 1500, idleTimeoutMillis: 10000});
+  max: 4, connectionTimeoutMillis: 1500, query_timeout: 3000, idleTimeoutMillis: 10000});
 authenticationThrottlePool.on('error', () => console.error('Authentication protection storage connection failed.'));
 const loginRateLimit = createPersistentLoginRateLimit({pool: authenticationThrottlePool, maxAttempts: runtimeEnvironment.loginRateLimit,
   maxIpAttempts: runtimeEnvironment.loginIpRateLimit});

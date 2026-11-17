@@ -17,8 +17,10 @@ export const createPersistentLoginRateLimit = ({pool, maxConcurrent = 32, ...opt
   let inFlight = 0;
   const consumeShared = async (req, callback) => {
     let client, failed = false;
+    const onConnectionError = () => { failed = true; };
     try {
       client = await pool.connect();
+      client.on('error', onConnectionError);
       await client.query('begin isolation level read committed');
       await client.query("set local lock_timeout='1000ms'");
       await client.query("set local statement_timeout='2000ms'");
@@ -56,10 +58,13 @@ export const createPersistentLoginRateLimit = ({pool, maxConcurrent = 32, ...opt
       return {allowed, retryAfter: allowed ? null : Math.max(1,Math.ceil((deniedUntil.getTime()-time.getTime())/1000))};
     } catch (error) {
       failed = true;
-      if (client) await client.query('rollback').catch(() => {});
+      // Destroying this connection rolls back its transaction, including when a network read timed out.
       throw error;
     } finally {
-      client?.release(failed);
+      if (client) {
+        client.removeListener('error', onConnectionError);
+        client.release(failed);
+      }
     }
   };
   const consume = async (req, res, next, callback) => {

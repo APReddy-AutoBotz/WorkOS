@@ -10,6 +10,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     assert.equal((await login(first)).status,429,'First API enforces the default account budget');
     await withCommercialApi({databaseUrl,identities:{}},async second=>{
       assert.equal((await login(second)).status,429,'A second actual API process must share exhausted budget');
+      const callback = api => fetch(`${api.baseUrl}/api/auth/entra/callback`,{redirect:'manual'});
+      for (let i=0;i<8;i++) assert.equal((await callback(first)).status,302);
+      assert.equal((await callback(second)).status,429,'Callback budget is independent of local input and shared across replicas');
     });
   });
   await withCommercialApi({databaseUrl,identities:{}},async restarted=>{
