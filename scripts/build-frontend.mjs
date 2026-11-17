@@ -1,19 +1,14 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {readFile, writeFile, cp, rm, mkdir} from 'node:fs/promises';
-import {loadFrontendEnvironment} from './frontend-environment.mjs';
+import {loadFrontendEnvironment, publicFrontendEnvironment} from './frontend-environment.mjs';
 import {build} from 'esbuild';
 import {frontendStyles} from './frontend-styles.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'dist');
 const environment = await loadFrontendEnvironment(root, 'production');
-const publicEnv = Object.fromEntries(Object.entries(environment).filter(([key]) => key.startsWith('VITE_')));
-Object.assign(publicEnv, {
-  BASE_URL: '/', MODE: 'production', PROD: true, DEV: false, SSR: false,
-  VITE_APP_MODE: environment.APP_MODE || publicEnv.VITE_APP_MODE || 'demo',
-  VITE_DISABLE_DEMO_FALLBACK: environment.DISABLE_DEMO_FALLBACK || publicEnv.VITE_DISABLE_DEMO_FALLBACK || 'false',
-});
+const publicEnv = publicFrontendEnvironment(environment, 'production', true);
 
 const result = await build({
   absWorkingDir: root,

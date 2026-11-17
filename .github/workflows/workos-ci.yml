@@ -157,6 +157,9 @@ jobs:
       - name: Verify the compiled production login page
         run: node tests/production-frontend-browser.mjs
 
+      - name: Verify the development login page and state-preserving refresh
+        run: node tests/development-frontend-browser.mjs
+
       - name: Verify operational timesheet CSV safety
         run: npm run test:timesheet-export-browser
 
