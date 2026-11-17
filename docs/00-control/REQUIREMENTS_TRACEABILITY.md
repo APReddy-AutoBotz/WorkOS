@@ -494,3 +494,6 @@ Current workforce identity in PR168: WOS-IAM-003/005/009/010, WOS-CORE-003 and W
 Operational CSV safety: WOS-NFR-SEC-008 maps to the shared cell encoder, generic/Timesheet Approval consumers, hostile header/value regressions and real browser downloads. WOS-RPT-006 and WOS-NFR-PRV-005 retain existing export scope, filtered output and audit behavior; this package does not claim full export-governance acceptance. See [the task](../tasks/WOS-07-OPERATIONAL-CSV-SAFETY.md).
 Production Compose wiring for WOS-IAM-008 is checked with a fractional session lifetime. Runtime environment tests cover invalid settings and the default. The real PostgreSQL session suite checks the issued expiry and denial after expiry. Auditing changes to this setting remains open.
 
+WOS-IAM-001 and WOS-NFR-SEC-001/002/013: shared auth throttle migration 057c, API middleware and `test:persistent-auth-throttle` verify durable replica budgets and safe storage failure.
+
+The production frontend build verifies WOS-ORG-005 document branding in `tests/document-metadata-smoke.mjs` and exercises the compiled login route in `tests/production-frontend-browser.mjs`. Build output checks cover default and configured metadata and a server-only environment marker.

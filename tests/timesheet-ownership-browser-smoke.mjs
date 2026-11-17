@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
-const vite=await createServer({root:fileURLToPath(new URL('../',import.meta.url)),logLevel:'error',server:{host:'127.0.0.1',port:0,hmr:false},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});
+const fixtureServer = await startFixtureServer({root:fileURLToPath(new URL('../',import.meta.url)), fixtures: ['timesheet-ownership']});
 let browser;
 try {
- await vite.listen();const base=`http://127.0.0.1:${vite.httpServer.address().port}`;
+ const base=fixtureServer.url;
  browser=await chromium.launch({headless:true});const page=await browser.newPage();page.setDefaultTimeout(20000);
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.clock.setFixedTime(new Date('2026-11-13T12:00:00Z'));
@@ -86,4 +86,4 @@ try {
  }
  assert.deepEqual(errors,[]);
  console.log('MyTimesheet ownership browser passed: held reads/saves, A-B-A navigation and identity replacement; synthetic timing, no database acceptance claim.');
-} finally {await browser?.close();await vite.close();}
+} finally {await browser?.close();await fixtureServer.close();}

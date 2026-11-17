@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentPermissions,amendmentScope,amendmentToday,grantAmendmentPermissions,createAmendmentHierarchy,amendmentTransition} from './support/commercial-amendments-test.mjs';
 import {workPermissions,grantWorkPermissions,seedWorkPeriods} from './support/work-assignment-test.mjs';
@@ -23,10 +23,10 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       if(path==='/api/employees')assert(result.body.some(x=>x.id===f.ownerId&&x.status==='Active'));
       if(path==='/api/projects')assert(result.body.some(x=>x.id===roots.project.id&&x.status==='Active'));
     }
-    const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});
+    const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['work-assignment'], apiUrl});
     let browser;
     try{
-      await vite.listen();const address=vite.httpServer.address();assert(address&&typeof address!=='string');const baseUrl=`http://127.0.0.1:${address.port}`;
+      const baseUrl=fixtureServer.url;
       browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1440,height:1100}});
       const session={id:identities.manager.id,employeeId:f.ownerId,name:'Synthetic work operator',role:'Admin',permissionRole:'Admin',permissions:[...new Set([...amendmentPermissions,...workPermissions])]};
       await context.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session,scope:amendmentScope,token:tokenFor(identities.manager)});
@@ -60,7 +60,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       const operations=writes.filter(x=>x.path==='/api/v1/imports/timesheets/apply');assert.equal(operations.filter(x=>x.body.dryRun===false).length,1,'repeated click has one confirmed apply');
       assert.deepEqual((await pool.query('select to_jsonb(t) value from timesheet_entries t where id=$1',[f.workId])).rows,baselineLegacy);
       assert.deepEqual(errors,[]);assert.deepEqual(external,[]);await context.close();
-    }finally{await browser?.close();await vite.close();}
+    }finally{await browser?.close();await fixtureServer.close();}
   });
 });
 console.log('Real work assignment React/API/PostgreSQL journey passed: plan, import dry-run/apply, immutable submission assurance, double-click, hostile text, held lifecycle error, protected replacement and legacy evidence.');

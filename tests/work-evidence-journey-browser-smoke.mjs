@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentToday,addUtcDays} from './support/commercial-amendments-test.mjs';
@@ -19,10 +19,10 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  const entries=async()=>(await pool.query('select category,work_date::text,hours::text,evidence_url from timesheet_entries where timesheet_id=$1 order by category,work_date',[header])).rows;
  await withCommercialApi({databaseUrl,identities},async({baseUrl:apiUrl,tokenFor,request})=>{
   assert.equal((await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly','daily']}})).status,201);
-  const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});
+  const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['work-capture-modes'], apiUrl});
   let browser;
   try{
-   await vite.listen();const baseUrl=`http://127.0.0.1:${vite.httpServer.address().port}`;
+   const baseUrl=fixtureServer.url;
    browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1700,height:1200},timezoneId:'Pacific/Kiritimati'});
    await context.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session:{id:f.ownerId,employeeId:f.ownerId,name:'Synthetic evidence operator',role:'Admin',permissionRole:'Admin',permissions:workPermissions},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(identities.manager)});
    const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[],external=[],writes=[];
@@ -55,7 +55,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await edit(page,'Synthetic Monday',link);assert.equal(await save(page),200);await page.getByText('Draft timesheet saved.',{exact:true}).waitFor();const winner=await workSnapshot(pool);
    await edit(second,'Synthetic Monday',nextLink);assert.equal(await save(second),409);await second.getByText(/Work changed since it was loaded/).waitFor();assert.deepEqual(await workSnapshot(pool),winner);assert.equal(await second.getByRole('button',{name:'Save Draft',exact:true}).isDisabled(),true);
    await second.close();assert.deepEqual(errors,[]);assert.deepEqual(external,[],'no preview or automatic request to any evidence URL');await context.close();
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });
 console.log('Work evidence real React/API/PostgreSQL journey passed: save/reload/clear, safe links, invalid URL feedback, mode/hidden/weekend/zero/context preservation, evidence-only stale tabs and no dereferencing.');

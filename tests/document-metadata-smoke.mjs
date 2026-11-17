@@ -2,10 +2,6 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {readFileSync, readdirSync, rmSync, statSync} from 'node:fs';
 import path from 'node:path';
-import {createRequire} from 'node:module';
-
-const require = createRequire(import.meta.url);
-const viteCli = path.join(path.dirname(require.resolve('vite/package.json')), 'bin', 'vite.js');
 
 const sourceDocument = readFileSync('index.html', 'utf8');
 assert.doesNotMatch(sourceDocument, /import\.meta\.env\.VITE_PRODUCT_(?:NAME|LOGO_URL)/);
@@ -31,7 +27,7 @@ const walkText = root => {
 
 const build = environment => {
   rmSync('dist', {force: true, recursive: true});
-  execFileSync(process.execPath, [viteCli, 'build'], {
+  execFileSync(process.execPath, ['scripts/build-frontend.mjs'], {
     env: environment,
     stdio: 'inherit',
   });
@@ -58,11 +54,13 @@ try {
 
   const configuredEnvironment = withoutBrandEnvironment();
   configuredEnvironment.VITE_PRODUCT_NAME = 'Synthetic Product';
+  configuredEnvironment.SERVER_ONLY_BUILD_FIXTURE = 'private-build-environment-canary';
   configuredEnvironment.VITE_PRODUCT_LOGO_URL = '/synthetic-mark.svg';
   const configuredBuild = build(configuredEnvironment);
   assertDocumentMetadata(configuredBuild.document, 'Synthetic Product', '/synthetic-mark.svg');
   assert.doesNotMatch(configuredBuild.output, /%VITE_[A-Z0-9_]+%/);
   assert.match(configuredBuild.output, /Synthetic Product/);
+  assert.doesNotMatch(configuredBuild.output, /private-build-environment-canary/);
   assert.match(configuredBuild.output, /\/synthetic-mark\.svg/);
 } finally {
   rmSync('dist', {force: true, recursive: true});
