@@ -24,8 +24,12 @@ const lines = createInterface({input: preview.stdout});
 let browser;
 try {
   const [line] = await once(lines, 'line', {signal: AbortSignal.timeout(10_000)});
-  assert.match(line, /^Preview listening at http:\/\/127\.0\.0\.1:\d+$/);
-  const origin = line.split(' ').at(-1);
+  assert.ok(line.startsWith('Preview listening at '));
+  const address = new URL(line.slice('Preview listening at '.length));
+  assert.equal(address.protocol, 'http:');
+  assert.equal(address.hostname, '127.0.0.1');
+  assert.ok(Number(address.port) > 0);
+  const origin = address.origin;
   const response = await fetch(origin + '/api/preview-check?q=one', {method: 'POST', body: 'preview body'});
   assert.equal(response.status, 201);
   assert.deepEqual(await response.json(), {body: 'preview body', query: {q: 'one'}});
