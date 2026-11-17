@@ -1,23 +1,14 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {readFile, writeFile, cp, rm, mkdir} from 'node:fs/promises';
-import {parse} from 'dotenv';
-import {expand} from 'dotenv-expand';
+import {loadFrontendEnvironment} from './frontend-environment.mjs';
 import {build} from 'esbuild';
 import postcss from 'postcss';
 import tailwind from '@tailwindcss/postcss';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'dist');
-const fileEnv = {};
-for (const name of ['.env', '.env.local', '.env.production', '.env.production.local']) {
-  try {
-    Object.assign(fileEnv, parse(await readFile(path.join(root, name))));
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-}
-const environment = {...expand({parsed: fileEnv, processEnv: {...process.env}}).parsed, ...process.env};
+const environment = await loadFrontendEnvironment(root, 'production');
 const publicEnv = Object.fromEntries(Object.entries(environment).filter(([key]) => key.startsWith('VITE_')));
 Object.assign(publicEnv, {
   BASE_URL: '/', MODE: 'production', PROD: true, DEV: false, SSR: false,

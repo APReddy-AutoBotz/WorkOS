@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY index.html tsconfig.json ./
-COPY scripts/build-frontend.mjs ./scripts/build-frontend.mjs
+COPY scripts/build-frontend.mjs scripts/frontend-environment.mjs ./scripts/
 COPY src ./src
 COPY shared ./shared
 COPY public ./public
