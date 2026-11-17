@@ -456,3 +456,7 @@ PR168 also refreshes canonical workforce bindings on each authenticated request.
 ## Operational CSV format compatibility
 
 Shared and Timesheet Approval exports quote every field and apply the existing apostrophe literal-text marker to dangerous control/whitespace/formula prefixes. Headers receive the same encoding. Source records, field order, filters, empty header-only Ops exports and audit behavior remain unchanged. Machine consumers must account for literal markers; spreadsheet saving/reopening and external transformations can alter interpretation. No universal spreadsheet execution guarantee is claimed. No migration is required; reverting the serializer reopens unsafe-prefix paths, so prefer forward correction.
+
+## Legacy approval delegation boundary
+
+Legacy delegation IDs cannot transfer ownership, including under administrative edits. Both retained and submitted participants must belong to the selected entity. Active delegation requires current participant account/assigned-role/membership/approval authority; reads revalidate the delegator's current relationship. On Leave remains supported; scoped revocation is permitted after authority or lifecycle loss. Historical orphan/cross-entity rows remain stored and unavailable. Malformed calendar dates return400, unauthorized ownership403, invalid activation/overlap422; failed audit leaves no mutation. No migration is required. Prefer a forward fix because older code restores the disclosure/takeover path.
