@@ -1,3 +1,4 @@
+import {safeNotificationMetadata, notificationFailureCode} from './modules/notifications/delivery-diagnostics.mjs';
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
 import {createLoginRateLimit,requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
@@ -950,7 +951,7 @@ const recordNotificationAttempt = async (client, {
     insert into notification_delivery_attempts (notification_id, channel, provider, status, response_metadata)
     values ($1,$2,$3,$4,$5)
     returning *
-  `, [notificationId, channel, provider, status, JSON.stringify(responseMetadata)]);
+  `, [notificationId, channel, provider, status, JSON.stringify(safeNotificationMetadata(responseMetadata,status === 'Failed'))]);
   return result.rows[0];
 };
 
@@ -1123,7 +1124,7 @@ const sendNotification = async (client, req, {
           entityType: entityType || 'NotificationEvent',
           entityId: entityId || event.id,
           status: 'Success',
-          responsePayload: metadata,
+          responsePayload: safeNotificationMetadata(metadata),
           organizationScope: req?.organizationScope,
         });
       }
@@ -1133,16 +1134,16 @@ const sendNotification = async (client, req, {
         channel: deliveryChannel,
         provider: selectedProvider,
         status: 'Failed',
-        responseMetadata: { error: error.message, deterministic: true },
+        responseMetadata: { errorCode: notificationFailureCode, deterministic: true },
       });
-      deliveryResults.push({ channel: deliveryChannel, provider: selectedProvider, status: 'Failed', error: error.message });
+      deliveryResults.push({ channel: deliveryChannel, provider: selectedProvider, status: 'Failed', errorCode: notificationFailureCode });
       await logIntegrationEvent(client, {
         provider: deliveryChannel === 'Teams' ? 'teams' : deliveryChannel === 'Email' ? 'email' : selectedProvider,
         eventType: `${deliveryChannel}NotificationFailed`,
         entityType: entityType || 'NotificationEvent',
         entityId: entityId || event.id,
         status: 'Failed',
-        responsePayload: { error: error.message },
+        responsePayload: { errorCode: notificationFailureCode },
         organizationScope: req?.organizationScope,
       });
     }

@@ -456,3 +456,7 @@ PR168 also refreshes canonical workforce bindings on each authenticated request.
 ## Operational CSV format compatibility
 
 Shared and Timesheet Approval exports quote every field and apply the existing apostrophe literal-text marker to dangerous control/whitespace/formula prefixes. Headers receive the same encoding. Source records, field order, filters, empty header-only Ops exports and audit behavior remain unchanged. Machine consumers must account for literal markers; spreadsheet saving/reopening and external transformations can alter interpretation. No universal spreadsheet execution guarantee is claimed. No migration is required; reverting the serializer reopens unsafe-prefix paths, so prefer forward correction.
+
+## Notification diagnostic visibility
+
+Delivery history uses current recipient organization/entity and worker visibility; events without a recipient cannot establish scoped ownership and remain hidden. Metadata is an allowlist of typed mode, deterministic flag, valid HTTP status code and fixed failure code. Provider response bodies, arbitrary nested errors and recipient addresses are not public diagnostic fields. Historical notification integration/audit copies are projected safely without rewriting evidence. Use NOTIFICATION_DELIVERY_FAILED plus channel/provider/time/status for triage. No migration is required. Preserve history and prefer forward correction; older readers can disclose retained raw metadata.
