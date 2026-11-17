@@ -1,6 +1,11 @@
+import {legacyApprovalScope} from './modules/approvals/legacy-approval-scope.mjs';
+import {registerLegacyDelegationRoutes} from './modules/approvals/legacy-delegation-router.mjs';
+
+import {safeNotificationMetadata, safeNotificationProvider, notificationFailureCode} from './modules/notifications/delivery-diagnostics.mjs';
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
-import {createLoginRateLimit,requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
+import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
+import {createPersistentLoginRateLimit} from './modules/identity-access/persistent-login-rate-limit.mjs';
 import {createOwnWorkPlanningRouter} from './modules/planning/own-work-planning-router.mjs';
 import {createAssignmentVersionRouter} from './modules/planning/assignment-version-router.mjs';
 import {setAssignmentVersionContext} from './modules/planning/assignment-version-context.mjs';
@@ -116,7 +121,11 @@ const {requireIdentity, requireAuth} = createIdentityAccessMiddleware({
   allowTestFallback: () => process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true',
 });
 
-const loginRateLimit = createLoginRateLimit({maxAttempts: runtimeEnvironment.loginRateLimit,
+const authenticationThrottlePool = new Pool({...databaseConnectionOptions({databaseUrl: runtimeEnvironment.databaseUrl,
+  sslMode: runtimeEnvironment.pgSslMode, sslRootCert: runtimeEnvironment.pgSslRootCert}),
+  max: 4, connectionTimeoutMillis: 1500, query_timeout: 3000, idleTimeoutMillis: 10000});
+authenticationThrottlePool.on('error', () => console.error('Authentication protection storage connection failed.'));
+const loginRateLimit = createPersistentLoginRateLimit({pool: authenticationThrottlePool, maxAttempts: runtimeEnvironment.loginRateLimit,
   maxIpAttempts: runtimeEnvironment.loginIpRateLimit});
 
 const requireRoles = (...roles) => (req, res, next) => {
@@ -272,12 +281,6 @@ const scryptHash = async (value) => {
 const getPasswordMinLength = () => {
   const configured = Number(process.env.PASSWORD_MIN_LENGTH || 6);
   return Number.isFinite(configured) && configured >= 6 ? configured : 6;
-};
-
-const getSessionTtlMs = () => {
-  const configuredHours = Number(process.env.API_SESSION_TTL_HOURS || 8);
-  const safeHours = Number.isFinite(configuredHours) && configuredHours > 0 ? configuredHours : 8;
-  return safeHours * 60 * 60 * 1000;
 };
 
 const getSessionCookieOptions = (expiresAt) => ({
@@ -904,7 +907,7 @@ const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null,
     select distinct group_id from entra_group_role_mappings
     where active = true and group_id = any($1::text[]) and role_name = any($2::text[])
     order by group_id`, [groups, systemRoles])).rows.map(row => row.group_id) : [];
-  const sessionExpiresAt = Date.now() + getSessionTtlMs();
+  const sessionExpiresAt = Date.now() + runtimeEnvironment.sessionTtlMs;
   const token = signToken({
     sid: crypto.randomUUID(),
     sub: user.id,
@@ -950,7 +953,7 @@ const recordNotificationAttempt = async (client, {
     insert into notification_delivery_attempts (notification_id, channel, provider, status, response_metadata)
     values ($1,$2,$3,$4,$5)
     returning *
-  `, [notificationId, channel, provider, status, JSON.stringify(responseMetadata)]);
+  `, [notificationId, channel, provider, status, JSON.stringify(safeNotificationMetadata(responseMetadata,status === 'Failed'))]);
   return result.rows[0];
 };
 
@@ -1096,7 +1099,7 @@ const sendNotification = async (client, req, {
     };
     const subject = renderNotificationText(template?.subject, title, context);
     const messageBody = renderNotificationText(template?.body, body, context);
-    const selectedProvider = provider || notificationProviderForChannel(deliveryChannel);
+    const selectedProvider = safeNotificationProvider(provider || notificationProviderForChannel(deliveryChannel));
     try {
       let metadata = { mode: selectedProvider, deterministic: true };
       if (deliveryChannel === 'Email' && selectedProvider === 'graph') {
@@ -1123,7 +1126,7 @@ const sendNotification = async (client, req, {
           entityType: entityType || 'NotificationEvent',
           entityId: entityId || event.id,
           status: 'Success',
-          responsePayload: metadata,
+          responsePayload: safeNotificationMetadata(metadata),
           organizationScope: req?.organizationScope,
         });
       }
@@ -1133,16 +1136,16 @@ const sendNotification = async (client, req, {
         channel: deliveryChannel,
         provider: selectedProvider,
         status: 'Failed',
-        responseMetadata: { error: error.message, deterministic: true },
+        responseMetadata: { errorCode: notificationFailureCode, deterministic: true },
       });
-      deliveryResults.push({ channel: deliveryChannel, provider: selectedProvider, status: 'Failed', error: error.message });
+      deliveryResults.push({ channel: deliveryChannel, provider: selectedProvider, status: 'Failed', errorCode: notificationFailureCode });
       await logIntegrationEvent(client, {
         provider: deliveryChannel === 'Teams' ? 'teams' : deliveryChannel === 'Email' ? 'email' : selectedProvider,
         eventType: `${deliveryChannel}NotificationFailed`,
         entityType: entityType || 'NotificationEvent',
         entityId: entityId || event.id,
         status: 'Failed',
-        responsePayload: { error: error.message },
+        responsePayload: { errorCode: notificationFailureCode },
         organizationScope: req?.organizationScope,
       });
     }
@@ -1338,7 +1341,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit.callback, as
   }
 });
 
-app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDatabase, async (req, res) => {
+app.post('/api/auth/login', requireLocalLoginEnabled, requireDatabase, loginRateLimit, async (req, res) => {
   const schema = z.object({
     username: z.string().min(1),
     password: z.string().min(1),
@@ -1387,7 +1390,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDat
       ? parsed.data.requestedRole
       : user.roles[0];
     const permissions = await getEffectivePermissionsForUser(pool, user.id, activeRole);
-    const sessionExpiresAt = Date.now() + getSessionTtlMs();
+    const sessionExpiresAt = Date.now() + runtimeEnvironment.sessionTtlMs;
     const token = signToken({
       sid: crypto.randomUUID(),
       sub: user.id,
@@ -3308,24 +3311,7 @@ app.use('/api', createAvailabilityReportRouter({
   buildEmployeeScopeWhere,
 }));
 
-const buildApprovalScopeWhere = (req, params) => {
-  if (isGlobalRole(req)) return 'true';
-  params.push(req.user.employeeRecordId);
-  const delegateParam = `$${params.length}`;
-  const delegatedScope = `exists (
-    select 1
-    from approval_delegations ad
-    where ad.delegate_id = ${delegateParam}
-      and ad.status = 'Active'
-      and current_date between ad.start_date and ad.end_date
-      and (e.id = ad.delegator_id or e.reporting_manager_id = ad.delegator_id)
-  )`;
-  if (req.user.activeRole === 'TeamLead') {
-    params.push(req.user.employeeRecordId, req.user.employeeId);
-    return `((e.id = $${params.length - 1} or e.employee_id = $${params.length} or e.reporting_manager_id = $${params.length - 1}) or ${delegatedScope})`;
-  }
-  return `(${buildEmployeeScopeWhere(req, params, 'e')} or ${delegatedScope})`;
-};
+const buildApprovalScopeWhere = (req, params) => legacyApprovalScope(req, params, {isGlobalRole, buildEmployeeScopeWhere});
 
 const approvalSelect = `
   select ar.*, e.name as subject_employee_name
@@ -3404,6 +3390,12 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
         res.status(422).json({ error: 'Linked timesheet is not submitted' });
         return;
       }
+      if (previous.employee_id !== approval.subject_employee_id) { await client.query('rollback'); res.status(409).json({error:'Approval does not match the timesheet worker'}); return; }
+      const decisionParams = [previous.employee_id];
+      const decisionScope = legacyApprovalScope(req, decisionParams, {isGlobalRole, buildEmployeeScopeWhere, timesheetId:previous.id});
+      if (!(await client.query(`select e.id from employees e where e.id=$1 and ${decisionScope}`, decisionParams)).rowCount) {
+        await client.query('rollback'); res.status(403).json({error:'Current timesheet decision authority is unavailable'}); return;
+      }
       await assertReportingPeriodAllows(client, {
         organizationId: previous.organization_id,
         legalEntityId: previous.legal_entity_id,
@@ -3481,117 +3473,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
   }
 });
 
-app.get('/api/approval-delegations', requireDatabase, requireAuth, requirePermission('approvals.view'), async (req, res) => {
-  const params = [];
-  let where = 'true';
-  if (!isGlobalRole(req)) {
-    params.push(req.user.employeeRecordId);
-    where = '(ad.delegator_id = $1 or ad.delegate_id = $1)';
-  }
-  await run(res, `
-    select ad.*, delegator.name as delegator_name, delegate.name as delegate_name
-    from approval_delegations ad
-    left join employees delegator on delegator.id = ad.delegator_id
-    left join employees delegate on delegate.id = ad.delegate_id
-    where ${where}
-    order by ad.status desc, ad.start_date desc
-  `, params);
-});
-
-app.post('/api/approval-delegations', requireDatabase, requireAuth, requirePermission('approvals.view'), async (req, res) => {
-  const schema = z.object({
-    id: z.string().optional(),
-    delegator_id: z.string().min(1),
-    delegate_id: z.string().min(1),
-    role: z.string().min(1),
-    start_date: z.string().min(10),
-    end_date: z.string().min(10),
-    status: z.enum(['Active', 'Inactive']).default('Active'),
-    reason: z.string().nullable().optional(),
-  });
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
-    return;
-  }
-  if (parsed.data.end_date < parsed.data.start_date) {
-    res.status(422).json({ error: 'Delegation end date must be on or after start date' });
-    return;
-  }
-  if (parsed.data.delegator_id === parsed.data.delegate_id) {
-    res.status(422).json({ error: 'Delegator and delegate must be different employees' });
-    return;
-  }
-  if (!isGlobalRole(req) && parsed.data.delegator_id !== req.user.employeeRecordId) {
-    res.status(403).json({ error: 'Users can create delegations only for themselves' });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('begin');
-    const people = (await client.query(`
-      select id, status
-      from employees
-      where id in ($1, $2)
-    `, [parsed.data.delegator_id, parsed.data.delegate_id])).rows;
-    const delegator = people.find(row => row.id === parsed.data.delegator_id);
-    const delegate = people.find(row => row.id === parsed.data.delegate_id);
-    if (!delegator || !delegate || delegator.status === 'Exited' || delegate.status === 'Exited') {
-      await client.query('rollback');
-      res.status(422).json({ error: 'Delegation requires active delegator and delegate employees' });
-      return;
-    }
-    const overlapping = (await client.query(`
-      select id
-      from approval_delegations
-      where id <> coalesce($1, '')
-        and delegator_id = $2
-        and delegate_id = $3
-        and status = 'Active'
-        and start_date <= $5::date
-        and end_date >= $4::date
-      limit 1
-    `, [parsed.data.id || null, parsed.data.delegator_id, parsed.data.delegate_id, parsed.data.start_date, parsed.data.end_date])).rows[0];
-    if (overlapping && parsed.data.status === 'Active') {
-      await client.query('rollback');
-      res.status(422).json({ error: 'An active approval delegation already overlaps this date range' });
-      return;
-    }
-    const previous = parsed.data.id ? (await client.query('select * from approval_delegations where id = $1', [parsed.data.id])).rows[0] : null;
-    const result = await client.query(`
-      insert into approval_delegations (id, delegator_id, delegate_id, role, start_date, end_date, status, reason)
-      values (coalesce($1, 'approval-delegation-' || gen_random_uuid()::text), $2, $3, $4, $5, $6, $7, $8)
-      on conflict (id) do update set
-        delegator_id = excluded.delegator_id,
-        delegate_id = excluded.delegate_id,
-        role = excluded.role,
-        start_date = excluded.start_date,
-        end_date = excluded.end_date,
-        status = excluded.status,
-        reason = excluded.reason,
-        updated_at = now()
-      returning *
-    `, [parsed.data.id || null, parsed.data.delegator_id, parsed.data.delegate_id, parsed.data.role, parsed.data.start_date, parsed.data.end_date, parsed.data.status, parsed.data.reason || null]);
-    await audit(client, req, {
-      module: 'Approvals',
-      action: previous ? 'Update Approval Delegation' : 'Create Approval Delegation',
-      entityType: 'ApprovalDelegation',
-      entityId: result.rows[0].id,
-      oldValue: previous,
-      newValue: result.rows[0],
-      details: `${previous ? 'Updated' : 'Created'} approval delegation ${result.rows[0].id}`,
-      reason: parsed.data.reason,
-    });
-    await client.query('commit');
-    res.json(result.rows[0]);
-  } catch (error) {
-    await client.query('rollback');
-    console.error(error);
-    res.status(500).json({ error: 'Approval delegation save failed' });
-  } finally {
-    client.release();
-  }
-});
+registerLegacyDelegationRoutes({app, pool, run, requireDatabase, requireAuth, requirePermission, isGlobalRole, audit});
 
 app.get('/api/reports/approval-sla', requireDatabase, requireAuth, requirePermission('approvals.view'), async (req, res) => {
   const params = [];

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {readFile} from 'node:fs/promises';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {withCommercialDatabase,migrateCommercialDatabase,withCommercialApi,commercialFixture as f} from './support/commercial-drafting-test.mjs';
 import {seedCapacity} from './support/worker-capacity-test.mjs';
@@ -28,10 +28,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    return rows;
   };
   const before=await sourceSnapshot();
-  const vite=await createServer({root,mode:'production',logLevel:'error',server:{host:'127.0.0.1',port:0,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['timesheet-export'], apiUrl, modules: {csv: 'src/lib/csv.ts'}});
   let browser;
   try {
-   await vite.listen();
    browser=await chromium.launch({headless:true});
    const context=await browser.newContext({acceptDownloads:true});
    await context.addInitScript(({identity,token,scope,permissions})=>{
@@ -40,7 +39,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));
    },{identity:identities.manager,token:tokenFor(identities.manager),scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},permissions:workPermissions});
    const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
-   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/tests/fixtures/timesheet-export.html`,{waitUntil:'domcontentloaded',timeout:60000});
+   await page.goto(`${fixtureServer.url}/tests/fixtures/timesheet-export.html`,{waitUntil:'domcontentloaded',timeout:60000});
    await page.locator('tbody tr').filter({hasText:today}).waitFor();
    await page.locator('select').first().selectOption(today);
    const download=page.waitForEvent('download');
@@ -68,12 +67,12 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    assert.deepEqual(audits.map(row=>row.details),['Exported 0 timesheet approval rows from current filter scope','Exported 2 timesheet approval rows from current filter scope']);
    assert.deepEqual(await sourceSnapshot(),before,'Export encoding must not modify stored work or approval evidence');
    const sharedDownload=page.waitForEvent('download');
-   await page.evaluate(async()=>{const {downloadCsv}=await import('/src/lib/csv.ts');downloadCsv('synthetic-shared-export.csv',[{'\t=1+1':'\ufeff＝1+1',normal:'comma, "quote"\nnext'}]);});
+   await page.evaluate(async()=>{const {downloadCsv}=await import('/tests/fixtures/csv.js');downloadCsv('synthetic-shared-export.csv',[{'\t=1+1':'\ufeff＝1+1',normal:'comma, "quote"\nnext'}]);});
    const shared=await sharedDownload;
    assert.equal(shared.suggestedFilename(),'synthetic-shared-export.csv');
    assert.deepEqual(parseCsv(await readFile(await shared.path(),'utf8')),[["'\t=1+1",'normal'],["'\ufeff＝1+1",'comma, "quote"\nnext']]);
    assert.deepEqual(errors,[]);
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });
 console.log('Timesheet Ops Export real browser/API/SQL: literal formula prefix, normal CSV quoting, filename and audit passed.');

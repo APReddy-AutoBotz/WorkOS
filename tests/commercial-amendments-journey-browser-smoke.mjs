@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,
   seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentPermissions,amendmentScope,amendmentMarker,amendmentSnapshot,amendmentCounts,amendmentToday,addUtcDays,
@@ -24,11 +24,10 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const today=await amendmentToday(pool),future=addUtcDays(today,30);
     const v2=await seedApplicableAmendmentVersion(pool,identities.manager,roots.contract,today);
     const immutableBefore=await amendmentSnapshot(pool);const projectsBefore=await amendmentSnapshot(pool,['projects']);
-    const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,
-      proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});
+    const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['commercial-amendments'], apiUrl});
     let browser;
     try{
-      await vite.listen();const address=vite.httpServer.address();assert(address&&typeof address!=='string');const baseUrl=`http://127.0.0.1:${address.port}`;
+      const baseUrl=fixtureServer.url;
       browser=await chromium.launch({headless:true,...(process.env.WORKOS_CHROMIUM_PATH?{executablePath:process.env.WORKOS_CHROMIUM_PATH}:{})});
       const errors=[],external=[],writes=[],reads=[];
       const createContext=async(identity,permissions)=>{
@@ -162,6 +161,6 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       assert(reads.every(read=>read.path.startsWith(amendmentPrefix)||read.path===`${prefix}/lifecycle/workspace`));
       assert.deepEqual(errors,[]);assert.deepEqual(external,[]);await reader.context.close();await denied.context.close();await manager.context.close();
       console.log('Commercial amendments real React/API/PostgreSQL journey passed: exact preview confirmation, explicit parent-to-child adoption, no cascade, lifecycle-stale conflict/reload, On Hold preservation, pending/current distinction, immutable activation/history, escaped private evidence, scope/token/permission invalidation and read-only/denied privacy.');
-    }finally{try{if(browser)await browser.close();}finally{await vite.close();}}
+    }finally{try{if(browser)await browser.close();}finally{await fixtureServer.close();}}
   });
 });

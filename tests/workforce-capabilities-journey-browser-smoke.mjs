@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {workSnapshot} from './support/work-assignment-test.mjs';
@@ -13,9 +13,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  identities.reader.employeeRecordId=f.ownerId;identities.reader.employeeId='SYNTHETIC-COMMERCIAL-LOCAL';await pool.query('update users set employee_record_id=$1,employee_id=$2 where id=$3',[f.ownerId,identities.reader.employeeId,identities.reader.id]);
  const before=await workSnapshot(pool),profiles=async()=>(await pool.query('select * from workforce_capability_versions order by sequence,id')).rows;
  await withCommercialApi({databaseUrl,identities},async({baseUrl:apiUrl,tokenFor,request})=>{
-  const vite=await createServer({root,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});let browser;
+  const fixtureServer = await startFixtureServer({root, fixtures: ['workforce-capabilities'], apiUrl});let browser;
   try{
-   await vite.listen();const baseUrl=`http://127.0.0.1:${vite.httpServer.address().port}`;browser=await chromium.launch({headless:true});const errors=[],external=[];
+   const baseUrl=fixtureServer.url;browser=await chromium.launch({headless:true});const errors=[],external=[];
    const contextFor=async(identity,permissions)=>{const c=await browser.newContext({viewport:{width:1400,height:1100},timezoneId:'Pacific/Kiritimati'});await c.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session:{id:identity.employeeRecordId??identity.id,employeeId:identity.employeeId??identity.id,name:'Synthetic capability operator',role:identity.role,permissionRole:identity.role,permissions},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(identity)});return c;};
    const hc=await contextFor(identities.manager,editorPermissions),ec=await contextFor(identities.reader,['employees.view']),page=await hc.newPage(),stale=await hc.newPage(),employee=await ec.newPage();
    for(const p of [page,stale,employee]){p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));p.on('request',r=>{if(/^https?:/.test(r.url())&&new URL(r.url()).origin!==baseUrl)external.push(r.url());});}
@@ -37,7 +37,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     await blocker.query('begin');open=true;await blocker.query('select 1 from employees where id=$1 for update',[f.ownerId]);await page.getByLabel('Availability note',{exact:true}).fill('Synthetic late note');await page.getByLabel('Change reason',{exact:true}).fill('Synthetic late scope save');const sent=page.waitForRequest(r=>new URL(r.url()).pathname===prefix+'/'+f.ownerId&&r.method()==='POST'),reply=page.waitForResponse(r=>new URL(r.url()).pathname===prefix+'/'+f.ownerId&&r.request().method()==='POST');await page.getByRole('button',{name:'Record capability version',exact:true}).click();await sent;await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));await page.getByText('Access or scope changed. Load capabilities again.',{exact:true}).waitFor();await blocker.query('commit');open=false;assert.equal((await reply).status(),201);assert.equal(await page.getByText('Synthetic late note',{exact:true}).count(),0);assert.equal(await page.getByRole('article',{name:'Capability version 1',exact:true}).count(),0);assert.equal(await planner.getByRole('article').count(),0);
    }finally{if(open)await blocker.query('rollback');blocker.release();}
    assert.deepEqual(await workSnapshot(pool),before);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);await hc.close();await ec.close();
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });
 console.log('Workforce capabilities real HR editor/Employee self-read React/API/PostgreSQL save/reload/clear/immutable history, stale edits, exact certification validity/no-expiry matching, planner pagination and late-owner suppression passed.');

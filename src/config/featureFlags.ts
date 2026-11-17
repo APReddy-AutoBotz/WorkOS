@@ -1,4 +1,4 @@
-const frontendEnv = ((import.meta as unknown as { env?: Record<string, string | undefined> }).env || {});
+import {frontendEnv} from './frontendEnvironment';
 
 export type EnterpriseFeatureFlag = 'leave' | 'notifications' | 'teams' | 'entra' | 'planning';
 

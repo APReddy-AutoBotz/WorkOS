@@ -4,6 +4,14 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. Auditing lifetime changes across deployments remains open.
+
+The November 18 review verified current-session logout and absolute expiry against the merged application. The remaining WOS-IAM-008 work is to record session lifetime changes with actor, timestamp, and old and new values. Administrative revoke-all needs separate authorization tests. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
+
+Twenty-one React-to-PostgreSQL browser journeys now compile their fixture pages in memory and forward API traffic to each journey’s disposable database-backed server. Session logout, independent leave decisions, timesheet ownership and export, and the import/audit harness use the same compiler. The fourteen browser interaction suites have a dedicated fixture server.
+
+The frontend toolchain migration replaces Vite in the production build, preview server, browser fixtures and development server. Browser coverage includes branding, styles, API proxying and preserving unsaved login input on a page edit. The release workflow checks lockfile installation, the full dependency audit and container startup. The shared login throttling checks exercise replica budgets, persistence and database failure. [Frontend toolchain](https://github.com/APReddy-AutoBotz/WorkOS/pull/176) and [Login throttling](https://github.com/APReddy-AutoBotz/WorkOS/pull/173)
+
 | Priority | Outcome | Evidence required to advance |
 |---|---|---|
 | 1 | Integrate the verified foundation and security corrections | Inventory exact PR heads/dependencies/reviews; inspect actual diffs; resolve blocking findings; verify applicable CI and database/browser negatives; expected-head merge; main checks |
@@ -95,8 +103,39 @@ This revision adds [independent leave decisions](../tasks/WOS-05-INDEPENDENT-LEA
 
 The next bounded package is [operational CSV literal-text safety](../tasks/WOS-07-OPERATIONAL-CSV-SAFETY.md), covering the shared exporter and Timesheet Approval Ops Export. This safely precedes the invoice-action source correction, whose commercial modules are absent from current main. Preserve existing scope, filters, audit and source records; no dependency or migration changes. Fresh local acceptance, independent exact-head review and hosted gates are required before merge. Other delegation domains, commercial source authorization, diagnostic disclosure, persistent throttling and buyer/release evidence remain open.
 
+### Shared login throttling
+
+Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in the buyer database. API replicas share the per-IP and per-input limits, including the Entra callback limit. Apply migrations before switching traffic, drain old API processes, and configure identical limits and trusted proxy settings on all replicas. Counters start empty on first upgrade. Storage failure returns HTTP 503 before authentication. Reverting to the previous application restores process-local counters and its readiness check rejects the newer migration ledger. Prefer forward correction and retain the migration.
+
+
+## Operational CSV safety accepted; notification diagnostics next — 2026-11-17
+
+[PR169](https://github.com/APReddy-AutoBotz/WorkOS/pull/169) merged at `88262c87a260529c00a680b22d2f021ff7d8cba4`. Candidate `907f02bb897adb4ad962d62d09647b4c67b776c7` passed all 83 steps in [CI43856156210](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43856156210); [main CI43857837218](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43857837218) also passed all 83 with no skips or failures. Independent exact-head review covered all 18 paths with no findings. Shared and Timesheet Approval exports now use consistent literal-text cell encoding; spreadsheet interoperability limitations remain documented.
+
+The next bounded security package is [scoped and sanitized notification diagnostics](../tasks/WOS-05-NOTIFICATION-DIAGNOSTIC-BOUNDARY.md). It restricts delivery attempts to current recipient organization/entity and worker visibility before the result limit, excludes orphan ownership, and sanitizes provider metadata in new writes and historical attempt/integration/audit readers. Preserve delivery outcome, legitimate operational fields and immutable history. Fresh local, browser, independent exact-head and hosted checks remain mandatory before merge. Commercial-source authorization prerequisites, other delegation domains, persistent throttling and buyer/release evidence remain open.
+
+## PR170 acceptance blocked by upstream dependency advisory — 2026-11-17
+
+Notification diagnostics runtime candidate `5ddb26a15970e34af1e2dbdb198ce21397d5ad9c` passed local typecheck, lint (266 modules), full aggregate, real PostgreSQL/API and NotificationCenter browser checks, 56 migration entries, production build/signed-identity/startup and bootstrap/adversarial scans. Independent immutable-head review `7484bf28-df01-47c9-bfe2-facc801e28d2` covered all 23 paths with zero findings.
+
+[PR170 CI44132858216](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/44132858216) passed all preceding application/API/browser/production-identity/migration steps, then failed the full dependency audit. `GHSA-fc5q-39xc-vjpf` flags repeated-extglob ReDoS in picomatch through the latest published version 4.0.7, propagating through fdir/tinyglobby/Vite. The subsequent Compose/container checks were skipped, so this run is not acceptance. The full-history secret scan passed. A fresh production-only audit reported zero vulnerabilities; that does not waive the full audit gate.
+
+The frontend toolchain correction merged in PR #176. The notification diagnostics journey now runs on the same compiled fixture server as the other database-backed browser checks.
+
+## Legacy approval/delegation security integration - 2026-11-17
+
+Accepted baseline: PR169 CSV safety merged at `88262c87a260529c00a680b22d2f021ff7d8cba4`; candidate CI43856156210 and main CI43857837218 passed all 83 steps. Earlier next-package references above are historical.
+
+[PR170](https://github.com/APReddy-AutoBotz/WorkOS/pull/170) remains unmerged at documentation head `471234b12ee700657aec80a658195f887ccb3a06`: runtime candidate `5ddb26a15970e34af1e2dbdb198ce21397d5ad9c` passed local checks and a 23-path independent review, but CI44132858216 failed the full dependency audit on unpatched picomatch. Eighty steps passed, one failed and four were skipped. The suggested Vite downgrade was evaluated and rejected because it introduces other high-severity vulnerabilities. No audit waiver or production deployment occurred.
+
+This independent revision implements [legacy approval/delegation ownership and selected-entity scope](../tasks/WOS-05-LEGACY-APPROVAL-SCOPE.md) on accepted main. Actual baseline API execution reproduced recipient ownership takeover and cross-entity approval disclosure; the corrected API and real browser regressions pass. New bounded modules preserve original-owner/scoped-administrator editing, revocation after lifecycle changes, On Leave compatibility and immutable audit evidence. Complete local/hosted gates and exact-head independent review remain required. The shared dependency audit blocker remains open; commercial source integration, remaining security reconciliation, persistent throttling and buyer/release evidence are separate work.
+
+PR #170 merged after 88 passing post-merge checks. The legacy approval browser journey now uses the compiled fixture server and the release workflow includes its two PostgreSQL authorization suites. [Notification main verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/44199853159)
+
 ## Settings persistence outcomes integration - 2026-11-17
 
 Accepted main remains PR169 merge `88262c87a260529c00a680b22d2f021ff7d8cba4`, with candidate/main CI both passing 83 steps. PR170 notification diagnostics and PR171 legacy delegation are independent drafts. PR171 runtime `16d9694fe6fb91d66161700d989b80c85b6d2edd` passed local functional/production checks and a 21-path independent security review with no reportable findings; hosted CI44139919944 completed with 81 passed, one failed dependency-audit step and four skipped steps (Compose, container build/startup and Node post-step). The shared full dependency audit flags four high entries in the unpatched picomatch chain. No waiver, unsafe downgrade, merge or production deployment is claimed for those drafts.
 
 The next independent package is [settings persistence outcomes](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md). Baseline browser execution reproduced false success before server acknowledgement and missing failed-load recovery. Scope is truthful save status, retained edits, duplicate prevention, newer-edit distinction, unmount suppression and load retry. Current validation remains required before publication/acceptance. Commercial source authorization, remaining security reconciliation, persistent throttling and buyer/release evidence remain separate.
+
+The settings recovery journey uses the compiled fixture server with the real PostgreSQL-backed API. CI checks acknowledged saves, failed loads and uncertain outcomes.

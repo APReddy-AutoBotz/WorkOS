@@ -192,8 +192,8 @@ try {
   assert.deepEqual(legacyRows[0].request_payload, {reason: 'No linked identity matched'},
     'the deployment view must apply shared recursive identity-field redaction');
   assert.deepEqual(legacyRows[0].response_payload, {status: 'Rejected'});
-  assert.deepEqual(legacyRows[1].response_payload, {statusCode: 202, activityType: 'systemDefault'},
-    'Teams delivery history must retain operational status while removing the provider user ID or UPN');
+  assert.deepEqual(legacyRows[1].response_payload, {statusCode: 202},
+    'Teams delivery history must retain allowlisted status while removing provider-specific metadata and identities');
   assert.deepEqual(legacyRows[2].response_payload, {},
     'bearer URLs must be redacted from deployment integration events');
   assert(!JSON.stringify(legacyRows).includes('provider-subject-private'));

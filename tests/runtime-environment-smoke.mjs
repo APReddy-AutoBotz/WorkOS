@@ -25,6 +25,12 @@ const productionEnvironment = {
 const validated = validateRuntimeEnvironment(productionEnvironment);
 assert.equal(validated.production, true);
 assert.equal(validated.port, 4000);
+assert.equal(validated.sessionTtlMs, 8 * 3_600_000);
+assert.equal(validateRuntimeEnvironment({...productionEnvironment, API_SESSION_TTL_HOURS: '0.25'}).sessionTtlMs, 900_000);
+for (const invalid of ['mistyped', '-1', '0', '1e-30', '3e9', 'Infinity']) {
+  assert.throws(() => validateRuntimeEnvironment({...productionEnvironment, API_SESSION_TTL_HOURS: invalid}),
+    /Invalid API_SESSION_TTL_HOURS/);
+}
 assert.equal(validated.databaseUrl, productionEnvironment.DATABASE_URL);
 assert.equal(validated.pgSslMode, 'require');
 
