@@ -4,6 +4,10 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+Twenty-one React-to-PostgreSQL browser journeys now compile their fixture pages in memory and forward API traffic to each journey’s disposable database-backed server. Session logout, independent leave decisions, timesheet ownership and export, and the import/audit harness use the same compiler. The fourteen browser interaction suites have a dedicated fixture server.
+
+The frontend toolchain migration replaces Vite in the production build, preview server, browser fixtures and development server. Browser coverage includes branding, styles, API proxying and preserving unsaved login input on a page edit. PR #176 requires a clean install and passing hosted checks including the full dependency audit. PR #173 adds persistent login throttling and requires passing migration, security and release checks after integration.
+
 | Priority | Outcome | Evidence required to advance |
 |---|---|---|
 | 1 | Integrate the verified foundation and security corrections | Inventory exact PR heads/dependencies/reviews; inspect actual diffs; resolve blocking findings; verify applicable CI and database/browser negatives; expected-head merge; main checks |

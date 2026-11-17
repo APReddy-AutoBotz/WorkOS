@@ -154,6 +154,12 @@ jobs:
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
+      - name: Verify the compiled production login page
+        run: node tests/production-frontend-browser.mjs
+
+      - name: Verify the development login page and state-preserving refresh
+        run: node tests/development-frontend-browser.mjs
+
       - name: Verify operational timesheet CSV safety
         run: npm run test:timesheet-export-browser
 
@@ -226,9 +232,9 @@ jobs:
           VITE_TERM_EMPLOYEE: employee
         run: |
           set -euo pipefail
-          npm run dev -- --host 127.0.0.1 --port 4177 > /tmp/workos-browser-vite.log 2>&1 &
-          VITE_PID=$!
-          trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT
+          node tests/support/serve-browser-fixtures.mjs &
+          FIXTURE_PID=$!
+          trap 'kill "$FIXTURE_PID" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 40); do
             if curl --fail --silent http://127.0.0.1:4177/tests/fixtures/import-history-panel.html > /dev/null; then
               break

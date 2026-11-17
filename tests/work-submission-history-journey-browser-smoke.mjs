@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentToday,addUtcDays} from './support/commercial-amendments-test.mjs';
@@ -17,9 +17,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    if(sequence<12)assert.equal((await request(`/api/timesheets/${header}/status`,{method:'PATCH',body:{status:'Rejected',reason:sequence===1?'Synthetic original correction reason':`Synthetic correction ${sequence}`}})).status,200);
   }
   assert.equal((await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly','daily']}})).status,201);
-  const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});let browser;
+  const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['work-submission-history'], apiUrl});let browser;
   try{
-   await vite.listen();const baseUrl=`http://127.0.0.1:${vite.httpServer.address().port}`;browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1500,height:1100},timezoneId:'Pacific/Kiritimati'});await context.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session:{id:f.ownerId,employeeId:f.ownerId,name:'Synthetic history operator',role:'Admin',permissionRole:'Admin',permissions:workPermissions},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(identities.manager)});
+   const baseUrl=fixtureServer.url;browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1500,height:1100},timezoneId:'Pacific/Kiritimati'});await context.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session:{id:f.ownerId,employeeId:f.ownerId,name:'Synthetic history operator',role:'Admin',permissionRole:'Admin',permissions:workPermissions},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(identities.manager)});
    const errors=[],external=[],page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(/^https?:/.test(r.url())&&new URL(r.url()).origin!==baseUrl)external.push(r.url());});
    const panel=()=>page.getByRole('region',{name:'Retained work history',exact:true});const ready=()=>page.waitForFunction(()=>{const select=document.querySelector('select[aria-label="Capture mode"]');return select&&!select.disabled;});
    const past=async()=>{await page.goto(`${baseUrl}/tests/fixtures/work-submission-history.html`);await ready();await page.getByRole('button',{name:'Previous week',exact:true}).click();await ready();await panel().waitFor();};
@@ -40,7 +40,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const response=page.waitForResponse(r=>new URL(r.url()).pathname===`/api/v1/timesheets/${header}/submissions`);release();await response;assert.equal(await page.getByRole('article',{name:'Retained submission 12',exact:true}).count(),0);if(invalidate==='header'){await past();await load();}
    }
    assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.equal(await page.evaluate(()=>window.syntheticHistoryExecuted),undefined);await context.close();
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });
 console.log('Retained history real React/API/PostgreSQL worker/approver corrections, immutable approval, bounded older/latest pages, legacy empty, retry, keyboard/narrow text/link rendering and in-flight header/scope invalidation passed.');

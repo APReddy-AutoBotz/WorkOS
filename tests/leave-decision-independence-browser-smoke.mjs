@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {withCommercialDatabase,migrateCommercialDatabase,withCommercialApi,seedCommercialReferences,seedCommercialIdentities,commercialFixture as f} from './support/commercial-drafting-test.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
@@ -16,10 +16,10 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const created=await request('/api/leave/requests',{identity:hr,method:'POST',body:{employee_id:hr.employeeRecordId,leave_type_id:'leave-type-unpaid',start_date:today,end_date:today,reason:'Synthetic browser independence'}});
     assert.equal(created.status,200,JSON.stringify(created.body));
     const path=`/api/leave/requests/${created.body.id}/status`;
-    const vite=await createServer({root,mode:'production',logLevel:'error',server:{host:'127.0.0.1',port:0,hmr:false,proxy:{'/api':{target:baseUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false'),'import.meta.env.VITE_FEATURE_LEAVE':JSON.stringify('true')}});
+    const fixtureServer = await startFixtureServer({root, fixtures: ['independent-leave'], apiUrl: baseUrl, publicEnv: {VITE_FEATURE_LEAVE: 'true'}});
     let browser;
     try{
-      await vite.listen();const origin=`http://127.0.0.1:${vite.httpServer.address().port}`;
+      const origin=fixtureServer.url;
       browser=await chromium.launch({headless:true});
       const pageFor=async identity=>{
         const current=await request('/api/auth/me',{identity});assert.equal(current.status,200);
@@ -43,6 +43,6 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       await reviewer.getByText('Approved',{exact:true}).waitFor();
       assert.equal((await pool.query('select status from leave_requests where id=$1',[created.body.id])).rows[0].status,'Approved');
       console.log('Real team leave UI passed: owner receives explicit denial, source stays Submitted, independent reviewer approves.');
-    }finally{await browser?.close();await vite.close();}
+    }finally{await browser?.close();await fixtureServer.close();}
   });
 });

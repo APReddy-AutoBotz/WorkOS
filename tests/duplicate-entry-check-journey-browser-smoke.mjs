@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentToday,addUtcDays} from './support/commercial-amendments-test.mjs';
@@ -22,9 +22,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  const entries=async()=>(await pool.query('select category,work_date::text,hours::text,evidence_url,work_reference from timesheet_entries where timesheet_id=$1 order by category,work_date,work_reference',[header])).rows;
  await withCommercialApi({databaseUrl,identities},async({baseUrl:apiUrl,tokenFor,request})=>{
   const enabled=await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly','daily']}});assert.equal(enabled.status,201);
-  const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});let browser;
+  const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['duplicate-entry-check'], apiUrl});let browser;
   try{
-   await vite.listen();const baseUrl=`http://127.0.0.1:${vite.httpServer.address().port}`;browser=await chromium.launch({headless:true});const errors=[],external=[];
+   const baseUrl=fixtureServer.url;browser=await chromium.launch({headless:true});const errors=[],external=[];
    const contextFor=async identity=>{const context=await browser.newContext({viewport:{width:1800,height:1200},timezoneId:'Pacific/Kiritimati'});await context.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session:{id:identity===identities.manager?f.ownerId:identity.id,employeeId:identity===identities.manager?f.ownerId:identity.id,name:'Synthetic duplicate operator',role:'Admin',permissionRole:'Admin',permissions:workPermissions},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(identity)});return context;};
    const watch=page=>{page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(/^https?:/.test(r.url())&&new URL(r.url()).origin!==baseUrl)external.push(r.url());});};
    const context=await contextFor(identities.manager),page=await context.newPage();watch(page);
@@ -46,7 +46,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    const approve=review.waitForResponse(r=>new URL(r.url()).pathname===`/api/timesheets/${header}/status`&&r.request().method()==='PATCH');await review.getByRole('button',{name:'Approve',exact:true}).click();assert.equal((await approve).status(),200);assert.equal((await pool.query('select status from timesheets where id=$1',[header])).rows[0].status,'Approved');assert.equal((await pool.query('select total_hours::text from timesheets where id=$1',[header])).rows[0].total_hours,'0.75');
    await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));await page.getByText('Access or scope changed. Reload work explicitly for the selected legal entity.',{exact:true}).waitFor();assert.equal(await warning(page).count(),0);assert.equal(await page.getByText('At submission, 1 identical-entry group was recorded by the within-header content check.',{exact:true}).count(),0);
    assert.equal(await page.evaluate(()=>window.syntheticDuplicateExecuted),undefined);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);await reviewContext.close();await context.close();
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });
 console.log('Identical-entry real React/API/PostgreSQL worker/approver advisory, reload/edit/mode preservation, stale writes, owner invalidation, retained check and unchanged approval/totals passed.');

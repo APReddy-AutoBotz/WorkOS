@@ -355,7 +355,7 @@ assert.match(server, /buildTeamsActionUrl/, 'Teams action tokens must expose por
 assert.match(server, /app\.get\('\/api\/integrations\/health'/, 'integration health route must exist');
 assert.match(server, /credentialChecks/, 'integration health must expose non-secret credential readiness checks');
 assert.match(server, /ENTRA_REDIRECT_URI/, 'integration readiness must account for Entra redirect URI');
-assert.match(readFileSync('vite.config.ts', 'utf8'), /proxy[\s\S]*'\/api'[\s\S]*API_PORT/, 'Vite dev server must proxy /api to the local API for SSO callback testing');
+assert.match(readFileSync('scripts/dev-frontend.mjs', 'utf8'), /env\.API_PORT[\s\S]*createFrontendApp\(values.host, 'http:\/\/localhost:' \+ apiPort\)/, 'development must use the shared API proxy with the configured local API port');
 assert.match(integrationMigration, /create table if not exists identity_provider_links/, 'integration migration must create identity provider links');
 assert.match(integrationMigration, /create table if not exists teams_action_tokens/, 'integration migration must create Teams action tokens');
 assert.match(integrationMigration, /action text not null check \(action in \('approve', 'reject', 'open_portal'\)\)/, 'Teams action tokens must be deterministic action-only');
