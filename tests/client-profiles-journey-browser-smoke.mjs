@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {
   withClientProfilesJourney, clientProfilePrefix as prefix, clientProfileFixture as f,
   clientProfileDate as day, clientProfileInput, clientProfileTables, preservedClientTables,
@@ -30,13 +30,10 @@ await withClientProfilesJourney(async ({pool, baseUrl: apiUrl, request: apiReque
   const engagement = await command('/engagements', {code: 'SYN-CLIENT-PIN-ENGAGEMENT', name: 'Synthetic preserved browser delivery', model: 'fixed_fee', ownerId,
     startsOn: '2020-01-01', endsOn: '2099-12-31', currency: 'USD', budget: '10000.0001', clientId, contractId: contract.id, contractVersionId: pinned, attributionId: null, reason: 'Synthetic fixture engagement setup'});
   const preserved = await snapshot(pool, preservedClientTables);
-  const vite = await createServer({root, mode: 'production', clearScreen: false, logLevel: 'error',
-    server: {host: '127.0.0.1', port: 0, strictPort: false, hmr: false, proxy: {'/api': {target: apiUrl, changeOrigin: true}}},
-    define: {'import.meta.env.VITE_APP_MODE': JSON.stringify('production'), 'import.meta.env.VITE_ALLOW_TEST_FALLBACK': JSON.stringify('false')}});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['client-profiles'], application: true, apiUrl});
   let browser;
   try {
-    await vite.listen();const address = vite.httpServer.address();assert.ok(address && typeof address !== 'string');
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const baseUrl = fixtureServer.url;
     browser = await chromium.launch({headless: true, ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {})});
     const errors = [], external = [], writes = [], protectedReads = [];
     const createContext = async (identity, permissions) => {
@@ -151,5 +148,5 @@ await withClientProfilesJourney(async ({pool, baseUrl: apiUrl, request: apiReque
     assert.deepEqual(errors, []);assert.deepEqual(external, []);
     await denied.context.close();await reader.context.close();await manager.context.close();
     console.log('Client profiles real /client-profiles React -> API -> PostgreSQL journey passed: explicit incomplete legacy state, legal/display/contact profiles, hierarchy, current/future immutable snapshots, both billing-unit kinds, null clearing, exact commands and scoped headers, stale concurrency rollback, reload persistence, pin/work preservation, protected audit, reader/no-access and safe text rendering.');
-  } finally {try {if (browser) await browser.close();} finally {await vite.close();}}
+  } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
 });

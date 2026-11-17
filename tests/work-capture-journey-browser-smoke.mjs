@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {commercialFixture as f, withCommercialDatabase, migrateCommercialDatabase, seedCommercialReferences,
   seedCommercialLegacyWork, seedCommercialIdentities, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentToday, addUtcDays} from './support/commercial-amendments-test.mjs';
@@ -30,12 +30,10 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
   await withCommercialApi({databaseUrl, identities}, async ({baseUrl: apiUrl, tokenFor, request}) => {
     const modeEnablement=await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly']}});
     assert.equal(modeEnablement.status,201,JSON.stringify(modeEnablement.body));
-    const vite = await createServer({root: rootDir, mode: 'production', clearScreen: false, logLevel: 'error',
-      server: {host: '127.0.0.1', port: 0, strictPort: false, hmr: false, proxy: {'/api': {target: apiUrl, changeOrigin: true}}},
-      define: {'import.meta.env.VITE_APP_MODE': JSON.stringify('production'), 'import.meta.env.VITE_ALLOW_TEST_FALLBACK': JSON.stringify('false')}});
+    const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['work-capture-policy'], apiUrl});
     let browser;
     try {
-      await vite.listen(); const address = vite.httpServer.address(); assert(address && typeof address !== 'string'); const baseUrl = `http://127.0.0.1:${address.port}`;
+      const baseUrl = fixtureServer.url;
       browser = await chromium.launch({headless: true}); const context = await browser.newContext({viewport: {width: 1600, height: 1100}, timezoneId: 'Asia/Kolkata'});
       const session = {id: f.ownerId, employeeId: f.ownerId, name: 'Synthetic capture operator', role: 'Admin', permissionRole: 'Admin', permissions: workPermissions};
       const scope = {organizationId: f.organizationId, legalEntityId: f.legalEntityId};
@@ -124,7 +122,7 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
       await page.getByRole('button', {name: 'Enter work', exact: true}).click(); await page.getByRole('button', {name: 'Previous week', exact: true}).click();
       await page.getByRole('region', {name: 'Preserved off-grid entries'}).waitFor(); assert.equal(await page.locator('tbody tr').count(), 2);
       assert.deepEqual(errors, []); assert.deepEqual(external, []); await context.close();
-    } finally { await browser?.close(); await vite.close(); }
+    } finally { await browser?.close(); await fixtureServer.close(); }
   });
 });
 console.log('Real React/API/PostgreSQL capture journey passed: quarter-hour save, duplicate and off-grid preservation, billability/comments, repeated clicks, outage recovery, validation/conflict/uncertain append recovery, append/reload and in-flight scope invalidation.');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {randomBytes, scryptSync} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {withCommercialDatabase,migrateCommercialDatabase,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 
@@ -13,24 +13,21 @@ await withCommercialDatabase(async ({pool,databaseUrl}) => {
   await pool.query('update users set password_hash=$1,must_change_password=false where id=$2',
     [`scrypt$${salt}$${scryptSync(password,salt,64).toString('hex')}`, identities.manager.id]);
   await withCommercialApi({databaseUrl,identities}, async ({baseUrl:apiUrl,request}) => {
-    const vite = await createServer({root,mode:'production',logLevel:'error',server:{host:'127.0.0.1',port:0,hmr:false,
-      proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),
-      'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});
+    const fixtureServer = await startFixtureServer({root, application: true, apiUrl, modules: {authService: 'src/services/authService.ts'}});
     let browser;
     try {
-      await vite.listen();
       browser = await chromium.launch({headless:true});
       const page = await browser.newPage();
       page.setDefaultTimeout(15000);
-      const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
-      // Prepare the cold development module graph separately from interaction
+      const origin = fixtureServer.url;
+      // Load the compiled login page separately from interaction
       // deadlines; this fixture is a workflow check, not a cold-start benchmark.
       const warmPage = await browser.newPage();
       try {
         await warmPage.goto(`${origin}/login`,{timeout:60000});
         await warmPage.getByRole('button',{name:'Open Workspace',exact:true}).waitFor({timeout:60000});
       } finally { await warmPage.close(); }
-      console.log('Development login module ready; interaction deadlines unchanged.');
+      console.log('Compiled login page ready; interaction deadlines unchanged.');
       const login = async () => {
         await page.goto(`${origin}/login`);
         await page.getByLabel('Username',{exact:true}).fill(identities.manager.username);
@@ -79,7 +76,7 @@ await withCommercialDatabase(async ({pool,databaseUrl}) => {
         await heldRefresh;
         await route.fulfill({response});
       });
-      await page.evaluate(() => {window.syntheticPendingRefresh = import('/src/services/authService.ts').then(({authService}) => authService.refreshSession());});
+      await page.evaluate(() => {window.syntheticPendingRefresh = import('/tests/fixtures/authService.js').then(({authService}) => authService.refreshSession());});
       await refreshObserved;
       await page.route('**/api/auth/logout',route=>route.abort('connectionfailed'));
       await page.getByTitle('Logout',{exact:true}).first().click();
@@ -92,6 +89,6 @@ await withCommercialDatabase(async ({pool,databaseUrl}) => {
       assert.equal((await request('/api/auth/me',{headers:{Authorization:`Bearer ${second}`}})).status,200,
         'failed delivery must not be misrepresented as server revocation');
       console.log('Actual login/sidebar logout browser journey passed: persisted server revocation, cleared device credentials/scope, late refresh rejection, failed-delivery warning and honest server status.');
-    } finally {await browser?.close();await vite.close();}
+    } finally {await browser?.close();await fixtureServer.close();}
   });
 });

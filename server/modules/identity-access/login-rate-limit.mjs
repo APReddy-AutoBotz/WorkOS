@@ -1,3 +1,4 @@
+import {loginRateLimitOptions} from './login-rate-policy.mjs';
 import {createHash} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
 
@@ -8,12 +9,9 @@ export const requireLocalLoginEnabled = (req, res, next) => {
   next();
 };
 
-export const createLoginRateLimit = ({maxAttempts = 8, maxIpAttempts = 64,
-  maxEntries = 10000, windowMs = 15 * 60 * 1000, now = () => performance.now()} = {}) => {
-  for (const value of [maxAttempts, maxIpAttempts, maxEntries, windowMs]) {
-    if (!Number.isSafeInteger(value) || value < 1) throw new Error('Login rate limits must be positive safe integers.');
-  }
-  if (windowMs > 86400000) throw new Error('Login rate window must not exceed one day.');
+export const createLoginRateLimit = (options = {}) => {
+  const {maxAttempts, maxIpAttempts, maxEntries, windowMs} = loginRateLimitOptions(options);
+  const now = options.now ?? (() => performance.now());
   const entries = new Map();
   const hash = value => createHash('sha256').update(value).digest('hex');
   const reject = (res, resetAt, time) => {

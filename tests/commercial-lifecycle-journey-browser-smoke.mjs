@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {runMigrations} from '../server/migrate.mjs';
 import {recordAuditEvent} from '../server/modules/audit/audit-record.mjs';
 import {withCommercialDatabase, withPreCommercialMigrations, seedCommercialReferences, seedCommercialLegacyWork,
@@ -74,11 +74,10 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     assert.equal(neutralBefore.source_snapshot.status, 'Proposed');assert.equal(neutralBefore.origin, 'legacy-neutral');
     assert.equal((await pool.query('select count(*)::int count from project_allocations where project_id=$1', [proposed.id])).rows[0].count, 0);
     assert.equal((await pool.query('select count(*)::int count from timesheet_entries where project_id=$1', [proposed.id])).rows[0].count, 0);
-    const vite = await createServer({root, mode: 'production', clearScreen: false, logLevel: 'error', server: {host: '127.0.0.1', port: 0, strictPort: false, hmr: false, proxy: {'/api': {target: apiUrl, changeOrigin: true}}},
-      define: {'import.meta.env.VITE_APP_MODE': JSON.stringify('production'), 'import.meta.env.VITE_ALLOW_TEST_FALLBACK': JSON.stringify('false')}});
+    const fixtureServer = await startFixtureServer({root, fixtures: ['commercial-lifecycle'], apiUrl});
     let browser;
     try {
-      await vite.listen();const address = vite.httpServer.address();assert(address && typeof address !== 'string');const baseUrl = `http://127.0.0.1:${address.port}`;
+      const baseUrl = fixtureServer.url;
       browser = await chromium.launch({headless: true, ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {})});
       const errors = [], external = [], writes = [], reads = [];
       const createContext = async (identity, permissions) => {
@@ -233,6 +232,6 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
       assert(writes.every(write => write.method === 'POST' && write.path.startsWith(lifecyclePrefix)));assert(reads.every(read => read.path.startsWith(lifecyclePrefix)), 'fixture uses lifecycle production API only');
       await reader.context.close();await denied.context.close();await manager.context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
       console.log('Commercial lifecycle real React -> API -> disposable PostgreSQL journey passed: exact current/future version pins, real parent/date/stale denials and rollback, two governed projects including same-ID explicit no-history promotion, unchanged neutral history/work, dependency-ordered hold/resume, persisted history/readiness/reload, protected audit and read-only/denied/context-invalidated privacy without hidden mutations.');
-    } finally {try {if (browser) await browser.close();} finally {await vite.close();}}
+    } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
   });
 });

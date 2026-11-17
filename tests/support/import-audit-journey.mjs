@@ -1,3 +1,4 @@
+import {startFixtureServer} from './compiled-fixture-server.mjs';
 // Test-only harness. Reuses migration-runner-smoke's local-service allowlist,
 // randomized database isolation, real migrations/API and guaranteed teardown.
 import assert from 'node:assert/strict';
@@ -107,7 +108,7 @@ export const withImportAuditJourney = async test => {
   let created = false;
   let pool;
   let api;
-  let vite;
+  let fixtureServer;
   await admin.connect();
   try {
     await admin.query(`create database ${quoteIdentifier(name)}`);
@@ -146,21 +147,9 @@ export const withImportAuditJourney = async test => {
       await delay(100);
     }
     assert.equal(ready, true, 'actual API must connect to the migrated disposable database');
-    const {createServer} = await import('vite');
-    vite = await createServer({root, mode: 'test', clearScreen: false, logLevel: 'error',
-      // vite.config.ts loadEnv does not import process.env API_PORT. Override
-      // its proxy here, never change production routing for this test.
-      server: {host: '127.0.0.1', port: 0, strictPort: true,
-        proxy: {'/api': {target: apiUrl, changeOrigin: true}}},
-      define: {
-        'import.meta.env.VITE_APP_MODE': JSON.stringify('test'),
-        'import.meta.env.VITE_ALLOW_TEST_FALLBACK': JSON.stringify('false'),
-        'import.meta.env.VITE_DISABLE_DEMO_FALLBACK': JSON.stringify('true'),
-        'import.meta.env.VITE_TERM_PROJECT': JSON.stringify('project'),
-      },
-    });
-    await vite.listen();
-    const browserUrl = `http://127.0.0.1:${vite.httpServer.address().port}`;
+    fixtureServer = await startFixtureServer({root, apiUrl, application: true, mode: 'test',
+      publicEnv: {VITE_DISABLE_DEMO_FALLBACK: 'true', VITE_TERM_PROJECT: 'project'}});
+    const browserUrl = fixtureServer.url;
     const bootstrap = async (id, username) => {
       // Only authentication bootstrap is synthetic. /auth/me, active account,
       // currently assigned role, effective permissions and all scopes stay real.
@@ -192,7 +181,7 @@ export const withImportAuditJourney = async test => {
       reviewer: await bootstrap(identities.reviewerId, journeyFixture.reviewerUsername)});
   } finally {
     // Stop every client before dropping only the randomized database we created.
-    try { if (vite) await vite.close(); } finally {
+    try { if (fixtureServer) await fixtureServer.close(); } finally {
       try { if (api) await stopApi(api); } finally {
         try { if (pool) await closeDisposablePool(pool); } finally {
           try {

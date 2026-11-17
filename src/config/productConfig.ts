@@ -1,4 +1,4 @@
-const frontendEnv = ((import.meta as unknown as { env?: Record<string, string | undefined> }).env || {});
+import {frontendEnv} from './frontendEnvironment';
 
 const valueOr = (key: string, fallback: string) => {
   const value = String(frontendEnv[key] || '').trim();
