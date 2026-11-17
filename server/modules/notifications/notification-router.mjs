@@ -1,5 +1,6 @@
 import {Router} from 'express';
 import {z} from 'zod';
+import {safeNotificationMetadata, safeNotificationProvider} from './delivery-diagnostics.mjs';
 
 export const createNotificationRouter = ({
   pool,
@@ -186,8 +187,22 @@ export const createNotificationRouter = ({
     }
   });
 
-  router.get('/notification-delivery-attempts', requireDatabase, requireAuth, requirePermission('notifications.manage'), (_req, res) => {
-    run(res, 'select * from notification_delivery_attempts order by attempted_at desc limit 300');
+  router.get('/notification-delivery-attempts', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {
+    try {
+      const params = [];
+      const where = buildEmployeeScopeWhere(req, params, 'e');
+      const result = await pool.query(`select nda.id, nda.notification_id, nda.channel, nda.provider,
+        nda.status, nda.attempted_at, nda.response_metadata
+        from notification_delivery_attempts nda
+        join notification_events ne on ne.id=nda.notification_id
+        join employees e on e.id=ne.recipient_employee_id
+        where ${where} order by nda.attempted_at desc, nda.id desc limit 300`,params);
+      res.json(result.rows.map(row => ({...row, provider: safeNotificationProvider(row.provider),
+        response_metadata:safeNotificationMetadata(row.response_metadata,row.status==='Failed')})));
+    } catch (error) {
+      logError(error);
+      res.status(500).json({error:'Notification delivery history unavailable'});
+    }
   });
 
   router.post('/notifications/test-delivery', requireDatabase, requireAuth, requirePermission('notifications.manage'), async (req, res) => {

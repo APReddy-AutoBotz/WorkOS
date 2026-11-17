@@ -4860,8 +4860,8 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
     assert.deepEqual(deploymentTeamsEvent.response_payload, {},
       'the deployment reader must redact bearer action URLs before returning events');
     const deploymentTeamsDeliveryEvent = deploymentIntegrationRows.find(row => row.id === 'deployment-teams-notification-delivered');
-    assert.deepEqual(deploymentTeamsDeliveryEvent.response_payload, {statusCode: 202, activityType: 'systemDefault'},
-      'the deployment reader must preserve Teams delivery status while redacting provider user IDs and UPNs');
+    assert.deepEqual(deploymentTeamsDeliveryEvent.response_payload, {statusCode: 202},
+      'the deployment reader must retain allowlisted status while removing provider-specific activity metadata and identities');
     assert(!JSON.stringify(deploymentIntegrationRows).includes('deployment-private-subject'));
     assert(!JSON.stringify(deploymentIntegrationRows).includes('deployment-private@example.test'));
     assert(!JSON.stringify(deploymentIntegrationRows).includes('deployment-private-object'));

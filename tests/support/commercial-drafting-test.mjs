@@ -186,7 +186,7 @@ const stopApi = async child => {
 };
 
 export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UTC',
-  sessionTtlHours = '0.25', sessionSecret = null}, test) => {
+  sessionTtlHours = '0.25', sessionSecret = null, emailProvider = 'mock'}, test) => {
   const port = await availablePort();
   const secret = sessionSecret || randomBytes(48).toString('base64url');
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -195,7 +195,7 @@ export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UT
     DATABASE_URL: databaseUrl, PGSSLMODE: 'disable', API_SESSION_SECRET: secret, APP_URL: baseUrl,
     IDENTITY_PROVIDER: 'local', API_SESSION_TTL_HOURS: sessionTtlHours, AUTO_SEED_DEMO: 'false', RESET_DEMO_DATA: 'false',
     ALLOW_TEST_FALLBACK: 'false', VITE_ALLOW_TEST_FALLBACK: 'false', ENTRA_ENABLED: 'false', TEAMS_ENABLED: 'false',
-    NOTIFICATION_PROVIDER: 'mock', TEAMS_PROVIDER: 'mock',
+    NOTIFICATION_PROVIDER: 'mock', TEAMS_PROVIDER: 'mock', EMAIL_PROVIDER: emailProvider,
   }});
   child.stdout.resume();
   child.stderr.resume();
