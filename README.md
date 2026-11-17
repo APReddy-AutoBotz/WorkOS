@@ -8,7 +8,7 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 Production Compose accepts `API_SESSION_TTL_HOURS` in hours, including fractions. The default is eight hours. Invalid durations prevent API startup. [Operations runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#configuring-session-lifetime)
 
-The merged PostgreSQL session and browser journeys verify current-session logout and absolute expiry. Auditing changes to session lifetime remains open under WOS-IAM-008. [Session acceptance evidence](docs/05-delivery/SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
+The merged PostgreSQL session and browser journeys verify current-session logout and absolute expiry. WOS-IAM-008 still requires an attributable history of session lifetime changes. [Outstanding acceptance criteria](docs/tasks/WOS-04-SESSION-LIFETIME-AUDIT.md). [Session acceptance evidence](docs/05-delivery/SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
 
 Run `npm ci` to install the locked frontend tools. For development, `npm run dev` starts a Node server on port 3000 and a Bun compiler on loopback. Bun is included in the development dependencies. For production assets, run `npm run build` (esbuild and Tailwind PostCSS), then `npm run preview` to serve the build on localhost port 4173. Both servers forward `/api` to the local API port (`API_PORT`, then `PORT`, default 4000). Use `npm run preview -- --help` for preview listener options.
 

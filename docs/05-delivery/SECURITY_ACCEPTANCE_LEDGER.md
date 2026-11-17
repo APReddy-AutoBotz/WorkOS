@@ -21,13 +21,19 @@ Durable session revocation PR167 merged at `b1822ca9f9683c5eeaf40db6db1d6450ca21
 
 This revision adds [independent leave decisions](../tasks/WOS-05-INDEPENDENT-LEAVE-DECISIONS.md): affected-worker and submitting-account separation, current canonical identity and qualified role-specific delegator scope checks, and a Teams source-workspace boundary. Migration057b adds only a scoped submission-evidence index. Missing or conflicting historical submitter evidence requires cancellation/resubmission; historical decisions are not rewritten. Final exact-head review and hosted acceptance are recorded in the PR. PR168 also refreshes canonical worker codes, worker IDs and qualified director scope on every bearer/cookie request, including identity-only routes. Null canonical links do not fall back to legacy codes. Other legacy delegation domains, commercial source eligibility, exports/diagnostics, persistent throttling and buyer/release evidence remain open.
 
+## Shared throttling and session configuration on main
+
+Migration `057c_wos04_shared_auth_throttle` gives API replicas in one buyer database a shared login budget. PR #173 verified restart persistence and storage failure handling. The full-history secret scan and all 81 application, migration and container steps passed after merge. [PR #173](https://github.com/APReddy-AutoBotz/WorkOS/pull/173) and [main verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/44188526683)
+
+PR #175 verified the production Compose lifetime override, startup validation and issued token expiry. All 86 steps passed on merged commit `e6b2621503daf06ee04199519337cf8f7f4914ca`. The API sees the configured duration. Compose supplies no authenticated identity for the person who edited the setting. [Main verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/44194366757)
+
 ## Remaining priority work
 
 1. Complete session lifetime change auditing under WOS-IAM-008. Track administrative revoke-all separately. See the session evidence below.
 2. Verify independent leave decisions, current director/relationship bindings and delegation authority against accepted behavior. Retain negative self-approval and stale-authority cases.
 3. Verify invoice source eligibility and alternate-source protections in the commercial integration sequence. Financial policy and immutable snapshots must remain authoritative.
 4. Integrate remaining timesheet/export safety and notification diagnostic controls with actual scope, CSV and redaction tests.
-5. Reconcile all earlier finding identifiers and proof artifacts against one release head; complete persistent production throttling, performance, backup/restore, buyer identity/topology and UAT evidence.
+5. Reconcile all earlier finding identifiers and proof artifacts against one release head; complete performance, backup/restore, buyer identity/topology and UAT evidence.
 
 These are work priorities, not a claim that every historical candidate still reproduces after intervening changes. Investigation precedes each repair; already corrected behavior should receive evidence rather than redundant rewrites.
 
