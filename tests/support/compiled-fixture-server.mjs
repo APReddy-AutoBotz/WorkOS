@@ -27,9 +27,11 @@ export async function startFixtureServer({root, fixtures = [], apiUrl, applicati
       ...(application ? {main: 'src/main.tsx'} : {}), ...modules,
     },
     outdir: output, bundle: true, format: 'esm', splitting: true, write: false,
-    define: {'import.meta.env': JSON.stringify({MODE: mode, PROD: true, DEV: false,
+    // Keep React's development lifecycle checks for fixtures in every app mode.
+    // The compiled production login journey independently exercises the release build.
+    define: {'import.meta.env': JSON.stringify({MODE: mode, PROD: false, DEV: true,
       BASE_URL: '/', SSR: false, VITE_APP_MODE: mode, VITE_ALLOW_TEST_FALLBACK: 'false', ...publicEnv}),
-      'process.env.NODE_ENV': '"production"'},
+      'process.env.NODE_ENV': '"development"'},
     plugins: [frontendStyles(root)],
   });
   for (const file of result.outputFiles) {
