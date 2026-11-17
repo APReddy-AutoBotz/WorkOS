@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. Auditing lifetime changes across deployments remains open.
+
 | Priority | Outcome | Evidence required to advance |
 |---|---|---|
 | 1 | Integrate the verified foundation and security corrections | Inventory exact PR heads/dependencies/reviews; inspect actual diffs; resolve blocking findings; verify applicable CI and database/browser negatives; expected-head merge; main checks |

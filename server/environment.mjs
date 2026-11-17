@@ -39,6 +39,8 @@ const environmentSchema = z.object({
   LOGIN_IP_RATE_LIMIT: loginLimit(64),
   TRUSTED_PROXY_CIDRS: optionalText.refine(value=>{try{parseTrustedProxies(value);return true;}catch{return false;}},'must contain explicit trusted proxy IP addresses or CIDRs'),
   API_SESSION_SECRET: optionalText,
+  API_SESSION_TTL_HOURS: optionalText.transform(value => Math.floor(Number(value ?? 8) * 3_600_000))
+    .refine(ms => Number.isSafeInteger(ms) && ms > 0 && Number.isFinite(new Date(Date.now() + ms).getTime())),
   APP_URL: optionalText,
   IDENTITY_PROVIDER: z.preprocess((value) => value === '' || value === undefined ? 'local' : value,
     z.enum(['local', 'entra'])),
@@ -179,6 +181,7 @@ export const validateRuntimeEnvironment = (source = process.env, {purpose = 'ser
     pgSslRootCert: environment.PGSSLROOTCERT,
     loginRateLimit: environment.LOGIN_RATE_LIMIT,
     loginIpRateLimit: environment.LOGIN_IP_RATE_LIMIT,
+    sessionTtlMs: environment.API_SESSION_TTL_HOURS,
     trustedProxies: parseTrustedProxies(environment.TRUSTED_PROXY_CIDRS),
     production,
   };

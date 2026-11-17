@@ -456,3 +456,7 @@ PR168 also refreshes canonical workforce bindings on each authenticated request.
 ## Operational CSV format compatibility
 
 Shared and Timesheet Approval exports quote every field and apply the existing apostrophe literal-text marker to dangerous control/whitespace/formula prefixes. Headers receive the same encoding. Source records, field order, filters, empty header-only Ops exports and audit behavior remain unchanged. Machine consumers must account for literal markers; spreadsheet saving/reopening and external transformations can alter interpretation. No universal spreadsheet execution guarantee is claimed. No migration is required; reverting the serializer reopens unsafe-prefix paths, so prefer forward correction.
+## Configuring session lifetime
+
+Set `API_SESSION_TTL_HOURS` in the production Compose environment before recreating the API replicas. For example, `0.25` configures a 15-minute lifetime. Omission uses eight hours. Startup checks that the duration resolves to at least one millisecond and a representable expiry. A configuration error names the setting. Correct the value and recreate the API services. Existing signed sessions retain their original expiry.
+
