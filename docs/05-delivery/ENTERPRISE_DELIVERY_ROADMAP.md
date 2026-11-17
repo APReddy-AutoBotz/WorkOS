@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+The November 18 review verified current-session logout and absolute expiry against the merged application. The remaining WOS-IAM-008 work is to record session lifetime changes with actor, timestamp, and old and new values. Administrative revoke-all needs separate authorization tests. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
+
 | Priority | Outcome | Evidence required to advance |
 |---|---|---|
 | 1 | Integrate the verified foundation and security corrections | Inventory exact PR heads/dependencies/reviews; inspect actual diffs; resolve blocking findings; verify applicable CI and database/browser negatives; expected-head merge; main checks |
