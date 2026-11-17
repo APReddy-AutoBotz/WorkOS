@@ -154,6 +154,9 @@ jobs:
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
+      - name: Verify acknowledged settings save and load recovery
+        run: npm run test:settings-save-outcomes-browser
+
       - name: Verify operational timesheet CSV safety
         run: npm run test:timesheet-export-browser
 

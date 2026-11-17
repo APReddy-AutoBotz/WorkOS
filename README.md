@@ -70,3 +70,5 @@ WorkOS v1 is not a payroll system, statutory invoicing engine, general ledger, c
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [AGENTS.md](AGENTS.md) before proposing changes. No implementation may be pushed directly to `main`. Merge in dependency order after exact-head review and applicable checks; verify the resulting main-branch checks and update status afterward.
+
+Current work: PR169 CSV safety is merged; [PR170](https://github.com/APReddy-AutoBotz/WorkOS/pull/170) notification diagnostics and [PR171](https://github.com/APReddy-AutoBotz/WorkOS/pull/171) delegation security remain drafts pending the full dependency gate. This independent revision addresses [acknowledged settings saves and failed-load recovery](docs/tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md). No dependency-audit waiver or production release is claimed.

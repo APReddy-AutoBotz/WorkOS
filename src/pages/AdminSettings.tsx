@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {Link} from 'react-router-dom';
 import {hasPermission} from '../services/permissions';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -60,6 +60,11 @@ export const AdminSettings = () => {
   const [newCountryName, setNewCountryName] = useState('');
   const [newIndustryName, setNewIndustryName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const mounted = useRef(false);
+  const saving = useRef(false);
+  const latestSettings = useRef<SystemSettings | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success'>('idle');
   const [setupReadiness, setSetupReadiness] = useState<OrganizationSetupReadiness | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
@@ -68,40 +73,72 @@ export const AdminSettings = () => {
   const canOpenPermissionSettings = canManagePermissions(currentUser);
 
   useEffect(() => {
-    const load = async () => {
-      const [setts, roles, cds, depts, ctrs, inds, employeeRows, clientRows, readiness] = await Promise.all([
-        adminService.getSettings(),
-        adminService.getRoleDefinitions(),
-        adminService.getCountryDirectors(),
-        adminService.getDepartments(),
-        adminService.getCountries(),
-        adminService.getIndustries(),
-        employeeService.getAll(),
-        clientService.getAll(),
-        adminService.getOrganizationSetupReadiness(),
-      ]);
-      setSettings(setts);
-      setRoleDefinitions(roles);
-      setCountryDirectors(cds);
-      setDepartments(depts);
-      setCountries(ctrs);
-      setIndustries(inds);
-      setEmployees(employeeRows);
-      setClients(clientRows);
-      setSetupReadiness(readiness);
-      setLoading(false);
-    };
-    load();
+    mounted.current = true;
+    return () => { mounted.current = false; };
   }, []);
 
-  const handleSave = () => {
-    if (!settings) return;
+  useEffect(() => {
+    latestSettings.current = settings;
+    setSaveStatus(current => current === 'success' ? 'idle' : current);
+  }, [settings]);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      setLoadError('');
+      try {
+        const [setts, roles, cds, depts, ctrs, inds, employeeRows, clientRows, readiness] = await Promise.all([
+          adminService.getSettings(),
+          adminService.getRoleDefinitions(),
+          adminService.getCountryDirectors(),
+          adminService.getDepartments(),
+          adminService.getCountries(),
+          adminService.getIndustries(),
+          employeeService.getAll(),
+          clientService.getAll(),
+          adminService.getOrganizationSetupReadiness(),
+        ]);
+        if (!active) return;
+        setSettings(setts);
+        setRoleDefinitions(roles);
+        setCountryDirectors(cds);
+        setDepartments(depts);
+        setCountries(ctrs);
+        setIndustries(inds);
+        setEmployees(employeeRows);
+        setClients(clientRows);
+        setSetupReadiness(readiness);
+      } catch {
+        if (active) setLoadError('Governance settings could not be loaded. Retry to continue.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [loadAttempt]);
+
+  const handleSave = async () => {
+    if (!settings || saving.current) return;
+    const submitted = settings;
+    saving.current = true;
     setSaveStatus('saving');
-    setTimeout(() => {
-      adminService.saveSettings(settings);
-      setSaveStatus('success');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    }, 500);
+    setNotice(null);
+    try {
+      await adminService.saveSettings(submitted);
+      if (!mounted.current) return;
+      const unchanged = latestSettings.current === submitted;
+      setSaveStatus(unchanged ? 'success' : 'idle');
+      setNotice({type: 'success', message: unchanged ? 'Settings were saved.' : 'Submitted settings were saved. Your newer edits have not been saved.'});
+    } catch {
+      if (mounted.current) {
+        setSaveStatus('idle');
+        setNotice({type: 'danger', message: 'Settings save could not be confirmed. Your edits are retained. Review the connection and retry.'});
+      }
+    } finally {
+      saving.current = false;
+    }
   };
 
   const handleAddRole = async () => {
@@ -265,17 +302,14 @@ export const AdminSettings = () => {
     });
   };
 
-  const handleRecalculateBounds = () => {
-    if (!settings) return;
-    adminService.saveSettings(settings);
-    setNotice({ type: 'success', message: 'Utilization settings were saved and demo calculations were refreshed.' });
-  };
+  const handleRecalculateBounds = () => { void handleSave(); };
 
   const captureModesLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/work-capture-modes">Edit work capture modes</Link>;
   const capturePolicyLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/work-capture-policy">Edit work capture policy</Link>;
   const calendarLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/working-calendars">Inspect working calendars</Link>;
   const terminologyLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/terminology">Edit terminology</Link>;
   const profileLink = hasPermission(currentUser, 'settings.manage') && <Link className="inline-block rounded-xl border border-slate-300 px-4 py-3 font-semibold underline focus-visible:outline focus-visible:outline-2" to="/admin/organization-profile">Edit organization profile</Link>;
+  if (loadError) return <div><p role="alert">{loadError}</p><button type="button" className="btn-primary mt-4" onClick={() => setLoadAttempt(value => value + 1)}>Retry loading settings</button></div>;
   if (loading || !settings) return <div>{profileLink}{terminologyLink}{calendarLink}{capturePolicyLink}{captureModesLink}<p role="status" className="mt-4">Loading governance settings…</p></div>;
 
   const [directorMappingCounts, directorClientCounts, departmentUsage, countryUsage, industryUsage] = [
@@ -758,6 +792,7 @@ export const AdminSettings = () => {
                       </p>
                       <button
                         onClick={handleRecalculateBounds}
+                        disabled={saveStatus === 'saving'}
                         className="btn-primary py-3 px-8 shadow-lg shadow-primary/20 flex items-center gap-2 mt-4"
                       >
                          Recalculate Bounds <RefreshCcw size={16} />

@@ -456,3 +456,7 @@ PR168 also refreshes canonical workforce bindings on each authenticated request.
 ## Operational CSV format compatibility
 
 Shared and Timesheet Approval exports quote every field and apply the existing apostrophe literal-text marker to dangerous control/whitespace/formula prefixes. Headers receive the same encoding. Source records, field order, filters, empty header-only Ops exports and audit behavior remain unchanged. Machine consumers must account for literal markers; spreadsheet saving/reopening and external transformations can alter interpretation. No universal spreadsheet execution guarantee is claimed. No migration is required; reverting the serializer reopens unsafe-prefix paths, so prefer forward correction.
+
+## Settings save acknowledgement
+
+A save success refers only to the submitted settings snapshot acknowledged by the service. Newer edits remain unsaved. After a refused or uncertain save, retain input and review/retry; do not assume that a network error proves the server did not commit. Failed initialization offers retry. The alternate utilization action saves configuration and does not claim a server recalculation. Preserve server permissions/audit and prefer forward correction of misleading outcomes; no migration is required.
