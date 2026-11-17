@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {withCommercialDraftingApi} from './support/commercial-drafting-test.mjs';
 
 // Hosted CI only: this is the actual React -> HTTP API -> disposable PostgreSQL
@@ -28,12 +28,10 @@ const legacyState = async pool => {
 };
 await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identities, actorId, scope, ownerId, clientId, request: apiRequest}) => {
   const beforeLegacy = await legacyState(pool);
-  const vite = await createServer({root, mode: 'production', server: {host: '127.0.0.1', port: 0, strictPort: false, hmr: false, proxy: {'/api': {target: apiUrl, changeOrigin: true}}}});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['commercial-drafting'], apiUrl});
   let browser;
   try {
-    await vite.listen();
-    const address = vite.httpServer.address();assert(address && typeof address !== 'string');
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const baseUrl = fixtureServer.url;
     browser = await chromium.launch({headless: true, ...(process.env.WORKOS_CHROMIUM_PATH ? {executablePath: process.env.WORKOS_CHROMIUM_PATH} : {})});
     const errors = [], external = [], writes = [];
     const createContext = async (identity, permissions) => {
@@ -122,5 +120,5 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const denied = await createContext(identities.denied, []);let deniedApiCalls = 0;denied.page.on('request', request => {if (new URL(request.url()).pathname.startsWith('/api/')) deniedApiCalls++;});await denied.page.goto(`${baseUrl}/tests/fixtures/commercial-drafting.html?live=1`);await denied.page.getByRole('alert').getByText('Scope or access changed.', {exact: false}).waitFor();assert.equal(deniedApiCalls, 0);assert.equal(writes.length, writeCount);
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
     console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
-  } finally {try {if (browser) await browser.close();} finally {await vite.close();}}
+  } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
 }, {upgrade: true});

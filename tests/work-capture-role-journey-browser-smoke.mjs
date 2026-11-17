@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentToday,addUtcDays} from './support/commercial-amendments-test.mjs';
@@ -26,9 +26,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   const allocation=await request('/api/allocations',{method:'POST',body:{employee_id:f.ownerId,project_id:projectId,percentage:20,start_date:monday,end_date:friday,billable:true,status:'Active',role_on_project:'Synthetic delivery role',comments:'Synthetic named-role acceptance'}});assert.equal(allocation.status,200,JSON.stringify(allocation.body));
   const modes=await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly','daily']}});assert.equal(modes.status,201);
   for(const path of ['/api/projects','/api/allocations','/api/timesheets','/api/settings'])assert.equal((await request(path,{identity:identities.reader})).status,200,path+' must be available under the existing authorized Employee work role');
-  const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});let browser;
+  const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['work-submission-history'], apiUrl});let browser;
   try{
-   await vite.listen();const baseUrl=`http://127.0.0.1:${vite.httpServer.address().port}`;browser=await chromium.launch({headless:true});const errors=[],external=[],workerWrites=[];
+   const baseUrl=fixtureServer.url;browser=await chromium.launch({headless:true});const errors=[],external=[],workerWrites=[];
    const contextFor=async identity=>{const isWorker=identity===identities.reader,context=await browser.newContext({viewport:{width:1500,height:1100},timezoneId:'Pacific/Kiritimati'});await context.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session:{id:isWorker?f.ownerId:identity.id,employeeId:isWorker?identities.reader.employeeId:identity.id,name:isWorker?'Synthetic named employee':'Synthetic named approver',role:identity.role,permissionRole:identity.role,permissions:isWorker?workerPermissions:workPermissions},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(identity)});return context;};
    const workerContext=await contextFor(identities.reader),approverContext=await contextFor(identities.manager),worker=await workerContext.newPage(),approver=await approverContext.newPage();
    for(const page of [worker,approver]){page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(/^https?:/.test(r.url())&&new URL(r.url()).origin!==baseUrl)external.push(r.url());});}
@@ -53,7 +53,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await worker.getByRole('button',{name:'Reload work',exact:true}).click();await ready(worker);const history=worker.getByRole('region',{name:'Retained work history',exact:true});await history.getByRole('button',{name:'Load retained history',exact:true}).click();await history.getByRole('article',{name:'Retained submission 1',exact:true}).waitFor();await history.getByText(`Comment: ${original}`,{exact:true}).waitFor();await history.getByText(`Comment: ${corrected}`,{exact:true}).waitFor();await history.getByText(new RegExp('Reason: '+reason)).waitFor();await history.getByRole('article',{name:'Retained submission 2',exact:true}).getByText(/^Approved /).waitFor();assert.equal(await worker.getByRole('button',{name:'Submit for Approval',exact:true}).count(),0);
    const accepted=await workSnapshot(pool),future={...workerWrites.at(-1),week_ending:futureFriday,expected_write_token:null,entries:[{...workerWrites.at(-1).entries[0],work_date:addUtcDays(today,1)}]};const denied=await request('/api/timesheets',{method:'POST',identity:identities.reader,body:future});assert([400,422].includes(denied.status),JSON.stringify(denied.body));assert.deepEqual(await workSnapshot(pool),accepted);
    assert.deepEqual((await pool.query('select to_jsonb(t) value from timesheet_entries t where id=$1',[f.workId])).rows,legacyBefore);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.equal(await worker.evaluate(()=>window.syntheticRoleExecuted),undefined);assert.equal(await approver.evaluate(()=>window.syntheticRoleExecuted),undefined);assert.deepEqual(workerWrites.map(w=>w.status),['Draft','Submitted','Submitted']);await workerContext.close();await approverContext.close();
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });
 console.log('Named Employee daily save/reload and weekly UI submit -> distinct approver required-reason reject -> Employee correction/UI resubmit -> approval passed over real React/API/PostgreSQL; exact references/actors/immutable history, denied worker decisions/retained overwrites/future work and legacy preservation passed.');

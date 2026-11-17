@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+Twenty-one React-to-PostgreSQL browser journeys now compile their fixture pages in memory and forward API traffic to each journey’s disposable database-backed server. Remaining Vite callers include development, session logout, independent leave decisions, timesheet ownership and export, and the import/audit harness.
+
 The frontend build-tool migration covers deployable HTML, JavaScript and CSS and the preview command. Its browser test opens the compiled login route, checks branding and styles, and exercises the local API proxy. The remaining callers are the development server and browser fixtures, including development refresh and proxy behavior. Remove Vite after those callers migrate, then rerun the full dependency audit and every hosted check before merging.
 
 | Priority | Outcome | Evidence required to advance |

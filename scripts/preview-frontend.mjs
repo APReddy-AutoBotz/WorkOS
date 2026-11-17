@@ -5,7 +5,7 @@ import {isIP} from 'node:net';
 import {parseArgs} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import express from 'express';
-import {createProxyServer} from 'httpxy';
+import {createFrontendApp} from './frontend-server.mjs';
 import {loadFrontendEnvironment} from './frontend-environment.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -30,22 +30,7 @@ const apiPort = portNumber(environment.API_PORT || environment.PORT || '4000');
 const output = path.join(root, 'dist');
 const index = path.join(output, 'index.html');
 await access(index);
-const proxy = createProxyServer({target: 'http://localhost:' + apiPort, changeOrigin: true});
-const app = express();
-app.disable('x-powered-by');
-app.use((req, res, next) => {
-  const host = req.headers.host?.match(/^(?:\[([a-f\d:]+)\]|([\w.-]+))(?::\d+)?$/i);
-  const hostname = (host?.[1] || host?.[2] || '').toLowerCase();
-  if (!isIP(hostname) && hostname !== 'localhost' && !hostname.endsWith('.localhost') &&
-      hostname !== values.host.toLowerCase()) return res.sendStatus(403);
-  next();
-});
-app.all(['/api', '/api/*'], (req, res) => {
-  proxy.web(req, res).catch(() => {
-    if (res.headersSent) res.destroy();
-    else res.sendStatus(502);
-  });
-});
+const app = createFrontendApp(values.host, 'http://localhost:' + apiPort);
 app.use(express.static(output));
 app.get('*', (req, res) => {
   if (req.path.startsWith('/assets/') || path.extname(req.path) || !req.accepts('html')) return res.sendStatus(404);

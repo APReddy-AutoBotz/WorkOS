@@ -3,8 +3,7 @@ import {fileURLToPath} from 'node:url';
 import {readFile, writeFile, cp, rm, mkdir} from 'node:fs/promises';
 import {loadFrontendEnvironment} from './frontend-environment.mjs';
 import {build} from 'esbuild';
-import postcss from 'postcss';
-import tailwind from '@tailwindcss/postcss';
+import {frontendStyles} from './frontend-styles.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'dist');
@@ -22,15 +21,7 @@ const result = await build({
   format: 'esm', splitting: true, target: 'es2020', metafile: true, write: false,
   entryNames: 'assets/[name]-[hash]', chunkNames: 'assets/[name]-[hash]', assetNames: 'assets/[name]-[hash]',
   define: {'import.meta.env': JSON.stringify(publicEnv), 'process.env.NODE_ENV': '"production"'},
-  plugins: [{
-    name: 'workos-tailwind',
-    setup(builder) {
-      builder.onLoad({filter: /\.css$/}, async ({path: file}) => {
-        const css = await postcss([tailwind({base: root})]).process(await readFile(file, 'utf8'), {from: file});
-        return {contents: css.css, loader: 'css', resolveDir: path.dirname(file)};
-      });
-    },
-  }],
+  plugins: [frontendStyles(root)],
 });
 
 const [entry, metadata] = Object.entries(result.metafile.outputs).find(([, item]) => item.entryPoint === 'src/main.tsx');
