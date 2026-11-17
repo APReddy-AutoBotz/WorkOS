@@ -4,6 +4,10 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+Twenty-one React-to-PostgreSQL browser journeys now compile their fixture pages in memory and forward API traffic to each journey’s disposable database-backed server. Session logout, independent leave decisions, timesheet ownership and export, and the import/audit harness use the same compiler. The fourteen browser interaction suites have a dedicated fixture server.
+
+The frontend toolchain migration replaces Vite in the production build, preview server, browser fixtures and development server. Browser coverage includes branding, styles, API proxying and preserving unsaved login input on a page edit. The release workflow checks lockfile installation, the full dependency audit and container startup. The shared login throttling checks exercise replica budgets, persistence and database failure. [Frontend toolchain](https://github.com/APReddy-AutoBotz/WorkOS/pull/176) and [Login throttling](https://github.com/APReddy-AutoBotz/WorkOS/pull/173)
+
 | Priority | Outcome | Evidence required to advance |
 |---|---|---|
 | 1 | Integrate the verified foundation and security corrections | Inventory exact PR heads/dependencies/reviews; inspect actual diffs; resolve blocking findings; verify applicable CI and database/browser negatives; expected-head merge; main checks |
@@ -95,8 +99,6 @@ This revision adds [independent leave decisions](../tasks/WOS-05-INDEPENDENT-LEA
 
 The next bounded package is [operational CSV literal-text safety](../tasks/WOS-07-OPERATIONAL-CSV-SAFETY.md), covering the shared exporter and Timesheet Approval Ops Export. This safely precedes the invoice-action source correction, whose commercial modules are absent from current main. Preserve existing scope, filters, audit and source records; no dependency or migration changes. Fresh local acceptance, independent exact-head review and hosted gates are required before merge. Other delegation domains, commercial source authorization, diagnostic disclosure, persistent throttling and buyer/release evidence remain open.
 
-### Shared login throttling candidate
-
-The November 18 dependency review found that Vite 6.4.6 resolves picomatch 4.0.7 after a lockfile refresh. The full audit still reports four high findings from one advisory. Vite 8.3.8 also depends on the affected matcher, and the npm-suggested downgrade falls below the repository’s reviewed Vite security floor. Acceptance requires a supported, unaffected dependency graph followed by a passing full audit and complete CI run. [PR #173](https://github.com/APReddy-AutoBotz/WorkOS/pull/173) · [Security advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+### Shared login throttling
 
 Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in the buyer database. API replicas share the per-IP and per-input limits, including the Entra callback limit. Apply migrations before switching traffic, drain old API processes, and configure identical limits and trusted proxy settings on all replicas. Counters start empty on first upgrade. Storage failure returns HTTP 503 before authentication. Reverting to the previous application restores process-local counters and its readiness check rejects the newer migration ledger. Prefer forward correction and retain the migration.

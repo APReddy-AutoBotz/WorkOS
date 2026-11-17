@@ -4,13 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "node scripts/dev-frontend.mjs",
     "api:dev": "node server/index.mjs",
     "api:migrate": "node server/migrate.mjs",
     "api:seed:demo": "node --import tsx server/seed-demo.mjs",
-    "build": "vite build",
+    "build": "node scripts/build-frontend.mjs",
     "start": "node server/start-production.mjs",
-    "preview": "vite preview",
+    "preview": "node scripts/preview-frontend.mjs",
     "clean": "rm -rf dist",
     "lint": "node scripts/lint.mjs",
     "test:requirements": "node --import tsx tests/requirements-smoke.mjs",
@@ -203,16 +203,20 @@
   },
   "devDependencies": {
     "@babel/compat-data": "^7.29.0",
-    "@tailwindcss/vite": "^4.1.14",
+    "@tailwindcss/postcss": "4.3.5",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
+    "bun": "1.4.4",
+    "dotenv-expand": "12.0.3",
+    "esbuild": "0.28.2",
+    "httpxy": "0.5.6",
     "playwright": "1.57.0",
+    "postcss": "8.5.32",
+    "react-refresh": "0.19.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "6.4.6"
+    "typescript": "~5.8.2"
   },
   "description": "Buyer-owned professional-services operations platform"
 }

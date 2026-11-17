@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentToday,addUtcDays} from './support/commercial-amendments-test.mjs';
@@ -21,9 +21,9 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  const original=await oldEntries();
  await withCommercialApi({databaseUrl,identities},async({baseUrl:apiUrl,tokenFor,request})=>{
   assert.equal((await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly','daily']}})).status,201);
-  const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});let browser;
+  const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['work-capture-policy'], apiUrl});let browser;
   try{
-   await vite.listen();const baseUrl=`http://127.0.0.1:${vite.httpServer.address().port}`;browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1700,height:1200},timezoneId:'Pacific/Kiritimati'});
+   const baseUrl=fixtureServer.url;browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1700,height:1200},timezoneId:'Pacific/Kiritimati'});
    await context.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session:{id:f.ownerId,employeeId:f.ownerId,name:'Synthetic evidence policy operator',role:'Admin',permissionRole:'Admin',permissions:workPermissions},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(identities.manager)});
    const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[],external=[],writes=[];page.on('pageerror',error=>errors.push(error.message));page.on('request',r=>{if(/^https?:/.test(r.url())&&new URL(r.url()).origin!==baseUrl)external.push(r.url());if(r.method()==='POST')writes.push({path:new URL(r.url()).pathname,body:r.postDataJSON()});});
    const response=path=>page.waitForResponse(r=>new URL(r.url()).pathname===path&&r.request().method()==='POST');
@@ -47,7 +47,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('button',{name:'Configure capture policy',exact:true}).click();await page.getByText(new RegExp(`Version 2, effective ${addUtcDays(today,7)}:.*evidence URLs required`)).waitFor();assert.equal(await page.getByLabel('Require an evidence URL on every positive entry',{exact:true}).isChecked(),true);await page.getByLabel('Require an evidence URL on every positive entry',{exact:true}).uncheck();const disable=response('/api/v1/work-capture-policy');await page.getByRole('button',{name:'Append capture policy',exact:true}).click();assert.equal((await disable).status(),201);await page.getByRole('button',{name:'Reload capture policy',exact:true}).click();await page.getByText(new RegExp(`Version 3, effective ${addUtcDays(today,14)}:.*evidence URLs optional`)).waitFor();
    await page.getByRole('button',{name:'Enter work',exact:true}).click();await ready();await page.getByLabel('Capture mode',{exact:true}).selectOption('daily');await edit('Synthetic current evidence','');assert.equal(await save(),422);await page.getByText(/An evidence URL is required for each positive work entry/).waitFor();assert.equal((await pool.query("select evidence_url from timesheet_entries where timesheet_id=$1 and category='Synthetic current evidence'",[current])).rows[0].evidence_url,url);await edit('Synthetic current evidence',url);assert.equal(await save(),200);
    assert.deepEqual(errors,[]);assert.deepEqual(external,[],'policy validation and evidence display perform no external request');await context.close();
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });
 console.log('Required evidence real React/API/PostgreSQL opt-in/history, missing-link rejection/recovery, zero exemption, mode/hidden/weekend preservation, legacy inheritance, prospective opt-out and no external request passed.');

@@ -15,7 +15,9 @@ const rootFiles = [
   'package-lock.json',
   'package.json',
   'tsconfig.json',
-  'vite.config.ts',
+  'bunfig.toml', 'scripts/dev-frontend.mjs', 'scripts/dev-bundler.mjs', 'scripts/development-assets.mjs',
+  'scripts/frontend-environment.mjs', 'scripts/frontend-server.mjs', 'scripts/build-frontend.mjs',
+  'scripts/frontend-styles.mjs', 'scripts/preview-frontend.mjs', 'scripts/dev-entry.html',
   'docs/03-specifications/WOS01A_RETAINED_REQUIREMENTS.md',
 ];
 const files = [];

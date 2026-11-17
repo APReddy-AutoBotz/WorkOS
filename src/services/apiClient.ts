@@ -22,7 +22,7 @@ import type {
 } from '../types';
 import { roundMetric } from '../lib/format';
 
-const frontendEnv = ((import.meta as unknown as { env?: Record<string, string | undefined> }).env || {});
+import {frontendEnv} from '../config/frontendEnvironment';
 const processEnv = ((globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env || {});
 const appMode = frontendEnv.VITE_APP_MODE || frontendEnv.APP_MODE || processEnv.VITE_APP_MODE || processEnv.APP_MODE || 'production';
 const allowTestFallback = frontendEnv.VITE_ALLOW_TEST_FALLBACK || frontendEnv.ALLOW_TEST_FALLBACK || processEnv.VITE_ALLOW_TEST_FALLBACK || processEnv.ALLOW_TEST_FALLBACK;
