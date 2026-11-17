@@ -228,6 +228,13 @@ This revision adds [independent leave decisions](../tasks/WOS-05-INDEPENDENT-LEA
 
 The next bounded package is [operational CSV literal-text safety](../tasks/WOS-07-OPERATIONAL-CSV-SAFETY.md), covering the shared exporter and Timesheet Approval Ops Export. This safely precedes the invoice-action source correction, whose commercial modules are absent from current main. Preserve existing scope, filters, audit and source records; no dependency or migration changes. Fresh local acceptance, independent exact-head review and hosted gates are required before merge. Other delegation domains, commercial source authorization, diagnostic disclosure, persistent throttling and buyer/release evidence remain open.
 
+
+## Operational CSV safety accepted; notification diagnostics next — 2026-11-17
+
+[PR169](https://github.com/APReddy-AutoBotz/WorkOS/pull/169) merged at `88262c87a260529c00a680b22d2f021ff7d8cba4`. Candidate `907f02bb897adb4ad962d62d09647b4c67b776c7` passed all 83 steps in [CI43856156210](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43856156210); [main CI43857837218](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/43857837218) also passed all 83 with no skips or failures. Independent exact-head review covered all 18 paths with no findings. Shared and Timesheet Approval exports now use consistent literal-text cell encoding; spreadsheet interoperability limitations remain documented.
+
+The next bounded security package is [scoped and sanitized notification diagnostics](../tasks/WOS-05-NOTIFICATION-DIAGNOSTIC-BOUNDARY.md). It restricts delivery attempts to current recipient organization/entity and worker visibility before the result limit, excludes orphan ownership, and sanitizes provider metadata in new writes and historical attempt/integration/audit readers. Preserve delivery outcome, legitimate operational fields and immutable history. Fresh local, browser, independent exact-head and hosted checks remain mandatory before merge. Commercial-source authorization prerequisites, other delegation domains, persistent throttling and buyer/release evidence remain open.
+
 ## Legacy approval/delegation security integration - 2026-11-17
 
 Accepted baseline: PR169 CSV safety merged at `88262c87a260529c00a680b22d2f021ff7d8cba4`; candidate CI43856156210 and main CI43857837218 passed all 83 steps. Earlier next-package references above are historical.

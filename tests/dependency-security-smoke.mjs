@@ -21,7 +21,7 @@ const atLeast = (actual, minimum) => {
 test('lockfile retains patched versions for every affected package instance', () => {
   const floors = {
     'body-parser': '1.20.9', 'proxy-addr': '2.0.8', qs: '6.16.2',
-    'source-map-js': '1.2.2', vite: '6.4.6', zod: '4.6.6',
+    'source-map-js': '1.2.2', zod: '4.6.6',
   };
   for (const [name, floor] of Object.entries(floors)) {
     const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith(`/node_modules/${name}`) || path === `node_modules/${name}`);
@@ -33,8 +33,11 @@ test('lockfile retains patched versions for every affected package instance', ()
       assert.ok(atLeast(value.version, floor), `${path} must be >= ${floor}`);
     }
   }
-  // GHSA-g7r4-m6w7-qqqr affects >=0.27.3 through 0.28.0. Vite 6's
-  // separate 0.25.x copy is outside that interval; do not force its major.
+  for (const [location, pkg] of Object.entries(lock.packages)) {
+    assert.ok(!/(?:^|\/)node_modules\/(?:vite|picomatch)$/.test(location) &&
+      !['vite', 'picomatch'].includes(pkg.name), 'Removed build dependency at ' + location);
+  }
+  // GHSA-g7r4-m6w7-qqqr affects >=0.27.3 through 0.28.0.
   const esbuilds = Object.entries(lock.packages).filter(([path]) => path.endsWith('/esbuild'));
   assert.ok(esbuilds.length);
   for (const [path, value] of esbuilds) {

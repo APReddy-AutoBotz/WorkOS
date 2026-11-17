@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {withCommercialDatabase,migrateCommercialDatabase,withCommercialApi,commercialFixture as f} from './support/commercial-drafting-test.mjs';
 import {seedCapacity} from './support/worker-capacity-test.mjs';
@@ -15,10 +15,10 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead','approvals.view',true) on conflict(role_name,permission_key)do update set enabled=true");
  await withCommercialApi({databaseUrl,identities:ids},async({request,tokenFor,baseUrl})=>{
   const identity=ids.manager,current=await request('/api/auth/me');assert.equal(current.status,200);
-  const vite=await createServer({root,mode:'production',logLevel:'error',server:{host:'127.0.0.1',port:0,hmr:false,proxy:{'/api':{target:baseUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});
+  const fixtureServer = await startFixtureServer({root, fixtures: ['legacy-approval'], apiUrl: baseUrl, publicEnv: {VITE_APP_MODE: 'production', VITE_ALLOW_TEST_FALLBACK: 'false'}});
   let browser;
   try{
-   await vite.listen();const origin=`http://127.0.0.1:${vite.httpServer.address().port}`;
+   const origin = fixtureServer.url;
    browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1600,height:1200}});
    await context.addInitScript(({user,scope,token})=>{
     sessionStorage.setItem('workos_session',JSON.stringify(user));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);
@@ -40,6 +40,6 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    await page.getByRole('status').filter({hasText:'Created approval delegation to Synthetic browser delegate.'}).waitFor();
    assert.equal((await pool.query('select count(*)::int n from approval_delegations')).rows[0].n,1);
    console.log('Real approval workspace: invalid participant role displays server refusal with zero writes; corrected delegation saves once and displays acknowledgement.');
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });

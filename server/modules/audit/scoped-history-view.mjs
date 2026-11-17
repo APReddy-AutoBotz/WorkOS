@@ -1,3 +1,5 @@
+import {safeNotificationMetadata, safeNotificationDeliveryResults, isNotificationDeliveryEvent} from '../notifications/delivery-diagnostics.mjs';
+
 const sensitiveIdentityKeys = new Set([
   'entraobjectid',
   'providersubject',
@@ -59,6 +61,12 @@ export const redactAuditHistoryRows = rows => rows.map(row => {
     old_value: redactIdentityFieldsWithValues(row.old_value, sensitiveValues),
     new_value: redactIdentityFieldsWithValues(row.new_value, sensitiveValues),
   };
+  if (row.module === 'Notifications' && row.action === 'Send Notification') {
+    for (const key of ['old_value','new_value']) {
+      if (redacted[key] && typeof redacted[key] === 'object' && !Array.isArray(redacted[key]))
+        redacted[key] = {...redacted[key],deliveryResults:safeNotificationDeliveryResults(redacted[key].deliveryResults)};
+    }
+  }
   if (Object.hasOwn(row, 'entity_id')) {
     redacted.entity_id = containsSensitiveIdentityValue(row.entity_id, sensitiveValues) ? null : row.entity_id;
   }
@@ -77,7 +85,9 @@ export const redactIntegrationHistoryRows = rows => rows.map(row => {
     entity_id: row.event_type === 'EntraLoginRejected' || containsSensitiveIdentityValue(row.entity_id, sensitiveValues)
       ? null
       : row.entity_id,
-    request_payload: redactIdentityFieldsWithValues(row.request_payload, sensitiveValues),
-    response_payload: redactIdentityFieldsWithValues(row.response_payload, sensitiveValues),
+    request_payload: isNotificationDeliveryEvent(row.event_type) ? {} : redactIdentityFieldsWithValues(row.request_payload, sensitiveValues),
+    response_payload: isNotificationDeliveryEvent(row.event_type)
+      ? safeNotificationMetadata(row.response_payload,row.status==='Failed')
+      : redactIdentityFieldsWithValues(row.response_payload, sensitiveValues),
   };
 });

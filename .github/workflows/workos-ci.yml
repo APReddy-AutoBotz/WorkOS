@@ -80,6 +80,12 @@ jobs:
       - name: Verify delegated timesheet source authority
         run: npm run test:legacy-timesheet-delegation
 
+      - name: Verify persistent authentication budgets across replica and restart
+        run: npm run test:persistent-auth-throttle
+
+      - name: Verify scoped and sanitized notification diagnostics
+        run: npm run test:notification-delivery-scope
+
       - name: Verify independent leave decisions and Teams boundary
         run: npm run test:leave-decision-independence
       - name: Current workforce identity bindings
@@ -163,6 +169,15 @@ jobs:
       - name: Verify legacy approval delegation browser journey
         run: npm run test:legacy-approval-browser
 
+      - name: Verify the compiled production login page
+        run: node tests/production-frontend-browser.mjs
+
+      - name: Verify the development login page and state-preserving refresh
+        run: node tests/development-frontend-browser.mjs
+
+      - name: Verify real notification diagnostics browser journey
+        run: npm run test:notification-diagnostics-browser
+
       - name: Verify operational timesheet CSV safety
         run: npm run test:timesheet-export-browser
 
@@ -235,9 +250,9 @@ jobs:
           VITE_TERM_EMPLOYEE: employee
         run: |
           set -euo pipefail
-          npm run dev -- --host 127.0.0.1 --port 4177 > /tmp/workos-browser-vite.log 2>&1 &
-          VITE_PID=$!
-          trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT
+          node tests/support/serve-browser-fixtures.mjs &
+          FIXTURE_PID=$!
+          trap 'kill "$FIXTURE_PID" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 40); do
             if curl --fail --silent http://127.0.0.1:4177/tests/fixtures/import-history-panel.html > /dev/null; then
               break
@@ -313,7 +328,10 @@ jobs:
           ENTRA_CLIENT_ID: 00000000-0000-0000-0000-000000000002
           ENTRA_CLIENT_SECRET: synthetic-client-secret
           ENTRA_REDIRECT_URI: https://workos.example.test/api/auth/entra/callback
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          API_SESSION_TTL_HOURS=0.25 docker compose config --format json |
+            node -e "const config = JSON.parse(require('node:fs').readFileSync(0, 'utf8')); require('node:assert/strict').equal(config.services.app.environment.API_SESSION_TTL_HOURS, '0.25')"
 
       - name: Build production container
         run: |

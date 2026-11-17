@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {chromium} from 'playwright';
 import {randomUUID} from 'node:crypto';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
@@ -19,9 +19,9 @@ for(const action of ['warn','block'])await withCommercialDatabase(async({pool,da
  const worker=async()=>{const id=`worker-ot-browser-${randomUUID()}`;await pool.query("insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id) values($1,$1,'Synthetic overtime import worker',$2,'Consultant','Delivery','US','director-commercial','Active',$3,$4)",[id,`${id}@example.test`,f.organizationId,f.legalEntityId]);return id;};
  await withCommercialApi({databaseUrl,identities},async({baseUrl:apiUrl,tokenFor,request})=>{
   assert.equal((await request('/api/v1/work-capture-modes/settings',{method:'POST',body:{expectedLatestId:null,enabledModes:['weekly','daily']}})).status,201);
-  const vite=await createServer({root:rootDir,mode:'production',clearScreen:false,logLevel:'error',server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,proxy:{'/api':{target:apiUrl,changeOrigin:true}}},define:{'import.meta.env.VITE_APP_MODE':JSON.stringify('production'),'import.meta.env.VITE_ALLOW_TEST_FALLBACK':JSON.stringify('false')}});let browser;
+  const fixtureServer = await startFixtureServer({root: rootDir, fixtures: ['overtime-capture-policy'], apiUrl});let browser;
   try{
-   await vite.listen();const baseUrl=`http://127.0.0.1:${vite.httpServer.address().port}`;browser=await chromium.launch({headless:true});const errors=[],external=[];
+   const baseUrl=fixtureServer.url;browser=await chromium.launch({headless:true});const errors=[],external=[];
    const contextFor=async identity=>{const employee=identity===identities.reader,context=await browser.newContext({viewport:{width:1700,height:1200},timezoneId:'Pacific/Kiritimati'});await context.addInitScript(({session,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(session));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{session:{id:employee?f.ownerId:identity.id,employeeId:employee?identities.reader.employeeId:identity.id,name:'Synthetic overtime operator',role:identity.role,permissionRole:identity.role,permissions:employee?workerPermissions:workPermissions},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(identity)});return context;};
    const adminContext=await contextFor(identities.manager),workContext=await contextFor(identities.reader),admin=await adminContext.newPage(),page=await workContext.newPage();for(const p of [admin,page]){p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(e.message));p.on('request',r=>{if(/^https?:/.test(r.url())&&new URL(r.url()).origin!==baseUrl)external.push(r.url());});}
    const ready=()=>page.waitForFunction(()=>{const select=document.querySelector('select[aria-label="Capture mode"]');return select&&!select.disabled;});const warning=()=>page.getByRole('status',{name:'Recorded work threshold warnings',exact:true});
@@ -48,7 +48,7 @@ for(const action of ['warn','block'])await withCommercialDatabase(async({pool,da
    }
    await page.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));await page.getByText('Access or scope changed. Reload work explicitly for the selected legal entity.',{exact:true}).waitFor();assert.equal(await warning().count(),0);
    assert.deepEqual(errors,[]);assert.deepEqual(external,[]);await adminContext.close();await workContext.close();
-  }finally{await browser?.close();await vite.close();}
+  }finally{await browser?.close();await fixtureServer.close();}
  });
 });
 console.log('Overtime real React/API/PostgreSQL explicit warn/block/off policy, named Employee warnings/save/reload/modes, hidden/weekend/zero preservation, import preview/apply warnings/block, approver history neutrality, inheritance and owner invalidation passed.');

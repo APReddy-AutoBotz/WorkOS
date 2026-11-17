@@ -1,8 +1,11 @@
 import {legacyApprovalScope} from './modules/approvals/legacy-approval-scope.mjs';
 import {registerLegacyDelegationRoutes} from './modules/approvals/legacy-delegation-router.mjs';
+
+import {safeNotificationMetadata, safeNotificationProvider, notificationFailureCode} from './modules/notifications/delivery-diagnostics.mjs';
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
-import {createLoginRateLimit,requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
+import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
+import {createPersistentLoginRateLimit} from './modules/identity-access/persistent-login-rate-limit.mjs';
 import {createOwnWorkPlanningRouter} from './modules/planning/own-work-planning-router.mjs';
 import {createAssignmentVersionRouter} from './modules/planning/assignment-version-router.mjs';
 import {setAssignmentVersionContext} from './modules/planning/assignment-version-context.mjs';
@@ -118,7 +121,11 @@ const {requireIdentity, requireAuth} = createIdentityAccessMiddleware({
   allowTestFallback: () => process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true',
 });
 
-const loginRateLimit = createLoginRateLimit({maxAttempts: runtimeEnvironment.loginRateLimit,
+const authenticationThrottlePool = new Pool({...databaseConnectionOptions({databaseUrl: runtimeEnvironment.databaseUrl,
+  sslMode: runtimeEnvironment.pgSslMode, sslRootCert: runtimeEnvironment.pgSslRootCert}),
+  max: 4, connectionTimeoutMillis: 1500, query_timeout: 3000, idleTimeoutMillis: 10000});
+authenticationThrottlePool.on('error', () => console.error('Authentication protection storage connection failed.'));
+const loginRateLimit = createPersistentLoginRateLimit({pool: authenticationThrottlePool, maxAttempts: runtimeEnvironment.loginRateLimit,
   maxIpAttempts: runtimeEnvironment.loginIpRateLimit});
 
 const requireRoles = (...roles) => (req, res, next) => {
@@ -274,12 +281,6 @@ const scryptHash = async (value) => {
 const getPasswordMinLength = () => {
   const configured = Number(process.env.PASSWORD_MIN_LENGTH || 6);
   return Number.isFinite(configured) && configured >= 6 ? configured : 6;
-};
-
-const getSessionTtlMs = () => {
-  const configuredHours = Number(process.env.API_SESSION_TTL_HOURS || 8);
-  const safeHours = Number.isFinite(configuredHours) && configuredHours > 0 ? configuredHours : 8;
-  return safeHours * 60 * 60 * 1000;
 };
 
 const getSessionCookieOptions = (expiresAt) => ({
@@ -906,7 +907,7 @@ const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null,
     select distinct group_id from entra_group_role_mappings
     where active = true and group_id = any($1::text[]) and role_name = any($2::text[])
     order by group_id`, [groups, systemRoles])).rows.map(row => row.group_id) : [];
-  const sessionExpiresAt = Date.now() + getSessionTtlMs();
+  const sessionExpiresAt = Date.now() + runtimeEnvironment.sessionTtlMs;
   const token = signToken({
     sid: crypto.randomUUID(),
     sub: user.id,
@@ -952,7 +953,7 @@ const recordNotificationAttempt = async (client, {
     insert into notification_delivery_attempts (notification_id, channel, provider, status, response_metadata)
     values ($1,$2,$3,$4,$5)
     returning *
-  `, [notificationId, channel, provider, status, JSON.stringify(responseMetadata)]);
+  `, [notificationId, channel, provider, status, JSON.stringify(safeNotificationMetadata(responseMetadata,status === 'Failed'))]);
   return result.rows[0];
 };
 
@@ -1098,7 +1099,7 @@ const sendNotification = async (client, req, {
     };
     const subject = renderNotificationText(template?.subject, title, context);
     const messageBody = renderNotificationText(template?.body, body, context);
-    const selectedProvider = provider || notificationProviderForChannel(deliveryChannel);
+    const selectedProvider = safeNotificationProvider(provider || notificationProviderForChannel(deliveryChannel));
     try {
       let metadata = { mode: selectedProvider, deterministic: true };
       if (deliveryChannel === 'Email' && selectedProvider === 'graph') {
@@ -1125,7 +1126,7 @@ const sendNotification = async (client, req, {
           entityType: entityType || 'NotificationEvent',
           entityId: entityId || event.id,
           status: 'Success',
-          responsePayload: metadata,
+          responsePayload: safeNotificationMetadata(metadata),
           organizationScope: req?.organizationScope,
         });
       }
@@ -1135,16 +1136,16 @@ const sendNotification = async (client, req, {
         channel: deliveryChannel,
         provider: selectedProvider,
         status: 'Failed',
-        responseMetadata: { error: error.message, deterministic: true },
+        responseMetadata: { errorCode: notificationFailureCode, deterministic: true },
       });
-      deliveryResults.push({ channel: deliveryChannel, provider: selectedProvider, status: 'Failed', error: error.message });
+      deliveryResults.push({ channel: deliveryChannel, provider: selectedProvider, status: 'Failed', errorCode: notificationFailureCode });
       await logIntegrationEvent(client, {
         provider: deliveryChannel === 'Teams' ? 'teams' : deliveryChannel === 'Email' ? 'email' : selectedProvider,
         eventType: `${deliveryChannel}NotificationFailed`,
         entityType: entityType || 'NotificationEvent',
         entityId: entityId || event.id,
         status: 'Failed',
-        responsePayload: { error: error.message },
+        responsePayload: { errorCode: notificationFailureCode },
         organizationScope: req?.organizationScope,
       });
     }
@@ -1340,7 +1341,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit.callback, as
   }
 });
 
-app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDatabase, async (req, res) => {
+app.post('/api/auth/login', requireLocalLoginEnabled, requireDatabase, loginRateLimit, async (req, res) => {
   const schema = z.object({
     username: z.string().min(1),
     password: z.string().min(1),
@@ -1389,7 +1390,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDat
       ? parsed.data.requestedRole
       : user.roles[0];
     const permissions = await getEffectivePermissionsForUser(pool, user.id, activeRole);
-    const sessionExpiresAt = Date.now() + getSessionTtlMs();
+    const sessionExpiresAt = Date.now() + runtimeEnvironment.sessionTtlMs;
     const token = signToken({
       sid: crypto.randomUUID(),
       sub: user.id,

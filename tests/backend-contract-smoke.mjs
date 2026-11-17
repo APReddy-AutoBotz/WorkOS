@@ -57,8 +57,8 @@ assert.match(server, /getCatalogUsage/, 'catalog delete usage guard must exist')
 
 assert.match(server, /loginRateLimit/, 'login rate limiter must exist');
 assert.match(server, /getPasswordMinLength/, 'password policy helper must exist');
-assert.match(server, /getSessionTtlMs/, 'session TTL helper must exist');
-assert.match(server, /API_SESSION_TTL_HOURS/, 'session TTL must be configurable through environment');
+assert.equal((server.match(/const sessionExpiresAt = Date\.now\(\) \+ runtimeEnvironment\.sessionTtlMs/g) || []).length, 2,
+  'local and provider sign-in must both use the validated deployment lifetime');
 assert.match(server, /maxAge: Math\.max\(0, expiresAt - Date\.now\(\)\)/, 'session cookie must retain the remaining absolute lifetime');
 assert.doesNotMatch(server, /Date\.now\(\) \+ 8 \* 60 \* 60 \* 1000/, 'session expiry must not be hardcoded at token issuance');
 assert.match(server, /sessionExpiresAt/, 'login and role switching must expose session expiry metadata');
@@ -355,7 +355,7 @@ assert.match(server, /buildTeamsActionUrl/, 'Teams action tokens must expose por
 assert.match(server, /app\.get\('\/api\/integrations\/health'/, 'integration health route must exist');
 assert.match(server, /credentialChecks/, 'integration health must expose non-secret credential readiness checks');
 assert.match(server, /ENTRA_REDIRECT_URI/, 'integration readiness must account for Entra redirect URI');
-assert.match(readFileSync('vite.config.ts', 'utf8'), /proxy[\s\S]*'\/api'[\s\S]*API_PORT/, 'Vite dev server must proxy /api to the local API for SSO callback testing');
+assert.match(readFileSync('scripts/dev-frontend.mjs', 'utf8'), /env\.API_PORT[\s\S]*createFrontendApp\(values.host, 'http:\/\/localhost:' \+ apiPort\)/, 'development must use the shared API proxy with the configured local API port');
 assert.match(integrationMigration, /create table if not exists identity_provider_links/, 'integration migration must create identity provider links');
 assert.match(integrationMigration, /create table if not exists teams_action_tokens/, 'integration migration must create Teams action tokens');
 assert.match(integrationMigration, /action text not null check \(action in \('approve', 'reject', 'open_portal'\)\)/, 'Teams action tokens must be deterministic action-only');

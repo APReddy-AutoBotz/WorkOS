@@ -3,8 +3,9 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import {DataStorage} from './services/storage';
 import './index.css';
+import {frontendEnv} from './config/frontendEnvironment';
 
-if (import.meta.env.MODE === 'test' && import.meta.env.VITE_ENABLE_TEST_FALLBACK === 'true') {
+if (frontendEnv.MODE === 'test' && frontendEnv.VITE_ENABLE_TEST_FALLBACK === 'true') {
   DataStorage.initialize();
 }
 
