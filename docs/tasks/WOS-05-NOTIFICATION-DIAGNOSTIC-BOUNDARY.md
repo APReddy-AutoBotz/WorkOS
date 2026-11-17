@@ -21,3 +21,12 @@ Required remaining gates: immutable-head independent review; type/lint/aggregate
 ## Operations and rollback
 
 Use channel, provider, delivery status, timestamp and safe diagnostic code/status to investigate failures. Raw provider responses, recipient addresses and arbitrary nested metadata are not an API contract. Historical orphan attempts remain stored but cannot establish scoped ownership. This does not introduce deployment-wide access, external retry redesign, or full notification/release acceptance. Prefer forward fixes: older code reopens disclosure while historical raw evidence remains stored. Preserve audit and delivery history. No production deployment is included.
+
+## PR170 acceptance blocked by upstream dependency advisory — 2026-11-17
+
+Notification diagnostics runtime candidate `5ddb26a15970e34af1e2dbdb198ce21397d5ad9c` passed local typecheck, lint (266 modules), full aggregate, real PostgreSQL/API and NotificationCenter browser checks, 56 migration entries, production build/signed-identity/startup and bootstrap/adversarial scans. Independent immutable-head review `7484bf28-df01-47c9-bfe2-facc801e28d2` covered all 23 paths with zero findings.
+
+[PR170 CI44132858216](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/44132858216) passed all preceding application/API/browser/production-identity/migration steps, then failed the full dependency audit. `GHSA-fc5q-39xc-vjpf` flags repeated-extglob ReDoS in picomatch through the latest published version 4.0.7, propagating through fdir/tinyglobby/Vite. The subsequent Compose/container checks were skipped, so this run is not acceptance. The full-history secret scan passed. A fresh production-only audit reported zero vulnerabilities; that does not waive the full audit gate.
+
+The npm-suggested Vite 6.2.7 downgrade was evaluated in an isolated temporary manifest and itself reports high-severity vulnerabilities, including file-read/path-traversal and editor-command issues. It was not adopted. No dependency changes, suppression, audit threshold reduction or production deployment were made. Keep PR170 unmerged until a safe remediation passes the complete checks. The earlier zero-vulnerability installation result is historical evidence only and is superseded by the fresh audit. Continue independent security work, beginning with investigation of retained legacy approval/delegation ownership and selected-entity scope; do not import the dependent commercial stack wholesale.
+
