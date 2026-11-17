@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+The frontend build-tool migration starts with the deployable HTML, JavaScript and CSS. Acceptance requires white-label metadata, browser environment isolation, a working production login page and the production container. The next stage covers the development server, API proxy, refresh behavior, preview and browser fixtures. Remove Vite after those callers migrate, then rerun the full dependency audit and every hosted check before merging.
+
 | Priority | Outcome | Evidence required to advance |
 |---|---|---|
 | 1 | Integrate the verified foundation and security corrections | Inventory exact PR heads/dependencies/reviews; inspect actual diffs; resolve blocking findings; verify applicable CI and database/browser negatives; expected-head merge; main checks |

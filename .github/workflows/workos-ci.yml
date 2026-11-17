@@ -154,6 +154,9 @@ jobs:
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
+      - name: Verify the compiled production login page
+        run: node tests/production-frontend-browser.mjs
+
       - name: Verify operational timesheet CSV safety
         run: npm run test:timesheet-export-browser
 
