@@ -422,7 +422,7 @@ Setup configuration inspection now requires settings.manage; do not broadly gran
 
 `TRUSTED_PROXY_CIDRS` defaults empty (no proxy trust). Set a comma-separated list of the actual immediate reverse-proxy IPs or CIDRs only when deploying behind a proxy. At most 64 entries and 4096 characters are accepted. Host aliases, boolean/hop-count shortcuts, universal /0 ranges, scoped IPv6 and malformed prefixes fail startup. The proxy must strip/replace untrusted forwarding headers; firewall application access so only approved proxies connect. Express walks the chain from the socket to the first untrusted hop. Throttling and audit records use this same resolved IP, not a raw forwarded-header value. An omitted proxy configuration groups proxied users by the proxy's socket address; verify the buyer topology before enabling external traffic. Compose forwards this setting to the application.
 
-Counters are process-local and reset on restart; replicas do not share them. Persistent/distributed throttling is still a release requirement. This increment does not change OIDC policy, enable production local credentials or add session revocation. Rollback would restore retention and spoofing risks; prefer a tested forward correction, or restrict ingress and disable affected authentication routes while recovering. No data migration or rollback SQL is needed.
+From migration 057c onward, login counters are shared across replicas. See Shared login throttling below for rollout and rollback.
 
 
 ### Authentication environment reference
@@ -433,7 +433,7 @@ Counters are process-local and reset on restart; replicas do not share them. Per
 | `LOGIN_IP_RATE_LIMIT` | Shared client-IP budget across authentication flows | Public configuration | Optional; 64 | Integer 1 through 1,000,000 |
 | `TRUSTED_PROXY_CIDRS` | Explicit ingress peers trusted to supply forwarding addresses | Public configuration; topology-sensitive operational access | Optional; empty means direct peer only | Up to 64 comma-separated IP/CIDR entries, 4096 characters; no /0, aliases or hop counts |
 
-Changing these settings requires application restart. Test proxy-chain resolution and NAT sign-in behavior before buyer rollout. Never substitute these limits for the separately required persistent production protection.
+Changing these settings requires application restart. Test proxy-chain resolution and NAT sign-in behavior before buyer rollout. Roll out matching limits to every replica.
 
 
 ## Durable session rollout and recovery
@@ -456,3 +456,7 @@ PR168 also refreshes canonical workforce bindings on each authenticated request.
 ## Operational CSV format compatibility
 
 Shared and Timesheet Approval exports quote every field and apply the existing apostrophe literal-text marker to dangerous control/whitespace/formula prefixes. Headers receive the same encoding. Source records, field order, filters, empty header-only Ops exports and audit behavior remain unchanged. Machine consumers must account for literal markers; spreadsheet saving/reopening and external transformations can alter interpretation. No universal spreadsheet execution guarantee is claimed. No migration is required; reverting the serializer reopens unsafe-prefix paths, so prefer forward correction.
+
+### Shared login throttling candidate
+
+Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in the buyer database. API replicas share the per-IP and per-input limits, including the Entra callback limit. Apply migrations before switching traffic, drain old API processes, and configure identical limits and trusted proxy settings on all replicas. Counters start empty on first upgrade. Storage failure returns HTTP 503 before authentication. Reverting to the previous application restores process-local counters and its readiness check rejects the newer migration ledger. Prefer forward correction and retain the migration.

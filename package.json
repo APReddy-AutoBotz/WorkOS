@@ -183,7 +183,8 @@
     "test:csv-output-safety": "node --import tsx tests/csv-output-safety-smoke.mjs",
     "test:timesheet-export-browser": "node tests/timesheet-export-browser-smoke.mjs",
     "test:live-workforce-bindings": "node tests/live-workforce-bindings-postgres-smoke.mjs",
-    "test:leave-decision-browser": "node tests/leave-decision-independence-browser-smoke.mjs"
+    "test:leave-decision-browser": "node tests/leave-decision-independence-browser-smoke.mjs",
+    "test:persistent-auth-throttle": "node tests/persistent-login-rate-limit-postgres-smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

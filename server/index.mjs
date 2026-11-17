@@ -1,6 +1,7 @@
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
-import {createLoginRateLimit,requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
+import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
+import {createPersistentLoginRateLimit} from './modules/identity-access/persistent-login-rate-limit.mjs';
 import {createOwnWorkPlanningRouter} from './modules/planning/own-work-planning-router.mjs';
 import {createAssignmentVersionRouter} from './modules/planning/assignment-version-router.mjs';
 import {setAssignmentVersionContext} from './modules/planning/assignment-version-context.mjs';
@@ -116,7 +117,11 @@ const {requireIdentity, requireAuth} = createIdentityAccessMiddleware({
   allowTestFallback: () => process.env.APP_MODE === 'test' && process.env.ALLOW_TEST_FALLBACK === 'true',
 });
 
-const loginRateLimit = createLoginRateLimit({maxAttempts: runtimeEnvironment.loginRateLimit,
+const authenticationThrottlePool = new Pool({...databaseConnectionOptions({databaseUrl: runtimeEnvironment.databaseUrl,
+  sslMode: runtimeEnvironment.pgSslMode, sslRootCert: runtimeEnvironment.pgSslRootCert}),
+  max: 4, connectionTimeoutMillis: 1500, idleTimeoutMillis: 10000});
+authenticationThrottlePool.on('error', () => console.error('Authentication protection storage connection failed.'));
+const loginRateLimit = createPersistentLoginRateLimit({pool: authenticationThrottlePool, maxAttempts: runtimeEnvironment.loginRateLimit,
   maxIpAttempts: runtimeEnvironment.loginIpRateLimit});
 
 const requireRoles = (...roles) => (req, res, next) => {
@@ -1338,7 +1343,7 @@ app.get('/api/auth/entra/callback', requireDatabase, loginRateLimit.callback, as
   }
 });
 
-app.post('/api/auth/login', requireLocalLoginEnabled, loginRateLimit, requireDatabase, async (req, res) => {
+app.post('/api/auth/login', requireLocalLoginEnabled, requireDatabase, loginRateLimit, async (req, res) => {
   const schema = z.object({
     username: z.string().min(1),
     password: z.string().min(1),
