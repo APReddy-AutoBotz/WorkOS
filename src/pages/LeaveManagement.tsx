@@ -1,3 +1,4 @@
+import {useCalendarLeaveRequest,CalendarLeaveSummary,CalendarLeaveHistory} from '../components/CalendarLeave';
 import {OwnWorkPlanning} from '../components/OwnWorkPlanning';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -732,6 +733,7 @@ const EmployeeLeavePanel = ({
     reason: '',
   });
   const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
+  const calendar=useCalendarLeaveRequest(employee.id,form.startDate,form.endDate,editingRequestId);
 
   useEffect(() => {
     if (!form.leaveTypeId && defaultType) {
@@ -743,7 +745,10 @@ const EmployeeLeavePanel = ({
     event.preventDefault();
     if (!employee || !form.leaveTypeId) return;
     try {
-      if (editingRequestId) {
+      if(calendar.enabled){
+        await calendar.save({employeeId:employee.id,leaveTypeId:form.leaveTypeId,startsOn:form.startDate,endsOn:form.endDate,reason:form.reason});
+        setNotice(editingRequestId?'Leave request updated.':'Leave request submitted for approval.');
+      }else if (editingRequestId) {
         await leaveService.updateRequest(editingRequestId, {
           leaveTypeId: form.leaveTypeId,
           startDate: form.startDate,
@@ -773,6 +778,7 @@ const EmployeeLeavePanel = ({
   };
 
   const editRequest = (request: LeaveRequest) => {
+    calendar.clear();
     setEditingRequestId(request.id);
     setForm({
       leaveTypeId: request.leaveTypeId,
@@ -783,6 +789,7 @@ const EmployeeLeavePanel = ({
   };
 
   const cancelEdit = () => {
+    calendar.clear();
     setEditingRequestId(null);
     setForm({
       leaveTypeId: defaultType?.id || '',
@@ -806,7 +813,7 @@ const EmployeeLeavePanel = ({
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.85fr_1.15fr]">
       <div className="space-y-6">
-        <Card title="Leave Balance" subtitle={availability ? `${formatHours(availability.availabilityHours)} availability after approved leave and holidays` : 'Balances by leave type'} headerVariant="secondary">
+        <Card title="Leave Balance" subtitle={availability ? `Compatibility availability: ${formatHours(availability.availabilityHours)} after approved leave and holidays` : 'Balances by leave type'} headerVariant="secondary">
           <div className="space-y-3">
             {balances.map(balance => (
               <div key={balance.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
@@ -826,7 +833,7 @@ const EmployeeLeavePanel = ({
         </Card>
 
         <Card title={editingRequestId ? 'Edit Leave Request' : 'New Leave Request'} headerVariant="secondary">
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit}><fieldset className="space-y-4" disabled={calendar.enabled&&calendar.waiting}>
             <label className="block">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Leave Type</span>
               <select value={form.leaveTypeId} onChange={event => setForm({ ...form, leaveTypeId: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">
@@ -836,24 +843,25 @@ const EmployeeLeavePanel = ({
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Start</span>
-                <input type="date" value={form.startDate} onChange={event => setForm({ ...form, startDate: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
+                <input type="date" value={form.startDate} onChange={event => {calendar.clear();setForm({ ...form, startDate: event.target.value });}} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
               </label>
               <label className="block">
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">End</span>
-                <input type="date" value={form.endDate} onChange={event => setForm({ ...form, endDate: event.target.value })} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
+                <input type="date" value={form.endDate} onChange={event => {calendar.clear();setForm({ ...form, endDate: event.target.value });}} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" />
               </label>
             </div>
             <label className="block">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Reason</span>
-              <textarea value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} className="mt-2 min-h-24 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium" />
+              <textarea aria-label="Reason" value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} className="mt-2 min-h-24 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium" />
             </label>
+            {calendar.enabled&&<section aria-label="Request calendar authority" className="rounded border p-3 space-y-2"><button type="button" disabled={calendar.waiting} onClick={()=>void calendar.calculate()}>Calculate leave dates</button>{calendar.waiting&&<p role="status">Confirming leave calendar…</p>}{calendar.notice&&<p role="status">{calendar.notice}</p>}{calendar.quote&&<CalendarLeaveSummary quote={calendar.quote}/>}</section>}
             <div className="flex gap-2">
               {editingRequestId && (
                 <button className="btn-secondary flex-1 py-2.5" type="button" onClick={cancelEdit}>Discard</button>
               )}
-              <button className="btn-primary flex-1 py-2.5" type="submit">{editingRequestId ? 'Save Changes' : 'Submit Request'}</button>
+              <button className="btn-primary flex-1 py-2.5" type="submit" disabled={calendar.enabled&&(!calendar.ready||calendar.waiting)}>{editingRequestId ? 'Save Changes' : 'Submit Request'}</button>
             </div>
-          </form>
+          </fieldset></form>
         </Card>
       </div>
       <LeaveRequestTable requests={requests} onEdit={editRequest} onCancel={cancelRequest} />
@@ -919,6 +927,7 @@ const LeaveRequestTable = ({
                         <button type="button" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-700" onClick={() => onCancel(request)}>Cancel</button>
                       )}
                     </div>
+                    <CalendarLeaveHistory requestId={request.id} employeeId={request.employeeId}/>
                   </td>
                 )}
               </tr>

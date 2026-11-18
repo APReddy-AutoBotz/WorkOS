@@ -80,6 +80,9 @@ jobs:
       - name: Verify delegated timesheet source authority
         run: npm run test:legacy-timesheet-delegation
 
+      - name: Verify calendar leave intake and decisions in PostgreSQL
+        run: npm run test:calendar-leave-postgres
+
       - name: Verify approved actual work reconciliation in PostgreSQL
         run: npm run test:actual-work-postgres
 
@@ -180,6 +183,9 @@ jobs:
 
       - name: Verify legacy approval delegation browser journey
         run: npm run test:legacy-approval-browser
+
+      - name: Verify calendar leave browser journey
+        run: npm run test:calendar-leave-journey
 
       - name: Verify actual utilization and evidence download in Chromium
         run: npm run test:actual-work-journey

@@ -1,6 +1,7 @@
 import {Router} from 'express';
 import {z} from 'zod';
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './decision-independence.mjs';
+import {quoteCalendarLeave,requireCalendarLeaveQuote,retainCalendarLeave,assertCalendarLeaveDecision,calendarLeaveError} from './calendar-leave-service.mjs';
 
 export const createLeaveRouter = ({
   pool,
@@ -26,6 +27,12 @@ export const createLeaveRouter = ({
   }
 
   const router = Router();
+  router.get('/v1/leave-calendar/workers/:id/period', requireDatabase, requireAuth, requirePermission('leave.self_service'), async(req,res)=>{
+    let c;try{c=await pool.connect();await c.query('begin isolation level repeatable read');const q=z.object({startsOn:z.string(),endsOn:z.string()}).strict().safeParse(req.query);if(!q.success){await c.query('rollback');res.status(400).json({error:'Choose explicit leave dates.'});return;}const computed=await quoteCalendarLeave(c,req,req.params.id,q.data.startsOn,q.data.endsOn,buildEmployeeScopeWhere,getBusinessLeaveDays);await c.query('commit');res.json({contractVersion:'calendar-leave/1',organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,quote:computed.quote});}catch(e){if(c)await c.query('rollback').catch(()=>{});if(!calendarLeaveError(res,e))res.status(e.statusCode||503).json({error:'Calendar leave quote could not be confirmed. Reload explicitly.'});}finally{c?.release();}
+  });
+  router.get('/v1/leave-calendar/requests/:id/history',requireDatabase,requireAuth,requirePermission('leave.self_service'),async(req,res)=>{
+    let c;try{c=await pool.connect();await c.query('begin isolation level repeatable read');const parsed=z.object({before:z.string().regex(/^[1-9]\d*$/).refine(v=>Number(v)<=2147483647).optional()}).strict().safeParse(req.query);if(!parsed.success){await c.query('rollback');res.status(400).json({error:'Invalid calendar history cursor.'});return;}const params=[req.params.id],where=buildEmployeeScopeWhere(req,params,'e'),row=(await c.query(`select lr.id,lr.employee_id from leave_requests lr join employees e on e.id=lr.employee_id where lr.id=$1 and ${where}`,params)).rows[0];if(!row){await c.query('rollback');res.status(404).json({error:'Leave calendar history is unavailable in this scope.'});return;}const rows=(await c.query('select id,sequence,created_at,active_role,source,quote from leave_calendar_evidence where request_id=$1 and employee_id=$2 and organization_id=$3 and legal_entity_id=$4 and($5::integer is null or sequence<$5)order by sequence desc limit 11',[row.id,row.employee_id,req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.before?Number(parsed.data.before):null])).rows;await c.query('commit');res.json({contractVersion:'calendar-leave/1',organizationId:req.organizationScope.organizationId,legalEntityId:req.organizationScope.legalEntityId,requestId:row.id,employeeId:row.employee_id,evidence:rows.slice(0,10).map(e=>({id:e.id,sequence:e.sequence,createdAt:e.created_at,activeRole:e.active_role,source:e.source,quote:e.quote})),nextBefore:rows.length>10?rows[9].sequence:null});}catch(e){if(c)await c.query('rollback').catch(()=>{});res.status(503).json({error:'Leave calendar history could not be confirmed. Reload explicitly.'});}finally{c?.release();}
+  });
   const leavePolicySelect = `
     select lp.*,
       coalesce(array_agg(lpt.leave_type_id order by lpt.leave_type_id) filter (where lpt.leave_type_id is not null), '{}') as leave_type_ids
@@ -332,8 +339,9 @@ export const createLeaveRouter = ({
     const params = [];
     const where = buildEmployeeScopeWhere(req, params, 'e');
     await run(res, `
-      select lr.*, e.name as employee_name, lt.name as leave_type_name
+      select lr.*, lr.start_date::text as start_date,lr.end_date::text as end_date,ce.quote as calendar_quote, e.name as employee_name, lt.name as leave_type_name
       from leave_requests lr
+      left join leave_calendar_evidence ce on ce.id=lr.calendar_evidence_id and ce.request_id=lr.id and ce.employee_id=lr.employee_id
       join employees e on e.id = lr.employee_id
       join leave_types lt on lt.id = lr.leave_type_id
       where ${where}
@@ -348,6 +356,7 @@ export const createLeaveRouter = ({
       start_date: z.string().min(10),
       end_date: z.string().min(10),
       total_days: z.number().min(0).max(366).optional(),
+      expected_calendar_token:z.string().regex(/^[a-f0-9]{64}$/).optional(),
       reason: z.string().nullable().optional(),
     });
     const parsed = schema.safeParse(req.body);
@@ -378,12 +387,6 @@ export const createLeaveRouter = ({
         res.status(422).json({ error: 'Leave request must reference an active employee' });
         return;
       }
-      const totalDays = await getBusinessLeaveDays(client, parsed.data.start_date, parsed.data.end_date, employee);
-      if (totalDays <= 0) {
-        await client.query('rollback');
-        res.status(422).json({ error: 'Leave request must include at least one business day' });
-        return;
-      }
       const scopeParams = [employee.id];
       const scopedEmployee = (await client.query(`
         select 1
@@ -396,6 +399,9 @@ export const createLeaveRouter = ({
         res.status(403).json({ error: 'Leave request is outside active-role data scope' });
         return;
       }
+      const calendar=await quoteCalendarLeave(client,req,employee.id,parsed.data.start_date,parsed.data.end_date,buildEmployeeScopeWhere,getBusinessLeaveDays,true);
+      const totalDays=requireCalendarLeaveQuote(calendar,parsed.data.expected_calendar_token);
+      if(totalDays<=0){await client.query('rollback');res.status(422).json({error:'Leave request must include at least one business day'});return;}
       const overlapping = (await client.query(`
         select id
         from leave_requests
@@ -421,6 +427,7 @@ export const createLeaveRouter = ({
         values ($1, $2, $3, $4, $5, 'Submitted', $6, now())
         returning *
       `, [employee.id, parsed.data.leave_type_id, parsed.data.start_date, parsed.data.end_date, totalDays, parsed.data.reason || null]);
+      result.rows[0]=await retainCalendarLeave(client,req,result.rows[0],calendar);
       await refreshLeaveBalancesForEmployee(client, employee.id, startYear);
       await upsertApprovalRecord(client, req, {
         entityType: 'LeaveRequest',
@@ -444,6 +451,7 @@ export const createLeaveRouter = ({
       res.json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
+      if(calendarLeaveError(res,error))return;
       console.error(error);
       res.status(error.status || 500).json({ error: error.status ? error.message : 'Leave request submit failed' });
     } finally {
@@ -457,6 +465,7 @@ export const createLeaveRouter = ({
       start_date: z.string().min(10),
       end_date: z.string().min(10),
       total_days: z.number().min(0).max(366).optional(),
+      expected_calendar_token:z.string().regex(/^[a-f0-9]{64}$/).optional(),
       reason: z.string().nullable().optional(),
     });
     const parsed = schema.safeParse(req.body);
@@ -477,7 +486,7 @@ export const createLeaveRouter = ({
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
+      const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
         await client.query('rollback');
         res.status(404).json({ error: 'Leave request not found' });
@@ -516,12 +525,9 @@ export const createLeaveRouter = ({
         return;
       }
       const employee = (await client.query('select * from employees where id = $1', [previous.employee_id])).rows[0];
-      const totalDays = await getBusinessLeaveDays(client, parsed.data.start_date, parsed.data.end_date, employee);
-      if (totalDays <= 0) {
-        await client.query('rollback');
-        res.status(422).json({ error: 'Leave request must include at least one business day' });
-        return;
-      }
+      const calendar=await quoteCalendarLeave(client,req,employee.id,parsed.data.start_date,parsed.data.end_date,buildEmployeeScopeWhere,getBusinessLeaveDays,true);
+      const totalDays=requireCalendarLeaveQuote(calendar,parsed.data.expected_calendar_token);
+      if(totalDays<=0){await client.query('rollback');res.status(422).json({error:'Leave request must include at least one business day'});return;}
       const { leaveType, balance } = await ensureLeaveBalanceForRequest(client, employee, parsed.data.leave_type_id, startYear, parsed.data.start_date);
       const previousDaysAdjustment = previous.leave_type_id === parsed.data.leave_type_id ? Number(previous.total_days || 0) : 0;
       if (leaveType.paid && balance && Number(balance.available_days || 0) + previousDaysAdjustment < totalDays) {
@@ -540,6 +546,7 @@ export const createLeaveRouter = ({
         where id = $1
         returning *
       `, [req.params.id, parsed.data.leave_type_id, parsed.data.start_date, parsed.data.end_date, totalDays, parsed.data.reason || null]);
+      result.rows[0]=await retainCalendarLeave(client,req,result.rows[0],calendar);
       const previousYear = getLeaveYear(previous.start_date);
       await refreshLeaveBalancesForEmployee(client, previous.employee_id, previousYear);
       if (startYear !== previousYear) {
@@ -558,6 +565,7 @@ export const createLeaveRouter = ({
       res.json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
+      if(calendarLeaveError(res,error))return;
       console.error(error);
       res.status(error.status || 500).json({ error: error.status ? error.message : 'Leave request update failed' });
     } finally {
@@ -577,7 +585,7 @@ export const createLeaveRouter = ({
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
+      const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
         await client.query('rollback');
         res.status(404).json({ error: 'Leave request not found' });
@@ -647,7 +655,7 @@ export const createLeaveRouter = ({
     const client = await pool.connect();
     try {
       await client.query('begin');
-      const previous = (await client.query('select * from leave_requests where id = $1 for update', [req.params.id])).rows[0];
+      const previous = (await client.query('select *,start_date::text,end_date::text from leave_requests where id = $1 for update', [req.params.id])).rows[0];
       if (!previous) {
         await client.query('rollback');
         res.status(404).json({ error: 'Leave request not found' });
@@ -698,6 +706,7 @@ export const createLeaveRouter = ({
         }
       }
       if (parsed.data.status !== 'Cancelled') await assertIndependentLeaveDecision(client, req, previous, buildEmployeeScopeWhere);
+      await assertCalendarLeaveDecision(client,req,previous,parsed.data.status,buildEmployeeScopeWhere,getBusinessLeaveDays);
       const result = await client.query(`
         update leave_requests
         set status = $2,
@@ -731,6 +740,7 @@ export const createLeaveRouter = ({
     } catch (error) {
       await client.query('rollback');
       if (sendLeaveDecisionError(res, error)) return;
+      if(calendarLeaveError(res,error))return;
       console.error(error);
       res.status(500).json({ error: 'Leave request status update failed' });
     } finally {

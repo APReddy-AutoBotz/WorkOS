@@ -9,6 +9,7 @@ const approvalDecisions = [];
 const balanceRefreshes = [];
 const employeeScopeQueries = [];
 let connects = 0;
+let storageUnavailable = false;
 let transactionQueries = [];
 const existingLeaveType = {
   id: 'leave-type-existing', code: 'ANNUAL', name: 'Annual Leave', paid: true,
@@ -46,6 +47,7 @@ const pool = {
     throw new Error(`Unexpected leave query: ${sql}`);
   },
   async connect() {
+    if (storageUnavailable) throw new Error("synthetic database detail");
     connects += 1;
     transactionQueries = [];
     return {
@@ -59,7 +61,8 @@ const pool = {
         if (sql.includes('select * from leave_types where id = $1')) {
           return {rows: params[0] === existingLeaveType.id ? [existingLeaveType] : []};
         }
-        if (sql.includes('select * from leave_requests where id = $1 for update')) {
+        if (sql.includes('from leave_requests where id = $1 for update')) {
+          assert.match(sql,/start_date::text,end_date::text/,'business DATE fields must remain canonical dates');
           const request = leaveRequests.get(params[0]);
           return {rows: request ? [{...request}] : []};
         }
@@ -150,6 +153,7 @@ const routeSignatures = leaveRouter.stack.filter(layer => layer.route).map(layer
   return `${method.toUpperCase()} ${layer.route.path}`;
 });
 assert.deepEqual(routeSignatures, [
+  'GET /v1/leave-calendar/workers/:id/period', 'GET /v1/leave-calendar/requests/:id/history',
   'GET /leave/types', 'POST /leave/types',
   'GET /leave/policies', 'POST /leave/policies',
   'GET /holiday-calendars', 'POST /holiday-calendars',
@@ -157,7 +161,7 @@ assert.deepEqual(routeSignatures, [
   'GET /leave/requests', 'POST /leave/requests',
   'PATCH /leave/requests/:id', 'PATCH /leave/requests/:id/cancel',
   'PATCH /leave/requests/:id/status',
-], 'the leave module must register the same legacy API route group');
+], 'the leave module retains every legacy route plus the two calendar authority readers');
 
 const app = express();
 app.use(express.json());
@@ -179,6 +183,14 @@ const request = (path, {
 });
 
 try {
+  storageUnavailable = true;
+  for (const path of ['/v1/leave-calendar/workers/worker-a/period?startsOn=2026-06-01&endsOn=2026-06-02',
+    '/v1/leave-calendar/requests/request-a/history']) {
+    const result = await request(path, {role: 'Employee'});
+    assert.equal(result.status, 503);
+    assert.doesNotMatch(await result.text(), /synthetic database detail/);
+  }
+  storageUnavailable = false;
   const types = await request('/leave/types', {role: 'Employee'});
   assert.equal(types.status, 200);
   assert.deepEqual(await types.json(), [existingLeaveType]);
@@ -372,6 +384,7 @@ try {
   assert.equal(balanceRefreshes.length, selfDenialBalanceCount);
 
   assert.deepEqual(permissionChecks, [
+    'leave.self_service', 'leave.self_service',
     'leave.self_service', 'leave.admin', 'leave.admin', 'leave.admin',
     'leave.self_service', 'leave.self_service', 'leave.approve', 'leave.approve',
     'leave.approve', 'leave.approve', 'leave.approve', 'leave.self_service',
