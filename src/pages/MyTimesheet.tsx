@@ -110,7 +110,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   const [scopeRevision,setScopeRevision]=useState(0);
   const blockWork=()=>{
     blocked.current=true;++generation.current;loadedContext.current=null;
-    setCategoryDays([]);setLoaded(false);setLoadedOwner(null);setSaving(false);setRows([]);setHourDrafts({});setPreservedEntries([]);setActiveRemark(null);
+    setCategoryDays([]);setLoaded(false);setLoadedOwner(null);setRows([]);setHourDrafts({});setPreservedEntries([]);setActiveRemark(null);
     setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setCaptureWarnings(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
     setNotice({type:'warning',message:'Access or scope changed. Reload work explicitly for the selected legal entity.'});
   };
