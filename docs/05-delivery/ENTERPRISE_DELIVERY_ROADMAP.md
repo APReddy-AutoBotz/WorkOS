@@ -122,3 +122,12 @@ Notification diagnostics runtime candidate `5ddb26a15970e34af1e2dbdb198ce21397d5
 
 The frontend toolchain correction merged in PR #176. The notification diagnostics journey now runs on the same compiled fixture server as the other database-backed browser checks.
 
+## Legacy approval/delegation security integration - 2026-11-17
+
+Accepted baseline: PR169 CSV safety merged at `88262c87a260529c00a680b22d2f021ff7d8cba4`; candidate CI43856156210 and main CI43857837218 passed all 83 steps. Earlier next-package references above are historical.
+
+[PR170](https://github.com/APReddy-AutoBotz/WorkOS/pull/170) remains unmerged at documentation head `471234b12ee700657aec80a658195f887ccb3a06`: runtime candidate `5ddb26a15970e34af1e2dbdb198ce21397d5ad9c` passed local checks and a 23-path independent review, but CI44132858216 failed the full dependency audit on unpatched picomatch. Eighty steps passed, one failed and four were skipped. The suggested Vite downgrade was evaluated and rejected because it introduces other high-severity vulnerabilities. No audit waiver or production deployment occurred.
+
+This independent revision implements [legacy approval/delegation ownership and selected-entity scope](../tasks/WOS-05-LEGACY-APPROVAL-SCOPE.md) on accepted main. Actual baseline API execution reproduced recipient ownership takeover and cross-entity approval disclosure; the corrected API and real browser regressions pass. New bounded modules preserve original-owner/scoped-administrator editing, revocation after lifecycle changes, On Leave compatibility and immutable audit evidence. Complete local/hosted gates and exact-head independent review remain required. The shared dependency audit blocker remains open; commercial source integration, remaining security reconciliation, persistent throttling and buyer/release evidence are separate work.
+
+PR #170 merged after 88 passing post-merge checks. The legacy approval browser journey now uses the compiled fixture server and the release workflow includes its two PostgreSQL authorization suites. [Notification main verification](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/44199853159)

@@ -327,7 +327,7 @@ assert.match(leaveMigration, /create table if not exists leave_requests/, 'leave
 assert.match(leaveMigration, /create table if not exists leave_balances/, 'leave migration must create leave balances');
 assert.match(server, /app\.get\('\/api\/approvals'/, 'approval inbox route must exist');
 assert.match(server, /app\.patch\('\/api\/approvals\/:id\/status'/, 'generic approval decision route must exist');
-assert.match(server, /app\.get\('\/api\/approval-delegations'/, 'approval delegation route must exist');
+assert.match(server, /registerLegacyDelegationRoutes\(\{app, pool, run, requireDatabase, requireAuth, requirePermission, isGlobalRole, audit\}\)/, 'legacy delegation routes must use the guarded bounded module');
 assert.match(server, /app\.get\('\/api\/reports\/approval-sla'/, 'approval SLA report route must exist');
 assert.match(approvalMigration, /create table if not exists approval_records/, 'approval migration must create approval records');
 assert.match(approvalMigration, /create table if not exists approval_delegations/, 'approval migration must create approval delegations');

@@ -1242,7 +1242,7 @@ export const approvalService = {
   saveDelegation: async (delegation: ApprovalDelegation): Promise<void> => {
     if (await checkBackend()) {
       await api.post('/api/approval-delegations', {
-        id: delegation.id,
+        id: delegation.id || undefined,
         delegator_id: delegation.delegatorId,
         delegate_id: delegation.delegateId,
         role: delegation.role,

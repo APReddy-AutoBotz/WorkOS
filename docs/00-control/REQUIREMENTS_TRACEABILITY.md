@@ -500,3 +500,5 @@ The production frontend build verifies WOS-ORG-005 document branding in `tests/d
 
 
 Notification diagnostics: WOS-IAM-005/010, CORE-003, INT-002/004, NFR-SEC-004/008/013 and PRV-001 map to scoped delivery SQL, the typed diagnostic projection, new notification writes, historical integration/audit readers and real API/browser negative tests. See [the task](../tasks/WOS-05-NOTIFICATION-DIAGNOSTIC-BOUNDARY.md). Broader notification policy/retry and deployment-wide support access remain separate.
+
+Legacy approval/delegation: WOS-CORE-003/005, WOS-IAM-003/005/010, WOS-APR-004/005 and WOS-NFR-SEC-004/008/012 map to the bounded legacy delegation router/scope, immutable owner and current-authority validation, shared inbox/decision/SLA/Teams/command-center predicates, actual PostgreSQL/API negatives and browser refusal/correction journey. See [the task](../tasks/WOS-05-LEGACY-APPROVAL-SCOPE.md). Source-specific decisions and final release gates remain separate.

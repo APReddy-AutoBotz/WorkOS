@@ -468,3 +468,7 @@ Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in th
 ## Notification diagnostic visibility
 
 Delivery history uses current recipient organization/entity and worker visibility; events without a recipient cannot establish scoped ownership and remain hidden. Metadata is an allowlist of typed mode, deterministic flag, valid HTTP status code and fixed failure code. Provider response bodies, arbitrary nested errors and recipient addresses are not public diagnostic fields. Historical notification integration/audit copies are projected safely without rewriting evidence. Use NOTIFICATION_DELIVERY_FAILED plus channel/provider/time/status for triage. No migration is required. Preserve history and prefer forward correction; older readers can disclose retained raw metadata.
+
+## Legacy approval delegation boundary
+
+Legacy delegation IDs cannot transfer ownership, including under administrative edits. Both retained and submitted participants must belong to the selected entity. Active delegation requires current participant account/assigned-role/membership/approval authority; reads revalidate the delegator's current relationship. On Leave remains supported; scoped revocation is permitted after authority or lifecycle loss. Historical orphan/cross-entity rows remain stored and unavailable. Malformed calendar dates return400, unauthorized ownership403, invalid activation/overlap422; failed audit leaves no mutation. No migration is required. Prefer a forward fix because older code restores the disclosure/takeover path.

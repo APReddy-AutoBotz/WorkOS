@@ -80,3 +80,5 @@ Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in th
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [AGENTS.md](AGENTS.md) before proposing changes. No implementation may be pushed directly to `main`. Merge in dependency order after exact-head review and applicable checks; verify the resulting main-branch checks and update status afterward.
+
+Legacy approval and delegation checks enforce current delegator authority and retain ownership on edits. The browser journey verifies that operators see a refusal when a save is denied. [Approval scope and acceptance](docs/tasks/WOS-05-LEGACY-APPROVAL-SCOPE.md)
