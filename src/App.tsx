@@ -11,6 +11,7 @@ import { RuntimeTerminology } from './config/RuntimeTerminology';
 import { OrganizationScopeGate } from './components/auth/OrganizationScopeGate';
 
 const Dashboard = lazyPage('Dashboard', () => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
+const WorkforceDirectory = lazyPage('WorkforceDirectory', () => import('./pages/WorkforceDirectory').then(module => ({default: module.WorkforceDirectory})));
 const EmployeeMaster = lazyPage('EmployeeMaster', () => import('./pages/EmployeeMaster').then(module => ({ default: module.EmployeeMaster })));
 const EmployeeDetail = lazyPage('EmployeeDetail', () => import('./pages/EmployeeDetail').then(module => ({ default: module.EmployeeDetail })));
 const EmployeeWorkspace = lazyPage('EmployeeWorkspace', () => import('./pages/EmployeeWorkspace').then(module => ({ default: module.EmployeeWorkspace })));
@@ -159,6 +160,7 @@ export default function App() {
                   <Route path="/dashboard" element={<Navigate to="/" replace />} />
 
                 {/* Employee Routes */}
+                <Route path="/workforce/directory" element={<RoleRoute roles={ROUTE_ROLES.employees}><WorkforceDirectory/></RoleRoute>} />
                 <Route path="/my-workspace" element={
                   <RoleRoute roles={ROUTE_ROLES.employeeWorkspace}>
                     <EmployeeWorkspace />

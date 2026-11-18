@@ -1,3 +1,4 @@
+import {createWorkforceDirectoryRouter} from './modules/workforce/directory-router.mjs';
 import {legacyApprovalScope} from './modules/approvals/legacy-approval-scope.mjs';
 import {registerLegacyDelegationRoutes} from './modules/approvals/legacy-delegation-router.mjs';
 
@@ -413,11 +414,13 @@ const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e') => {
       or ${employeeAlias}.reporting_manager_id = $${params.length}
       or ${employeeAlias}.id in (
         with recursive reporting_chain as (
-          select id from employees where reporting_manager_id = $${params.length - 1} or reporting_manager_id = $${params.length}
-          union all
+          select id from employees where organization_id = $${params.length - 3} and legal_entity_id = $${params.length - 2}
+            and (reporting_manager_id = $${params.length - 1} or reporting_manager_id = $${params.length})
+          union
           select e.id
           from employees e
           join reporting_chain chain on e.reporting_manager_id = chain.id
+          where e.organization_id = $${params.length - 3} and e.legal_entity_id = $${params.length - 2}
         )
         select id from reporting_chain
       )
@@ -6397,6 +6400,7 @@ app.use('/api/v1/native-forecast',createNativeForecastRouter({pool,requireDataba
 app.use('/api/v1/actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/my-actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit,own:true}));
 app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
+app.use('/api/v1/workforce-directory',createWorkforceDirectoryRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole}));
 app.use('/api/v1/my-work-planning',createOwnWorkPlanningRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere}));
 app.use('/api/v1/resource-demand',createResourceDemandRouter({pool,requireDatabase,requireAuth,requirePermission,buildProjectScopeWhere,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/workforce-capabilities',createWorkforceCapabilitiesRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));

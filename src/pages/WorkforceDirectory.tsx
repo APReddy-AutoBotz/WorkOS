@@ -1,0 +1,38 @@
+import {lazy,Suspense,useEffect,useRef,useState} from 'react';
+import {directorySearch} from '../../shared/workforce-directory.mjs';
+import {ApiClientError} from '../services/apiClient';
+import {captureDirectoryContext,isDirectoryContextCurrent,workforceDirectoryService,type DirectoryContext,type DirectoryPage,type DirectorySelection,type DirectoryPaging} from '../services/workforceDirectory';
+const WorkerCapacity=lazy(()=>import('../components/WorkerCapacity').then(m=>({default:m.WorkerCapacity})));
+const WorkerCapabilities=lazy(()=>import('../components/WorkerCapabilities').then(m=>({default:m.WorkerCapabilities})));
+export const WorkforceDirectory=()=>{
+ const[search,setSearch]=useState(''),[page,setPage]=useState<DirectoryPage|null>(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[pane,setPane]=useState<'capacity'|'capabilities'|null>(null);
+ const generation=useRef(0),mounted=useRef(false),inFlight=useRef(false),context=useRef<DirectoryContext|null>(null);
+ const clear=(message='')=>{++generation.current;context.current=null;inFlight.current=false;setPage(null);setPane(null);setBusy(false);setNotice(message);};
+ const block=()=>{clear('Account, role or scope changed. Directory and unsent handoffs cleared. Reload explicitly.');setSearch('');};
+ useEffect(()=>{mounted.current=true;const check=()=>{if(context.current&&!isDirectoryContextCurrent(context.current))block();};window.addEventListener('workos:organization-scope-switch-requested',block);window.addEventListener('workos:organization-scope-changed',block);window.addEventListener('focus',check);window.addEventListener('storage',check);return()=>{mounted.current=false;++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',block);window.removeEventListener('workos:organization-scope-changed',block);window.removeEventListener('focus',check);window.removeEventListener('storage',check);};},[]);
+ const current=()=>{if(context.current&&isDirectoryContextCurrent(context.current))return true;block();return false;};
+ const load=async(selection:DirectorySelection={search,parentId:null},paging:DirectoryPaging={})=>{
+  if(inFlight.current)return;if(context.current&&!current())return;const n=++generation.current,c=captureDirectoryContext(()=>mounted.current&&generation.current===n);context.current=c;setPage(null);setPane(null);setNotice('');if(!c){block();return;}inFlight.current=true;setBusy(true);setSearch(selection.search);
+  try{const result=await workforceDirectoryService.read(selection,paging,c);if(mounted.current&&n===generation.current&&isDirectoryContextCurrent(c))setPage(result);}
+  catch(e){if(mounted.current&&n===generation.current){if(!isDirectoryContextCurrent(c)){block();return;}setNotice(e instanceof ApiClientError&&e.status===409?'Directory sources or relationships changed. Reload from the first directory page.':'Directory unavailable for this account or scope. Reload explicitly; no other scope is substituted.');}}
+  finally{if(mounted.current&&n===generation.current){inFlight.current=false;setBusy(false);}}
+ };
+ const navigate=(id:string|null)=>{if(!page||!current())return;void load({search:'',parentId:id},{expectedRosterToken:page.rosterToken});};
+ const handoff=(kind:'capacity'|'capabilities')=>{if(page?.parent&&current())setPane(kind);};
+ const permitted=Boolean(captureDirectoryContext());
+ return <div className="mx-auto max-w-6xl pb-12 space-y-4"><h1 className="text-2xl font-semibold">Scoped workforce directory</h1><p>Current recorded directory and reporting relationships within your active-role scope. Counts include only visible direct reports. A manager absent from this view is not evidence of an organizational root; no manager or ownership is inferred from a title.</p>
+ {!permitted&&<p role="alert">Existing workforce read access and a selected organization and legal entity are required.</p>}
+ <form onSubmit={e=>{e.preventDefault();void load();}}><fieldset disabled={!permitted||busy} className="flex gap-3 flex-wrap"><legend>Find authorized workers</legend><label>Directory search<input aria-label="Directory search" value={search} maxLength={100} onChange={e=>{clear();setSearch(e.target.value);}} placeholder="Name, code, designation or recorded structure"/></label><button type="submit" disabled={!directorySearch(search)}>Load scoped directory</button></fieldset></form>
+ {busy&&<p role="status">Reading the authorized directory…</p>}{notice&&<p role="status">{notice}</p>}
+ {page&&<section aria-label="Current scoped directory" className="space-y-3"><p>Observed {page.observedAt}. Matching visible workers: {page.totalMatching}. This page: {page.workers.length}. This is a current directory observation, not historical reporting or a whole-company count.</p>
+ <button type="button" disabled={busy} onClick={()=>void load()}>Reload first directory page</button>
+ {page.parent&&<section aria-label="Selected directory worker" className="rounded-xl border p-4 space-y-2"><h2>{page.parent.name} · {page.parent.code}</h2><p>{page.parent.designation} · {page.parent.department} · {page.parent.country} · {page.parent.status}</p><p>Recorded business unit: {page.parent.businessUnit??'Not recorded'} · Region: {page.parent.region??'Not recorded'} · Visible direct reports: {page.parent.visibleDirectReports}</p>
+ {page.parent.manager?<p>Visible recorded manager: {page.parent.manager.name} · <button type="button" disabled={busy} onClick={()=>navigate(page.parent!.manager!.id)}>Open recorded manager {page.parent.manager.code}</button></p>:<p>No recorded manager is shown in this authorized view.</p>}
+ <div className="flex gap-3"><button type="button" disabled={busy} onClick={()=>handoff('capabilities')}>Inspect selected worker capabilities</button><button type="button" disabled={busy} onClick={()=>handoff('capacity')}>Inspect selected worker capacity</button><button type="button" disabled={busy} onClick={()=>navigate(null)}>Return to scoped directory</button></div><h3>Visible direct reports</h3></section>}
+ {page.workers.length===0&&<p role="status">No workers match this current scoped selection. Other relationships and scopes are not inferred.</p>}
+ <ul aria-label={page.parent?'Visible direct reports':'Visible directory workers'} className="space-y-2">{page.workers.map(w=><li key={w.id} className="rounded-xl border p-3"><h3>{w.name} · {w.code}</h3><p>{w.designation} · {w.department} · {w.country} · {w.status} · Visible direct reports {w.visibleDirectReports}</p><p>{w.manager?'Visible recorded manager: '+w.manager.name:'No recorded manager shown in this view.'}</p><button type="button" disabled={busy} onClick={()=>navigate(w.id)}>Open reporting context {w.code}</button></li>)}</ul>
+ {page.nextAfter&&<button type="button" disabled={busy} onClick={()=>{if(current())void load(page.selection,{after:page.nextAfter!,expectedRosterToken:page.rosterToken});}}>Next scoped directory page</button>}
+ </section>}
+ {page?.parent&&pane&&<section aria-label="Selected workforce handoff" className="border-t pt-4"><h2>{page.parent.name} · {page.parent.code}</h2><p>Original governed workspace: fresh source authorization and existing permissions apply independently. Directory visibility grants no change, export or approval authority.</p><button type="button" onClick={()=>setPane(null)}>Close workforce handoff</button><Suspense fallback={<p role="status">Loading worker workspace…</p>}>{pane==='capacity'?<WorkerCapacity key={page.rosterToken+'/capacity/'+page.parent.id} employeeId={page.parent.id}/>:<WorkerCapabilities key={page.rosterToken+'/capabilities/'+page.parent.id} employeeId={page.parent.id}/>}</Suspense></section>}
+ </div>;
+};
