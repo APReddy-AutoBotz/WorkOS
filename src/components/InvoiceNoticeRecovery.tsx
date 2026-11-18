@@ -206,7 +206,11 @@ export const InvoiceNoticeRecovery = ({ choices }: { choices: Choice[] }) => {
             >
               <option value="">Choose</option>
               {drafts
-                .filter((x) => x.engagementId === engagement && ['Approved', 'Exported'].includes(x.state))
+                .filter(
+                  (x) =>
+                    x.engagementId === engagement &&
+                    ['Approved', 'Exported', 'Billed/Confirmed'].includes(x.state),
+                )
                 .map((x) => (
                   <option key={x.id} value={x.id}>
                     {x.state} · {x.id}

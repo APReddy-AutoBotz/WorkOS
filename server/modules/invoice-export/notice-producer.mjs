@@ -38,7 +38,7 @@ const context = (c, r, { batch, policy, resultId, kind, eventId, eventOperationI
   ]);
 const fillRecipients = async (c, { batch, policy, eventId, kind }) => {
   const p = policy.definition,
-    key = kind === 'artifact' ? 'invoice_batch.exported_or_billed_confirmed' : 'invoice_batch.export_failed',
+    key = kind === 'failure' ? 'invoice_batch.export_failed' : 'invoice_batch.exported_or_billed_confirmed',
     relationships = invoiceExportRecipients(key, { userId: batch.owner_user_id, role: batch.owner_role }, p);
   await c.query('savepoint invoice_export_notice_recipients');
   try {
@@ -86,11 +86,14 @@ export const emitInvoiceExportNotice = async (
   r,
   { batch, policy, resultId, kind, eventOperationId = r.operationId, recoveryId = null },
 ) => {
-  if (!['artifact', 'failure'].includes(kind) || !validInvoiceExportNotificationPolicy(policy.definition))
+  if (
+    !['artifact', 'failure', 'confirmation'].includes(kind) ||
+    !validInvoiceExportNotificationPolicy(policy.definition)
+  )
     throw new TypeError('Exact invoice export event is required.');
   const key =
-      kind === 'artifact' ? 'invoice_batch.exported_or_billed_confirmed' : 'invoice_batch.export_failed',
-    cls = kind === 'artifact' ? 'INFORMATIONAL' : 'OPERATIONAL_CRITICAL',
+      kind === 'failure' ? 'invoice_batch.export_failed' : 'invoice_batch.exported_or_billed_confirmed',
+    cls = kind === 'failure' ? 'OPERATIONAL_CRITICAL' : 'INFORMATIONAL',
     eventId = randomUUID(),
     p = policy.definition,
     notice = renderInvoiceExportNotice(p, key, batch.id);
@@ -98,13 +101,14 @@ export const emitInvoiceExportNotice = async (
   await c.query('savepoint invoice_export_notice_producer');
   try {
     await c.query(
-      'insert into invoice_export_notice_events(id,batch_id,policy_id,artifact_id,failure_id,event_key,policy_class,operation_id,locale,title,body)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+      'insert into invoice_export_notice_events(id,batch_id,policy_id,artifact_id,failure_id,confirmation_id,event_key,policy_class,operation_id,locale,title,body)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
       [
         eventId,
         batch.id,
         policy.id,
         kind === 'artifact' ? resultId : null,
         kind === 'failure' ? resultId : null,
+        kind === 'confirmation' ? resultId : null,
         key,
         cls,
         eventOperationId,
@@ -140,13 +144,14 @@ export const emitInvoiceExportNotice = async (
     await c.query('release savepoint invoice_export_notice_producer');
     if (!recoveryId)
       await c.query(
-        "insert into invoice_export_notice_producer_failures(id,batch_id,policy_id,artifact_id,failure_id,operation_id,code)values($1,$2,$3,$4,$5,$6,'NOTIFICATION_EVENT_UNAVAILABLE')",
+        "insert into invoice_export_notice_producer_failures(id,batch_id,policy_id,artifact_id,failure_id,confirmation_id,operation_id,code)values($1,$2,$3,$4,$5,$6,$7,'NOTIFICATION_EVENT_UNAVAILABLE')",
         [
           randomUUID(),
           batch.id,
           policy.id,
           kind === 'artifact' ? resultId : null,
           kind === 'failure' ? resultId : null,
+          kind === 'confirmation' ? resultId : null,
           eventOperationId,
         ],
       );
@@ -154,8 +159,8 @@ export const emitInvoiceExportNotice = async (
   }
 };
 export const recoverInvoiceExportRecipients = async (c, r, { batch, policy, event, recoveryId }) => {
-  const kind = event.artifact_id ? 'artifact' : 'failure',
-    resultId = event.artifact_id ?? event.failure_id;
+  const kind = event.artifact_id ? 'artifact' : event.failure_id ? 'failure' : 'confirmation',
+    resultId = event.artifact_id ?? event.failure_id ?? event.confirmation_id;
   await context(c, r, {
     batch,
     policy,

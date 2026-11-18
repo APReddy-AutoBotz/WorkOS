@@ -48,7 +48,7 @@ await withCommercialDatabase(async ({ pool }) => {
         'commercial.invoice_export.create',
         'commercial.invoice_export.configure',
         'commercial.invoice_export.recover_notices',
-        'integrations.invoice_alert_routes.manage',
+        'integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm',
       ];
     assert.equal(
       (
@@ -61,7 +61,7 @@ await withCommercialDatabase(async ({ pool }) => {
     );
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
       '065i_wos06_approved_invoice_csv',
-      '065j_wos06_invoice_export_notifications',
+      '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation',
     ]);
     assert.deepEqual(await snapshot(), before);
     assert.equal(
@@ -71,7 +71,7 @@ await withCommercialDatabase(async ({ pool }) => {
           [keys],
         )
       ).rows[0].n,
-      5,
+      keys.length,
     );
     for (const t of ['invoice_csv_artifacts', 'invoice_csv_failures', 'invoice_csv_request_keys'])
       assert.equal((await pool.query('select count(*)::int n from ' + t)).rows[0].n, 0);

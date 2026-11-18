@@ -46,7 +46,7 @@ await withCommercialDatabase(async ({ pool }) => {
       keys = [
         'commercial.invoice_export.configure',
         'commercial.invoice_export.recover_notices',
-        'integrations.invoice_alert_routes.manage',
+        'integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm',
       ];
     assert.equal(
       (
@@ -58,7 +58,7 @@ await withCommercialDatabase(async ({ pool }) => {
       0,
     );
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-      '065j_wos06_invoice_export_notifications',
+      '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation',
     ]);
     assert.deepEqual(await snapshot(), before);
     assert.equal(
@@ -68,7 +68,7 @@ await withCommercialDatabase(async ({ pool }) => {
           [keys],
         )
       ).rows[0].n,
-      3,
+      keys.length,
     );
     for (const t of [
       'invoice_alert_route_versions',

@@ -349,7 +349,11 @@ const InvoiceCsvEngagement = ({
             >
               <option value="">Choose a batch</option>
               {drafts
-                .filter((x) => x.engagementId === engagementId && ['Approved', 'Exported'].includes(x.state))
+                .filter(
+                  (x) =>
+                    x.engagementId === engagementId &&
+                    ['Approved', 'Exported', 'Billed/Confirmed'].includes(x.state),
+                )
                 .map((x) => (
                   <option key={x.id} value={x.id}>
                     {x.state} · {x.id} · {x.currency}
@@ -390,7 +394,7 @@ const InvoiceCsvEngagement = ({
                   {source.control.total}.
                 </p>
               )}
-              {source.state === 'Exported' && source.artifactId && (
+              {['Exported', 'Billed/Confirmed'].includes(source.state) && source.artifactId && (
                 <button type="button" disabled={busy || !!pending} onClick={retrieve}>
                   Retrieve retained invoice CSV
                 </button>
