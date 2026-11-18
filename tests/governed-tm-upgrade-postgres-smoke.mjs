@@ -289,7 +289,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         );
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
           '065e_wos06_governed_tm_valuation',
-          '065f_wos06_tm_billing_eligibility',
+          '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy',
         ]);
         const after = await snapshot(),
           newKeys = [
