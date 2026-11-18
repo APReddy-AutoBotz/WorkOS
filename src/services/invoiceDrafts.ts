@@ -293,14 +293,12 @@ export const invoiceDrafts = {
       return bad();
     const raw = await call('GET', '/reconciliation?' + new URLSearchParams({ engagementId }), c, 'view');
     if (!hasRatePermission('commercial.invoice_export.view')) return bad();
-    const row = z
+    const commonRow = z
       .object({
         itemId: uuid,
         itemVersion: z.literal(1),
         eventId: uuid,
         eventVersion: z.literal(1),
-        sourceType: z.literal('TM_SNAPSHOT'),
-        snapshotId: uuid,
         eligibilityApprovalId: uuid,
         eligibilityDecisionId: uuid,
         clientId: id,
@@ -309,7 +307,6 @@ export const invoiceDrafts = {
         eligibleOn: date,
         currency: z.string().regex(/^[A-Z]{3}$/),
         amount,
-        evidence,
         sourceAmount: amount,
         sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
         sourceMatches: z.boolean(),
@@ -358,12 +355,22 @@ export const invoiceDrafts = {
         controlOk: z.boolean(),
       })
       .strict();
+    const row = z.discriminatedUnion('sourceType', [
+      commonRow.extend({ sourceType: z.literal('TM_SNAPSHOT'), snapshotId: uuid, evidence }),
+      commonRow.extend({
+        sourceType: z.literal('MILESTONE_ACCEPTANCE'),
+        snapshotId: z.null(),
+        milestoneId: id,
+        evidence: milestoneInvoiceEvidence,
+        acceptanceMatches: z.boolean(),
+      }),
+    ]);
     const report = z
       .object({
         ...envelope,
         asOf: instant,
         engagementId: id,
-        version: z.literal('workos.tm-reconciliation/1'),
+        version: z.enum(['workos.tm-reconciliation/1', 'workos.milestone-reconciliation/1']),
         reportToken: z.string().regex(/^[a-f0-9]{64}$/),
         items: z.array(row).max(500),
         missingEvents: z
@@ -371,7 +378,8 @@ export const invoiceDrafts = {
             z
               .object({
                 eventId: uuid,
-                snapshotId: uuid,
+                snapshotId: uuid.nullable(),
+                milestoneId: id.optional(),
                 currency: z.string().regex(/^[A-Z]{3}$/),
                 amount,
                 sourceAmount: amount,
@@ -416,7 +424,12 @@ export const invoiceDrafts = {
     if (!report.success || report.data.engagementId !== engagementId) return bad();
     const value = report.data,
       keys = new Set<string>();
+    const milestone = value.version === 'workos.milestone-reconciliation/1';
     if (
+      (milestone && !hasRatePermission('commercial.milestone_billing.view')) ||
+      value.missingEvents.some((e) =>
+        milestone ? !e.milestoneId || e.snapshotId !== null : !e.snapshotId || e.milestoneId !== undefined,
+      ) ||
       value.exceptionCount !== value.items.filter((x) => !x.controlOk).length + value.missingEvents.length ||
       value.items.some(
         (x) =>
@@ -425,7 +438,12 @@ export const invoiceDrafts = {
           x.sourceMatches !==
             (x.sourceCurrency === x.currency &&
               canonicalHours(x.sourceAmount) === canonicalHours(x.amount)) ||
-          x.snapshotId !== x.evidence.snapshotId ||
+          milestone !== (x.sourceType === 'MILESTONE_ACCEPTANCE') ||
+          (x.sourceType === 'MILESTONE_ACCEPTANCE'
+            ? x.milestoneId !== x.evidence.milestoneId ||
+              x.engagementId !== x.evidence.engagementId ||
+              x.eligibilityDecisionId !== x.evidence.decisionId
+            : x.snapshotId !== x.evidence.snapshotId) ||
           x.currency !== x.evidence.currency ||
           canonicalHours(x.amount) !== canonicalHours(x.evidence.amount) ||
           x.status !== (x.batchId ? 'OCCUPIED' : x.sourceCurrent ? 'AVAILABLE' : 'SOURCE_UNAVAILABLE') ||
@@ -434,6 +452,7 @@ export const invoiceDrafts = {
           Boolean(x.batchId) !== Boolean(x.acquisitionOperationId) ||
           x.controlOk !==
             (x.sourceMatches &&
+              (x.sourceType !== 'MILESTONE_ACCEPTANCE' || x.acceptanceMatches) &&
               x.lineMatches &&
               x.artifactMatches &&
               x.history.every((h) => h.batchState === 'Cancelled' && h.matches) &&
@@ -500,7 +519,7 @@ export const invoiceDrafts = {
     return value;
   },
   exportReconciliation: async (
-    report: { engagementId: string; reportToken: string },
+    report: { engagementId: string; reportToken: string; version?: string },
     requestId: string,
     why: string,
     c: RateContext | null,
@@ -525,7 +544,7 @@ export const invoiceDrafts = {
         ...envelope,
         requestId: uuid,
         engagementId: id,
-        version: z.literal('workos.tm-reconciliation/1'),
+        version: z.enum(['workos.tm-reconciliation/1', 'workos.milestone-reconciliation/1']),
         asOf: instant,
         reportToken: z.string().regex(/^[a-f0-9]{64}$/),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -536,6 +555,9 @@ export const invoiceDrafts = {
       .safeParse(raw);
     if (
       !out.success ||
+      out.data.version !== (report.version ?? 'workos.tm-reconciliation/1') ||
+      (out.data.version === 'workos.milestone-reconciliation/1' &&
+        !hasRatePermission('commercial.milestone_billing.view')) ||
       out.data.requestId !== requestId ||
       out.data.engagementId !== report.engagementId ||
       out.data.reportToken !== report.reportToken

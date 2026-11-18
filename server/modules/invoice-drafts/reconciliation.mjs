@@ -3,30 +3,87 @@ import { invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
 // Read a bounded, scope-filtered population in the caller's repeatable-read transaction.
 // Suppress an item if any linked batch contains a worker outside the caller's scope;
 // neither an occupancy nor a historical batch may disclose that worker indirectly.
-export const readBillingReconciliation = async (client, req, engagementId, options) => {
+export const readBillingReconciliation = async (
+  client,
+  req,
+  engagementId,
+  options,
+  model = 'time_and_materials',
+) => {
+  const milestone = model === 'milestone';
+  if (!milestone && model !== 'time_and_materials') throw new Error('Unsupported reconciliation model.');
   const args = [req.organizationScope.organizationId, req.organizationScope.legalEntityId, engagementId];
-  const visible = options.buildEmployeeScopeWhere(req, args, 'worker');
+  const visible = milestone ? 'true' : options.buildEmployeeScopeWhere(req, args, 'worker');
   const visibleArgs = [...args];
-  const batchVisible = options.buildEmployeeScopeWhere(req, args, 'batch_worker');
+  const batchVisible = milestone ? null : options.buildEmployeeScopeWhere(req, args, 'batch_worker');
+  const relatedScope = milestone
+    ? `and not exists (
+    select 1 from invoice_draft_lines related join invoice_draft_batches linked on linked.id=related.batch_id
+    where related.item_id=item.id and related.item_version=item.version and
+      (linked.source_type<>'MILESTONE_ACCEPTANCE' or linked.organization_id<>item.organization_id
+       or linked.legal_entity_id<>item.legal_entity_id or linked.engagement_id<>ev.engagement_id))`
+    : `and not exists (
+        select 1 from invoice_draft_lines related
+        join invoice_draft_lines member on member.batch_id=related.batch_id
+        join commercial_tm_valuations batch_v on batch_v.id=member.snapshot_id
+        join work_submission_evidence batch_sub on batch_sub.id=batch_v.submission_id
+        join timesheets batch_h on batch_h.id=batch_sub.timesheet_id
+        left join employees batch_worker on batch_worker.id=batch_h.employee_id
+        where related.item_id=item.id and related.item_version=item.version
+          and not coalesce((${batchVisible}),false)
+      )`;
+  const sourceJoins = milestone
+    ? `
+    join milestone_billing_instances review on review.id=ev.milestone_instance_id
+      and review.organization_id=ev.organization_id and review.legal_entity_id=ev.legal_entity_id
+      and review.engagement_id=ev.engagement_id
+    join commercial_milestones m on m.id=review.milestone_id and m.engagement_id=review.engagement_id
+      and m.organization_id=review.organization_id and m.legal_entity_id=review.legal_entity_id
+    join milestone_billing_transitions decision on decision.id=ev.milestone_decision_id and decision.instance_id=review.id
+    join milestone_billing_policies policy on policy.id=review.policy_id`
+    : `join commercial_tm_valuations v on v.id=ev.snapshot_id
+    join work_submission_evidence sub on sub.id=v.submission_id
+    join timesheets h on h.id=sub.timesheet_id
+    join employees worker on worker.id=h.employee_id`;
+  const sourceIds = milestone
+    ? 'm.id as "milestoneId", null::uuid as "snapshotId"'
+    : 'ev.snapshot_id as "snapshotId"';
+  const approvalId = milestone ? 'ev.milestone_instance_id' : 'ev.instance_id';
+  const decisionId = milestone ? 'ev.milestone_decision_id' : 'ev.decision_id';
+  const sourceAmount = milestone ? 'm.amount::text' : "v.result->>'billableValue'";
+  const sourceCurrency = milestone ? 'm.currency' : "v.result->>'currency'";
+  const sourceType = milestone ? 'MILESTONE_ACCEPTANCE' : 'TM_SNAPSHOT';
+  const sourceCurrent = milestone
+    ? 'milestone_billing_source_valid(review.organization_id,review.legal_entity_id,review.engagement_id,review.milestone_id,review.engagement_lifecycle_id,review.contract_lifecycle_id)'
+    : 'tm_billing_source_valid(ev.organization_id,ev.legal_entity_id,ev.engagement_id,ev.snapshot_id)';
+  const milestoneChecks = milestone
+    ? `coalesce(decision.decision='Approved'
+    and decision.sequence=jsonb_array_length(policy.definition->'stages')
+    and ev.billing_evidence->>'milestoneId'=m.id and ev.billing_evidence->>'decisionId'=decision.id::text
+    and ev.billing_evidence->'evidence'=review.evidence
+    and ev.billing_evidence->>'policyId'=policy.id::text
+    and ev.billing_evidence->>'engagementLifecycleId'=review.engagement_lifecycle_id
+    and ev.billing_evidence->>'contractLifecycleId'=review.contract_lifecycle_id,false) as "acceptanceMatches",`
+    : '';
   const rows = (
     await client.query(
       `
     select item.id as "itemId", item.version as "itemVersion", ev.id as "eventId",
-      ev.version as "eventVersion", ev.source_type as "sourceType", ev.snapshot_id as "snapshotId",
-      ev.instance_id as "eligibilityApprovalId", ev.decision_id as "eligibilityDecisionId",
+      ev.version as "eventVersion", ev.source_type as "sourceType", ${sourceIds},
+      ${approvalId} as "eligibilityApprovalId", ${decisionId} as "eligibilityDecisionId",
       ev.client_id as "clientId", ev.contract_id as "contractId", ev.engagement_id as "engagementId",
       ev.eligible_on::text as "eligibleOn", ev.currency, ev.amount::text as amount,
       ev.billing_evidence as evidence,
-      v.result->>'billableValue' as "sourceAmount",v.result->>'currency' as "sourceCurrency",
-      coalesce(v.result->>'currency'=ev.currency and (v.result->>'billableValue')::numeric=ev.amount,false) as "sourceMatches",
-      tm_billing_source_valid(ev.organization_id,ev.legal_entity_id,ev.engagement_id,ev.snapshot_id) as "sourceCurrent",
+      (${sourceAmount}) as "sourceAmount",(${sourceCurrency}) as "sourceCurrency",
+      coalesce((${sourceCurrency})=ev.currency and (${sourceAmount})::numeric=ev.amount,false) as "sourceMatches",
+      ${milestoneChecks} ${sourceCurrent} as "sourceCurrent",
       occ.batch_id as "batchId", occ.line_id as "lineId", line.request_id as "acquisitionRequestId",
       line.operation_id as "acquisitionOperationId",line.amount::text as "lineAmount",line.currency as "lineCurrency",
       case when occ.batch_id is not null then invoice_batch_governed_state(occ.batch_id) end as "batchState",
       art.id as "artifactId", art.sha256 as "artifactHash", conf.id as "confirmationId",
       case when occ.line_id is null then true else coalesce(
         line.id=occ.line_id and line.batch_id=occ.batch_id and line.item_id=item.id
-        and line.item_version=item.version and line.event_id=ev.id and line.snapshot_id=ev.snapshot_id
+        and line.item_version=item.version and line.event_id=ev.id and line.snapshot_id is not distinct from ev.snapshot_id
         and line.organization_id=ev.organization_id and line.legal_entity_id=ev.legal_entity_id
         and line.currency=ev.currency and line.amount=ev.amount and line.billing_evidence=ev.billing_evidence
         and batch.organization_id=ev.organization_id and batch.legal_entity_id=ev.legal_entity_id
@@ -43,32 +100,20 @@ export const readBillingReconciliation = async (client, req, engagementId, optio
        and not exists(select 1 from invoice_draft_occupancies current_occ where current_occ.line_id=hist.id)) as "historicalLineCount",
       coalesce((select jsonb_agg(jsonb_build_object('lineId',hist.id,'batchId',hist.batch_id,
         'batchState',invoice_batch_governed_state(hist.batch_id),'amount',hist.amount::text,'currency',hist.currency,
-        'matches',hist.event_id=ev.id and hist.snapshot_id=ev.snapshot_id and hist.amount=ev.amount and hist.currency=ev.currency) order by hist.created_at,hist.id)
+        'matches',hist.event_id=ev.id and hist.snapshot_id is not distinct from ev.snapshot_id and hist.billing_evidence=ev.billing_evidence and hist.amount=ev.amount and hist.currency=ev.currency) order by hist.created_at,hist.id)
         from invoice_draft_lines hist where hist.item_id=item.id and hist.item_version=item.version
         and not exists(select 1 from invoice_draft_occupancies current_occ where current_occ.line_id=hist.id)), '[]'::jsonb) as history
     from approved_unbilled_items item
     join billing_eligibility_events ev on ev.id=item.event_id
-    join commercial_tm_valuations v on v.id=ev.snapshot_id
-    join work_submission_evidence sub on sub.id=v.submission_id
-    join timesheets h on h.id=sub.timesheet_id
-    join employees worker on worker.id=h.employee_id
+    ${sourceJoins}
     left join invoice_draft_occupancies occ on occ.item_id=item.id and occ.item_version=item.version
     left join invoice_draft_lines line on line.id=occ.line_id
     left join invoice_draft_batches batch on batch.id=occ.batch_id
     left join invoice_csv_artifacts art on art.batch_id=occ.batch_id
     left join invoice_batch_confirmations conf on conf.batch_id=occ.batch_id
     where item.organization_id=$1 and item.legal_entity_id=$2 and ev.organization_id=$1
-      and ev.legal_entity_id=$2 and ev.engagement_id=$3 and (${visible})
-      and not exists (
-        select 1 from invoice_draft_lines related
-        join invoice_draft_lines member on member.batch_id=related.batch_id
-        join commercial_tm_valuations batch_v on batch_v.id=member.snapshot_id
-        join work_submission_evidence batch_sub on batch_sub.id=batch_v.submission_id
-        join timesheets batch_h on batch_h.id=batch_sub.timesheet_id
-        left join employees batch_worker on batch_worker.id=batch_h.employee_id
-        where related.item_id=item.id and related.item_version=item.version
-          and not coalesce((${batchVisible}),false)
-      )
+      and ev.legal_entity_id=$2 and ev.engagement_id=$3 and ev.source_type='${sourceType}' and (${visible})
+      ${relatedScope}
     order by item.id limit 501`,
       args,
     )
@@ -82,14 +127,11 @@ export const readBillingReconciliation = async (client, req, engagementId, optio
   const missing = (
     await client.query(
       `
-    select ev.id as "eventId",ev.snapshot_id as "snapshotId",ev.currency,ev.amount::text as amount,
-      v.result->>'billableValue' as "sourceAmount",v.result->>'currency' as "sourceCurrency"
+    select ev.id as "eventId",${sourceIds},ev.currency,ev.amount::text as amount,
+      (${sourceAmount}) as "sourceAmount",(${sourceCurrency}) as "sourceCurrency"
     from billing_eligibility_events ev
-    join commercial_tm_valuations v on v.id=ev.snapshot_id
-    join work_submission_evidence sub on sub.id=v.submission_id
-    join timesheets h on h.id=sub.timesheet_id
-    join employees worker on worker.id=h.employee_id
-    where ev.organization_id=$1 and ev.legal_entity_id=$2 and ev.engagement_id=$3 and (${visible})
+    ${sourceJoins}
+    where ev.organization_id=$1 and ev.legal_entity_id=$2 and ev.engagement_id=$3 and ev.source_type='${sourceType}' and (${visible})
       and not exists(select 1 from approved_unbilled_items item where item.event_id=ev.id)
     order by ev.id limit 501`,
       visibleArgs,
@@ -112,6 +154,7 @@ export const readBillingReconciliation = async (client, req, engagementId, optio
     row.status = row.batchId ? 'OCCUPIED' : row.sourceCurrent ? 'AVAILABLE' : 'SOURCE_UNAVAILABLE';
     row.controlOk =
       row.sourceMatches &&
+      (!milestone || row.acceptanceMatches) &&
       row.lineMatches &&
       row.artifactMatches &&
       row.history.every((line) => line.batchState === 'Cancelled' && line.matches) &&
