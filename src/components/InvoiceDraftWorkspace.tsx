@@ -261,7 +261,12 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     });
   };
   const cancel = () => {
-    if (!detail || detail.batch.state === 'Cancelled' || cancelReason.trim().length < 3) return;
+    if (
+      !detail ||
+      !['Draft', 'Under Review', 'Approved'].includes(detail.batch.state) ||
+      cancelReason.trim().length < 3
+    )
+      return;
     perform({
       type: 'cancellation',
       batchId: detail.batch.id,
@@ -483,7 +488,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                       </button>
                     </fieldset>
                   )}
-                  {canCancel && detail.batch.state !== 'Cancelled' && (
+                  {canCancel && ['Draft', 'Under Review', 'Approved'].includes(detail.batch.state) && (
                     <fieldset disabled={busy || !!pending}>
                       <legend>Cancel this Draft</legend>
                       <p>Cancellation retains line history and releases current occupancy.</p>

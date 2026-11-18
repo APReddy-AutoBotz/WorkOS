@@ -50,7 +50,7 @@ await withCommercialDatabase(async ({ pool }) => {
         ),
       );
     const before = await snapshot();
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['065a_wos06_rate_cost_candidates', '065b_wos06_candidate_owners', '065c_wos06_commercial_candidate_approvals', '065d_wos06_approved_rate_adoptions', '065e_wos06_governed_tm_valuation', '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy', '065h_wos06_invoice_batch_approval']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied, ['065a_wos06_rate_cost_candidates', '065b_wos06_candidate_owners', '065c_wos06_commercial_candidate_approvals', '065d_wos06_approved_rate_adoptions', '065e_wos06_governed_tm_valuation', '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy', '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications']);
     assert.deepEqual(await snapshot(), before);
     assert.equal((await pool.query('select count(*)::int n from commercial_rate_candidates')).rows[0].n, 0);
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied, []);

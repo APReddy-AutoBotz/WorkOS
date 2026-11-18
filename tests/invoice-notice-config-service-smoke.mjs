@@ -1,0 +1,160 @@
+import assert from 'node:assert/strict';
+import { randomUUID, createHash, webcrypto } from 'node:crypto';
+globalThis.crypto ??= webcrypto;
+process.env.APP_MODE = 'production';
+process.env.VITE_APP_MODE = 'production';
+process.env.ALLOW_TEST_FALLBACK = 'false';
+process.env.VITE_ALLOW_TEST_FALLBACK = 'false';
+const store = new Map(),
+  calls = [];
+globalThis.sessionStorage = {
+  getItem: (k) => store.get(k) ?? null,
+  setItem: (k, v) => store.set(k, String(v)),
+  removeItem: (k) => store.delete(k),
+};
+globalThis.localStorage = Object.fromEntries(
+  ['getItem', 'setItem', 'removeItem', 'clear'].map((k) => [
+    k,
+    () => {
+      throw Error('No fallback');
+    },
+  ]),
+);
+globalThis.window = {
+  localStorage,
+  location: { pathname: '/commercial-drafting', href: '/commercial-drafting' },
+  dispatchEvent: () => true,
+};
+const actor = randomUUID(),
+  scope = { organizationId: 'synthetic-org', legalEntityId: 'synthetic-legal' },
+  user = {
+    id: actor,
+    employeeId: 'SYN-ACTOR',
+    userName: 'synthetic-actor',
+    role: 'Admin',
+    permissionRole: 'Admin',
+    permissions: ['commercial.invoice_export.configure', 'integrations.invoice_alert_routes.manage'],
+  },
+  reset = () => {
+    store.set('workos_session', JSON.stringify(user));
+    store.set('workos_organization_scope', JSON.stringify(scope));
+    store.set('workos_api_token', 'synthetic-token');
+  };
+reset();
+const { invoiceNoticeConfig: s, captureRateContext: capture } = await import(
+  '../src/services/invoiceNoticeConfig.ts'
+);
+const ownerKey = createHash('sha256')
+    .update(JSON.stringify([user.userName, user.id, user.role, scope.organizationId, scope.legalEntityId]))
+    .digest('hex'),
+  base = { ...scope, ownerKey, actorUserId: actor, activeRole: 'Admin' },
+  routeCmd = {
+    requestId: randomUUID(),
+    routeKey: randomUUID(),
+    expectedLatestId: null,
+    label: 'Synthetic route',
+    active: true,
+    reason: 'Synthetic route configuration',
+  },
+  route = {
+    id: randomUUID(),
+    routeKey: routeCmd.routeKey,
+    sequence: 1,
+    previousId: null,
+    label: routeCmd.label,
+    active: true,
+    routeKind: 'INTERNAL_OUTBOX',
+    requestId: routeCmd.requestId,
+    actorId: actor,
+    activeRole: 'Admin',
+    reason: routeCmd.reason,
+    createdAt: '2026-10-28T00:00:00Z',
+  },
+  definition = {
+    entityType: 'InvoiceExport',
+    engagementId: 'synthetic-engagement',
+    financeOwner: { userId: randomUUID(), role: 'Finance' },
+    integrationAdmin: { userId: randomUUID(), role: 'Integration' },
+    alertRouteId: route.id,
+    locale: 'en-US',
+    templates: [
+      { key: 'invoice_batch.export_failed', subject: 'Failure {{sourceRef}}', body: 'Synthetic notice' },
+      {
+        key: 'invoice_batch.exported_or_billed_confirmed',
+        subject: 'Export {{sourceRef}}',
+        body: 'Synthetic notice',
+      },
+    ],
+    completionInApp: true,
+  },
+  cmd = {
+    requestId: randomUUID(),
+    expectedLatestId: null,
+    effectiveFrom: '2026-10-28',
+    definition,
+    reason: 'Synthetic policy configuration',
+  },
+  policy = {
+    id: randomUUID(),
+    engagementId: definition.engagementId,
+    sequence: 1,
+    previousId: null,
+    effectiveFrom: cmd.effectiveFrom,
+    definition: {
+      templates: definition.templates,
+      completionInApp: true,
+      locale: 'en-US',
+      alertRouteId: route.id,
+      integrationAdmin: definition.integrationAdmin,
+      financeOwner: definition.financeOwner,
+      engagementId: definition.engagementId,
+      entityType: 'InvoiceExport',
+    },
+    requestId: cmd.requestId,
+    actorId: actor,
+    activeRole: 'Admin',
+    reason: cmd.reason,
+    createdAt: '2026-10-28T00:00:00Z',
+  };
+let raw = { ...base, route, replayed: false },
+  mutate = () => {};
+globalThis.fetch = async (url, init) => {
+  calls.push({ url, init });
+  mutate();
+  return new Response(JSON.stringify(raw), { status: 200, headers: { 'Content-Type': 'application/json' } });
+};
+assert.equal((await s.route(routeCmd, capture())).id, route.id);
+raw = { ...base, policy, replayed: false };
+assert.equal((await s.policy(cmd, capture())).id, policy.id);
+raw = {
+  ...base,
+  policy: {
+    ...policy,
+    definition: {
+      ...policy.definition,
+      financeOwner: { ...policy.definition.financeOwner, userId: randomUUID() },
+    },
+  },
+  replayed: false,
+};
+await assert.rejects(s.policy(cmd, capture()), { status: 503 });
+raw = { ...base, policy, replayed: false };
+reset();
+const c = capture();
+mutate = () => store.set('workos_api_token', 'different');
+await assert.rejects(s.policy(cmd, c), { status: 403 });
+const n = calls.length;
+await assert.rejects(s.policy(cmd, c), { status: 403 });
+assert.equal(calls.length, n);
+reset();
+mutate = () => {};
+globalThis.fetch = async () => {
+  calls.push({});
+  throw Error('Synthetic uncertain request');
+};
+const before = calls.length;
+await assert.rejects(s.policy(cmd, capture()));
+assert.equal(calls.length, before + 1);
+console.log(
+  'Invoice notice configuration client validates original receipts and scope without write retries.',
+);

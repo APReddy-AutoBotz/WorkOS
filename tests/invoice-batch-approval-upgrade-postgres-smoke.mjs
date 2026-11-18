@@ -833,11 +833,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           defs = (
             await pool.query('select to_jsonb(x)v from permission_definitions x order by to_jsonb(x)::text')
           ).rows,
-          keys = ['commercial.invoice_approval.manage', 'commercial.invoice_approval.decide'];
+          keys = ['commercial.invoice_approval.manage', 'commercial.invoice_approval.decide', 'commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage'];
         assert(!defs.some((x) => keys.includes(x.v.permission_key)));
         assert.equal(before.invoice_draft_occupancies.length, 1);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-          '065h_wos06_invoice_batch_approval',
+          '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications',
         ]);
         assert.deepEqual(await snapshot(), before);
         const after = (

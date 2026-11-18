@@ -353,6 +353,19 @@ jobs:
           node tests/tm-billing-eligibility-postgres-smoke.mjs
           node tests/tm-billing-eligibility-upgrade-postgres-smoke.mjs
 
+      - name: Verify approved invoice export, receipt recovery and notifications
+        run: |
+          node tests/invoice-csv-upgrade-postgres-smoke.mjs
+          node tests/invoice-export-event-recovery-postgres-smoke.mjs
+          node tests/invoice-export-notification-config-api-smoke.mjs
+          node tests/invoice-export-notification-journey-browser-smoke.mjs
+          node tests/invoice-export-notification-journey-postgres-smoke.mjs
+          node tests/invoice-export-notification-postgres-smoke.mjs
+          node tests/invoice-export-notification-ui-browser-smoke.mjs
+          node tests/invoice-export-notification-upgrade-postgres-smoke.mjs
+          node tests/invoice-export-operational-failure-postgres-smoke.mjs
+          node tests/invoice-export-recipient-recovery-postgres-smoke.mjs
+
       - name: Verify invoice batch approval, upgrades and browser decisions
         run: |
           node tests/invoice-batch-approval-postgres-smoke.mjs
