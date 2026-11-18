@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Buyers can adopt effective-dated work categories for project, descriptive client and non-client work. Capture and CSV imports retain the selected catalog version with the submitted entry. [Work category specification](docs/tasks/WOS-04-WORK-CATEGORY-CONTEXT.md)
+
 Allocation Control supports buyer-selected warning and blocking thresholds for overlapping active assignments. Thresholds use the declared assignment percentages and become effective on the adopted date. [Assignment overlap policy](docs/tasks/WOS-04-ASSIGNMENT-OVERLAP-POLICY.md)
 
 Production Compose accepts `API_SESSION_TTL_HOURS` in hours, including fractions. The default is eight hours. Invalid durations prevent API startup. [Operations runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#configuring-session-lifetime)

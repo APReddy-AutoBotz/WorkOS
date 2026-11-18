@@ -29,7 +29,7 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     const beforeUpgrade = await request('/api/auth/me',{headers:{Authorization:`Bearer ${preUpgrade}`}});
     assert.equal(beforeUpgrade.status,503);
     assert.equal(beforeUpgrade.body.code,'SESSION_AUTHORITY_UNAVAILABLE');
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['057a_wos04_session_revocations','057b_wos05_leave_submitter_lookup','057c_wos04_shared_auth_throttle','058_wos04_assignment_overlap_policy','058a_wos04_assignment_overlap_serialization']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['057a_wos04_session_revocations','057b_wos05_leave_submitter_lookup','057c_wos04_shared_auth_throttle','058_wos04_assignment_overlap_policy','058a_wos04_assignment_overlap_serialization','059_wos04_work_category_context']);
     assert.equal((await request('/api/auth/me',{headers:{Authorization:`Bearer ${preUpgrade}`}})).status,200);
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
     const login = async () => {

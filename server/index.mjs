@@ -6,6 +6,8 @@ import {createSessionLogoutHandler} from './modules/identity-access/session-life
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
 import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createPersistentLoginRateLimit} from './modules/identity-access/persistent-login-rate-limit.mjs';
+import {createWorkCategoryRouter} from './modules/work-capture/work-category-router.mjs';
+import {categoryCodeInput,applyWorkCategories,categoryEntryProjection} from './modules/work-capture/work-category.mjs';
 import {createAssignmentOverlapRouter} from './modules/planning/assignment-overlap-router.mjs';
 import {retainedOverlapEvidence} from './modules/planning/assignment-overlap-policy.mjs';
 import {createOwnWorkPlanningRouter} from './modules/planning/own-work-planning-router.mjs';
@@ -2801,7 +2803,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
     with visible as (select
       t header,t.id,t.updated_at,t.week_ending::text,work_capture_write_token(t.id) write_token,
       (select json_build_object('id',w.id,'sequence',w.sequence,'policyVersion',w.policy_version,'entryCount',jsonb_array_length(w.entries),'governedEntryCount',(select count(*) from jsonb_array_elements(w.entries) x where x->>'kind'='governed'),'submissionTiming',w.submission_timing,'duplicateCheck',case when w.duplicate_entry_check is not null then json_build_object('version',w.duplicate_entry_check->>'version','groupCount',jsonb_array_length(w.duplicate_entry_check->'groups')) else null end) from work_submission_evidence w where w.timesheet_id=t.id and w.organization_id=t.organization_id and w.legal_entity_id=t.legal_entity_id order by w.sequence desc limit 1) work_assurance,
-      coalesce(json_agg(json_build_object(
+      coalesce(json_agg((jsonb_build_object(
         'id', te.id,
         'employee_id', t.employee_id,
         'project_id', te.project_id,
@@ -2818,7 +2820,7 @@ app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('time
         'status', t.status,
         'billable', te.billable,
         'week_ending', t.week_ending
-      ) order by te.work_date, te.id) filter (where te.id is not null), '[]') as entries
+      )||case when te.category_reference is not null then jsonb_build_object('category_code',te.category_code,'category_reference',te.category_reference)else '{}'::jsonb end) order by te.work_date, te.id) filter (where te.id is not null), '[]') as entries
     from timesheets t
     join employees e on e.id = t.employee_id
     left join timesheet_entries te on te.timesheet_id = t.id
@@ -2835,9 +2837,10 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
   const entrySchema = z.object({
     id: z.string().optional(),
     project_id: z.string().optional().nullable(),
-    work_type: z.enum(['Project Work', 'Client Misc Task']),
+    work_type: z.enum(['Project Work', 'Client Misc Task', 'Non-client Work']),
     client_name: z.string().optional().nullable(),
     category: z.string().optional().nullable(),
+    category_code:categoryCodeInput,
     work_date: strictIsoDateSchema,
     hours: captureHoursInput,
     remark: z.string().optional().nullable(),
@@ -2913,7 +2916,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     assertTimesheetEditable(previous);
     const previousEvidence=await readWorkEvidenceAudit(client,previous?.id);
     const previousDuplicateCheck=await readDuplicateEntryCheck(client,previous?.id);
-    const evidenceEntries=await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries);
+    const evidenceEntries=await applyWorkCategories(client,req,employee.id,await resolveWorkEntryMetadataReplacement(client,previous?.id,policyEntries));
     await assertCaptureReplacementPeriods(client,req,previous?.id);
     parsed.data.entries=await validateCapturePolicy(client,req,employee.id,evidenceEntries,{replacementTimesheetId:previous?.id});
     await validateWorkSourceReplacement(client,req,employee.id,parsed.data.week_ending,parsed.data.entries,previous?.id||null);
@@ -2944,8 +2947,8 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
     const savedEntries=[];
     for (const entry of parsed.data.entries) {
       const inserted=await client.query(`
-        insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference, source_identity)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) returning *,work_date::text
+        insert into timesheet_entries (timesheet_id, project_id, work_type, client_name, category, work_date, hours, remark, billable, evidence_url, work_reference, source_identity,category_code,category_reference)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14::jsonb) returning *,work_date::text
       `, [
         timesheet.id,
         entry.project_id || null,
@@ -2957,7 +2960,7 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
         entry.remark || null,
         entry.billable,
         entry.evidence_url,
-        entry.work_reference,entry.source_identity?JSON.stringify(entry.source_identity):null,
+        entry.work_reference,entry.source_identity?JSON.stringify(entry.source_identity):null,entry.category_code,entry.category_reference?JSON.stringify(entry.category_reference):null,
       ]);
       savedEntries.push({...inserted.rows[0],policy:entry.policy,capturePolicyReference:entry.capturePolicyReference});
     }
@@ -2985,14 +2988,14 @@ app.post('/api/timesheets', requireDatabase, requireAuth, requirePermission('tim
       entityType: 'Timesheet',
       entityId: String(timesheet.id),
       oldValue: previous?{...previous,entryEvidence:previousEvidence,duplicateEntryCheck:previousDuplicateCheck}:null,
-      newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference,source_identity:entry.source_identity})),duplicateEntryCheck},
+      newValue: {...timesheet,entryEvidence:savedEntries.map(entry=>({id:entry.id,evidence_url:entry.evidence_url,work_reference:entry.work_reference,source_identity:entry.source_identity,...(entry.category_reference?{category_code:entry.category_code,category_reference:entry.category_reference}:{})})),duplicateEntryCheck},
       details: `${previous ? 'Updated' : 'Created'} ${parsed.data.status} timesheet for ${employee.employee_id}, week ending ${parsed.data.week_ending}`,
       reason: parsed.data.rejection_reason || null,
     });
     const writeToken=(await client.query('select work_capture_write_token($1) token',[timesheet.id])).rows[0].token;
     const captureWarnings=(await client.query("select coalesce(work_capture_overtime_warnings(array[$1::uuid])->$1::text,'[]'::jsonb) warnings",[timesheet.id])).rows[0].warnings;
     await client.query('commit');
-    res.json({ ...timesheet, capture_warnings:captureWarnings, write_token:writeToken, work_assurance:workAssurance, duplicate_entry_check:duplicateEntryCheck, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>entry) });
+    res.json({ ...timesheet, capture_warnings:captureWarnings, write_token:writeToken, work_assurance:workAssurance, duplicate_entry_check:duplicateEntryCheck, entries:parsed.data.entries.map(({policy,capturePolicyReference,...entry})=>categoryEntryProjection(entry)) });
   } catch (error) {
     await client.query('rollback');
     if (sendReportingPeriodError(res, error)) return;
@@ -6381,6 +6384,7 @@ app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,require
 app.use('/api/v1/my-work-planning',createOwnWorkPlanningRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere}));
 app.use('/api/v1/resource-demand',createResourceDemandRouter({pool,requireDatabase,requireAuth,requirePermission,buildProjectScopeWhere,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/workforce-capabilities',createWorkforceCapabilitiesRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
+app.use('/api/v1/work-categories',createWorkCategoryRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
 app.use('/api/v1/work-capture-modes',createCaptureModesRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
 app.use('/api/v1/work-submission-deadline',createSubmissionDeadlineRouter({pool,requireDatabase,requireAuth,requirePermission}));
 app.use('/api/v1/work-capture-policy',createCapturePolicyRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));

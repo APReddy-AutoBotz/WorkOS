@@ -290,7 +290,7 @@ assert.match(timesheetImportRoute, /assertReportingPeriodAllows[\s\S]*REPORTING_
   'timesheet provenance must preserve authoritative period checks and existing scoped group upserts');
 assert.match(timesheetImportRoute, /const status = dryRun \? 'Dry Run' : validEntryRows === 0 \? 'Failed' : errors\.length > 0 \? 'Partial' : 'Success'/,
   'timesheet import success, partial and failed counts must retain their existing row semantics');
-assert.match(timesheetImportRoute, /const naturalTarget = row\.workType === 'Project Work' \? project\?\.id : row\.clientName[\s\S]*seenTimesheetEntryKeys/,
+assert.match(timesheetImportRoute, /const naturalTarget = row\.workType === 'Project Work' \? project\?\.id :[\s\S]*row\.clientName[\s\S]*categoryImportKeySuffix\(row\.categoryCode\)[\s\S]*seenTimesheetEntryKeys/,
   'versioned Timesheet Import must detect duplicate natural keys after resolving employee/project aliases');
 assert.match(timesheetImportRoute, /!isWorkDateInsideWeek\(row\.date, row\.weekEnding\)/,
   'versioned Timesheet Import must preserve the existing seven-day work-date rule');
@@ -309,7 +309,7 @@ assert.match(server, /duplicateImportRows\.duplicateRowNumbers\.has\(rowNumber\)
 assert.match(server, /action: previous \? 'Update Client' : 'Create Client'/, 'client master changes must be audited with create/update actions');
 assert.match(server, /action: 'Deactivate Blocked'[\s\S]*active project\(s\) remain/, 'blocked client deactivation must be audited with dependency reason');
 assert.match(server, /action: 'Deactivate Client'[\s\S]*oldValue: previous[\s\S]*newValue: result\.rows\[0\]/, 'client deactivation must be audited with old and new values');
-assert.match(server, /json_agg\(json_build_object/, 'timesheet API must include entries');
+assert.match(server, /json_agg\(\(?jsonb?_build_object/, 'timesheet API must include entries');
 assert.match(server, /app\.get\('\/api\/reports\/planned-utilization'/, 'planned utilization report route must exist');
 assert.match(server, /app\.get\('\/api\/reports\/actual-utilization'/, 'actual utilization report route must exist');
 assert.match(server, /app\.get\('\/api\/reports\/forecast-utilization'/, 'forecast utilization report route must exist');
