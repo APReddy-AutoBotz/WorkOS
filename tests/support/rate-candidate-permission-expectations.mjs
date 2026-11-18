@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.invoice_approval.manage',module:'Commercial',label:'Manage invoice batch approvals',description:'Configure prospective scoped invoice batch approval and submit Drafts.',protected:false},
+ {permission_key:'commercial.invoice_approval.decide',module:'Commercial',label:'Decide invoice batch approvals',description:'Decide an explicitly assigned current scoped invoice batch approval stage.',protected:false},
  {permission_key:'commercial.invoice_drafts.view',module:'Commercial',label:'View invoice-ready drafts',description:'View scoped draft batches and their billing-safe item lineage.',protected:false},
  {permission_key:'commercial.invoice_drafts.prepare',module:'Commercial',label:'Prepare invoice-ready drafts',description:'Create scoped draft batches and acquire eligible whole items.',protected:false},
  {permission_key:'commercial.invoice_drafts.own',module:'Commercial',label:'Own invoice-ready drafts',description:'Be an explicitly named scoped draft owner.',protected:false},
@@ -21,6 +23,6 @@ export const assertRateCandidatePermissionAdditions=(before,after)=>{
  assert(before.every(x=>!keys.has(x.permission_key)),'candidate permissions were not present in the old ledger');
  assert.deepEqual(after.filter(x=>!keys.has(x.permission_key)),before,'all earlier permission definitions remain byte-equivalent');
  const added=after.filter(x=>keys.has(x.permission_key)).sort((a,b)=>a.permission_key.localeCompare(b.permission_key));
- assert.equal(added.length,expected.length,'exactly the fifteen specified opt-in definitions are added');
+ assert.equal(added.length,expected.length,'exactly the seventeen specified opt-in definitions are added');
  assert.deepEqual(added.map(({created_at,...row})=>{assert.equal(typeof created_at,'string');return row;}),[...expected].sort((a,b)=>a.permission_key.localeCompare(b.permission_key)),'new definition metadata matches the explicit migration contract');
 };

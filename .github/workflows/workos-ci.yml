@@ -353,6 +353,12 @@ jobs:
           node tests/tm-billing-eligibility-postgres-smoke.mjs
           node tests/tm-billing-eligibility-upgrade-postgres-smoke.mjs
 
+      - name: Verify invoice batch approval, upgrades and browser decisions
+        run: |
+          node tests/invoice-batch-approval-postgres-smoke.mjs
+          node tests/invoice-batch-approval-upgrade-postgres-smoke.mjs
+          node tests/invoice-batch-approval-journey-browser-smoke.mjs
+
       - name: Verify invoice draft reservations, cancellation, upgrades and browser journeys
         run: |
           node tests/invoice-draft-postgres-smoke.mjs

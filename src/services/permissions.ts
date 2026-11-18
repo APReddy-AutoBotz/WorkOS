@@ -25,6 +25,8 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.cost_approvals.decide', module: 'Commercial', label: 'Decide Cost Candidate Approvals', description: 'Opt-in decisions on explicitly assigned scoped confidential cost candidates.', optIn: true },
   { key: 'commercial.tm_valuation.view', module: 'Commercial', label: 'View T&M Valuation', description: 'Opt-in scoped access to protected T&M calculations, with separate billing and cost access.', optIn: true },
   { key: 'commercial.tm_valuation.create', module: 'Commercial', label: 'Create T&M Valuation', description: 'Opt-in creation of governed T&M calculations and policies.', optIn: true },
+  { key: 'commercial.invoice_approval.manage', module: 'Commercial', label: 'Manage Invoice Approvals', description: 'Opt-in scoped policy and submission management.', optIn: true },
+  { key: 'commercial.invoice_approval.decide', module: 'Commercial', label: 'Decide Invoice Approvals', description: 'Opt-in decisions for assigned scoped stages.', optIn: true },
   { key: 'commercial.invoice_drafts.view', module: 'Commercial', label: 'View Invoice Drafts', description: 'Opt-in scoped access to invoice draft lineage.', optIn: true },
   { key: 'commercial.invoice_drafts.prepare', module: 'Commercial', label: 'Prepare Invoice Drafts', description: 'Opt-in creation and whole-item acquisition.', optIn: true },
   { key: 'commercial.invoice_drafts.own', module: 'Commercial', label: 'Own Invoice Drafts', description: 'Opt-in eligibility as a named scoped draft owner.', optIn: true },

@@ -131,7 +131,7 @@ export const createInvoiceDraftRouter = (o) => {
   const batch = async (c, r, batchId, lock = false) => {
     const row = (
       await c.query(
-        `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",case when exists(select 1 from invoice_draft_cancellations x where x.batch_id=b.id) then 'Cancelled' else 'Draft' end as state from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
+        `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",invoice_batch_governed_state(b.id) as state from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
         [batchId, ...scope(r)],
       )
     ).rows[0];
@@ -253,7 +253,7 @@ export const createInvoiceDraftRouter = (o) => {
       args.push(q.after ?? null);
       const rows = (
         await c.query(
-          `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",case when exists(select 1 from invoice_draft_cancellations x where x.batch_id=b.id) then 'Cancelled' else 'Draft' end as state from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2 and ($${args.length}::uuid is null or b.id>$${args.length}::uuid) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by b.id limit 51`,
+          `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",invoice_batch_governed_state(b.id) as state from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2 and ($${args.length}::uuid is null or b.id>$${args.length}::uuid) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by b.id limit 51`,
           args,
         )
       ).rows;
@@ -386,6 +386,45 @@ export const createInvoiceDraftRouter = (o) => {
         return { ...(await detail(c, r, b)), cancellation: old, replayed: true };
       }
       const cancellationId = randomUUID();
+      if (b.state === 'Under Review') {
+        const i = (
+          await c.query(
+            'select * from invoice_batch_approval_instances where batch_id=$1 order by sequence desc limit 1',
+            [batchId],
+          )
+        ).rows[0];
+        if (!i) throw fail(409, 'INVOICE_DRAFT_SOURCE', 'Active review unavailable.');
+        const invalidationId = randomUUID();
+        await c.query("select set_config('workos.invoice_batch_approval_context',$1,true)", [
+          JSON.stringify({
+            organizationId: scope(r)[0],
+            legalEntityId: scope(r)[1],
+            actorId: r.user.sub,
+            activeRole: r.user.activeRole,
+            operationId: r.operationId,
+            batchId,
+            instanceId: i.id,
+            invalidationId,
+          }),
+        ]);
+        await c.query(
+          'insert into invoice_batch_approval_invalidations(id,instance_id,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8)',
+          [invalidationId, i.id, r.user.sub, r.user.activeRole, d.requestId, digest, d.reason, r.operationId],
+        );
+        await c.query(
+          "update approval_records set status='Cancelled',updated_at=now() where entity_type='InvoiceBatchApproval' and entity_id=$1",
+          [i.id],
+        );
+        await o.audit(c, r, {
+          module: 'Invoice Batch Approval',
+          action: 'Cancel Review',
+          entityType: 'InvoiceBatchApproval',
+          entityId: invalidationId,
+          newValue: { invalidationId, instanceId: i.id, batchId },
+          reason: 'Scoped review cancellation.',
+          details: 'No financial amount in general audit.',
+        });
+      }
       await context(c, r, batchId, null, cancellationId, d.expectedLineCount);
       await c.query(
         'insert into invoice_draft_cancellations(id,organization_id,legal_entity_id,batch_id,expected_line_count,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
