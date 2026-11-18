@@ -4,7 +4,9 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
-Staged timesheet approvals cover ordered decisions, correction history and recipient-scoped in-app notices. Buyers can adopt the policy prospectively for selected workers. Deadline reminders, delegated stages and other approval sources remain separate work packages. [Approval work package](../tasks/WOS-05-STAGED-WORK-APPROVALS.md)
+Weekly submission notices cover operator-initiated evaluation of configured UTC deadlines and audited in-app delivery. Automatic scheduling and external delivery remain open. [Deadline notice work package](../tasks/WOS-04-DEADLINE-INAPP-NOTICES.md)
+
+Staged timesheet approvals cover ordered decisions, correction history and recipient-scoped in-app notices. Buyers can adopt the policy prospectively for selected workers. Delegated stages and other approval sources remain separate work packages. [Approval work package](../tasks/WOS-05-STAGED-WORK-APPROVALS.md)
 
 The planning forecast adds dated assignment percentages, project visibility checks and retained CSV evidence. Physical utilization forecasting still requires an approved conversion policy. [Forecast work package](../tasks/WOS-04-NATIVE-PERCENTAGE-FORECAST.md)
 

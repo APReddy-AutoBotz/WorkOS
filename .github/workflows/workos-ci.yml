@@ -89,6 +89,9 @@ jobs:
       - name: Verify staged work approval PostgreSQL acceptance
         run: npm run test:work-approval-postgres
 
+      - name: Verify UTC deadline notices in PostgreSQL
+        run: npm run test:work-period-notices-postgres
+
       - name: Verify approved actual work reconciliation in PostgreSQL
         run: npm run test:actual-work-postgres
 
@@ -198,6 +201,9 @@ jobs:
 
       - name: Verify staged work approval React acceptance
         run: npm run test:work-approval-journey
+
+      - name: Verify UTC deadline notices in browser
+        run: npm run test:work-period-notices-journey
 
       - name: Verify actual utilization and evidence download in Chromium
         run: npm run test:actual-work-journey

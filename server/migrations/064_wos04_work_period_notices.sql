@@ -1,0 +1,96 @@
+-- Empty, prospective in-app producer. No scheduler, grant, default, backfill or external delivery.
+create table work_period_notice_policies(
+ id uuid primary key,organization_id text not null,legal_entity_id text not null,sequence integer not null check(sequence>0),effective_from date not null,
+ definition jsonb not null check(jsonb_typeof(definition)='object'),actor_id uuid not null references users(id),active_role text not null,reason text not null check(length(btrim(reason))between 1 and 1000),created_at timestamptz not null default clock_timestamp(),
+ foreign key(organization_id,legal_entity_id)references legal_entities(organization_id,id),unique(organization_id,legal_entity_id,sequence),unique(organization_id,legal_entity_id,effective_from)
+);
+create table work_period_notice_templates(id uuid primary key,policy_id uuid not null references work_period_notice_policies(id),event_key text not null check(event_key in('work_period.submission_due','work_period.submission_overdue')),locale text not null,subject text not null,body text not null,unique(policy_id,event_key));
+create table work_period_notice_runs(
+ id uuid primary key,organization_id text not null,legal_entity_id text not null,employee_id text not null references employees(id),period_id text not null references reporting_periods(id),sequence integer not null check(sequence>0),policy_id uuid references work_period_notice_policies(id),
+ request_id uuid not null,request_fingerprint text not null check(request_fingerprint~'^[a-f0-9]{64}$'),actor_id uuid not null references users(id),active_role text not null,reason text not null,operation_id text not null,correlation_id text not null,
+ source_token text not null check(source_token~'^[a-f0-9]{64}$'),source_version text not null check(source_version~'^[a-f0-9]{64}$'),source_canonical text not null,outcome jsonb not null,created_at timestamptz not null default clock_timestamp(),
+ foreign key(organization_id,legal_entity_id)references legal_entities(organization_id,id),unique(organization_id,legal_entity_id,request_id),unique(organization_id,legal_entity_id,employee_id,period_id,sequence)
+);
+create table work_period_notice_events(
+ id text primary key,organization_id text not null,legal_entity_id text not null,employee_id text not null references employees(id),period_id text not null references reporting_periods(id),run_id uuid not null unique references work_period_notice_runs(id),source_version text not null,event_key text not null check(event_key in('work_period.submission_due','work_period.submission_overdue')),policy_class text not null,template_id uuid not null references work_period_notice_templates(id),operation_id text not null,correlation_id text not null,locale text not null,title text not null,body text not null,created_at timestamptz not null default clock_timestamp(),
+ unique(source_version,event_key),unique(organization_id,legal_entity_id,employee_id,period_id,event_key),foreign key(organization_id,legal_entity_id)references legal_entities(organization_id,id),check((event_key='work_period.submission_due'and policy_class='ACTION_REQUIRED')or(event_key='work_period.submission_overdue'and policy_class='CONTROL_MANDATORY'))
+);
+create table work_period_notice_recipients(id uuid primary key,event_id text not null references work_period_notice_events(id),user_id uuid not null references users(id),reasons text[] not null check(cardinality(reasons)between 1 and 2 and reasons<@array['affected_worker','configured_escalation_owner']::text[]),in_app boolean not null check(in_app),channel_decision text not null check(channel_decision='Required'),unique(event_id,user_id));
+create table work_period_notice_deliveries(id uuid primary key,recipient_id uuid not null unique references work_period_notice_recipients(id),channel text not null check(channel='InApp'),status text not null check(status='Delivered'),operation_id text not null,correlation_id text not null,attempt integer not null check(attempt=1),created_at timestamptz not null default clock_timestamp());
+create table work_period_notice_reads(recipient_id uuid primary key references work_period_notice_recipients(id),user_id uuid not null references users(id),read_at timestamptz not null default clock_timestamp());
+create function guard_period_notice_append()returns trigger language plpgsql as $$
+declare ctx jsonb;p work_period_notice_policies;r work_period_notice_runs;ev work_period_notice_events;
+begin
+ begin ctx=nullif(current_setting('workos.work_approval_context',true),'')::jsonb;exception when others then ctx=null;end;
+ if ctx is null or not exists(select 1 from users where id=(ctx->>'actorId')::uuid and status='Active')then raise exception 'Use the scoped notice command.'using errcode='WDN01';end if;
+ if tg_table_name='work_period_notice_policies'then
+  select * into p from work_period_notice_policies where organization_id=new.organization_id and legal_entity_id=new.legal_entity_id order by sequence desc limit 1;
+  if ctx->>'organizationId'is distinct from new.organization_id or ctx->>'legalEntityId'is distinct from new.legal_entity_id or ctx->>'actorId'is distinct from new.actor_id::text or ctx->>'activeRole'is distinct from new.active_role or new.sequence<>coalesce(p.sequence,0)+1 or new.effective_from<(clock_timestamp()at time zone'UTC')::date or(p.id is not null and new.effective_from<=p.effective_from)or not exists(select 1 from reporting_periods where organization_id=new.organization_id and legal_entity_id=new.legal_entity_id and frequency='Weekly'and starts_on=new.effective_from)then raise exception 'Notice policy must append at a prospective Weekly boundary.'using errcode='WDN02';end if;return new;
+ elsif tg_table_name='work_period_notice_templates'then select * into p from work_period_notice_policies where id=new.policy_id;
+  if ctx->>'organizationId'is distinct from p.organization_id or ctx->>'legalEntityId'is distinct from p.legal_entity_id or new.locale is distinct from p.definition->>'locale'or not exists(select 1 from jsonb_array_elements(p.definition->'templates')t where t->>'key'=new.event_key and t->>'subject'=new.subject and t->>'body'=new.body)then raise exception 'Use the retained scoped template.'using errcode='WDN01';end if;return new;
+ elsif tg_table_name='work_period_notice_runs'then
+  if ctx->>'organizationId'is distinct from new.organization_id or ctx->>'legalEntityId'is distinct from new.legal_entity_id or ctx->>'actorId'is distinct from new.actor_id::text or ctx->>'activeRole'is distinct from new.active_role or ctx->>'operationId'is distinct from new.operation_id or new.source_token<>encode(digest(new.source_canonical,'sha256'),'hex')or not exists(select 1 from employees where id=new.employee_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id)or not exists(select 1 from reporting_periods where id=new.period_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id and frequency='Weekly')or new.sequence<>(select coalesce(max(sequence),0)+1 from work_period_notice_runs where organization_id=new.organization_id and legal_entity_id=new.legal_entity_id and employee_id=new.employee_id and period_id=new.period_id)then raise exception 'Use exact scoped source evaluation.'using errcode='WDN03';end if;return new;
+ elsif tg_table_name='work_period_notice_events'then select * into r from work_period_notice_runs where id=new.run_id;if new.organization_id is distinct from r.organization_id or new.legal_entity_id is distinct from r.legal_entity_id or new.employee_id is distinct from r.employee_id or new.period_id is distinct from r.period_id then raise exception 'Canonical phase ownership must match its source run.'using errcode='WDN01';end if;
+ elsif tg_table_name='work_period_notice_recipients'then select e.* into ev from work_period_notice_events e where e.id=new.event_id;select * into r from work_period_notice_runs where id=ev.run_id;
+ elsif tg_table_name='work_period_notice_deliveries'then select e.* into ev from work_period_notice_events e join work_period_notice_recipients n on n.event_id=e.id where n.id=new.recipient_id;select * into r from work_period_notice_runs where id=ev.run_id;
+ else select e.* into ev from work_period_notice_events e join work_period_notice_recipients n on n.event_id=e.id where n.id=new.recipient_id and n.user_id=new.user_id;select * into r from work_period_notice_runs where id=ev.run_id;
+  if ctx->>'actorId'is distinct from new.user_id::text then raise exception 'Read only your own notice.'using errcode='WDN01';end if;
+ end if;
+ if r.id is null or ctx->>'organizationId'is distinct from r.organization_id or ctx->>'legalEntityId'is distinct from r.legal_entity_id then raise exception 'Notice evidence scope unavailable.'using errcode='WDN01';end if;return new;
+end $$;
+do $$declare t text;begin foreach t in array array['work_period_notice_policies','work_period_notice_templates','work_period_notice_runs','work_period_notice_events','work_period_notice_recipients','work_period_notice_deliveries','work_period_notice_reads']loop
+ execute format('create trigger immutable_%I before update or delete on %I for each row execute function reject_commercial_draft_rewrite()',t,t);
+ execute format('create trigger guarded_%I before insert on %I for each row execute function guard_period_notice_append()',t,t);
+end loop;end $$;
+create function validate_period_notice_commit()returns trigger language plpgsql as $$
+declare e work_period_notice_events;p work_period_notice_policies;users uuid[];u uuid;reasons text[];n work_period_notice_recipients;s jsonb;w uuid;owner_id uuid;period reporting_periods;checks jsonb;timing jsonb;checked timestamptz;deadline timestamptz;reminder timestamptz;overdue timestamptz;expected_key text;
+begin
+ if new.outcome->>'disposition'<>'Emitted'then if exists(select 1 from work_period_notice_events where run_id=new.id)then raise exception 'No-event evaluation cannot create delivery.'using errcode='WDN03';end if;return null;end if;
+ select * into e from work_period_notice_events where run_id=new.id;select * into p from work_period_notice_policies where id=new.policy_id;s=new.source_canonical::jsonb;
+ if e.id is null or e.source_version<>new.source_version or e.operation_id<>new.operation_id or e.correlation_id<>new.correlation_id or e.event_key is distinct from s->>'eventKey'or s->>'state'not in('due','overdue')or not(p.definition->'workerIds'?new.employee_id)or not exists(select 1 from work_period_notice_templates where id=e.template_id and policy_id=p.id and event_key=e.event_key)then raise exception 'Canonical notice source/event/template must converge.'using errcode='WDN03';end if;
+ select * into period from reporting_periods where id=new.period_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id;
+ checked=(new.outcome->>'checkedAt')::timestamptz;
+ checks=work_submission_timing(new.organization_id,new.legal_entity_id,array[period.starts_on,period.ends_on],checked);
+ select x into timing from jsonb_array_elements(checks)x where x->>'periodId'=period.id;
+ deadline=(timing->>'deadlineAt')::timestamptz;reminder=deadline-(p.definition->>'reminderMinutesBeforeDeadline')::integer*interval '1 minute';
+ overdue=case when p.definition->>'overdueBoundary'='deadline'then deadline else(timing->>'graceEndsAt')::timestamptz end;
+ expected_key=case when checked>overdue then 'work_period.submission_overdue'when checked>=reminder then 'work_period.submission_due'else null end;
+ if period.status<>'Open'or checks is null or jsonb_array_length(checks)<>1 or timing is null or abs(extract(epoch from new.created_at-checked))>60 or reminder<(period.starts_on::timestamp at time zone'UTC')or e.event_key is distinct from expected_key or s->>'organizationId'is distinct from new.organization_id or s->>'legalEntityId'is distinct from new.legal_entity_id or s->'worker'->>'id'is distinct from new.employee_id or s->'period'->>'id'is distinct from new.period_id or s->>'capturePolicyId'is distinct from timing->>'policyId'or exists(select 1 from timesheets t where t.organization_id=new.organization_id and t.legal_entity_id=new.legal_entity_id and t.employee_id=new.employee_id and(t.week_ending between period.starts_on and period.ends_on or exists(select 1 from timesheet_entries x where x.timesheet_id=t.id and x.work_date between period.starts_on and period.ends_on))and(t.status<>'Draft'or exists(select 1 from work_submission_evidence where timesheet_id=t.id)or exists(select 1 from approval_records a where a.entity_type='Timesheet'and a.entity_id=t.id::text and a.status='Pending')))then raise exception 'An exact current missing-submission phase is required.'using errcode='WDN03';end if;
+ if(select count(*)from users u join user_organization_scopes sc on sc.user_id=u.id where u.employee_record_id=new.employee_id and u.status='Active'and sc.organization_id=new.organization_id and sc.legal_entity_id=new.legal_entity_id and sc.active)<>1 then raise exception 'Affected worker relationship unavailable.'using errcode='WDN03';end if;
+ select u.id into w from users u join user_organization_scopes sc on sc.user_id=u.id where u.employee_record_id=new.employee_id and u.status='Active'and sc.organization_id=new.organization_id and sc.legal_entity_id=new.legal_entity_id and sc.active;
+ users=array[w];owner_id=(p.definition->'escalationOwner'->>'userId')::uuid;
+ if e.event_key='work_period.submission_overdue'then
+  if not exists(select 1 from users u join user_organization_scopes sc on sc.user_id=u.id join user_roles ur on ur.user_id=u.id join roles ro on ro.id=ur.role_id where u.id=owner_id and u.status='Active'and sc.organization_id=new.organization_id and sc.legal_entity_id=new.legal_entity_id and sc.active and ro.name=p.definition->'escalationOwner'->>'role')then raise exception 'Configured escalation relationship unavailable.'using errcode='WDN03';end if;
+  select array_agg(distinct x)into users from unnest(array[w,owner_id])x;
+ end if;
+ if cardinality(users)is null or cardinality(users)not between 1 and 2 or(select count(*)from work_period_notice_recipients where event_id=e.id)<>cardinality(users)then raise exception 'Mandatory recipient set is incomplete.'using errcode='WDN03';end if;
+ foreach u in array users loop
+  select * into n from work_period_notice_recipients where event_id=e.id and user_id=u;
+  reasons=array[]::text[];if u=w then reasons=array_append(reasons,'affected_worker');end if;if e.event_key='work_period.submission_overdue'and u=owner_id then reasons=array_append(reasons,'configured_escalation_owner');end if;
+  if n.id is null or n.reasons is distinct from reasons or not exists(select 1 from work_period_notice_deliveries where recipient_id=n.id and channel='InApp'and status='Delivered'and operation_id=new.operation_id and correlation_id=new.correlation_id)then raise exception 'Protected in-app set and accepted-delivery evidence must commit completely.'using errcode='WDN03';end if;
+ end loop;return null;
+end $$;
+create constraint trigger work_period_notice_commit after insert on work_period_notice_runs deferrable initially deferred for each row execute function validate_period_notice_commit();
+create function work_period_notice_units(value text)returns integer language sql immutable strict as $$select coalesce(sum(case when ascii(ch)>65535 then 2 else 1 end),0)::integer from regexp_split_to_table(value,'')ch where ch<>''$$;
+create function valid_work_period_notice_definition(d jsonb)returns boolean language plpgsql immutable as $$
+declare x jsonb;t jsonb;v text;stripped text;field_name text;expanded text;
+begin
+ if jsonb_typeof(d)is distinct from 'object'or not(d?&array['workerIds','reminderMinutesBeforeDeadline','overdueBoundary','escalationOwner','locale','templates'])or(select count(*)from jsonb_object_keys(d))<>6 or jsonb_typeof(d->'workerIds')is distinct from 'array'or jsonb_array_length(d->'workerIds')>200 or jsonb_typeof(d->'reminderMinutesBeforeDeadline')is distinct from 'number'or(d->>'reminderMinutesBeforeDeadline')!~'^[0-9]+$'or(d->>'reminderMinutesBeforeDeadline')::numeric not between 0 and 527040 or coalesce(d->>'overdueBoundary','')not in('deadline','grace-end')or jsonb_typeof(d->'locale')is distinct from 'string'or work_period_notice_units(d->>'locale')>100 or(d->>'locale')!~'^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$'or jsonb_typeof(d->'templates')is distinct from 'array'or jsonb_array_length(d->'templates')<>2 then return false;end if;
+ x=d->'escalationOwner';if jsonb_typeof(x)is distinct from 'object'or not(x?&array['userId','role'])or(select count(*)from jsonb_object_keys(x))<>2 or jsonb_typeof(x->'userId')is distinct from 'string'or(x->>'userId')!~'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'or jsonb_typeof(x->'role')is distinct from 'string'or length(btrim(x->>'role'))not between 1 and 100 then return false;end if;
+ if(select count(distinct value)from jsonb_array_elements_text(d->'workerIds'))<>jsonb_array_length(d->'workerIds')then return false;end if;
+ for x in select value from jsonb_array_elements(d->'workerIds')loop if jsonb_typeof(x)is distinct from 'string'or length(x#>>'{}')not between 1 and 200 then return false;end if;end loop;
+ if(select count(distinct item->>'key')from jsonb_array_elements(d->'templates')item)<>2 then return false;end if;
+ for t in select value from jsonb_array_elements(d->'templates')loop
+  if jsonb_typeof(t)is distinct from 'object'or not(t?&array['key','subject','body'])or(select count(*)from jsonb_object_keys(t))<>3 or coalesce(t->>'key','')not in('work_period.submission_due','work_period.submission_overdue')or jsonb_typeof(t->'subject')is distinct from 'string'or jsonb_typeof(t->'body')is distinct from 'string'or length(btrim(t->>'subject'))not between 1 and 200 or length(btrim(t->>'body'))not between 1 and 8000 then return false;end if;
+  foreach field_name in array array['subject','body']loop
+   stripped=t->>field_name;expanded=stripped;
+   if work_period_notice_units(stripped)>(case when field_name='subject'then 200 else 8000 end) then return false;end if;
+   foreach v in array array['workerCode','periodCode','deadlineAt','graceEndsAt','reminderAt']loop stripped=replace(stripped,'{{'||v||'}}','');expanded=replace(expanded,'{{'||v||'}}',repeat('x',case when v in('workerCode','periodCode')then 200 else 40 end));end loop;
+   if stripped~'[{}]'or work_period_notice_units(expanded)>(case when field_name='subject'then 1200 else 12000 end) then return false;end if;
+  end loop;
+ end loop;return true;
+exception when others then return false;
+end $$;
+alter table work_period_notice_policies add constraint work_period_notice_definition_shape check(valid_work_period_notice_definition(definition));
+
+alter table work_period_notice_events add constraint work_period_notice_render_bounds check(work_period_notice_units(title)between 1 and 1200 and work_period_notice_units(body)between 1 and 12000 and work_period_notice_units(locale)between 1 and 100);
