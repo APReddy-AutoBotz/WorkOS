@@ -10,7 +10,15 @@ export const approvedWorkDisposition=(entry,submission,decision)=>{
  let classification;try{classification=readCategoryEntry(entry.category_code,entry.category_reference,entry.work_type,entry.work_date,entry.billable,entry.category);}catch{return{disposition:'unresolved',reason:'APPROVED_CATEGORY_INVALID'};}
  if(!classification.categoryReference)return{disposition:'unresolved',reason:'APPROVED_CATEGORY_UNMAPPED'};
  if(!submission||!decision||decision.status!=='Approved')return{disposition:'unresolved',reason:'APPROVAL_EVIDENCE_UNAVAILABLE'};
- const retained=submission.entries.filter(r=>r.entryId===entry.id);try{if(retained.length!==1||!isDeepStrictEqual(material(entry),material(retained[0],true)))return{disposition:'unresolved',reason:'APPROVED_WORK_EVIDENCE_MISMATCH'};}catch{return{disposition:'unresolved',reason:'APPROVED_WORK_EVIDENCE_MISMATCH'};}
+ const mismatch = {disposition:'unresolved', reason:'APPROVED_WORK_EVIDENCE_MISMATCH'};
+ if (!Array.isArray(submission.entries)) return mismatch;
+ const retained = submission.entries.filter(row => row?.entryId === entry.id);
+ if (retained.length !== 1) return mismatch;
+ try {
+   if (!isDeepStrictEqual(material(entry), material(retained[0], true))) return mismatch;
+ } catch {
+   return mismatch;
+ }
  return{disposition:classification.categoryReference.includeInUtilization?'included':'excluded',reason:null};
 };
 export const calculateScopedActualWork=async(c,req,workerId,startsOn,endsOn,buildEmployeeScopeWhere)=>{
