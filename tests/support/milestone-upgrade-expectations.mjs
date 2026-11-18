@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 
-// Migrations 065m add these explicit columns to pre-milestone rows.
+// Migrations 065m, 065n and 065r add these explicit columns to pre-milestone rows.
 // Preserve every original value and require the precise T&M discriminator or
 // null milestone references; never remove fields or derive expected values
 // from the post-upgrade database.
 const additions = Object.freeze({
   billing_eligibility_events: { milestone_instance_id: null, milestone_decision_id: null },
   approved_unbilled_items: { source_type: 'TM_SNAPSHOT' },
+  invoice_draft_batches: { source_type: 'TM_SNAPSHOT' },
+  invoice_draft_lines: { source_type: 'TM_SNAPSHOT' },
+  invoice_draft_cancellations: { source_type: 'TM_SNAPSHOT' },
+  invoice_batch_confirmations: { source_type: 'TM_SNAPSHOT' },
 });
 export function expectedMilestoneUpgradeSnapshot(before) {
   const expected = structuredClone(before);

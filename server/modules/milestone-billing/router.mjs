@@ -64,20 +64,16 @@ export const createMilestoneBillingRouter = (o) => {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
       else if (['MBE01', 'MBE02', 'MBE03', 'MBE04', '23505', '23514', '40001', '40P01'].includes(e.code))
-        res
-          .status(e.code === 'MBE01' ? 403 : 409)
-          .json({
-            code: e.code === 'MBE01' ? 'MILESTONE_BILLING_AUTHORITY' : 'MILESTONE_BILLING_CONFLICT',
-            error: 'Current milestone, owner, scope or approval changed. Reload.',
-          });
+        res.status(e.code === 'MBE01' ? 403 : 409).json({
+          code: e.code === 'MBE01' ? 'MILESTONE_BILLING_AUTHORITY' : 'MILESTONE_BILLING_CONFLICT',
+          error: 'Current milestone, owner, scope or approval changed. Reload.',
+        });
       else {
         o.logError?.(e);
-        res
-          .status(503)
-          .json({
-            code: 'MILESTONE_BILLING_UNCONFIRMED',
-            error: 'The operation could not be confirmed. Read its original receipt.',
-          });
+        res.status(503).json({
+          code: 'MILESTONE_BILLING_UNCONFIRMED',
+          error: 'The operation could not be confirmed. Read its original receipt.',
+        });
       }
     } finally {
       c?.release();
@@ -725,11 +721,22 @@ export const createMilestoneBillingRouter = (o) => {
           [...scope(r), q.after ?? null, q.engagementId ?? null],
         )
       ).rows;
+      const capabilities = (
+        await c.query('select count(*)::int n from schema_migrations where id=any($1::text[])', [
+          [
+            '065n_wos06_milestone_invoice_lineage',
+            '065o_wos06_milestone_invoice_approval',
+            '065p_wos06_milestone_invoice_export',
+            '065q_wos06_milestone_invoice_cancel_notice',
+            '065r_wos06_milestone_invoice_confirmation',
+          ],
+        ])
+      ).rows[0];
       return {
         ...(await envelope(c, r)),
         items: rows.slice(0, 50),
         nextAfter: rows.length > 50 ? rows[49].id : null,
-        batchSupport: false,
+        batchSupport: capabilities.n === 5,
       };
     }),
   );

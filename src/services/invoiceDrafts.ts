@@ -1,3 +1,4 @@
+import { milestoneInvoiceEvidence, milestoneEvidenceMatches } from './milestoneInvoiceContracts';
 import { z } from 'zod';
 import { validInvoiceDraft, invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { canonicalHours } from '../../shared/work-hours.mjs';
@@ -62,11 +63,17 @@ const batch = z
     reason,
     createdAt: instant,
     ownerCurrent: z.boolean(),
+    sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
   })
   .strict()
-  .refine((x) => x.periodStart <= x.periodEnd);
-const line = z
+  .refine(
+    (x) =>
+      x.periodStart <= x.periodEnd &&
+      (!x.sourceType ||
+        (x.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission('commercial.milestone_billing.view'))),
+  );
+const tmLine = z
   .object({
     id: uuid,
     batchId: uuid,
@@ -91,6 +98,27 @@ const line = z
       x.currency === x.evidence.currency &&
       canonicalHours(x.amount) === canonicalHours(x.evidence.amount),
   );
+const milestoneLine = z
+  .object({
+    id: uuid,
+    batchId: uuid,
+    sequence: z.number().int().positive(),
+    itemId: uuid,
+    itemVersion: z.literal(1),
+    eventId: uuid,
+    snapshotId: z.null(),
+    sourceType: z.literal('MILESTONE_ACCEPTANCE'),
+    currency: z.string().regex(/^[A-Z]{3}$/),
+    amount,
+    evidence: milestoneInvoiceEvidence,
+    actorId: uuid,
+    activeRole: id,
+    requestId: uuid,
+    reason,
+    createdAt: instant,
+  })
+  .strict();
+const line = z.union([tmLine, milestoneLine]);
 const cancellation = z
     .object({
       id: uuid,
@@ -127,13 +155,18 @@ const checkDetail = (
   try {
     const computed = invoiceDraftTotal(lines.map((l) => l.amount));
     return (
+      lines.every((l) => (l.snapshotId === null) === (x.sourceType === 'MILESTONE_ACCEPTANCE')) &&
       lines.every(
         (l, i) =>
           l.batchId === x.id &&
           l.sequence === i + 1 &&
-          l.evidence.engagementId === x.engagementId &&
-          l.evidence.references.find((r) => r.entityType === 'Contract')?.entityId === x.contractId &&
-          l.currency === x.currency,
+          l.currency === x.currency &&
+          ('sourceType' in l
+            ? hasRatePermission('commercial.milestone_billing.view') &&
+              x.periodBasis === 'ELIGIBLE_DATE' &&
+              milestoneEvidenceMatches(l.evidence, x.engagementId, x.currency, l.amount)
+            : l.evidence.engagementId === x.engagementId &&
+              l.evidence.references.find((r) => r.entityType === 'Contract')?.entityId === x.contractId),
       ) &&
       computed.lineCount === sum.lineCount &&
       canonicalHours(computed.amount) === canonicalHours(sum.amount) &&

@@ -5,7 +5,7 @@ import {
   type InvoiceBatchApproval,
   type InvoiceApprovalOperation,
 } from './invoiceBatchApprovals';
-import { isRateContextCurrent, type RateContext } from './rateCandidates';
+import { hasRatePermission, isRateContextCurrent, type RateContext } from './rateCandidates';
 import { canonicalHours } from '../../shared/work-hours.mjs';
 import { approvalUuid } from '../../shared/work-approval.mjs';
 
@@ -52,6 +52,15 @@ export const reviewInvoiceDecision = (
     approval.lineCount !== batch.lineCount ||
     approval.currency !== batch.currency ||
     canonicalHours(approval.total) !== canonicalHours(batch.total) ||
+    !Array.isArray(batch.lines) ||
+    batch.lines.length !== batch.lineCount ||
+    batch.lines.some((line) =>
+      batch.sourceType === 'MILESTONE_ACCEPTANCE'
+        ? !('sourceType' in line) || line.sourceType !== 'MILESTONE_ACCEPTANCE' || line.snapshotId !== null
+        : 'sourceType' in line || typeof line.snapshotId !== 'string',
+    ) ||
+    (batch.sourceType === 'MILESTONE_ACCEPTANCE' &&
+      !hasRatePermission('commercial.milestone_billing.view')) ||
     !approvalUuid(requestId) ||
     !['Approved', 'Rejected'].includes(decision) ||
     reason.trim().length < 3 ||
@@ -116,7 +125,12 @@ export const executeReviewedInvoices = async (
     }
     try {
       const approval = await invoiceBatchApprovals.run(item.operation, item.engagementId, ctx);
-      if (!('batchId' in approval) || !live() || !isRateContextCurrent(ctx)) {
+      if (
+        !('batchId' in approval) ||
+        !matchesReviewedInvoice(item, approval) ||
+        !live() ||
+        !isRateContextCurrent(ctx)
+      ) {
         report({ requestId, status: 'Uncertain' });
         stopped = true;
       } else report({ requestId, status: 'Confirmed', approval });
@@ -130,6 +144,20 @@ export const executeReviewedInvoices = async (
       report({ requestId, status: definitive ? 'Denied' : 'Uncertain', httpStatus });
       if (!definitive) stopped = true;
     }
+  }
+};
+const matchesReviewedInvoice = (item: ReviewedInvoice, approval: InvoiceBatchApproval) => {
+  try {
+    return (
+      approval.id === item.approval.id &&
+      approval.batchId === item.batch.id &&
+      approval.lineageHash === item.batch.lineageHash &&
+      approval.lineCount === item.batch.lineCount &&
+      approval.currency === item.batch.currency &&
+      canonicalHours(approval.total) === canonicalHours(item.batch.total)
+    );
+  } catch {
+    return false;
   }
 };
 export const reconcileReviewedInvoice = async (
@@ -148,6 +176,7 @@ export const reconcileReviewedInvoice = async (
   if (key !== item.ownerKey || !isRateContextCurrent(ctx))
     throw Error('The original account, role and scope are required.');
   const approval = await invoiceBatchApprovals.run(item.operation, item.engagementId, ctx, true);
-  if (!('batchId' in approval)) throw Error('The original decision receipt is unavailable.');
+  if (!('batchId' in approval) || !matchesReviewedInvoice(item, approval))
+    throw Error('The original decision receipt is unavailable.');
   return approval;
 };

@@ -1,3 +1,4 @@
+import {expectedMilestoneUpgradeSnapshot} from './support/milestone-upgrade-expectations.mjs';
 import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -112,9 +113,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert(before.invoice_draft_batches.some((x) => x.v.id === draft.id));
         assert.equal((await pool.query("select to_regclass('invoice_action_events') t")).rows[0].t, null);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-          '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility',
+          '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility', '065n_wos06_milestone_invoice_lineage', '065o_wos06_milestone_invoice_approval', '065p_wos06_milestone_invoice_export', '065q_wos06_milestone_invoice_cancel_notice', '065r_wos06_milestone_invoice_confirmation',
         ]);
-        assert.deepEqual(await snapshot(), before);
+        assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
         for (const t of [
           'invoice_action_templates',
           'invoice_action_events',
@@ -124,7 +125,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ])
           assert.equal((await pool.query('select count(*)::int n from ' + t)).rows[0].n, 0);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, []);
-        assert.deepEqual(await snapshot(), before);
+        assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
         console.log(
           'Synthetic populated 065k to 065l upgrade preserves draft, identities, grants, audit and replay.',
         );

@@ -359,6 +359,12 @@ jobs:
           node tests/billing-reconciliation-postgres-smoke.mjs
           node tests/billing-reconciliation-journey-browser-smoke.mjs
 
+      - name: Verify milestone invoice lifecycle, mixed decisions and populated upgrade
+        run: |
+          node tests/milestone-invoice-postgres-smoke.mjs
+          node tests/milestone-mixed-bulk-postgres-smoke.mjs
+          node tests/milestone-populated-upgrade-postgres-smoke.mjs
+
       - name: Verify milestone acceptance, staged eligibility and register journey
         run: node tests/milestone-billing-postgres-smoke.mjs
 

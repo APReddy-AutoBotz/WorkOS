@@ -1,8 +1,10 @@
 import { RECONCILIATION_VERSION, reconciliationToken, reconciliationCsv } from './reconciliation-csv.mjs';
 import { readBillingReconciliation } from './reconciliation.mjs';
+import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { loadMilestoneInvoiceItem, milestoneInvoiceAcquisitionAllowed } from './milestone-source.mjs';
 import { capacityCanonical, capacityHash } from '../planning/worker-capacity-service.mjs';
 import { assertCommercialAuthority } from '../commercial-drafting/service.mjs';
 import { scopedCapacityWorker } from '../planning/worker-capacity-service.mjs';
@@ -25,8 +27,24 @@ const fence = (r, k) => {
   if (workApprovalOwner(r) !== k)
     throw fail(409, 'INVOICE_DRAFT_CONTEXT', 'Account, role or scope changed. Reload.');
 };
-const batchFields = `b.id,b.client_id as "clientId",b.contract_id as "contractId",b.engagement_id as "engagementId",b.currency,b.period_start::text as "periodStart",b.period_end::text as "periodEnd",b.period_basis as "periodBasis",b.owner_user_id as "ownerUserId",b.owner_role as "ownerRole",b.preparer_user_id as "preparerUserId",b.preparer_role as "preparerRole",b.request_id as "requestId",b.reason,b.created_at as "createdAt"`;
-const lineFields = `l.id,l.batch_id as "batchId",l.sequence,l.item_id as "itemId",l.item_version as "itemVersion",l.event_id as "eventId",l.snapshot_id as "snapshotId",l.currency,l.amount::text,l.billing_evidence as evidence,l.actor_id as "actorId",l.active_role as "activeRole",l.request_id as "requestId",l.reason,l.created_at as "createdAt"`;
+const batchFields = `coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT') as "sourceType",b.id,b.client_id as "clientId",b.contract_id as "contractId",b.engagement_id as "engagementId",b.currency,b.period_start::text as "periodStart",b.period_end::text as "periodEnd",b.period_basis as "periodBasis",b.owner_user_id as "ownerUserId",b.owner_role as "ownerRole",b.preparer_user_id as "preparerUserId",b.preparer_role as "preparerRole",b.request_id as "requestId",b.reason,b.created_at as "createdAt"`;
+const lineFields = `l.id,l.batch_id as "batchId",l.sequence,l.item_id as "itemId",l.item_version as "itemVersion",l.event_id as "eventId",l.snapshot_id as "snapshotId",coalesce(to_jsonb(l)->>'source_type','TM_SNAPSHOT') as "sourceType",l.currency,l.amount::text,l.billing_evidence as evidence,l.actor_id as "actorId",l.active_role as "activeRole",l.request_id as "requestId",l.reason,l.created_at as "createdAt"`;
+const batchView = (x) => {
+  if (x.sourceType === 'MILESTONE_ACCEPTANCE') return x;
+  if (x.sourceType === 'TM_SNAPSHOT') {
+    const { sourceType: _, ...legacy } = x;
+    return legacy;
+  }
+  throw fail(503, 'INVOICE_DRAFT_UNCONFIRMED', 'Invoice batch source could not be confirmed.');
+};
+const lineView = (x) => {
+  if (x.sourceType === 'MILESTONE_ACCEPTANCE' && x.snapshotId === null) return x;
+  if (x.sourceType === 'TM_SNAPSHOT' && typeof x.snapshotId === 'string') {
+    const { sourceType: _, ...legacy } = x;
+    return legacy;
+  }
+  throw fail(503, 'INVOICE_DRAFT_UNCONFIRMED', 'Invoice line source could not be confirmed.');
+};
 const cancellationFields = `c.id,c.batch_id as "batchId",c.expected_line_count as "expectedLineCount",c.actor_id as "actorId",c.active_role as "activeRole",c.request_id as "requestId",c.reason,c.created_at as "createdAt"`;
 export const createInvoiceDraftRouter = (o) => {
   const router = Router();
@@ -60,20 +78,16 @@ export const createInvoiceDraftRouter = (o) => {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
       else if (['IDR01', 'IDR02', 'IDR03', 'IBA02', '23505', '23514', '40001', '40P01'].includes(e.code))
-        res
-          .status(e.code === 'IDR01' ? 403 : 409)
-          .json({
-            code: e.code === 'IDR01' ? 'INVOICE_DRAFT_AUTHORITY' : 'INVOICE_DRAFT_CONFLICT',
-            error: 'Current draft, owner, item or scope changed. Reload.',
-          });
+        res.status(e.code === 'IDR01' ? 403 : 409).json({
+          code: e.code === 'IDR01' ? 'INVOICE_DRAFT_AUTHORITY' : 'INVOICE_DRAFT_CONFLICT',
+          error: 'Current draft, owner, item or scope changed. Reload.',
+        });
       else {
         o.logError?.(e);
-        res
-          .status(503)
-          .json({
-            code: 'INVOICE_DRAFT_UNCONFIRMED',
-            error: 'The operation could not be confirmed. Read the original receipt.',
-          });
+        res.status(503).json({
+          code: 'INVOICE_DRAFT_UNCONFIRMED',
+          error: 'The operation could not be confirmed. Read the original receipt.',
+        });
       }
     } finally {
       if (c && sessionLock)
@@ -152,13 +166,20 @@ export const createInvoiceDraftRouter = (o) => {
       )
     ).rows[0];
     if (!row) throw fail(404, 'INVOICE_DRAFT_SOURCE', 'Scoped draft unavailable.');
+    const isMilestone = await milestoneBatchModel(c, r, batchId);
+    if (isMilestone !== (row.sourceType === 'MILESTONE_ACCEPTANCE'))
+      throw fail(409, 'INVOICE_DRAFT_SOURCE', 'Invoice batch source does not match its engagement.');
+    if (isMilestone) await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
     const ids = (
       await c.query('select snapshot_id from invoice_draft_lines where batch_id=$1 order by sequence', [
         batchId,
       ])
     ).rows;
-    for (const x of ids) await worker(c, r, x.snapshot_id, lock);
-    return row;
+    for (const x of ids) {
+      if (x.snapshot_id === null) await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
+      else await worker(c, r, x.snapshot_id, lock);
+    }
+    return batchView(row);
   };
   const lines = async (c, batchId) =>
     (
@@ -166,7 +187,7 @@ export const createInvoiceDraftRouter = (o) => {
         `select ${lineFields} from invoice_draft_lines l where l.batch_id=$1 order by l.sequence`,
         [batchId],
       )
-    ).rows;
+    ).rows.map(lineView);
   const detail = async (c, r, b) => {
     const records = await lines(c, b.id),
       total = (
@@ -184,7 +205,17 @@ export const createInvoiceDraftRouter = (o) => {
         ).rows[0] ?? null;
     return { ...(await envelope(c, r)), batch: b, lines: records, total, cancellation: cancel };
   };
-  const item = async (c, r, itemId, lock = false) => {
+  const item = async (c, r, itemId, lock = false, batchId) => {
+    const kind = (
+      await c.query(
+        "select coalesce(to_jsonb(item)->>'source_type','TM_SNAPSHOT') source_type from approved_unbilled_items item where item.id=$1 and item.organization_id=$2 and item.legal_entity_id=$3",
+        [itemId, ...scope(r)],
+      )
+    ).rows[0];
+    if (kind?.source_type === 'MILESTONE_ACCEPTANCE')
+      return loadMilestoneInvoiceItem(c, r, batchId, itemId, lock);
+    if (kind?.source_type !== 'TM_SNAPSHOT')
+      throw fail(404, 'INVOICE_DRAFT_SOURCE', 'Scoped approved-unbilled item unavailable.');
     const x = (
       await c.query(
         `select item.id as "itemId",item.version as "itemVersion",ev.id as "eventId",ev.client_id as "clientId",ev.contract_id as "contractId",ev.engagement_id as "engagementId",ev.currency,ev.eligible_on::text as "eligibleOn",ev.amount::text,ev.snapshot_id as "snapshotId",ev.billing_evidence as evidence,ev.billing_evidence->>'workDate' as "workDate",tm_billing_source_valid(ev.organization_id,ev.legal_entity_id,ev.engagement_id,ev.snapshot_id) as current from approved_unbilled_items item join billing_eligibility_events ev on ev.id=item.event_id where item.id=$1 and item.organization_id=$2 and item.legal_entity_id=$3${lock ? ' for share of item,ev' : ''}`,
@@ -231,30 +262,50 @@ export const createInvoiceDraftRouter = (o) => {
         return { ...(await detail(c, r, await batch(c, r, old.id))), replayed: true };
       }
       const v = d.definition,
-        id = randomUUID();
+        id = randomUUID(),
+        engagement = (
+          await c.query(
+            'select model from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3 for share',
+            [...scope(r), v.engagementId],
+          )
+        ).rows[0];
+      if (!engagement || !['time_and_materials', 'milestone'].includes(engagement.model))
+        throw fail(404, 'INVOICE_DRAFT_SOURCE', 'Scoped billing engagement unavailable.');
+      if (engagement.model === 'milestone') {
+        await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
+        if (v.periodBasis !== 'ELIGIBLE_DATE')
+          throw fail(409, 'INVOICE_DRAFT_SOURCE', 'Milestone batches use their explicit eligibility date.');
+      }
       await context(c, r, id);
-      await c.query(
-        `insert into invoice_draft_batches(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,currency,period_start,period_end,period_basis,owner_user_id,owner_role,preparer_user_id,preparer_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
-        [
-          id,
-          ...scope(r),
-          v.clientId,
-          v.contractId,
-          v.engagementId,
-          v.currency,
-          v.periodStart,
-          v.periodEnd,
-          v.periodBasis,
-          v.ownerUserId,
-          v.ownerRole,
-          r.user.sub,
-          r.user.activeRole,
-          d.requestId,
-          digest,
-          d.reason,
-          r.operationId,
-        ],
-      );
+      const args = [
+        id,
+        ...scope(r),
+        v.clientId,
+        v.contractId,
+        v.engagementId,
+        v.currency,
+        v.periodStart,
+        v.periodEnd,
+        v.periodBasis,
+        v.ownerUserId,
+        v.ownerRole,
+        r.user.sub,
+        r.user.activeRole,
+        d.requestId,
+        digest,
+        d.reason,
+        r.operationId,
+      ];
+      if (engagement.model === 'milestone')
+        await c.query(
+          "insert into invoice_draft_batches(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,currency,period_start,period_end,period_basis,owner_user_id,owner_role,preparer_user_id,preparer_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'MILESTONE_ACCEPTANCE')",
+          args,
+        );
+      else
+        await c.query(
+          `insert into invoice_draft_batches(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,currency,period_start,period_end,period_basis,owner_user_id,owner_role,preparer_user_id,preparer_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+          args,
+        );
       await audit(c, r, 'Create Draft', id, { batchId: id });
       return { ...(await detail(c, r, await batch(c, r, id))), replayed: false };
     }),
@@ -264,18 +315,27 @@ export const createInvoiceDraftRouter = (o) => {
     handle(false, async (c, r) => {
       const q = parse(z.object({ after: uuid.optional() }).strict(), r.query);
       await authorize(c, r);
+      let milestoneAccess = false;
+      try {
+        await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
+        milestoneAccess = true;
+      } catch (e) {
+        if (e.code !== 'COMMERCIAL_PERMISSION_DENIED') throw e;
+      }
       const args = [...scope(r)],
         workerWhere = o.buildEmployeeScopeWhere(r, args, 'worker');
       args.push(q.after ?? null);
+      const afterParam = args.length;
+      args.push(milestoneAccess);
       const rows = (
         await c.query(
-          `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",invoice_batch_governed_state(b.id) as state from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2 and ($${args.length}::uuid is null or b.id>$${args.length}::uuid) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by b.id limit 51`,
+          `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",invoice_batch_governed_state(b.id) as state from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2 and ($${afterParam}::uuid is null or b.id>$${afterParam}::uuid) and (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='TM_SNAPSHOT' or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='MILESTONE_ACCEPTANCE' and $${args.length}::boolean)) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by b.id limit 51`,
           args,
         )
       ).rows;
       return {
         ...(await envelope(c, r)),
-        batches: rows.slice(0, 50),
+        batches: rows.slice(0, 50).map(batchView),
         nextAfter: rows.length > 50 ? rows[49].id : null,
       };
     }),
@@ -386,7 +446,7 @@ export const createInvoiceDraftRouter = (o) => {
       fence(r, d.expectedOwnerKey);
       await authorize(c, r, 'prepare');
       const b = await batch(c, r, batchId, true),
-        source = await item(c, r, d.itemId, true),
+        source = await item(c, r, d.itemId, true, batchId),
         digest = fingerprint(d);
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [
         `invoice-line-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`,
@@ -401,7 +461,7 @@ export const createInvoiceDraftRouter = (o) => {
         if (old.fingerprint !== digest || old.batchId !== batchId || old.activeRole !== r.user.activeRole)
           throw fail(409, 'INVOICE_DRAFT_KEY', 'Original line request differs.');
         delete old.fingerprint;
-        return { ...(await detail(c, r, b)), line: old, replayed: true };
+        return { ...(await detail(c, r, b)), line: lineView(old), replayed: true };
       }
       const draft = {
           clientId: b.clientId,
@@ -426,32 +486,45 @@ export const createInvoiceDraftRouter = (o) => {
           amount: source.amount,
           current: source.current,
         };
-      if (b.state !== 'Draft' || !b.ownerCurrent || !invoiceItemMatches(draft, match))
+      if (
+        b.state !== 'Draft' ||
+        !b.ownerCurrent ||
+        !(source.sourceType === 'MILESTONE_ACCEPTANCE'
+          ? milestoneInvoiceAcquisitionAllowed(draft, source)
+          : invoiceItemMatches(draft, match))
+      )
         throw fail(409, 'INVOICE_DRAFT_SOURCE', 'The whole current item is unavailable for this draft.');
       const lineId = randomUUID();
       await context(c, r, batchId, lineId, null, d.expectedLineCount);
-      await c.query(
-        'insert into invoice_draft_lines(id,organization_id,legal_entity_id,batch_id,sequence,item_id,item_version,event_id,snapshot_id,currency,amount,billing_evidence,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18)',
-        [
-          lineId,
-          ...scope(r),
-          batchId,
-          d.expectedLineCount + 1,
-          d.itemId,
-          d.itemVersion,
-          source.eventId,
-          source.snapshotId,
-          source.currency,
-          source.amount,
-          JSON.stringify(source.evidence),
-          r.user.sub,
-          r.user.activeRole,
-          d.requestId,
-          digest,
-          d.reason,
-          r.operationId,
-        ],
-      );
+      const lineArgs = [
+        lineId,
+        ...scope(r),
+        batchId,
+        d.expectedLineCount + 1,
+        d.itemId,
+        d.itemVersion,
+        source.eventId,
+        source.snapshotId,
+        source.currency,
+        source.amount,
+        JSON.stringify(source.evidence),
+        r.user.sub,
+        r.user.activeRole,
+        d.requestId,
+        digest,
+        d.reason,
+        r.operationId,
+      ];
+      if (source.sourceType === 'MILESTONE_ACCEPTANCE')
+        await c.query(
+          "insert into invoice_draft_lines(id,organization_id,legal_entity_id,batch_id,sequence,item_id,item_version,event_id,snapshot_id,currency,amount,billing_evidence,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,'MILESTONE_ACCEPTANCE')",
+          lineArgs,
+        );
+      else
+        await c.query(
+          'insert into invoice_draft_lines(id,organization_id,legal_entity_id,batch_id,sequence,item_id,item_version,event_id,snapshot_id,currency,amount,billing_evidence,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18)',
+          lineArgs,
+        );
       await c.query(
         'insert into invoice_draft_occupancies(item_id,item_version,batch_id,line_id)values($1,$2,$3,$4)',
         [d.itemId, d.itemVersion, batchId, lineId],
@@ -459,7 +532,7 @@ export const createInvoiceDraftRouter = (o) => {
       await audit(c, r, 'Acquire Item', lineId, { batchId, lineId, itemId: d.itemId });
       const saved = (await c.query(`select ${lineFields} from invoice_draft_lines l where l.id=$1`, [lineId]))
         .rows[0];
-      return { ...(await detail(c, r, b)), line: saved, replayed: false };
+      return { ...(await detail(c, r, b)), line: lineView(saved), replayed: false };
     }),
   );
   router.post(
@@ -527,21 +600,29 @@ export const createInvoiceDraftRouter = (o) => {
         });
       }
       await context(c, r, batchId, null, cancellationId, d.expectedLineCount);
-      await c.query(
-        'insert into invoice_draft_cancellations(id,organization_id,legal_entity_id,batch_id,expected_line_count,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
-        [
-          cancellationId,
-          ...scope(r),
-          batchId,
-          d.expectedLineCount,
-          r.user.sub,
-          r.user.activeRole,
-          d.requestId,
-          digest,
-          d.reason,
-          r.operationId,
-        ],
-      );
+      const cancelArgs = [
+        cancellationId,
+        ...scope(r),
+        batchId,
+        d.expectedLineCount,
+        r.user.sub,
+        r.user.activeRole,
+        d.requestId,
+        digest,
+        d.reason,
+        r.operationId,
+      ];
+      if (await milestoneBatchModel(c, r, batchId)) {
+        await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
+        await c.query(
+          "insert into invoice_draft_cancellations(id,organization_id,legal_entity_id,batch_id,expected_line_count,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'MILESTONE_ACCEPTANCE')",
+          cancelArgs,
+        );
+      } else
+        await c.query(
+          'insert into invoice_draft_cancellations(id,organization_id,legal_entity_id,batch_id,expected_line_count,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+          cancelArgs,
+        );
       await c.query('delete from invoice_draft_occupancies where batch_id=$1', [batchId]);
       await audit(c, r, 'Cancel Draft', cancellationId, { batchId, cancellationId });
       return { ...(await detail(c, r, await batch(c, r, batchId))), replayed: false };
@@ -566,7 +647,9 @@ export const createInvoiceDraftRouter = (o) => {
       }
       const table = typ === 'line' ? 'invoice_draft_lines' : 'invoice_draft_cancellations',
         fields =
-          typ === 'line' ? lineFields.replaceAll('l.', 'x.') : cancellationFields.replaceAll('c.', 'x.'),
+          typ === 'line'
+            ? lineFields.replaceAll('l.', 'x.').replaceAll('to_jsonb(l)', 'to_jsonb(x)')
+            : cancellationFields.replaceAll('c.', 'x.'),
         row = (
           await c.query(
             `select ${fields} from ${table} x where x.organization_id=$1 and x.legal_entity_id=$2 and x.actor_id=$3 and x.active_role=$4 and x.request_id=$5`,
@@ -575,7 +658,9 @@ export const createInvoiceDraftRouter = (o) => {
         ).rows[0];
       if (!row) throw fail(404, 'INVOICE_DRAFT_UNCONFIRMED', 'Original receipt unavailable.');
       const d = await detail(c, r, await batch(c, r, row.batchId));
-      return typ === 'line' ? { ...d, type: typ, line: row } : { ...d, type: typ, cancellation: row };
+      return typ === 'line'
+        ? { ...d, type: typ, line: lineView(row) }
+        : { ...d, type: typ, cancellation: row };
     }),
   );
   return router;

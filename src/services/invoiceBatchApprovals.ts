@@ -1,3 +1,4 @@
+import { milestoneInvoiceEvidence, milestoneEvidenceMatches } from './milestoneInvoiceContracts';
 import { z } from 'zod';
 import {
   validInvoiceBatchApprovalPolicy,
@@ -49,7 +50,7 @@ const evidence = z
       v.references.find((x) => x.entityType === 'Engagement')?.entityId === v.engagementId &&
       new Set(v.references.map((x) => x.contractVersionId)).size === 1,
   );
-const line = z
+const tmLine = z
   .object({
     id: uuid,
     sequence: z.number().int().positive(),
@@ -62,9 +63,25 @@ const line = z
     evidence,
   })
   .strict();
+const milestoneLine = z
+  .object({
+    id: uuid,
+    sequence: z.number().int().positive(),
+    itemId: uuid,
+    itemVersion: z.literal(1),
+    eventId: uuid,
+    snapshotId: z.null(),
+    sourceType: z.literal('MILESTONE_ACCEPTANCE'),
+    currency: z.string().regex(/^[A-Z]{3}$/),
+    amount: money,
+    evidence: milestoneInvoiceEvidence,
+  })
+  .strict();
+const line = z.union([tmLine, milestoneLine]);
 const source = z
   .object({
     id: uuid,
+    sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
     current: z.boolean(),
     currency: z.string().regex(/^[A-Z]{3}$/),
@@ -84,18 +101,25 @@ const source = z
     try {
       const sum = invoiceDraftTotal(v.lines.map((x) => x.amount));
       return (
+        v.lines.every((x) => (x.snapshotId === null) === (v.sourceType === 'MILESTONE_ACCEPTANCE')) &&
+        (!v.sourceType ||
+          (v.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission('commercial.milestone_billing.view'))) &&
         v.periodStart <= v.periodEnd &&
         sum.lineCount === v.lineCount &&
         canonicalHours(sum.amount) === canonicalHours(v.total) &&
         v.lines.every(
           (x, n) =>
             x.sequence === n + 1 &&
-            x.snapshotId === x.evidence.snapshotId &&
             x.currency === v.currency &&
-            x.currency === x.evidence.currency &&
-            canonicalHours(x.amount) === canonicalHours(x.evidence.amount) &&
-            x.evidence.engagementId === v.engagementId &&
-            x.evidence.references.find((r) => r.entityType === 'Contract')?.entityId === v.contractId,
+            ('sourceType' in x
+              ? hasRatePermission('commercial.milestone_billing.view') &&
+                v.periodBasis === 'ELIGIBLE_DATE' &&
+                milestoneEvidenceMatches(x.evidence, v.engagementId, v.currency, x.amount)
+              : x.snapshotId === x.evidence.snapshotId &&
+                x.currency === x.evidence.currency &&
+                canonicalHours(x.amount) === canonicalHours(x.evidence.amount) &&
+                x.evidence.engagementId === v.engagementId &&
+                x.evidence.references.find((r) => r.entityType === 'Contract')?.entityId === v.contractId),
         )
       );
     } catch {

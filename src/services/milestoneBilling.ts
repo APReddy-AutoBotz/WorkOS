@@ -373,8 +373,12 @@ export const milestoneBilling = {
       return bad();
     return out.data;
   },
-  register: async (engagementId: string, c: RateContext | null) => {
-    const raw = await call('GET', '/register?engagementId=' + encodeURIComponent(engagementId), c, 'viewer'),
+  register: async (engagementId: string | null, c: RateContext | null, after?: string) => {
+    if (after && !uuid.safeParse(after).success) return bad();
+    const query = new URLSearchParams();
+    if (engagementId) query.set('engagementId', engagementId);
+    if (after) query.set('after', after);
+    const raw = await call('GET', '/register' + (query.size ? '?' + query.toString() : ''), c, 'viewer'),
       item = z
         .object({
           id: uuid,
@@ -403,11 +407,15 @@ export const milestoneBilling = {
           ...envelope,
           items: z.array(item).max(50),
           nextAfter: uuid.nullable(),
-          batchSupport: z.literal(false),
+          batchSupport: z.boolean(),
         })
         .strict()
         .safeParse(raw);
-    if (!out.success || out.data.items.some((x) => x.engagementId !== engagementId)) return bad();
+    if (
+      !out.success ||
+      (engagementId !== null && out.data.items.some((x) => x.engagementId !== engagementId))
+    )
+      return bad();
     return out.data;
   },
   run: async (op: MilestoneOperation, c: RateContext | null, receipt = false) => {

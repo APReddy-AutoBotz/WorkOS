@@ -153,6 +153,7 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
     if (!source || source.state !== 'Exported' || !attested || !reference.trim() || reason.trim().length < 3)
       return;
     execute({
+      ...(source.sourceType ? { sourceType: source.sourceType } : {}),
       requestId: crypto.randomUUID(),
       batchId: source.batchId,
       artifactId: source.artifactId,
@@ -181,8 +182,8 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
     <section aria-label="Invoice billing confirmation" className="my-4 space-y-3 rounded-xl border p-4">
       <h2>Invoice billing confirmation</h2>
       <p>
-        Confirm that this exported batch was billed downstream. Enter the external reference and check
-        the exported total before submitting. The receipt records your attestation.
+        Confirm that this exported batch was billed downstream. Enter the external reference and check the
+        exported total before submitting. The receipt records your attestation.
       </p>
       {!allowed ? (
         <p role="status">Scoped billing confirmation authority is required.</p>
@@ -248,8 +249,9 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
           {source && (
             <section aria-label="Inspected confirmation source">
               <p>
-                {source.state} · artifact {source.artifactId} v{source.artifactVersion} · SHA-256{' '}
-                {source.artifactSha256} · {source.currency} {source.total}.
+                {source.state} · {source.sourceType === 'MILESTONE_ACCEPTANCE' ? 'milestone source · ' : ''}
+                artifact {source.artifactId} v{source.artifactVersion} · SHA-256 {source.artifactSha256} ·{' '}
+                {source.currency} {source.total}.
               </p>
               {source.state === 'Exported' && (
                 <fieldset disabled={busy || !!pending}>

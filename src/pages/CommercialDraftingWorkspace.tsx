@@ -1,3 +1,4 @@
+import {hasRatePermission} from '../services/rateCandidates';
 import {MilestoneBillingWorkspace} from '../components/MilestoneBillingWorkspace';
 import {InvoiceActionNotice} from '../components/InvoiceActionNotice';
 import {BillingReconciliation} from '../components/BillingReconciliation';
@@ -223,6 +224,11 @@ export const CommercialDraftingWorkspace = () => {
 
   const owned = Boolean(state.context && current(state));
   const workspace = owned && state.status === 'ready' ? state.workspace : undefined;
+  const canViewMilestones = hasRatePermission('commercial.milestone_billing.view');
+  const invoiceEngagements = workspace?.engagements.filter(e =>
+    e.model === 'time_and_materials' || (e.model === 'milestone' && canViewMilestones)
+  ) ?? [];
+  const invoiceChoices = invoiceEngagements.map(e => ({ id: e.id, label: e.name }));
   const draft = workspace && state.context?.canManage ? state.draft : undefined;
   const detail = workspace ? state.detail : undefined;
   const canManage = Boolean(owned && state.context?.canManage);
@@ -259,16 +265,16 @@ export const CommercialDraftingWorkspace = () => {
     {owned && state.message && state.status !== 'loading' && <p role={state.status === 'error' ? 'alert' : 'status'} className="mb-5 rounded-xl border border-slate-300 p-4">{state.message}</p>}
     {workspace && <>
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceNoticeConfiguration choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceBillingConfirmation choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceNoticeConfiguration choices={invoiceChoices}/>
+      <InvoiceBillingConfirmation choices={invoiceChoices}/>
       <BillingReconciliation choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <MilestoneBillingWorkspace choices={workspace.engagements.filter(x=>x.model==='milestone').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceActionNotice choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceCsvWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceNoticeRecovery choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <ReviewedInvoiceBatch choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceBatchApprovalWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceDraftWorkspace choices={workspace.engagements.flatMap(x=>x.model==='time_and_materials'&&x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency}]:[])}/>
+      <InvoiceCsvWorkspace choices={invoiceChoices}/>
+      <InvoiceNoticeRecovery choices={invoiceChoices}/>
+      <ReviewedInvoiceBatch choices={invoiceChoices}/>
+      <InvoiceBatchApprovalWorkspace choices={invoiceChoices}/>
+      <InvoiceDraftWorkspace choices={invoiceEngagements.flatMap(x=>x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency,...(x.model==='milestone'?{sourceType:'MILESTONE_ACCEPTANCE' as const}:{})}]:[])}/>
       <TmBillingEligibilityWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <RateCandidates kind="billing" choices={[...workspace.contracts.map(x=>({type:'contract' as const,id:x.id,label:x.number})),...workspace.engagements.map(x=>({type:'engagement' as const,id:x.id,label:x.name}))]}/>
       <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">

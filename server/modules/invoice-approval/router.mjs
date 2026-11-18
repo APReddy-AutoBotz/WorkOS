@@ -1,3 +1,4 @@
+import { milestoneBatchModel, loadMilestoneApprovalBatch } from './milestone-batch.mjs';
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -65,20 +66,16 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
       else if (['IBA01', 'IBA02', 'IBA03', '23505', '23514', '40001', '40P01'].includes(e.code))
-        res
-          .status(e.code === 'IBA01' ? 403 : 409)
-          .json({
-            code: e.code === 'IBA01' ? 'INVOICE_APPROVAL_AUTHORITY' : 'INVOICE_APPROVAL_CONFLICT',
-            error: 'Current scope, batch or approval stage changed. Reload.',
-          });
+        res.status(e.code === 'IBA01' ? 403 : 409).json({
+          code: e.code === 'IBA01' ? 'INVOICE_APPROVAL_AUTHORITY' : 'INVOICE_APPROVAL_CONFLICT',
+          error: 'Current scope, batch or approval stage changed. Reload.',
+        });
       else {
         o.logError?.(e);
-        res
-          .status(503)
-          .json({
-            code: 'INVOICE_APPROVAL_UNCONFIRMED',
-            error: 'The operation could not be confirmed. Read the original receipt.',
-          });
+        res.status(503).json({
+          code: 'INVOICE_APPROVAL_UNCONFIRMED',
+          error: 'The operation could not be confirmed. Read the original receipt.',
+        });
       }
     } finally {
       c?.release();
@@ -130,13 +127,14 @@ export const createInvoiceBatchApprovalRouter = (o) => {
     ).rows[0];
     if (
       !row ||
-      row.model !== 'time_and_materials' ||
+      !['time_and_materials', 'milestone'].includes(row.model) ||
       row.origin !== 'manual' ||
       !row.billable ||
       !row.client_id ||
       !row.contract_id
     )
-      throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped T&M engagement unavailable.');
+      throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped billing engagement unavailable.');
+    if (row.model === 'milestone') await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
     return row;
   };
   const context = async (c, r, fields) =>
@@ -251,6 +249,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
     }),
   );
   const batch = async (c, r, batchId, lock = false) => {
+    if (await milestoneBatchModel(c, r, batchId)) return loadMilestoneApprovalBatch(c, r, batchId, lock);
     const b = (
       await c.query(
         `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state,invoice_batch_source_current(b) current,invoice_batch_lineage_hash(b.id) lineage_hash from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
@@ -258,6 +257,8 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       )
     ).rows[0];
     if (!b) throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped invoice batch unavailable.');
+    if (b.source_type && b.source_type !== 'TM_SNAPSHOT')
+      throw fail(409, 'INVOICE_APPROVAL_SOURCE', 'Invoice source does not match its engagement.');
     const lines = (
       await c.query(
         'select l.id,l.sequence,l.item_id,l.item_version,l.event_id,l.snapshot_id,l.currency,l.amount::text,l.billing_evidence,h.employee_id from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence e on e.id=v.submission_id join timesheets h on h.id=e.timesheet_id where l.batch_id=$1 order by l.sequence',
@@ -304,9 +305,17 @@ export const createInvoiceBatchApprovalRouter = (o) => {
             [i.id],
           )
         ).rows[0] ?? null,
+      model = (
+        await c.query(
+          'select e.model from invoice_batch_approval_instances i join invoice_draft_batches b on b.id=i.batch_id join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where i.id=$1',
+          [i.id],
+        )
+      ).rows[0]?.model,
       current = (
         await c.query(
-          'select invoice_batch_approval_review_current(i) current from invoice_batch_approval_instances i where id=$1',
+          model === 'milestone'
+            ? "select invoice_batch_governed_state(i.batch_id)='Under Review' and not exists(select 1 from invoice_batch_approval_invalidations z where z.instance_id=i.id) and i.sequence=(select max(x.sequence) from invoice_batch_approval_instances x where x.batch_id=i.batch_id) and milestone_invoice_approval_pin_current(i) current from invoice_batch_approval_instances i where id=$1"
+            : 'select invoice_batch_approval_review_current(i) current from invoice_batch_approval_instances i where id=$1',
           [i.id],
         )
       ).rows[0].current;
@@ -338,6 +347,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
   };
   const sourceView = (source) => ({
     id: source.row.id,
+    ...(source.row.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: source.row.source_type } : {}),
     state: source.row.state,
     current: source.row.current,
     currency: source.row.currency,
@@ -355,6 +365,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       itemVersion: x.item_version,
       eventId: x.event_id,
       snapshotId: x.snapshot_id,
+      ...(x.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: x.source_type } : {}),
       currency: x.currency,
       amount: x.amount,
       evidence: x.billing_evidence,
@@ -743,6 +754,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
           )
         ).rows[0];
         if (!p) throw fail(404, 'INVOICE_APPROVAL_UNCONFIRMED', 'Original receipt unavailable.');
+        await engagement(c, r, p.engagement_id);
         return { ...(await envelope(c, r)), type: typ, policy: policyView(p) };
       }
       const table =

@@ -532,7 +532,10 @@ const InvoiceApprovalEngagement = ({
                   <ul>
                     {source.lines.map((x) => (
                       <li key={x.id}>
-                        Item {x.itemId} version {x.itemVersion} · event {x.eventId} · snapshot {x.snapshotId}{' '}
+                        Item {x.itemId} version {x.itemVersion} · event {x.eventId} ·{' '}
+                        {'sourceType' in x
+                          ? `milestone ${x.evidence.milestoneId}`
+                          : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
                       </li>
                     ))}
@@ -611,7 +614,9 @@ const InvoiceApprovalEngagement = ({
               <ul>
                 {inspected.batch.lines.map((x) => (
                   <li key={x.id}>
-                    Item {x.itemId} · event {x.eventId} · snapshot {x.snapshotId} · {x.currency} {x.amount}
+                    Item {x.itemId} · event {x.eventId} ·{' '}
+                    {'sourceType' in x ? `milestone ${x.evidence.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
+                    {x.currency} {x.amount}
                   </li>
                 ))}
               </ul>
