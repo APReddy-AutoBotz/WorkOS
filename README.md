@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+The workforce directory shows workers and reporting relationships within the signed-in role and legal entity. Use it to select a worker before opening their capacity or capability view.
+
 If a commercial draft save has an uncertain outcome, reload the workspace and inspect the server records before creating another draft. If that read fails, use **Retry workspace**.
 
 Buyers can require approval for changes to selected assignment fields. A pending proposal keeps the current allocation in effect. Final approval rechecks the assignment version and overlap rules before applying the change. [Material assignment approvals](docs/tasks/WOS-05-MATERIAL-ASSIGNMENT-APPROVALS.md)

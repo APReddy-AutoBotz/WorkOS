@@ -540,3 +540,7 @@ RES008/009, APR001/002/003/006, CORE003/004/005, IAM003/005/010 and INT002/003/0
 ## Commercial draft reconciliation
 
 WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-005 cover commercial save recovery. The commercial drafting browser suite checks that a failed reconciliation read keeps creation unavailable and that retrying the read issues no additional write.
+
+## Scoped workforce directory
+
+WOS-WKF-008, ORG-004 and IAM-003/005/010 are covered by scoped directory API, PostgreSQL and browser tests. Team-lead traversal stays inside the current legal entity at every reporting level.

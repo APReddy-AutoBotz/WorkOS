@@ -512,3 +512,7 @@ Apply migration 065 before configuring material fields and approvers. Leave the 
 ## Commercial draft reconciliation
 
 After a commercial save returns an uncertain outcome, discarding the local draft leaves creation locked. Reload the workspace. If that read fails, retry the workspace read, inspect the records for the original submission, then decide whether a new draft is necessary.
+
+## Scoped workforce directory
+
+Open Workforce directory with the employee viewing permission. Search and paging return workers in the current role and legal entity. Reload the directory after a roster change before paging or opening another relationship. This read-only feature has no migration or commercial permission grant.

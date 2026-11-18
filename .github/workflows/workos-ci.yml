@@ -95,6 +95,9 @@ jobs:
       - name: Verify material assignment approvals in PostgreSQL
         run: npm run test:assignment-approval-postgres
 
+      - name: Verify scoped workforce directory postgres
+        run: npm run test:workforce-directory-postgres
+
       - name: Verify approved actual work reconciliation in PostgreSQL
         run: npm run test:actual-work-postgres
 
@@ -210,6 +213,9 @@ jobs:
 
       - name: Verify material assignment approvals in browser
         run: npm run test:assignment-approval-journey
+
+      - name: Verify scoped workforce directory journey
+        run: npm run test:workforce-directory-journey
 
       - name: Verify actual utilization and evidence download in Chromium
         run: npm run test:actual-work-journey
