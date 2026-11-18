@@ -337,6 +337,30 @@ jobs:
           npm run test:commercial-drafting-browser
           npm run test:client-profiles-browser
 
+      - name: Verify commercial ownership, approvals, adopted rates, valuation and eligibility in PostgreSQL
+        run: |
+          node tests/commercial-approval-postgres-smoke.mjs
+          node tests/commercial-approval-sql-smoke.mjs
+          node tests/commercial-approval-upgrade-postgres-smoke.mjs
+          node tests/commercial-owner-loss-postgres-smoke.mjs
+          node tests/commercial-owner-postgres-smoke.mjs
+          node tests/commercial-owner-upgrade-postgres-smoke.mjs
+          node tests/governed-tm-postgres-smoke.mjs
+          node tests/governed-tm-sql-smoke.mjs
+          node tests/governed-tm-upgrade-postgres-smoke.mjs
+          node tests/rate-adoption-postgres-smoke.mjs
+          node tests/rate-adoption-upgrade-postgres-smoke.mjs
+          node tests/tm-billing-eligibility-postgres-smoke.mjs
+          node tests/tm-billing-eligibility-upgrade-postgres-smoke.mjs
+
+      - name: Verify commercial reviewer, finance and billing browser journeys
+        run: |
+          node tests/commercial-approval-journey-browser-smoke.mjs
+          node tests/commercial-owner-journey-browser-smoke.mjs
+          node tests/governed-tm-journey-browser-smoke.mjs
+          node tests/rate-adoption-journey-browser-smoke.mjs
+          node tests/tm-billing-eligibility-journey-browser-smoke.mjs
+
       - name: Verify real import-to-audit browser and PostgreSQL journey
         env:
           WORKOS_TEST_DATABASE_URL: postgresql://postgres:workos-ci-only@127.0.0.1:5432/postgres

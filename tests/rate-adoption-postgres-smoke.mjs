@@ -1,0 +1,600 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import {
+  commercialFixture as f,
+  withCommercialDatabase,
+  migrateCommercialDatabase,
+  withCommercialApi,
+} from './support/commercial-drafting-test.mjs';
+import { seedCapacity } from './support/worker-capacity-test.mjs';
+import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
+const candidates = '/api/v1/rate-candidates',
+  approvals = '/api/v1/commercial-candidate-approvals',
+  adoptions = '/api/v1/approved-rate-sources',
+  ok = (v, n = 200) => {
+    assert.equal(v.status, n, JSON.stringify(v.body));
+    return v.body;
+  };
+await withCommercialDatabase(async ({ pool, databaseUrl }) => {
+  await migrateCommercialDatabase(pool);
+  const fx = await seedCapacity(pool),
+    admin = fx.identities.manager,
+    reviewer = fx.identities.denied;
+  for (const k of [
+    'commercial.rate_candidates.view',
+    'commercial.rate_candidates.manage',
+    'commercial.cost_candidates.view',
+    'commercial.cost_candidates.manage',
+    'commercial.cost_approvals.decide',
+  ])
+    await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled)values('Admin',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+      [k],
+    );
+  for (const k of [
+    'commercial.contracts.view',
+    'commercial.rate_candidates.view',
+    'commercial.rate_approvals.decide',
+    'notifications.view',
+    'approvals.view',
+    'employees.view',
+  ])
+    await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+      [k],
+    );
+  await pool.query(
+    "insert into user_roles(user_id,role_id)select $1,id from roles where name='Admin' on conflict do nothing",
+    [reviewer.id],
+  );
+  await withCommercialApi(
+    { databaseUrl, identities: fx.identities, onServerError: (s) => process.stderr.write(s) },
+    async ({ request }) => {
+      const end = shift(fx.today, 30),
+        contract = ok(
+          await request('/contracts', {
+            method: 'POST',
+            body: {
+              number: 'SYN-ADOPTION',
+              clientId: f.clientId,
+              name: 'Synthetic source contract',
+              model: 'time_and_materials',
+              startsOn: fx.today,
+              endsOn: end,
+              effectiveFrom: fx.today,
+              currency: 'USD',
+              value: '1000.0000',
+              billingTerms: 'Synthetic terms',
+              documents: [],
+              reason: 'Synthetic fixture',
+            },
+          }),
+          201,
+        ),
+        engagement = ok(
+          await request('/engagements', {
+            method: 'POST',
+            body: {
+              code: 'SYN-ADOPTION',
+              name: 'Synthetic source engagement',
+              model: 'time_and_materials',
+              ownerId: f.ownerId,
+              startsOn: fx.today,
+              endsOn: end,
+              currency: 'USD',
+              budget: '1000.0000',
+              clientId: f.clientId,
+              contractId: contract.id,
+              contractVersionId: contract.versions[0].id,
+              attributionId: null,
+              reason: 'Synthetic fixture',
+            },
+          }),
+          201,
+        );
+      const resolve = (kind, sourceId) =>
+        request(
+          adoptions +
+            '/resolve?' +
+            new URLSearchParams({ kind, sourceId, asOf: fx.today, currency: 'USD', unit: 'HOUR' }),
+        );
+      assert.equal(ok(await resolve('billing', engagement.id)).result, 'missing');
+      assert.equal(ok(await resolve('cost', f.ownerId)).result, 'missing');
+      const keys = [
+        'approval.action_required',
+        'approval.rejected_or_correction_required',
+        'approval.completed',
+      ];
+      const make = async (kind, priority, decision = 'Approved') => {
+        const bindingType = kind === 'billing' ? 'contract' : 'worker',
+          bindingId = kind === 'billing' ? contract.id : f.ownerId,
+          actor = kind === 'billing' ? reviewer : { ...reviewer, role: 'Admin' };
+        const candidate = ok(
+            await request(candidates + '/candidates', {
+              method: 'POST',
+              body: {
+                requestId: randomUUID(),
+                streamId: randomUUID(),
+                expectedLatestId: null,
+                kind,
+                bindingType,
+                bindingId,
+                effectiveFrom: fx.today,
+                effectiveTo: end,
+                currency: 'USD',
+                unit: 'HOUR',
+                amount: kind === 'billing' ? '125.2500' : '53.0200',
+                priority,
+                reason: 'Synthetic protected candidate',
+              },
+            }),
+            201,
+          ).candidate,
+          own = ok(
+            await request(candidates + '/owners', {
+              method: 'POST',
+              body: {
+                requestId: randomUUID(),
+                candidateId: candidate.id,
+                expectedOwnerEventId: null,
+                ownerUserId: admin.id,
+                ownerRole: 'Admin',
+                reason: 'Synthetic owner',
+              },
+            }),
+            201,
+          ),
+          definition = {
+            entityType: 'CommercialCandidate',
+            kind,
+            candidateId: candidate.id,
+            stages: [{ userId: reviewer.id, role: actor.role }],
+            locale: 'en-US',
+            templates: keys.map((key) => ({
+              key,
+              subject: 'Review {{stageNumber}}',
+              body: 'Source {{sourceRef}}',
+            })),
+            completionInApp: false,
+          },
+          policy = ok(
+            await request(approvals + '/policies', {
+              method: 'POST',
+              body: {
+                expectedOwnerKey: own.ownerKey,
+                requestId: randomUUID(),
+                expectedLatestId: null,
+                effectiveFrom: fx.today,
+                definition,
+                reason: 'Synthetic policy',
+              },
+            }),
+            201,
+          ).policy,
+          approval = ok(
+            await request(approvals + '/requests', {
+              method: 'POST',
+              body: {
+                expectedOwnerKey: own.ownerKey,
+                requestId: randomUUID(),
+                candidateId: candidate.id,
+                expectedOwnerEventId: own.owner.id,
+                expectedPolicyId: policy.id,
+                reason: 'Synthetic request',
+              },
+            }),
+            201,
+          ).approval,
+          view = ok(await request(approvals + '/instances/' + approval.id, { identity: actor }));
+        if (decision === 'Pending') return { candidate, own, policy, approval, decided: null };
+        const decided = ok(
+          await request(approvals + '/instances/' + approval.id + '/decisions', {
+            method: 'POST',
+            identity: actor,
+            body: {
+              expectedOwnerKey: view.ownerKey,
+              requestId: randomUUID(),
+              expectedCandidateId: candidate.id,
+              expectedOwnerEventId: own.owner.id,
+              expectedPolicyId: policy.id,
+              expectedSequence: 0,
+              decision,
+              reason: 'Synthetic decision',
+            },
+          }),
+          201,
+        ).approval;
+        return { candidate, own, policy, approval, decided };
+      };
+      const pending = await make('billing', 20, 'Pending'),
+        pendingView = ok(await request(adoptions + '/candidates/' + pending.candidate.id));
+      assert.deepEqual(pendingView.reviews, []);
+      assert.equal(
+        (
+          await request(adoptions + '/adoptions', {
+            method: 'POST',
+            body: {
+              expectedOwnerKey: pendingView.ownerKey,
+              requestId: randomUUID(),
+              candidateId: pending.candidate.id,
+              expectedOwnerEventId: pending.own.owner.id,
+              approvalId: pending.approval.id,
+              expectedPolicyId: pending.policy.id,
+              expectedFinalTransitionId: randomUUID(),
+              reason: 'Synthetic premature adoption',
+            },
+          })
+        ).status,
+        409,
+      );
+      assert.equal(ok(await resolve('billing', engagement.id)).result, 'missing');
+      const billing = await make('billing', 10),
+        inspection = ok(await request(adoptions + '/candidates/' + billing.candidate.id));
+      assert.equal(inspection.adoption, null);
+      assert.equal(inspection.reviews.length, 1);
+      const t = inspection.reviews[0];
+      assert.equal(t.current, true);
+      assert.equal(t.approvalId, billing.approval.id);
+      const cmd = {
+          expectedOwnerKey: inspection.ownerKey,
+          requestId: randomUUID(),
+          candidateId: billing.candidate.id,
+          expectedOwnerEventId: t.ownerEventId,
+          approvalId: t.approvalId,
+          expectedPolicyId: t.policyId,
+          expectedFinalTransitionId: t.finalTransitionId,
+          reason: 'Synthetic adoption',
+        },
+        created = ok(await request(adoptions + '/adoptions', { method: 'POST', body: cmd }), 201);
+      assert.equal(created.adoption.candidateId, billing.candidate.id);
+      assert.equal(ok(await request(adoptions + '/adoptions', { method: 'POST', body: cmd })).replayed, true);
+      assert.equal(
+        (
+          await request(adoptions + '/adoptions', {
+            method: 'POST',
+            body: { ...cmd, reason: 'Different reason' },
+          })
+        ).status,
+        409,
+      );
+      assert.equal(
+        ok(await request(adoptions + '/receipts/' + cmd.requestId)).adoption.id,
+        created.adoption.id,
+      );
+      const value = ok(await resolve('billing', engagement.id));
+      assert.equal(value.result, 'source');
+      assert.equal(value.source.amount, '125.2500');
+      assert.equal(value.source.approvalId, billing.approval.id);
+      assert.equal(value.source.adoptionId, created.adoption.id);
+      assert.equal(typeof value.source.adoptedAt, 'string');
+      ok(
+        await request(candidates + '/owners', {
+          method: 'POST',
+          body: {
+            requestId: randomUUID(),
+            candidateId: billing.candidate.id,
+            expectedOwnerEventId: billing.own.owner.id,
+            ownerUserId: admin.id,
+            ownerRole: 'Admin',
+            reason: 'Synthetic later owner event',
+          },
+        }),
+        201,
+      );
+      const retained = ok(await resolve('billing', engagement.id));
+      assert.equal(retained.source.adoptionId, created.adoption.id);
+      assert.equal(retained.source.ownerEventId, billing.own.owner.id);
+      assert.equal(retained.source.amount, '125.2500');
+      assert.equal(
+        ok(
+          await request(
+            candidates +
+              '/preview?' +
+              new URLSearchParams({
+                kind: 'billing',
+                sourceId: engagement.id,
+                asOf: fx.today,
+                currency: 'USD',
+                unit: 'HOUR',
+              }),
+          ),
+        ).previewOnly,
+        true,
+      );
+      const duplicate = await make('billing', 10),
+        d = ok(await request(adoptions + '/candidates/' + duplicate.candidate.id)),
+        dr = d.reviews[0],
+        duplicateCmd = {
+          expectedOwnerKey: d.ownerKey,
+          requestId: randomUUID(),
+          candidateId: duplicate.candidate.id,
+          expectedOwnerEventId: dr.ownerEventId,
+          approvalId: dr.approvalId,
+          expectedPolicyId: dr.policyId,
+          expectedFinalTransitionId: dr.finalTransitionId,
+          reason: 'Synthetic equal priority',
+        };
+      ok(await request(adoptions + '/adoptions', { method: 'POST', body: duplicateCmd }), 201);
+      assert.equal(ok(await resolve('billing', engagement.id)).result, 'conflict');
+      const cost = await make('cost', 4),
+        ci = ok(await request(adoptions + '/candidates/' + cost.candidate.id)),
+        cr = ci.reviews[0],
+        cc = {
+          expectedOwnerKey: ci.ownerKey,
+          requestId: randomUUID(),
+          candidateId: cost.candidate.id,
+          expectedOwnerEventId: cr.ownerEventId,
+          approvalId: cr.approvalId,
+          expectedPolicyId: cr.policyId,
+          expectedFinalTransitionId: cr.finalTransitionId,
+          reason: 'Synthetic confidential source',
+        };
+      assert.equal(
+        (await request(adoptions + '/candidates/' + cost.candidate.id, { identity: fx.identities.reader }))
+          .status,
+        403,
+      );
+      ok(await request(adoptions + '/adoptions', { method: 'POST', body: cc }), 201);
+      assert.equal(ok(await resolve('cost', f.ownerId)).source.amount, '53.0200');
+      assert.equal(
+        (
+          await request(
+            adoptions +
+              '/resolve?' +
+              new URLSearchParams({
+                kind: 'cost',
+                sourceId: f.ownerId,
+                asOf: fx.today,
+                currency: 'USD',
+                unit: 'HOUR',
+              }),
+            { identity: fx.identities.reader },
+          )
+        ).status,
+        403,
+      );
+      const rejected = await make('billing', 7, 'Rejected'),
+        ri = ok(await request(adoptions + '/candidates/' + rejected.candidate.id));
+      assert.equal(ri.reviews.length, 0);
+      const denied = {
+        ...cmd,
+        requestId: randomUUID(),
+        candidateId: rejected.candidate.id,
+        expectedOwnerEventId: rejected.own.owner.id,
+        approvalId: rejected.approval.id,
+        expectedPolicyId: rejected.policy.id,
+        expectedFinalTransitionId: rejected.decided.transitions[0].id,
+      };
+      assert.equal((await request(adoptions + '/adoptions', { method: 'POST', body: denied })).status, 409);
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from commercial_rate_adoptions where candidate_id=$1', [
+            rejected.candidate.id,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      const makeCommand = async (source) => {
+        const v = ok(await request(adoptions + '/candidates/' + source.candidate.id)),
+          r = v.reviews[0];
+        assert(r?.current);
+        return {
+          expectedOwnerKey: v.ownerKey,
+          requestId: randomUUID(),
+          candidateId: source.candidate.id,
+          expectedOwnerEventId: r.ownerEventId,
+          approvalId: r.approvalId,
+          expectedPolicyId: r.policyId,
+          expectedFinalTransitionId: r.finalTransitionId,
+          reason: 'Synthetic exact adoption',
+        };
+      };
+      const staleOwner = await make('billing', 5),
+        staleOwnerCmd = await makeCommand(staleOwner);
+      ok(
+        await request(candidates + '/owners', {
+          method: 'POST',
+          body: {
+            requestId: randomUUID(),
+            candidateId: staleOwner.candidate.id,
+            expectedOwnerEventId: staleOwner.own.owner.id,
+            ownerUserId: admin.id,
+            ownerRole: 'Admin',
+            reason: 'Synthetic owner version',
+          },
+        }),
+        201,
+      );
+      assert.equal(
+        (await request(adoptions + '/adoptions', { method: 'POST', body: staleOwnerCmd })).status,
+        409,
+      );
+      const staleVersion = await make('billing', 6),
+        staleVersionCmd = await makeCommand(staleVersion);
+      ok(
+        await request(candidates + '/candidates', {
+          method: 'POST',
+          body: {
+            requestId: randomUUID(),
+            streamId: staleVersion.candidate.streamId,
+            expectedLatestId: staleVersion.candidate.id,
+            kind: 'billing',
+            bindingType: 'contract',
+            bindingId: contract.id,
+            effectiveFrom: shift(end, 1),
+            effectiveTo: shift(end, 2),
+            currency: 'USD',
+            unit: 'HOUR',
+            amount: '130.0000',
+            priority: 6,
+            reason: 'Synthetic later version',
+          },
+        }),
+        201,
+      );
+      assert.equal(
+        (await request(adoptions + '/adoptions', { method: 'POST', body: staleVersionCmd })).status,
+        409,
+      );
+      const rereview = await make('billing', 8),
+        olderCmd = await makeCommand(rereview);
+      ok(
+        await request(approvals + '/requests', {
+          method: 'POST',
+          body: {
+            expectedOwnerKey: rereview.own.ownerKey,
+            requestId: randomUUID(),
+            candidateId: rereview.candidate.id,
+            expectedOwnerEventId: rereview.own.owner.id,
+            expectedPolicyId: rereview.policy.id,
+            reason: 'Synthetic fresh review',
+          },
+        }),
+        201,
+      );
+      assert.equal((await request(adoptions + '/adoptions', { method: 'POST', body: olderCmd })).status, 409);
+      const race = await make('billing', 9),
+        raceCmd = await makeCommand(race),
+        [one, two] = await Promise.all([
+          request(adoptions + '/adoptions', { method: 'POST', body: raceCmd }),
+          request(adoptions + '/adoptions', { method: 'POST', body: raceCmd }),
+        ]);
+      assert.deepEqual([one.status, two.status].sort(), [200, 201]);
+      assert.equal(one.body.adoption.id, two.body.adoption.id);
+      assert.equal(
+        (
+          await request(adoptions + '/adoptions', {
+            method: 'POST',
+            body: { ...raceCmd, requestId: randomUUID() },
+          })
+        ).status,
+        409,
+      );
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from commercial_rate_adoptions where candidate_id=$1', [
+            race.candidate.id,
+          ])
+        ).rows[0].n,
+        1,
+      );
+      const distinct = await make('billing', 13),
+        distinctCmd = await makeCommand(distinct),
+        [first, second] = await Promise.all([
+          request(adoptions + '/adoptions', { method: 'POST', body: distinctCmd }),
+          request(adoptions + '/adoptions', {
+            method: 'POST',
+            body: { ...distinctCmd, requestId: randomUUID() },
+          }),
+        ]);
+      assert.deepEqual([first.status, second.status].sort(), [201, 409]);
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from commercial_rate_adoptions where candidate_id=$1', [
+            distinct.candidate.id,
+          ])
+        ).rows[0].n,
+        1,
+      );
+      const rollback = await make('billing', 3),
+        rollbackCmd = await makeCommand(rollback);
+      await pool.query(
+        "create function synthetic_adoption_audit_failure() returns trigger language plpgsql as $$begin if new.module='Commercial Rate Adoption' then raise exception 'Synthetic audit unavailable';end if;return new;end$$;create trigger synthetic_adoption_audit_failure before insert on audit_logs for each row execute function synthetic_adoption_audit_failure()",
+      );
+      try {
+        assert.equal(
+          (await request(adoptions + '/adoptions', { method: 'POST', body: rollbackCmd })).status,
+          503,
+        );
+        assert.equal(
+          (
+            await pool.query('select count(*)::int n from commercial_rate_adoptions where candidate_id=$1', [
+              rollback.candidate.id,
+            ])
+          ).rows[0].n,
+          0,
+        );
+      } finally {
+        await pool.query(
+          'drop trigger synthetic_adoption_audit_failure on audit_logs;drop function synthetic_adoption_audit_failure()',
+        );
+      }
+      ok(await request(adoptions + '/adoptions', { method: 'POST', body: rollbackCmd }), 201);
+      const eligibility = await make('billing', 1),
+        eligibilityCmd = await makeCommand(eligibility),
+        held = await pool.connect();
+      try {
+        await held.query('begin');
+        await held.query(
+          "update role_permissions set enabled=false where role_name='Admin' and permission_key='notifications.view'",
+        );
+        const pending = request(adoptions + '/adoptions', { method: 'POST', body: eligibilityCmd });
+        let blocked = false;
+        for (let i = 0; i < 100; i++) {
+          if (
+            (
+              await pool.query(
+                "select 1 from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query like '%insert into commercial_rate_adoptions%'",
+              )
+            ).rowCount
+          ) {
+            blocked = true;
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        assert(blocked, 'adoption waits for owner eligibility changes');
+        await held.query('commit');
+        const denied = await pending;
+        assert.equal(denied.status, 409, JSON.stringify(denied.body));
+        assert.equal(
+          (
+            await pool.query('select count(*)::int n from commercial_rate_adoptions where candidate_id=$1', [
+              eligibility.candidate.id,
+            ])
+          ).rows[0].n,
+          0,
+        );
+      } finally {
+        await held.query('rollback').catch(() => {});
+        held.release();
+        await pool.query(
+          "update role_permissions set enabled=true where role_name='Admin' and permission_key='notifications.view'",
+        );
+      }
+      const bypass = await make('billing', 2),
+        bypassCmd = await makeCommand(bypass),
+        { expectedOwnerKey: _context, ...bypassBody } = bypassCmd;
+      await assert.rejects(
+        pool.query(
+          'insert into commercial_rate_adoptions(id,organization_id,legal_entity_id,candidate_id,owner_event_id,approval_id,policy_id,final_transition_id,actor_id,active_role,request_id,command,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)',
+          [
+            randomUUID(),
+            f.organizationId,
+            f.legalEntityId,
+            bypassCmd.candidateId,
+            bypassCmd.expectedOwnerEventId,
+            bypassCmd.approvalId,
+            bypassCmd.expectedPolicyId,
+            bypassCmd.expectedFinalTransitionId,
+            admin.id,
+            'Admin',
+            bypassCmd.requestId,
+            JSON.stringify(bypassBody),
+            bypassCmd.reason,
+            'synthetic-bypass',
+          ],
+        ),
+        (e) => e.code === 'CRA01',
+      );
+      assert(
+        !JSON.stringify(
+          (await pool.query("select * from audit_logs where module='Commercial Rate Adoption'")).rows,
+        ).includes('53.0200'),
+      );
+      console.log(
+        'Approved source adoption, native resolution, tie, cost isolation, replay, rejected refusal and redacted audit passed.',
+      );
+    },
+  );
+});

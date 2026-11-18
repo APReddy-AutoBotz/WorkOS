@@ -1,0 +1,242 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import {
+  commercialFixture as f,
+  withCommercialDatabase,
+  migrateCommercialDatabase,
+  withCommercialApi,
+} from './support/commercial-drafting-test.mjs';
+import { seedCapacity } from './support/worker-capacity-test.mjs';
+import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
+const base = '/api/v1/rate-candidates',
+  ok = (r, status = 200) => {
+    assert.equal(r.status, status, JSON.stringify(r.body));
+    return r.body;
+  };
+await withCommercialDatabase(async ({ pool, databaseUrl }) => {
+  await migrateCommercialDatabase(pool);
+  const fx = await seedCapacity(pool),
+    keys = [
+      'commercial.rate_candidates.view',
+      'commercial.rate_candidates.manage',
+      'commercial.cost_candidates.view',
+      'commercial.cost_candidates.manage',
+    ];
+  for (const k of keys)
+    await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled)values('Admin',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+      [k],
+    );
+  await withCommercialApi(
+    { databaseUrl, identities: fx.identities, onServerError: (s) => process.stderr.write(s) },
+    async ({ request }) => {
+      const contract = ok(
+        await request('/contracts', {
+          method: 'POST',
+          body: {
+            number: 'SYN-OWNER',
+            clientId: f.clientId,
+            name: 'Synthetic contract',
+            model: 'time_and_materials',
+            startsOn: fx.today,
+            endsOn: shift(fx.today, 90),
+            effectiveFrom: fx.today,
+            currency: 'USD',
+            value: '1000.0000',
+            billingTerms: 'Synthetic terms',
+            documents: [],
+            reason: 'Synthetic fixture',
+          },
+        }),
+        201,
+      );
+      const make = (kind, bindingType, bindingId) => ({
+        requestId: randomUUID(),
+        streamId: randomUUID(),
+        expectedLatestId: null,
+        kind,
+        bindingType,
+        bindingId,
+        effectiveFrom: fx.today,
+        effectiveTo: fx.today,
+        currency: 'USD',
+        unit: 'HOUR',
+        amount: '77.1234',
+        priority: 3,
+        reason: 'Synthetic rate',
+      });
+      const billing = ok(
+          await request(base + '/candidates', {
+            method: 'POST',
+            body: make('billing', 'contract', contract.id),
+          }),
+          201,
+        ).candidate,
+        cost = ok(
+          await request(base + '/candidates', { method: 'POST', body: make('cost', 'worker', f.ownerId) }),
+          201,
+        ).candidate;
+      assert.equal(ok(await request(base + '/owners/' + billing.id)).current, null);
+      const cmd = {
+        requestId: randomUUID(),
+        candidateId: billing.id,
+        expectedOwnerEventId: null,
+        ownerUserId: fx.identities.manager.id,
+        ownerRole: 'Admin',
+        reason: 'Synthetic assignment',
+      };
+      const assigned = ok(await request(base + '/owners', { method: 'POST', body: cmd }), 201).owner;
+      assert.equal(assigned.sequence, 1);
+      assert.equal(ok(await request(base + '/owners', { method: 'POST', body: cmd })).owner.id, assigned.id);
+      assert.equal(
+        (await request(base + '/owners', { method: 'POST', body: { ...cmd, reason: 'Changed reason' } }))
+          .status,
+        409,
+      );
+      assert.equal(ok(await request(base + '/owner-receipts/' + cmd.requestId)).owner.id, assigned.id);
+      assert.equal(ok(await request(base + '/owners/' + billing.id)).current.eligible, true);
+      const invalidOwner = {
+        ...cmd,
+        requestId: randomUUID(),
+        expectedOwnerEventId: assigned.id,
+        ownerUserId: fx.identities.reader.id,
+        ownerRole: 'Employee',
+      };
+      assert.equal((await request(base + '/owners', { method: 'POST', body: invalidOwner })).status, 409);
+      assert.equal(
+        (
+          await request(base + '/owners', {
+            method: 'POST',
+            body: { ...invalidOwner, ownerUserId: randomUUID() },
+          })
+        ).status,
+        409,
+      );
+      assert.equal(ok(await request(base + '/owners/' + billing.id)).current.id, assigned.id);
+      await pool.query("update users set status='Disabled' where id=$1", [fx.identities.manager.id]);
+      assert.equal(
+        (
+          await pool.query(
+            'select valid_candidate_owner($1,$2,c,$3,$4) valid from commercial_rate_candidates c where c.id=$5',
+            [f.organizationId, f.legalEntityId, fx.identities.manager.id, 'Admin', billing.id],
+          )
+        ).rows[0].valid,
+        false,
+      );
+      await pool.query("update users set status='Active' where id=$1", [fx.identities.manager.id]);
+      await assert.rejects(
+        pool.query(
+          `insert into commercial_candidate_owners(id,organization_id,legal_entity_id,candidate_id,sequence,owner_user_id,owner_role,request_id,actor_id,active_role,reason,operation_id)values($1,$2,$3,$4,1,$5,'Admin',$6,$5,'Admin','Synthetic bypass','test')`,
+          [
+            randomUUID(),
+            f.organizationId,
+            f.legalEntityId,
+            billing.id,
+            fx.identities.manager.id,
+            randomUUID(),
+          ],
+        ),
+        { code: 'RCO01' },
+      );
+      const adminLock = await pool.connect();
+      try {
+        await adminLock.query('begin');
+        await adminLock.query(
+          "update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.contracts.manage'",
+        );
+        const pending = request(base + '/owners', {
+          method: 'POST',
+          body: { ...cmd, requestId: randomUUID(), expectedOwnerEventId: assigned.id },
+        });
+        let waiting = false;
+        for (let i = 0; i < 60; i++) {
+          const state = await pool.query(
+            "select 1 from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query like '%commercial.contracts.manage%for share%' limit 1",
+          );
+          if (state.rowCount) {
+            waiting = true;
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        assert.equal(waiting, true, 'owner assignment waits on current commercial administrator permission');
+        await adminLock.query('commit');
+        const denied = await pending;
+        assert.equal(denied.status, 403, JSON.stringify(denied.body));
+        assert.equal(
+          (
+            await pool.query(
+              'select count(*)::int n from commercial_candidate_owners where candidate_id=$1',
+              [billing.id],
+            )
+          ).rows[0].n,
+          1,
+        );
+      } finally {
+        await adminLock.query('rollback').catch(() => {});
+        adminLock.release();
+        await pool.query(
+          "update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.contracts.manage'",
+        );
+      }
+      const next = {
+        ...cmd,
+        requestId: randomUUID(),
+        expectedOwnerEventId: assigned.id,
+        reason: 'Synthetic reassignment',
+      };
+      const [a, b] = await Promise.all([
+        request(base + '/owners', { method: 'POST', body: next }),
+        request(base + '/owners', { method: 'POST', body: next }),
+      ]);
+      assert.deepEqual([a.status, b.status].sort(), [200, 201]);
+      assert.equal(a.body.owner.id, b.body.owner.id);
+      assert.equal(
+        (await request(base + '/owners', { method: 'POST', body: { ...cmd, requestId: randomUUID() } }))
+          .status,
+        409,
+      );
+      const costCmd = { ...cmd, requestId: randomUUID(), candidateId: cost.id, expectedOwnerEventId: null };
+      const c = ok(await request(base + '/owners', { method: 'POST', body: costCmd }), 201).owner;
+      assert.equal(c.candidateId, cost.id);
+      assert.equal(
+        (await request(base + '/owners/' + cost.id, { identity: fx.identities.reader })).status,
+        403,
+      );
+      await pool.query(
+        "update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.cost_candidates.view'",
+      );
+      assert.equal(
+        (
+          await pool.query(
+            'select valid_candidate_owner($1,$2,c,$3,$4) valid from commercial_rate_candidates c where c.id=$5',
+            [f.organizationId, f.legalEntityId, fx.identities.manager.id, 'Admin', cost.id],
+          )
+        ).rows[0].valid,
+        false,
+      );
+      await pool.query(
+        "update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.cost_candidates.view'",
+      );
+      await assert.rejects(
+        pool.query('update commercial_candidate_owners set reason=$2 where id=$1', [
+          assigned.id,
+          'overwrite',
+        ]),
+        { code: '55000' },
+      );
+      await assert.rejects(pool.query('delete from commercial_candidate_owners where id=$1', [assigned.id]), {
+        code: '55000',
+      });
+      const audit = (
+        await pool.query("select new_value,details,reason from audit_logs where module='Commercial Owner'")
+      ).rows;
+      assert.equal(audit.length, 3);
+      assert(!JSON.stringify(audit).includes('77.1234'));
+      assert(!JSON.stringify(audit).includes('Synthetic assignment'));
+      console.log(
+        'Commercial candidate ownership PostgreSQL/API: scope, role, permissions, immutable owner versions, replay, stale/concurrency, confidential audit.',
+      );
+    },
+  );
+});

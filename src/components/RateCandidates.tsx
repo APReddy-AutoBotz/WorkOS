@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../services/apiClient';
+import { CandidateOwner } from './CandidateOwner';
+import { CommercialCandidateApproval } from './CommercialCandidateApproval';
+import { ApprovedRateSource, AdoptedRateResolution } from './ApprovedRateSource';
 import {
-  hasRatePermission,
-  isRateContextCurrent,
-  type RateContext,
   captureRateContext,
   rateCandidateInput,
   rateCandidateService,
@@ -12,10 +12,14 @@ import {
   type Binding,
   type RateKind,
 } from '../services/rateCandidates';
+import { hasRatePermission, isRateContextCurrent, type RateContext } from '../services/rateCandidates';
 
 type Choice = { id: string; label: string; type: 'contract' | 'engagement' };
 type Props = { kind: RateKind; workerId?: string; choices?: Choice[] };
 export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
+  const [ownerCandidate, setOwnerCandidate] = useState<string | null>(null),
+    [approvalCandidate, setApprovalCandidate] = useState<string | null>(null),
+    [adoptionCandidate, setAdoptionCandidate] = useState<string | null>(null);
   const [selection, setSelection] = useState(''),
     [previewSource, setPreviewSource] = useState(''),
     [rows, setRows] = useState<RateCandidate[] | null>(null),
@@ -46,6 +50,9 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
     setPreviewSource('');
     setRows(null);
     setTruncated(false);
+    setOwnerCandidate(null);
+    setApprovalCandidate(null);
+    setAdoptionCandidate(null);
     setPrior(null);
     setFrom('');
     setTo('');
@@ -120,6 +127,7 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
     void run(async (c) => {
       const r = await rateCandidateService.list(kind, selected.type, selected.id, c);
       setRows(r.candidates);
+      setOwnerCandidate(null);
       setTruncated(r.truncated);
       setPrior(null);
       setConfirm(false);
@@ -203,9 +211,10 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
     >
       <h2>{kind === 'billing' ? 'Billing rate candidates' : 'Confidential worker cost candidates'}</h2>
       <p>
-        Candidate preview only. No rate is approved or applied to valuation, work or invoices. Currency and
-        units remain as entered; no conversion is performed. Among candidates matching the chosen currency and
-        unit, higher explicit priority wins; tied highest priorities conflict.
+        Candidate preview includes unapproved inputs. Approved sources require explicit adoption; no source
+        here creates valuation, work or invoices. Currency and units remain as entered; no conversion is
+        performed. Among candidates matching the chosen currency and unit, higher explicit priority wins; tied
+        highest priorities conflict.
       </p>
       {!read && (
         <p role="status">
@@ -221,10 +230,15 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
               <select
                 aria-label="Candidate source"
                 value={selection}
-                disabled={busy || Boolean(pending)}
+                disabled={
+                  busy || Boolean(pending) || !!ownerCandidate || !!approvalCandidate || !!adoptionCandidate
+                }
                 onChange={(e) => {
                   setSelection(e.target.value);
                   setRows(null);
+                  setOwnerCandidate(null);
+                  setApprovalCandidate(null);
+                  setAdoptionCandidate(null);
                   setPrior(null);
                   setPreview(null);
                   setConfirm(false);
@@ -239,7 +253,18 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
               </select>
             </label>
           )}
-          <button type="button" onClick={load} disabled={!selected || busy || Boolean(pending)}>
+          <button
+            type="button"
+            onClick={load}
+            disabled={
+              !selected ||
+              busy ||
+              Boolean(pending) ||
+              !!ownerCandidate ||
+              !!approvalCandidate ||
+              !!adoptionCandidate
+            }
+          >
             Load candidates
           </button>
           {rows && (
@@ -254,6 +279,70 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
                   <li key={x.id}>
                     {x.effectiveFrom}–{x.effectiveTo} · {x.currency} {x.amount}/{x.unit} · priority{' '}
                     {x.priority} · {x.reason}{' '}
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        Boolean(pending) ||
+                        !!ownerCandidate ||
+                        !!approvalCandidate ||
+                        !!adoptionCandidate
+                      }
+                      onClick={() => setOwnerCandidate(x.id)}
+                    >
+                      Change owner for version {x.sequence}
+                    </button>
+                    {ownerCandidate === x.id && (
+                      <CandidateOwner
+                        key={x.id}
+                        candidateId={x.id}
+                        kind={kind}
+                        onClose={() => setOwnerCandidate(null)}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        Boolean(pending) ||
+                        !!ownerCandidate ||
+                        !!approvalCandidate ||
+                        !!adoptionCandidate
+                      }
+                      onClick={() => setApprovalCandidate(x.id)}
+                    >
+                      Review approval for version {x.sequence}
+                    </button>
+                    {approvalCandidate === x.id && (
+                      <CommercialCandidateApproval
+                        key={x.id}
+                        candidateId={x.id}
+                        kind={kind}
+                        onClose={() => setApprovalCandidate(null)}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        Boolean(pending) ||
+                        !!ownerCandidate ||
+                        !!approvalCandidate ||
+                        !!adoptionCandidate
+                      }
+                      onClick={() => setAdoptionCandidate(x.id)}
+                    >
+                      Inspect adoption for version {x.sequence}
+                    </button>
+                    {adoptionCandidate === x.id && (
+                      <ApprovedRateSource
+                        key={x.id}
+                        candidateId={x.id}
+                        kind={kind}
+                        effectiveFrom={x.effectiveFrom}
+                        onClose={() => setAdoptionCandidate(null)}
+                      />
+                    )}{' '}
                     {write && (
                       <button
                         type="button"
@@ -274,7 +363,11 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
                 ))}
               </ul>
               {write && (
-                <fieldset disabled={busy || Boolean(pending)}>
+                <fieldset
+                  disabled={
+                    busy || Boolean(pending) || !!ownerCandidate || !!approvalCandidate || !!adoptionCandidate
+                  }
+                >
                   <legend>{prior ? 'Append candidate version' : 'New candidate'}</legend>
                   <label>
                     Effective from UTC
@@ -391,7 +484,11 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
               )}
             </>
           )}
-          <fieldset disabled={busy || Boolean(pending)}>
+          <fieldset
+            disabled={
+              busy || Boolean(pending) || !!ownerCandidate || !!approvalCandidate || !!adoptionCandidate
+            }
+          >
             <legend>Preview candidate resolution</legend>
             {kind === 'billing' && (
               <label>
@@ -475,6 +572,7 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
               . No financial authority.
             </p>
           )}
+          <AdoptedRateResolution key={kind + ':' + (sourceId ?? '')} kind={kind} sourceId={sourceId} />
         </>
       )}
       {pending && (
