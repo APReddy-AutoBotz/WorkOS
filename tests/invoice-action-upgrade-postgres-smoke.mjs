@@ -112,7 +112,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert(before.invoice_draft_batches.some((x) => x.v.id === draft.id));
         assert.equal((await pool.query("select to_regclass('invoice_action_events') t")).rows[0].t, null);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-          '065l_wos06_invoice_action_required',
+          '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility',
         ]);
         assert.deepEqual(await snapshot(), before);
         for (const t of [

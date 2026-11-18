@@ -200,10 +200,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
         '065d_wos06_approved_rate_adoptions',
         '065e_wos06_governed_tm_valuation',
-        '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy', '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required',
+        '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy', '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility',
       ]);
       const upgraded = await snapshot(),
         newKeys = [
+          'commercial.milestone_billing.view',
+          'commercial.milestone_billing.manage',
+          'commercial.milestone_billing.decide',
           'commercial.tm_valuation.view',
           'commercial.tm_valuation.create',
           'commercial.tm_billing.view',

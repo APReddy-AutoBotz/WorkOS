@@ -1,3 +1,4 @@
+import {expectedMilestoneUpgradeSnapshot} from './support/milestone-upgrade-expectations.mjs';
 import { mkdtemp, mkdir, copyFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -833,13 +834,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           defs = (
             await pool.query('select to_jsonb(x)v from permission_definitions x order by to_jsonb(x)::text')
           ).rows,
-          keys = ['commercial.invoice_approval.manage', 'commercial.invoice_approval.decide', 'commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm'];
+          keys = ['commercial.invoice_approval.manage', 'commercial.invoice_approval.decide', 'commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm', 'commercial.milestone_billing.view', 'commercial.milestone_billing.manage', 'commercial.milestone_billing.decide'];
         assert(!defs.some((x) => keys.includes(x.v.permission_key)));
         assert.equal(before.invoice_draft_occupancies.length, 1);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-          '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required',
+          '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility',
         ]);
-        assert.deepEqual(await snapshot(), before);
+        assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
         const after = (
           await pool.query('select to_jsonb(x)v from permission_definitions x order by to_jsonb(x)::text')
         ).rows;
@@ -884,7 +885,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ])
           assert.equal((await pool.query('select count(*)::int n from ' + t)).rows[0].n, 0);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, []);
-        assert.deepEqual(await snapshot(), before);
+        assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
         assert.equal(ok(await request(route + '/batches/' + draft.batch.id)).total.lineCount, 1);
         console.log('populated 082 invoice history, occupancy and grants preserved by upgrade/replay.');
       }

@@ -61,7 +61,7 @@ await withCommercialDatabase(async ({ pool }) => {
     );
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
       '065i_wos06_approved_invoice_csv',
-      '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required',
+      '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility',
     ]);
     assert.deepEqual(await snapshot(), before);
     assert.equal(

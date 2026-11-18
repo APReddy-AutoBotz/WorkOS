@@ -572,3 +572,5 @@ WOS-APR-003/006/008, INV-006/008 and INT-002/003/005 cover [reviewed invoice dec
 WOS-INV-001/003/006/008 and RPT-007 cover [scoped T&M reconciliation](../tasks/WOS-06-SCOPED-BILLING-RECONCILIATION.md). Report and export use the same visibility rules and population. No schema migration is required. Reverting this report preserves the source records and export audit history.
 
 WOS-INT-002/003/005 and WOS-INV-005/006 cover [empty invoice draft notices](../tasks/WOS-06-INVOICE-ACTION-REQUIRED.md). Current recipient access is checked again on inbox display and acknowledgement. Migration 065l retains event, recipient, delivery and read history.
+
+WOS-COM-008, WOS-INV-001/003/005/008, WOS-APR-001/003/006 and WOS-INT-002 cover [milestone acceptance and approved-unbilled registration](../tasks/WOS-06-MILESTONE-ELIGIBILITY.md). Database, API and browser acceptance exercise named stages, evidence, current access, rollback and replay.

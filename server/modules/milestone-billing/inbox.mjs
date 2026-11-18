@@ -1,0 +1,28 @@
+// Only the authenticated recipient can read a sanitized retained notice.
+export const setMilestoneBillingInboxContext = (c, r) =>
+  c.query("select set_config('workos.milestone_billing_context',$1,true)", [
+    JSON.stringify({
+      actorId: r.user.sub,
+      activeRole: r.user.activeRole,
+      operationId: r.operationId,
+      organizationId: r.organizationScope.organizationId,
+      legalEntityId: r.organizationScope.legalEntityId,
+      instanceId: null,
+    }),
+  ]);
+export const milestoneBillingInboxRows = async (c, r, { after = null, id = null } = {}) => {
+  if (!(await c.query("select to_regclass('public.milestone_billing_recipients') t")).rows[0]?.t) return [];
+  return (
+    await c.query(
+      `select 'milestone-billing-eligibility' kind,rec.id,rec.event_id "eventId",i.id "instanceId",i.milestone_id "milestoneId",notice.transition_sequence "transitionSequence",notice.event_key "eventKey",notice.policy_class "policyClass",notice.policy_id "templateId",notice.operation_id "operationId",notice.locale,notice.title,notice.body,rec.reasons,rec.channel_decision "channelDecision",d.id "deliveryId",d.status "deliveryStatus",notice.created_at "createdAt",rd.read_at "readAt" from milestone_billing_recipients rec join milestone_billing_notices notice on notice.id=rec.event_id join milestone_billing_instances i on i.id=notice.instance_id join milestone_billing_deliveries d on d.recipient_id=rec.id left join milestone_billing_reads rd on rd.recipient_id=rec.id and rd.user_id=rec.user_id where rec.user_id=$1 and i.organization_id=$2 and i.legal_entity_id=$3 and rec.in_app and milestone_billing_actor_valid(i.organization_id,i.legal_entity_id,rec.user_id,$6,'viewer') and ($4::uuid is null or rec.id>$4) and ($5::uuid is null or rec.id=$5) order by rec.id limit 21`,
+      [
+        r.user.sub,
+        r.organizationScope.organizationId,
+        r.organizationScope.legalEntityId,
+        after,
+        id,
+        r.user.activeRole,
+      ],
+    )
+  ).rows;
+};
