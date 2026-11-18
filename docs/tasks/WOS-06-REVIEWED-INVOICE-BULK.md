@@ -1,0 +1,7 @@
+# Reviewed invoice-batch bulk decisions
+
+WOS-APR-003/006/008, WOS-INV-006/008 and WOS-INT-002/003/005 require individually authorized staged decisions and independently validated bulk operations. The existing configured invoice batch approval path already retains the source, policy, named actor, stage, line lineage, totals, canonical notifications and exact decision receipt. The queue uses the invoice batch approval API on main after PR #193.
+
+Add a reviewed queue for invoice-batch decisions using the existing single-item API, with explicit source inspection, decision and reason for each item. Each item uses its own current actor, stage, permission, scope, source and transaction checks. A success never authorizes another item. Stop unsent items when session/scope changes or a response is uncertain. Reconcile an uncertain result by reading its exact original request receipt; do not automatically retry writes. Do not introduce a batch authority, policy, recipient, grant, financial calculation, delegation or reopening rule.
+
+Acceptance: prove a real React/API/PostgreSQL queue with independently approved, rejected, stale, unauthorized and foreign items; preserved current occupancy and immutable prior artifact; intermediate versus final approval behavior; recipient failure rollback; replay and lost-response reconciliation; and actor/scope stop behavior. The browser journey also switches legal entity while a decision has an uncertain result. The new entity sees an empty queue. Returning to the original identity and entity allows read-only reconciliation.

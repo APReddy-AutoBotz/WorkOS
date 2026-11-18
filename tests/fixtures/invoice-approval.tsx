@@ -1,11 +1,14 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { InvoiceBatchApprovalWorkspace } from '../../src/components/InvoiceBatchApprovalWorkspace';
+import { ReviewedInvoiceBatch } from '../../src/components/ReviewedInvoiceBatch';
 import { CanonicalApprovalInbox } from '../../src/components/GovernedWorkApprovals';
 const q = new URLSearchParams(location.search);
+const choices = [{ id: q.get('engagement')!, label: 'Synthetic engagement' }];
 createRoot(document.getElementById('root')!).render(
   <>
-    <InvoiceBatchApprovalWorkspace choices={[{ id: q.get('engagement')!, label: 'Synthetic engagement' }]} />
+    <InvoiceBatchApprovalWorkspace choices={choices} />
+    <ReviewedInvoiceBatch choices={choices} />
     <CanonicalApprovalInbox />
   </>,
 );
