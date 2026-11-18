@@ -68,7 +68,7 @@ await withCommercialDatabase(async ({ pool }) => {
           [keys],
         )
       ).rows[0].n,
-      3,
+      keys.length,
     );
     for (const t of [
       'invoice_alert_route_versions',

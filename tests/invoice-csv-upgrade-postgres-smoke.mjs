@@ -71,7 +71,7 @@ await withCommercialDatabase(async ({ pool }) => {
           [keys],
         )
       ).rows[0].n,
-      5,
+      keys.length,
     );
     for (const t of ['invoice_csv_artifacts', 'invoice_csv_failures', 'invoice_csv_request_keys'])
       assert.equal((await pool.query('select count(*)::int n from ' + t)).rows[0].n, 0);
