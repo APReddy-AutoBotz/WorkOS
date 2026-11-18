@@ -1,0 +1,11 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { InvoiceActionNotice } from '../../src/components/InvoiceActionNotice';
+import { CanonicalApprovalInbox } from '../../src/components/GovernedWorkApprovals';
+const q = new URLSearchParams(location.search);
+createRoot(document.getElementById('root')!).render(
+  <>
+    <InvoiceActionNotice choices={[{ id: q.get('engagement')!, label: 'Synthetic engagement' }]} />
+    <CanonicalApprovalInbox />
+  </>,
+);

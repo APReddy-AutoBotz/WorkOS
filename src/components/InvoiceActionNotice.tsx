@@ -1,0 +1,378 @@
+import { useEffect, useRef, useState } from 'react';
+import { validInvoiceActionTemplate } from '../../shared/invoice-action-required.mjs';
+import { ApiClientError } from '../services/apiClient';
+import { invoiceDrafts, type InvoiceDraft } from '../services/invoiceDrafts';
+import {
+  captureRateContext,
+  invoiceActionNotice,
+  type InvoiceActionOperation,
+  type InvoiceActionSource,
+  type InvoiceActionTemplate,
+} from '../services/invoiceActionNotice';
+import { hasRatePermission, isRateContextCurrent, type RateContext } from '../services/rateCandidates';
+type Choice = { id: string; label: string };
+export const InvoiceActionNotice = ({ choices }: { choices: Choice[] }) => {
+  const [engagement, setEngagement] = useState(''),
+    [drafts, setDrafts] = useState<InvoiceDraft[]>([]),
+    [templates, setTemplates] = useState<InvoiceActionTemplate[]>([]),
+    [draftNext, setDraftNext] = useState<string | null>(null),
+    [loaded, setLoaded] = useState(false),
+    [selected, setSelected] = useState(''),
+    [source, setSource] = useState<InvoiceActionSource | null>(null),
+    [effectiveFrom, setEffectiveFrom] = useState(''),
+    [locale, setLocale] = useState(''),
+    [subject, setSubject] = useState(''),
+    [body, setBody] = useState(''),
+    [templateReason, setTemplateReason] = useState(''),
+    [reason, setReason] = useState(''),
+    [pending, setPending] = useState<InvoiceActionOperation | null>(null),
+    [busy, setBusy] = useState(false),
+    [notice, setNotice] = useState('');
+  const mounted = useRef(false),
+    generation = useRef(0),
+    inFlight = useRef(false),
+    context = useRef<RateContext | null>(null),
+    base = [
+      'commercial.contracts.view',
+      'commercial.tm_billing.view',
+      'commercial.invoice_drafts.view',
+      'employees.view',
+      'notifications.view',
+    ].every(hasRatePermission),
+    manager =
+      base && ['commercial.contracts.manage', 'commercial.invoice_approval.manage'].every(hasRatePermission),
+    preparer = base && hasRatePermission('commercial.invoice_drafts.prepare');
+  useEffect(() => {
+    mounted.current = true;
+    const block = () => {
+      ++generation.current;
+      context.current = null;
+      setDrafts([]);
+      setTemplates([]);
+      setDraftNext(null);
+      setLoaded(false);
+      setSelected('');
+      setSource(null);
+      setEffectiveFrom('');
+      setLocale('');
+      setSubject('');
+      setBody('');
+      setTemplateReason('');
+      setReason('');
+      setNotice(
+        'Account, role or scope changed. Unsent inputs were cleared; an uncertain request needs its original receipt.',
+      );
+    };
+    const check = () => {
+      if (context.current && !isRateContextCurrent(context.current)) block();
+    };
+    window.addEventListener('workos:organization-scope-switch-requested', block);
+    window.addEventListener('workos:organization-scope-changed', block);
+    window.addEventListener('focus', check);
+    window.addEventListener('storage', check);
+    return () => {
+      mounted.current = false;
+      ++generation.current;
+      window.removeEventListener('workos:organization-scope-switch-requested', block);
+      window.removeEventListener('workos:organization-scope-changed', block);
+      window.removeEventListener('focus', check);
+      window.removeEventListener('storage', check);
+    };
+  }, []);
+  const run = async (fn: (c: RateContext, live: () => boolean) => Promise<void>) => {
+    if (inFlight.current) return;
+    const n = ++generation.current,
+      live = () => mounted.current && generation.current === n,
+      c = captureRateContext(live);
+    if (!c) {
+      setNotice('An active session and selected scope are required.');
+      return;
+    }
+    context.current = c;
+    inFlight.current = true;
+    setBusy(true);
+    setNotice('');
+    try {
+      await fn(c, live);
+    } catch {
+      if (mounted.current)
+        setNotice('The result could not be confirmed. Read the original receipt if available.');
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  };
+  const load = () => {
+    if (!engagement) return;
+    void run(async (c, live) => {
+      const [draftResult, templateResult] = await Promise.all([
+        preparer ? invoiceDrafts.list(c) : Promise.resolve(null),
+        manager ? invoiceActionNotice.templates(engagement, c) : Promise.resolve(null),
+      ]);
+      if (live()) {
+        setDrafts(draftResult?.batches ?? []);
+        setDraftNext(draftResult?.nextAfter ?? null);
+        setTemplates(templateResult ?? []);
+        setLoaded(true);
+        setSelected('');
+        setSource(null);
+      }
+    });
+  };
+  const more = () => {
+    if (!draftNext) return;
+    void run(async (c, live) => {
+      const x = await invoiceDrafts.list(c, draftNext);
+      if (live()) {
+        setDrafts((old) => [...old, ...x.batches]);
+        setDraftNext(x.nextAfter);
+      }
+    });
+  };
+  const inspect = () => {
+    if (!selected) return;
+    void run(async (c, live) => {
+      const x = await invoiceActionNotice.source(selected, c);
+      if (x.engagementId !== engagement) throw Error('Engagement changed');
+      if (live()) setSource(x);
+    });
+  };
+  const execute = (op: InvoiceActionOperation, receipt = false) =>
+    void run(async (c, live) => {
+      if (!receipt) setPending(op);
+      try {
+        await invoiceActionNotice.run(op, engagement, c, receipt);
+        if (live()) {
+          setPending(null);
+          setSource(null);
+          setNotice(
+            receipt
+              ? 'Original request confirmed by receipt.'
+              : 'Request recorded. Reload current source before another action.',
+          );
+        }
+      } catch (e) {
+        if (
+          !receipt &&
+          e instanceof ApiClientError &&
+          [400, 403, 404, 409, 422].includes(e.status) &&
+          live()
+        ) {
+          setPending(null);
+          setSource(null);
+          setNotice('The request was refused. Reload before a deliberate new request.');
+          return;
+        }
+        throw e;
+      }
+    });
+  const configure = () => {
+    const definition = {
+      entityType: 'InvoiceBatch',
+      engagementId: engagement,
+      locale,
+      key: 'invoice_batch.action_required',
+      subject,
+      body,
+    };
+    if (!validInvoiceActionTemplate(definition) || !effectiveFrom || templateReason.trim().length < 3) return;
+    execute({
+      type: 'template',
+      data: {
+        requestId: crypto.randomUUID(),
+        expectedLatestId: templates[0]?.id ?? null,
+        effectiveFrom,
+        definition,
+        reason: templateReason.trim(),
+      },
+    });
+  };
+  const assess = () => {
+    if (
+      !source ||
+      source.state !== 'Draft' ||
+      !source.ownerCurrent ||
+      source.lineCount !== 0 ||
+      !source.templateId ||
+      reason.trim().length < 3
+    )
+      return;
+    execute({
+      type: 'assessment',
+      data: {
+        requestId: crypto.randomUUID(),
+        batchId: source.batchId,
+        templateId: source.templateId,
+        lineageHash: source.lineageHash,
+        reason: reason.trim(),
+      },
+    });
+  };
+  return (
+    <section aria-label="Invoice remediation notices" className="my-4 space-y-3 rounded border p-4">
+      <h2>Invoice remediation notices</h2>
+      <p>
+        Assess a current empty invoice Draft and notify its retained owner and finance preparer. This does not
+        submit or approve the invoice and sends no external message.
+      </p>
+      {!base ? (
+        <p role="status">Scoped invoice access is required.</p>
+      ) : (
+        <>
+          <label>
+            Invoice notice engagement
+            <select
+              aria-label="Invoice action engagement"
+              value={engagement}
+              disabled={busy || !!pending}
+              onChange={(e) => {
+                setEngagement(e.target.value);
+                setDrafts([]);
+                setTemplates([]);
+                setDraftNext(null);
+                setLoaded(false);
+                setSelected('');
+                setSource(null);
+              }}
+            >
+              <option value="">Choose</option>
+              {choices.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" disabled={!engagement || busy || !!pending} onClick={load}>
+            Load invoice notice configuration
+          </button>
+          {manager && (
+            <fieldset disabled={busy || !!pending || !engagement || !loaded}>
+              <legend>Prospective action template</legend>
+              <label>
+                Effective from UTC
+                <input
+                  aria-label="Invoice action template effective from"
+                  type="date"
+                  value={effectiveFrom}
+                  onChange={(e) => setEffectiveFrom(e.target.value)}
+                />
+              </label>
+              <label>
+                Locale
+                <input
+                  aria-label="Invoice action template locale"
+                  value={locale}
+                  onChange={(e) => setLocale(e.target.value)}
+                />
+              </label>
+              <label>
+                Subject
+                <input
+                  aria-label="Invoice action template subject"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                />
+              </label>
+              <label>
+                Body
+                <input
+                  aria-label="Invoice action template body"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                />
+              </label>
+              <p>Only {'{{sourceRef}}'} is available as a template variable.</p>
+              <label>
+                Reason
+                <input
+                  aria-label="Invoice action template reason"
+                  value={templateReason}
+                  onChange={(e) => setTemplateReason(e.target.value)}
+                />
+              </label>
+              <button type="button" onClick={configure}>
+                Record invoice action template
+              </button>
+            </fieldset>
+          )}
+          {preparer && (
+            <fieldset disabled={busy || !!pending || !engagement || !loaded}>
+              <legend>Assess a retained Draft</legend>
+              <label>
+                Draft
+                <select
+                  aria-label="Invoice action Draft"
+                  value={selected}
+                  onChange={(e) => {
+                    setSelected(e.target.value);
+                    setSource(null);
+                  }}
+                >
+                  <option value="">Choose</option>
+                  {drafts
+                    .filter((x) => x.engagementId === engagement && x.state === 'Draft')
+                    .map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.id}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {draftNext && (
+                <button type="button" onClick={more}>
+                  More invoice action Drafts
+                </button>
+              )}
+              <button type="button" disabled={!selected} onClick={inspect}>
+                Inspect invoice action source
+              </button>
+              {source && (
+                <section aria-label="Invoice action source">
+                  <p>
+                    Batch {source.batchId} · {source.state} · {source.lineCount} lines · owner current{' '}
+                    {String(source.ownerCurrent)} · template {source.templateId ?? 'Not configured'} · owner{' '}
+                    {source.ownerUserId} · preparer {source.preparerUserId} · lineage {source.lineageHash}.
+                  </p>
+                  <label>
+                    Assessment reason
+                    <input
+                      aria-label="Invoice action assessment reason"
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={
+                      source.state !== 'Draft' ||
+                      !source.ownerCurrent ||
+                      source.lineCount !== 0 ||
+                      !source.templateId ||
+                      reason.trim().length < 3
+                    }
+                    onClick={assess}
+                  >
+                    Assess empty invoice Draft
+                  </button>
+                </section>
+              )}
+            </fieldset>
+          )}
+          {pending && (
+            <div>
+              <p>
+                Original {pending.type} request {pending.data.requestId} may still be in flight. No write is
+                retried automatically.
+              </p>
+              <button type="button" disabled={busy} onClick={() => execute(pending, true)}>
+                Read original invoice action receipt
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      {notice && <p role="status">{notice}</p>}
+    </section>
+  );
+};

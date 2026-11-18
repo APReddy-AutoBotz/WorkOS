@@ -359,6 +359,12 @@ jobs:
           node tests/billing-reconciliation-postgres-smoke.mjs
           node tests/billing-reconciliation-journey-browser-smoke.mjs
 
+      - name: Verify invoice action notices, authorization, upgrade and recipient journey
+        run: |
+          node tests/invoice-action-postgres-smoke.mjs
+          node tests/invoice-action-upgrade-postgres-smoke.mjs
+          node tests/invoice-action-journey-browser-smoke.mjs
+
       - name: Verify manual billing confirmation, recovery, upgrade and browser journey
         run: |
           node tests/invoice-billing-confirmation-journey-browser-smoke.mjs
