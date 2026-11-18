@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { validAssignmentApprovalPolicy, materialAssignmentFields, assignmentApprovalIdentity } from '../shared/assignment-approval.mjs';
+import { approvalState, approvalRecipients } from '../shared/work-approval.mjs';
+const userId = '11111111-1111-4111-8111-111111111111', d = { entityType: 'Assignment', workerIds: ['synthetic-worker'], materialFields: ['quantityExact', 'status'], stages: [{ userId, role: 'Synthetic existing role' }], locale: 'en-GB', completionInApp: false, templates: ['approval.action_required', 'approval.rejected_or_correction_required', 'approval.completed'].map(key => ({ key, subject: 'Review {{sourceRef}}', body: 'Worker {{workerCode}}, stage {{stageNumber}}, reason {{decisionReason}}.' })) };
+assert(validAssignmentApprovalPolicy(d));
+assert(validAssignmentApprovalPolicy({ ...d, workerIds: [] }));
+for (const patch of [{ entityType: 'Timesheet' }, { materialFields: [] }, { materialFields: ['hours'] }, { materialFields: ['status', 'quantityExact'] }, { materialFields: ['quantityExact', 'quantityExact'] }, { workerIds: ['z', 'a'] }, { stages: [] }, { stages: [{ userId, role: 'Synthetic', recipient: 'redirect' }] }, { locale: 'x'.repeat(101) }, { completionInApp: 'false' }, { templates: d.templates.map(t => ({ ...t, body: '{{unapprovedAddress}}' })) }, { templates: d.templates.map(t => ({ ...t, body: Array(20).fill('{{decisionReason}}').join(' ') })) }, { templates: d.templates.map(t => ({ ...t, subject: Array(7).fill('{{workerCode}}').join(' ') })) }])
+    assert.equal(validAssignmentApprovalPolicy({ ...d, ...patch }), false, JSON.stringify(patch));
+assert.deepEqual(materialAssignmentFields({ quantityExact: '20', status: 'Active', comment: null }, { quantityExact: '20', status: 'Active', comment: 'Synthetic note' }, d.materialFields), []);
+assert.deepEqual(materialAssignmentFields({ quantityExact: '20', status: 'Active' }, { quantityExact: '20.0000000000001', status: 'Paused' }, d.materialFields), ['quantityExact', 'status']);
+assert.equal(assignmentApprovalIdentity(userId, 0, 'approval.action_required', 'synthetic/operation'), `assignment-approval/${userId}/0/approval.action_required/synthetic%2Foperation`);
+assert.deepEqual(approvalState(d.stages, []), { status: 'Pending', sequence: 0, currentStage: 0 });
+assert.deepEqual(approvalState(d.stages, [{ sequence: 1, stage: 0, decision: 'Approved' }]), { status: 'Approved', sequence: 1, currentStage: null });
+assert.throws(() => approvalState(d.stages, [{ sequence: 2, stage: 0, decision: 'Approved' }]));
+assert.deepEqual(approvalRecipients([{ userId, reason: 'requester' }, { userId, reason: 'affected_worker' }]), [{ userId, reasons: ['affected_worker', 'requester'] }]);
+console.log('Material assignment explicit field/stage/locale/template/render limits, exact native quantity selection, state, canonical identity and recipient-reason dedup passed.');
+assert.equal(validAssignmentApprovalPolicy({ ...d, templates: d.templates.map(t => ({ ...t, subject: 'Review {{decisionReason}}' })) }), false, 'Action-required blank reason must not create an unreadable trailing-space acknowledgement');

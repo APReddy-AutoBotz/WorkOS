@@ -3326,7 +3326,7 @@ app.use('/api', createAvailabilityReportRouter({
 
 const buildApprovalScopeWhere = (req, params) => legacyApprovalScope(req, params, {isGlobalRole, buildEmployeeScopeWhere});
 
-const workApprovalOptions={fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord};
+const workApprovalOptions={getSetting,buildProjectScopeWhere,fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord};
 
 const approvalSelect = `
   select ar.*, e.name as subject_employee_name

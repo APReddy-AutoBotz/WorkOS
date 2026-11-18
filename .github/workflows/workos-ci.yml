@@ -92,6 +92,9 @@ jobs:
       - name: Verify UTC deadline notices in PostgreSQL
         run: npm run test:work-period-notices-postgres
 
+      - name: Verify material assignment approvals in PostgreSQL
+        run: npm run test:assignment-approval-postgres
+
       - name: Verify approved actual work reconciliation in PostgreSQL
         run: npm run test:actual-work-postgres
 
@@ -204,6 +207,9 @@ jobs:
 
       - name: Verify UTC deadline notices in browser
         run: npm run test:work-period-notices-journey
+
+      - name: Verify material assignment approvals in browser
+        run: npm run test:assignment-approval-journey
 
       - name: Verify actual utilization and evidence download in Chromium
         run: npm run test:actual-work-journey
