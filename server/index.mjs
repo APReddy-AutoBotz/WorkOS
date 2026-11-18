@@ -6,6 +6,8 @@ import {createSessionLogoutHandler} from './modules/identity-access/session-life
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
 import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createPersistentLoginRateLimit} from './modules/identity-access/persistent-login-rate-limit.mjs';
+import {createAssignmentOverlapRouter} from './modules/planning/assignment-overlap-router.mjs';
+import {retainedOverlapEvidence} from './modules/planning/assignment-overlap-policy.mjs';
 import {createOwnWorkPlanningRouter} from './modules/planning/own-work-planning-router.mjs';
 import {createAssignmentVersionRouter} from './modules/planning/assignment-version-router.mjs';
 import {setAssignmentVersionContext} from './modules/planning/assignment-version-context.mjs';
@@ -2706,8 +2708,9 @@ app.post('/api/allocations', requireDatabase, requireAuth, requirePermission('al
       employee,
       project,
     });
+    const overlapEvidence=await retainedOverlapEvidence(client,req,result.rows[0].id);
     await client.query('commit');
-    res.json(result.rows[0]);
+    res.json({...result.rows[0],...(overlapEvidence?.checks.length?{assignment_overlap_evidence:overlapEvidence}:{})});
   } catch (error) {
     await client.query('rollback');
     if (workPolicyError(res,error)) return;
@@ -6374,6 +6377,7 @@ app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
 app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,getSetting,audit,recordAllocationChangeApproval}));
+app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/my-work-planning',createOwnWorkPlanningRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere}));
 app.use('/api/v1/resource-demand',createResourceDemandRouter({pool,requireDatabase,requireAuth,requirePermission,buildProjectScopeWhere,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/workforce-capabilities',createWorkforceCapabilitiesRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));

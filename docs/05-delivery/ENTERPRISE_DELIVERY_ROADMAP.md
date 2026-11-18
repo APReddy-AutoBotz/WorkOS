@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+The next assignment package integrates effective-dated overlap rules and retained decision evidence with current allocation editing and CSV imports. Migration 058 follows the shared login throttle migration. Acceptance covers fresh installation, upgrade, concurrent writes and the Allocation Control browser journey. [Work package](../tasks/WOS-04-ASSIGNMENT-OVERLAP-POLICY.md)
+
 The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. Auditing lifetime changes across deployments remains open.
 
 The November 18 review verified current-session logout and absolute expiry against the merged application. The remaining WOS-IAM-008 work is to record session lifetime changes with actor, timestamp, and old and new values. Administrative revoke-all needs separate authorization tests. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)

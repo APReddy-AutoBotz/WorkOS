@@ -1,3 +1,4 @@
+import {readOverlapAssessment,overlapWarningNotice,readOverlapImportWarnings} from '../../shared/assignment-overlap-policy.mjs';
 import {sourceIdentityCommandRequiresAcknowledgement,readSourceIdentityCheck} from '../../shared/work-source-identity.mjs';
 import {normalizeImportSubmissionTiming,type ImportSubmissionTiming} from './submissionDeadline';
 import {normalizeImportOvertimeWarnings,type ImportOvertimeWarnings} from './overtimeCapture';
@@ -59,6 +60,7 @@ type ImportApplyError = {
 };
 type ImportApplyResult = {
   captureWarnings?: ImportOvertimeWarnings[];
+  assignmentPolicyWarnings?: import('./assignmentOverlap').OverlapImportWarning[];
   sourceIdentityCheck?:{version:'work-source/1';linkedEntries:number;mode:'preview'|'apply'};
   submissionTiming?: ImportSubmissionTiming[];
   status: ImportExportLog['status'];
@@ -544,9 +546,9 @@ export const allocationService = {
     }
     return DataStorage.get<Allocation[]>(STORAGE_KEYS.ALLOCATIONS, []);
   },
-  save: async (alloc: Allocation): Promise<void> => {
+  save: async (alloc: Allocation): Promise<{policyNotice?:string}|void> => {
     if (await checkBackend()) {
-      await api.post('/api/allocations', {
+      const receipt=await api.post<Record<string,unknown>>('/api/allocations', {
         id: alloc.id,
         employee_id: alloc.employeeId,
         project_id: alloc.projectId,
@@ -557,6 +559,7 @@ export const allocationService = {
         billable: alloc.billable,
         status: alloc.status,
       });
+      if(receipt.assignment_overlap_evidence!==undefined){const assessment=readOverlapAssessment(receipt.assignment_overlap_evidence,alloc.employeeId,alloc.startDate,alloc.endDate);if(assessment.checks.some(v=>v.blockingExceeded))throw new Error('Assignment acknowledgement is inconsistent. Read back before retrying.');return {policyNotice:overlapWarningNotice(assessment)};}
       return;
     }
     const list = DataStorage.get<Allocation[]>(STORAGE_KEYS.ALLOCATIONS, []);
@@ -2125,6 +2128,7 @@ export const adminService = {
     }, {'Idempotency-Key': request.idempotencyKey});
     const log = raw.log && typeof raw.log === 'object' ? raw.log as Record<string, unknown> : undefined;
     return {
+      ...(raw.assignmentPolicyWarnings===undefined?{}:{assignmentPolicyWarnings:readOverlapImportWarnings(raw.assignmentPolicyWarnings)}),
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? request.totalRows),
       validRows: Number(raw.validRows ?? 0),
@@ -2178,6 +2182,7 @@ export const adminService = {
       clientErrors,
     });
     return {
+      ...(raw.assignmentPolicyWarnings===undefined?{}:{assignmentPolicyWarnings:readOverlapImportWarnings(raw.assignmentPolicyWarnings)}),
       status: raw.status as ImportExportLog['status'],
       totalRows: Number(raw.totalRows ?? rows.length),
       validRows: Number(raw.validRows ?? 0),
