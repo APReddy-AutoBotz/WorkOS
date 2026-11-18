@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
@@ -41,6 +42,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     'commercial.invoice_drafts.cancel',
     'commercial.invoice_approval.manage',
     'commercial.invoice_approval.decide',
+    'reports.export',
     'commercial.invoice_export.view',
     'commercial.invoice_export.create',
     'commercial.invoice_export.configure',
@@ -260,6 +262,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       console.log('Milestone review, event and register verified.');
       const drafts = '/api/v1/invoice-drafts',
         invoiceApproval = '/api/v1/invoice-batch-approvals';
+      const reportPath =
+        drafts + '/reconciliation?' + new URLSearchParams({ engagementId: roots.engagement.id });
+      const available = ok(await request(reportPath, { identity: ids.manager }));
+      assert.equal(available.version, 'workos.milestone-reconciliation/1');
+      assert.equal(available.items[0].milestoneId, milestone.id);
+      assert.equal(available.items[0].status, 'AVAILABLE');
+      assert.equal(available.exceptionCount, 0);
       const create = {
         expectedOwnerKey: initial.ownerKey,
         requestId: randomUUID(),
@@ -279,7 +288,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       const uiDraft = ok(await request(drafts + '/batches', { method: 'POST', body: create }), 201);
       const vite = await startFixtureServer({
         root: fileURLToPath(new URL('../', import.meta.url)),
-        fixtures: ['milestone-invoice-draft', 'milestone-invoice-confirmation'],
+        fixtures: ['milestone-invoice-draft', 'milestone-invoice-confirmation', 'invoice-csv'],
         apiUrl,
       });
       let browser, context;
@@ -715,6 +724,76 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             .payload,
           bytes.payload,
         );
+        const reportExportPath = drafts + '/reconciliation/exports';
+        const reportExportCommand = {
+          engagementId: roots.engagement.id,
+          expectedOwnerKey: available.ownerKey,
+          expectedReportToken: available.reportToken,
+          requestId: randomUUID(),
+          reason: 'Synthetic control reconciliation',
+        };
+        assert.equal(
+          (
+            await request(reportExportPath, {
+              method: 'POST',
+              identity: ids.manager,
+              body: reportExportCommand,
+            })
+          ).status,
+          409,
+        );
+        await page.goto(origin + '/tests/fixtures/invoice-csv.html?' + query);
+        const reconciliationUi = page.getByRole('region', { name: 'Billing reconciliation' });
+        await reconciliationUi.getByLabel('Reconciliation engagement').selectOption(roots.engagement.id);
+        const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === drafts + '/reconciliation');
+        await reconciliationUi.getByRole('button', { name: 'Load billing reconciliation' }).click();
+        const reconciled = await (await loaded).json();
+        assert.equal(reconciled.exceptionCount, 0);
+        const [row] = reconciled.items;
+        assert.equal(row.artifactId, artifact.id);
+        assert.equal(row.snapshotId, null);
+        assert.equal(row.eligibilityApprovalId, created.id);
+        assert.equal(row.eligibilityDecisionId, row.evidence.decisionId);
+        assert.equal(row.history.length, 1);
+        assert.equal(row.history[0].batchState, 'Cancelled');
+        assert(row.controlOk);
+        for (const boundary of [
+          'EVENT_BACKED_SOURCE',
+          'ELIGIBILITY_EVENT',
+          'REGISTER_ITEM',
+          'CURRENT_OCCUPANCY',
+          'CURRENT_LINE',
+          'EXPORTED_LINE',
+          'MANUALLY_CONFIRMED_LINE',
+          'HISTORICAL_RELEASED_LINE',
+        ]) {
+          const control = reconciled.controls.find(
+            (x) => x.currency === row.currency && x.boundary === boundary,
+          );
+          assert.equal(control.lineCount, 1);
+          assert.equal(control.amount, '125.15');
+        }
+        await reconciliationUi.getByLabel('Report export reason').fill('Synthetic reconciled milestone');
+        const download = page.waitForEvent('download');
+        const exported = page.waitForResponse((r) => new URL(r.url()).pathname === reportExportPath);
+        await reconciliationUi.getByRole('button', { name: 'Download audited reconciliation CSV' }).click();
+        const exportedResponse = await exported;
+        assert.equal(exportedResponse.status(), 201);
+        const artifactReport = await exportedResponse.json(),
+          saved = await download;
+        assert(saved.suggestedFilename().startsWith('milestone-billing-reconciliation-'));
+        assert.equal(await readFile(await saved.path(), 'utf8'), artifactReport.csv);
+        assert(artifactReport.csv.split('\r\n')[0].includes('milestone_id'));
+        assert(artifactReport.csv.includes(milestone.id));
+        assert.equal(
+          (
+            await pool.query(
+              "select count(*)::int n from audit_logs where action='Export Milestone Billing Reconciliation' and entity_id=$1",
+              [artifactReport.requestId],
+            )
+          ).rows[0].n,
+          1,
+        );
         const inboxPath = '/api/v1/work-approvals/inbox';
         const exportInbox = ok(await request(inboxPath, { identity: ids.manager }));
         const exportNotice = exportInbox.notifications.find(
@@ -736,6 +815,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           !ok(await request(drafts + '/batches', { identity: ids.manager })).batches.some(
             (b) => b.id === draft.batch.id,
           ),
+        );
+        assert.equal((await request(reportPath, { identity: ids.manager })).status, 403);
+        assert.equal(
+          (
+            await request(reportExportPath, {
+              method: 'POST',
+              identity: ids.manager,
+              body: { ...reportExportCommand, expectedReportToken: reconciled.reportToken },
+            })
+          ).status,
+          403,
         );
         const afterLoss = ok(await request(inboxPath, { identity: ids.manager }));
         for (const n of [notice, exportNotice]) {

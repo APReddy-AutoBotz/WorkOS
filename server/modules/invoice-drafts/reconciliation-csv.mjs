@@ -2,10 +2,11 @@ import { quoteCsvCell } from '../../../shared/csv-cell.mjs';
 import { capacityCanonical, capacityHash } from '../planning/worker-capacity-service.mjs';
 
 export const RECONCILIATION_VERSION = 'workos.tm-reconciliation/1';
+export const MILESTONE_RECONCILIATION_VERSION = 'workos.milestone-reconciliation/1';
 export const reconciliationToken = (scope, report) =>
   capacityHash(
     capacityCanonical({
-      version: RECONCILIATION_VERSION,
+      version: report.version ?? RECONCILIATION_VERSION,
       scope,
       engagementId: report.engagementId,
       items: report.items,
@@ -31,7 +32,7 @@ export const reconciliationCsv = (scope, report, token) => {
     'amount',
     'item_id',
     'event_id',
-    'snapshot_id',
+    report.version === MILESTONE_RECONCILIATION_VERSION ? 'milestone_id' : 'snapshot_id',
     'approval_id',
     'decision_id',
     'batch_id',
@@ -43,7 +44,7 @@ export const reconciliationCsv = (scope, report, token) => {
     'control_ok',
   ];
   const base = [
-    RECONCILIATION_VERSION,
+    report.version ?? RECONCILIATION_VERSION,
     scope.organizationId,
     scope.legalEntityId,
     report.engagementId,
@@ -68,7 +69,7 @@ export const reconciliationCsv = (scope, report, token) => {
         item.amount,
         item.itemId,
         item.eventId,
-        item.snapshotId,
+        item.milestoneId ?? item.snapshotId,
         item.eligibilityApprovalId,
         item.eligibilityDecisionId,
         item.batchId,
@@ -92,7 +93,7 @@ export const reconciliationCsv = (scope, report, token) => {
           line.amount,
           item.itemId,
           item.eventId,
-          item.snapshotId,
+          item.milestoneId ?? item.snapshotId,
           item.eligibilityApprovalId,
           item.eligibilityDecisionId,
           line.batchId,

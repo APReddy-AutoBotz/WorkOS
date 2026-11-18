@@ -1,4 +1,9 @@
-import { RECONCILIATION_VERSION, reconciliationToken, reconciliationCsv } from './reconciliation-csv.mjs';
+import {
+  MILESTONE_RECONCILIATION_VERSION,
+  RECONCILIATION_VERSION,
+  reconciliationToken,
+  reconciliationCsv,
+} from './reconciliation-csv.mjs';
 import { readBillingReconciliation } from './reconciliation.mjs';
 import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { Router } from 'express';
@@ -342,12 +347,21 @@ export const createInvoiceDraftRouter = (o) => {
   );
   const reportScope = (r) => ({ organizationId: scope(r)[0], legalEntityId: scope(r)[1] });
   const report = async (c, r, engagementId) => {
-    const value = await readBillingReconciliation(c, r, engagementId, o);
-    return {
-      ...value,
-      version: RECONCILIATION_VERSION,
-      reportToken: reconciliationToken(reportScope(r), value),
+    const source = (
+      await c.query(
+        'select model from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3',
+        [...scope(r), engagementId],
+      )
+    ).rows[0];
+    if (!source || !['milestone', 'time_and_materials'].includes(source.model))
+      throw fail(404, 'BILLING_REPORT_SOURCE', 'Scoped billing engagement unavailable.');
+    const milestone = source.model === 'milestone';
+    if (milestone) await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
+    const value = {
+      ...(await readBillingReconciliation(c, r, engagementId, o, source.model)),
+      version: milestone ? MILESTONE_RECONCILIATION_VERSION : RECONCILIATION_VERSION,
     };
+    return { ...value, reportToken: reconciliationToken(reportScope(r), value) };
   };
   router.get(
     '/reconciliation',
@@ -374,9 +388,10 @@ export const createInvoiceDraftRouter = (o) => {
       );
       fence(r, d.expectedOwnerKey);
       await authorize(c, r, 'view', ['commercial.invoice_export.view', 'reports.export']);
+      const value = await report(c, r, d.engagementId);
       const prior = (
         await c.query(
-          "select 1 from audit_logs where organization_id=$1 and legal_entity_id=$2 and user_id=$3 and module='Reports' and action='Export T&M Billing Reconciliation' and entity_id=$4",
+          "select 1 from audit_logs where organization_id=$1 and legal_entity_id=$2 and user_id=$3 and module='Reports' and action in ('Export T&M Billing Reconciliation','Export Milestone Billing Reconciliation') and entity_id=$4",
           [...scope(r), r.user.sub, d.requestId],
         )
       ).rowCount;
@@ -386,7 +401,6 @@ export const createInvoiceDraftRouter = (o) => {
           'BILLING_REPORT_ALREADY_RECORDED',
           'This report request was already recorded. Check audit history before creating another.',
         );
-      const value = await report(c, r, d.engagementId);
       if (value.reportToken !== d.expectedReportToken)
         throw fail(409, 'BILLING_REPORT_STALE', 'The report changed. Reload before exporting.');
       if (value.exceptionCount)
@@ -396,8 +410,14 @@ export const createInvoiceDraftRouter = (o) => {
         bytes = Buffer.byteLength(csv, 'utf8');
       await o.audit(c, r, {
         module: 'Reports',
-        action: 'Export T&M Billing Reconciliation',
-        entityType: 'TmBillingReconciliationExport',
+        action:
+          value.version === MILESTONE_RECONCILIATION_VERSION
+            ? 'Export Milestone Billing Reconciliation'
+            : 'Export T&M Billing Reconciliation',
+        entityType:
+          value.version === MILESTONE_RECONCILIATION_VERSION
+            ? 'MilestoneBillingReconciliationExport'
+            : 'TmBillingReconciliationExport',
         entityId: d.requestId,
         newValue: {
           requestId: d.requestId,

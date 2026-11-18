@@ -87,7 +87,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
       const url = URL.createObjectURL(new Blob([result.csv], { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `tm-billing-reconciliation-${result.requestId}.csv`;
+      link.download = `${result.version === 'workos.milestone-reconciliation/1' ? 'milestone' : 'tm'}-billing-reconciliation-${result.requestId}.csv`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setMessage(`Report export recorded. Reference ${result.requestId}; SHA-256 ${result.sha256}.`);
@@ -104,9 +104,9 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
     <section aria-label="Billing reconciliation" className="my-4 space-y-3 rounded-xl border p-4">
       <h2>Billing reconciliation</h2>
       <p>
-        Shows visible T&amp;M items and retained invoice evidence for one engagement. Totals include only
-        records visible in your current scope. Milestone, fixed-fee, retainer, managed-service and adjustment
-        sources are not supported here. Manual confirmation is an attestation, not provider verification.
+        Reconcile approved T&amp;M work or accepted milestones for one engagement, from eligibility through
+        invoice reservation, export and manual confirmation. Totals reflect your current access and stay in
+        the original currency.
       </p>
       {!allowed ? (
         <p role="status">Scoped invoice and export view access are required.</p>
@@ -188,8 +188,10 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                   <li key={item.itemId}>
                     <span>
                       {item.currency} {item.amount} · {item.status} · item {item.itemId} v{item.itemVersion} ·
-                      event {item.eventId} v{item.eventVersion} · source {item.snapshotId} · eligibility
-                      approval {item.eligibilityApprovalId} · decision {item.eligibilityDecisionId}
+                      event {item.eventId} v{item.eventVersion} · source{' '}
+                      {item.sourceType === 'MILESTONE_ACCEPTANCE' ? item.milestoneId : item.snapshotId} ·
+                      eligibility approval {item.eligibilityApprovalId} · decision{' '}
+                      {item.eligibilityDecisionId}
                     </span>
                     {item.batchId && (
                       <span>
