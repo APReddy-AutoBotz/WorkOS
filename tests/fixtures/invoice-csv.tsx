@@ -1,3 +1,4 @@
+import { BillingReconciliation } from '../../src/components/BillingReconciliation';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { InvoiceBatchApprovalWorkspace } from '../../src/components/InvoiceBatchApprovalWorkspace';
@@ -17,6 +18,7 @@ createRoot(document.getElementById('root')!).render(
     <InvoiceCsvWorkspace choices={choices} />
     <InvoiceNoticeRecovery choices={choices} />
     <InvoiceBillingConfirmation choices={choices} />
+    <BillingReconciliation choices={choices} />
     <CanonicalApprovalInbox />
   </>,
 );

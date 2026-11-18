@@ -1,3 +1,5 @@
+import { RECONCILIATION_VERSION, reconciliationToken, reconciliationCsv } from './reconciliation-csv.mjs';
+import { readBillingReconciliation } from './reconciliation.mjs';
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -38,10 +40,17 @@ export const createInvoiceDraftRouter = (o) => {
   );
   const handle = (write, fn) => async (r, res) => {
     let c,
-      begun = false;
+      begun = false,
+      sessionLock = null,
+      discard = false;
     try {
       c = await o.pool.connect();
-      await c.query(write ? 'begin' : 'begin isolation level repeatable read');
+      if (write === 'snapshot') {
+        const requestId = parse(uuid, r.body?.requestId);
+        sessionLock = `tm-reconciliation-export:${scope(r).join(':')}:${r.user.sub}:${requestId}`;
+        await c.query('select pg_advisory_lock(hashtextextended($1,0))', [sessionLock]);
+      }
+      await c.query(write === true ? 'begin' : 'begin isolation level repeatable read');
       begun = true;
       const result = await fn(c, r);
       await c.query('commit');
@@ -67,7 +76,13 @@ export const createInvoiceDraftRouter = (o) => {
           });
       }
     } finally {
-      c?.release();
+      if (c && sessionLock)
+        try {
+          await c.query('select pg_advisory_unlock(hashtextextended($1,0))', [sessionLock]);
+        } catch {
+          discard = true;
+        }
+      c?.release(discard);
     }
   };
   const envelope = async (c, r) => ({
@@ -79,7 +94,7 @@ export const createInvoiceDraftRouter = (o) => {
     serverDate: (await c.query("select to_char((clock_timestamp() at time zone 'UTC')::date,'YYYY-MM-DD') d"))
       .rows[0].d,
   });
-  const authorize = async (c, r, kind = 'view') => {
+  const authorize = async (c, r, kind = 'view', extras = []) => {
     const keys = [
         'commercial.contracts.view',
         'commercial.tm_billing.view',
@@ -87,6 +102,7 @@ export const createInvoiceDraftRouter = (o) => {
         'employees.view',
         'notifications.view',
         ...(kind === 'view' ? [] : ['commercial.invoice_drafts.' + kind]),
+        ...extras,
       ].sort(),
       held = await c.query(
         'select 1 from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3 and active for share',
@@ -261,6 +277,91 @@ export const createInvoiceDraftRouter = (o) => {
         ...(await envelope(c, r)),
         batches: rows.slice(0, 50),
         nextAfter: rows.length > 50 ? rows[49].id : null,
+      };
+    }),
+  );
+  const reportScope = (r) => ({ organizationId: scope(r)[0], legalEntityId: scope(r)[1] });
+  const report = async (c, r, engagementId) => {
+    const value = await readBillingReconciliation(c, r, engagementId, o);
+    return {
+      ...value,
+      version: RECONCILIATION_VERSION,
+      reportToken: reconciliationToken(reportScope(r), value),
+    };
+  };
+  router.get(
+    '/reconciliation',
+    handle(false, async (c, r) => {
+      const q = parse(z.object({ engagementId: id }).strict(), r.query);
+      await authorize(c, r, 'view', ['commercial.invoice_export.view']);
+      return { ...(await envelope(c, r)), ...(await report(c, r, q.engagementId)) };
+    }),
+  );
+  router.post(
+    '/reconciliation/exports',
+    handle('snapshot', async (c, r) => {
+      const d = parse(
+        z
+          .object({
+            expectedOwnerKey: key,
+            engagementId: id,
+            expectedReportToken: key,
+            requestId: uuid,
+            reason,
+          })
+          .strict(),
+        r.body,
+      );
+      fence(r, d.expectedOwnerKey);
+      await authorize(c, r, 'view', ['commercial.invoice_export.view', 'reports.export']);
+      const prior = (
+        await c.query(
+          "select 1 from audit_logs where organization_id=$1 and legal_entity_id=$2 and user_id=$3 and module='Reports' and action='Export T&M Billing Reconciliation' and entity_id=$4",
+          [...scope(r), r.user.sub, d.requestId],
+        )
+      ).rowCount;
+      if (prior)
+        throw fail(
+          409,
+          'BILLING_REPORT_ALREADY_RECORDED',
+          'This report request was already recorded. Check audit history before creating another.',
+        );
+      const value = await report(c, r, d.engagementId);
+      if (value.reportToken !== d.expectedReportToken)
+        throw fail(409, 'BILLING_REPORT_STALE', 'The report changed. Reload before exporting.');
+      if (value.exceptionCount)
+        throw fail(409, 'BILLING_REPORT_EXCEPTION', 'Resolve reconciliation exceptions before exporting.');
+      const csv = reconciliationCsv(reportScope(r), value, value.reportToken),
+        sha256 = capacityHash(csv),
+        bytes = Buffer.byteLength(csv, 'utf8');
+      await o.audit(c, r, {
+        module: 'Reports',
+        action: 'Export T&M Billing Reconciliation',
+        entityType: 'TmBillingReconciliationExport',
+        entityId: d.requestId,
+        newValue: {
+          requestId: d.requestId,
+          engagementId: d.engagementId,
+          version: value.version,
+          asOf: new Date(value.asOf).toISOString(),
+          reportToken: value.reportToken,
+          artifactSha256: sha256,
+          artifactBytes: bytes,
+          itemCount: value.items.length,
+        },
+        reason: d.reason,
+        details: 'Scoped report download; no financial delivery or invoice state change.',
+      });
+      return {
+        ...(await envelope(c, r)),
+        requestId: d.requestId,
+        engagementId: d.engagementId,
+        version: value.version,
+        asOf: value.asOf,
+        reportToken: value.reportToken,
+        sha256,
+        bytes,
+        csv,
       };
     }),
   );
