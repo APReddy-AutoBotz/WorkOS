@@ -500,3 +500,7 @@ Run migration 062 before enabling the updated Forecast page. The migration creat
 ## Staged timesheet approvals
 
 Apply migration 063 before deploying the application. Existing submissions keep their original decision path. To retire a staged policy prospectively, publish an empty worker selection. Finish pending instances against their retained policy and preserve the migration, event records and read acknowledgements during recovery.
+
+## Weekly submission notices
+
+Apply migration 064 before adopting a notice policy. Configure the weekly deadline, worker selection, reminder timing, escalation owner and templates. Evaluate the worker and period explicitly. Check the recorded evaluation before retrying an uncertain result. For recovery, retain the notice ledger and use a forward correction.
