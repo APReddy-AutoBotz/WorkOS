@@ -1,3 +1,5 @@
+import {createInvoiceNoticeConfigRouter} from './modules/invoice-export/notice-config-router.mjs';
+import {createInvoiceCsvRouter} from './modules/invoice-export/router.mjs';
 import {createInvoiceBatchApprovalRouter} from './modules/invoice-approval/router.mjs';
 import {createInvoiceDraftRouter} from './modules/invoice-drafts/router.mjs';
 import {createGovernedTmRouter} from './modules/commercial-tm/router.mjs';
@@ -180,6 +182,11 @@ const permissionDefinitions = [
   ['commercial.tm_valuation.create', 'Commercial', 'Create protected T&M valuation', false],
   ['commercial.invoice_approval.manage', 'Commercial', 'Manage invoice batch approvals', false],
   ['commercial.invoice_approval.decide', 'Commercial', 'Decide invoice batch approvals', false],
+  ['commercial.invoice_export.view', 'Commercial', 'View invoice CSV artifacts', false],
+  ['commercial.invoice_export.create', 'Commercial', 'Create invoice CSV artifacts', false],
+  ['commercial.invoice_export.configure', 'Commercial', 'Configure invoice export notices', false],
+  ['commercial.invoice_export.recover_notices', 'Commercial', 'Recover invoice export notices', false],
+  ['integrations.invoice_alert_routes.manage', 'Integrations', 'Manage invoice alert routes', false],
   ['commercial.invoice_drafts.view', 'Commercial', 'View invoice-ready drafts', false],
   ['commercial.invoice_drafts.prepare', 'Commercial', 'Prepare invoice-ready drafts', false],
   ['commercial.invoice_drafts.own', 'Commercial', 'Own invoice-ready drafts', false],
@@ -219,7 +226,7 @@ const permissionDefinitions = [
 ];
 const protectedPermissionKeys = new Set(permissionDefinitions.filter(([, , , protectedCore]) => protectedCore).map(([key]) => key));
 const defaultRolePermissions = {
-  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.clients.view', 'commercial.clients.manage', 'commercial.contracts.view', 'commercial.contracts.manage', 'commercial.lifecycle.manage', 'commercial.amendments.manage', 'commercial.rate_candidates.view', 'commercial.rate_candidates.manage', 'commercial.cost_candidates.view', 'commercial.cost_candidates.manage', 'commercial.rate_approvals.decide', 'commercial.cost_approvals.decide', 'commercial.tm_valuation.view', 'commercial.tm_valuation.create', 'commercial.tm_billing.view', 'commercial.tm_billing.manage', 'commercial.tm_billing.decide', 'commercial.invoice_drafts.view', 'commercial.invoice_drafts.prepare', 'commercial.invoice_drafts.own', 'commercial.invoice_drafts.cancel', 'commercial.invoice_approval.manage', 'commercial.invoice_approval.decide'].includes(key)).map(([key]) => key),
+  Admin: permissionDefinitions.filter(([key]) => ![deploymentAuditPermissionKey, organizationAuditPermissionKey, 'commercial.clients.view', 'commercial.clients.manage', 'commercial.contracts.view', 'commercial.contracts.manage', 'commercial.lifecycle.manage', 'commercial.amendments.manage', 'commercial.rate_candidates.view', 'commercial.rate_candidates.manage', 'commercial.cost_candidates.view', 'commercial.cost_candidates.manage', 'commercial.rate_approvals.decide', 'commercial.cost_approvals.decide', 'commercial.tm_valuation.view', 'commercial.tm_valuation.create', 'commercial.tm_billing.view', 'commercial.tm_billing.manage', 'commercial.tm_billing.decide', 'commercial.invoice_drafts.view', 'commercial.invoice_drafts.prepare', 'commercial.invoice_drafts.own', 'commercial.invoice_drafts.cancel', 'commercial.invoice_approval.manage', 'commercial.invoice_approval.decide', 'commercial.invoice_export.view', 'commercial.invoice_export.create', 'commercial.invoice_export.configure', 'commercial.invoice_export.recover_notices', 'integrations.invoice_alert_routes.manage'].includes(key)).map(([key]) => key),
   HR: ['dashboard.view', 'employees.view', 'employees.manage', 'employees.password_reset', 'projects.view', 'projects.manage', 'projects.status_update', 'clients.view', 'clients.manage', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'leave.admin', 'approvals.view', 'notifications.view', 'notifications.manage', 'integrations.identity', 'integrations.teams', 'integrations.teams_actions', 'settings.manage'],
   CountryDirector: ['dashboard.view', 'employees.view', 'projects.view', 'clients.view', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
   ProjectManager: ['pm_workspace.view', 'employees.view', 'projects.view', 'projects.status_update', 'allocations.view', 'allocations.manage', 'timesheets.submit', 'timesheets.approve', 'reports.view_utilization', 'reports.export', 'reports.data_quality', 'governance.brd_traceability', 'leave.self_service', 'leave.team', 'leave.approve', 'approvals.view', 'notifications.view', 'integrations.teams_actions'],
@@ -6426,6 +6433,8 @@ app.use('/api/v1/my-actual-work',createActualWorkRouter({pool,requireDatabase,re
 app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/commercial-candidate-approvals',createCommercialCandidateApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Commercial candidate approval failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-batch-approvals',createInvoiceBatchApprovalRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice batch approval failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/invoice-export-notice-config',createInvoiceNoticeConfigRouter({pool,requireDatabase,requireAuth,audit,logError:e=>console.error('Invoice notification configuration failed',e?.code||'UNKNOWN')}));
+app.use('/api/v1/invoice-csv',createInvoiceCsvRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice CSV failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/invoice-drafts',createInvoiceDraftRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Invoice draft failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/tm-billing-eligibility',createTmBillingRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('T&M billing eligibility failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/approved-rate-sources',createRateAdoptionRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Approved rate source failed',e?.code||'UNKNOWN')}));

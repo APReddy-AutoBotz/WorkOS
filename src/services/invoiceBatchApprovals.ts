@@ -65,7 +65,7 @@ const line = z
 const source = z
   .object({
     id: uuid,
-    state: z.enum(['Draft', 'Under Review', 'Approved', 'Cancelled']),
+    state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Cancelled']),
     current: z.boolean(),
     currency: z.string().regex(/^[A-Z]{3}$/),
     clientId: id,

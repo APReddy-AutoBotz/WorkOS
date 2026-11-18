@@ -1,3 +1,6 @@
+import {InvoiceNoticeRecovery} from '../components/InvoiceNoticeRecovery';
+import {InvoiceNoticeConfiguration} from '../components/InvoiceNoticeConfiguration';
+import {InvoiceCsvWorkspace} from '../components/InvoiceCsvWorkspace';
 import {InvoiceBatchApprovalWorkspace} from '../components/InvoiceBatchApprovalWorkspace';
 import {InvoiceDraftWorkspace} from '../components/InvoiceDraftWorkspace';
 import {GovernedTmWorkspace} from '../components/GovernedTmWorkspace';
@@ -251,6 +254,9 @@ export const CommercialDraftingWorkspace = () => {
     {owned && state.message && state.status !== 'loading' && <p role={state.status === 'error' ? 'alert' : 'status'} className="mb-5 rounded-xl border border-slate-300 p-4">{state.message}</p>}
     {workspace && <>
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceNoticeConfiguration choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceCsvWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
+      <InvoiceNoticeRecovery choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceBatchApprovalWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceDraftWorkspace choices={workspace.engagements.flatMap(x=>x.model==='time_and_materials'&&x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency}]:[])}/>
       <TmBillingEligibilityWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>

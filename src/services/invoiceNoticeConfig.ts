@@ -1,0 +1,214 @@
+import { z } from 'zod';
+import { api, ApiClientError } from './apiClient';
+import { captureRateContext } from './rateCandidates';
+import { hasRatePermission, isRateContextCurrent, type RateContext } from './rateCandidates';
+const uuid = z.string().uuid(),
+  id = z.string().trim().min(1).max(200),
+  role = z.string().trim().min(1).max(100),
+  reason = z.string().trim().min(3).max(1000),
+  instant = z.string().refine((x) => Number.isFinite(Date.parse(x))),
+  hash = z.string().regex(/^[a-f0-9]{64}$/),
+  date = z.string().date(),
+  envelope = { ownerKey: hash, actorUserId: uuid, activeRole: role, organizationId: id, legalEntityId: id };
+const named = z.object({ userId: uuid, role }).strict(),
+  template = z
+    .object({
+      key: z.enum(['invoice_batch.export_failed', 'invoice_batch.exported_or_billed_confirmed']),
+      subject: z.string().trim().min(1).max(200),
+      body: z.string().trim().min(1).max(8000),
+    })
+    .strict(),
+  definition = z
+    .object({
+      entityType: z.literal('InvoiceExport'),
+      engagementId: id,
+      financeOwner: named,
+      integrationAdmin: named,
+      alertRouteId: uuid,
+      locale: id,
+      templates: z.array(template).length(2),
+      completionInApp: z.boolean(),
+    })
+    .strict();
+const route = z
+    .object({
+      id: uuid,
+      routeKey: uuid,
+      sequence: z.number().int().positive(),
+      previousId: uuid.nullable(),
+      label: id,
+      active: z.boolean(),
+      routeKind: z.literal('INTERNAL_OUTBOX'),
+      requestId: uuid,
+      actorId: uuid,
+      activeRole: role,
+      reason,
+      createdAt: instant,
+    })
+    .strict(),
+  policy = z
+    .object({
+      id: uuid,
+      engagementId: id,
+      sequence: z.number().int().positive(),
+      previousId: uuid.nullable(),
+      effectiveFrom: date,
+      definition,
+      requestId: uuid,
+      actorId: uuid,
+      activeRole: role,
+      reason,
+      createdAt: instant,
+    })
+    .strict();
+export type NoticeRoute = z.infer<typeof route>;
+export type NoticePolicy = z.infer<typeof policy>;
+export type NoticeDefinition = z.infer<typeof definition>;
+export type NoticeRouteCommand = {
+  requestId: string;
+  routeKey: string;
+  expectedLatestId: string | null;
+  label: string;
+  active: boolean;
+  reason: string;
+};
+export type NoticePolicyCommand = {
+  requestId: string;
+  expectedLatestId: string | null;
+  effectiveFrom: string;
+  definition: NoticeDefinition;
+  reason: string;
+};
+const canonical = (v: unknown): string => {
+  if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+  if (v !== null && typeof v === 'object')
+    return (
+      '{' +
+      Object.entries(v)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, x]) => JSON.stringify(k) + ':' + canonical(x))
+        .join(',') +
+      '}'
+    );
+  return JSON.stringify(v) ?? 'null';
+};
+const bad = (): never => {
+  throw new ApiClientError('Notification configuration could not be confirmed. Read the original receipt.', {
+    status: 503,
+  });
+};
+const call = async (
+  method: 'GET' | 'POST',
+  path: string,
+  c: RateContext | null,
+  permission: string,
+  body?: object,
+) => {
+  if (!c || !isRateContextCurrent(c) || !hasRatePermission(permission))
+    throw new ApiClientError('Current configuration authority changed.', { status: 403 });
+  const ownerKey = Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(c.ownerIdentity))),
+    ),
+  )
+    .map((x) => x.toString(16).padStart(2, '0'))
+    .join('');
+  if (!isRateContextCurrent(c) || !hasRatePermission(permission))
+    throw new ApiClientError('Current configuration authority changed.', { status: 403 });
+  const raw = await api.requestWithContext<unknown>(
+    method,
+    '/api/v1/invoice-export-notice-config' + path,
+    body ? { ...body, expectedOwnerKey: ownerKey } : undefined,
+    c,
+  );
+  if (!isRateContextCurrent(c) || !hasRatePermission(permission))
+    throw new ApiClientError('Current configuration authority changed.', { status: 403 });
+  const out = z.object(envelope).passthrough().safeParse(raw);
+  if (
+    !out.success ||
+    out.data.ownerKey !== ownerKey ||
+    out.data.organizationId !== c.scope.organizationId ||
+    out.data.legalEntityId !== c.scope.legalEntityId ||
+    out.data.activeRole !== c.activeRole ||
+    (uuid.safeParse(c.ownerIdentity[1]).success && out.data.actorUserId !== c.ownerIdentity[1])
+  )
+    return bad();
+  return out.data;
+};
+const routePermission = 'integrations.invoice_alert_routes.manage',
+  policyPermission = 'commercial.invoice_export.configure';
+export { captureRateContext };
+export const invoiceNoticeConfig = {
+  routes: async (c: RateContext | null) => {
+    const out = z
+      .object({ ...envelope, routes: z.array(route) })
+      .strict()
+      .safeParse(await call('GET', '/routes', c, routePermission));
+    if (!out.success) return bad();
+    return out.data.routes;
+  },
+  policies: async (engagementId: string, c: RateContext | null) => {
+    if (!id.safeParse(engagementId).success) return bad();
+    const out = z
+      .object({ ...envelope, policies: z.array(policy) })
+      .strict()
+      .safeParse(
+        await call('GET', '/policies?engagementId=' + encodeURIComponent(engagementId), c, policyPermission),
+      );
+    if (!out.success || out.data.policies.some((x) => x.engagementId !== engagementId)) return bad();
+    return out.data.policies;
+  },
+  route: async (cmd: NoticeRouteCommand, c: RateContext | null, receipt = false) => {
+    const out = z
+      .object({ ...envelope, route, ...(receipt ? {} : { replayed: z.boolean() }) })
+      .strict()
+      .safeParse(
+        await call(
+          receipt ? 'GET' : 'POST',
+          receipt ? '/route-receipts/' + cmd.requestId : '/routes',
+          c,
+          routePermission,
+          receipt ? undefined : cmd,
+        ),
+      );
+    if (
+      !out.success ||
+      out.data.route.requestId !== cmd.requestId ||
+      out.data.route.routeKey !== cmd.routeKey ||
+      out.data.route.previousId !== cmd.expectedLatestId ||
+      out.data.route.label !== cmd.label ||
+      out.data.route.active !== cmd.active ||
+      out.data.route.reason !== cmd.reason ||
+      out.data.route.actorId !== out.data.actorUserId ||
+      out.data.route.activeRole !== out.data.activeRole
+    )
+      return bad();
+    return out.data.route;
+  },
+  policy: async (cmd: NoticePolicyCommand, c: RateContext | null, receipt = false) => {
+    const out = z
+      .object({ ...envelope, policy, ...(receipt ? {} : { replayed: z.boolean() }) })
+      .strict()
+      .safeParse(
+        await call(
+          receipt ? 'GET' : 'POST',
+          receipt ? '/policy-receipts/' + cmd.requestId : '/policies',
+          c,
+          policyPermission,
+          receipt ? undefined : cmd,
+        ),
+      );
+    if (
+      !out.success ||
+      out.data.policy.requestId !== cmd.requestId ||
+      out.data.policy.previousId !== cmd.expectedLatestId ||
+      out.data.policy.effectiveFrom !== cmd.effectiveFrom ||
+      out.data.policy.reason !== cmd.reason ||
+      out.data.policy.actorId !== out.data.actorUserId ||
+      out.data.policy.activeRole !== out.data.activeRole ||
+      canonical(out.data.policy.definition) !== canonical(cmd.definition)
+    )
+      return bad();
+    return out.data.policy;
+  },
+};

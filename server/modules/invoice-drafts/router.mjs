@@ -50,7 +50,7 @@ export const createInvoiceDraftRouter = (o) => {
     } catch (e) {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
-      else if (['IDR01', 'IDR02', 'IDR03', '23505', '23514', '40001', '40P01'].includes(e.code))
+      else if (['IDR01', 'IDR02', 'IDR03', 'IBA02', '23505', '23514', '40001', '40P01'].includes(e.code))
         res
           .status(e.code === 'IDR01' ? 403 : 409)
           .json({
