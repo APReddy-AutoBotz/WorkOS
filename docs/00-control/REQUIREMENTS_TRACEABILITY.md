@@ -536,3 +536,7 @@ TIM007, WKF007, CORE003–005, IAM003/005/010 and INT002/003/005 advance through
 ### Local PR009C / existing-assignment material approvals
 
 RES008/009, APR001/002/003/006, CORE003/004/005, IAM003/005/010 and INT002/003/005: [plan](../tasks/WOS-05-MATERIAL-ASSIGNMENT-APPROVALS.md), migration065, assignment-approval module/client/React policy/proposal/current-stage workspace and canonical inbox extension. Executable evidence: assignment-approval-smoke.mjs, assignment-approval-service-smoke.mjs, assignment-approval-postgres-smoke.mjs, assignment-approval-journey-browser-smoke.mjs plus retained suites; exact-source receipts recorded externally. Native units/current source/held-role scope, all-writer material denial, final existing guards, atomic recipients/delivery/rejection/retry and unchanged prior work/financial evidence. Local-only candidate: publication separately restricted; no hosted, review, integration/UAT/release acceptance claimed.
+
+## Commercial draft reconciliation
+
+WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-005 cover commercial save recovery. The commercial drafting browser suite checks that a failed reconciliation read keeps creation unavailable and that retrying the read issues no additional write.

@@ -508,3 +508,7 @@ Apply migration 064 before adopting a notice policy. Configure the weekly deadli
 ## Material assignment approvals
 
 Apply migration 065 before configuring material fields and approvers. Leave the policy unconfigured until the buyer selects the fields, workers and eligible reviewers. Keep pending proposals and the decision ledger on recovery. Publish a prospective policy change to retire routing and reconcile pending proposals against their original source versions.
+
+## Commercial draft reconciliation
+
+After a commercial save returns an uncertain outcome, discarding the local draft leaves creation locked. Reload the workspace. If that read fails, retry the workspace read, inspect the records for the original submission, then decide whether a new draft is necessary.

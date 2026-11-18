@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+If a commercial draft save has an uncertain outcome, reload the workspace and inspect the server records before creating another draft. If that read fails, use **Retry workspace**.
+
 Buyers can require approval for changes to selected assignment fields. A pending proposal keeps the current allocation in effect. Final approval rechecks the assignment version and overlap rules before applying the change. [Material assignment approvals](docs/tasks/WOS-05-MATERIAL-ASSIGNMENT-APPROVALS.md)
 
 Authorized operators can evaluate weekly submission deadlines and issue in-app notices to the affected worker and configured overdue contact. A submitted timesheet suppresses the missing-submission notice. [Weekly deadline notices](docs/tasks/WOS-04-DEADLINE-INAPP-NOTICES.md)
