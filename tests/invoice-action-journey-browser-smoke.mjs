@@ -1,0 +1,265 @@
+import { fileURLToPath } from 'node:url';
+import { startFixtureServer } from './support/compiled-fixture-server.mjs';
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { workPermissions } from './support/work-assignment-test.mjs';
+import {
+  commercialFixture as f,
+  withCommercialDatabase,
+  migrateCommercialDatabase,
+  withCommercialApi,
+} from './support/commercial-drafting-test.mjs';
+import {
+  seedWorkApproval,
+  readApprovalOwner,
+  WORK_APPROVAL_BASE as work,
+} from './support/work-approval-test.mjs';
+import {
+  grantAmendmentPermissions,
+  createAmendmentHierarchy,
+} from './support/commercial-amendments-test.mjs';
+import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
+const ok = (v, n = 200) => {
+  assert.equal(v.status, n, JSON.stringify(v.body));
+  return v.body;
+};
+await withCommercialDatabase(async ({ pool, databaseUrl }) => {
+  await migrateCommercialDatabase(pool);
+  const fx = await seedWorkApproval(pool),
+    ids = fx.identities;
+  await grantAmendmentPermissions(pool);
+  for (const k of [
+    'commercial.tm_billing.view',
+    'commercial.invoice_drafts.view',
+    'commercial.invoice_drafts.prepare',
+    'commercial.invoice_drafts.own',
+    'commercial.invoice_drafts.cancel',
+    'commercial.invoice_approval.manage',
+    'commercial.contracts.manage',
+  ])
+    await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled)values('Admin',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+      [k],
+    );
+  await withCommercialApi(
+    { databaseUrl, identities: ids, onServerError: (s) => process.stderr.write(s) },
+    async ({ request, tokenFor, baseUrl: apiUrl }) => {
+      const end = shift(fx.today, 30),
+        roots = await createAmendmentHierarchy(request, 'SYN-ACTION-UI', {
+          contract: {
+            model: 'time_and_materials',
+            startsOn: fx.today,
+            endsOn: end,
+            effectiveFrom: fx.today,
+            currency: 'USD',
+          },
+          engagement: { startsOn: fx.today, endsOn: end, currency: 'USD' },
+          project: { startsOn: fx.today, endsOn: end },
+        }),
+        requesterKey = await readApprovalOwner(request, ids.requester),
+        route = '/api/v1/invoice-action-notices',
+        drafts = '/api/v1/invoice-drafts';
+      const draft = ok(
+        await request(drafts + '/batches', {
+          method: 'POST',
+          identity: ids.requester,
+          body: {
+            expectedOwnerKey: requesterKey,
+            requestId: randomUUID(),
+            definition: {
+              clientId: roots.contract.clientId,
+              contractId: roots.contract.id,
+              engagementId: roots.engagement.id,
+              currency: 'USD',
+              periodStart: fx.today,
+              periodEnd: fx.today,
+              periodBasis: 'WORK_DATE',
+              ownerUserId: ids.manager.id,
+              ownerRole: 'Admin',
+            },
+            reason: 'Synthetic empty draft',
+          },
+        }),
+        201,
+      ).batch;
+      const fixture = await startFixtureServer({
+        root: fileURLToPath(new URL('../', import.meta.url)),
+        fixtures: ['invoice-action'],
+        apiUrl,
+      });
+      let browser;
+      const contexts = [];
+      try {
+        const origin = fixture.url;
+        browser = await chromium.launch({ headless: true });
+        const open = async (identity) => {
+          const c = await browser.newContext({ viewport: { width: 1800, height: 1400 }, timezoneId: 'UTC' });
+          contexts.push(c);
+          await c.addInitScript(
+            ({ user, scope, token }) => {
+              sessionStorage.setItem('workos_session', JSON.stringify(user));
+              sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
+              sessionStorage.setItem('workos_api_token', token);
+            },
+            {
+              user: {
+                id: identity.id,
+                employeeId: identity.id,
+                userName: identity.username,
+                name: 'Synthetic actor',
+                role: 'Admin',
+                permissionRole: 'Admin',
+                permissions: [
+                  ...workPermissions,
+                  'notifications.view',
+                  'commercial.contracts.view',
+                  'commercial.contracts.manage',
+                  'commercial.tm_billing.view',
+                  'commercial.invoice_drafts.view',
+                  'commercial.invoice_drafts.prepare',
+                  'commercial.invoice_approval.manage',
+                ],
+              },
+              scope: { organizationId: f.organizationId, legalEntityId: f.legalEntityId },
+              token: tokenFor(identity),
+            },
+          );
+          const p = await c.newPage(),
+            errors = [],
+            external = [];
+          p.setDefaultTimeout(25000);
+          p.on('pageerror', (e) => errors.push(e.stack ?? e.message));
+          p.on('request', (q) => {
+            if (/^https?:/.test(q.url()) && new URL(q.url()).origin !== origin) external.push(q.url());
+          });
+          await p.goto(
+            origin +
+              '/tests/fixtures/invoice-action.html?' +
+              new URLSearchParams({ engagement: roots.engagement.id }),
+          );
+          return { p, ui: p.getByRole('region', { name: 'Invoice remediation notices' }), errors, external };
+        };
+        const wait = (p, path, method = 'GET') =>
+            p.waitForResponse((r) => new URL(r.url()).pathname === path && r.request().method() === method),
+          body = async (w, status = 200) => {
+            const r = await w;
+            assert.equal(r.status(), status, await r.text());
+            return r.json();
+          };
+        const owner = await open(ids.requester),
+          { p, ui } = owner;
+        await ui.getByLabel('Invoice action engagement').selectOption(roots.engagement.id);
+        let t = wait(p, route + '/templates'),
+          d = wait(p, drafts + '/batches');
+        await ui.getByRole('button', { name: 'Load invoice notice configuration' }).click();
+        await Promise.all([body(t), body(d)]);
+        await ui.getByLabel('Invoice action template effective from').fill(fx.today);
+        await ui.getByLabel('Invoice action template locale').fill('en-US');
+        await ui.getByLabel('Invoice action template subject').fill('Inspect {{sourceRef}}');
+        await ui.getByLabel('Invoice action template body').fill('Review {{sourceRef}}');
+        await ui.getByLabel('Invoice action template reason').fill('Synthetic template');
+        let configured, configurationDone;
+        const configuredPromise = new Promise((resolve) => {
+          configurationDone = resolve;
+        });
+        await p.route(
+          '**/api/v1/invoice-action-notices/templates',
+          async (intercepted) => {
+            const response = await intercepted.fetch();
+            assert.equal(response.status(), 201, await response.text());
+            configured = await response.json();
+            configurationDone();
+            await intercepted.abort('failed');
+          },
+          { times: 1 },
+        );
+        await ui.getByRole('button', { name: 'Record invoice action template' }).click();
+        await configuredPromise;
+        await ui.getByText(/may still be in flight/).waitFor();
+        t = wait(p, route + '/template-receipts/' + configured.template.requestId);
+        await ui.getByRole('button', { name: 'Read original invoice action receipt' }).click();
+        const policy = (await body(t)).template;
+        assert.equal(policy.id, configured.template.id);
+        await ui.getByText('Original request confirmed by receipt.').waitFor();
+        t = wait(p, route + '/templates');
+        d = wait(p, drafts + '/batches');
+        await ui.getByRole('button', { name: 'Load invoice notice configuration' }).click();
+        await Promise.all([body(t), body(d)]);
+        await ui.getByLabel('Invoice action Draft').selectOption(draft.id);
+        let w = wait(p, route + '/sources/' + draft.id);
+        await ui.getByRole('button', { name: 'Inspect invoice action source' }).click();
+        const source = (await body(w)).source;
+        assert.equal(source.lineCount, 0);
+        assert.equal(source.templateId, policy.id);
+        await ui.getByLabel('Invoice action assessment reason').fill('Synthetic assessment');
+        let accepted, resolve;
+        const done = new Promise((r) => {
+          resolve = r;
+        });
+        await p.route(
+          '**/api/v1/invoice-action-notices/assessments',
+          async (intercepted) => {
+            const response = await intercepted.fetch();
+            assert.equal(response.status(), 201, await response.text());
+            accepted = await response.json();
+            resolve();
+            await intercepted.abort('failed');
+          },
+          { times: 1 },
+        );
+        await ui.getByRole('button', { name: 'Assess empty invoice Draft' }).click();
+        await done;
+        await ui.getByText(/may still be in flight/).waitFor();
+        await p.evaluate(
+          (scope) => {
+            sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
+            window.dispatchEvent(new Event('workos:organization-scope-changed'));
+          },
+          { organizationId: f.organizationId, legalEntityId: f.foreignLegalEntityId },
+        );
+        await ui.getByText(/Account, role or scope changed/).waitFor();
+        w = wait(p, route + '/receipts/' + accepted.event.requestId);
+        await ui.getByRole('button', { name: 'Read original invoice action receipt' }).click();
+        assert.equal((await w).status(), 403);
+        await ui.getByText(/may still be in flight/).waitFor();
+        await p.evaluate(
+          (scope) => {
+            sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
+            window.dispatchEvent(new Event('workos:organization-scope-changed'));
+          },
+          { organizationId: f.organizationId, legalEntityId: f.legalEntityId },
+        );
+        w = wait(p, route + '/receipts/' + accepted.event.requestId);
+        await ui.getByRole('button', { name: 'Read original invoice action receipt' }).click();
+        assert.equal((await body(w)).event.id, accepted.event.id);
+        await ui.getByText('Original request confirmed by receipt.').waitFor();
+        assert.equal((await pool.query('select count(*)::int n from invoice_action_events')).rows[0].n, 1);
+        const receiver = await open(ids.manager),
+          inbox = receiver.p.getByRole('region', { name: 'Canonical work approval notifications' });
+        w = wait(receiver.p, work + '/inbox');
+        await inbox.getByRole('button', { name: 'Load my governed notifications' }).click();
+        const notification = (await body(w)).notifications.find(
+          (x) => x.kind === 'invoice-action' && x.eventId === accepted.event.id,
+        );
+        assert(notification);
+        const card = inbox.getByRole('article', { name: 'Governed notification ' + notification.id });
+        await card.getByText(/invoice_batch.action_required/).waitFor();
+        w = wait(receiver.p, work + '/inbox/' + notification.id + '/read', 'POST');
+        await card
+          .getByRole('button', { name: 'Mark governed notification read ' + notification.id })
+          .click();
+        assert((await body(w)).notification.readAt);
+        assert.deepEqual(owner.errors, []);
+        assert.deepEqual(receiver.errors, []);
+        assert.deepEqual(owner.external, []);
+        assert.deepEqual(receiver.external, []);
+        console.log('Real invoice remediation configuration, lost response and owned in-app read passed.');
+      } finally {
+        for (const c of contexts) await c.close();
+        if (browser) await browser.close();
+        await fixture.close();
+      }
+    },
+  );
+});

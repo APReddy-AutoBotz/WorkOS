@@ -1,0 +1,443 @@
+import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { capacityCanonical, capacityHash } from '../planning/worker-capacity-service.mjs';
+import { assertCommercialAuthority } from '../commercial-drafting/service.mjs';
+import { scopedCapacityWorker } from '../planning/worker-capacity-service.mjs';
+import { workApprovalOwner } from '../approvals/work-approval-service.mjs';
+import {
+  INVOICE_ACTION_REQUIRED,
+  validInvoiceActionTemplate,
+  renderInvoiceActionNotice,
+  invoiceActionRecipients,
+  invoiceActionNeeded,
+} from '../../../shared/invoice-action-required.mjs';
+
+const uuid = z.string().uuid(),
+  id = z.string().trim().min(1).max(200),
+  hash = z.string().regex(/^[a-f0-9]{64}$/),
+  reason = z.string().trim().min(3).max(1000),
+  scope = (r) => [r.organizationScope.organizationId, r.organizationScope.legalEntityId],
+  fingerprint = (v) => capacityHash(capacityCanonical(v)),
+  fail = (statusCode, code, message) => Object.assign(Error(message), { statusCode, code });
+const parse = (schema, v) => {
+  const p = schema.safeParse(v);
+  if (!p.success)
+    throw fail(400, 'INVOICE_ACTION_INPUT', 'Explicit valid invoice action inputs are required.');
+  return p.data;
+};
+export const createInvoiceActionRouter = (o) => {
+  const router = Router();
+  router.use(
+    (_r, res, next) => {
+      res.set('Cache-Control', 'no-store');
+      next();
+    },
+    o.requireDatabase,
+    o.requireAuth,
+  );
+  const handle = (write, fn) => async (r, res) => {
+    let c,
+      begun = false;
+    try {
+      c = await o.pool.connect();
+      await c.query(write ? 'begin' : 'begin isolation level repeatable read');
+      begun = true;
+      const value = await fn(c, r);
+      await c.query('commit');
+      begun = false;
+      res.status(write && !value.replayed ? 201 : 200).json(value);
+    } catch (e) {
+      if (begun) await c.query('rollback').catch(() => {});
+      if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
+      else if (['IAN01', 'IAN02', 'IAN03', '23505', '23514', '40001', '40P01'].includes(e.code))
+        res
+          .status(e.code === 'IAN01' ? 403 : 409)
+          .json({
+            code: e.code === 'IAN01' ? 'INVOICE_ACTION_AUTHORITY' : 'INVOICE_ACTION_CONFLICT',
+            error: 'The source, required relationship or operation changed. Reload.',
+          });
+      else {
+        o.logError?.(e);
+        res
+          .status(503)
+          .json({
+            code: 'INVOICE_ACTION_UNCONFIRMED',
+            error: 'The operation could not be confirmed. Read its original receipt.',
+          });
+      }
+    } finally {
+      c?.release();
+    }
+  };
+  const envelope = async (c, r) => ({
+    ownerKey: workApprovalOwner(r),
+    actorUserId: r.user.sub,
+    activeRole: r.user.activeRole,
+    organizationId: scope(r)[0],
+    legalEntityId: scope(r)[1],
+    serverDate: (await c.query("select to_char((clock_timestamp() at time zone 'UTC')::date,'YYYY-MM-DD') d"))
+      .rows[0].d,
+  });
+  const authorize = async (c, r, kind) => {
+    const keys = [
+      'commercial.contracts.view',
+      'commercial.tm_billing.view',
+      'commercial.invoice_drafts.view',
+      'employees.view',
+      'notifications.view',
+      ...(kind === 'manager'
+        ? ['commercial.contracts.manage', 'commercial.invoice_approval.manage']
+        : kind === 'prepare'
+          ? ['commercial.invoice_drafts.prepare']
+          : []),
+    ];
+    for (const k of keys) await assertCommercialAuthority(c, r, k);
+  };
+  const fence = (r, k) => {
+    if (workApprovalOwner(r) !== k)
+      throw fail(409, 'INVOICE_ACTION_CONTEXT', 'Account, role or scope changed. Reload.');
+  };
+  const context = (c, r, x) =>
+    c.query("select set_config('workos.invoice_action_context',$1,true)", [
+      JSON.stringify({
+        organizationId: scope(r)[0],
+        legalEntityId: scope(r)[1],
+        actorId: r.user.sub,
+        activeRole: r.user.activeRole,
+        operationId: r.operationId,
+        ...x,
+      }),
+    ]);
+  const assertEngagement = async (c, r, engagementId) => {
+    const result = await c.query('select invoice_action_engagement_supported($1,$2,$3) as supported', [
+      ...scope(r),
+      engagementId,
+    ]);
+    if (!result.rows[0].supported)
+      throw fail(404, 'INVOICE_ACTION_SOURCE', 'Scoped T&M engagement unavailable.');
+  };
+  const batch = async (c, r, batchId, lock = false) => {
+    const b = (
+      await c.query(
+        `select b.*,invoice_batch_governed_state(b.id) state,invoice_draft_owner_current(b) owner_current,invoice_batch_lineage_hash(b.id) lineage_hash,(select count(*)::int from invoice_draft_lines l where l.batch_id=b.id) line_count from invoice_draft_batches b where invoice_action_engagement_supported(b.organization_id,b.legal_entity_id,b.engagement_id) and b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
+        [batchId, ...scope(r)],
+      )
+    ).rows[0];
+    if (!b) throw fail(404, 'INVOICE_ACTION_SOURCE', 'Scoped invoice source unavailable.');
+    const rows = (
+      await c.query(
+        'select h.employee_id from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence e on e.id=v.submission_id join timesheets h on h.id=e.timesheet_id where l.batch_id=$1 order by l.sequence',
+        [batchId],
+      )
+    ).rows;
+    if (rows.length !== b.line_count) throw fail(404, 'INVOICE_ACTION_SOURCE', 'Incomplete invoice lineage.');
+    for (const x of rows) await scopedCapacityWorker(c, r, x.employee_id, o.buildEmployeeScopeWhere, lock);
+    return b;
+  };
+  const templateView = (x) => ({
+    id: x.id,
+    engagementId: x.engagement_id,
+    sequence: x.sequence,
+    previousId: x.previous_id,
+    effectiveFrom: x.effective_from,
+    definition: x.definition,
+    actorId: x.actor_id,
+    activeRole: x.active_role,
+    requestId: x.request_id,
+    reason: x.reason,
+    createdAt: x.created_at,
+  });
+  const eventView = (x) => ({
+    id: x.id,
+    batchId: x.batch_id,
+    templateId: x.template_id,
+    eventKey: x.event_key,
+    policyClass: x.policy_class,
+    triggerKind: x.trigger_kind,
+    lineageHash: x.lineage_hash,
+    lineCount: x.line_count,
+    actorId: x.actor_id,
+    activeRole: x.active_role,
+    requestId: x.request_id,
+    reason: x.reason,
+    createdAt: x.created_at,
+  });
+  router.get(
+    '/template-receipts/:id',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r, 'manager');
+      const requestId = parse(uuid, r.params.id),
+        x = (
+          await c.query(
+            'select *,effective_from::text from invoice_action_templates where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and active_role=$4 and request_id=$5',
+            [...scope(r), r.user.sub, r.user.activeRole, requestId],
+          )
+        ).rows[0];
+      if (!x) throw fail(404, 'INVOICE_ACTION_UNCONFIRMED', 'Original template is unavailable.');
+      await assertEngagement(c, r, x.engagement_id);
+      return { ...(await envelope(c, r)), template: templateView(x) };
+    }),
+  );
+  router.get(
+    '/templates',
+    handle(false, async (c, r) => {
+      const q = parse(z.object({ engagementId: id }).strict(), r.query);
+      await authorize(c, r, 'manager');
+      await assertEngagement(c, r, q.engagementId);
+      const rows = (
+        await c.query(
+          'select *,effective_from::text from invoice_action_templates where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence desc limit 20',
+          [...scope(r), q.engagementId],
+        )
+      ).rows;
+      return { ...(await envelope(c, r)), templates: rows.map(templateView) };
+    }),
+  );
+  router.post(
+    '/templates',
+    handle(true, async (c, r) => {
+      const d = parse(
+        z
+          .object({
+            expectedOwnerKey: hash,
+            requestId: uuid,
+            expectedLatestId: uuid.nullable(),
+            effectiveFrom: z.string().date(),
+            definition: z.unknown().refine(validInvoiceActionTemplate),
+            reason,
+          })
+          .strict(),
+        r.body,
+      );
+      fence(r, d.expectedOwnerKey);
+      await authorize(c, r, 'manager');
+      const fp = fingerprint(d),
+        def = d.definition;
+      await assertEngagement(c, r, def.engagementId);
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `invoice-action-template-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`,
+      ]);
+      const old = (
+        await c.query(
+          'select *,effective_from::text from invoice_action_templates where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and request_id=$4',
+          [...scope(r), r.user.sub, d.requestId],
+        )
+      ).rows[0];
+      if (old) {
+        if (old.request_fingerprint !== fp || old.active_role !== r.user.activeRole)
+          throw fail(409, 'INVOICE_ACTION_KEY', 'Original template request differs.');
+        return { ...(await envelope(c, r)), template: templateView(old), replayed: true };
+      }
+      const today = (await c.query("select (clock_timestamp() at time zone 'UTC')::date::text d")).rows[0].d;
+      if (d.effectiveFrom < today)
+        throw fail(400, 'INVOICE_ACTION_TEMPLATE', 'A prospective UTC effective date is required.');
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `invoice-action-template:${scope(r).join(':')}:${def.engagementId}`,
+      ]);
+      const e = (
+        await c.query(
+          'select id from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3 for share',
+          [...scope(r), def.engagementId],
+        )
+      ).rows[0];
+      if (!e) throw fail(404, 'INVOICE_ACTION_SOURCE', 'Scoped engagement unavailable.');
+      const prev = (
+        await c.query(
+          'select id,sequence from invoice_action_templates where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence desc limit 1',
+          [...scope(r), def.engagementId],
+        )
+      ).rows[0];
+      if ((prev?.id ?? null) !== d.expectedLatestId)
+        throw fail(409, 'INVOICE_ACTION_TEMPLATE', 'Template version changed.');
+      const templateId = randomUUID();
+      await context(c, r, { templateId });
+      const x = (
+        await c.query(
+          'insert into invoice_action_templates(id,organization_id,legal_entity_id,engagement_id,sequence,previous_id,effective_from,definition,actor_id,active_role,request_id,request_fingerprint,reason,operation_id) values($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14) returning *,effective_from::text',
+          [
+            templateId,
+            ...scope(r),
+            def.engagementId,
+            (prev?.sequence ?? 0) + 1,
+            prev?.id ?? null,
+            d.effectiveFrom,
+            JSON.stringify(def),
+            r.user.sub,
+            r.user.activeRole,
+            d.requestId,
+            fp,
+            d.reason,
+            r.operationId,
+          ],
+        )
+      ).rows[0];
+      await o.audit(c, r, {
+        module: 'Invoice Action Notice',
+        action: 'Configure Template',
+        entityType: 'InvoiceActionTemplate',
+        entityId: templateId,
+        newValue: { templateId, engagementId: def.engagementId },
+        reason: 'Explicit prospective template.',
+        details: 'No recipient override, external route or grant.',
+      });
+      return { ...(await envelope(c, r)), template: templateView(x), replayed: false };
+    }),
+  );
+  router.get(
+    '/sources/:id',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r, 'prepare');
+      const b = await batch(c, r, parse(uuid, r.params.id));
+      const p = (
+        await c.query(
+          "select id,sequence from invoice_action_templates where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and effective_from<=(clock_timestamp() at time zone 'UTC')::date order by effective_from desc,sequence desc limit 1",
+          [...scope(r), b.engagement_id],
+        )
+      ).rows[0];
+      return {
+        ...(await envelope(c, r)),
+        source: {
+          batchId: b.id,
+          engagementId: b.engagement_id,
+          state: b.state,
+          ownerCurrent: b.owner_current,
+          lineCount: b.line_count,
+          lineageHash: b.lineage_hash,
+          templateId: p?.id ?? null,
+          ownerUserId: b.owner_user_id,
+          preparerUserId: b.preparer_user_id,
+        },
+      };
+    }),
+  );
+  router.get(
+    '/receipts/:id',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r, 'view');
+      const requestId = parse(uuid, r.params.id),
+        x = (
+          await c.query(
+            'select * from invoice_action_events where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and active_role=$4 and request_id=$5',
+            [...scope(r), r.user.sub, r.user.activeRole, requestId],
+          )
+        ).rows[0];
+      if (!x) throw fail(404, 'INVOICE_ACTION_UNCONFIRMED', 'Original assessment is unavailable.');
+      await batch(c, r, x.batch_id);
+      return { ...(await envelope(c, r)), event: eventView(x) };
+    }),
+  );
+  router.post(
+    '/assessments',
+    handle(true, async (c, r) => {
+      const d = parse(
+        z
+          .object({
+            expectedOwnerKey: hash,
+            requestId: uuid,
+            batchId: uuid,
+            templateId: uuid,
+            lineageHash: hash,
+            reason,
+          })
+          .strict(),
+        r.body,
+      );
+      fence(r, d.expectedOwnerKey);
+      await authorize(c, r, 'prepare');
+      const b = await batch(c, r, d.batchId, true),
+        fp = fingerprint(d);
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `invoice-action-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`,
+      ]);
+      const old = (
+        await c.query(
+          'select * from invoice_action_events where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and request_id=$4',
+          [...scope(r), r.user.sub, d.requestId],
+        )
+      ).rows[0];
+      if (old) {
+        if (
+          old.request_fingerprint !== fp ||
+          old.active_role !== r.user.activeRole ||
+          old.batch_id !== d.batchId
+        )
+          throw fail(409, 'INVOICE_ACTION_KEY', 'Original assessment differs.');
+        return { ...(await envelope(c, r)), event: eventView(old), replayed: true };
+      }
+      if (
+        !invoiceActionNeeded({
+          state: b.state,
+          current: b.owner_current,
+          lineCount: b.line_count,
+          pendingStage: b.state === 'Under Review',
+          trigger: 'EMPTY_DRAFT_ASSESSMENT',
+        }) ||
+        b.lineage_hash !== d.lineageHash
+      )
+        throw fail(409, 'INVOICE_ACTION_SOURCE', 'An exact current empty Draft is required.');
+      const p = (
+        await c.query(
+          "select * from invoice_action_templates where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and effective_from<=(clock_timestamp() at time zone 'UTC')::date order by effective_from desc,sequence desc limit 1",
+          [...scope(r), b.engagement_id],
+        )
+      ).rows[0];
+      if (!p || p.id !== d.templateId)
+        throw fail(409, 'INVOICE_ACTION_TEMPLATE', 'A current explicit template is required.');
+      const eventId = randomUUID(),
+        rendered = renderInvoiceActionNotice(p.definition, b.id),
+        recipients = invoiceActionRecipients(
+          { userId: b.owner_user_id, role: b.owner_role },
+          { userId: b.preparer_user_id, role: b.preparer_role },
+        );
+      await context(c, r, { eventId, batchId: b.id, templateId: p.id });
+      const ev = (
+        await c.query(
+          "insert into invoice_action_events(id,organization_id,legal_entity_id,batch_id,template_id,event_key,policy_class,trigger_kind,lineage_hash,line_count,locale,title,body,actor_id,active_role,request_id,request_fingerprint,reason,operation_id) values($1,$2,$3,$4,$5,$6,'ACTION_REQUIRED','EMPTY_DRAFT_ASSESSMENT',$7,0,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning *",
+          [
+            eventId,
+            ...scope(r),
+            b.id,
+            p.id,
+            INVOICE_ACTION_REQUIRED,
+            b.lineage_hash,
+            p.definition.locale,
+            rendered.title,
+            rendered.body,
+            r.user.sub,
+            r.user.activeRole,
+            d.requestId,
+            fp,
+            d.reason,
+            r.operationId,
+          ],
+        )
+      ).rows[0];
+      for (const rec of recipients) {
+        const rid = randomUUID();
+        await c.query(
+          "insert into invoice_action_recipients(id,event_id,user_id,reasons,in_app,channel_decision) values($1,$2,$3,$4,true,'Required')",
+          [rid, eventId, rec.userId, rec.relationships.map((x) => x.reason)],
+        );
+        await c.query(
+          "insert into invoice_action_deliveries(id,recipient_id,channel,status,attempt) values($1,$2,'InApp','Delivered',1)",
+          [randomUUID(), rid],
+        );
+      }
+      await o.audit(c, r, {
+        module: 'Invoice Action Notice',
+        action: 'Assess Empty Draft',
+        entityType: 'InvoiceActionEvent',
+        entityId: eventId,
+        newValue: { eventId, batchId: b.id, templateId: p.id, lineageHash: b.lineage_hash },
+        reason: 'Scoped empty Draft assessment.',
+        details: 'Mandatory in-app recipient set; no external delivery.',
+      });
+      return { ...(await envelope(c, r)), event: eventView(ev), replayed: false };
+    }),
+  );
+  return router;
+};

@@ -1134,7 +1134,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             0,
           );
           assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-            '065k_wos06_invoice_billing_confirmation',
+            '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required',
           ]);
           assert.deepEqual(await snapshot(), before);
           for (const t of ['role_permissions', 'user_permission_grants'])
