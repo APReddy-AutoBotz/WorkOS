@@ -166,6 +166,9 @@ jobs:
       - name: Install Chromium for synthetic browser checks
         run: npx playwright install --with-deps chromium
 
+      - name: Verify acknowledged settings save and load recovery
+        run: npm run test:settings-save-outcomes-browser
+
       - name: Verify legacy approval delegation browser journey
         run: npm run test:legacy-approval-browser
 

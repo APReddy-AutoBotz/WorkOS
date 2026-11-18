@@ -472,3 +472,7 @@ Delivery history uses current recipient organization/entity and worker visibilit
 ## Legacy approval delegation boundary
 
 Legacy delegation IDs cannot transfer ownership, including under administrative edits. Both retained and submitted participants must belong to the selected entity. Active delegation requires current participant account/assigned-role/membership/approval authority; reads revalidate the delegator's current relationship. On Leave remains supported; scoped revocation is permitted after authority or lifecycle loss. Historical orphan/cross-entity rows remain stored and unavailable. Malformed calendar dates return400, unauthorized ownership403, invalid activation/overlap422; failed audit leaves no mutation. No migration is required. Prefer a forward fix because older code restores the disclosure/takeover path.
+
+## Settings save acknowledgement
+
+A save success refers only to the submitted settings snapshot acknowledged by the service. Newer edits remain unsaved. After a refused or uncertain save, retain input and review/retry; do not assume that a network error proves the server did not commit. Failed initialization offers retry. The alternate utilization action saves configuration and does not claim a server recalculation. Preserve server permissions/audit and prefer forward correction of misleading outcomes; no migration is required.
