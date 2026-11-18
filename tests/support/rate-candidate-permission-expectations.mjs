@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.invoice_batch.confirm',module:'Commercial',label:'Confirm downstream invoice billing',description:'Record an explicit scoped human attestation for an exported invoice-ready artifact.',protected:false},
  {permission_key:'commercial.invoice_export.configure',module:'Commercial',label:'Configure invoice export notices',description:'Configure prospective scoped invoice-export recipient and template policy.',protected:false},
  {permission_key:'commercial.invoice_export.recover_notices',module:'Commercial',label:'Recover invoice export notices',description:'Attempt scoped recovery of incomplete invoice-export notification evidence.',protected:false},
  {permission_key:'integrations.invoice_alert_routes.manage',module:'Integrations',label:'Manage invoice alert routes',description:'Configure prospective invoice operational-alert outbox routes.',protected:false},

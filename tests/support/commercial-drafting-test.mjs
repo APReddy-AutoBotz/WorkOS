@@ -186,11 +186,11 @@ const stopApi = async child => {
 };
 
 export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UTC',
-  sessionTtlHours = '0.25', sessionSecret = null, emailProvider = 'mock', onServerError = null}, test) => {
+  sessionTtlHours = '0.25', sessionSecret = null, emailProvider = 'mock', onServerError = null, apiRoot = root}, test) => {
   const port = await availablePort();
   const secret = sessionSecret || randomBytes(48).toString('base64url');
   const baseUrl = `http://127.0.0.1:${port}`;
-  const child = spawn(process.execPath, ['server/index.mjs'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+  const child = spawn(process.execPath, ['server/index.mjs'], {cwd: apiRoot, stdio: ['ignore', 'pipe', 'pipe'], env: {
     PATH: process.env.PATH, TZ: timeZone, NODE_ENV: 'test', APP_MODE: 'test', PORT: String(port),
     DATABASE_URL: databaseUrl, PGSSLMODE: 'disable', API_SESSION_SECRET: secret, APP_URL: baseUrl,
     IDENTITY_PROVIDER: 'local', API_SESSION_TTL_HOURS: sessionTtlHours, AUTO_SEED_DEMO: 'false', RESET_DEMO_DATA: 'false',

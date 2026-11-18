@@ -1,4 +1,8 @@
 import {
+  validInvoiceConfirmationCommand,
+  invoiceConfirmationAllowed,
+} from '../../../shared/invoice-billing-confirmation.mjs';
+import {
   currentInvoiceNoticePolicy,
   emitInvoiceExportNotice,
   recoverInvoiceExportRecipients,
@@ -56,6 +60,8 @@ export const createInvoiceCsvRouter = (o) => {
           'INC01',
           'INC02',
           'INC03',
+          'IBC01',
+          'IBC02',
           'CCA02',
           'TBE02',
           '23505',
@@ -65,9 +71,11 @@ export const createInvoiceCsvRouter = (o) => {
         ].includes(e.code)
       )
         res
-          .status(['ICV01', 'INC01'].includes(e.code) ? 403 : 409)
+          .status(['ICV01', 'INC01', 'IBC01'].includes(e.code) ? 403 : 409)
           .json({
-            code: ['ICV01', 'INC01'].includes(e.code) ? 'INVOICE_CSV_AUTHORITY' : 'INVOICE_CSV_CONFLICT',
+            code: ['ICV01', 'INC01', 'IBC01'].includes(e.code)
+              ? 'INVOICE_CSV_AUTHORITY'
+              : 'INVOICE_CSV_CONFLICT',
             error: 'Current batch, approval, scope or artifact changed. Reload.',
           });
       else {
@@ -389,6 +397,247 @@ export const createInvoiceCsvRouter = (o) => {
       return { ...(await envelope(c, r)), artifact: artifactView(a), failure: null, replayed: false };
     }),
   );
+  const confirmationView = (x) => ({
+    id: x.id,
+    batchId: x.batch_id,
+    artifactId: x.artifact_id,
+    artifactVersion: x.artifact_version,
+    artifactSha256: x.artifact_sha256,
+    currency: x.currency,
+    total: String(x.total),
+    method: x.confirmation_kind,
+    reference: x.external_reference,
+    actorId: x.actor_id,
+    activeRole: x.active_role,
+    requestId: x.request_id,
+    reason: x.reason,
+    operationId: x.operation_id,
+    confirmedAt: x.confirmed_at,
+  });
+  router.get(
+    '/confirmation-sources/:batchId',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r);
+      await assertCommercialAuthority(c, r, 'commercial.invoice_batch.confirm');
+      const { row } = await batch(c, r, parse(uuid, r.params.batchId)),
+        a =
+          (
+            await c.query(
+              'select *,trim_scale(total)::text exact_total from invoice_csv_artifacts where batch_id=$1',
+              [row.id],
+            )
+          ).rows[0] ?? null,
+        x =
+          (
+            await c.query(
+              'select *,trim_scale(total)::text total from invoice_batch_confirmations where batch_id=$1',
+              [row.id],
+            )
+          ).rows[0] ?? null;
+      if (!a) throw fail(409, 'INVOICE_CONFIRMATION_SOURCE', 'An accepted scoped CSV artifact is required.');
+      return {
+        ...(await envelope(c, r)),
+        source: {
+          batchId: row.id,
+          state: row.state,
+          artifactId: a.id,
+          artifactVersion: a.version,
+          artifactSha256: a.sha256,
+          currency: a.currency,
+          total: a.exact_total,
+        },
+        confirmation: x ? confirmationView(x) : null,
+      };
+    }),
+  );
+  router.get(
+    '/confirmation-receipts/:requestId',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r);
+      await assertCommercialAuthority(c, r, 'commercial.invoice_batch.confirm');
+      const x = (
+        await c.query(
+          'select *,trim_scale(total)::text total from invoice_batch_confirmations where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and active_role=$4 and request_id=$5',
+          [...scope(r), r.user.sub, r.user.activeRole, parse(uuid, r.params.requestId)],
+        )
+      ).rows[0];
+      if (!x)
+        throw fail(404, 'INVOICE_CONFIRMATION_UNCONFIRMED', 'Original confirmation receipt unavailable.');
+      await batch(c, r, x.batch_id);
+      return { ...(await envelope(c, r)), confirmation: confirmationView(x) };
+    }),
+  );
+  router.get(
+    '/confirmation-notification-status/:requestId',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r);
+      await assertCommercialAuthority(c, r, 'commercial.invoice_batch.confirm');
+      const requestId = parse(uuid, r.params.requestId),
+        x = (
+          await c.query(
+            'select * from invoice_batch_confirmations where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and active_role=$4 and request_id=$5',
+            [...scope(r), r.user.sub, r.user.activeRole, requestId],
+          )
+        ).rows[0];
+      if (!x) throw fail(404, 'INVOICE_CONFIRMATION_UNCONFIRMED', 'Original confirmation is unavailable.');
+      await batch(c, r, x.batch_id);
+      const event =
+          (
+            await c.query(
+              `select e.*,exists(select 1 from invoice_export_notice_failures f where f.event_id=e.id) and (select count(*) from invoice_export_notice_recipients rec where rec.event_id=e.id)<(select count(distinct y.recipient) from invoice_export_expected_recipients(e)y) delivery_incomplete from invoice_export_notice_events e where e.confirmation_id=$1`,
+              [x.id],
+            )
+          ).rows[0] ?? null,
+        failure =
+          (
+            await c.query('select id from invoice_export_notice_producer_failures where confirmation_id=$1', [
+              x.id,
+            ])
+          ).rows[0] ?? null;
+      if (!event && !failure)
+        throw fail(503, 'INVOICE_CONFIRMATION_UNCONFIRMED', 'Notification status is not confirmed.');
+      return {
+        ...(await envelope(c, r)),
+        status: {
+          requestId,
+          batchId: x.batch_id,
+          eventId: event?.id ?? null,
+          eventKey: event?.event_key ?? null,
+          state: !event ? 'EventUnavailable' : event.delivery_incomplete ? 'DeliveryIncomplete' : 'Recorded',
+          alertOutbox: null,
+        },
+      };
+    }),
+  );
+  router.post(
+    '/confirmations',
+    handle(true, async (c, r) => {
+      const input = parse(
+          z
+            .object({
+              expectedOwnerKey: key,
+              requestId: uuid,
+              batchId: uuid,
+              artifactId: uuid,
+              artifactVersion: z.literal(1),
+              artifactSha256: key,
+              currency: z.string().regex(/^[A-Z]{3}$/),
+              total: money,
+              reference: z.string().trim().min(1).max(200),
+              reason,
+            })
+            .strict(),
+          r.body,
+        ),
+        { expectedOwnerKey, ...cmd } = input;
+      if (expectedOwnerKey !== workApprovalOwner(r))
+        throw fail(409, 'INVOICE_CONFIRMATION_CONTEXT', 'Account, role or scope changed.');
+      if (!validInvoiceConfirmationCommand(cmd))
+        throw fail(400, 'INVOICE_CONFIRMATION_INPUT', 'Explicit valid attestation inputs are required.');
+      await authorize(c, r);
+      await assertCommercialAuthority(c, r, 'commercial.invoice_batch.confirm');
+      const { row } = await batch(c, r, cmd.batchId, true);
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `invoice-confirmation:${scope(r).join(':')}:${r.user.sub}:${cmd.requestId}`,
+      ]);
+      const fp = fingerprint(input),
+        old = (
+          await c.query(
+            'select *,trim_scale(total)::text total from invoice_batch_confirmations where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and request_id=$4',
+            [...scope(r), r.user.sub, cmd.requestId],
+          )
+        ).rows[0];
+      if (old) {
+        if (
+          old.active_role !== r.user.activeRole ||
+          old.request_fingerprint !== fp ||
+          old.batch_id !== cmd.batchId
+        )
+          throw fail(409, 'INVOICE_CONFIRMATION_KEY', 'Original confirmation request differs.');
+        return { ...(await envelope(c, r)), confirmation: confirmationView(old), replayed: true };
+      }
+      const a = (
+        await c.query(
+          'select *,trim_scale(total)::text exact_total from invoice_csv_artifacts where id=$1 and batch_id=$2 for share',
+          [cmd.artifactId, row.id],
+        )
+      ).rows[0];
+      if (
+        !a ||
+        !invoiceConfirmationAllowed(
+          cmd,
+          {
+            state: row.state,
+            batchId: row.id,
+            artifactId: a.id,
+            artifactVersion: a.version,
+            artifactSha256: a.sha256,
+            currency: a.currency,
+            total: a.exact_total,
+          },
+          { active: true, heldRole: true, scopedSourceAccess: true, confirmationPermission: true },
+        )
+      )
+        throw fail(
+          409,
+          'INVOICE_CONFIRMATION_SOURCE',
+          'Exact current exported artifact and totals are required.',
+        );
+      const notificationPolicy = await currentInvoiceNoticePolicy(c, row),
+        confirmationId = randomUUID();
+      await c.query("select set_config('workos.invoice_confirmation_context',$1,true)", [
+        JSON.stringify({
+          confirmationId,
+          organizationId: scope(r)[0],
+          legalEntityId: scope(r)[1],
+          actorId: r.user.sub,
+          activeRole: r.user.activeRole,
+          operationId: r.operationId,
+        }),
+      ]);
+      const x = (
+        await c.query(
+          "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16)returning *,trim_scale(total)::text total",
+          [
+            confirmationId,
+            ...scope(r),
+            row.id,
+            a.id,
+            a.version,
+            a.sha256,
+            a.currency,
+            a.exact_total,
+            cmd.reference,
+            r.user.sub,
+            r.user.activeRole,
+            cmd.requestId,
+            fp,
+            cmd.reason,
+            r.operationId,
+          ],
+        )
+      ).rows[0];
+      await o.audit(c, r, {
+        module: 'Invoice Billing Confirmation',
+        action: 'Record Manual Attestation',
+        entityType: 'InvoiceBatchConfirmation',
+        entityId: confirmationId,
+        newValue: { confirmationId, batchId: row.id, artifactId: a.id, sha256: a.sha256 },
+        reason: 'Scoped user attestation.',
+        details: 'User-entered reference; no provider verification, payment or ledger posting.',
+      });
+      await emitInvoiceExportNotice(c, r, {
+        batch: row,
+        policy: notificationPolicy,
+        resultId: confirmationId,
+        kind: 'confirmation',
+      });
+      return { ...(await envelope(c, r)), confirmation: confirmationView(x), replayed: false };
+    }),
+  );
   router.get(
     '/artifacts/:id',
     handle(false, async (c, r) => {
@@ -428,7 +677,7 @@ export const createInvoiceCsvRouter = (o) => {
       await batch(c, r, id);
       const rows = (
         await c.query(
-          `select * from (select f.id,'producer'::text kind,f.policy_id,f.created_at from invoice_export_notice_producer_failures f where f.batch_id=$1 and not exists(select 1 from invoice_export_notice_events e where (f.artifact_id is not null and e.artifact_id=f.artifact_id) or (f.failure_id is not null and e.failure_id=f.failure_id)) union all select e.id,'event'::text kind,e.policy_id,e.created_at from invoice_export_notice_events e join invoice_export_notice_failures f on f.event_id=e.id where e.batch_id=$1 and not exists(select 1 from invoice_export_notice_recipients x where x.event_id=e.id)) x where ($2::uuid is null or x.id>$2) order by x.id limit 21`,
+          `select * from (select f.id,'producer'::text kind,f.policy_id,f.created_at from invoice_export_notice_producer_failures f where f.batch_id=$1 and not exists(select 1 from invoice_export_notice_events e where (f.artifact_id is not null and e.artifact_id=f.artifact_id) or (f.failure_id is not null and e.failure_id=f.failure_id) or (f.confirmation_id is not null and e.confirmation_id=f.confirmation_id)) union all select e.id,'event'::text kind,e.policy_id,e.created_at from invoice_export_notice_events e join invoice_export_notice_failures f on f.event_id=e.id where e.batch_id=$1 and not exists(select 1 from invoice_export_notice_recipients x where x.event_id=e.id)) x where ($2::uuid is null or x.id>$2) order by x.id limit 21`,
           [id, q.after ?? null],
         )
       ).rows;
@@ -534,8 +783,8 @@ export const createInvoiceCsvRouter = (o) => {
         producerFailure &&
         (
           await c.query(
-            'select 1 from invoice_export_notice_events where ($1::uuid is not null and artifact_id=$1) or ($2::uuid is not null and failure_id=$2)',
-            [producerFailure.artifact_id, producerFailure.failure_id],
+            'select 1 from invoice_export_notice_events where ($1::uuid is not null and artifact_id=$1) or ($2::uuid is not null and failure_id=$2) or ($3::uuid is not null and confirmation_id=$3)',
+            [producerFailure.artifact_id, producerFailure.failure_id, producerFailure.confirmation_id],
           )
         ).rowCount
       )
@@ -592,8 +841,13 @@ export const createInvoiceCsvRouter = (o) => {
       });
       if (event) await recoverInvoiceExportRecipients(c, r, { batch: row, policy, event, recoveryId });
       else {
-        const resultId = producerFailure.artifact_id ?? producerFailure.failure_id,
-          kind = producerFailure.artifact_id ? 'artifact' : 'failure';
+        const resultId =
+            producerFailure.artifact_id ?? producerFailure.failure_id ?? producerFailure.confirmation_id,
+          kind = producerFailure.artifact_id
+            ? 'artifact'
+            : producerFailure.failure_id
+              ? 'failure'
+              : 'confirmation';
         await emitInvoiceExportNotice(c, r, {
           batch: row,
           policy,

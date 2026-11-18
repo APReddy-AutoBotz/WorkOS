@@ -289,7 +289,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         );
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
           '065e_wos06_governed_tm_valuation',
-          '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy', '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications',
+          '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy', '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation',
         ]);
         const after = await snapshot(),
           newKeys = [
@@ -301,7 +301,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             'commercial.invoice_drafts.view',
             'commercial.invoice_drafts.prepare',
             'commercial.invoice_drafts.own',
-            'commercial.invoice_drafts.cancel','commercial.invoice_approval.manage','commercial.invoice_approval.decide','commercial.invoice_export.view', 'commercial.invoice_export.create', 'commercial.invoice_export.configure', 'commercial.invoice_export.recover_notices', 'integrations.invoice_alert_routes.manage',
+            'commercial.invoice_drafts.cancel','commercial.invoice_approval.manage','commercial.invoice_approval.decide','commercial.invoice_export.view', 'commercial.invoice_export.create', 'commercial.invoice_export.configure', 'commercial.invoice_export.recover_notices', 'integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm',
           ];
         assert.deepEqual(
           after.permission_definitions

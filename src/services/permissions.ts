@@ -27,6 +27,7 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.tm_valuation.create', module: 'Commercial', label: 'Create T&M Valuation', description: 'Opt-in creation of governed T&M calculations and policies.', optIn: true },
   { key: 'commercial.invoice_approval.manage', module: 'Commercial', label: 'Manage Invoice Approvals', description: 'Opt-in scoped policy and submission management.', optIn: true },
   { key: 'commercial.invoice_approval.decide', module: 'Commercial', label: 'Decide Invoice Approvals', description: 'Opt-in decisions for assigned scoped stages.', optIn: true },
+  { key: 'commercial.invoice_batch.confirm', module: 'Commercial', label: 'Confirm Invoice Billing', description: 'Opt-in scoped manual billing attestation.', optIn: true },
   { key: 'commercial.invoice_export.view', module: 'Commercial', label: 'View Invoice CSV', description: 'Opt-in scoped access to retained invoice CSV artifacts.', optIn: true },
   { key: 'commercial.invoice_export.create', module: 'Commercial', label: 'Create Invoice CSV', description: 'Opt-in acceptance of approved invoice CSV artifacts.', optIn: true },
   { key: 'commercial.invoice_export.configure', module: 'Commercial', label: 'Configure Invoice Notices', description: 'Opt-in scoped notification policy configuration.', optIn: true },

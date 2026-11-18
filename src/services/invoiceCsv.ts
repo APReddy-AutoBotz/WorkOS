@@ -1,6 +1,7 @@
+import { validInvoiceConfirmationCommand } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
-import { canonicalHours } from '../../shared/work-hours.mjs';
+import { canonicalHours, compareHours } from '../../shared/work-hours.mjs';
 import { api, ApiClientError } from './apiClient';
 import { captureRateContext } from './rateCandidates';
 import { hasRatePermission, isRateContextCurrent, type RateContext } from './rateCandidates';
@@ -69,7 +70,7 @@ const line = z
 const source = z
   .object({
     id: uuid,
-    state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Cancelled']),
+    state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
     clientId: id,
     contractId: id,
     engagementId: id,
@@ -88,7 +89,7 @@ const source = z
   .strict()
   .refine((v) => {
     if (v.periodStart > v.periodEnd) return false;
-    if ((v.state === 'Exported') !== Boolean(v.artifactId)) return false;
+    if (['Exported', 'Billed/Confirmed'].includes(v.state) !== Boolean(v.artifactId)) return false;
     if (v.control === null) return !v.sourceCurrent;
     try {
       const total = invoiceDraftTotal(v.lines.map((x) => x.amount));
@@ -174,7 +175,7 @@ const operation = z
       status: 503,
     });
   };
-const current = (c: RateContext | null, kind: 'view' | 'create' | 'recover') => {
+const current = (c: RateContext | null, kind: 'view' | 'create' | 'recover' | 'confirm') => {
   const keys = [
     'commercial.contracts.view',
     'commercial.tm_billing.view',
@@ -186,7 +187,9 @@ const current = (c: RateContext | null, kind: 'view' | 'create' | 'recover') => 
       ? ['commercial.invoice_export.create']
       : kind === 'recover'
         ? ['commercial.invoice_export.recover_notices']
-        : []),
+        : kind === 'confirm'
+          ? ['commercial.invoice_batch.confirm']
+          : []),
   ];
   if (!c || !isRateContextCurrent(c) || !keys.every(hasRatePermission))
     throw new ApiClientError('Current invoice export scope or permission changed.', { status: 403 });
@@ -196,7 +199,7 @@ const call = async (
   method: 'GET' | 'POST',
   path: string,
   c: RateContext | null,
-  kind: 'view' | 'create' | 'recover',
+  kind: 'view' | 'create' | 'recover' | 'confirm',
   body?: object,
 ) => {
   const ctx = current(c, kind),
@@ -338,6 +341,67 @@ export type InvoiceNoticeRecoveryOperation = {
   producerFailureId: string | null;
   reason: string;
 };
+const confirmation = z
+  .object({
+    id: uuid,
+    batchId: uuid,
+    artifactId: uuid,
+    artifactVersion: z.literal(1),
+    artifactSha256: hash,
+    currency: z.string().regex(/^[A-Z]{3}$/),
+    total: money,
+    method: z.literal('MANUAL_ATTESTATION'),
+    reference: id,
+    actorId: uuid,
+    activeRole: id,
+    requestId: uuid,
+    reason,
+    operationId: id,
+    confirmedAt: instant,
+  })
+  .strict()
+  .refine((v) => {
+    try {
+      return (
+        !/[\u0000-\u001f\u007f-\u009f]/u.test(v.reference) &&
+        canonicalHours(v.total) === v.total &&
+        compareHours(v.total, '0') > 0
+      );
+    } catch {
+      return false;
+    }
+  });
+const confirmationSource = z
+  .object({
+    batchId: uuid,
+    state: z.enum(['Exported', 'Billed/Confirmed']),
+    artifactId: uuid,
+    artifactVersion: z.literal(1),
+    artifactSha256: hash,
+    currency: z.string().regex(/^[A-Z]{3}$/),
+    total: money,
+  })
+  .strict()
+  .refine((v) => {
+    try {
+      return canonicalHours(v.total) === v.total && compareHours(v.total, '0') > 0;
+    } catch {
+      return false;
+    }
+  });
+export type InvoiceConfirmationSource = z.infer<typeof confirmationSource>;
+export type InvoiceConfirmation = z.infer<typeof confirmation>;
+export type InvoiceConfirmationOperation = {
+  requestId: string;
+  batchId: string;
+  artifactId: string;
+  artifactVersion: 1;
+  artifactSha256: string;
+  currency: string;
+  total: string;
+  reference: string;
+  reason: string;
+};
 export { captureRateContext };
 export const invoiceCsv = {
   source: async (batchId: string, c: RateContext | null) => {
@@ -401,6 +465,80 @@ export const invoiceCsv = {
       .safeParse(await call('GET', '/artifacts/' + artifactId, c, 'view'));
     if (!out.success || out.data.artifact.id !== artifactId) return bad();
     return { artifact: out.data.artifact, bytes: await checkArtifact(out.data.artifact) };
+  },
+  confirmationSource: async (batchId: string, c: RateContext | null) => {
+    if (!uuid.safeParse(batchId).success) return bad();
+    const out = z
+      .object({ ...envelope, source: confirmationSource, confirmation: confirmation.nullable() })
+      .strict()
+      .safeParse(await call('GET', '/confirmation-sources/' + batchId, c, 'confirm'));
+    if (
+      !out.success ||
+      out.data.source.batchId !== batchId ||
+      (out.data.source.state === 'Billed/Confirmed') !== Boolean(out.data.confirmation)
+    )
+      return bad();
+    if (
+      out.data.confirmation &&
+      (out.data.confirmation.batchId !== batchId ||
+        out.data.confirmation.artifactId !== out.data.source.artifactId ||
+        out.data.confirmation.artifactSha256 !== out.data.source.artifactSha256 ||
+        out.data.confirmation.currency !== out.data.source.currency ||
+        canonicalHours(out.data.confirmation.total) !== canonicalHours(out.data.source.total))
+    )
+      return bad();
+    return out.data;
+  },
+  confirm: async (op: InvoiceConfirmationOperation, c: RateContext | null, receipt = false) => {
+    if (!validInvoiceConfirmationCommand(op)) return bad();
+    const raw = await call(
+        receipt ? 'GET' : 'POST',
+        receipt ? '/confirmation-receipts/' + op.requestId : '/confirmations',
+        c,
+        'confirm',
+        receipt ? undefined : op,
+      ),
+      out = z
+        .object({ ...envelope, confirmation, ...(receipt ? {} : { replayed: z.boolean() }) })
+        .strict()
+        .safeParse(raw);
+    if (!out.success) return bad();
+    const x = out.data.confirmation;
+    if (
+      x.requestId !== op.requestId ||
+      x.batchId !== op.batchId ||
+      x.artifactId !== op.artifactId ||
+      x.artifactVersion !== op.artifactVersion ||
+      x.artifactSha256 !== op.artifactSha256 ||
+      x.currency !== op.currency ||
+      canonicalHours(x.total) !== canonicalHours(op.total) ||
+      x.reference !== op.reference ||
+      x.reason !== op.reason ||
+      x.actorId !== out.data.actorUserId ||
+      x.activeRole !== out.data.activeRole
+    )
+      return bad();
+    return x;
+  },
+  confirmationNotificationStatus: async (requestId: string, c: RateContext | null) => {
+    if (!uuid.safeParse(requestId).success) return bad();
+    const status = z
+      .object({
+        requestId: uuid,
+        batchId: uuid,
+        eventId: uuid.nullable(),
+        eventKey: z.literal('invoice_batch.exported_or_billed_confirmed').nullable(),
+        state: z.enum(['EventUnavailable', 'DeliveryIncomplete', 'Recorded']),
+        alertOutbox: z.null(),
+      })
+      .strict()
+      .refine((v) => (v.state === 'EventUnavailable') === (v.eventId === null && v.eventKey === null));
+    const out = z
+      .object({ ...envelope, status })
+      .strict()
+      .safeParse(await call('GET', '/confirmation-notification-status/' + requestId, c, 'confirm'));
+    if (!out.success || out.data.status.requestId !== requestId) return bad();
+    return out.data.status;
   },
   recoveryTargets: async (batchId: string, c: RateContext | null, after?: string) => {
     if (!uuid.safeParse(batchId).success || (after && !uuid.safeParse(after).success)) return bad();

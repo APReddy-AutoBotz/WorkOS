@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import { withCommercialDatabase, migrateCommercialDatabase } from './support/commercial-drafting-test.mjs';
+// This verifies additive shape and no default grants; connected acceptance is separate.
+await withCommercialDatabase(async ({ pool }) => {
+  await migrateCommercialDatabase(pool);
+  const key = 'commercial.invoice_batch.confirm';
+  assert.equal(
+    (await pool.query('select count(*)::int n from permission_definitions where permission_key=$1', [key]))
+      .rows[0].n,
+    1,
+  );
+  for (const t of ['role_permissions', 'user_permission_grants'])
+    assert.equal(
+      (await pool.query('select count(*)::int n from ' + t + ' where permission_key=$1', [key])).rows[0].n,
+      0,
+    );
+  for (const t of ['invoice_batch_confirmations'])
+    assert.equal((await pool.query('select count(*)::int n from ' + t)).rows[0].n, 0);
+  for (const t of ['invoice_export_notice_events', 'invoice_export_notice_producer_failures'])
+    assert.equal(
+      (
+        await pool.query(
+          "select count(*)::int n from information_schema.columns where table_name=$1 and column_name='confirmation_id'",
+          [t],
+        )
+      ).rows[0].n,
+      1,
+    );
+  assert.deepEqual((await migrateCommercialDatabase(pool)).applied, []);
+  console.log('Billing confirmation additive schema and no-grant replay passed.');
+});
