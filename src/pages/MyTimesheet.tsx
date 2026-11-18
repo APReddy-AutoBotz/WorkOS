@@ -1,3 +1,6 @@
+import {categoryContext} from '../../shared/work-category.mjs';
+import {WorkCategory} from '../components/WorkCategory';
+import {captureCategoryContext,workCategoryService,type CategoryDay} from '../services/workCategories';
 import {WorkSourceIdentity} from '../components/WorkSourceIdentity';
 import {normalizeWorkSourceIdentity,workSourceIdentityIsValid} from '../../shared/work-source-identity.mjs';
 import {SubmissionDeadlinePreview} from '../components/SubmissionTiming';
@@ -99,6 +102,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   const hasInvalidReference=rows.some(row=>row.workReferences?.some(value=>!workReferenceIsValid(value)));
   const hasInvalidEvidence=rows.some(row=>row.evidenceUrls?.some(value=>!evidenceUrlIsValid(value)));
   const [preservedEntries,setPreservedEntries]=useState<TimesheetEntry[]>([]);
+  const [categoryDays,setCategoryDays]=useState<CategoryDay[]>([]);
   const [loaded,setLoaded]=useState(false);
   const [saving,setSaving]=useState(false);
   const savePending=useRef(false),generation=useRef(0),mounted=useRef(true);
@@ -106,7 +110,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
   const [scopeRevision,setScopeRevision]=useState(0);
   const blockWork=()=>{
     blocked.current=true;++generation.current;loadedContext.current=null;
-    setLoaded(false);setLoadedOwner(null);setRows([]);setHourDrafts({});setPreservedEntries([]);setActiveRemark(null);
+    setCategoryDays([]);setLoaded(false);setLoadedOwner(null);setRows([]);setHourDrafts({});setPreservedEntries([]);setActiveRemark(null);
     setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setCaptureWarnings(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
     setNotice({type:'warning',message:'Access or scope changed. Reload work explicitly for the selected legal entity.'});
   };
@@ -129,10 +133,12 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
     const context=captureWorkCaptureContext(()=>!cancelled&&request===generation.current&&ownsView());
     setLoaded(false);setLoadedOwner(null);loadedContext.current=null;setRows([]);setPreservedEntries([]);setHourDrafts({});setNotice(null);setActiveRemark(null);
     setStatus('Draft');setWorkAssurance(undefined);setDuplicateEntryCheck(undefined);setHistoryHeader(undefined);setCaptureWarnings(undefined);setRejectionNote(undefined);setAssignedProjects([]);setModes(null);setMode(null);setWriteToken(null);
-    workCaptureWorkspaceService.get(context).then(({projects,allocations,timesheets,modes:projection})=>{
+    const categoryOwner=captureCategoryContext('capture',()=>!cancelled&&request===generation.current&&ownsView());
+    setCategoryDays([]);
+    Promise.all([workCaptureWorkspaceService.get(context),workCategoryService.options(gridStart,getWeekEnding(currentWeek),categoryOwner)]).then(([{projects,allocations,timesheets,modes:projection},categories])=>{
       if(cancelled||request!==generation.current||!ownsView())return;
       if(!context||!isWorkCaptureContextCurrent(context)){blockWork();return;}
-      setServerDate(projection.serverDate);
+      setCategoryDays(categories);setServerDate(projection.serverDate);
       if(!aligned.current){
         aligned.current=true;const system=getWeekStart(new Date(`${projection.serverDate}T00:00:00Z`));
         if(toIsoDate(system)!==currentWeekKey){setCurrentWeek(system);return;}
@@ -214,7 +220,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
     rows.forEach(row => {
       row.hours.forEach((h: number, i: number) => {
         const quantity=canonicalCaptureHourInput(hourDrafts[`${row.id}:${i}`]??row.exactHours?.[i]??String(h));
-        if (quantity!==null&&(compareHours(quantity,'0')>0||Boolean(row.evidenceUrls?.[i])||Boolean(row.workReferences?.[i])||Boolean(row.sourceIdentities?.[i]))) {
+        if (quantity!==null&&(compareHours(quantity,'0')>0||Boolean(row.evidenceUrls?.[i])||Boolean(row.workReferences?.[i])||Boolean(row.sourceIdentities?.[i])||Boolean(row.categoryCodes?.[i]))) {
           const d = shiftDate(currentWeek,i-2);
           entries.push({
             id: Math.random().toString(),
@@ -223,7 +229,9 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
             projectName: row.projectName,
             workType: row.workType,
             clientName: row.clientName,
-            category: row.category,
+            category: row.categoryLabels?.[i]??row.category,
+            categoryCode:row.categoryCodes?.[i]??null,
+            categoryReference:row.categoryReferences?.[i]??null,
             date: toIsoDate(d),
             hours: quantity,
             remark: row.remarks[i],
@@ -231,7 +239,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
             workReference: normalizeWorkReference(row.workReferences?.[i]??null),
             sourceIdentity:normalizeWorkSourceIdentity(row.sourceIdentities?.[i]??null),
             status: nextStatus,
-            billable: row.billable,
+            billable: row.billables?.[i]??row.billable,
             weekEnding
           });
         }
@@ -244,7 +252,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
         {writeToken,mode,modePolicyId:modes?.latestId||null},context);
       if(!current())return;
       setWriteToken(saved.writeToken);setStatus(nextStatus);setWorkAssurance(saved.workAssurance);setDuplicateEntryCheck(saved.duplicateEntryCheck);setHistoryHeader(saved.timesheetId);setCaptureWarnings(saved.captureWarnings);
-      setRows(currentRows=>currentRows.map(row=>({...row,sourceIdentityRecorded:row.hours.map((_:number,index:number)=>Boolean(row.sourceIdentities?.[index]))})));
+      setRows(currentRows=>currentRows.map(row=>({...row,categoryReferences:row.hours.map((_:number,index:number)=>saved.categoryEvidence.find(e=>e.date===toIsoDate(shiftDate(currentWeek,index-2))&&e.code===row.categoryCodes?.[index])?.reference??row.categoryReferences?.[index]??null),sourceIdentityRecorded:row.hours.map((_:number,index:number)=>Boolean(row.sourceIdentities?.[index]))})));
       setRejectionNote(undefined);
       setNotice({
         type: 'success',
@@ -326,7 +334,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
       hours: Array(7).fill(0), exactHours:Array(7).fill('0'),
       remarks: Array(7).fill(''), evidenceUrls:Array(7).fill(null),workReferences:Array(7).fill(null),
       rowRemark: '',
-      billable: true
+      billable: type==='Project Work'
     }]);
   };
 
@@ -342,12 +350,13 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
 
   const workTypes: WorkType[] = [
     'Project Work',
-    'Client Misc Task'
+    'Client Misc Task',
+    'Non-client Work'
   ];
 
   const headerSubtitle = user?.role === 'Admin'
     ? "Testing view for project-level effort entries. Audit restricted to demo scenarios."
-    : `Log your client/project-related effort. Internal ${productConfig.organizationName} activities should not be submitted here.`;
+    : `Log work using the categories and contexts configured by ${productConfig.organizationName}. Absence remains separate availability.`;
 
   if (user?.role === 'CountryDirector') {
     return <Navigate to="/timesheets/approval" replace />;
@@ -474,7 +483,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                       onChange={(e) => {
                         const val = e.target.value as WorkType;
                         patchRow(row.id,{workType:val,projectId:val==='Project Work'?row.projectId:undefined,
-                          projectName:val==='Project Work'?row.projectName:'Select Category',billable:val==='Project Work'});
+                          projectName:val==='Project Work'?row.projectName:undefined,clientName:val==='Client Misc Task'?row.clientName:undefined,billable:val==='Project Work',categoryCodes:Array(7).fill(null),categoryReferences:Array(7).fill(null),categoryLabels:Array(7).fill(null),billables:Array(7).fill(null)});
                       }}
                     >
                       {workTypes.map(wt => <option key={wt} value={wt}>{wt}</option>)}
@@ -501,7 +510,7 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                             <option value="">{row.projectName}</option>
                             {assignedProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                           </select>
-                        ) : (
+                        ) : row.workType==='Client Misc Task' ? (
                           <div className="space-y-1">
                             <input
                               type="text"
@@ -518,9 +527,9 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                               onChange={(e) => patchRow(row.id,{category:e.target.value})}
                             />
                           </div>
-                        )}
+                        ) : <p>Non-client work · no project or client</p>}
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">
-                          {row.workType === 'Project Work' ? 'Client Engagement' : 'Client-Related Work'}
+                          {row.workType === 'Project Work' ? 'Client Engagement' : row.workType==='Client Misc Task'?'Descriptive client context':'Non-client context'}
                         </p>
                       </div>
                       <button
@@ -556,6 +565,11 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
                           <MessageSquare size={12} />
                         </button>
                       </div>
+                      {categoryDays[i]?.enabled&&<><label className="block text-xs">Category {allDays[i]}<select aria-label={`Category ${allDays[i]}`} className="block w-full rounded border p-1" disabled={!editable()||Boolean(row.sourceIdentityRecorded?.[i])} value={row.categoryCodes?.[i]??''} onChange={e=>{
+                        const choice=categoryDays[i].categories.find(c=>c.code===e.target.value);setRows(current=>current.map(r=>r.id===row.id?{...r,categoryCodes:r.hours.map((_:number,j:number)=>j===i?choice?.code??null:r.categoryCodes?.[j]??null),categoryReferences:r.hours.map((_:number,j:number)=>j===i?null:r.categoryReferences?.[j]??null),categoryLabels:r.hours.map((_:number,j:number)=>j===i?choice?.label??null:r.categoryLabels?.[j]??null),billables:r.hours.map((_:number,j:number)=>j===i?choice?.billability==='non_billable'?false:r.billables?.[j]??r.billable:r.billables?.[j]??null)}:r));
+                      }}><option value="">Choose category explicitly</option>{categoryDays[i].categories.filter(c=>c.contexts.includes(categoryContext(row.workType))).map(c=><option key={c.code} value={c.code}>{c.label} ({c.code})</option>)}</select></label>
+                      {categoryDays[i].categories.find(c=>c.code===row.categoryCodes?.[i])?.billability==='project_bound'&&<label className="block text-xs"><input type="checkbox" aria-label={`Billable ${allDays[i]}`} disabled={!editable()||Boolean(row.sourceIdentityRecorded?.[i])} checked={row.billables?.[i]??row.billable} onChange={e=>setRows(current=>current.map(r=>r.id===row.id?{...r,billables:r.hours.map((_:number,j:number)=>j===i?e.target.checked:r.billables?.[j]??null)}:r))}/>Request billable within project/assignment eligibility</label>}</>}
+                      <WorkCategory value={row.categoryReferences?.[i]} code={row.categoryCodes?.[i]}/>
                       <WorkSourceIdentity value={row.sourceIdentities?.[i]}/><WorkReference value={row.workReferences?.[i]}/><EvidenceLink value={row.evidenceUrls?.[i]}/>
                     </td>
                   );})}
@@ -610,8 +624,9 @@ const TimesheetEditor = ({owner, currentWeek, setCurrentWeek, aligned}: {
       {hasInvalidSource&&<p role="alert">Provide both exact source identity fields, or leave both blank before capture. Recorded source-linked content is create-only.</p>}
       {hasInvalidReference&&<p role="alert">Use a single-line work reference of at most 200 characters without control characters.</p>}
       {hasInvalidEvidence&&<p role="alert">Use an absolute HTTP or HTTPS evidence URL of at most 2048 characters without embedded credentials.</p>}
-      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hoursExact??entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'} <WorkSourceIdentity value={entry.sourceIdentity}/><WorkReference value={entry.workReference}/><EvidenceLink value={entry.evidenceUrl}/></p>)}</section>}
-      {hiddenCells.length>0&&<section aria-label="Preserved unseen entries" className="mt-4 rounded-xl border p-4"><p>These cells are outside the current view and remain in the same whole-header save. Change their context only in a view that includes their dates.</p>{hiddenCells.map(({row,index})=><p key={`${row.id}:${index}`}>{toIsoDate(shiftDate(currentWeek,index-2))}: {captureCellText(row,index,hourDrafts)}h, {row.projectName||row.clientName||row.workType}, {row.category||'No category'}, {row.remarks[index]||'No comment'} <WorkSourceIdentity value={row.sourceIdentities?.[index]}/><WorkReference value={row.workReferences?.[index]}/><EvidenceLink value={row.evidenceUrls?.[index]}/></p>)}</section>}
+      <button type="button" className="rounded border p-2" disabled={!editable()} onClick={()=>addRow('Non-client Work')}>Add Non-client Work</button>
+      {preservedEntries.length>0&&<section aria-label="Preserved off-grid entries" className="mt-4 rounded-xl border p-4"><p>{preservedEntries.length} existing entries are outside this compatibility grid or have zero hours. They are retained unchanged on save and included in totals.</p>{preservedEntries.map(entry=><p key={entry.id}>{entry.date}: {canonicalHours(entry.hoursExact??entry.hours)}h, {entry.projectName||entry.clientName||entry.workType}, {entry.remark||'No comment'} <WorkCategory value={entry.categoryReference} code={entry.categoryCode}/><WorkSourceIdentity value={entry.sourceIdentity}/><WorkReference value={entry.workReference}/><EvidenceLink value={entry.evidenceUrl}/></p>)}</section>}
+      {hiddenCells.length>0&&<section aria-label="Preserved unseen entries" className="mt-4 rounded-xl border p-4"><p>These cells are outside the current view and remain in the same whole-header save. Change their context only in a view that includes their dates.</p>{hiddenCells.map(({row,index})=><p key={`${row.id}:${index}`}>{toIsoDate(shiftDate(currentWeek,index-2))}: {captureCellText(row,index,hourDrafts)}h, {row.projectName||row.clientName||row.workType}, {row.category||'No category'}, {row.remarks[index]||'No comment'} <WorkCategory value={row.categoryReferences?.[index]} code={row.categoryCodes?.[index]}/><WorkSourceIdentity value={row.sourceIdentities?.[index]}/><WorkReference value={row.workReferences?.[index]}/><EvidenceLink value={row.evidenceUrls?.[index]}/></p>)}</section>}
       {!loaded&&<p role="status">Work is not ready for editing. Reload this page after checking connection and access.</p>}
       {saving&&<p role="status">Saving work…</p>}
       {/* Remark Input Modal/Overlay */}

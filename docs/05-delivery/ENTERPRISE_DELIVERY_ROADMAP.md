@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+The work category package adds migration 059 after the assignment overlap controls. Acceptance covers category adoption, named employee entry, CSV import, correction history and approval readback. [Work package](../tasks/WOS-04-WORK-CATEGORY-CONTEXT.md)
+
 The next assignment package integrates effective-dated overlap rules and retained decision evidence with current allocation editing and CSV imports. Migration 058 follows the shared login throttle migration. Acceptance covers fresh installation, upgrade, concurrent writes and the Allocation Control browser journey. [Work package](../tasks/WOS-04-ASSIGNMENT-OVERLAP-POLICY.md)
 
 The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. Auditing lifetime changes across deployments remains open.

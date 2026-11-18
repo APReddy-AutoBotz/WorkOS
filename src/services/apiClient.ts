@@ -1,3 +1,4 @@
+import {readCategoryEntry} from '../../shared/work-category.mjs';
 import {normalizeWorkSourceIdentity} from '../../shared/work-source-identity.mjs';
 import {normalizeSubmissionTiming} from './submissionDeadline';
 import {normalizeOvertimeWarnings} from './overtimeCapture';
@@ -427,6 +428,7 @@ export const normalizeTimesheetSummary = (
       evidenceUrl: typeof entry.evidence_url === 'string' ? entry.evidence_url : null,
       workReference: typeof entry.work_reference === 'string' ? entry.work_reference : null,
       sourceIdentity:entry.source_identity===undefined?undefined:normalizeWorkSourceIdentity(entry.source_identity),
+      ...readCategoryEntry(entry.category_code,entry.category_reference,entry.work_type,String(entry.work_date).slice(0,10),entry.billable,entry.category),
       status: (entry.status || r.status) as TimesheetEntry['status'],
       billable: Boolean(entry.billable),
       weekEnding: String(entry.week_ending ?? r.week_ending).slice(0, 10),

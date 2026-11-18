@@ -5,6 +5,8 @@ import {BrowserRouter} from 'react-router-dom';
 import {MyTimesheet} from '../../src/pages/MyTimesheet';
 import {authService} from '../../src/services/authService';
 import {workCaptureWorkspaceService} from '../../src/services/workCaptureModes';
+import {workCategoryService} from '../../src/services/workCategories';
+import {shiftCapacityDate} from '../../shared/worker-capacity.mjs';
 import '../../src/index.css';
 let identity = 'synthetic-worker-a';
 const reads: Array<{resolve: (value: any) => void; identity: string}> = [];
@@ -16,6 +18,13 @@ authService.getCurrentUser = () => ({id:identity,name:'Synthetic worker',role:'E
 const scope={organizationId:'synthetic-org',legalEntityId:'synthetic-legal'};
 sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));
 workCaptureWorkspaceService.submissionSettings = () => holdSettings ? new Promise(resolve=>settings.push(resolve)) : Promise.resolve({demoSubmissionMode:true} as any);
+workCategoryService.options = async (startsOn, endsOn) => {
+  const days = [];
+  for (let date = startsOn; date <= endsOn; date = shiftCapacityDate(date, 1)) {
+    days.push({date, catalogId: null, sequence: 0, effectiveFrom: null, enabled: false, categories: []});
+  }
+  return days;
+};
 workCaptureWorkspaceService.get = () => new Promise(resolve => reads.push({resolve,identity}));
 workCaptureWorkspaceService.save = input => new Promise(resolve => saves.push({resolve,input}));
 (window as any).ownership = {

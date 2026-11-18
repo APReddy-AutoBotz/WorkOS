@@ -1,3 +1,4 @@
+import {readCategoryEntry} from '../../shared/work-category.mjs';
 import {normalizeWorkSourceIdentity,workSourceIdentityIsValid} from '../../shared/work-source-identity.mjs';
 import {normalizeSubmissionTiming,type SubmissionTiming} from './submissionDeadline';
 import {api,ApiClientError} from './apiClient';
@@ -5,7 +6,7 @@ import {assertWorkCaptureContext,type WorkCaptureContext} from './workCaptureMod
 import {canonicalHours} from '../../shared/work-hours.mjs';
 import {normalizeEvidenceUrl,evidenceUrlIsValid} from '../../shared/work-evidence.mjs';
 import {workReferenceIsValid} from '../../shared/work-reference.mjs';
-export type HistoricalWorkEntry={sourceIdentity?:import('../types').WorkSourceIdentity|null;entryId:string;projectId:string|null;workType:'Project Work'|'Client Misc Task';workDate:string;hoursExact:string;billable:boolean;clientName:string|null;category:string|null;remark:string|null;evidenceUrl?:string|null;workReference?:string|null};
+export type HistoricalWorkEntry={sourceIdentity?:import('../types').WorkSourceIdentity|null;entryId:string;projectId:string|null;categoryCode?:string|null;categoryReference?:import('../types').WorkCategoryReference|null;workType:import('../types').WorkType;workDate:string;hoursExact:string;billable:boolean;clientName:string|null;category:string|null;remark:string|null;evidenceUrl?:string|null;workReference?:string|null};
 export type WorkHistorySubmission={submissionTiming?:SubmissionTiming[];id:string;sequence:number;createdAt:string;activeRole:string;source:string;entries:HistoricalWorkEntry[];decision:null|{status:'Approved'|'Rejected'|'Cancelled';reason:string|null;createdAt:string;activeRole:string;source:string}};
 export type WorkHistoryPage={organizationId:string;legalEntityId:string;timesheetId:string;employeeId:string;weekEnding:string;submissions:WorkHistorySubmission[];nextBeforeSequence:number|null};
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v&&typeof v==='object'&&!Array.isArray(v));
@@ -22,13 +23,14 @@ export const decodeWorkHistoryPage=(value:unknown,before:number|null=null):WorkH
   if(!object(raw)||!text(raw.id)||seen.has(raw.id)||!Number.isInteger(raw.sequence)||Number(raw.sequence)<1||Number(raw.sequence)>=previous||!instant(raw.createdAt)||!text(raw.activeRole)||!text(raw.source)||!Array.isArray(raw.entries)||raw.entries.length<1||raw.entries.length>100)fail();
   const row=raw as Record<string,unknown>;previous=Number(row.sequence);seen.add(row.id as string);const ids=new Set<string>();
   const entries=(row.entries as unknown[]).map(rawEntry=>{
-   if(!object(rawEntry)||!text(rawEntry.entryId)||ids.has(rawEntry.entryId)||!optionalText(rawEntry.projectId)||typeof rawEntry.workType!=='string'||!['Project Work','Client Misc Task'].includes(rawEntry.workType)||!date(rawEntry.workDate)||typeof rawEntry.hoursExact!=='string'||typeof rawEntry.billable!=='boolean'||!['clientName','category','remark'].every(key=>optionalText(rawEntry[key])))fail();
+   if(!object(rawEntry)||!text(rawEntry.entryId)||ids.has(rawEntry.entryId)||!optionalText(rawEntry.projectId)||typeof rawEntry.workType!=='string'||!['Project Work','Client Misc Task','Non-client Work'].includes(rawEntry.workType)||!date(rawEntry.workDate)||typeof rawEntry.hoursExact!=='string'||typeof rawEntry.billable!=='boolean'||!['clientName','category','remark'].every(key=>optionalText(rawEntry[key])))fail();
    const entry=rawEntry as Record<string,unknown>;ids.add(entry.entryId as string);
    try{canonicalHours(entry.hoursExact as string);}catch{fail();}
    if(Object.hasOwn(entry,'evidenceUrl')&&(!optionalText(entry.evidenceUrl)||!evidenceUrlIsValid(entry.evidenceUrl)))fail();
    if(Object.hasOwn(entry,'sourceIdentity')&&!workSourceIdentityIsValid(entry.sourceIdentity))fail();
    if(Object.hasOwn(entry,'workReference')&&(!optionalText(entry.workReference)||!workReferenceIsValid(entry.workReference)))fail();
-   return {entryId:entry.entryId,projectId:entry.projectId,workType:entry.workType,workDate:entry.workDate,hoursExact:canonicalHours(entry.hoursExact as string),billable:entry.billable,clientName:entry.clientName,category:entry.category,remark:entry.remark,
+   let classification;try{classification=readCategoryEntry(entry.categoryCode,entry.categoryReference,entry.workType,entry.workDate,entry.billable,entry.category);}catch{fail();}
+   return {...classification,entryId:entry.entryId,projectId:entry.projectId,workType:entry.workType,workDate:entry.workDate,hoursExact:canonicalHours(entry.hoursExact as string),billable:entry.billable,clientName:entry.clientName,category:entry.category,remark:entry.remark,
     ...(Object.hasOwn(entry,'evidenceUrl')?{evidenceUrl:normalizeEvidenceUrl(entry.evidenceUrl)}:{}),...(Object.hasOwn(entry,'workReference')?{workReference:entry.workReference}:{}),...(Object.hasOwn(entry,'sourceIdentity')?{sourceIdentity:normalizeWorkSourceIdentity(entry.sourceIdentity)}:{})} as HistoricalWorkEntry;
   });
   let decision:WorkHistorySubmission['decision']=null;

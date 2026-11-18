@@ -106,7 +106,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const proposalInput=projectInput(dates,'SYN-UPGRADE-PROMOTION',{id:'pending',billable:true},{budgetAllocation:'0.0000'});
     const proposedId=await seedProposal(pool,proposalInput);
     const oldLegacy=await snapshot(pool,legacyTables);
-    for(const row of oldLegacy.timesheet_entries){row.snapshot.evidence_url=null;row.snapshot.work_reference=null;row.snapshot.source_identity=null;} // additive 047/048 column
+    for(const row of oldLegacy.timesheet_entries){row.snapshot.evidence_url=null;row.snapshot.work_reference=null;row.snapshot.source_identity=null;row.snapshot.category_code=null;row.snapshot.category_reference=null;} // additive 047/048 column
     await copyFile(join(commercialServerDir,'migrations',`${migration040}.sql`),join(rootDir,'migrations',`${migration040}.sql`));
     const before041=await runMigrations({pool,rootDir,logger:quiet});assert.deepEqual(before041.applied,[migration040]);
     const identities=await seedCommercialIdentities(pool);
@@ -119,7 +119,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       await client.query('commit');
     }catch(error){await client.query('rollback');throw error;}finally{client.release();}
     const immutable040=await snapshot(pool,draftTables);
-    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration041,'042_wos04_scoped_client_profiles','043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand','056_wos04_effective_worker_capacity','056a_wos04_capacity_exact_percentage','057_wos04_assignment_versions','057a_wos04_session_revocations','057b_wos05_leave_submitter_lookup','057c_wos04_shared_auth_throttle','058_wos04_assignment_overlap_policy','058a_wos04_assignment_overlap_serialization']);assert.equal(upgraded.status.isCurrent,true);
+    const upgraded=await migrateCommercialDatabase(pool);assert.deepEqual(upgraded.applied,[migration041,'042_wos04_scoped_client_profiles','043_wos04_governed_amendments', '044_wos04_work_submission_evidence','045_wos04_work_capture_policy','046_wos04_work_capture_modes','047_wos04_work_entry_evidence','048_wos04_work_entry_reference','049_wos04_required_work_evidence','050_wos04_identical_entry_check','051_wos04_overtime_capture_policy','052_wos04_submission_deadline','053_wos04_work_source_identity','054_wos04_workforce_capabilities','055_wos04_resource_demand','056_wos04_effective_worker_capacity','056a_wos04_capacity_exact_percentage','057_wos04_assignment_versions','057a_wos04_session_revocations','057b_wos05_leave_submitter_lookup','057c_wos04_shared_auth_throttle','058_wos04_assignment_overlap_policy','058a_wos04_assignment_overlap_serialization','059_wos04_work_category_context']);assert.equal(upgraded.status.isCurrent,true);
     assert.deepEqual(await snapshot(pool,legacyTables),oldLegacy,'041 upgrade must not change old project/work/client/employee identities or fields');
     assert.deepEqual(await snapshot(pool,draftTables),immutable040,'041 upgrade never converts or edits 040 drafts, terms, events or neutral mappings');
     assert.equal((await counts(pool)).events,0);assert.equal((await counts(pool)).bindings,0);

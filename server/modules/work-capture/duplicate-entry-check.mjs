@@ -12,7 +12,7 @@ export const checkDuplicateEntries=entries=>{
  const grouped=new Map(),ids=new Set();
  for(const entry of entries){
   if(!entry||typeof entry.id!=='string'||!entry.id||ids.has(entry.id)
-    ||!['Project Work','Client Misc Task'].includes(entry.work_type)||typeof entry.billable!=='boolean'
+    ||!['Project Work','Client Misc Task','Non-client Work'].includes(entry.work_type)||typeof entry.billable!=='boolean'
     ||fields.some(field=>optionalText(entry[field])!==null&&typeof entry[field]!=='string'))return null;
   ids.add(entry.id);
   let workDate,hoursExact;
@@ -22,7 +22,7 @@ export const checkDuplicateEntries=entries=>{
    hoursExact=canonicalHours(entry.hours_exact??entry.hours);
   }catch{return null;}
   const content=JSON.stringify([workDate,entry.work_type,optionalText(entry.project_id),optionalText(entry.client_name),optionalText(entry.category),hoursExact,entry.billable,
-   optionalText(entry.remark),optionalText(entry.evidence_url),optionalText(entry.work_reference)]);
+   optionalText(entry.remark),optionalText(entry.evidence_url),optionalText(entry.work_reference),...(entry.category_reference?[entry.category_code,entry.category_reference]:[])]);
   let group=grouped.get(content);
   if(!group){group={key:createHash('sha256').update(content).digest('hex'),entryIds:[],workDate,hoursExact,
    workType:entry.work_type,projectId:optionalText(entry.project_id),clientName:optionalText(entry.client_name),category:optionalText(entry.category)};grouped.set(content,group);}

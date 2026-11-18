@@ -73,7 +73,7 @@ const replacementClient={query:async(sql,values)=>{
 }};
 await assert.rejects(assertCaptureReplacementPeriods(replacementClient,req,'header-old'),{code:'REPORTING_PERIOD_CLOSED'});
 const source = await readFile(new URL('../server/modules/imports/operational-import-router.mjs', import.meta.url), 'utf8');
-assert.match(source, /category:entry.category,remark:entry.remark/);
+assert.match(source, /category:entry.category,category_code:entry.categoryCode,remark:entry.remark/);
 assert.match(source, /stagedReplacements:dryRun\?stagedCaptureReplacements:\[\]/);
 assert.doesNotMatch(source, /hours: round1\(row.hours\)/);
 const assignmentMigration = await readFile(new URL('../server/migrations/044_wos04_work_submission_evidence.sql', import.meta.url), 'utf8');
