@@ -488,3 +488,5 @@ Run assignment-overlap unit/production transport, real PostgreSQL fresh/057 upgr
 Migration 058a serializes source and policy writes per organization and legal entity. A repeatable-read writer with an outdated snapshot receives PostgreSQL serialization failure 40001. Retry the complete transaction against fresh data. Preserve migrations 058 and 058a and their evidence on rollback.
 
 Apply migration 059 before enabling the work category editor. Existing entries retain their original classification. Adopt a catalog explicitly for each participating legal entity. Preserve the catalog versions and retained entry references on rollback. Resume category-aware writes with a compatible application.
+
+Apply migration 060 before exposing actual work evidence exports. Preserve the immutable evidence rows, request identities and artifact checksums on rollback. Use a compatible reader to retrieve existing evidence. A missing capacity or classification source leaves the percentage unavailable.

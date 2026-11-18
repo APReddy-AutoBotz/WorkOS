@@ -6,6 +6,7 @@ import {createSessionLogoutHandler} from './modules/identity-access/session-life
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
 import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createPersistentLoginRateLimit} from './modules/identity-access/persistent-login-rate-limit.mjs';
+import {createActualWorkRouter} from './modules/planning/actual-work-router.mjs';
 import {createWorkCategoryRouter} from './modules/work-capture/work-category-router.mjs';
 import {categoryCodeInput,applyWorkCategories,categoryEntryProjection} from './modules/work-capture/work-category.mjs';
 import {createAssignmentOverlapRouter} from './modules/planning/assignment-overlap-router.mjs';
@@ -6380,6 +6381,8 @@ app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
 app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,getSetting,audit,recordAllocationChangeApproval}));
+app.use('/api/v1/actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
+app.use('/api/v1/my-actual-work',createActualWorkRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit,own:true}));
 app.use('/api/v1/assignment-overlap',createAssignmentOverlapRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/my-work-planning',createOwnWorkPlanningRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere}));
 app.use('/api/v1/resource-demand',createResourceDemandRouter({pool,requireDatabase,requireAuth,requirePermission,buildProjectScopeWhere,buildEmployeeScopeWhere,audit}));
