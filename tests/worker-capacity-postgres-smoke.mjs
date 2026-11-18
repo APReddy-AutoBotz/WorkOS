@@ -25,7 +25,7 @@ await withCommercialDatabase(async({pool})=>withPreCommercialMigrations(async ro
  for(const name of(await readdir(join(commercialServerDir,'migrations'))).filter(n=>/^0(?:4\d|5[0-6])_/.test(n)))await copyFile(join(commercialServerDir,'migrations',name),join(rootDir,'migrations',name));
  await runMigrations({pool,rootDir,logger:{log(){}}});
  assert.equal((await pool.query('select valid_capacity_profile($1::jsonb) valid',[JSON.stringify(precisionProfile)])).rows[0].valid,false,'original056 exhibits precision defect');
- assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['056a_wos04_capacity_exact_percentage','057_wos04_assignment_versions','057a_wos04_session_revocations','057b_wos05_leave_submitter_lookup','057c_wos04_shared_auth_throttle','058_wos04_assignment_overlap_policy','058a_wos04_assignment_overlap_serialization']);
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['056a_wos04_capacity_exact_percentage','057_wos04_assignment_versions','057a_wos04_session_revocations','057b_wos05_leave_submitter_lookup','057c_wos04_shared_auth_throttle','058_wos04_assignment_overlap_policy','058a_wos04_assignment_overlap_serialization','059_wos04_work_category_context']);
  await assertPrecision(pool);
  assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
 }));
