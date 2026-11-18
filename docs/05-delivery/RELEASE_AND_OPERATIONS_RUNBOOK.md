@@ -496,3 +496,7 @@ Apply migration 061 before serving calendar-backed full-day leave. Retain the im
 ## Native percentage forecasts
 
 Run migration 062 before enabling the updated Forecast page. The migration creates an empty forecast evidence table. To recover from an application regression, keep the migration and retained exports and roll forward with a corrected application. Older applications can reject the newer migration ledger.
+
+## Staged timesheet approvals
+
+Apply migration 063 before deploying the application. Existing submissions keep their original decision path. To retire a staged policy prospectively, publish an empty worker selection. Finish pending instances against their retained policy and preserve the migration, event records and read acknowledgements during recovery.

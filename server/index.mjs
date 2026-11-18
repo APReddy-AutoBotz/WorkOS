@@ -6,6 +6,8 @@ import {createSessionLogoutHandler} from './modules/identity-access/session-life
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
 import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
 import {createPersistentLoginRateLimit} from './modules/identity-access/persistent-login-rate-limit.mjs';
+import {createWorkApprovalRouter} from './modules/approvals/work-approval-router.mjs';
+import {startWorkApproval,assertLegacyWorkApproval} from './modules/approvals/work-approval-service.mjs';
 import {assertCalendarLeaveDecision,calendarLeaveError} from './modules/leave/calendar-leave-service.mjs';
 import {createNativeForecastRouter} from './modules/planning/native-forecast-router.mjs';
 import {createActualWorkRouter} from './modules/planning/actual-work-router.mjs';
@@ -611,6 +613,7 @@ const upsertApprovalRecord = async (client, req, {
     source,
     dueAt,
   ]);
+  if(status==='Pending'&&entityType==='Timesheet'&&await startWorkApproval(client,req,entityId,workApprovalOptions))return result.rows[0];
   if (status === 'Pending') {
     await sendNotification(client, req, {
       recipientEmployeeId: subjectEmployeeId,
@@ -625,7 +628,7 @@ const upsertApprovalRecord = async (client, req, {
   return result.rows[0];
 };
 
-const decideApprovalRecord = async (client, req, { entityType, entityId, status, comments = null }) => {
+const decideApprovalRecord = async (client, req, { entityType, entityId, status, comments = null, suppressNotification = false }) => {
   const result = await client.query(`
     update approval_records
     set status = $3,
@@ -648,7 +651,7 @@ const decideApprovalRecord = async (client, req, { entityType, entityId, status,
     req.user?.activeRole || 'system',
   ]);
   const next = result.rows[0] || null;
-  if (next) {
+  if (next && !suppressNotification) {
     await sendNotification(client, req, {
       recipientEmployeeId: next.subject_employee_id,
       eventType: 'ApprovalDecided',
@@ -3092,6 +3095,7 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
       }
     }
 
+    await assertLegacyWorkApproval(client,req,previous.id);
     await assertWorkDecisionAllowed(client,req,previous);
     const approved = parsed.data.status === 'Approved';
     const result = await client.query(`
@@ -3322,6 +3326,8 @@ app.use('/api', createAvailabilityReportRouter({
 
 const buildApprovalScopeWhere = (req, params) => legacyApprovalScope(req, params, {isGlobalRole, buildEmployeeScopeWhere});
 
+const workApprovalOptions={fetchUserAuthRowByWhere,getEffectivePermissionsForUser,buildEmployeeScopeWhere,audit,assertWorkDecisionAllowed,retainWorkDecision,decideApprovalRecord};
+
 const approvalSelect = `
   select ar.*, e.name as subject_employee_name
   from approval_records ar
@@ -3392,6 +3398,7 @@ app.patch('/api/approvals/:id/status', requireDatabase, requireAuth, requirePerm
     }
 
     if (approval.entity_type === 'Timesheet') {
+      await assertLegacyWorkApproval(client,req,approval.entity_id);
       if(!req.user.permissions.includes('timesheets.approve')){await client.query('rollback');res.status(403).json({error:'Insufficient permission privileges'});return;}
       const previous = (await client.query('select *,week_ending::text from timesheets where id=$1 and organization_id=$2 and legal_entity_id=$3 for update', [approval.entity_id, req.organizationScope.organizationId, req.organizationScope.legalEntityId])).rows[0];
       if (!previous || previous.status !== 'Submitted') {
@@ -6383,6 +6390,7 @@ registerOrganizationSetupRoutes({
 const workHistoryRouter=createWorkHistoryRouter({pool,requireDatabase,requireAuth,requirePermission});
 app.use('/api/timesheets',workHistoryRouter);
 app.use('/api/v1/timesheets',workHistoryRouter);
+app.use('/api/v1/work-approvals',createWorkApprovalRouter({pool,requireDatabase,requireAuth,requirePermission,...workApprovalOptions}));
 app.use('/api/v1/worker-capacity',createWorkerCapacityRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/assignment-versions',createAssignmentVersionRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,getSetting,audit,recordAllocationChangeApproval}));
 app.use('/api/v1/native-forecast',createNativeForecastRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere,audit}));
