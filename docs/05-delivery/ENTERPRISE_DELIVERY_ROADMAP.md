@@ -1,14 +1,14 @@
 # Enterprise delivery and integration roadmap
 
-Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
+Updated 2026-11-18. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
 
 ## Delivery priorities
 
 The commercial rate candidate package adds dated billing and cost inputs, separate permissions and exact-decimal resolution previews. It uses scoped workforce selection and current employment status. Candidate versions now have named owners, independent approval and explicit adoption. Adopted rates support time-and-materials valuation snapshots and a separate billing-eligibility decision. Non-T&M policy profiles and invoice issuance remain open. [Rate candidate scope](../tasks/WOS-06-RATE-COST-CANDIDATES.md)
 
-The scoped workforce directory establishes worker selection for upcoming cost-rate maintenance. Directory access grants no commercial permissions. Worker classification and dated worker-type maintenance remain open.
+The scoped workforce directory provides worker selection for cost-rate maintenance. Directory access grants no commercial permissions. Worker classification and dated worker-type maintenance remain open.
 
-Commercial drafting recovery covers failed reconciliation reads after a lost or invalid save response. Rate approval, adoption, valuation and billing follow candidate integration.
+Commercial drafting recovery covers failed reconciliation reads after a lost or invalid save response.
 
 Material assignment changes can now follow named approval stages. The work package covers edits and ending existing assignments, including import controls. Creation approvals are a separate package. [Material assignment approvals](../tasks/WOS-05-MATERIAL-ASSIGNMENT-APPROVALS.md)
 
