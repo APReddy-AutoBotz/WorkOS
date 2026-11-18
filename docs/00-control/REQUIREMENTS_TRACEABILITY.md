@@ -548,3 +548,7 @@ WOS-WKF-008, ORG-004 and IAM-003/005/010 are covered by scoped directory API, Po
 ## Commercial rate candidates
 
 WOS-COM-001–004 and COM-014/015 are partially implemented by effective-dated billing and cost candidates. API, migration and browser tests cover decimal precision, explicit priority, conflict and missing outcomes, read-after-write recovery and confidential cost permissions. Approval and authoritative financial calculations remain pending.
+
+### WOS-06 commercial rate governance
+
+Ownership, approval and adoption are tracked in the commercial owner, canonical candidate approval and approved rate adoption task specifications. The governed T&M valuation and T&M eligibility specifications cover separate downstream decisions. The release gates exercise their PostgreSQL upgrade paths and scoped browser journeys.

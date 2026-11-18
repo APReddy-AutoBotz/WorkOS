@@ -110,6 +110,7 @@ const candidate = z
       (x.sequence === 1 ? x.previousId === null : x.previousId !== null) &&
       (x.kind === 'cost' ? x.bindingType === 'worker' : x.bindingType !== 'worker'),
   );
+export const rateCandidateSchema = candidate;
 export type RateCandidate = z.infer<typeof candidate>;
 const envelope = {
   ownerKey: z.string().regex(/^[a-f0-9]{64}$/),
@@ -274,4 +275,13 @@ export const rateCandidateService = {
       return bad();
     return x;
   },
+};
+
+const ownerEvent=z.object({id:uuid,candidateId:uuid,sequence:z.number().int().positive(),previousId:uuid.nullable(),ownerUserId:uuid,ownerRole:z.string().min(1),requestId:uuid,actorId:uuid,activeRole:z.string().min(1),reason:z.string().min(3),createdAt:z.string().refine(x=>Number.isFinite(Date.parse(x)))}).strict().refine(x=>x.sequence===1?x.previousId===null:x.previousId!==null);
+const ownerCommand=z.object({requestId:uuid,candidateId:uuid,expectedOwnerEventId:uuid.nullable(),ownerUserId:uuid,ownerRole:z.string().min(1).max(200),reason:z.string().trim().min(3).max(1000)}).strict();
+export type OwnerCommand=z.infer<typeof ownerCommand>;export type OwnerEvent=z.infer<typeof ownerEvent>;
+const ownerCurrent=(c:RateContext|null,k:RateKind)=>{const ctx=current(c,k,true);if(k==='billing'&&!hasRatePermission('commercial.contracts.manage'))throw new ApiClientError('Current commercial administration is required.',{status:403});return ctx;};
+export const candidateOwnerService={
+ inspect:async(id:string,k:RateKind,c:RateContext|null)=>{const raw=await call('GET','/owners/'+id,undefined,c,k),p=z.object({...envelope,candidateId:uuid,kind,current:ownerEvent.extend({eligible:z.boolean()}).nullable()}).strict().safeParse(raw);if(!p.success||p.data.candidateId!==id||p.data.kind!==k||p.data.current&&p.data.current.candidateId!==id)return bad();return p.data;},
+ assign:async(d:OwnerCommand,k:RateKind,c:RateContext|null,read=false)=>{const input=ownerCommand.safeParse(d);if(!input.success)return bad();if(!read)ownerCurrent(c,k);const raw=await call(read?'GET':'POST',read?'/owner-receipts/'+d.requestId:'/owners',read?undefined:d,c,k,!read),p=z.object({...envelope,kind,owner:ownerEvent,...read?{}:{replayed:z.boolean()}}).strict().safeParse(raw);if(!p.success||p.data.kind!==k)return bad();const e=p.data.owner;if(e.candidateId!==d.candidateId||e.previousId!==d.expectedOwnerEventId||e.ownerUserId!==d.ownerUserId||e.ownerRole!==d.ownerRole||e.requestId!==d.requestId||e.reason!==d.reason||e.actorId!==p.data.actorUserId||e.activeRole!==p.data.activeRole)return bad();return e;}
 };
