@@ -504,3 +504,7 @@ Apply migration 063 before deploying the application. Existing submissions keep 
 ## Weekly submission notices
 
 Apply migration 064 before adopting a notice policy. Configure the weekly deadline, worker selection, reminder timing, escalation owner and templates. Evaluate the worker and period explicitly. Check the recorded evaluation before retrying an uncertain result. For recovery, retain the notice ledger and use a forward correction.
+
+## Material assignment approvals
+
+Apply migration 065 before configuring material fields and approvers. Leave the policy unconfigured until the buyer selects the fields, workers and eligible reviewers. Keep pending proposals and the decision ledger on recovery. Publish a prospective policy change to retire routing and reconcile pending proposals against their original source versions.

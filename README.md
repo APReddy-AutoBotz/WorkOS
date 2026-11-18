@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Buyers can require approval for changes to selected assignment fields. A pending proposal keeps the current allocation in effect. Final approval rechecks the assignment version and overlap rules before applying the change. [Material assignment approvals](docs/tasks/WOS-05-MATERIAL-ASSIGNMENT-APPROVALS.md)
+
 Authorized operators can evaluate weekly submission deadlines and issue in-app notices to the affected worker and configured overdue contact. A submitted timesheet suppresses the missing-submission notice. [Weekly deadline notices](docs/tasks/WOS-04-DEADLINE-INAPP-NOTICES.md)
 
 Work approvals can route a submitted timesheet through configured reviewers. Each stage checks the reviewer’s current role and worker relationship before issuing its inbox notice. Only final approval changes the work to Approved. [Staged work approvals](docs/tasks/WOS-05-STAGED-WORK-APPROVALS.md)

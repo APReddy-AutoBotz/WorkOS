@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+Material assignment changes can now follow named approval stages. The work package covers edits and ending existing assignments, including import controls. Creation approvals are a separate package. [Material assignment approvals](../tasks/WOS-05-MATERIAL-ASSIGNMENT-APPROVALS.md)
+
 Weekly submission notices cover operator-initiated evaluation of configured UTC deadlines and audited in-app delivery. Automatic scheduling and external delivery remain open. [Deadline notice work package](../tasks/WOS-04-DEADLINE-INAPP-NOTICES.md)
 
 Staged timesheet approvals cover ordered decisions, correction history and recipient-scoped in-app notices. Buyers can adopt the policy prospectively for selected workers. Delegated stages and other approval sources remain separate work packages. [Approval work package](../tasks/WOS-05-STAGED-WORK-APPROVALS.md)
