@@ -1,3 +1,4 @@
+import {CanonicalApprovalInbox} from '../components/GovernedWorkApprovals';
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, MailCheck, Send, Settings2, ShieldAlert } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -160,6 +161,7 @@ export const NotificationCenter = () => {
 
   return (
     <div className="space-y-6 pb-12">
+      <CanonicalApprovalInbox/>
       <PageHeader
         title="Notifications"
         subtitle="In-app notification inbox, preferences, templates, and delivery monitoring."

@@ -86,6 +86,9 @@ jobs:
       - name: Native percentage forecast PostgreSQL acceptance
         run: npm run test:native-forecast-postgres
 
+      - name: Verify staged work approval PostgreSQL acceptance
+        run: npm run test:work-approval-postgres
+
       - name: Verify approved actual work reconciliation in PostgreSQL
         run: npm run test:actual-work-postgres
 
@@ -192,6 +195,9 @@ jobs:
 
       - name: Native percentage forecast planner browser acceptance
         run: npm run test:native-forecast-journey
+
+      - name: Verify staged work approval React acceptance
+        run: npm run test:work-approval-journey
 
       - name: Verify actual utilization and evidence download in Chromium
         run: npm run test:actual-work-journey

@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+Staged timesheet approvals cover ordered decisions, correction history and recipient-scoped in-app notices. Buyers can adopt the policy prospectively for selected workers. Deadline reminders, delegated stages and other approval sources remain separate work packages. [Approval work package](../tasks/WOS-05-STAGED-WORK-APPROVALS.md)
+
 The planning forecast adds dated assignment percentages, project visibility checks and retained CSV evidence. Physical utilization forecasting still requires an approved conversion policy. [Forecast work package](../tasks/WOS-04-NATIVE-PERCENTAGE-FORECAST.md)
 
 Calendar leave intake connects full-day leave to effective capacity. Acceptance covers approval independence, changed calendar inputs, paid balances and historical capacity reconciliation. [Work package](../tasks/WOS-04-CALENDAR-LEAVE-INTAKE.md)

@@ -186,7 +186,7 @@ const stopApi = async child => {
 };
 
 export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UTC',
-  sessionTtlHours = '0.25', sessionSecret = null, emailProvider = 'mock'}, test) => {
+  sessionTtlHours = '0.25', sessionSecret = null, emailProvider = 'mock', onServerError = null}, test) => {
   const port = await availablePort();
   const secret = sessionSecret || randomBytes(48).toString('base64url');
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -198,6 +198,7 @@ export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UT
     NOTIFICATION_PROVIDER: 'mock', TEAMS_PROVIDER: 'mock', EMAIL_PROVIDER: emailProvider,
   }});
   child.stdout.resume();
+  if(typeof onServerError==='function')child.stderr.on('data',chunk=>onServerError(chunk.toString()));
   child.stderr.resume();
   let launchError;
   child.on('error', error => { launchError = error; });

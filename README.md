@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Work approvals can route a submitted timesheet through configured reviewers. Each stage checks the reviewer’s current role and worker relationship before issuing its inbox notice. Only final approval changes the work to Approved. [Staged work approvals](docs/tasks/WOS-05-STAGED-WORK-APPROVALS.md)
+
 Planners can review assigned percentages at one-, two- and three-month checkpoints, inspect the underlying assignments and retain a dated forecast export. Capacity hours appear separately. [Forecast scope](docs/tasks/WOS-04-NATIVE-PERCENTAGE-FORECAST.md)
 
 Full-day leave requests use the worker’s effective schedule and calendar once adopted. Each request retains the dates counted, so approvals, leave balances and utilization can use the same evidence. [Calendar leave intake](docs/tasks/WOS-04-CALENDAR-LEAVE-INTAKE.md)

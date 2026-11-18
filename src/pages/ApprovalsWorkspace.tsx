@@ -1,3 +1,4 @@
+import {GovernedWorkApprovals} from '../components/GovernedWorkApprovals';
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Clock, History, ShieldCheck, XCircle } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -240,6 +241,7 @@ export const ApprovalsWorkspace = () => {
 
   return (
     <div className="space-y-6 pb-12">
+      <GovernedWorkApprovals/>
       <PageHeader
         title="Approvals Inbox"
         subtitle="Shared approval inbox, approval history, delegations, and SLA governance."
