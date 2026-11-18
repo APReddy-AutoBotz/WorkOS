@@ -558,3 +558,5 @@ WOS-COM-001–004 and COM-014/015 are partially implemented by effective-dated b
 | WOS-INV-001/003, COM-006/011/014/015 | [Independent T&M eligibility review](../tasks/WOS-06-TM-ELIGIBILITY.md) |
 
 Migrations 065b–065f retain immutable versions and existing commercial history. To roll back application access, revoke the new opt-in permissions and redeploy the previous application. Preserve the migration ledger, rate evidence, valuation snapshots and eligibility decisions.
+
+WOS-INV-001–003/005/006/008 are partially covered by scoped draft membership and cancellation. Migration 065g enforces item-version reservation, event provenance and retained history. See [invoice draft acceptance](../tasks/WOS-06-INVOICE-BATCH-OCCUPANCY.md).

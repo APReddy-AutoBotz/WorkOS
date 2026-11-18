@@ -91,7 +91,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         '065c_wos06_commercial_candidate_approvals',
         '065d_wos06_approved_rate_adoptions',
         '065e_wos06_governed_tm_valuation',
-        '065f_wos06_tm_billing_eligibility',
+        '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy',
       ]);
       assert.deepEqual(await snapshot(), before);
       assert.equal(
