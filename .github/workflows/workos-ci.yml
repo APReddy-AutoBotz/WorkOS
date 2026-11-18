@@ -353,6 +353,12 @@ jobs:
           node tests/tm-billing-eligibility-postgres-smoke.mjs
           node tests/tm-billing-eligibility-upgrade-postgres-smoke.mjs
 
+      - name: Verify scoped T&M reconciliation, control totals and CSV export
+        run: |
+          node tests/billing-reconciliation-boundaries-smoke.mjs
+          node tests/billing-reconciliation-postgres-smoke.mjs
+          node tests/billing-reconciliation-journey-browser-smoke.mjs
+
       - name: Verify manual billing confirmation, recovery, upgrade and browser journey
         run: |
           node tests/invoice-billing-confirmation-journey-browser-smoke.mjs

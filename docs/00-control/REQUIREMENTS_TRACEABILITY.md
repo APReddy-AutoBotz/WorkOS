@@ -568,3 +568,5 @@ WOS-INV-006/007 and INT-002/003/005 cover [approved CSV export](../tasks/WOS-06-
 WOS-INV-006/007/008, INT-002/003/005 and GOV-002 cover [manual billing confirmation](../tasks/WOS-06-BILLING-CONFIRMATION.md). Migration 065k binds a single confirmation to the retained export, keeps billed membership occupied and records the actor and source of the attestation. Disable new confirmations by revoking the confirm permission. Preserve existing records and keep a reader that understands confirmed state until any application rollback is reconciled.
 
 WOS-APR-003/006/008, INV-006/008 and INT-002/003/005 cover [reviewed invoice decisions](../tasks/WOS-06-REVIEWED-INVOICE-BULK.md). Each queued item uses the existing scoped decision transaction and receipt. Reverting the client restores the single-review workflow and preserves recorded decisions.
+
+WOS-INV-001/003/006/008 and RPT-007 cover [scoped T&M reconciliation](../tasks/WOS-06-SCOPED-BILLING-RECONCILIATION.md). Report and export use the same visibility rules and population. No schema migration is required. Reverting this report preserves the source records and export audit history.

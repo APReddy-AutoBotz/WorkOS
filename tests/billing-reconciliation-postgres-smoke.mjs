@@ -1,0 +1,1570 @@
+import assert from 'node:assert/strict';
+import { randomUUID, createHash } from 'node:crypto';
+import {
+  commercialFixture as f,
+  withCommercialDatabase,
+  migrateCommercialDatabase,
+  withCommercialApi,
+} from './support/commercial-drafting-test.mjs';
+import {
+  seedWorkApproval,
+  adoptStagedPolicy,
+  submitStagedWork,
+  readApprovalOwner,
+  WORK_APPROVAL_BASE as work,
+} from './support/work-approval-test.mjs';
+import { actualCatalog } from './support/actual-work-test.mjs';
+import {
+  grantAmendmentPermissions,
+  createAmendmentHierarchy,
+} from './support/commercial-amendments-test.mjs';
+import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
+const base = '/api/v1/governed-tm-valuations',
+  candidates = '/api/v1/rate-candidates',
+  approvals = '/api/v1/commercial-candidate-approvals',
+  adoptions = '/api/v1/approved-rate-sources',
+  ok = (v, n = 200) => {
+    assert.equal(v.status, n, JSON.stringify(v.body));
+    return v.body;
+  };
+await withCommercialDatabase(async ({ pool, databaseUrl }) => {
+  await migrateCommercialDatabase(pool);
+  assert.equal(
+    (
+      await pool.query(
+        "select count(*)::int n from role_permissions where permission_key like 'commercial.tm_billing.%'",
+      )
+    ).rows[0].n,
+    0,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        "select count(*)::int n from user_permission_grants where permission_key like 'commercial.tm_billing.%'",
+      )
+    ).rows[0].n,
+    0,
+  );
+  const fx = await seedWorkApproval(pool),
+    ids = fx.identities;
+  await grantAmendmentPermissions(pool);
+  for (const k of [
+    'commercial.rate_candidates.view',
+    'commercial.rate_candidates.manage',
+    'commercial.cost_candidates.view',
+    'commercial.cost_candidates.manage',
+    'commercial.rate_approvals.decide',
+    'commercial.cost_approvals.decide',
+    'commercial.tm_valuation.view',
+    'commercial.tm_valuation.create',
+    'commercial.tm_billing.view',
+    'commercial.tm_billing.manage',
+    'commercial.tm_billing.decide',
+    'commercial.invoice_drafts.view',
+    'commercial.invoice_drafts.prepare',
+    'commercial.invoice_drafts.own',
+    'commercial.invoice_drafts.cancel',
+    'commercial.invoice_export.view',
+    'reports.export',
+  ])
+    await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled)values('Admin',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+      [k],
+    );
+  await withCommercialApi(
+    { databaseUrl, identities: ids, onServerError: (s) => process.stderr.write(s) },
+    async ({ request }) => {
+      const end = shift(fx.today, 30),
+        roots = await createAmendmentHierarchy(request, 'SYN-TM-VAL', {
+          contract: {
+            model: 'time_and_materials',
+            startsOn: fx.today,
+            endsOn: end,
+            effectiveFrom: fx.today,
+            currency: 'USD',
+          },
+          engagement: { startsOn: fx.today, endsOn: end, currency: 'USD' },
+          project: { startsOn: fx.today, endsOn: end },
+        });
+      ok(
+        await request('/api/v1/work-categories/catalogs', {
+          method: 'POST',
+          body: {
+            expectedLatestId: null,
+            effectiveFrom: fx.today,
+            definition: actualCatalog,
+            reason: 'Synthetic category',
+          },
+        }),
+        201,
+      );
+      await adoptStagedPolicy(request, ids, fx.today);
+      ok(
+        await request('/api/allocations', {
+          method: 'POST',
+          body: {
+            employee_id: f.ownerId,
+            project_id: roots.project.id,
+            percentage: 20,
+            start_date: fx.today,
+            end_date: fx.today,
+            billable: true,
+            status: 'Active',
+          },
+        }),
+      );
+      const keys = [
+          'approval.action_required',
+          'approval.rejected_or_correction_required',
+          'approval.completed',
+        ],
+        makeRate = async (
+          kind,
+          amount,
+          priority = 1,
+          adoptNow = true,
+          currency = 'USD',
+          workerId = f.ownerId,
+        ) => {
+          const bindingType = kind === 'billing' ? 'contract' : 'worker',
+            bindingId = kind === 'billing' ? roots.contract.id : workerId,
+            candidate = ok(
+              await request(candidates + '/candidates', {
+                method: 'POST',
+                body: {
+                  requestId: randomUUID(),
+                  streamId: randomUUID(),
+                  expectedLatestId: null,
+                  kind,
+                  bindingType,
+                  bindingId,
+                  effectiveFrom: fx.today,
+                  effectiveTo: end,
+                  currency,
+                  unit: 'HOUR',
+                  amount,
+                  priority,
+                  reason: 'Synthetic governed source',
+                },
+              }),
+              201,
+            ).candidate,
+            owner = ok(
+              await request(candidates + '/owners', {
+                method: 'POST',
+                body: {
+                  requestId: randomUUID(),
+                  candidateId: candidate.id,
+                  expectedOwnerEventId: null,
+                  ownerUserId: ids.manager.id,
+                  ownerRole: 'Admin',
+                  reason: 'Synthetic rate owner',
+                },
+              }),
+              201,
+            ),
+            definition = {
+              entityType: 'CommercialCandidate',
+              kind,
+              candidateId: candidate.id,
+              stages: [{ userId: ids.second.id, role: 'Admin' }],
+              locale: 'en-US',
+              templates: keys.map((key) => ({
+                key,
+                subject: 'Review {{stageNumber}}',
+                body: 'Source {{sourceRef}}',
+              })),
+              completionInApp: false,
+            },
+            policy = ok(
+              await request(approvals + '/policies', {
+                method: 'POST',
+                body: {
+                  expectedOwnerKey: owner.ownerKey,
+                  requestId: randomUUID(),
+                  expectedLatestId: null,
+                  effectiveFrom: fx.today,
+                  definition,
+                  reason: 'Synthetic rate policy',
+                },
+              }),
+              201,
+            ).policy,
+            approval = ok(
+              await request(approvals + '/requests', {
+                method: 'POST',
+                body: {
+                  expectedOwnerKey: owner.ownerKey,
+                  requestId: randomUUID(),
+                  candidateId: candidate.id,
+                  expectedOwnerEventId: owner.owner.id,
+                  expectedPolicyId: policy.id,
+                  reason: 'Synthetic review',
+                },
+              }),
+              201,
+            ).approval,
+            actor = ok(await request(approvals + '/instances/' + approval.id, { identity: ids.second }));
+          ok(
+            await request(approvals + '/instances/' + approval.id + '/decisions', {
+              method: 'POST',
+              identity: ids.second,
+              body: {
+                expectedOwnerKey: actor.ownerKey,
+                requestId: randomUUID(),
+                expectedCandidateId: candidate.id,
+                expectedOwnerEventId: owner.owner.id,
+                expectedPolicyId: policy.id,
+                expectedSequence: 0,
+                decision: 'Approved',
+                reason: 'Synthetic source review',
+              },
+            }),
+            201,
+          );
+          const inspected = ok(await request(adoptions + '/candidates/' + candidate.id)),
+            r = inspected.reviews[0];
+          const adoptionCommand = {
+            expectedOwnerKey: inspected.ownerKey,
+            requestId: randomUUID(),
+            candidateId: candidate.id,
+            expectedOwnerEventId: r.ownerEventId,
+            approvalId: r.approvalId,
+            expectedPolicyId: r.policyId,
+            expectedFinalTransitionId: r.finalTransitionId,
+            reason: 'Synthetic source adoption',
+          };
+          return adoptNow
+            ? ok(await request(adoptions + '/adoptions', { method: 'POST', body: adoptionCommand }), 201)
+                .adoption
+            : adoptionCommand;
+        };
+      const billing = await makeRate('billing', '100.1234'),
+        cost = await makeRate('cost', '40.0020'),
+        policies = ok(await request(base + '/policies?engagementId=' + roots.engagement.id)),
+        definition = {
+          version: 'governed-tm/1',
+          currency: 'USD',
+          precision: 2,
+          rounding: 'HALF_UP',
+          aggregation: 'PER_ENTRY',
+          capTreatment: 'NONE',
+          exclusions: 'NONE',
+          unit: 'HOUR',
+          approvalTreatment: 'NONE',
+        },
+        policyCmd = {
+          expectedOwnerKey: policies.ownerKey,
+          requestId: randomUUID(),
+          engagementId: roots.engagement.id,
+          expectedLatestId: null,
+          effectiveFrom: fx.today,
+          definition,
+          reason: 'Synthetic selected T&M policy',
+        },
+        policy = ok(await request(base + '/policies', { method: 'POST', body: policyCmd }), 201).policy;
+      assert.equal(ok(await request(base + '/policies', { method: 'POST', body: policyCmd })).replayed, true);
+      assert.equal(
+        (
+          await request(base + '/policies', {
+            method: 'POST',
+            body: { ...policyCmd, reason: 'Synthetic changed reason' },
+          })
+        ).status,
+        409,
+      );
+      assert.equal(
+        (
+          await request(base + '/policies', {
+            method: 'POST',
+            body: { ...policyCmd, requestId: randomUUID() },
+          })
+        ).status,
+        409,
+      );
+      const invalidPolicy = { ...definition };
+      delete invalidPolicy.approvalTreatment;
+      assert.equal(
+        (
+          await request(base + '/policies', {
+            method: 'POST',
+            body: {
+              ...policyCmd,
+              requestId: randomUUID(),
+              expectedLatestId: policy.id,
+              definition: invalidPolicy,
+            },
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await request(base + '/policies', {
+            method: 'POST',
+            body: {
+              ...policyCmd,
+              requestId: randomUUID(),
+              expectedLatestId: policy.id,
+              definition: { ...definition, approvalTreatment: 'REQUIRED' },
+            },
+          })
+        ).status,
+        400,
+      );
+      const submitted = await submitStagedWork(request, ids.reader, fx.today, {
+          entries: [
+            {
+              project_id: roots.project.id,
+              work_type: 'Project Work',
+              category_code: 'BILL',
+              work_date: fx.today,
+              hours: '1.25',
+              billable: true,
+              remark: 'Synthetic approved work',
+            },
+            {
+              project_id: roots.project.id,
+              work_type: 'Project Work',
+              category_code: 'BILL',
+              work_date: fx.today,
+              hours: '2.5',
+              billable: true,
+              remark: 'Synthetic other work',
+            },
+            {
+              project_id: roots.project.id,
+              work_type: 'Project Work',
+              category_code: 'BILL',
+              work_date: fx.today,
+              hours: '3.75',
+              billable: true,
+              remark: 'Synthetic concurrent work',
+            },
+          ],
+        }),
+        evidence = (
+          await pool.query('select * from work_submission_evidence where id=$1', [
+            submitted.instance.submissionId,
+          ])
+        ).rows[0],
+        entry = evidence.entries[0];
+      const decideWork = async (identity) => {
+        const current = ok(await request(work + '/instances/' + submitted.instance.id)).instance;
+        return ok(
+          await request(work + '/instances/' + submitted.instance.id + '/decisions', {
+            method: 'POST',
+            identity,
+            body: {
+              expectedOwnerKey: await readApprovalOwner(request, identity),
+              expectedSourceToken: current.sourceToken,
+              expectedSequence: current.state.sequence,
+              requestId: randomUUID(),
+              decision: 'Approved',
+              reason: 'Synthetic approved work stage',
+            },
+          }),
+          201,
+        ).receipt;
+      };
+      await decideWork(ids.manager);
+      await decideWork(ids.second);
+      const calc = ok(
+        await request(base + '/valuations', {
+          method: 'POST',
+          body: {
+            expectedOwnerKey: policies.ownerKey,
+            requestId: randomUUID(),
+            engagementId: roots.engagement.id,
+            policyId: policy.id,
+            submissionId: evidence.id,
+            entryId: entry.entryId,
+            billingAdoptionId: billing.id,
+            costAdoptionId: cost.id,
+            reason: 'Synthetic calculation',
+          },
+        }),
+        201,
+      ).valuation;
+      const calc2 = ok(
+        await request(base + '/valuations', {
+          method: 'POST',
+          body: {
+            expectedOwnerKey: policies.ownerKey,
+            requestId: randomUUID(),
+            engagementId: roots.engagement.id,
+            policyId: policy.id,
+            submissionId: evidence.id,
+            entryId: evidence.entries.find((x) => x.hours === '2.5').entryId,
+            billingAdoptionId: billing.id,
+            costAdoptionId: cost.id,
+            reason: 'Synthetic other calculation',
+          },
+        }),
+        201,
+      ).valuation;
+      const calc3 = ok(
+        await request(base + '/valuations', {
+          method: 'POST',
+          body: {
+            expectedOwnerKey: policies.ownerKey,
+            requestId: randomUUID(),
+            engagementId: roots.engagement.id,
+            policyId: policy.id,
+            submissionId: evidence.id,
+            entryId: evidence.entries.find((x) => x.hours === '3.75').entryId,
+            billingAdoptionId: billing.id,
+            costAdoptionId: cost.id,
+            reason: 'Synthetic concurrent calculation',
+          },
+        }),
+        201,
+      ).valuation;
+      const b = '/api/v1/tm-billing-eligibility',
+        initial = ok(await request(b + '/policies?engagementId=' + roots.engagement.id)),
+        approvalDefinition = {
+          entityType: 'TmBillingEligibility',
+          engagementId: roots.engagement.id,
+          stages: [
+            { userId: ids.manager.id, role: 'Admin' },
+            { userId: ids.second.id, role: 'Admin' },
+          ],
+          locale: 'en-US',
+          templates: keys.map((key) => ({
+            key,
+            subject: 'Review {{sourceRef}}',
+            body: 'Stage {{stageNumber}}',
+          })),
+          completionInApp: true,
+        };
+      const policyResult = ok(
+        await request(b + '/policies', {
+          method: 'POST',
+          body: {
+            expectedOwnerKey: initial.ownerKey,
+            requestId: randomUUID(),
+            engagementId: roots.engagement.id,
+            expectedLatestId: null,
+            effectiveFrom: fx.today,
+            definition: approvalDefinition,
+            reason: 'Synthetic billing policy',
+          },
+        }),
+        201,
+      ).policy;
+      const requesterKey = await readApprovalOwner(request, ids.requester),
+        requestBody = {
+          expectedOwnerKey: requesterKey,
+          requestId: randomUUID(),
+          snapshotId: calc.id,
+          expectedPolicyId: policyResult.id,
+          ownerUserId: ids.manager.id,
+          ownerRole: 'Admin',
+          reason: 'Synthetic billing review',
+        };
+      let created = ok(
+        await request(b + '/requests', { method: 'POST', identity: ids.requester, body: requestBody }),
+        201,
+      ).approval;
+      assert.equal(created.state.status, 'Pending');
+      assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events')).rows[0].n, 0);
+      assert.equal(
+        ok(await request(b + '/requests', { method: 'POST', identity: ids.requester, body: requestBody }))
+          .replayed,
+        true,
+      );
+      assert.equal(
+        (
+          await request(b + '/requests', {
+            method: 'POST',
+            identity: ids.requester,
+            body: { ...requestBody, reason: 'Changed synthetic reason' },
+          })
+        ).status,
+        409,
+      );
+      await assert.rejects(
+        pool.query(
+          'insert into tm_billing_eligibility_policies(id,organization_id,legal_entity_id,engagement_id,sequence,previous_id,effective_from,definition,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,2,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13)',
+          [
+            randomUUID(),
+            f.organizationId,
+            f.legalEntityId,
+            roots.engagement.id,
+            policyResult.id,
+            fx.today,
+            JSON.stringify(approvalDefinition),
+            ids.manager.id,
+            'Admin',
+            randomUUID(),
+            'a'.repeat(64),
+            'Synthetic direct denial',
+            'synthetic-direct',
+          ],
+        ),
+        (e) => e.code === 'TBE01',
+      );
+      for (const k of [
+        'commercial.contracts.view',
+        'commercial.tm_billing.view',
+        'employees.view',
+        'notifications.view',
+      ])
+        await pool.query(
+          "insert into role_permissions(role_name,permission_key,enabled)values('Employee',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+          [k],
+        );
+      const limited = ok(await request(b + '/sources/' + calc.id, { identity: ids.reader }));
+      assert(!JSON.stringify(limited).includes('costAdoptionId'));
+      assert(!JSON.stringify(limited).includes('costValue'));
+      assert(!JSON.stringify(limited).includes('marginValue'));
+      assert.equal((await request(base + '/valuations/' + calc.id, { identity: ids.reader })).status, 403);
+      for (const k of [
+        'commercial.contracts.view',
+        'commercial.tm_billing.view',
+        'employees.view',
+        'notifications.view',
+      ])
+        await pool.query(
+          "insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+          [k],
+        );
+      assert.equal(
+        (await request(b + '/sources/' + calc.id, { identity: ids.denied })).status,
+        404,
+        'A billing viewer cannot inspect a foreign worker',
+      );
+      assert.equal(ok(await request(b + '/register', { identity: ids.denied })).items.length, 0);
+      assert.equal(
+        (
+          await request(b + '/requests', {
+            method: 'POST',
+            identity: ids.reader,
+            body: { ...requestBody, expectedOwnerKey: await readApprovalOwner(request, ids.reader) },
+          })
+        ).status,
+        403,
+        'View access does not grant review management',
+      );
+
+      const decision = async (identity, expectedSequence) => {
+        const reply = ok(await request(b + '/instances/' + created.id, { identity }));
+        return request(b + '/instances/' + created.id + '/decisions', {
+          method: 'POST',
+          identity,
+          body: {
+            expectedOwnerKey: reply.ownerKey,
+            requestId: randomUUID(),
+            expectedSequence,
+            decision: 'Approved',
+            reason: 'Synthetic billing decision',
+          },
+        });
+      };
+      await pool.query("update users set status='Inactive' where id=$1", [ids.manager.id]);
+      await pool.query("update users set status='Active' where id=$1", [ids.manager.id]);
+      const revived = await decision(ids.manager, 0);
+      assert.equal(
+        revived.status,
+        409,
+        'An owner eligibility loss must require a fresh review even after access is restored',
+      );
+      assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events')).rows[0].n, 0);
+      const cancelled = await request(b + '/instances/' + created.id + '/cancellations', {
+        method: 'POST',
+        identity: ids.requester,
+        body: {
+          expectedOwnerKey: requesterKey,
+          requestId: randomUUID(),
+          reason: 'Synthetic stale review cancellation',
+        },
+      });
+      assert.equal(cancelled.status, 201, JSON.stringify(cancelled.body));
+      created = ok(
+        await request(b + '/requests', {
+          method: 'POST',
+          identity: ids.requester,
+          body: { ...requestBody, requestId: randomUUID() },
+        }),
+        201,
+      ).approval;
+      const inbox = ok(await request(work + '/inbox', { identity: ids.manager })),
+        notice = inbox.notifications.find(
+          (x) => x.kind === 'tm-billing-eligibility' && x.instanceId === created.id,
+        );
+      assert(notice);
+      assert(!JSON.stringify(notice).includes('costValue'));
+      assert(
+        ok(
+          await request(work + '/inbox/' + notice.id + '/read', {
+            method: 'POST',
+            identity: ids.manager,
+            body: { expectedOwnerKey: inbox.ownerKey },
+          }),
+        ).notification.readAt,
+      );
+      const legacy = ok(await request('/api/approvals'));
+      assert(!legacy.some((x) => x.entity_type === 'TmBillingEligibilityApproval'));
+      const compatibility = (
+        await pool.query(
+          "select id from approval_records where entity_type='TmBillingEligibilityApproval' and entity_id=$1",
+          [created.id],
+        )
+      ).rows[0];
+      assert.equal(
+        (
+          await request('/api/approvals/' + compatibility.id + '/status', {
+            method: 'PATCH',
+            body: { status: 'Approved' },
+          })
+        ).status,
+        404,
+      );
+      const stage0 = ok(await request(b + '/instances/' + created.id, { identity: ids.manager })),
+        stage0Body = {
+          expectedOwnerKey: stage0.ownerKey,
+          requestId: randomUUID(),
+          expectedSequence: 0,
+          decision: 'Approved',
+          reason: 'Synthetic stage decision',
+        };
+      await pool.query(
+        "create function synthetic_tm_billing_notice_refusal() returns trigger language plpgsql as $$begin raise exception 'synthetic recipient refusal' using errcode='TBE04';end$$",
+      );
+      await pool.query(
+        'create trigger synthetic_tm_billing_notice_refusal before insert on tm_billing_eligibility_recipients for each row execute function synthetic_tm_billing_notice_refusal()',
+      );
+      const refused = await request(b + '/instances/' + created.id + '/decisions', {
+        method: 'POST',
+        identity: ids.manager,
+        body: stage0Body,
+      });
+      assert.equal(refused.status, 409);
+      assert.equal(
+        (
+          await pool.query(
+            'select count(*)::int n from tm_billing_eligibility_transitions where instance_id=$1',
+            [created.id],
+          )
+        ).rows[0].n,
+        0,
+      );
+      assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events')).rows[0].n, 0);
+      await pool.query(
+        'drop trigger synthetic_tm_billing_notice_refusal on tm_billing_eligibility_recipients;drop function synthetic_tm_billing_notice_refusal()',
+      );
+      assert.equal(
+        (
+          await request(b + '/instances/' + created.id + '/decisions', {
+            method: 'POST',
+            identity: ids.manager,
+            body: stage0Body,
+          })
+        ).status,
+        201,
+      );
+      assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events')).rows[0].n, 0);
+      await pool.query(
+        "insert into notification_preferences(employee_id,event_type,in_app)values($1,'approval.completed',false),($1,'approval.rejected_or_correction_required',false) on conflict(employee_id,event_type)do update set in_app=excluded.in_app",
+        [f.ownerId],
+      );
+      const stage1 = ok(await request(b + '/instances/' + created.id, { identity: ids.second })),
+        stage1Body = {
+          expectedOwnerKey: stage1.ownerKey,
+          requestId: randomUUID(),
+          expectedSequence: 1,
+          decision: 'Approved',
+          reason: 'Synthetic final decision',
+        };
+      await pool.query(
+        "create function synthetic_tm_billing_audit_failure()returns trigger language plpgsql as $$begin if new.module='T&M Billing Eligibility' and new.action='Decide Review' then raise exception 'synthetic audit refusal' using errcode='TBE04';end if;return new;end$$;create trigger synthetic_tm_billing_audit_failure before insert on audit_logs for each row execute function synthetic_tm_billing_audit_failure()",
+      );
+      const auditFailure = await request(b + '/instances/' + created.id + '/decisions', {
+        method: 'POST',
+        identity: ids.second,
+        body: stage1Body,
+      });
+      assert.equal(auditFailure.status, 409);
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from billing_eligibility_events where instance_id=$1', [
+            created.id,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      assert.equal(
+        (
+          await pool.query(
+            'select count(*)::int n from tm_billing_eligibility_transitions where instance_id=$1',
+            [created.id],
+          )
+        ).rows[0].n,
+        1,
+      );
+      await pool.query(
+        'drop trigger synthetic_tm_billing_audit_failure on audit_logs;drop function synthetic_tm_billing_audit_failure()',
+      );
+      await pool.query(
+        "create function synthetic_tm_decider_loss()returns trigger language plpgsql as $$begin if new.sequence=2 then update users set status='Inactive' where id=new.actor_id;end if;return new;end$$;create trigger synthetic_tm_decider_loss after insert on tm_billing_eligibility_transitions for each row execute function synthetic_tm_decider_loss()",
+      );
+      const decisionLoss = await request(b + '/instances/' + created.id + '/decisions', {
+        method: 'POST',
+        identity: ids.second,
+        body: stage1Body,
+      });
+      assert.equal(
+        decisionLoss.status,
+        403,
+        'Decider loss in the same transaction must refuse final approval',
+      );
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from billing_eligibility_events where instance_id=$1', [
+            created.id,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      assert.equal(
+        (await pool.query('select status from users where id=$1', [ids.second.id])).rows[0].status,
+        'Active',
+      );
+      await pool.query(
+        'drop trigger synthetic_tm_decider_loss on tm_billing_eligibility_transitions;drop function synthetic_tm_decider_loss()',
+      );
+      const both = await Promise.all([
+        request(b + '/instances/' + created.id + '/decisions', {
+          method: 'POST',
+          identity: ids.second,
+          body: stage1Body,
+        }),
+        request(b + '/instances/' + created.id + '/decisions', {
+          method: 'POST',
+          identity: ids.second,
+          body: stage1Body,
+        }),
+      ]);
+      assert.deepEqual(both.map((x) => x.status).sort(), [200, 201]);
+      const final = ok(
+        both.find((x) => x.status === 201),
+        201,
+      );
+      assert.equal(final.approval.state.status, 'Approved');
+      const route = '/api/v1/invoice-drafts',
+        empty = ok(await request(b + '/register'));
+      assert.equal(empty.items.length, 1);
+      const itemId = empty.items[0].id,
+        batchDefinition = {
+          clientId: roots.contract.clientId,
+          contractId: roots.contract.id,
+          engagementId: roots.engagement.id,
+          currency: 'USD',
+          periodStart: fx.today,
+          periodEnd: fx.today,
+          periodBasis: 'WORK_DATE',
+          ownerUserId: ids.manager.id,
+          ownerRole: 'Admin',
+        },
+        createBody = {
+          expectedOwnerKey: initial.ownerKey,
+          requestId: randomUUID(),
+          definition: batchDefinition,
+          reason: 'Synthetic draft',
+        };
+      const reportPath = route + '/reconciliation?engagementId=' + encodeURIComponent(roots.engagement.id);
+      const availableReport = ok(await request(reportPath));
+      assert.equal(availableReport.items.length, 1);
+      assert.equal(availableReport.items[0].status, 'AVAILABLE');
+      assert.equal(availableReport.items[0].itemId, itemId);
+      assert.equal(availableReport.totals[0].amount, '125.15');
+      assert.equal(availableReport.exceptionCount, 0);
+      const control = (r, boundary) =>
+        r.controls.find((x) => x.currency === 'USD' && x.boundary === boundary);
+      for (const boundary of ['EVENT_BACKED_SOURCE', 'ELIGIBILITY_EVENT', 'REGISTER_ITEM']) {
+        assert.equal(control(availableReport, boundary).amount, '125.15');
+        assert.equal(control(availableReport, boundary).lineCount, 1);
+      }
+      const reportRequest = {
+        expectedOwnerKey: availableReport.ownerKey,
+        engagementId: roots.engagement.id,
+        expectedReportToken: availableReport.reportToken,
+        requestId: randomUUID(),
+        reason: 'Synthetic scoped report',
+      };
+      const exportedReport = ok(
+        await request(route + '/reconciliation/exports', { method: 'POST', body: reportRequest }),
+        201,
+      );
+      assert.equal(createHash('sha256').update(exportedReport.csv).digest('hex'), exportedReport.sha256);
+      assert.equal(Buffer.byteLength(exportedReport.csv), exportedReport.bytes);
+      const reportAudit = (
+        await pool.query(
+          "select * from audit_logs where module='Reports' and action='Export T&M Billing Reconciliation' and entity_id=$1",
+          [reportRequest.requestId],
+        )
+      ).rows;
+      assert.equal(reportAudit.length, 1);
+      assert.equal(reportAudit[0].new_value.artifactSha256, exportedReport.sha256);
+      assert.equal(
+        (await request(route + '/reconciliation/exports', { method: 'POST', body: reportRequest })).status,
+        409,
+      );
+      const raceReport = { ...reportRequest, requestId: randomUUID() };
+      const raceResults = await Promise.all([
+        request(route + '/reconciliation/exports', { method: 'POST', body: raceReport }),
+        request(route + '/reconciliation/exports', { method: 'POST', body: raceReport }),
+      ]);
+      assert.deepEqual(raceResults.map((x) => x.status).sort(), [201, 409]);
+      assert.equal(
+        (
+          await pool.query(
+            "select count(*)::int n from audit_logs where module='Reports' and action='Export T&M Billing Reconciliation' and entity_id=$1",
+            [raceReport.requestId],
+          )
+        ).rows[0].n,
+        1,
+      );
+      await pool.query(
+        "create function synthetic_report_audit_failure() returns trigger language plpgsql as $$begin if new.module='Reports' and new.action='Export T&M Billing Reconciliation' then raise exception 'Synthetic report audit refusal';end if;return new;end$$;create trigger synthetic_report_audit_failure before insert on audit_logs for each row execute function synthetic_report_audit_failure()",
+      );
+      const failedReportRequest = { ...reportRequest, requestId: randomUUID() };
+      assert.equal(
+        (await request(route + '/reconciliation/exports', { method: 'POST', body: failedReportRequest }))
+          .status,
+        503,
+      );
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from audit_logs where entity_id=$1', [
+            failedReportRequest.requestId,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      await pool.query(
+        'drop trigger synthetic_report_audit_failure on audit_logs;drop function synthetic_report_audit_failure()',
+      );
+      assert.equal(
+        (
+          await request(route + '/reconciliation/exports', {
+            method: 'POST',
+            identity: ids.reader,
+            body: {
+              ...reportRequest,
+              requestId: randomUUID(),
+              expectedOwnerKey: await readApprovalOwner(request, ids.reader),
+            },
+          })
+        ).status,
+        403,
+      );
+      assert.equal((await request(reportPath, { identity: ids.reader })).status, 403);
+      assert.equal(
+        (
+          await request(
+            route +
+              '/reconciliation?engagementId=' +
+              encodeURIComponent(roots.engagement.id) +
+              '&unexpected=1',
+          )
+        ).status,
+        400,
+      );
+      const first = ok(await request(route + '/batches', { method: 'POST', body: createBody }), 201);
+      assert.equal(first.batch.state, 'Draft');
+      assert.equal(first.total.lineCount, 0);
+      assert.equal(
+        ok(await request(route + '/batches', { method: 'POST', body: createBody })).replayed,
+        true,
+      );
+      const addBody = {
+          expectedOwnerKey: first.ownerKey,
+          requestId: randomUUID(),
+          itemId,
+          itemVersion: 1,
+          expectedLineCount: 0,
+          reason: 'Synthetic acquire',
+        },
+        responses = await Promise.all([
+          request(route + '/batches/' + first.batch.id + '/lines', { method: 'POST', body: addBody }),
+          request(route + '/batches/' + first.batch.id + '/lines', { method: 'POST', body: addBody }),
+        ]);
+      assert.deepEqual(responses.map((x) => x.status).sort(), [200, 201]);
+      const added = ok(
+        responses.find((x) => x.status === 201),
+        201,
+      );
+      assert.equal(added.total.lineCount, 1);
+      assert.equal(added.total.amount, '125.15');
+      assert(!JSON.stringify(added).includes('costValue'));
+      assert.equal(
+        (await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1', [itemId]))
+          .rows[0].n,
+        1,
+      );
+      assert.equal(ok(await request(b + '/register')).items.length, 0);
+      const occupiedReport = ok(await request(reportPath));
+      assert.equal(occupiedReport.items[0].status, 'OCCUPIED');
+      assert.equal(occupiedReport.items[0].batchId, first.batch.id);
+      assert.equal(occupiedReport.items[0].lineId, added.line.id);
+      assert.equal(occupiedReport.items[0].acquisitionRequestId, addBody.requestId);
+      assert(occupiedReport.items[0].eligibilityApprovalId);
+      assert(occupiedReport.items[0].eligibilityDecisionId);
+      assert.equal(occupiedReport.items[0].batchState, 'Draft');
+      assert.equal(control(occupiedReport, 'CURRENT_OCCUPANCY').amount, '125.15');
+      assert.equal(control(occupiedReport, 'CURRENT_LINE').amount, '125.15');
+      assert.equal(
+        (
+          await request(route + '/reconciliation/exports', {
+            method: 'POST',
+            body: { ...reportRequest, requestId: randomUUID() },
+          })
+        ).status,
+        409,
+        'A stale report token must not export',
+      );
+      assert.equal(occupiedReport.exceptionCount, 0);
+      assert.equal(
+        (
+          await request(route + '/batches', {
+            method: 'POST',
+            identity: ids.reader,
+            body: {
+              ...createBody,
+              expectedOwnerKey: await readApprovalOwner(request, ids.reader),
+              requestId: randomUUID(),
+            },
+          })
+        ).status,
+        403,
+        'A worker without draft authority cannot create a batch',
+      );
+      for (const k of [
+        'commercial.invoice_drafts.view',
+        'commercial.invoice_drafts.prepare',
+        'commercial.invoice_drafts.cancel',
+      ])
+        await pool.query(
+          "insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+          [k],
+        );
+      assert.equal(
+        (await request(route + '/batches/' + first.batch.id, { identity: ids.denied })).status,
+        404,
+        'A scoped actor cannot inspect another worker’s draft',
+      );
+      assert(
+        !ok(await request(route + '/batches', { identity: ids.denied })).batches.some(
+          (x) => x.id === first.batch.id,
+        ),
+        'A foreign worker batch and its total are hidden from the list',
+      );
+      await pool.query(
+        "insert into role_permissions(role_name,permission_key,enabled)values('TeamLead','commercial.invoice_export.view',true)on conflict(role_name,permission_key)do update set enabled=true",
+      );
+      const limitedReport = ok(await request(reportPath, { identity: ids.denied }));
+      assert.equal(limitedReport.items.length, 0);
+      assert.equal(limitedReport.totals.length, 0);
+      assert(!JSON.stringify(limitedReport).includes(first.batch.id));
+      const second = ok(
+        await request(route + '/batches', {
+          method: 'POST',
+          body: { ...createBody, requestId: randomUUID() },
+        }),
+        201,
+      );
+      assert.equal(
+        (
+          await request(route + '/batches/' + second.batch.id + '/lines', {
+            method: 'POST',
+            body: { ...addBody, requestId: randomUUID(), expectedOwnerKey: second.ownerKey },
+          })
+        ).status,
+        409,
+      );
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from invoice_draft_lines where batch_id=$1', [
+            second.batch.id,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      await assert.rejects(
+        pool.query('delete from invoice_draft_occupancies where item_id=$1', [itemId]),
+        (e) => e.code === 'IDR01',
+      );
+      await assert.rejects(
+        pool.query(
+          'insert into invoice_draft_occupancies(item_id,item_version,batch_id,line_id)values($1,1,$2,$3)',
+          [randomUUID(), first.batch.id, added.line.id],
+        ),
+        (e) => e.code === 'IDR01',
+      );
+      await assert.rejects(
+        pool.query('insert into invoice_draft_owner_losses(batch_id,cause)values($1,$2)', [
+          first.batch.id,
+          'synthetic direct bypass',
+        ]),
+        (e) => e.code === 'IDR01',
+      );
+      await assert.rejects(
+        pool.query('update invoice_draft_lines set amount=0 where id=$1', [added.line.id]),
+        (e) => e.code === '55000',
+      );
+      const cancelBody = {
+        expectedOwnerKey: first.ownerKey,
+        requestId: randomUUID(),
+        expectedLineCount: 1,
+        reason: 'Synthetic cancellation',
+      };
+      await pool.query(
+        "create function synthetic_invoice_cancel_audit_failure()returns trigger language plpgsql as $$begin if new.module='Invoice Draft' and new.action='Cancel Draft' then raise exception 'Synthetic audit refusal' using errcode='IDR03';end if;return new;end$$;create trigger synthetic_invoice_cancel_audit_failure before insert on audit_logs for each row execute function synthetic_invoice_cancel_audit_failure()",
+      );
+      assert.equal(
+        (
+          await request(route + '/batches/' + first.batch.id + '/cancellations', {
+            method: 'POST',
+            body: cancelBody,
+          })
+        ).status,
+        409,
+      );
+      assert.equal(
+        (await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1', [itemId]))
+          .rows[0].n,
+        1,
+      );
+      await pool.query(
+        'drop trigger synthetic_invoice_cancel_audit_failure on audit_logs;drop function synthetic_invoice_cancel_audit_failure()',
+      );
+      assert.equal(
+        ok(
+          await request(route + '/batches/' + first.batch.id + '/cancellations', {
+            method: 'POST',
+            body: cancelBody,
+          }),
+          201,
+        ).batch.state,
+        'Cancelled',
+      );
+      assert.equal(ok(await request(b + '/register')).items.length, 1);
+      const releasedReport = ok(await request(reportPath));
+      assert.equal(releasedReport.items[0].status, 'AVAILABLE');
+      assert.equal(releasedReport.items[0].historicalLineCount, 1);
+      assert.equal(releasedReport.items[0].history[0].batchId, first.batch.id);
+      assert.equal(releasedReport.items[0].history[0].batchState, 'Cancelled');
+      assert.equal(control(releasedReport, 'HISTORICAL_RELEASED_LINE').amount, '125.15');
+      assert(!control(releasedReport, 'CURRENT_OCCUPANCY'));
+      assert.equal(
+        ok(
+          await request(route + '/batches/' + first.batch.id + '/cancellations', {
+            method: 'POST',
+            body: cancelBody,
+          }),
+        ).replayed,
+        true,
+      );
+      const reacquired = ok(
+        await request(route + '/batches/' + second.batch.id + '/lines', {
+          method: 'POST',
+          body: { ...addBody, expectedOwnerKey: second.ownerKey, requestId: randomUUID() },
+        }),
+        201,
+      );
+      assert.notEqual(reacquired.line.id, added.line.id);
+      const renewedReport = ok(await request(reportPath));
+      assert.equal(renewedReport.items[0].status, 'OCCUPIED');
+      assert.equal(renewedReport.items[0].batchId, second.batch.id);
+      assert.equal(renewedReport.items[0].historicalLineCount, 1);
+      assert.equal(
+        (await pool.query('select count(*)::int n from invoice_draft_lines where item_id=$1', [itemId]))
+          .rows[0].n,
+        2,
+      );
+      assert.equal(
+        (
+          await request(route + '/batches', {
+            method: 'POST',
+            body: {
+              ...createBody,
+              requestId: randomUUID(),
+              definition: { ...batchDefinition, periodBasis: '' },
+            },
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await request(route + '/batches/' + second.batch.id + '/lines', {
+            method: 'POST',
+            body: {
+              ...addBody,
+              expectedOwnerKey: second.ownerKey,
+              requestId: randomUUID(),
+              expectedLineCount: 1,
+              amount: '0.01',
+            },
+          })
+        ).status,
+        400,
+        'Partial presentation fields cannot create a split line',
+      );
+      assert.equal(
+        (
+          await request(route + '/batches/' + second.batch.id + '/lines', {
+            method: 'POST',
+            body: {
+              ...addBody,
+              expectedOwnerKey: second.ownerKey,
+              requestId: randomUUID(),
+              expectedLineCount: 1,
+              itemId: calc.id,
+            },
+          })
+        ).status,
+        404,
+        'A raw valuation snapshot is not a register item',
+      );
+      // The actor can see the first worker but not the second. A mixed-worker batch must not leak either its identity or partial totals.
+      await pool.query(
+        "insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)values('synthetic-report-lead','synthetic-report-lead','Synthetic report lead','synthetic-report-lead@example.test','Lead','Delivery','US','director-commercial','Active',$1,$2)",
+        [f.organizationId, f.legalEntityId],
+      );
+      await pool.query('update users set employee_record_id=$1,employee_id=$1 where id=$2', [
+        'synthetic-report-lead',
+        ids.denied.id,
+      ]);
+      ids.denied.employeeRecordId = 'synthetic-report-lead';
+      ids.denied.employeeId = 'synthetic-report-lead';
+      await pool.query('update employees set reporting_manager_id=$1 where id=$2', [
+        'synthetic-report-lead',
+        f.ownerId,
+      ]);
+      const scopedBefore = ok(await request(reportPath, { identity: ids.denied }));
+      assert.equal(scopedBefore.items.length, 1);
+      assert.equal(scopedBefore.items[0].itemId, itemId);
+      ok(
+        await request('/api/allocations', {
+          method: 'POST',
+          body: {
+            employee_id: ids.first.employeeRecordId,
+            project_id: roots.project.id,
+            percentage: 20,
+            start_date: fx.today,
+            end_date: fx.today,
+            billable: true,
+            status: 'Active',
+          },
+        }),
+      );
+      const otherWork = await submitStagedWork(request, ids.first, fx.today, {
+        entries: [
+          {
+            project_id: roots.project.id,
+            work_type: 'Project Work',
+            category_code: 'BILL',
+            work_date: fx.today,
+            hours: '1',
+            billable: true,
+            remark: 'Synthetic other worker',
+          },
+        ],
+      });
+      const otherEvidence = (
+        await pool.query('select * from work_submission_evidence where id=$1', [
+          otherWork.instance.submissionId,
+        ])
+      ).rows[0];
+      for (const identity of [ids.manager, ids.second]) {
+        const current = ok(await request(work + '/instances/' + otherWork.instance.id)).instance;
+        ok(
+          await request(work + '/instances/' + otherWork.instance.id + '/decisions', {
+            method: 'POST',
+            identity,
+            body: {
+              expectedOwnerKey: await readApprovalOwner(request, identity),
+              expectedSourceToken: current.sourceToken,
+              expectedSequence: current.state.sequence,
+              requestId: randomUUID(),
+              decision: 'Approved',
+              reason: 'Synthetic other worker approval',
+            },
+          }),
+          201,
+        );
+      }
+      const otherCost = await makeRate('cost', '40.0020', 1, true, 'USD', ids.first.employeeRecordId),
+        otherCalc = ok(
+          await request(base + '/valuations', {
+            method: 'POST',
+            body: {
+              expectedOwnerKey: policies.ownerKey,
+              requestId: randomUUID(),
+              engagementId: roots.engagement.id,
+              policyId: policy.id,
+              submissionId: otherEvidence.id,
+              entryId: otherEvidence.entries[0].entryId,
+              billingAdoptionId: billing.id,
+              costAdoptionId: otherCost.id,
+              reason: 'Synthetic second worker calculation',
+            },
+          }),
+          201,
+        ).valuation;
+      const otherReview = ok(
+        await request(b + '/requests', {
+          method: 'POST',
+          identity: ids.requester,
+          body: { ...requestBody, snapshotId: otherCalc.id, requestId: randomUUID() },
+        }),
+        201,
+      ).approval;
+      for (const [identity, sequence] of [
+        [ids.manager, 0],
+        [ids.second, 1],
+      ]) {
+        const current = ok(await request(b + '/instances/' + otherReview.id, { identity }));
+        ok(
+          await request(b + '/instances/' + otherReview.id + '/decisions', {
+            method: 'POST',
+            identity,
+            body: {
+              expectedOwnerKey: current.ownerKey,
+              requestId: randomUUID(),
+              expectedSequence: sequence,
+              decision: 'Approved',
+              reason: 'Synthetic second worker eligibility',
+            },
+          }),
+          201,
+        );
+      }
+      const otherItem = ok(await request(b + '/register')).items.find((x) => x.snapshotId === otherCalc.id);
+      assert(otherItem);
+      ok(
+        await request(route + '/batches/' + second.batch.id + '/lines', {
+          method: 'POST',
+          body: {
+            ...addBody,
+            itemId: otherItem.id,
+            expectedOwnerKey: second.ownerKey,
+            expectedLineCount: 1,
+            requestId: randomUUID(),
+          },
+        }),
+        201,
+      );
+      const mixedAdmin = ok(await request(reportPath));
+      assert.equal(mixedAdmin.items.length, 2);
+      assert.equal(control(mixedAdmin, 'CURRENT_LINE').amount, '225.27');
+      const mixedLimited = ok(await request(reportPath, { identity: ids.denied }));
+      assert.equal(mixedLimited.items.length, 0);
+      assert.equal(mixedLimited.controls.length, 0);
+      assert(!JSON.stringify(mixedLimited).includes(second.batch.id));
+      const review2 = ok(
+        await request(b + '/requests', {
+          method: 'POST',
+          identity: ids.requester,
+          body: { ...requestBody, snapshotId: calc2.id, requestId: randomUUID() },
+        }),
+        201,
+      ).approval;
+      for (const [identity, sequence] of [
+        [ids.manager, 0],
+        [ids.second, 1],
+      ]) {
+        const v = ok(await request(b + '/instances/' + review2.id, { identity }));
+        ok(
+          await request(b + '/instances/' + review2.id + '/decisions', {
+            method: 'POST',
+            identity,
+            body: {
+              expectedOwnerKey: v.ownerKey,
+              requestId: randomUUID(),
+              expectedSequence: sequence,
+              decision: 'Approved',
+              reason: 'Synthetic batch source approval',
+            },
+          }),
+          201,
+        );
+      }
+      const available = ok(await request(b + '/register')).items,
+        secondItem = available.find((x) => x.snapshotId === calc2.id);
+      assert(secondItem);
+      const atomicBatch = ok(
+        await request(route + '/batches', {
+          method: 'POST',
+          body: { ...createBody, requestId: randomUUID() },
+        }),
+        201,
+      );
+      await pool.query(
+        "create function synthetic_invoice_owner_loss() returns trigger language plpgsql as $$begin update users set status='Inactive' where id=(select owner_user_id from invoice_draft_batches where id=new.batch_id);return new;end$$;create trigger synthetic_invoice_owner_loss after insert on invoice_draft_lines for each row execute function synthetic_invoice_owner_loss()",
+      );
+      const lostInTransaction = await request(route + '/batches/' + atomicBatch.batch.id + '/lines', {
+        method: 'POST',
+        body: {
+          ...addBody,
+          itemId: secondItem.id,
+          requestId: randomUUID(),
+          expectedOwnerKey: atomicBatch.ownerKey,
+        },
+      });
+      assert(
+        [403, 409].includes(lostInTransaction.status),
+        'An owner loss before commit must refuse acquisition',
+      );
+      assert.equal(
+        (await pool.query('select status from users where id=$1', [ids.manager.id])).rows[0].status,
+        'Active',
+        'Failed acquisition rolls back the same-transaction owner change',
+      );
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from invoice_draft_lines where batch_id=$1', [
+            atomicBatch.batch.id,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1', [
+            secondItem.id,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      await pool.query(
+        'drop trigger synthetic_invoice_owner_loss on invoice_draft_lines;drop function synthetic_invoice_owner_loss()',
+      );
+      const batch3 = ok(
+          await request(route + '/batches', {
+            method: 'POST',
+            body: { ...createBody, requestId: randomUUID() },
+          }),
+          201,
+        ),
+        batch4 = ok(
+          await request(route + '/batches', {
+            method: 'POST',
+            body: { ...createBody, requestId: randomUUID() },
+          }),
+          201,
+        ),
+        raceBody = {
+          ...addBody,
+          itemId: secondItem.id,
+          expectedLineCount: 0,
+          reason: 'Synthetic concurrent acquisition',
+        },
+        race = await Promise.all([
+          request(route + '/batches/' + batch3.batch.id + '/lines', {
+            method: 'POST',
+            body: { ...raceBody, requestId: randomUUID(), expectedOwnerKey: batch3.ownerKey },
+          }),
+          request(route + '/batches/' + batch4.batch.id + '/lines', {
+            method: 'POST',
+            body: { ...raceBody, requestId: randomUUID(), expectedOwnerKey: batch4.ownerKey },
+          }),
+        ]);
+      assert.deepEqual(race.map((x) => x.status).sort(), [201, 409]);
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1', [
+            secondItem.id,
+          ])
+        ).rows[0].n,
+        1,
+      );
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from invoice_draft_lines where item_id=$1', [
+            secondItem.id,
+          ])
+        ).rows[0].n,
+        1,
+      );
+      const review3 = ok(
+        await request(b + '/requests', {
+          method: 'POST',
+          identity: ids.requester,
+          body: { ...requestBody, snapshotId: calc3.id, requestId: randomUUID() },
+        }),
+        201,
+      ).approval;
+      for (const [identity, sequence] of [
+        [ids.manager, 0],
+        [ids.second, 1],
+      ]) {
+        const v = ok(await request(b + '/instances/' + review3.id, { identity }));
+        ok(
+          await request(b + '/instances/' + review3.id + '/decisions', {
+            method: 'POST',
+            identity,
+            body: {
+              expectedOwnerKey: v.ownerKey,
+              requestId: randomUUID(),
+              expectedSequence: sequence,
+              decision: 'Approved',
+              reason: 'Synthetic source approval',
+            },
+          }),
+          201,
+        );
+      }
+      const thirdItem = ok(await request(b + '/register')).items.find((x) => x.snapshotId === calc3.id);
+      assert(thirdItem, 'Owner-loss test must use an available, unoccupied item');
+      const eligibleBasis = ok(
+        await request(route + '/batches', {
+          method: 'POST',
+          body: {
+            ...createBody,
+            requestId: randomUUID(),
+            definition: { ...batchDefinition, periodBasis: 'ELIGIBLE_DATE' },
+          },
+        }),
+        201,
+      );
+      const wrongPeriod = ok(
+        await request(route + '/batches', {
+          method: 'POST',
+          body: {
+            ...createBody,
+            requestId: randomUUID(),
+            definition: {
+              ...batchDefinition,
+              periodStart: shift(fx.today, 1),
+              periodEnd: shift(fx.today, 1),
+            },
+          },
+        }),
+        201,
+      );
+      assert.equal(
+        (
+          await request(route + '/batches/' + wrongPeriod.batch.id + '/lines', {
+            method: 'POST',
+            body: {
+              ...addBody,
+              itemId: thirdItem.id,
+              requestId: randomUUID(),
+              expectedOwnerKey: wrongPeriod.ownerKey,
+            },
+          })
+        ).status,
+        409,
+        'A whole item outside the selected period is refused',
+      );
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1', [
+            thirdItem.id,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      const eligibleLine = ok(
+        await request(route + '/batches/' + eligibleBasis.batch.id + '/lines', {
+          method: 'POST',
+          body: {
+            ...addBody,
+            itemId: thirdItem.id,
+            requestId: randomUUID(),
+            expectedOwnerKey: eligibleBasis.ownerKey,
+          },
+        }),
+        201,
+      );
+      assert.equal(
+        eligibleLine.line.itemId,
+        thirdItem.id,
+        'Explicit eligibility-date basis admits an item on its retained eligibility date',
+      );
+      ok(
+        await request(route + '/batches/' + eligibleBasis.batch.id + '/cancellations', {
+          method: 'POST',
+          body: {
+            expectedOwnerKey: eligibleBasis.ownerKey,
+            requestId: randomUUID(),
+            expectedLineCount: 1,
+            reason: 'Synthetic release',
+          },
+        }),
+        201,
+      );
+      const ownerLossBatch = ok(
+        await request(route + '/batches', {
+          method: 'POST',
+          body: { ...createBody, requestId: randomUUID() },
+        }),
+        201,
+      );
+      await pool.query("update users set status='Inactive' where id=$1", [ids.manager.id]);
+      await pool.query("update users set status='Active' where id=$1", [ids.manager.id]);
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from invoice_draft_owner_losses where batch_id=$1', [
+            ownerLossBatch.batch.id,
+          ])
+        ).rows[0].n,
+        1,
+      );
+      assert.equal(
+        ok(await request(route + '/batches/' + ownerLossBatch.batch.id)).batch.ownerCurrent,
+        false,
+        'Restoration must not make the retained owner current',
+      );
+      const stale = await request(route + '/batches/' + ownerLossBatch.batch.id + '/lines', {
+        method: 'POST',
+        body: {
+          ...addBody,
+          itemId: thirdItem.id,
+          requestId: randomUUID(),
+          expectedOwnerKey: ownerLossBatch.ownerKey,
+        },
+      });
+      assert.equal(stale.status, 409, 'Owner restoration must not revive a stale Draft');
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1', [
+            thirdItem.id,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      assert(
+        ok(await request(b + '/register')).items.some((x) => x.id === thirdItem.id),
+        'The rejected acquisition leaves the item available',
+      );
+      const oldDetail = ok(await request(route + '/batches/' + second.batch.id));
+      assert.equal(oldDetail.batch.ownerCurrent, false);
+      const staleCancel = ok(
+        await request(route + '/batches/' + second.batch.id + '/cancellations', {
+          method: 'POST',
+          body: {
+            expectedOwnerKey: second.ownerKey,
+            requestId: randomUUID(),
+            expectedLineCount: 2,
+            reason: 'Synthetic stale draft cancellation',
+          },
+        }),
+        201,
+      );
+      assert.equal(staleCancel.batch.state, 'Cancelled');
+      assert.equal(staleCancel.lines[0].id, reacquired.line.id);
+      assert.equal(
+        (await pool.query('select count(*)::int n from invoice_draft_occupancies where item_id=$1', [itemId]))
+          .rows[0].n,
+        0,
+      );
+      console.log(
+        'invoice draft occupancy, duplicate, owner loss and cancellation API passed in disposable PostgreSQL.',
+      );
+    },
+  );
+});

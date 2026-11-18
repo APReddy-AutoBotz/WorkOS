@@ -255,6 +255,267 @@ const canonical = (value: unknown) =>
   );
 export { captureRateContext };
 export const invoiceDrafts = {
+  reconciliation: async (engagementId: string, c: RateContext | null) => {
+    if (!id.safeParse(engagementId).success || !hasRatePermission('commercial.invoice_export.view'))
+      return bad();
+    const raw = await call('GET', '/reconciliation?' + new URLSearchParams({ engagementId }), c, 'view');
+    if (!hasRatePermission('commercial.invoice_export.view')) return bad();
+    const row = z
+      .object({
+        itemId: uuid,
+        itemVersion: z.literal(1),
+        eventId: uuid,
+        eventVersion: z.literal(1),
+        sourceType: z.literal('TM_SNAPSHOT'),
+        snapshotId: uuid,
+        eligibilityApprovalId: uuid,
+        eligibilityDecisionId: uuid,
+        clientId: id,
+        contractId: id,
+        engagementId: id,
+        eligibleOn: date,
+        currency: z.string().regex(/^[A-Z]{3}$/),
+        amount,
+        evidence,
+        sourceAmount: amount,
+        sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
+        sourceMatches: z.boolean(),
+        sourceCurrent: z.boolean(),
+        batchId: uuid.nullable(),
+        lineId: uuid.nullable(),
+        acquisitionRequestId: uuid.nullable(),
+        acquisitionOperationId: id.nullable(),
+        lineAmount: amount.nullable(),
+        lineCurrency: z
+          .string()
+          .regex(/^[A-Z]{3}$/)
+          .nullable(),
+        batchState: z
+          .enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled'])
+          .nullable(),
+        artifactId: uuid.nullable(),
+        artifactHash: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .nullable(),
+        confirmationId: uuid.nullable(),
+        lineMatches: z.boolean(),
+        artifactMatches: z.boolean(),
+        historicalLineCount: z.number().int().nonnegative(),
+        history: z.array(
+          z
+            .object({
+              lineId: uuid,
+              batchId: uuid,
+              batchState: z.enum([
+                'Draft',
+                'Under Review',
+                'Approved',
+                'Exported',
+                'Billed/Confirmed',
+                'Cancelled',
+              ]),
+              amount,
+              currency: z.string().regex(/^[A-Z]{3}$/),
+              matches: z.boolean(),
+            })
+            .strict(),
+        ),
+        status: z.enum(['OCCUPIED', 'AVAILABLE', 'SOURCE_UNAVAILABLE']),
+        controlOk: z.boolean(),
+      })
+      .strict();
+    const report = z
+      .object({
+        ...envelope,
+        asOf: instant,
+        engagementId: id,
+        version: z.literal('workos.tm-reconciliation/1'),
+        reportToken: z.string().regex(/^[a-f0-9]{64}$/),
+        items: z.array(row).max(500),
+        missingEvents: z
+          .array(
+            z
+              .object({
+                eventId: uuid,
+                snapshotId: uuid,
+                currency: z.string().regex(/^[A-Z]{3}$/),
+                amount,
+                sourceAmount: amount,
+                sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
+              })
+              .strict(),
+          )
+          .max(500),
+        controls: z.array(
+          z
+            .object({
+              currency: z.string().regex(/^[A-Z]{3}$/),
+              boundary: z.enum([
+                'EVENT_BACKED_SOURCE',
+                'ELIGIBILITY_EVENT',
+                'REGISTER_ITEM',
+                'CURRENT_OCCUPANCY',
+                'CURRENT_LINE',
+                'EXPORTED_LINE',
+                'MANUALLY_CONFIRMED_LINE',
+                'HISTORICAL_RELEASED_LINE',
+              ]),
+              lineCount: z.number().int().nonnegative(),
+              amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
+            })
+            .strict(),
+        ),
+        totals: z.array(
+          z
+            .object({
+              currency: z.string().regex(/^[A-Z]{3}$/),
+              status: z.enum(['OCCUPIED', 'AVAILABLE', 'SOURCE_UNAVAILABLE']),
+              lineCount: z.number().int().nonnegative(),
+              amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
+            })
+            .strict(),
+        ),
+        exceptionCount: z.number().int().nonnegative(),
+      })
+      .strict()
+      .safeParse(raw);
+    if (!report.success || report.data.engagementId !== engagementId) return bad();
+    const value = report.data,
+      keys = new Set<string>();
+    if (
+      value.exceptionCount !== value.items.filter((x) => !x.controlOk).length + value.missingEvents.length ||
+      value.items.some(
+        (x) =>
+          x.historicalLineCount !== x.history.length ||
+          x.engagementId !== engagementId ||
+          x.sourceMatches !==
+            (x.sourceCurrency === x.currency &&
+              canonicalHours(x.sourceAmount) === canonicalHours(x.amount)) ||
+          x.snapshotId !== x.evidence.snapshotId ||
+          x.currency !== x.evidence.currency ||
+          canonicalHours(x.amount) !== canonicalHours(x.evidence.amount) ||
+          x.status !== (x.batchId ? 'OCCUPIED' : x.sourceCurrent ? 'AVAILABLE' : 'SOURCE_UNAVAILABLE') ||
+          Boolean(x.batchId) !== Boolean(x.lineId) ||
+          Boolean(x.batchId) !== Boolean(x.acquisitionRequestId) ||
+          Boolean(x.batchId) !== Boolean(x.acquisitionOperationId) ||
+          x.controlOk !==
+            (x.sourceMatches &&
+              x.lineMatches &&
+              x.artifactMatches &&
+              x.history.every((h) => h.batchState === 'Cancelled' && h.matches) &&
+              (!x.batchId ||
+                ['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed'].includes(
+                  x.batchState ?? '',
+                )) &&
+              (!['Exported', 'Billed/Confirmed'].includes(x.batchState ?? '') || !!x.artifactId) &&
+              (x.batchState !== 'Billed/Confirmed' || !!x.confirmationId)),
+      )
+    )
+      return bad();
+    for (const t of value.totals) {
+      const k = t.currency + ':' + t.status;
+      if (keys.has(k)) return bad();
+      keys.add(k);
+      const selected = value.items.filter((x) => x.currency === t.currency && x.status === t.status),
+        sum = invoiceDraftTotal(selected.map((x) => x.amount));
+      if (
+        !selected.length ||
+        sum.lineCount !== t.lineCount ||
+        canonicalHours(sum.amount) !== canonicalHours(t.amount)
+      )
+        return bad();
+    }
+    if (value.items.some((x) => !keys.has(x.currency + ':' + x.status))) return bad();
+    const grouped = new Map<string, string[]>(),
+      add = (currency: string, boundary: string, v: string) => {
+        const k = currency + ':' + boundary;
+        grouped.set(k, [...(grouped.get(k) ?? []), v]);
+      };
+    for (const x of value.items) {
+      add(x.sourceCurrency, 'EVENT_BACKED_SOURCE', x.sourceAmount);
+      add(x.currency, 'ELIGIBILITY_EVENT', x.amount);
+      add(x.currency, 'REGISTER_ITEM', x.amount);
+      if (x.batchId) {
+        add(x.currency, 'CURRENT_OCCUPANCY', x.amount);
+        if (x.lineCurrency && x.lineAmount) {
+          add(x.lineCurrency, 'CURRENT_LINE', x.lineAmount);
+          if (['Exported', 'Billed/Confirmed'].includes(x.batchState ?? ''))
+            add(x.lineCurrency, 'EXPORTED_LINE', x.lineAmount);
+          if (x.batchState === 'Billed/Confirmed')
+            add(x.lineCurrency, 'MANUALLY_CONFIRMED_LINE', x.lineAmount);
+        }
+      }
+      for (const h of x.history)
+        if (h.batchState === 'Cancelled') add(h.currency, 'HISTORICAL_RELEASED_LINE', h.amount);
+    }
+    for (const x of value.missingEvents) {
+      add(x.sourceCurrency, 'EVENT_BACKED_SOURCE', x.sourceAmount);
+      add(x.currency, 'ELIGIBILITY_EVENT', x.amount);
+    }
+    const seen = new Set<string>();
+    for (const t of value.controls) {
+      const k = t.currency + ':' + t.boundary,
+        amounts = grouped.get(k);
+      if (!amounts || seen.has(k)) return bad();
+      seen.add(k);
+      const total = invoiceDraftTotal(amounts);
+      if (total.lineCount !== t.lineCount || canonicalHours(total.amount) !== canonicalHours(t.amount))
+        return bad();
+    }
+    if (seen.size !== grouped.size) return bad();
+    return value;
+  },
+  exportReconciliation: async (
+    report: { engagementId: string; reportToken: string },
+    requestId: string,
+    why: string,
+    c: RateContext | null,
+  ) => {
+    if (
+      !uuid.safeParse(requestId).success ||
+      !reason.safeParse(why).success ||
+      !hasRatePermission('commercial.invoice_export.view') ||
+      !hasRatePermission('reports.export')
+    )
+      return bad();
+    const raw = await call('POST', '/reconciliation/exports', c, 'view', {
+      engagementId: report.engagementId,
+      expectedReportToken: report.reportToken,
+      requestId,
+      reason: why,
+    });
+    if (!hasRatePermission('commercial.invoice_export.view') || !hasRatePermission('reports.export'))
+      return bad();
+    const out = z
+      .object({
+        ...envelope,
+        requestId: uuid,
+        engagementId: id,
+        version: z.literal('workos.tm-reconciliation/1'),
+        asOf: instant,
+        reportToken: z.string().regex(/^[a-f0-9]{64}$/),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        bytes: z.number().int().nonnegative(),
+        csv: z.string(),
+      })
+      .strict()
+      .safeParse(raw);
+    if (
+      !out.success ||
+      out.data.requestId !== requestId ||
+      out.data.engagementId !== report.engagementId ||
+      out.data.reportToken !== report.reportToken
+    )
+      return bad();
+    const data = new TextEncoder().encode(out.data.csv),
+      hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)))
+        .map((x) => x.toString(16).padStart(2, '0'))
+        .join('');
+    if (data.length !== out.data.bytes || hash !== out.data.sha256 || !c || !isRateContextCurrent(c))
+      return bad();
+    return out.data;
+  },
   list: async (c: RateContext | null, after?: string) => {
     if (after && !uuid.safeParse(after).success) return bad();
     const raw = await call(
