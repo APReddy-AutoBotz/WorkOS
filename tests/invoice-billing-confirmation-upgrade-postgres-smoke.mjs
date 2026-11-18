@@ -1,3 +1,4 @@
+import {expectedMilestoneUpgradeSnapshot} from './support/milestone-upgrade-expectations.mjs';
 import { mkdtemp, mkdir, copyFile, readdir, cp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runMigrations } from '../server/migrate.mjs';
@@ -1083,6 +1084,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           assert.deepEqual(Buffer.from(result.artifact.payloadBase64, 'base64'), saved.payload);
           assert.equal(saved.hash, result.artifact.sha256);
           const tables = [
+              'billing_eligibility_events',
+              'approved_unbilled_items',
               'users',
               'user_roles',
               'user_organization_scopes',
@@ -1134,9 +1137,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             0,
           );
           assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-            '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required',
+            '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility',
           ]);
-          assert.deepEqual(await snapshot(), before);
+          assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
           for (const t of ['role_permissions', 'user_permission_grants'])
             assert.equal(
               (await pool.query('select count(*)::int n from ' + t + ' where permission_key=$1', [key]))
@@ -1148,7 +1151,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             0,
           );
           assert.deepEqual((await migrateCommercialDatabase(pool)).applied, []);
-          assert.deepEqual(await snapshot(), before);
+          assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
           assert.deepEqual(
             (await pool.query('select payload from invoice_csv_artifacts where id=$1', [result.artifact.id]))
               .rows[0].payload,

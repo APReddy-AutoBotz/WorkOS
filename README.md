@@ -18,6 +18,8 @@ Authorized operators can evaluate weekly submission deadlines and issue in-app n
 
 A finance preparer can assess an empty T&M invoice draft and send an in-app notice to its recorded owner and preparer. When one person holds both roles, they receive one notice with both reasons. [Invoice action notices](docs/tasks/WOS-06-INVOICE-ACTION-REQUIRED.md)
 
+Milestone engagements can record acceptance evidence and route it to named independent reviewers. Final approval adds one item in the milestone’s currency to the approved-unbilled register. [Milestone billing eligibility](docs/tasks/WOS-06-MILESTONE-ELIGIBILITY.md)
+
 Work approvals can route a submitted timesheet through configured reviewers. Each stage checks the reviewer’s current role and worker relationship before issuing its inbox notice. Only final approval changes the work to Approved. [Staged work approvals](docs/tasks/WOS-05-STAGED-WORK-APPROVALS.md)
 
 Planners can review assigned percentages at one-, two- and three-month checkpoints, inspect the underlying assignments and retain a dated forecast export. Capacity hours appear separately. [Forecast scope](docs/tasks/WOS-04-NATIVE-PERCENTAGE-FORECAST.md)
