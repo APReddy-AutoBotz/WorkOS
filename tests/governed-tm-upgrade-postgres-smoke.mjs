@@ -298,6 +298,10 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             'commercial.tm_billing.view',
             'commercial.tm_billing.manage',
             'commercial.tm_billing.decide',
+            'commercial.invoice_drafts.view',
+            'commercial.invoice_drafts.prepare',
+            'commercial.invoice_drafts.own',
+            'commercial.invoice_drafts.cancel',
           ];
         assert.deepEqual(
           after.permission_definitions
