@@ -516,3 +516,7 @@ After a commercial save returns an uncertain outcome, discarding the local draft
 ## Scoped workforce directory
 
 Open Workforce directory with the employee viewing permission. Search and paging return workers in the current role and legal entity. Reload the directory after a roster change before paging or opening another relationship. This read-only feature has no migration or commercial permission grant.
+
+## Commercial rate candidates
+
+Apply migration 065a after 065. It creates an empty, append-only candidate table and defines four opt-in permissions. Grant billing and confidential cost access separately. After an uncertain write, read its original receipt before attempting another save. Retain the ledger on recovery. Authoritative rate adoption and invoice workflows still require separate release gates.

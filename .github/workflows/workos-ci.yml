@@ -98,6 +98,9 @@ jobs:
       - name: Verify scoped workforce directory postgres
         run: npm run test:workforce-directory-postgres
 
+      - name: Verify billing and cost candidates postgres
+        run: npm run test:rate-candidate-postgres
+
       - name: Verify approved actual work reconciliation in PostgreSQL
         run: npm run test:actual-work-postgres
 
@@ -216,6 +219,9 @@ jobs:
 
       - name: Verify scoped workforce directory journey
         run: npm run test:workforce-directory-journey
+
+      - name: Verify billing and cost candidates journey
+        run: npm run test:rate-candidate-journey
 
       - name: Verify actual utilization and evidence download in Chromium
         run: npm run test:actual-work-journey

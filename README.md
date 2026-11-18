@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Commercial drafting supports effective-dated billing-rate candidates for contracts and engagements. The workforce directory supports confidential cost-rate candidates for scoped workers. Preview a date, currency and unit to see the highest-priority match, a tie or a missing rate. Each capability requires an explicit permission grant.
+
 The workforce directory shows workers and reporting relationships within the signed-in role and legal entity. Use it to select a worker before opening their capacity or capability view.
 
 If a commercial draft save has an uncertain outcome, reload the workspace and inspect the server records before creating another draft. If that read fails, use **Retry workspace**.

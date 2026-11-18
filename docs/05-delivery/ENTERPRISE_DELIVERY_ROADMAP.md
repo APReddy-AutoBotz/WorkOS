@@ -4,9 +4,11 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
-The scoped workforce directory establishes worker selection for upcoming cost-rate maintenance. Directory access grants no commercial permissions. Worker classification, worker types, protected rate inputs, rate adoption and billing reconciliation remain open.
+The commercial rate candidate package adds dated billing and cost inputs, separate permissions and exact-decimal resolution previews. It uses scoped workforce selection and current employment status. Commercial ownership, approval, rate adoption, valuation and billing eligibility remain subsequent packages. [Rate candidate scope](../tasks/WOS-06-RATE-COST-CANDIDATES.md)
 
-Commercial drafting recovery covers failed reconciliation reads after a lost or invalid save response. The rate and cost candidate work still depends on scoped worker classification and worker-type controls. Rate approval, adoption, valuation and billing follow that integration.
+The scoped workforce directory establishes worker selection for upcoming cost-rate maintenance. Directory access grants no commercial permissions. Worker classification and dated worker-type maintenance remain open.
+
+Commercial drafting recovery covers failed reconciliation reads after a lost or invalid save response. Rate approval, adoption, valuation and billing follow candidate integration.
 
 Material assignment changes can now follow named approval stages. The work package covers edits and ending existing assignments, including import controls. Creation approvals are a separate package. [Material assignment approvals](../tasks/WOS-05-MATERIAL-ASSIGNMENT-APPROVALS.md)
 
