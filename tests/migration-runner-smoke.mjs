@@ -1824,6 +1824,7 @@ await withDisposableDatabase(async (pool, databaseUrl) => {
         from pg_locks l
         cross join (select hashtextextended($1, 0) as lock_key) expected
         where l.locktype='advisory' and l.granted=$2 and l.objsubid=1
+          and l.database=(select oid from pg_database where datname=current_database())
           and l.classid::bigint=((expected.lock_key >> 32) & 4294967295)
           and l.objid::bigint=(expected.lock_key & 4294967295)
       `, [lockKey, granted])).rows[0].count;

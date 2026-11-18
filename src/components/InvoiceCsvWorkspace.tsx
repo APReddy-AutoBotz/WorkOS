@@ -406,7 +406,7 @@ const InvoiceCsvEngagement = ({
                       onChange={(e) => setVersion(e.target.value)}
                     >
                       <option value="">Choose</option>
-                      <option value="workos.invoice-tm-csv/1">WorkOS T&M invoice CSV v1</option>
+                      <option value="workos.invoice-tm-csv/1">T&M invoice CSV v1</option>
                     </select>
                   </label>
                   <label>
