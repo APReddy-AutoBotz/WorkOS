@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Actual Utilization reconciles approved hours against eligible capacity for a selected worker and period. The report shows excluded hours, unresolved classifications and the sources behind its percentage. [Actual work reconciliation](docs/tasks/WOS-04-ACTUAL-WORK-RECONCILIATION.md)
+
 Buyers can adopt effective-dated work categories for project, descriptive client and non-client work. Capture and CSV imports retain the selected catalog version with the submitted entry. [Work category specification](docs/tasks/WOS-04-WORK-CATEGORY-CONTEXT.md)
 
 Allocation Control supports buyer-selected warning and blocking thresholds for overlapping active assignments. Thresholds use the declared assignment percentages and become effective on the adopted date. [Assignment overlap policy](docs/tasks/WOS-04-ASSIGNMENT-OVERLAP-POLICY.md)
