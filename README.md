@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Allocation Control supports buyer-selected warning and blocking thresholds for overlapping active assignments. Thresholds use the declared assignment percentages and become effective on the adopted date. [Assignment overlap policy](docs/tasks/WOS-04-ASSIGNMENT-OVERLAP-POLICY.md)
+
 Production Compose accepts `API_SESSION_TTL_HOURS` in hours, including fractions. The default is eight hours. Invalid durations prevent API startup. [Operations runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#configuring-session-lifetime)
 
 The merged PostgreSQL session and browser journeys verify current-session logout and absolute expiry. Auditing changes to session lifetime remains open under WOS-IAM-008. [Session acceptance evidence](docs/05-delivery/SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)

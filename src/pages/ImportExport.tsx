@@ -1,3 +1,4 @@
+import {overlapImportNotice} from '../../shared/assignment-overlap-policy.mjs';
 import {resolveWorkSourceIdentityAliases,sourceIdentityImportNotice} from '../../shared/work-source-identity.mjs';
 import {importSubmissionTimingNotice} from '../services/submissionDeadline';
 import {importOvertimeNotice} from '../services/overtimeCapture';
@@ -581,7 +582,7 @@ export const ImportExport = () => {
             ? {employeeImportOperation: {...basePending.employeeImportOperation, validationState: 'complete'}}
             : {}),
         });
-        setLastResult(`Server dry run complete for ${fileName}: ${serverValidRows.length}/${rows.length} rows are valid. Review saved errors before applying.`+importOvertimeNotice(result.captureWarnings)+importSubmissionTimingNotice(result.submissionTiming)+sourceIdentityImportNotice(result.sourceIdentityCheck));
+        setLastResult(`Server dry run complete for ${fileName}: ${serverValidRows.length}/${rows.length} rows are valid. Review saved errors before applying.`+overlapImportNotice(result.assignmentPolicyWarnings)+importOvertimeNotice(result.captureWarnings)+importSubmissionTimingNotice(result.submissionTiming)+sourceIdentityImportNotice(result.sourceIdentityCheck));
         refreshHistory();
       } catch (error) {
         if (!isCurrentRequest()) return;
@@ -674,7 +675,7 @@ export const ImportExport = () => {
           ? {employeeImportOperation: {...snapshot.employeeImportOperation, validationState: 'complete'}}
           : {}),
       });
-      setLastResult(`Server dry run complete for ${snapshot.fileName}: ${validRows.length}/${snapshot.totalRows} rows are valid. Review saved errors before applying.`+importOvertimeNotice(result.captureWarnings)+importSubmissionTimingNotice(result.submissionTiming)+sourceIdentityImportNotice(result.sourceIdentityCheck));
+      setLastResult(`Server dry run complete for ${snapshot.fileName}: ${validRows.length}/${snapshot.totalRows} rows are valid. Review saved errors before applying.`+overlapImportNotice(result.assignmentPolicyWarnings)+importOvertimeNotice(result.captureWarnings)+importSubmissionTimingNotice(result.submissionTiming)+sourceIdentityImportNotice(result.sourceIdentityCheck));
       refreshHistory();
     } catch (error) {
       if (!isCurrentRequest()) return;
@@ -743,7 +744,7 @@ export const ImportExport = () => {
         const resultText = backendResult.status === 'Success'
           ? `Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`
           : `${pendingImport.title} apply finished with ${backendResult.validRows} valid rows and ${backendResult.errorRows} errors for ${pendingImport.fileName}. View saved diagnostic details in Import History.`;
-        setLastResult(resultText+importOvertimeNotice(backendResult.captureWarnings)+importSubmissionTimingNotice(backendResult.submissionTiming)+sourceIdentityImportNotice(backendResult.sourceIdentityCheck));
+        setLastResult(resultText+overlapImportNotice(backendResult.assignmentPolicyWarnings)+importOvertimeNotice(backendResult.captureWarnings)+importSubmissionTimingNotice(backendResult.submissionTiming)+sourceIdentityImportNotice(backendResult.sourceIdentityCheck));
         setPendingImport(null);
         refreshHistory();
       } catch (error) {
@@ -853,7 +854,7 @@ export const ImportExport = () => {
       const backendResult = await adminService.applyTimesheetImport(pendingImport.fileName, pendingImport.validRows, pendingImport.errors, pendingImport.rows.length, pendingImport.scope);
       if (!isCurrentApply()) return;
       if (backendResult) {
-        setLastResult(`Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`+importOvertimeNotice(backendResult.captureWarnings)+importSubmissionTimingNotice(backendResult.submissionTiming)+sourceIdentityImportNotice(backendResult.sourceIdentityCheck));
+        setLastResult(`Applied ${backendResult.validRows} valid ${pendingImport.title.toLowerCase()} rows from ${pendingImport.fileName}.`+overlapImportNotice(backendResult.assignmentPolicyWarnings)+importOvertimeNotice(backendResult.captureWarnings)+importSubmissionTimingNotice(backendResult.submissionTiming)+sourceIdentityImportNotice(backendResult.sourceIdentityCheck));
         setPendingImport(null);
         refreshHistory();
         return;

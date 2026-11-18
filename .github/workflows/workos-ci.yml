@@ -80,6 +80,9 @@ jobs:
       - name: Verify delegated timesheet source authority
         run: npm run test:legacy-timesheet-delegation
 
+      - name: Verify assignment overlap policy in PostgreSQL
+        run: npm run test:assignment-overlap-postgres
+
       - name: Verify persistent authentication budgets across replica and restart
         run: npm run test:persistent-auth-throttle
 
@@ -171,6 +174,9 @@ jobs:
 
       - name: Verify legacy approval delegation browser journey
         run: npm run test:legacy-approval-browser
+
+      - name: Verify assignment overlap browser journey
+        run: npm run test:assignment-overlap-journey
 
       - name: Verify the compiled production login page
         run: node tests/production-frontend-browser.mjs
