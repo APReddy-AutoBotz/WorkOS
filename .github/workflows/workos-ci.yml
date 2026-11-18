@@ -83,6 +83,9 @@ jobs:
       - name: Verify calendar leave intake and decisions in PostgreSQL
         run: npm run test:calendar-leave-postgres
 
+      - name: Native percentage forecast PostgreSQL acceptance
+        run: npm run test:native-forecast-postgres
+
       - name: Verify approved actual work reconciliation in PostgreSQL
         run: npm run test:actual-work-postgres
 
@@ -186,6 +189,9 @@ jobs:
 
       - name: Verify calendar leave browser journey
         run: npm run test:calendar-leave-journey
+
+      - name: Native percentage forecast planner browser acceptance
+        run: npm run test:native-forecast-journey
 
       - name: Verify actual utilization and evidence download in Chromium
         run: npm run test:actual-work-journey

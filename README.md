@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Planners can review assigned percentages at one-, two- and three-month checkpoints, inspect the underlying assignments and retain a dated forecast export. Capacity hours appear separately. [Forecast scope](docs/tasks/WOS-04-NATIVE-PERCENTAGE-FORECAST.md)
+
 Full-day leave requests use the worker’s effective schedule and calendar once adopted. Each request retains the dates counted, so approvals, leave balances and utilization can use the same evidence. [Calendar leave intake](docs/tasks/WOS-04-CALENDAR-LEAVE-INTAKE.md)
 
 Actual Utilization reconciles approved hours against eligible capacity for a selected worker and period. The report shows excluded hours, unresolved classifications and the sources behind its percentage. [Actual work reconciliation](docs/tasks/WOS-04-ACTUAL-WORK-RECONCILIATION.md)
