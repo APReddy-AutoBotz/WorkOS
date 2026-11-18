@@ -292,7 +292,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       assert(final.eventId && final.itemId);
       assert.equal(ok(await decision(ids.second, 1, 'Approved', finalKey)).itemId, final.itemId);
       const register = ok(await request(route + '/register'));
-      assert.equal(register.batchSupport, false);
+      assert.equal(register.batchSupport, true);
       assert.equal(register.items.length, 1);
       assert.equal(register.items[0].id, final.itemId);
       assert.equal(register.items[0].evidence.milestoneId, milestone.id);

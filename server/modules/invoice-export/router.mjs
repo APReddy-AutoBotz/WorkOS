@@ -1,3 +1,6 @@
+import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
+import { loadMilestoneExportBatch } from './milestone-batch.mjs';
+import { milestoneInvoiceCsvArtifact, MILESTONE_INVOICE_CSV_SCHEMA } from './milestone-csv.mjs';
 import {
   validInvoiceConfirmationCommand,
   invoiceConfirmationAllowed,
@@ -70,22 +73,18 @@ export const createInvoiceCsvRouter = (o) => {
           '40P01',
         ].includes(e.code)
       )
-        res
-          .status(['ICV01', 'INC01', 'IBC01'].includes(e.code) ? 403 : 409)
-          .json({
-            code: ['ICV01', 'INC01', 'IBC01'].includes(e.code)
-              ? 'INVOICE_CSV_AUTHORITY'
-              : 'INVOICE_CSV_CONFLICT',
-            error: 'Current batch, approval, scope or artifact changed. Reload.',
-          });
+        res.status(['ICV01', 'INC01', 'IBC01'].includes(e.code) ? 403 : 409).json({
+          code: ['ICV01', 'INC01', 'IBC01'].includes(e.code)
+            ? 'INVOICE_CSV_AUTHORITY'
+            : 'INVOICE_CSV_CONFLICT',
+          error: 'Current batch, approval, scope or artifact changed. Reload.',
+        });
       else {
         o.logError?.(e);
-        res
-          .status(503)
-          .json({
-            code: 'INVOICE_CSV_UNCONFIRMED',
-            error: 'The operation could not be confirmed. Read the original receipt.',
-          });
+        res.status(503).json({
+          code: 'INVOICE_CSV_UNCONFIRMED',
+          error: 'The operation could not be confirmed. Read the original receipt.',
+        });
       }
     } finally {
       c?.release();
@@ -137,6 +136,7 @@ export const createInvoiceCsvRouter = (o) => {
       }),
     ]);
   const batch = async (c, r, batchId, lock = false) => {
+    if (await milestoneBatchModel(c, r, batchId)) return loadMilestoneExportBatch(c, r, batchId, lock);
     const b = (
       await c.query(
         `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
@@ -144,6 +144,8 @@ export const createInvoiceCsvRouter = (o) => {
       )
     ).rows[0];
     if (!b) throw fail(404, 'INVOICE_CSV_SOURCE', 'Scoped invoice batch unavailable.');
+    if (b.source_type && b.source_type !== 'TM_SNAPSHOT')
+      throw fail(409, 'INVOICE_CSV_SOURCE', 'Invoice source does not match its engagement.');
     const rows = (
       await c.query(
         `select l.id as "lineId",l.sequence,l.item_id as "itemId",l.item_version as "itemVersion",l.event_id as "eventId",l.snapshot_id as "snapshotId",l.currency,trim_scale(l.amount)::text amount,l.billing_evidence::text as "evidenceJson",l.billing_evidence->>'workDate' as "workDate",ev.eligible_on::text as "eligibleDate",h.employee_id as "workerId" from invoice_draft_lines l join billing_eligibility_events ev on ev.id=l.event_id join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence e on e.id=v.submission_id join timesheets h on h.id=e.timesheet_id where l.batch_id=$1 order by l.sequence`,
@@ -222,7 +224,10 @@ export const createInvoiceCsvRouter = (o) => {
           (await c.query('select id from invoice_csv_artifacts where batch_id=$1', [row.id])).rows[0] ?? null;
       let total = null;
       try {
-        const x = invoiceCsvArtifact(source);
+        const x =
+          source.lines[0]?.sourceType === 'MILESTONE_ACCEPTANCE'
+            ? milestoneInvoiceCsvArtifact(source)
+            : invoiceCsvArtifact(source);
         total = { lineCount: x.lineCount, total: x.total, currency: x.currency };
       } catch {
         /* Historical source can remain inspectable without becoming exportable. */
@@ -231,6 +236,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         batch: {
           id: row.id,
+          ...(row.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: row.source_type } : {}),
           state: row.state,
           clientId: row.client_id,
           contractId: row.contract_id,
@@ -244,18 +250,33 @@ export const createInvoiceCsvRouter = (o) => {
           lineageHash: review?.lineage_hash ?? null,
           sourceCurrent: review?.current === true,
           artifactId: stored?.id ?? null,
-          lines: source.lines.map((x) => ({
-            lineId: x.lineId,
-            sequence: x.sequence,
-            itemId: x.itemId,
-            itemVersion: x.itemVersion,
-            eventId: x.eventId,
-            snapshotId: x.snapshotId,
-            workDate: x.workDate,
-            eligibleDate: x.eligibleDate,
-            currency: x.currency,
-            amount: x.amount,
-          })),
+          lines: source.lines.map((x) =>
+            x.sourceType === 'MILESTONE_ACCEPTANCE'
+              ? {
+                  lineId: x.lineId,
+                  sequence: x.sequence,
+                  itemId: x.itemId,
+                  itemVersion: x.itemVersion,
+                  eventId: x.eventId,
+                  sourceType: x.sourceType,
+                  milestoneId: JSON.parse(x.evidenceJson).milestoneId,
+                  eligibleDate: x.eligibleDate,
+                  currency: x.currency,
+                  amount: x.amount,
+                }
+              : {
+                  lineId: x.lineId,
+                  sequence: x.sequence,
+                  itemId: x.itemId,
+                  itemVersion: x.itemVersion,
+                  eventId: x.eventId,
+                  snapshotId: x.snapshotId,
+                  workDate: x.workDate,
+                  eligibleDate: x.eligibleDate,
+                  currency: x.currency,
+                  amount: x.amount,
+                },
+          ),
           control: total,
         },
       };
@@ -273,7 +294,7 @@ export const createInvoiceCsvRouter = (o) => {
             approvalId: uuid,
             finalTransitionId: uuid,
             lineageHash: key,
-            schemaVersion: z.literal(INVOICE_CSV_SCHEMA),
+            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA]),
             expectedLineCount: z.number().int().min(1).max(1000000),
             expectedTotal: money,
             reason,
@@ -324,7 +345,10 @@ export const createInvoiceCsvRouter = (o) => {
       const notificationPolicy = await currentInvoiceNoticePolicy(c, row);
       let rendered;
       try {
-        rendered = invoiceCsvArtifact(source);
+        rendered =
+          source.lines[0]?.sourceType === 'MILESTONE_ACCEPTANCE'
+            ? milestoneInvoiceCsvArtifact(source)
+            : invoiceCsvArtifact(source);
       } catch (e) {
         if (!(e instanceof TypeError)) throw e;
         const failureId = randomUUID();
@@ -354,7 +378,11 @@ export const createInvoiceCsvRouter = (o) => {
         });
         return { ...(await envelope(c, r)), artifact: null, failure: failureView(f), replayed: false };
       }
-      if (rendered.lineCount !== d.expectedLineCount || rendered.total !== d.expectedTotal)
+      if (
+        rendered.schemaVersion !== d.schemaVersion ||
+        rendered.lineCount !== d.expectedLineCount ||
+        rendered.total !== d.expectedTotal
+      )
         throw fail(409, 'INVOICE_CSV_TOTAL', 'The approved control totals changed.');
       const artifactId = randomUUID();
       await context(c, r, { batchId: d.batchId, artifactId });
@@ -399,6 +427,7 @@ export const createInvoiceCsvRouter = (o) => {
   );
   const confirmationView = (x) => ({
     id: x.id,
+    ...(x.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: x.source_type } : {}),
     batchId: x.batch_id,
     artifactId: x.artifact_id,
     artifactVersion: x.artifact_version,
@@ -435,11 +464,21 @@ export const createInvoiceCsvRouter = (o) => {
               [row.id],
             )
           ).rows[0] ?? null;
-      if (!a) throw fail(409, 'INVOICE_CONFIRMATION_SOURCE', 'An accepted scoped CSV artifact is required.');
+      if (
+        !a ||
+        a.schema_version !==
+          (row.source_type === 'MILESTONE_ACCEPTANCE' ? MILESTONE_INVOICE_CSV_SCHEMA : INVOICE_CSV_SCHEMA)
+      )
+        throw fail(
+          409,
+          'INVOICE_CONFIRMATION_SOURCE',
+          'An accepted scoped CSV artifact of the batch source is required.',
+        );
       return {
         ...(await envelope(c, r)),
         source: {
           batchId: row.id,
+          ...(row.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: row.source_type } : {}),
           state: row.state,
           artifactId: a.id,
           artifactVersion: a.version,
@@ -567,6 +606,8 @@ export const createInvoiceCsvRouter = (o) => {
       ).rows[0];
       if (
         !a ||
+        a.schema_version !==
+          (row.source_type === 'MILESTONE_ACCEPTANCE' ? MILESTONE_INVOICE_CSV_SCHEMA : INVOICE_CSV_SCHEMA) ||
         !invoiceConfirmationAllowed(
           cmd,
           {
@@ -598,28 +639,31 @@ export const createInvoiceCsvRouter = (o) => {
           operationId: r.operationId,
         }),
       ]);
-      const x = (
-        await c.query(
-          "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16)returning *,trim_scale(total)::text total",
-          [
-            confirmationId,
-            ...scope(r),
-            row.id,
-            a.id,
-            a.version,
-            a.sha256,
-            a.currency,
-            a.exact_total,
-            cmd.reference,
-            r.user.sub,
-            r.user.activeRole,
-            cmd.requestId,
-            fp,
-            cmd.reason,
-            r.operationId,
-          ],
-        )
-      ).rows[0];
+      const confirmationArgs = [
+          confirmationId,
+          ...scope(r),
+          row.id,
+          a.id,
+          a.version,
+          a.sha256,
+          a.currency,
+          a.exact_total,
+          cmd.reference,
+          r.user.sub,
+          r.user.activeRole,
+          cmd.requestId,
+          fp,
+          cmd.reason,
+          r.operationId,
+        ],
+        x = (
+          await c.query(
+            row.source_type === 'MILESTONE_ACCEPTANCE'
+              ? "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16,'MILESTONE_ACCEPTANCE')returning *,trim_scale(total)::text total"
+              : "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16)returning *,trim_scale(total)::text total",
+            confirmationArgs,
+          )
+        ).rows[0];
       await o.audit(c, r, {
         module: 'Invoice Billing Confirmation',
         action: 'Record Manual Attestation',

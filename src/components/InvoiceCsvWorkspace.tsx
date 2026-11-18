@@ -250,7 +250,10 @@ const InvoiceCsvEngagement = ({
       !source.finalTransitionId ||
       !source.lineageHash ||
       !source.control ||
-      version !== 'workos.invoice-tm-csv/1' ||
+      version !==
+        (source.sourceType === 'MILESTONE_ACCEPTANCE'
+          ? 'workos.invoice-milestone-csv/1'
+          : 'workos.invoice-tm-csv/1') ||
       !confirmed ||
       reason.trim().length < 3
     )
@@ -261,7 +264,10 @@ const InvoiceCsvEngagement = ({
       approvalId: source.approvalId,
       finalTransitionId: source.finalTransitionId,
       lineageHash: source.lineageHash,
-      schemaVersion: 'workos.invoice-tm-csv/1',
+      schemaVersion:
+        source.sourceType === 'MILESTONE_ACCEPTANCE'
+          ? 'workos.invoice-milestone-csv/1'
+          : 'workos.invoice-tm-csv/1',
       expectedLineCount: source.control.lineCount,
       expectedTotal: source.control.total,
       reason: reason.trim(),
@@ -383,7 +389,8 @@ const InvoiceCsvEngagement = ({
               <ul>
                 {source.lines.map((x) => (
                   <li key={x.lineId}>
-                    Line {x.lineId} · item {x.itemId} · event {x.eventId} · snapshot {x.snapshotId} ·{' '}
+                    Line {x.lineId} · item {x.itemId} · event {x.eventId} ·{' '}
+                    {'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
                   </li>
                 ))}
@@ -410,7 +417,13 @@ const InvoiceCsvEngagement = ({
                       onChange={(e) => setVersion(e.target.value)}
                     >
                       <option value="">Choose</option>
-                      <option value="workos.invoice-tm-csv/1">T&M invoice CSV v1</option>
+                      {source.sourceType === 'MILESTONE_ACCEPTANCE' ? (
+                        <option value="workos.invoice-milestone-csv/1">
+                          Milestone invoice CSV v1
+                        </option>
+                      ) : (
+                        <option value="workos.invoice-tm-csv/1">T&M invoice CSV v1</option>
+                      )}
                     </select>
                   </label>
                   <label>

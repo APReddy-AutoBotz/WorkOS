@@ -27,6 +27,7 @@ const actor = randomUUID(),
     permissions: [
       'commercial.contracts.view',
       'commercial.tm_billing.view',
+      'commercial.milestone_billing.view',
       'commercial.invoice_drafts.view',
       'commercial.invoice_approval.decide',
       'approvals.view',
@@ -66,6 +67,7 @@ const sample = () => {
       lineCount: 1,
       currency: 'USD',
       total: '100.00',
+      lines: [{ snapshotId: randomUUID() }],
     },
     approval: {
       id,
@@ -95,13 +97,25 @@ assert.throws(() =>
   ),
 );
 assert.throws(() => reviewInvoiceDecision(p, 'Approved', '  '));
+const m = sample();
+m.batch.sourceType = 'MILESTONE_ACCEPTANCE';
+m.batch.lines = [{ sourceType: 'MILESTONE_ACCEPTANCE', snapshotId: null }];
+const milestone = reviewInvoiceDecision(m, 'Approved', 'Synthetic milestone decision');
+assert.equal(milestone.batch.sourceType, 'MILESTONE_ACCEPTANCE');
+assert.throws(() =>
+  reviewInvoiceDecision(
+    { ...m, batch: { ...m.batch, lines: [{ snapshotId: randomUUID() }] } },
+    'Approved',
+    'Synthetic reason',
+  ),
+);
 const original = invoiceBatchApprovals.run;
 let calls = [],
   out = [];
 invoiceBatchApprovals.run = async (op) => {
   calls.push(op.data.requestId);
   if (op.id === second.approval.id) throw new ApiClientError('stale', { status: 409 });
-  return { batchId: p.batch.id };
+  return [first, third].find((x) => x.approval.id === op.id).approval;
 };
 await executeReviewedInvoices(
   [first, second, third],
@@ -118,6 +132,59 @@ assert.deepEqual(calls, [
   second.operation.data.requestId,
   third.operation.data.requestId,
 ]);
+calls = [];
+out = [];
+invoiceBatchApprovals.run = async (op) => {
+  calls.push(op.data.requestId);
+  return [first, milestone].find((x) => x.approval.id === op.id).approval;
+};
+await executeReviewedInvoices(
+  [first, milestone],
+  captureRateContext(),
+  () => true,
+  (r) => out.push(r),
+);
+assert.deepEqual(
+  out.map((x) => x.status),
+  ['Confirmed', 'Confirmed'],
+);
+assert.equal(calls.length, 2);
+// Both source families must retain individual results when only one goes stale.
+calls = [];
+out = [];
+invoiceBatchApprovals.run = async (op) => {
+  calls.push(op.data.requestId);
+  if (op.id === milestone.approval.id) throw new ApiClientError('stale milestone', { status: 409 });
+  return first.approval;
+};
+await executeReviewedInvoices(
+  [first, milestone],
+  captureRateContext(),
+  () => true,
+  (r) => out.push(r),
+);
+assert.deepEqual(
+  out.map((x) => x.status),
+  ['Confirmed', 'Denied'],
+);
+assert.deepEqual(calls, [first.operation.data.requestId, milestone.operation.data.requestId]);
+calls = [];
+out = [];
+invoiceBatchApprovals.run = async (op) => {
+  calls.push(op.data.requestId);
+  return { ...milestone.approval, batchId: randomUUID() };
+};
+await executeReviewedInvoices(
+  [milestone, third],
+  captureRateContext(),
+  () => true,
+  (r) => out.push(r),
+);
+assert.deepEqual(
+  out.map((x) => x.status),
+  ['Uncertain', 'NotAttempted'],
+);
+assert.equal(calls.length, 1);
 calls = [];
 out = [];
 invoiceBatchApprovals.run = async (op) => {
@@ -141,7 +208,7 @@ out = [];
 invoiceBatchApprovals.run = async (op) => {
   calls.push(op.data.requestId);
   store.set('workos_organization_scope', JSON.stringify({ ...scope, legalEntityId: 'foreign' }));
-  return { batchId: p.batch.id };
+  return first.approval;
 };
 await executeReviewedInvoices(
   [first, second],
@@ -159,7 +226,7 @@ reset();
 calls = [];
 invoiceBatchApprovals.run = async (op, engagement, ctx, receipt) => {
   calls.push({ requestId: op.data.requestId, receipt });
-  return { batchId: p.batch.id };
+  return first.approval;
 };
 await reconcileReviewedInvoice(first, captureRateContext());
 assert.deepEqual(calls, [{ requestId: first.operation.data.requestId, receipt: true }]);

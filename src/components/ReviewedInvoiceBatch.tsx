@@ -244,7 +244,9 @@ export const ReviewedInvoiceBatch = ({ choices }: { choices: Choice[] }) => {
                 <ul>
                   {page.batch.lines.map((x) => (
                     <li key={x.id}>
-                      Item {x.itemId} · event {x.eventId} · snapshot {x.snapshotId} · {x.currency} {x.amount}
+                      Item {x.itemId} · event {x.eventId} ·{' '}
+                      {'sourceType' in x ? `milestone ${x.evidence.milestoneId}` : `snapshot ${x.snapshotId}`}{' '}
+                      · {x.currency} {x.amount}
                     </li>
                   ))}
                 </ul>

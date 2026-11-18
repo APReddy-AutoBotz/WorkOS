@@ -1,0 +1,43 @@
+-- Source-specific milestone invoice controls.
+-- Retained T&M confirmations keep the legacy default and all original bytes.
+alter table invoice_batch_confirmations add column source_type text not null default 'TM_SNAPSHOT';
+alter table invoice_batch_confirmations add constraint invoice_confirmation_batch_source_fk foreign key(batch_id,source_type) references invoice_draft_batches(id,source_type);
+
+create or replace function guard_invoice_batch_confirmation() returns trigger language plpgsql as $$
+declare ctx jsonb;b invoice_draft_batches;a invoice_csv_artifacts;l invoice_draft_lines;begin
+ begin ctx=nullif(current_setting('workos.invoice_confirmation_context',true),'')::jsonb;exception when others then ctx=null;end;
+ select * into b from invoice_draft_batches where id=new.batch_id for update;select * into a from invoice_csv_artifacts where id=new.artifact_id for share;perform lock_commercial_candidate_identity(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role);
+ if ctx is null or b.id is null or a.id is null or new.id::text is distinct from ctx->>'confirmationId' or new.organization_id is distinct from ctx->>'organizationId' or new.legal_entity_id is distinct from ctx->>'legalEntityId' or new.actor_id::text is distinct from ctx->>'actorId' or new.active_role is distinct from ctx->>'activeRole' or new.operation_id is distinct from ctx->>'operationId' or b.organization_id<>new.organization_id or b.legal_entity_id<>new.legal_entity_id or a.batch_id<>b.id or invoice_batch_governed_state(b.id)<>'Exported' or new.artifact_version<>a.version or new.artifact_sha256<>a.sha256 or new.artifact_sha256<>encode(digest(a.payload,'sha256'),'hex') or new.currency<>a.currency or new.total<>a.total or not invoice_csv_actor_valid(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'view') or not invoice_notice_actor_has(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'commercial.invoice_batch.confirm') then raise exception 'Exact exported artifact, scoped actor and confirmation authority are required.' using errcode='IBC01';end if;
+ if new.source_type is distinct from b.source_type or a.schema_version is distinct from (case b.source_type when 'TM_SNAPSHOT' then 'workos.invoice-tm-csv/1' when 'MILESTONE_ACCEPTANCE' then 'workos.invoice-milestone-csv/1' else null end) then raise exception 'Retained artifact source and batch type must match.' using errcode='IBC01';end if;
+ new.confirmed_at=clock_timestamp();for l in select * from invoice_draft_lines where batch_id=b.id order by sequence loop perform invoice_lock_source_witness(b.organization_id,b.legal_entity_id,l,new.actor_id,new.active_role);if not invoice_source_historical_visible(b.organization_id,b.legal_entity_id,l,new.actor_id,new.active_role) then raise exception 'Current worker scope is required for every retained line.' using errcode='IBC01';end if;end loop;return new;
+end $$;
+
+create or replace function complete_invoice_batch_confirmation() returns trigger language plpgsql as $$
+declare b invoice_draft_batches;a invoice_csv_artifacts;begin
+ select * into b from invoice_draft_batches where id=new.batch_id;select * into a from invoice_csv_artifacts where id=new.artifact_id;
+ if b.id is null or a.id is null or invoice_batch_governed_state(b.id)<>'Billed/Confirmed' or a.batch_id<>b.id or new.artifact_version<>a.version or new.artifact_sha256<>a.sha256 or new.artifact_sha256<>encode(digest(a.payload,'sha256'),'hex') or new.currency<>a.currency or new.total<>a.total or exists(select 1 from invoice_draft_cancellations where batch_id=b.id) or exists(select 1 from invoice_draft_lines l where l.batch_id=b.id and not exists(select 1 from invoice_draft_occupancies o where o.batch_id=b.id and o.line_id=l.id and o.item_id=l.item_id and o.item_version=l.item_version)) or not invoice_csv_actor_valid(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'view') or not invoice_notice_actor_has(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'commercial.invoice_batch.confirm') or exists(select 1 from invoice_draft_lines l where l.batch_id=b.id and not invoice_source_historical_visible(b.organization_id,b.legal_entity_id,l,new.actor_id,new.active_role)) then raise exception 'Confirmation, immutable artifact, occupancy and current scope must commit together.' using errcode='IBC02';end if;
+ if new.source_type is distinct from b.source_type or a.schema_version is distinct from (case b.source_type when 'TM_SNAPSHOT' then 'workos.invoice-tm-csv/1' when 'MILESTONE_ACCEPTANCE' then 'workos.invoice-milestone-csv/1' else null end) then raise exception 'Retained artifact source and batch type must persist.' using errcode='IBC02';end if;
+ if not exists(select 1 from audit_logs x where x.organization_id=b.organization_id and x.legal_entity_id=b.legal_entity_id and x.user_id=new.actor_id::text and x.active_role=new.active_role and x.module='Invoice Billing Confirmation' and x.action='Record Manual Attestation' and x.entity_id=new.id::text and x.operation_id=new.operation_id and x.new_value=jsonb_build_object('confirmationId',new.id,'batchId',b.id,'artifactId',a.id,'sha256',a.sha256)) then raise exception 'Confirmation and sanitized audit must commit together.' using errcode='IBC02';end if;
+ if not exists(select 1 from invoice_export_notice_events x where x.confirmation_id=new.id and x.batch_id=b.id and x.operation_id=new.operation_id and x.event_key='invoice_batch.exported_or_billed_confirmed') and not exists(select 1 from invoice_export_notice_producer_failures x where x.confirmation_id=new.id and x.batch_id=b.id and x.operation_id=new.operation_id) then raise exception 'Confirmation requires the canonical event or visible recovery evidence.' using errcode='IBC02';end if;return null;
+end $$;
+
+-- Inbox entries and read receipts follow current access to the milestone source.
+create function invoice_notice_source_authorized(b invoice_draft_batches, actor uuid, active_role text)
+returns boolean language sql stable as $$
+ select case b.source_type
+  when 'TM_SNAPSHOT' then true
+  when 'MILESTONE_ACCEPTANCE' then milestone_billing_actor_valid(b.organization_id,b.legal_entity_id,actor,active_role,'viewer')
+  else false end
+$$;
+
+create or replace function guard_invoice_batch_notice_read() returns trigger language plpgsql as $$
+declare ctx jsonb;begin
+ begin ctx=nullif(current_setting('workos.invoice_batch_approval_context',true),'')::jsonb;exception when others then ctx=null;end;
+ if ctx is null or new.user_id::text is distinct from ctx->>'actorId' or not exists(select 1 from users u join user_roles ur on ur.user_id=u.id join roles role on role.id=ur.role_id join user_organization_scopes sc on sc.user_id=u.id join invoice_batch_approval_recipients r on r.user_id=u.id join invoice_batch_approval_notices ev on ev.id=r.event_id join invoice_batch_approval_instances i on i.id=ev.instance_id join invoice_draft_batches b on b.id=i.batch_id where u.id=new.user_id and u.status='Active' and role.name=ctx->>'activeRole' and sc.organization_id=ctx->>'organizationId' and sc.legal_entity_id=ctx->>'legalEntityId' and sc.active and i.organization_id=sc.organization_id and i.legal_entity_id=sc.legal_entity_id and r.id=new.recipient_id and invoice_notice_source_authorized(b,new.user_id,ctx->>'activeRole') and r.in_app and (exists(select 1 from role_permissions rp where rp.role_name=role.name and rp.permission_key='notifications.view' and rp.enabled) or exists(select 1 from user_permission_grants g where g.user_id=u.id and g.permission_key='notifications.view'))) then raise exception 'Only the current named recipient may acknowledge this notice.' using errcode='IBA01';end if;return new;
+end $$;
+
+create or replace function guard_invoice_export_notice_read() returns trigger language plpgsql as $$
+declare ctx jsonb;begin
+ begin ctx=nullif(current_setting('workos.invoice_notice_read_context',true),'')::jsonb;exception when others then ctx=null;end;
+ if ctx is null or new.user_id::text is distinct from ctx->>'actorId' or not exists(select 1 from invoice_export_notice_recipients r join invoice_export_notice_events ev on ev.id=r.event_id join invoice_draft_batches b on b.id=ev.batch_id where r.id=new.recipient_id and r.user_id=new.user_id and invoice_notice_source_authorized(b,new.user_id,ctx->>'activeRole') and r.in_app and b.organization_id=ctx->>'organizationId' and b.legal_entity_id=ctx->>'legalEntityId' and invoice_notice_actor_has(b.organization_id,b.legal_entity_id,new.user_id,ctx->>'activeRole','notifications.view')) then raise exception 'Only the current scoped named recipient may acknowledge this notice.' using errcode='INC01';end if;return new;
+end $$;

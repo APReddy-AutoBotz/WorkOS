@@ -1,3 +1,5 @@
+import { milestoneInvoiceItemMatches } from '../../shared/milestone-invoice-source.mjs';
+import { milestoneBilling } from '../services/milestoneBilling';
 import { useEffect, useRef, useState } from 'react';
 import { validInvoiceDraft, invoiceItemMatches } from '../../shared/invoice-batch-draft.mjs';
 import { ApiClientError } from '../services/apiClient';
@@ -10,13 +12,24 @@ import {
 } from '../services/invoiceDrafts';
 import { tmBillingEligibility } from '../services/tmBillingEligibility';
 import { hasRatePermission, isRateContextCurrent, type RateContext } from '../services/rateCandidates';
-type Choice = { id: string; label: string; clientId: string; contractId: string; currency: string };
+type Choice = {
+  id: string;
+  label: string;
+  clientId: string;
+  contractId: string;
+  currency: string;
+  sourceType?: 'MILESTONE_ACCEPTANCE';
+};
+type MilestoneItem = Awaited<ReturnType<typeof milestoneBilling.register>>['items'][number];
 type RegisterItem = Awaited<ReturnType<typeof tmBillingEligibility.register>>['items'][number];
 export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
   const [batches, setBatches] = useState<InvoiceDraft[]>([]),
     [batchNext, setBatchNext] = useState<string | null>(null),
     [register, setRegister] = useState<RegisterItem[]>([]),
     [registerNext, setRegisterNext] = useState<string | null>(null),
+    [milestones, setMilestones] = useState<MilestoneItem[]>([]),
+    [milestoneNext, setMilestoneNext] = useState<string | null>(null),
+    [milestoneEnabled, setMilestoneEnabled] = useState(false),
     [loaded, setLoaded] = useState(false),
     [selected, setSelected] = useState(''),
     [detail, setDetail] = useState<InvoiceDraftDetail | null>(null),
@@ -46,6 +59,9 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     setBatchNext(null);
     setRegister([]);
     setRegisterNext(null);
+    setMilestones([]);
+    setMilestoneNext(null);
+    setMilestoneEnabled(false);
     setLoaded(false);
     setSelected('');
     setDetail(null);
@@ -115,11 +131,20 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
   };
   const load = () =>
     void run(async (c) => {
-      const [b, i] = await Promise.all([invoiceDrafts.list(c), tmBillingEligibility.register(c)]);
+      const [b, i, m] = await Promise.all([
+        invoiceDrafts.list(c),
+        tmBillingEligibility.register(c),
+        hasRatePermission('commercial.milestone_billing.view')
+          ? milestoneBilling.register(null, c)
+          : Promise.resolve(null),
+      ]);
       setBatches(b.batches);
       setBatchNext(b.nextAfter);
       setRegister(i.items);
       setRegisterNext(i.nextAfter);
+      setMilestones(m?.batchSupport ? m.items : []);
+      setMilestoneNext(m?.batchSupport ? m.nextAfter : null);
+      setMilestoneEnabled(m?.batchSupport === true);
       setLoaded(true);
       setSelected('');
       setDetail(null);
@@ -139,6 +164,15 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
       const x = await tmBillingEligibility.register(c, registerNext);
       setRegister((old) => [...old, ...x.items]);
       setRegisterNext(x.nextAfter);
+    });
+  };
+  const moreMilestones = () => {
+    if (!milestoneNext) return;
+    void run(async (c) => {
+      const x = await milestoneBilling.register(null, c, milestoneNext);
+      if (!x.batchSupport) throw Error('Milestone batch support changed');
+      setMilestones((old) => [...old, ...x.items]);
+      setMilestoneNext(x.nextAfter);
     });
   };
   const inspect = () => {
@@ -197,7 +231,10 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     canPrepare = hasRatePermission('commercial.invoice_drafts.prepare'),
     canCancel = hasRatePermission('commercial.invoice_drafts.cancel'),
     choice = choices.find((x) => x.id === engagementId),
-    chosen = register.find((x) => x.id === itemId);
+    chosen = register.find((x) => x.id === itemId),
+    chosenMilestone = itemId.startsWith('milestone:')
+      ? milestones.find((x) => x.id === itemId.slice(10))
+      : undefined;
   const create = () => {
     if (!choice || !confirmed || reason.trim().length < 3) return;
     const definition = {
@@ -211,13 +248,16 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
       ownerUserId: ownerId,
       ownerRole,
     };
-    if (!validInvoiceDraft(definition)) return;
+    if (
+      !validInvoiceDraft(definition) ||
+      (choice.sourceType === 'MILESTONE_ACCEPTANCE' && (!milestoneEnabled || periodBasis !== 'ELIGIBLE_DATE'))
+    )
+      return;
     perform({ type: 'batch', data: { requestId: crypto.randomUUID(), definition, reason: reason.trim() } });
   };
   const add = () => {
     if (
       !detail ||
-      !chosen ||
       itemReason.trim().length < 3 ||
       detail.batch.state !== 'Draft' ||
       !detail.batch.ownerCurrent
@@ -234,19 +274,53 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
         periodBasis: d.periodBasis,
         ownerUserId: d.ownerUserId,
         ownerRole: d.ownerRole,
-      },
-      item = {
-        itemId: chosen.id,
-        itemVersion: chosen.version,
-        clientId: chosen.clientId,
-        contractId: chosen.contractId,
-        engagementId: chosen.engagementId,
-        currency: chosen.currency,
-        workDate: chosen.evidence.workDate,
-        eligibleOn: chosen.eligibleOn,
-        amount: chosen.amount,
-        current: true,
       };
+    if (d.sourceType === 'MILESTONE_ACCEPTANCE') {
+      if (
+        !chosenMilestone ||
+        !milestoneEnabled ||
+        !milestoneInvoiceItemMatches(definition, {
+          sourceType: 'MILESTONE_ACCEPTANCE',
+          itemId: chosenMilestone.id,
+          itemVersion: chosenMilestone.version,
+          eventId: chosenMilestone.eventId,
+          clientId: chosenMilestone.clientId,
+          contractId: chosenMilestone.contractId,
+          engagementId: chosenMilestone.engagementId,
+          currency: chosenMilestone.currency,
+          eligibleOn: chosenMilestone.eligibleOn,
+          amount: chosenMilestone.amount,
+          current: true,
+          evidence: chosenMilestone.evidence,
+        })
+      )
+        return;
+      perform({
+        type: 'line',
+        batchId: d.id,
+        data: {
+          requestId: crypto.randomUUID(),
+          itemId: chosenMilestone.id,
+          itemVersion: 1,
+          expectedLineCount: detail.total.lineCount,
+          reason: itemReason.trim(),
+        },
+      });
+      return;
+    }
+    if (!chosen) return;
+    const item = {
+      itemId: chosen.id,
+      itemVersion: chosen.version,
+      clientId: chosen.clientId,
+      contractId: chosen.contractId,
+      engagementId: chosen.engagementId,
+      currency: chosen.currency,
+      workDate: chosen.evidence.workDate,
+      eligibleOn: chosen.eligibleOn,
+      amount: chosen.amount,
+      current: true,
+    };
     if (!invoiceItemMatches(definition, item)) return;
     perform({
       type: 'line',
@@ -440,7 +514,10 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                   <ul>
                     {detail.lines.map((x) => (
                       <li key={x.id}>
-                        Item {x.itemId} version {x.itemVersion} · Event {x.eventId} · snapshot {x.snapshotId}{' '}
+                        Item {x.itemId} version {x.itemVersion} · Event {x.eventId} ·{' '}
+                        {'sourceType' in x
+                          ? `milestone ${x.evidence.milestoneId}`
+                          : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
                       </li>
                     ))}
@@ -456,23 +533,41 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                           onChange={(e) => setItemId(e.target.value)}
                         >
                           <option value="">Choose an item</option>
-                          {register.map((x) => (
-                            <option key={x.id} value={x.id}>
-                              {x.currency} {x.amount} · {x.id} · {x.engagementId}
-                            </option>
-                          ))}
+                          {detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
+                            ? milestones.map((x) => (
+                                <option key={x.id} value={'milestone:' + x.id}>
+                                  {x.currency} {x.amount} · {x.evidence.milestoneId} · {x.engagementId}
+                                </option>
+                              ))
+                            : register.map((x) => (
+                                <option key={x.id} value={x.id}>
+                                  {x.currency} {x.amount} · {x.id} · {x.engagementId}
+                                </option>
+                              ))}
                         </select>
                       </label>
-                      {registerNext && (
-                        <button type="button" onClick={moreItems}>
-                          More available items
-                        </button>
-                      )}
+                      {detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
+                        ? milestoneNext && (
+                            <button type="button" onClick={moreMilestones}>
+                              More available milestones
+                            </button>
+                          )
+                        : registerNext && (
+                            <button type="button" onClick={moreItems}>
+                              More available items
+                            </button>
+                          )}
                       {chosen && (
                         <p>
                           Item {chosen.id} version {chosen.version} · event {chosen.eventId} · work{' '}
                           {chosen.evidence.submissionId} · snapshot {chosen.snapshotId} · {chosen.currency}{' '}
                           {chosen.amount}.
+                        </p>
+                      )}
+                      {chosenMilestone && (
+                        <p>
+                          Milestone {chosenMilestone.evidence.milestoneId} · item {chosenMilestone.id} · event{' '}
+                          {chosenMilestone.eventId} · {chosenMilestone.currency} {chosenMilestone.amount}.
                         </p>
                       )}
                       <label>

@@ -42,20 +42,16 @@ export const createInvoiceNoticeConfigRouter = (o) => {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
       else if (['INC01', 'INC02', 'INC03', '23505', '23514', '40001', '40P01'].includes(e.code))
-        res
-          .status(e.code === 'INC01' ? 403 : 409)
-          .json({
-            code: e.code === 'INC01' ? 'INVOICE_NOTICE_AUTHORITY' : 'INVOICE_NOTICE_CONFLICT',
-            error: 'Current configuration, scope or authority changed. Reload.',
-          });
+        res.status(e.code === 'INC01' ? 403 : 409).json({
+          code: e.code === 'INC01' ? 'INVOICE_NOTICE_AUTHORITY' : 'INVOICE_NOTICE_CONFLICT',
+          error: 'Current configuration, scope or authority changed. Reload.',
+        });
       else {
         o.logError?.(e);
-        res
-          .status(503)
-          .json({
-            code: 'INVOICE_NOTICE_UNCONFIRMED',
-            error: 'The operation could not be confirmed. Read the original receipt.',
-          });
+        res.status(503).json({
+          code: 'INVOICE_NOTICE_UNCONFIRMED',
+          error: 'The operation could not be confirmed. Read the original receipt.',
+        });
       }
     } finally {
       c?.release();
@@ -70,6 +66,15 @@ export const createInvoiceNoticeConfigRouter = (o) => {
   });
   const authorize = async (c, r, key) => {
     await assertCommercialAuthority(c, r, key);
+  };
+  const requireMilestoneScope = async (c, r, engagementId) => {
+    const e = (
+      await c.query(
+        'select model from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3',
+        [...scope(r), engagementId],
+      )
+    ).rows[0];
+    if (e?.model === 'milestone') await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
   };
   const context = (c, r, id) =>
     c.query("select set_config('workos.invoice_notice_context',$1,true)", [
@@ -137,6 +142,7 @@ export const createInvoiceNoticeConfigRouter = (o) => {
         )
       ).rows[0];
       if (!row) throw fail(404, 'INVOICE_NOTICE_UNCONFIRMED', 'Original policy receipt is unavailable.');
+      await requireMilestoneScope(c, r, row.engagement_id);
       return { ...envelope(r), policy: policyView(row) };
     }),
   );
@@ -232,6 +238,7 @@ export const createInvoiceNoticeConfigRouter = (o) => {
     handle(false, async (c, r) => {
       const d = parse(z.object({ engagementId: z.string().trim().min(1).max(200) }).strict(), r.query);
       await authorize(c, r, 'commercial.invoice_export.configure');
+      await requireMilestoneScope(c, r, d.engagementId);
       const v = await c.query(
         'select *,effective_from::text effective_from from invoice_export_notice_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence',
         [...scope(r), d.engagementId],
@@ -258,6 +265,7 @@ export const createInvoiceNoticeConfigRouter = (o) => {
         throw fail(400, 'INVOICE_NOTICE_INPUT', 'Explicit valid policy is required.');
       await authorize(c, r, 'commercial.invoice_export.configure');
       const p = d.definition;
+      await requireMilestoneScope(c, r, p.engagementId);
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [
         `invoice-notice-policy:${scope(r).join(':')}:${p.engagementId}`,
       ]);

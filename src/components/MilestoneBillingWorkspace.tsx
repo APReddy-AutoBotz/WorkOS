@@ -32,7 +32,8 @@ export const MilestoneBillingWorkspace = ({ choices }: { choices: Choice[] }) =>
     <section aria-label="Milestone billing eligibility" className="my-4 space-y-3 rounded-xl border p-4">
       <h2>Milestone billing eligibility</h2>
       <p>
-        Record internal or client acceptance evidence for the named reviewers. You attest to the client evidence you supply.
+        Record internal or client acceptance evidence for the named reviewers. You attest to the client
+        evidence you supply.
       </p>
       {!canRead ? (
         <p role="status">Scoped milestone billing access is required.</p>
@@ -101,7 +102,8 @@ const MilestoneReview = ({
     [register, setRegister] = useState<Awaited<ReturnType<typeof milestoneBilling.register>>['items'] | null>(
       null,
     ),
-    [registerLimited, setRegisterLimited] = useState(false);
+    [registerLimited, setRegisterLimited] = useState(false),
+    [batchSupport, setBatchSupport] = useState(false);
   const mounted = useRef(false),
     generation = useRef(0),
     inFlight = useRef(false),
@@ -140,6 +142,7 @@ const MilestoneReview = ({
     setPending(null);
     setBusy(false);
     setRegister(null);
+    setBatchSupport(false);
     setRegisterLimited(false);
     setNotice(message);
   };
@@ -346,6 +349,7 @@ const MilestoneReview = ({
             const result = await milestoneBilling.register(engagementId, c);
             setRegister(result.items);
             setRegisterLimited(!!result.nextAfter);
+            setBatchSupport(result.batchSupport);
           })
         }
       >
@@ -367,7 +371,11 @@ const MilestoneReview = ({
         <section aria-label="Milestone approved-unbilled register">
           <h3>Milestone approved-unbilled register</h3>
           {registerLimited && <p role="status">Only the first 50 visible items are shown.</p>}
-          <p>Batch preparation for these items is not yet available.</p>
+          <p>
+            {batchSupport
+              ? 'Eligible milestones can be selected in invoice preparation.'
+              : 'Invoice batch preparation is unavailable in this environment.'}
+          </p>
           <ul>
             {register.map((x) => (
               <li key={x.id}>
