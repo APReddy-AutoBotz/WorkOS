@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+The planning forecast adds dated assignment percentages, project visibility checks and retained CSV evidence. Physical utilization forecasting still requires an approved conversion policy. [Forecast work package](../tasks/WOS-04-NATIVE-PERCENTAGE-FORECAST.md)
+
 Calendar leave intake connects full-day leave to effective capacity. Acceptance covers approval independence, changed calendar inputs, paid balances and historical capacity reconciliation. [Work package](../tasks/WOS-04-CALENDAR-LEAVE-INTAKE.md)
 
 The actual work report uses retained approval decisions, category versions and effective capacity. Acceptance includes the employee view, scoped reporting and a server-generated CSV with a retained checksum. [Reconciliation specification](../tasks/WOS-04-ACTUAL-WORK-RECONCILIATION.md)

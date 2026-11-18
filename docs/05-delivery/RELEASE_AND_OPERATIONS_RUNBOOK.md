@@ -492,3 +492,7 @@ Apply migration 059 before enabling the work category editor. Existing entries r
 Apply migration 060 before exposing actual work evidence exports. Preserve the immutable evidence rows, request identities and artifact checksums on rollback. Use a compatible reader to retrieve existing evidence. A missing capacity or classification source leaves the percentage unavailable.
 
 Apply migration 061 before serving calendar-backed full-day leave. Retain the immutable request evidence and its date allocations on rollback. Use a compatible application for subsequent edits and decisions. If the schedule changes before approval, review the dates and submit an updated request.
+
+## Native percentage forecasts
+
+Run migration 062 before enabling the updated Forecast page. The migration creates an empty forecast evidence table. To recover from an application regression, keep the migration and retained exports and roll forward with a corrected application. Older applications can reject the newer migration ledger.
