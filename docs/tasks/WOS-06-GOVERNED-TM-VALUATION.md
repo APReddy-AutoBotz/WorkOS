@@ -1,5 +1,7 @@
 # Governed T&M valuation — bounded development plan
 
+The original design and evidence notes below describe the earlier draft. The current mainline integration uses migrations 065b–065f and the acceptance gates in the WorkOS CI workflow.
+
 ## Requirement lineage and dependency
 
 WOS-COM-001–004/006/013–015, CORE003–005/008, IAM003/005/010 and the commercial specification require deterministic decimal-safe T&M calculations from approved eligible work, exact effective rate/cost/rounding sources, protected visibility and retained source evidence. Base the isolated development branch on frozen approved-rate-source candidate `48fa23911d077f77b9c2464b51768da4dc0258c6`, tree `b080f902507de14fd80bbcc3065cffd6a34b8085`. This is not integration: do not publish until that dependency itself has been published and its exact-head hosted gates pass.

@@ -1,5 +1,7 @@
 # Explicit approved rate-source adoption — bounded plan
 
+The original design and evidence notes below describe the earlier draft. The current mainline integration uses migrations 065b–065f and the acceptance gates in the WorkOS CI workflow.
+
 ## Requirement lineage and dependency
 
 WOS-COM-001–003 and 014–015, CORE003–005/008, IAM003/005/010 and the commercial specification require effective-dated rates, explicit deterministic source precedence, separate cost visibility, auditable commercial changes and retained source evidence. Begin only from PR102's frozen source `27d62c29fd43f89a7181237970df02e6a76014a6`, tree `b78107ca0a378930504e432dddf2318e296d3b0f`. This is an isolated development continuation; PR102's exact-head hosted validation must pass before publishing any dependent Draft. Prior Drafts, main and integration are not changed by this local work.

@@ -1,29 +1,591 @@
-import {useEffect,useRef,useState} from 'react';
-import {ApiClientError} from '../services/apiClient';
-import {CandidateOwner} from './CandidateOwner';
-import {CommercialCandidateApproval} from './CommercialCandidateApproval';
-import {ApprovedRateSource,AdoptedRateResolution} from './ApprovedRateSource';
-import {captureRateContext,rateCandidateInput,rateCandidateService,type RateCandidate,type RateInput,type Binding,type RateKind} from '../services/rateCandidates';
-import {hasRatePermission,isRateContextCurrent,type RateContext} from '../services/rateCandidates';
+import { useEffect, useRef, useState } from 'react';
+import { ApiClientError } from '../services/apiClient';
+import { CandidateOwner } from './CandidateOwner';
+import { CommercialCandidateApproval } from './CommercialCandidateApproval';
+import { ApprovedRateSource, AdoptedRateResolution } from './ApprovedRateSource';
+import {
+  captureRateContext,
+  rateCandidateInput,
+  rateCandidateService,
+  type RateCandidate,
+  type RateInput,
+  type Binding,
+  type RateKind,
+} from '../services/rateCandidates';
+import { hasRatePermission, isRateContextCurrent, type RateContext } from '../services/rateCandidates';
 
-type Choice={id:string;label:string;type:'contract'|'engagement'};
-type Props={kind:RateKind;workerId?:string;choices?:Choice[]};
-export const RateCandidates=({kind,workerId,choices=[]}:Props)=>{
- const [ownerCandidate,setOwnerCandidate]=useState<string|null>(null),[approvalCandidate,setApprovalCandidate]=useState<string|null>(null),[adoptionCandidate,setAdoptionCandidate]=useState<string|null>(null);
- const [selection,setSelection]=useState(''),[previewSource,setPreviewSource]=useState(''),[rows,setRows]=useState<RateCandidate[]|null>(null),[truncated,setTruncated]=useState(false),[prior,setPrior]=useState<RateCandidate|null>(null),[from,setFrom]=useState(''),[to,setTo]=useState(''),[currency,setCurrency]=useState(''),[unit,setUnit]=useState(''),[amount,setAmount]=useState(''),[priority,setPriority]=useState(''),[reason,setReason]=useState(''),[confirm,setConfirm]=useState(false),[asOf,setAsOf]=useState(''),[preview,setPreview]=useState<Awaited<ReturnType<typeof rateCandidateService.preview>>|null>(null),[pending,setPending]=useState<RateInput|null>(null),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
- const generation=useRef(0),mounted=useRef(false),inFlight=useRef(false),owner=useRef<RateContext|null>(null);
- const clear=(message='')=>{++generation.current;owner.current=null;inFlight.current=false;setSelection('');setPreviewSource('');setRows(null);setTruncated(false);setOwnerCandidate(null);setApprovalCandidate(null);setAdoptionCandidate(null);setPrior(null);setFrom('');setTo('');setCurrency('');setUnit('');setAmount('');setPriority('');setReason('');setConfirm(false);setAsOf('');setPreview(null);setPending(null);setNotice(message);setBusy(false);};
- useEffect(()=>{mounted.current=true;const block=()=>clear('Account, role or scope changed. Unsent candidate details cleared.');const check=()=>{if(owner.current&&!isRateContextCurrent(owner.current))block();};window.addEventListener('workos:organization-scope-switch-requested',block);window.addEventListener('workos:organization-scope-changed',block);window.addEventListener('focus',check);window.addEventListener('storage',check);return()=>{mounted.current=false;++generation.current;window.removeEventListener('workos:organization-scope-switch-requested',block);window.removeEventListener('workos:organization-scope-changed',block);window.removeEventListener('focus',check);window.removeEventListener('storage',check);};},[kind,workerId]);
- const run=async(fn:(c:RateContext)=>Promise<void>)=>{if(inFlight.current)return;if(owner.current&&!isRateContextCurrent(owner.current)){clear('Account, role or scope changed. Reload.');return;}const n=++generation.current,c=captureRateContext(()=>mounted.current&&generation.current===n);if(!c){clear('An active session and selected scope are required.');return;}owner.current=c;inFlight.current=true;setBusy(true);setNotice('');try{await fn(c);}catch{if(mounted.current&&n===generation.current)setNotice('Operation could not be confirmed. Read the original receipt if offered; otherwise reload.');}finally{if(mounted.current&&n===generation.current){inFlight.current=false;setBusy(false);}}};
- const selected=kind==='cost'&&workerId?{type:'worker' as Binding,id:workerId}:choices.find(x=>x.type+':'+x.id===selection);const sourceId=kind==='cost'?workerId:previewSource;
- const load=()=>{if(!selected)return;void run(async c=>{const r=await rateCandidateService.list(kind,selected.type,selected.id,c);setRows(r.candidates);setOwnerCandidate(null);setTruncated(r.truncated);setPrior(null);setConfirm(false);setPreview(null);});};
- const doPreview=()=>{if(!sourceId)return;void run(async c=>{const r=await rateCandidateService.preview(kind,sourceId,asOf,currency,unit,c);setPreview(r);});};
- const submit=()=>{if(!selected||pending||!confirm)return;const input:RateInput={requestId:crypto.randomUUID(),streamId:prior?.streamId??crypto.randomUUID(),expectedLatestId:prior?.id??null,kind,bindingType:selected.type,bindingId:selected.id,effectiveFrom:from,effectiveTo:to,currency,unit,amount,priority:Number(priority),reason};if(!rateCandidateInput.safeParse(input).success)return;void run(async c=>{setPending(input);try{const row=await rateCandidateService.submit(input,c);setPending(null);setRows(null);setPrior(null);setConfirm(false);setPreview(null);setNotice('Candidate '+row.id+' recorded. Reload before another change.');}catch(e){if(e instanceof ApiClientError&&[400,403,409,422].includes(e.status)){setPending(null);setRows(null);setPrior(null);setConfirm(false);setNotice('Candidate refused. Reload the source before a deliberate new request.');return;}throw e;}});};
- const reconcile=()=>{if(!pending)return;void run(async c=>{const row=await rateCandidateService.submit(pending,c,true);setPending(null);setRows(null);setPrior(null);setConfirm(false);setNotice('Original candidate '+row.id+' confirmed by read-only receipt.');});};
- const read=hasRatePermission('commercial.contracts.view')&&hasRatePermission(kind==='billing'?'commercial.rate_candidates.view':'commercial.cost_candidates.view')&&(kind!=='cost'||hasRatePermission('employees.view'));const write=read&&hasRatePermission(kind==='billing'?'commercial.rate_candidates.manage':'commercial.cost_candidates.manage');
- return <section aria-label={kind==='billing'?'Billing rate candidates':'Worker cost candidates'} className="space-y-3 rounded-xl border p-4"><h2>{kind==='billing'?'Billing rate candidates':'Confidential worker cost candidates'}</h2><p>Candidate preview includes unapproved inputs. Approved sources require explicit adoption; no source here creates valuation, work or invoices. Currency and units remain as entered; no conversion is performed. Among candidates matching the chosen currency and unit, higher explicit priority wins; tied highest priorities conflict.</p>{!read&&<p role="status">Separate commercial and {kind==='billing'?'billing-rate':'cost-rate and worker'} view permissions are required.</p>}
- {read&&<>{kind==='billing'&&<label>Candidate source<select aria-label="Candidate source" value={selection} disabled={busy||Boolean(pending)||!!ownerCandidate||!!approvalCandidate||!!adoptionCandidate} onChange={e=>{setSelection(e.target.value);setRows(null);setOwnerCandidate(null);setApprovalCandidate(null);setAdoptionCandidate(null);setPrior(null);setPreview(null);setConfirm(false);}}><option value="">Choose a contract or engagement</option>{choices.map(x=><option key={x.type+':'+x.id} value={x.type+':'+x.id}>{x.type}: {x.label}</option>)}</select></label>}<button type="button" onClick={load} disabled={!selected||busy||Boolean(pending)||!!ownerCandidate||!!approvalCandidate||!!adoptionCandidate}>Load candidates</button>{rows&&<><p>{truncated?'First 100 candidates shown; results are not exhaustive.':'Candidates for selected source.'}</p><ul>{rows.map(x=><li key={x.id}>{x.effectiveFrom}–{x.effectiveTo} · {x.currency} {x.amount}/{x.unit} · priority {x.priority} · {x.reason} <button type="button" disabled={busy||Boolean(pending)||!!ownerCandidate||!!approvalCandidate||!!adoptionCandidate} onClick={()=>setOwnerCandidate(x.id)}>Change owner for version {x.sequence}</button>{ownerCandidate===x.id&&<CandidateOwner key={x.id} candidateId={x.id} kind={kind} onClose={()=>setOwnerCandidate(null)}/>}<button type="button" disabled={busy||Boolean(pending)||!!ownerCandidate||!!approvalCandidate||!!adoptionCandidate} onClick={()=>setApprovalCandidate(x.id)}>Review approval for version {x.sequence}</button>{approvalCandidate===x.id&&<CommercialCandidateApproval key={x.id} candidateId={x.id} kind={kind} onClose={()=>setApprovalCandidate(null)}/>}<button type="button" disabled={busy||Boolean(pending)||!!ownerCandidate||!!approvalCandidate||!!adoptionCandidate} onClick={()=>setAdoptionCandidate(x.id)}>Inspect adoption for version {x.sequence}</button>{adoptionCandidate===x.id&&<ApprovedRateSource key={x.id} candidateId={x.id} kind={kind} effectiveFrom={x.effectiveFrom} onClose={()=>setAdoptionCandidate(null)}/>} {write&&<button type="button" disabled={busy||Boolean(pending)||rows.some(y=>y.streamId===x.streamId&&y.sequence>x.sequence)} onClick={()=>{setPrior(x);setConfirm(false);}}>Append after version {x.sequence}</button>}</li>)}</ul>{write&&<fieldset disabled={busy||Boolean(pending)||!!ownerCandidate||!!approvalCandidate||!!adoptionCandidate}><legend>{prior?'Append candidate version':'New candidate'}</legend><label>Effective from UTC<input aria-label="Effective from UTC" type="date" value={from} onChange={e=>{setFrom(e.target.value);setConfirm(false);}}/></label><label>Effective to UTC<input aria-label="Effective to UTC" type="date" value={to} onChange={e=>{setTo(e.target.value);setConfirm(false);}}/></label><label>Currency<input aria-label="Currency" value={currency} maxLength={3} onChange={e=>{setCurrency(e.target.value);setConfirm(false);setPreview(null);}}/></label><label>Unit code<input aria-label="Unit code" value={unit} maxLength={40} onChange={e=>{setUnit(e.target.value);setConfirm(false);setPreview(null);}}/></label><label>Exact rate amount<input aria-label="Exact rate amount" inputMode="decimal" value={amount} onChange={e=>{setAmount(e.target.value);setConfirm(false);}}/></label><label>Explicit priority<input aria-label="Explicit priority" inputMode="numeric" value={priority} onChange={e=>{setPriority(e.target.value);setConfirm(false);}}/></label><label>Reason<input aria-label="Candidate reason" value={reason} maxLength={1000} onChange={e=>{setReason(e.target.value);setConfirm(false);}}/></label><label><input type="checkbox" checked={confirm} onChange={e=>setConfirm(e.target.checked)}/>Confirm this unapproved candidate</label><button type="button" onClick={submit} disabled={!confirm||!from||!to||!currency||!unit||!amount||!/^\d+$/.test(priority)||!reason}>Record candidate</button>{prior&&<button type="button" onClick={()=>setPrior(null)}>Start a separate candidate</button>}</fieldset>}</>}
- <fieldset disabled={busy||Boolean(pending)||!!ownerCandidate||!!approvalCandidate||!!adoptionCandidate}><legend>Preview candidate resolution</legend>{kind==='billing'&&<label>Engagement for preview<select aria-label="Engagement for preview" value={previewSource} onChange={e=>{setPreviewSource(e.target.value);setPreview(null);}}><option value="">Choose an engagement</option>{choices.filter(x=>x.type==='engagement').map(x=><option key={x.id} value={x.id}>{x.label}</option>)}</select></label>}<label>Preview as-of UTC<input aria-label="Preview as-of UTC" type="date" value={asOf} onChange={e=>{setAsOf(e.target.value);setPreview(null);}}/></label><label>Preview currency<input aria-label="Preview currency" value={currency} maxLength={3} onChange={e=>{setCurrency(e.target.value);setPreview(null);setConfirm(false);}}/></label><label>Preview unit<input aria-label="Preview unit" value={unit} maxLength={40} onChange={e=>{setUnit(e.target.value);setPreview(null);setConfirm(false);}}/></label><button type="button" onClick={doPreview} disabled={!sourceId||!asOf||!currency||!unit}>Preview resolution</button></fieldset>{preview&&<p role="status">Preview: {preview.result}{preview.candidate?' · '+preview.candidate.currency+' '+preview.candidate.amount+'/'+preview.candidate.unit+' · '+preview.matchingBasis+' source '+preview.candidate.id:''}. No financial authority.</p>}<AdoptedRateResolution key={kind+':'+(sourceId??'')} kind={kind} sourceId={sourceId}/></>}
- {pending&&<section><p>Original request {pending.requestId} may still be in flight; no write is retried automatically.</p><button type="button" disabled={busy} onClick={reconcile}>Read original candidate receipt</button></section>}{notice&&<p role="status">{notice}</p>}
- </section>;
+type Choice = { id: string; label: string; type: 'contract' | 'engagement' };
+type Props = { kind: RateKind; workerId?: string; choices?: Choice[] };
+export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
+  const [ownerCandidate, setOwnerCandidate] = useState<string | null>(null),
+    [approvalCandidate, setApprovalCandidate] = useState<string | null>(null),
+    [adoptionCandidate, setAdoptionCandidate] = useState<string | null>(null);
+  const [selection, setSelection] = useState(''),
+    [previewSource, setPreviewSource] = useState(''),
+    [rows, setRows] = useState<RateCandidate[] | null>(null),
+    [truncated, setTruncated] = useState(false),
+    [prior, setPrior] = useState<RateCandidate | null>(null),
+    [from, setFrom] = useState(''),
+    [to, setTo] = useState(''),
+    [currency, setCurrency] = useState(''),
+    [unit, setUnit] = useState(''),
+    [amount, setAmount] = useState(''),
+    [priority, setPriority] = useState(''),
+    [reason, setReason] = useState(''),
+    [confirm, setConfirm] = useState(false),
+    [asOf, setAsOf] = useState(''),
+    [preview, setPreview] = useState<Awaited<ReturnType<typeof rateCandidateService.preview>> | null>(null),
+    [pending, setPending] = useState<RateInput | null>(null),
+    [notice, setNotice] = useState(''),
+    [busy, setBusy] = useState(false);
+  const generation = useRef(0),
+    mounted = useRef(false),
+    inFlight = useRef(false),
+    owner = useRef<RateContext | null>(null);
+  const clear = (message = '') => {
+    ++generation.current;
+    owner.current = null;
+    inFlight.current = false;
+    setSelection('');
+    setPreviewSource('');
+    setRows(null);
+    setTruncated(false);
+    setOwnerCandidate(null);
+    setApprovalCandidate(null);
+    setAdoptionCandidate(null);
+    setPrior(null);
+    setFrom('');
+    setTo('');
+    setCurrency('');
+    setUnit('');
+    setAmount('');
+    setPriority('');
+    setReason('');
+    setConfirm(false);
+    setAsOf('');
+    setPreview(null);
+    setPending(null);
+    setNotice(message);
+    setBusy(false);
+  };
+  useEffect(() => {
+    mounted.current = true;
+    const block = () => clear('Account, role or scope changed. Unsent candidate details cleared.');
+    const check = () => {
+      if (owner.current && !isRateContextCurrent(owner.current)) block();
+    };
+    window.addEventListener('workos:organization-scope-switch-requested', block);
+    window.addEventListener('workos:organization-scope-changed', block);
+    window.addEventListener('focus', check);
+    window.addEventListener('storage', check);
+    return () => {
+      mounted.current = false;
+      ++generation.current;
+      window.removeEventListener('workos:organization-scope-switch-requested', block);
+      window.removeEventListener('workos:organization-scope-changed', block);
+      window.removeEventListener('focus', check);
+      window.removeEventListener('storage', check);
+    };
+  }, [kind, workerId]);
+  const run = async (fn: (c: RateContext) => Promise<void>) => {
+    if (inFlight.current) return;
+    if (owner.current && !isRateContextCurrent(owner.current)) {
+      clear('Account, role or scope changed. Reload.');
+      return;
+    }
+    const n = ++generation.current,
+      c = captureRateContext(() => mounted.current && generation.current === n);
+    if (!c) {
+      clear('An active session and selected scope are required.');
+      return;
+    }
+    owner.current = c;
+    inFlight.current = true;
+    setBusy(true);
+    setNotice('');
+    try {
+      await fn(c);
+    } catch {
+      if (mounted.current && n === generation.current)
+        setNotice(
+          'Operation could not be confirmed. Read the original receipt if offered; otherwise reload.',
+        );
+    } finally {
+      if (mounted.current && n === generation.current) {
+        inFlight.current = false;
+        setBusy(false);
+      }
+    }
+  };
+  const selected =
+    kind === 'cost' && workerId
+      ? { type: 'worker' as Binding, id: workerId }
+      : choices.find((x) => x.type + ':' + x.id === selection);
+  const sourceId = kind === 'cost' ? workerId : previewSource;
+  const load = () => {
+    if (!selected) return;
+    void run(async (c) => {
+      const r = await rateCandidateService.list(kind, selected.type, selected.id, c);
+      setRows(r.candidates);
+      setOwnerCandidate(null);
+      setTruncated(r.truncated);
+      setPrior(null);
+      setConfirm(false);
+      setPreview(null);
+    });
+  };
+  const doPreview = () => {
+    if (!sourceId) return;
+    void run(async (c) => {
+      const r = await rateCandidateService.preview(kind, sourceId, asOf, currency, unit, c);
+      setPreview(r);
+    });
+  };
+  const submit = () => {
+    if (!selected || pending || !confirm) return;
+    const input: RateInput = {
+      requestId: crypto.randomUUID(),
+      streamId: prior?.streamId ?? crypto.randomUUID(),
+      expectedLatestId: prior?.id ?? null,
+      kind,
+      bindingType: selected.type,
+      bindingId: selected.id,
+      effectiveFrom: from,
+      effectiveTo: to,
+      currency,
+      unit,
+      amount,
+      priority: Number(priority),
+      reason,
+    };
+    if (!rateCandidateInput.safeParse(input).success) return;
+    void run(async (c) => {
+      setPending(input);
+      try {
+        const row = await rateCandidateService.submit(input, c);
+        setPending(null);
+        setRows(null);
+        setPrior(null);
+        setConfirm(false);
+        setPreview(null);
+        setNotice('Candidate ' + row.id + ' recorded. Reload before another change.');
+      } catch (e) {
+        if (e instanceof ApiClientError && [400, 403, 409, 422].includes(e.status)) {
+          setPending(null);
+          setRows(null);
+          setPrior(null);
+          setConfirm(false);
+          setNotice('Candidate refused. Reload the source before a deliberate new request.');
+          return;
+        }
+        throw e;
+      }
+    });
+  };
+  const reconcile = () => {
+    if (!pending) return;
+    void run(async (c) => {
+      const row = await rateCandidateService.submit(pending, c, true);
+      setPending(null);
+      setRows(null);
+      setPrior(null);
+      setConfirm(false);
+      setNotice('Original candidate ' + row.id + ' confirmed by read-only receipt.');
+    });
+  };
+  const read =
+    hasRatePermission('commercial.contracts.view') &&
+    hasRatePermission(
+      kind === 'billing' ? 'commercial.rate_candidates.view' : 'commercial.cost_candidates.view',
+    ) &&
+    (kind !== 'cost' || hasRatePermission('employees.view'));
+  const write =
+    read &&
+    hasRatePermission(
+      kind === 'billing' ? 'commercial.rate_candidates.manage' : 'commercial.cost_candidates.manage',
+    );
+  return (
+    <section
+      aria-label={kind === 'billing' ? 'Billing rate candidates' : 'Worker cost candidates'}
+      className="space-y-3 rounded-xl border p-4"
+    >
+      <h2>{kind === 'billing' ? 'Billing rate candidates' : 'Confidential worker cost candidates'}</h2>
+      <p>
+        Candidate preview includes unapproved inputs. Approved sources require explicit adoption; no source
+        here creates valuation, work or invoices. Currency and units remain as entered; no conversion is
+        performed. Among candidates matching the chosen currency and unit, higher explicit priority wins; tied
+        highest priorities conflict.
+      </p>
+      {!read && (
+        <p role="status">
+          Separate commercial and {kind === 'billing' ? 'billing-rate' : 'cost-rate and worker'} view
+          permissions are required.
+        </p>
+      )}
+      {read && (
+        <>
+          {kind === 'billing' && (
+            <label>
+              Candidate source
+              <select
+                aria-label="Candidate source"
+                value={selection}
+                disabled={
+                  busy || Boolean(pending) || !!ownerCandidate || !!approvalCandidate || !!adoptionCandidate
+                }
+                onChange={(e) => {
+                  setSelection(e.target.value);
+                  setRows(null);
+                  setOwnerCandidate(null);
+                  setApprovalCandidate(null);
+                  setAdoptionCandidate(null);
+                  setPrior(null);
+                  setPreview(null);
+                  setConfirm(false);
+                }}
+              >
+                <option value="">Choose a contract or engagement</option>
+                {choices.map((x) => (
+                  <option key={x.type + ':' + x.id} value={x.type + ':' + x.id}>
+                    {x.type}: {x.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button
+            type="button"
+            onClick={load}
+            disabled={
+              !selected ||
+              busy ||
+              Boolean(pending) ||
+              !!ownerCandidate ||
+              !!approvalCandidate ||
+              !!adoptionCandidate
+            }
+          >
+            Load candidates
+          </button>
+          {rows && (
+            <>
+              <p>
+                {truncated
+                  ? 'First 100 candidates shown; results are not exhaustive.'
+                  : 'Candidates for selected source.'}
+              </p>
+              <ul>
+                {rows.map((x) => (
+                  <li key={x.id}>
+                    {x.effectiveFrom}–{x.effectiveTo} · {x.currency} {x.amount}/{x.unit} · priority{' '}
+                    {x.priority} · {x.reason}{' '}
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        Boolean(pending) ||
+                        !!ownerCandidate ||
+                        !!approvalCandidate ||
+                        !!adoptionCandidate
+                      }
+                      onClick={() => setOwnerCandidate(x.id)}
+                    >
+                      Change owner for version {x.sequence}
+                    </button>
+                    {ownerCandidate === x.id && (
+                      <CandidateOwner
+                        key={x.id}
+                        candidateId={x.id}
+                        kind={kind}
+                        onClose={() => setOwnerCandidate(null)}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        Boolean(pending) ||
+                        !!ownerCandidate ||
+                        !!approvalCandidate ||
+                        !!adoptionCandidate
+                      }
+                      onClick={() => setApprovalCandidate(x.id)}
+                    >
+                      Review approval for version {x.sequence}
+                    </button>
+                    {approvalCandidate === x.id && (
+                      <CommercialCandidateApproval
+                        key={x.id}
+                        candidateId={x.id}
+                        kind={kind}
+                        onClose={() => setApprovalCandidate(null)}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        Boolean(pending) ||
+                        !!ownerCandidate ||
+                        !!approvalCandidate ||
+                        !!adoptionCandidate
+                      }
+                      onClick={() => setAdoptionCandidate(x.id)}
+                    >
+                      Inspect adoption for version {x.sequence}
+                    </button>
+                    {adoptionCandidate === x.id && (
+                      <ApprovedRateSource
+                        key={x.id}
+                        candidateId={x.id}
+                        kind={kind}
+                        effectiveFrom={x.effectiveFrom}
+                        onClose={() => setAdoptionCandidate(null)}
+                      />
+                    )}{' '}
+                    {write && (
+                      <button
+                        type="button"
+                        disabled={
+                          busy ||
+                          Boolean(pending) ||
+                          rows.some((y) => y.streamId === x.streamId && y.sequence > x.sequence)
+                        }
+                        onClick={() => {
+                          setPrior(x);
+                          setConfirm(false);
+                        }}
+                      >
+                        Append after version {x.sequence}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {write && (
+                <fieldset
+                  disabled={
+                    busy || Boolean(pending) || !!ownerCandidate || !!approvalCandidate || !!adoptionCandidate
+                  }
+                >
+                  <legend>{prior ? 'Append candidate version' : 'New candidate'}</legend>
+                  <label>
+                    Effective from UTC
+                    <input
+                      aria-label="Effective from UTC"
+                      type="date"
+                      value={from}
+                      onChange={(e) => {
+                        setFrom(e.target.value);
+                        setConfirm(false);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Effective to UTC
+                    <input
+                      aria-label="Effective to UTC"
+                      type="date"
+                      value={to}
+                      onChange={(e) => {
+                        setTo(e.target.value);
+                        setConfirm(false);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Currency
+                    <input
+                      aria-label="Currency"
+                      value={currency}
+                      maxLength={3}
+                      onChange={(e) => {
+                        setCurrency(e.target.value);
+                        setConfirm(false);
+                        setPreview(null);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Unit code
+                    <input
+                      aria-label="Unit code"
+                      value={unit}
+                      maxLength={40}
+                      onChange={(e) => {
+                        setUnit(e.target.value);
+                        setConfirm(false);
+                        setPreview(null);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Exact rate amount
+                    <input
+                      aria-label="Exact rate amount"
+                      inputMode="decimal"
+                      value={amount}
+                      onChange={(e) => {
+                        setAmount(e.target.value);
+                        setConfirm(false);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Explicit priority
+                    <input
+                      aria-label="Explicit priority"
+                      inputMode="numeric"
+                      value={priority}
+                      onChange={(e) => {
+                        setPriority(e.target.value);
+                        setConfirm(false);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Reason
+                    <input
+                      aria-label="Candidate reason"
+                      value={reason}
+                      maxLength={1000}
+                      onChange={(e) => {
+                        setReason(e.target.value);
+                        setConfirm(false);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
+                    Confirm this unapproved candidate
+                  </label>
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={
+                      !confirm ||
+                      !from ||
+                      !to ||
+                      !currency ||
+                      !unit ||
+                      !amount ||
+                      !/^\d+$/.test(priority) ||
+                      !reason
+                    }
+                  >
+                    Record candidate
+                  </button>
+                  {prior && (
+                    <button type="button" onClick={() => setPrior(null)}>
+                      Start a separate candidate
+                    </button>
+                  )}
+                </fieldset>
+              )}
+            </>
+          )}
+          <fieldset
+            disabled={
+              busy || Boolean(pending) || !!ownerCandidate || !!approvalCandidate || !!adoptionCandidate
+            }
+          >
+            <legend>Preview candidate resolution</legend>
+            {kind === 'billing' && (
+              <label>
+                Engagement for preview
+                <select
+                  aria-label="Engagement for preview"
+                  value={previewSource}
+                  onChange={(e) => {
+                    setPreviewSource(e.target.value);
+                    setPreview(null);
+                  }}
+                >
+                  <option value="">Choose an engagement</option>
+                  {choices
+                    .filter((x) => x.type === 'engagement')
+                    .map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.label}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
+            <label>
+              Preview as-of UTC
+              <input
+                aria-label="Preview as-of UTC"
+                type="date"
+                value={asOf}
+                onChange={(e) => {
+                  setAsOf(e.target.value);
+                  setPreview(null);
+                }}
+              />
+            </label>
+            <label>
+              Preview currency
+              <input
+                aria-label="Preview currency"
+                value={currency}
+                maxLength={3}
+                onChange={(e) => {
+                  setCurrency(e.target.value);
+                  setPreview(null);
+                  setConfirm(false);
+                }}
+              />
+            </label>
+            <label>
+              Preview unit
+              <input
+                aria-label="Preview unit"
+                value={unit}
+                maxLength={40}
+                onChange={(e) => {
+                  setUnit(e.target.value);
+                  setPreview(null);
+                  setConfirm(false);
+                }}
+              />
+            </label>
+            <button type="button" onClick={doPreview} disabled={!sourceId || !asOf || !currency || !unit}>
+              Preview resolution
+            </button>
+          </fieldset>
+          {preview && (
+            <p role="status">
+              Preview: {preview.result}
+              {preview.candidate
+                ? ' · ' +
+                  preview.candidate.currency +
+                  ' ' +
+                  preview.candidate.amount +
+                  '/' +
+                  preview.candidate.unit +
+                  ' · ' +
+                  preview.matchingBasis +
+                  ' source ' +
+                  preview.candidate.id
+                : ''}
+              . No financial authority.
+            </p>
+          )}
+          <AdoptedRateResolution key={kind + ':' + (sourceId ?? '')} kind={kind} sourceId={sourceId} />
+        </>
+      )}
+      {pending && (
+        <section>
+          <p>
+            Original request {pending.requestId} may still be in flight; no write is retried automatically.
+          </p>
+          <button type="button" disabled={busy} onClick={reconcile}>
+            Read original candidate receipt
+          </button>
+        </section>
+      )}
+      {notice && <p role="status">{notice}</p>}
+    </section>
+  );
 };

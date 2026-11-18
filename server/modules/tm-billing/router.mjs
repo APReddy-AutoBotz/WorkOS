@@ -7,41 +7,796 @@ import { scopedCapacityWorker } from '../planning/worker-capacity-service.mjs';
 import { workApprovalOwner } from '../approvals/work-approval-service.mjs';
 import { commercialApprovalRecipients } from '../../../shared/commercial-candidate-approval.mjs';
 import { approvalEventIdentity } from '../../../shared/work-approval.mjs';
-import { validTmEligibilityPolicy, tmEligibilityState, tmBillingEvidence, renderTmEligibilityNotice } from '../../../shared/tm-billing-eligibility.mjs';
+import {
+  validTmEligibilityPolicy,
+  tmEligibilityState,
+  tmBillingEvidence,
+  renderTmEligibilityNotice,
+} from '../../../shared/tm-billing-eligibility.mjs';
 
-const uuid=z.string().uuid(), id=z.string().trim().min(1).max(200), reason=z.string().trim().min(3).max(1000), key=z.string().regex(/^[a-f0-9]{64}$/), date=z.string().date();
-const fail=(statusCode,code,message)=>Object.assign(new Error(message),{statusCode,code});
-const parse=(schema,value)=>{const result=schema.safeParse(value);if(!result.success)throw fail(400,'TM_BILLING_INVALID','Provide explicit valid billing review inputs.');return result.data;};
-const scope=r=>[r.organizationScope.organizationId,r.organizationScope.legalEntityId];
-const fingerprint=x=>capacityHash(capacityCanonical(x));
-const fence=(r,k)=>{if(workApprovalOwner(r)!==k)throw fail(409,'TM_BILLING_CONTEXT_CHANGED','Account or scope changed. Reload.');};
-const policyView=p=>({id:p.id,engagementId:p.engagement_id,sequence:p.sequence,previousId:p.previous_id,effectiveFrom:String(p.effective_from).slice(0,10),definition:p.definition,actorId:p.actor_id,activeRole:p.active_role,reason:p.reason,requestId:p.request_id,createdAt:p.created_at});
-const baseBody={expectedOwnerKey:key,requestId:uuid,reason};
+const uuid = z.string().uuid(),
+  id = z.string().trim().min(1).max(200),
+  reason = z.string().trim().min(3).max(1000),
+  key = z.string().regex(/^[a-f0-9]{64}$/),
+  date = z.string().date();
+const fail = (statusCode, code, message) => Object.assign(new Error(message), { statusCode, code });
+const parse = (schema, value) => {
+  const result = schema.safeParse(value);
+  if (!result.success) throw fail(400, 'TM_BILLING_INVALID', 'Provide explicit valid billing review inputs.');
+  return result.data;
+};
+const scope = (r) => [r.organizationScope.organizationId, r.organizationScope.legalEntityId];
+const fingerprint = (x) => capacityHash(capacityCanonical(x));
+const fence = (r, k) => {
+  if (workApprovalOwner(r) !== k)
+    throw fail(409, 'TM_BILLING_CONTEXT_CHANGED', 'Account or scope changed. Reload.');
+};
+const policyView = (p) => ({
+  id: p.id,
+  engagementId: p.engagement_id,
+  sequence: p.sequence,
+  previousId: p.previous_id,
+  effectiveFrom: String(p.effective_from).slice(0, 10),
+  definition: p.definition,
+  actorId: p.actor_id,
+  activeRole: p.active_role,
+  reason: p.reason,
+  requestId: p.request_id,
+  createdAt: p.created_at,
+});
+const baseBody = { expectedOwnerKey: key, requestId: uuid, reason };
 
-export const createTmBillingRouter=o=>{
- const router=Router();router.use((_r,res,next)=>{res.set('Cache-Control','no-store');next();},o.requireDatabase,o.requireAuth);
- const handle=(write,fn)=>async(r,res)=>{let c,begun=false;try{c=await o.pool.connect();await c.query(write?'begin':'begin isolation level repeatable read');begun=true;const out=await fn(c,r);await c.query('commit');begun=false;res.status(write&&!out.replayed?201:200).json(out);}catch(e){if(begun)await c.query('rollback').catch(()=>{});if(e.statusCode)res.status(e.statusCode).json({code:e.code,error:e.message});else if(['TBE01','TBE02','TBE03','TBE04','23505','23514','40001','40P01'].includes(e.code))res.status(e.code==='TBE01'?403:409).json({code:e.code==='TBE01'?'TM_BILLING_AUTHORITY':'TM_BILLING_CONFLICT',error:'Current billing scope, source, owner or stage changed. Reload.'});else{o.logError?.(e);res.status(503).json({code:'TM_BILLING_UNCONFIRMED',error:'The operation could not be confirmed. Read the original receipt.'});}}finally{c?.release();}};
- const envelope=async(c,r)=>({ownerKey:workApprovalOwner(r),actorUserId:r.user.sub,activeRole:r.user.activeRole,organizationId:r.organizationScope.organizationId,legalEntityId:r.organizationScope.legalEntityId,serverDate:(await c.query("select to_char((clock_timestamp() at time zone 'UTC')::date,'YYYY-MM-DD') d")).rows[0].d});
- const authorize=async(c,r,kind='viewer')=>{const keys=['commercial.contracts.view','commercial.tm_billing.view','employees.view','notifications.view',...(kind==='manager'?['commercial.contracts.manage','commercial.tm_billing.manage']:[]),...(kind==='decider'?['approvals.view','commercial.tm_billing.decide']:[])].sort();const held=await c.query('select 1 from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3 and active for share',[r.user.sub,...scope(r)]);if(!held.rowCount)throw fail(403,'TM_BILLING_AUTHORITY','Current scope unavailable.');await c.query('select permission_key from role_permissions where role_name=$1 and permission_key=any($2::text[]) order by permission_key for share',[r.user.activeRole,keys]);await c.query('select permission_key from user_permission_grants where user_id=$1 and permission_key=any($2::text[]) order by permission_key for share',[r.user.sub,keys]);for(const k of keys)await assertCommercialAuthority(c,r,k);};
- const engagement=async(c,r,engagementId,lock=false)=>{const row=(await c.query(`select * from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3${lock?' for share':''}`,[...scope(r),engagementId])).rows[0];if(!row||row.model!=='time_and_materials'||row.origin!=='manual'||!row.billable||!row.contract_id||!row.client_id)throw fail(404,'TM_BILLING_SOURCE','Scoped T&M engagement unavailable.');return row;};
- const snapshot=async(c,r,snapshotId,lock=false,requireCurrent=false)=>{const v=(await c.query(`select v.id,v.engagement_id as "engagementId",v.policy_id as "policyId",v.submission_id as "submissionId",v.decision_id as "decisionId",v.entry_id as "entryId",v.billing_adoption_id as "billingAdoptionId",v.source_evidence as "sourceEvidence",v.result,h.employee_id as "workerId",tm_billing_source_valid(v.organization_id,v.legal_entity_id,v.engagement_id,v.id) as current from commercial_tm_valuations v join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id where v.id=$1 and v.organization_id=$2 and v.legal_entity_id=$3${lock?' for share of h':''}`,[snapshotId,...scope(r)])).rows[0];if(!v||(requireCurrent&&!v.current))throw fail(404,'TM_BILLING_SOURCE','Retained work snapshot unavailable.');await engagement(c,r,v.engagementId,lock);await scopedCapacityWorker(c,r,v.workerId,o.buildEmployeeScopeWhere,lock);let evidence;try{evidence=tmBillingEvidence(v);}catch{throw fail(409,'TM_BILLING_SOURCE','Billing evidence unavailable.');}return{row:v,evidence};};
- const context=async(c,r,instanceId,eventId=null,itemId=null)=>c.query("select set_config('workos.tm_billing_context',$1,true)",[JSON.stringify({organizationId:scope(r)[0],legalEntityId:scope(r)[1],actorId:r.user.sub,activeRole:r.user.activeRole,operationId:r.operationId,instanceId,eventId,itemId})]);
- const instance=async(c,r,instanceId,lock=false)=>{const i=(await c.query(`select * from tm_billing_eligibility_instances where id=$1 and organization_id=$2 and legal_entity_id=$3${lock?' for update':''}`,[instanceId,...scope(r)])).rows[0];if(!i)throw fail(404,'TM_BILLING_SOURCE','Billing review unavailable.');await snapshot(c,r,i.snapshot_id,lock);return i;};
- const view=async(c,i)=>{const p=(await c.query('select *,effective_from::text from tm_billing_eligibility_policies where id=$1',[i.policy_id])).rows[0],transitions=(await c.query('select id,sequence,stage,decision,actor_id as "actorId",active_role as "activeRole",request_id as "requestId",reason,created_at as "createdAt" from tm_billing_eligibility_transitions where instance_id=$1 order by sequence',[i.id])).rows,cancel=(await c.query('select id,actor_id as "actorId",active_role as "activeRole",request_id as "requestId",reason,created_at as "createdAt" from tm_billing_eligibility_invalidations where instance_id=$1',[i.id])).rows[0]??null,current=(await c.query('select tm_billing_review_current(i) current from tm_billing_eligibility_instances i where id=$1',[i.id])).rows[0].current;return{id:i.id,snapshotId:i.snapshot_id,engagementId:i.engagement_id,ownerUserId:i.owner_user_id,ownerRole:i.owner_role,requesterUserId:i.requester_user_id,activeRole:i.active_role,requestId:i.request_id,reason:i.reason,createdAt:i.created_at,policy:policyView(p),state:cancel?{status:'Cancelled',sequence:transitions.length,currentStage:null}:tmEligibilityState(p.definition,transitions),current,transitions,cancellation:cancel};};
- const audit=async(c,r,action,entityId,instanceId,snapshotId)=>o.audit(c,r,{module:'T&M Billing Eligibility',action,entityType:'TmBillingEligibilityApproval',entityId,newValue:{instanceId,snapshotId},reason:'Scoped billing review retained.',details:'Billing review evidence; no cost or margin values in general audit.'});
- const emit=async(c,r,i,p,seq,stage,eventKey)=>{const template=p.definition.templates.find(x=>x.key===eventKey),rendered=renderTmEligibilityNotice(template,i.snapshot_id,stage+1),source=(await c.query('select h.employee_id from commercial_tm_valuations v join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id where v.id=$1',[i.snapshot_id])).rows[0],workers=(await c.query("select u.id from users u join user_organization_scopes sc on sc.user_id=u.id where u.employee_record_id=$1 and u.status='Active' and sc.organization_id=$2 and sc.legal_entity_id=$3 and sc.active",[source.employee_id,i.organization_id,i.legal_entity_id])).rows;if(workers.length!==1)throw fail(409,'TM_BILLING_RECIPIENT','Affected worker unavailable.');const rows=eventKey==='approval.action_required'?[{userId:p.definition.stages[stage].userId,reason:'current_stage_approver'}]:[{userId:i.requester_user_id,reason:'requester'},...(eventKey==='approval.rejected_or_correction_required'?[{userId:i.owner_user_id,reason:'commercial_change_owner'}]:[]),{userId:workers[0].id,reason:'affected_worker'}],recipients=commercialApprovalRecipients(rows),mandatory=eventKey!=='approval.completed',eventId=approvalEventIdentity(i.id,seq,eventKey,r.operationId).replace(/^work-approval\//,'tm-billing-eligibility/');await c.query('insert into tm_billing_eligibility_notices(id,instance_id,transition_sequence,stage,event_key,policy_class,policy_id,operation_id,locale,title,body)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',[eventId,i.id,seq,stage,eventKey,mandatory?'ACTION_REQUIRED':'INFORMATIONAL',p.id,r.operationId,p.definition.locale,rendered.title,rendered.body]);for(const item of recipients){const pref=(await c.query('select n.in_app from notification_preferences n join users u on u.employee_record_id=n.employee_id where u.id=$1 and n.event_type=$2',[item.userId,eventKey])).rows[0],channel=mandatory?'Required':!p.definition.completionInApp?'SuppressedPolicy':pref?.in_app===false?'SuppressedPreference':'Enabled',inApp=['Required','Enabled'].includes(channel),rid=randomUUID();await c.query('insert into tm_billing_eligibility_recipients(id,event_id,user_id,reasons,in_app,channel_decision)values($1,$2,$3,$4,$5,$6)',[rid,eventId,item.userId,item.reasons,inApp,channel]);if(inApp)await c.query("insert into tm_billing_eligibility_deliveries(id,recipient_id,channel,status,attempt)values($1,$2,'InApp','Delivered',1)",[randomUUID(),rid]);}};
- const outcome=async(c,instanceId)=>{const row=(await c.query('select ev.id as "eventId",item.id as "itemId" from billing_eligibility_events ev join approved_unbilled_items item on item.event_id=ev.id where ev.instance_id=$1',[instanceId])).rows[0];return row??{eventId:null,itemId:null};};
- const ownedPolicy=async(c,r,requestId)=>(await c.query('select *,effective_from::text from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and active_role=$4 and request_id=$5',[...scope(r),r.user.sub,r.user.activeRole,requestId])).rows[0];
- router.get('/policies',handle(false,async(c,r)=>{const q=parse(z.object({engagementId:id}).strict(),r.query);await authorize(c,r);await engagement(c,r,q.engagementId);const rows=(await c.query('select *,effective_from::text from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence desc limit 21',[...scope(r),q.engagementId])).rows;return{...await envelope(c,r),policies:rows.slice(0,20).map(policyView),truncated:rows.length>20};}));
- router.post('/policies',handle(true,async(c,r)=>{const d=parse(z.object({...baseBody,engagementId:id,expectedLatestId:uuid.nullable(),effectiveFrom:date,definition:z.unknown().refine(validTmEligibilityPolicy)}).strict(),r.body);fence(r,d.expectedOwnerKey);await authorize(c,r,'manager');await engagement(c,r,d.engagementId,true);await c.query('select pg_advisory_xact_lock(hashtext($1))',[`tm-billing-policy-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`]);const digest=fingerprint(d),old=await ownedPolicy(c,r,d.requestId);if(old){if(old.request_fingerprint!==digest)throw fail(409,'TM_BILLING_KEY','Original policy request differs.');return{...await envelope(c,r),policy:policyView(old),replayed:true};}await c.query('select pg_advisory_xact_lock(hashtext($1))',[`tm-billing-policy:${scope(r).join(':')}:${d.engagementId}`]);const prior=(await c.query('select * from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence desc limit 1',[...scope(r),d.engagementId])).rows[0];if((prior?.id??null)!==d.expectedLatestId||d.definition.engagementId!==d.engagementId)throw fail(409,'TM_BILLING_POLICY','Policy version or engagement changed.');const pid=randomUUID();await context(c,r,null,pid);const p=(await c.query('insert into tm_billing_eligibility_policies(id,organization_id,legal_entity_id,engagement_id,sequence,previous_id,effective_from,definition,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14)returning *,effective_from::text',[pid,...scope(r),d.engagementId,(prior?.sequence??0)+1,prior?.id??null,d.effectiveFrom,JSON.stringify(d.definition),r.user.sub,r.user.activeRole,d.requestId,digest,d.reason,r.operationId])).rows[0];await o.audit(c,r,{module:'T&M Billing Eligibility',action:'Configure Policy',entityType:'TmBillingPolicy',entityId:pid,newValue:{policyId:pid,engagementId:d.engagementId},reason:'Prospective billing review policy.',details:'No role or account grant was created.'});return{...await envelope(c,r),policy:policyView(p),replayed:false};}));
- router.get('/sources',handle(false,async(c,r)=>{const q=parse(z.object({engagementId:id,after:uuid.optional()}).strict(),r.query);await authorize(c,r);await engagement(c,r,q.engagementId);const args=[...scope(r),q.engagementId],workerWhere=o.buildEmployeeScopeWhere(r,args,'worker');args.push(q.after??null);const rows=(await c.query(`select v.id,v.engagement_id as "engagementId",v.policy_id as "policyId",v.submission_id as "submissionId",v.decision_id as "decisionId",v.entry_id as "entryId",v.billing_adoption_id as "billingAdoptionId",v.source_evidence as "sourceEvidence",v.result from commercial_tm_valuations v join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id join employees worker on worker.id=h.employee_id where v.organization_id=$1 and v.legal_entity_id=$2 and v.engagement_id=$3 and (${workerWhere}) and tm_billing_source_valid(v.organization_id,v.legal_entity_id,v.engagement_id,v.id) and ($${args.length}::uuid is null or v.id>$${args.length}::uuid) order by v.id limit 51`,args)).rows;const sources=rows.slice(0,50).map(tmBillingEvidence);return{...await envelope(c,r),sources,nextAfter:rows.length>50?rows[49].id:null};}));
- router.get('/instances',handle(false,async(c,r)=>{const q=parse(z.object({engagementId:id,after:uuid.optional()}).strict(),r.query);await authorize(c,r);await engagement(c,r,q.engagementId);const args=[...scope(r),q.engagementId],workerWhere=o.buildEmployeeScopeWhere(r,args,'worker');args.push(q.after??null);const rows=(await c.query(`select i.* from tm_billing_eligibility_instances i join commercial_tm_valuations v on v.id=i.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id join employees worker on worker.id=h.employee_id where i.organization_id=$1 and i.legal_entity_id=$2 and i.engagement_id=$3 and (${workerWhere}) and ($${args.length}::uuid is null or i.id>$${args.length}::uuid) order by i.id limit 51`,args)).rows;return{...await envelope(c,r),approvals:await Promise.all(rows.slice(0,50).map(x=>view(c,x))),nextAfter:rows.length>50?rows[49].id:null};}));
- router.get('/sources/:id',handle(false,async(c,r)=>{parse(z.object({}).strict(),r.query);await authorize(c,r);const source=await snapshot(c,r,parse(uuid,r.params.id));return{...await envelope(c,r),source:source.evidence,current:source.row.current};}));
- router.post('/requests',handle(true,async(c,r)=>{const d=parse(z.object({...baseBody,snapshotId:uuid,expectedPolicyId:uuid,ownerUserId:uuid,ownerRole:id}).strict(),r.body);fence(r,d.expectedOwnerKey);await authorize(c,r,'manager');const source=await snapshot(c,r,d.snapshotId,true,true),digest=fingerprint(d);await c.query('select pg_advisory_xact_lock(hashtext($1))',[`tm-billing-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`]);const old=(await c.query('select * from tm_billing_eligibility_instances where organization_id=$1 and legal_entity_id=$2 and requester_user_id=$3 and request_id=$4',[...scope(r),r.user.sub,d.requestId])).rows[0];if(old){if(old.request_fingerprint!==digest||old.active_role!==r.user.activeRole)throw fail(409,'TM_BILLING_KEY','Original review request differs.');return{...await envelope(c,r),approval:await view(c,old),replayed:true};}const p=(await c.query('select * from tm_billing_eligibility_policies where id=$1 and organization_id=$2 and legal_entity_id=$3 and engagement_id=$4',[d.expectedPolicyId,...scope(r),source.row.engagementId])).rows[0];if(!p)throw fail(409,'TM_BILLING_POLICY','Exact billing policy unavailable.');const instanceId=randomUUID();await context(c,r,instanceId);const i=(await c.query('insert into tm_billing_eligibility_instances(id,organization_id,legal_entity_id,engagement_id,snapshot_id,policy_id,owner_user_id,owner_role,requester_user_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)returning *',[instanceId,...scope(r),source.row.engagementId,d.snapshotId,p.id,d.ownerUserId,d.ownerRole,r.user.sub,r.user.activeRole,d.requestId,digest,d.reason,r.operationId])).rows[0];await c.query("insert into approval_records(id,entity_type,entity_id,subject_employee_id,status,source)values($1,'TmBillingEligibilityApproval',$2,$3,'Pending','Web')",['tm-billing-'+instanceId,instanceId,source.row.workerId]);await emit(c,r,i,p,0,0,'approval.action_required');await audit(c,r,'Request Review',instanceId,instanceId,i.snapshot_id);return{...await envelope(c,r),approval:await view(c,i),replayed:false};}));
- router.get('/instances/:id',handle(false,async(c,r)=>{parse(z.object({}).strict(),r.query);await authorize(c,r);const i=await instance(c,r,parse(uuid,r.params.id));return{...await envelope(c,r),approval:await view(c,i),source:(await snapshot(c,r,i.snapshot_id)).evidence};}));
- router.post('/instances/:id/decisions',handle(true,async(c,r)=>{const instanceId=parse(uuid,r.params.id),d=parse(z.object({...baseBody,expectedSequence:z.number().int().min(0).max(9),decision:z.enum(['Approved','Rejected'])}).strict(),r.body);fence(r,d.expectedOwnerKey);await authorize(c,r,'decider');const i=await instance(c,r,instanceId,true),digest=fingerprint(d);await c.query('select pg_advisory_xact_lock(hashtext($1))',[`tm-billing-decision-request:${i.id}:${r.user.sub}:${d.requestId}`]);const old=(await c.query('select * from tm_billing_eligibility_transitions where instance_id=$1 and request_id=$2',[i.id,d.requestId])).rows[0];if(old){if(old.actor_id!==r.user.sub||old.active_role!==r.user.activeRole||old.request_fingerprint!==digest)throw fail(409,'TM_BILLING_KEY','Original decision request differs.');return{...await envelope(c,r),approval:await view(c,i),...await outcome(c,i.id),replayed:true};}const p=(await c.query('select * from tm_billing_eligibility_policies where id=$1',[i.policy_id])).rows[0],transitions=(await c.query('select sequence,stage,decision from tm_billing_eligibility_transitions where instance_id=$1 order by sequence',[i.id])).rows,state=tmEligibilityState(p.definition,transitions);if(state.status!=='Pending'||state.sequence!==d.expectedSequence)throw fail(409,'TM_BILLING_STALE','Review stage changed. Reload.');const final=d.decision==='Approved'&&state.sequence+1===p.definition.stages.length,eventId=final?randomUUID():null,itemId=final?randomUUID():null,transitionId=randomUUID();await context(c,r,i.id,eventId,itemId);await c.query('insert into tm_billing_eligibility_transitions(id,instance_id,sequence,stage,decision,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',[transitionId,i.id,state.sequence+1,state.currentStage,d.decision,r.user.sub,r.user.activeRole,d.requestId,digest,d.reason,r.operationId]);const status=d.decision==='Rejected'?'Rejected':final?'Approved':'Pending';await c.query("update approval_records set status=$2,updated_at=now() where entity_type='TmBillingEligibilityApproval' and entity_id=$1",[i.id,status]);if(final){const source=await snapshot(c,r,i.snapshot_id,true,true),e=await engagement(c,r,i.engagement_id,true);await c.query(`insert into billing_eligibility_events(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,source_type,snapshot_id,instance_id,decision_id,version,eligible_on,currency,amount,billing_evidence,actor_id,active_role,operation_id,created_at) select $1,$2,$3,$4,$5,$6,'TM_SNAPSHOT',$7,$8,$9,1,(v.ts at time zone 'UTC')::date,$10,$11,$12::jsonb,$13,$14,$15,v.ts from (select clock_timestamp() ts)v`,[eventId,...scope(r),e.client_id,e.contract_id,e.id,i.snapshot_id,i.id,transitionId,source.evidence.currency,source.evidence.amount,JSON.stringify(source.evidence),r.user.sub,r.user.activeRole,r.operationId]);await c.query('insert into approved_unbilled_items(id,event_id,organization_id,legal_entity_id,version)values($1,$2,$3,$4,1)',[itemId,eventId,...scope(r)]);}await audit(c,r,'Decide Review',transitionId,i.id,i.snapshot_id);if(!final&&d.decision==='Approved')await emit(c,r,i,p,state.sequence+1,state.currentStage+1,'approval.action_required');else if(d.decision==='Rejected')await emit(c,r,i,p,state.sequence+1,state.currentStage,'approval.rejected_or_correction_required');else{await c.query('savepoint optional_tm_billing_notice');try{await emit(c,r,i,p,state.sequence+1,state.currentStage,'approval.completed');await c.query('set constraints complete_tm_billing_review_transition immediate');await c.query('set constraints complete_tm_billing_review_transition deferred');await c.query('release savepoint optional_tm_billing_notice');}catch{await c.query('rollback to savepoint optional_tm_billing_notice');await c.query("insert into tm_billing_eligibility_notice_failures(id,instance_id,transition_sequence,code)values($1,$2,$3,'INFORMATIONAL_NOTIFICATION_UNAVAILABLE')",[randomUUID(),i.id,state.sequence+1]);await c.query('release savepoint optional_tm_billing_notice');}}return{...await envelope(c,r),approval:await view(c,i),eventId,itemId,replayed:false};}));
- router.post('/instances/:id/cancellations',handle(true,async(c,r)=>{const instanceId=parse(uuid,r.params.id),d=parse(z.object(baseBody).strict(),r.body);fence(r,d.expectedOwnerKey);await authorize(c,r,'manager');const i=await instance(c,r,instanceId,true),digest=fingerprint(d);await c.query('select pg_advisory_xact_lock(hashtext($1))',[`tm-billing-cancel:${i.id}:${r.user.sub}:${d.requestId}`]);const old=(await c.query('select * from tm_billing_eligibility_invalidations where actor_id=$1 and request_id=$2',[r.user.sub,d.requestId])).rows[0];if(old){if(old.instance_id!==i.id||old.active_role!==r.user.activeRole||old.request_fingerprint!==digest)throw fail(409,'TM_BILLING_KEY','Original cancellation differs.');return{...await envelope(c,r),approval:await view(c,i),replayed:true};}const cid=randomUUID();await context(c,r,i.id);await c.query('insert into tm_billing_eligibility_invalidations(id,instance_id,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8)',[cid,i.id,r.user.sub,r.user.activeRole,d.requestId,digest,d.reason,r.operationId]);await c.query("update approval_records set status='Cancelled',updated_at=now() where entity_type='TmBillingEligibilityApproval' and entity_id=$1",[i.id]);await o.audit(c,r,{module:'T&M Billing Eligibility',action:'Cancel Review',entityType:'TmBillingEligibilityApproval',entityId:cid,newValue:{cancellationId:cid,instanceId:i.id},reason:'Protected review cancelled.',details:'No billing item was created.'});return{...await envelope(c,r),approval:await view(c,i),replayed:false};}));
- router.get('/register',handle(false,async(c,r)=>{const q=parse(z.object({after:uuid.optional()}).strict(),r.query);await authorize(c,r);const args=[...scope(r)],workerWhere=o.buildEmployeeScopeWhere(r,args,'worker');args.push(q.after??null);const rows=(await c.query(`select item.id,item.version,ev.id as "eventId",ev.snapshot_id as "snapshotId",ev.client_id as "clientId",ev.contract_id as "contractId",ev.engagement_id as "engagementId",ev.eligible_on::text as "eligibleOn",ev.currency,ev.amount::text as amount,ev.billing_evidence as evidence,ev.created_at as "createdAt" from approved_unbilled_items item join billing_eligibility_events ev on ev.id=item.event_id join commercial_tm_valuations v on v.id=ev.snapshot_id join work_submission_evidence sub on sub.id=v.submission_id join timesheets h on h.id=sub.timesheet_id join employees worker on worker.id=h.employee_id where item.organization_id=$1 and item.legal_entity_id=$2 and (${workerWhere}) and tm_billing_source_valid(v.organization_id,v.legal_entity_id,v.engagement_id,v.id) and ($${args.length}::uuid is null or item.id>$${args.length}::uuid) order by item.id limit 51`,args)).rows;return{...await envelope(c,r),items:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};}));
- router.get('/receipts/:type/:requestId',handle(false,async(c,r)=>{parse(z.object({}).strict(),r.query);await authorize(c,r);const typ=parse(z.enum(['policy','request','decision','cancellation']),r.params.type),requestId=parse(uuid,r.params.requestId);if(typ==='policy'){const p=await ownedPolicy(c,r,requestId);if(!p)throw fail(404,'TM_BILLING_UNCONFIRMED','Original receipt unavailable.');await engagement(c,r,p.engagement_id);return{...await envelope(c,r),type:typ,policy:policyView(p)};}let row;if(typ==='request')row=(await c.query('select * from tm_billing_eligibility_instances where organization_id=$1 and legal_entity_id=$2 and requester_user_id=$3 and active_role=$4 and request_id=$5',[...scope(r),r.user.sub,r.user.activeRole,requestId])).rows[0];else{const table=typ==='decision'?'tm_billing_eligibility_transitions':'tm_billing_eligibility_invalidations';row=(await c.query(`select i.* from ${table} t join tm_billing_eligibility_instances i on i.id=t.instance_id where i.organization_id=$1 and i.legal_entity_id=$2 and t.actor_id=$3 and t.active_role=$4 and t.request_id=$5`,[...scope(r),r.user.sub,r.user.activeRole,requestId])).rows[0];}if(!row)throw fail(404,'TM_BILLING_UNCONFIRMED','Original receipt unavailable.');await instance(c,r,row.id);return{...await envelope(c,r),type:typ,approval:await view(c,row),...await outcome(c,row.id)};}));
- return router;
+export const createTmBillingRouter = (o) => {
+  const router = Router();
+  router.use(
+    (_r, res, next) => {
+      res.set('Cache-Control', 'no-store');
+      next();
+    },
+    o.requireDatabase,
+    o.requireAuth,
+  );
+  const handle = (write, fn) => async (r, res) => {
+    let c,
+      begun = false;
+    try {
+      c = await o.pool.connect();
+      await c.query(write ? 'begin' : 'begin isolation level repeatable read');
+      begun = true;
+      const out = await fn(c, r);
+      await c.query('commit');
+      begun = false;
+      res.status(write && !out.replayed ? 201 : 200).json(out);
+    } catch (e) {
+      if (begun) await c.query('rollback').catch(() => {});
+      if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
+      else if (['TBE01', 'TBE02', 'TBE03', 'TBE04', '23505', '23514', '40001', '40P01'].includes(e.code))
+        res
+          .status(e.code === 'TBE01' ? 403 : 409)
+          .json({
+            code: e.code === 'TBE01' ? 'TM_BILLING_AUTHORITY' : 'TM_BILLING_CONFLICT',
+            error: 'Current billing scope, source, owner or stage changed. Reload.',
+          });
+      else {
+        o.logError?.(e);
+        res
+          .status(503)
+          .json({
+            code: 'TM_BILLING_UNCONFIRMED',
+            error: 'The operation could not be confirmed. Read the original receipt.',
+          });
+      }
+    } finally {
+      c?.release();
+    }
+  };
+  const envelope = async (c, r) => ({
+    ownerKey: workApprovalOwner(r),
+    actorUserId: r.user.sub,
+    activeRole: r.user.activeRole,
+    organizationId: r.organizationScope.organizationId,
+    legalEntityId: r.organizationScope.legalEntityId,
+    serverDate: (await c.query("select to_char((clock_timestamp() at time zone 'UTC')::date,'YYYY-MM-DD') d"))
+      .rows[0].d,
+  });
+  const authorize = async (c, r, kind = 'viewer') => {
+    const keys = [
+      'commercial.contracts.view',
+      'commercial.tm_billing.view',
+      'employees.view',
+      'notifications.view',
+      ...(kind === 'manager' ? ['commercial.contracts.manage', 'commercial.tm_billing.manage'] : []),
+      ...(kind === 'decider' ? ['approvals.view', 'commercial.tm_billing.decide'] : []),
+    ].sort();
+    const held = await c.query(
+      'select 1 from user_organization_scopes where user_id=$1 and organization_id=$2 and legal_entity_id=$3 and active for share',
+      [r.user.sub, ...scope(r)],
+    );
+    if (!held.rowCount) throw fail(403, 'TM_BILLING_AUTHORITY', 'Current scope unavailable.');
+    await c.query(
+      'select permission_key from role_permissions where role_name=$1 and permission_key=any($2::text[]) order by permission_key for share',
+      [r.user.activeRole, keys],
+    );
+    await c.query(
+      'select permission_key from user_permission_grants where user_id=$1 and permission_key=any($2::text[]) order by permission_key for share',
+      [r.user.sub, keys],
+    );
+    for (const k of keys) await assertCommercialAuthority(c, r, k);
+  };
+  const engagement = async (c, r, engagementId, lock = false) => {
+    const row = (
+      await c.query(
+        `select * from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3${lock ? ' for share' : ''}`,
+        [...scope(r), engagementId],
+      )
+    ).rows[0];
+    if (
+      !row ||
+      row.model !== 'time_and_materials' ||
+      row.origin !== 'manual' ||
+      !row.billable ||
+      !row.contract_id ||
+      !row.client_id
+    )
+      throw fail(404, 'TM_BILLING_SOURCE', 'Scoped T&M engagement unavailable.');
+    return row;
+  };
+  const snapshot = async (c, r, snapshotId, lock = false, requireCurrent = false) => {
+    const v = (
+      await c.query(
+        `select v.id,v.engagement_id as "engagementId",v.policy_id as "policyId",v.submission_id as "submissionId",v.decision_id as "decisionId",v.entry_id as "entryId",v.billing_adoption_id as "billingAdoptionId",v.source_evidence as "sourceEvidence",v.result,h.employee_id as "workerId",tm_billing_source_valid(v.organization_id,v.legal_entity_id,v.engagement_id,v.id) as current from commercial_tm_valuations v join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id where v.id=$1 and v.organization_id=$2 and v.legal_entity_id=$3${lock ? ' for share of h' : ''}`,
+        [snapshotId, ...scope(r)],
+      )
+    ).rows[0];
+    if (!v || (requireCurrent && !v.current))
+      throw fail(404, 'TM_BILLING_SOURCE', 'Retained work snapshot unavailable.');
+    await engagement(c, r, v.engagementId, lock);
+    await scopedCapacityWorker(c, r, v.workerId, o.buildEmployeeScopeWhere, lock);
+    let evidence;
+    try {
+      evidence = tmBillingEvidence(v);
+    } catch {
+      throw fail(409, 'TM_BILLING_SOURCE', 'Billing evidence unavailable.');
+    }
+    return { row: v, evidence };
+  };
+  const context = async (c, r, instanceId, eventId = null, itemId = null) =>
+    c.query("select set_config('workos.tm_billing_context',$1,true)", [
+      JSON.stringify({
+        organizationId: scope(r)[0],
+        legalEntityId: scope(r)[1],
+        actorId: r.user.sub,
+        activeRole: r.user.activeRole,
+        operationId: r.operationId,
+        instanceId,
+        eventId,
+        itemId,
+      }),
+    ]);
+  const instance = async (c, r, instanceId, lock = false) => {
+    const i = (
+      await c.query(
+        `select * from tm_billing_eligibility_instances where id=$1 and organization_id=$2 and legal_entity_id=$3${lock ? ' for update' : ''}`,
+        [instanceId, ...scope(r)],
+      )
+    ).rows[0];
+    if (!i) throw fail(404, 'TM_BILLING_SOURCE', 'Billing review unavailable.');
+    await snapshot(c, r, i.snapshot_id, lock);
+    return i;
+  };
+  const view = async (c, i) => {
+    const p = (
+        await c.query('select *,effective_from::text from tm_billing_eligibility_policies where id=$1', [
+          i.policy_id,
+        ])
+      ).rows[0],
+      transitions = (
+        await c.query(
+          'select id,sequence,stage,decision,actor_id as "actorId",active_role as "activeRole",request_id as "requestId",reason,created_at as "createdAt" from tm_billing_eligibility_transitions where instance_id=$1 order by sequence',
+          [i.id],
+        )
+      ).rows,
+      cancel =
+        (
+          await c.query(
+            'select id,actor_id as "actorId",active_role as "activeRole",request_id as "requestId",reason,created_at as "createdAt" from tm_billing_eligibility_invalidations where instance_id=$1',
+            [i.id],
+          )
+        ).rows[0] ?? null,
+      current = (
+        await c.query(
+          'select tm_billing_review_current(i) current from tm_billing_eligibility_instances i where id=$1',
+          [i.id],
+        )
+      ).rows[0].current;
+    return {
+      id: i.id,
+      snapshotId: i.snapshot_id,
+      engagementId: i.engagement_id,
+      ownerUserId: i.owner_user_id,
+      ownerRole: i.owner_role,
+      requesterUserId: i.requester_user_id,
+      activeRole: i.active_role,
+      requestId: i.request_id,
+      reason: i.reason,
+      createdAt: i.created_at,
+      policy: policyView(p),
+      state: cancel
+        ? { status: 'Cancelled', sequence: transitions.length, currentStage: null }
+        : tmEligibilityState(p.definition, transitions),
+      current,
+      transitions,
+      cancellation: cancel,
+    };
+  };
+  const audit = async (c, r, action, entityId, instanceId, snapshotId) =>
+    o.audit(c, r, {
+      module: 'T&M Billing Eligibility',
+      action,
+      entityType: 'TmBillingEligibilityApproval',
+      entityId,
+      newValue: { instanceId, snapshotId },
+      reason: 'Scoped billing review retained.',
+      details: 'Billing review evidence; no cost or margin values in general audit.',
+    });
+  const emit = async (c, r, i, p, seq, stage, eventKey) => {
+    const template = p.definition.templates.find((x) => x.key === eventKey),
+      rendered = renderTmEligibilityNotice(template, i.snapshot_id, stage + 1),
+      source = (
+        await c.query(
+          'select h.employee_id from commercial_tm_valuations v join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id where v.id=$1',
+          [i.snapshot_id],
+        )
+      ).rows[0],
+      workers = (
+        await c.query(
+          "select u.id from users u join user_organization_scopes sc on sc.user_id=u.id where u.employee_record_id=$1 and u.status='Active' and sc.organization_id=$2 and sc.legal_entity_id=$3 and sc.active",
+          [source.employee_id, i.organization_id, i.legal_entity_id],
+        )
+      ).rows;
+    if (workers.length !== 1) throw fail(409, 'TM_BILLING_RECIPIENT', 'Affected worker unavailable.');
+    const rows =
+        eventKey === 'approval.action_required'
+          ? [{ userId: p.definition.stages[stage].userId, reason: 'current_stage_approver' }]
+          : [
+              { userId: i.requester_user_id, reason: 'requester' },
+              ...(eventKey === 'approval.rejected_or_correction_required'
+                ? [{ userId: i.owner_user_id, reason: 'commercial_change_owner' }]
+                : []),
+              { userId: workers[0].id, reason: 'affected_worker' },
+            ],
+      recipients = commercialApprovalRecipients(rows),
+      mandatory = eventKey !== 'approval.completed',
+      eventId = approvalEventIdentity(i.id, seq, eventKey, r.operationId).replace(
+        /^work-approval\//,
+        'tm-billing-eligibility/',
+      );
+    await c.query(
+      'insert into tm_billing_eligibility_notices(id,instance_id,transition_sequence,stage,event_key,policy_class,policy_id,operation_id,locale,title,body)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+      [
+        eventId,
+        i.id,
+        seq,
+        stage,
+        eventKey,
+        mandatory ? 'ACTION_REQUIRED' : 'INFORMATIONAL',
+        p.id,
+        r.operationId,
+        p.definition.locale,
+        rendered.title,
+        rendered.body,
+      ],
+    );
+    for (const item of recipients) {
+      const pref = (
+          await c.query(
+            'select n.in_app from notification_preferences n join users u on u.employee_record_id=n.employee_id where u.id=$1 and n.event_type=$2',
+            [item.userId, eventKey],
+          )
+        ).rows[0],
+        channel = mandatory
+          ? 'Required'
+          : !p.definition.completionInApp
+            ? 'SuppressedPolicy'
+            : pref?.in_app === false
+              ? 'SuppressedPreference'
+              : 'Enabled',
+        inApp = ['Required', 'Enabled'].includes(channel),
+        rid = randomUUID();
+      await c.query(
+        'insert into tm_billing_eligibility_recipients(id,event_id,user_id,reasons,in_app,channel_decision)values($1,$2,$3,$4,$5,$6)',
+        [rid, eventId, item.userId, item.reasons, inApp, channel],
+      );
+      if (inApp)
+        await c.query(
+          "insert into tm_billing_eligibility_deliveries(id,recipient_id,channel,status,attempt)values($1,$2,'InApp','Delivered',1)",
+          [randomUUID(), rid],
+        );
+    }
+  };
+  const outcome = async (c, instanceId) => {
+    const row = (
+      await c.query(
+        'select ev.id as "eventId",item.id as "itemId" from billing_eligibility_events ev join approved_unbilled_items item on item.event_id=ev.id where ev.instance_id=$1',
+        [instanceId],
+      )
+    ).rows[0];
+    return row ?? { eventId: null, itemId: null };
+  };
+  const ownedPolicy = async (c, r, requestId) =>
+    (
+      await c.query(
+        'select *,effective_from::text from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and active_role=$4 and request_id=$5',
+        [...scope(r), r.user.sub, r.user.activeRole, requestId],
+      )
+    ).rows[0];
+  router.get(
+    '/policies',
+    handle(false, async (c, r) => {
+      const q = parse(z.object({ engagementId: id }).strict(), r.query);
+      await authorize(c, r);
+      await engagement(c, r, q.engagementId);
+      const rows = (
+        await c.query(
+          'select *,effective_from::text from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence desc limit 21',
+          [...scope(r), q.engagementId],
+        )
+      ).rows;
+      return {
+        ...(await envelope(c, r)),
+        policies: rows.slice(0, 20).map(policyView),
+        truncated: rows.length > 20,
+      };
+    }),
+  );
+  router.post(
+    '/policies',
+    handle(true, async (c, r) => {
+      const d = parse(
+        z
+          .object({
+            ...baseBody,
+            engagementId: id,
+            expectedLatestId: uuid.nullable(),
+            effectiveFrom: date,
+            definition: z.unknown().refine(validTmEligibilityPolicy),
+          })
+          .strict(),
+        r.body,
+      );
+      fence(r, d.expectedOwnerKey);
+      await authorize(c, r, 'manager');
+      await engagement(c, r, d.engagementId, true);
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `tm-billing-policy-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`,
+      ]);
+      const digest = fingerprint(d),
+        old = await ownedPolicy(c, r, d.requestId);
+      if (old) {
+        if (old.request_fingerprint !== digest)
+          throw fail(409, 'TM_BILLING_KEY', 'Original policy request differs.');
+        return { ...(await envelope(c, r)), policy: policyView(old), replayed: true };
+      }
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `tm-billing-policy:${scope(r).join(':')}:${d.engagementId}`,
+      ]);
+      const prior = (
+        await c.query(
+          'select * from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence desc limit 1',
+          [...scope(r), d.engagementId],
+        )
+      ).rows[0];
+      if ((prior?.id ?? null) !== d.expectedLatestId || d.definition.engagementId !== d.engagementId)
+        throw fail(409, 'TM_BILLING_POLICY', 'Policy version or engagement changed.');
+      const pid = randomUUID();
+      await context(c, r, null, pid);
+      const p = (
+        await c.query(
+          'insert into tm_billing_eligibility_policies(id,organization_id,legal_entity_id,engagement_id,sequence,previous_id,effective_from,definition,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14)returning *,effective_from::text',
+          [
+            pid,
+            ...scope(r),
+            d.engagementId,
+            (prior?.sequence ?? 0) + 1,
+            prior?.id ?? null,
+            d.effectiveFrom,
+            JSON.stringify(d.definition),
+            r.user.sub,
+            r.user.activeRole,
+            d.requestId,
+            digest,
+            d.reason,
+            r.operationId,
+          ],
+        )
+      ).rows[0];
+      await o.audit(c, r, {
+        module: 'T&M Billing Eligibility',
+        action: 'Configure Policy',
+        entityType: 'TmBillingPolicy',
+        entityId: pid,
+        newValue: { policyId: pid, engagementId: d.engagementId },
+        reason: 'Prospective billing review policy.',
+        details: 'No role or account grant was created.',
+      });
+      return { ...(await envelope(c, r)), policy: policyView(p), replayed: false };
+    }),
+  );
+  router.get(
+    '/sources',
+    handle(false, async (c, r) => {
+      const q = parse(z.object({ engagementId: id, after: uuid.optional() }).strict(), r.query);
+      await authorize(c, r);
+      await engagement(c, r, q.engagementId);
+      const args = [...scope(r), q.engagementId],
+        workerWhere = o.buildEmployeeScopeWhere(r, args, 'worker');
+      args.push(q.after ?? null);
+      const rows = (
+        await c.query(
+          `select v.id,v.engagement_id as "engagementId",v.policy_id as "policyId",v.submission_id as "submissionId",v.decision_id as "decisionId",v.entry_id as "entryId",v.billing_adoption_id as "billingAdoptionId",v.source_evidence as "sourceEvidence",v.result from commercial_tm_valuations v join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id join employees worker on worker.id=h.employee_id where v.organization_id=$1 and v.legal_entity_id=$2 and v.engagement_id=$3 and (${workerWhere}) and tm_billing_source_valid(v.organization_id,v.legal_entity_id,v.engagement_id,v.id) and ($${args.length}::uuid is null or v.id>$${args.length}::uuid) order by v.id limit 51`,
+          args,
+        )
+      ).rows;
+      const sources = rows.slice(0, 50).map(tmBillingEvidence);
+      return { ...(await envelope(c, r)), sources, nextAfter: rows.length > 50 ? rows[49].id : null };
+    }),
+  );
+  router.get(
+    '/instances',
+    handle(false, async (c, r) => {
+      const q = parse(z.object({ engagementId: id, after: uuid.optional() }).strict(), r.query);
+      await authorize(c, r);
+      await engagement(c, r, q.engagementId);
+      const args = [...scope(r), q.engagementId],
+        workerWhere = o.buildEmployeeScopeWhere(r, args, 'worker');
+      args.push(q.after ?? null);
+      const rows = (
+        await c.query(
+          `select i.* from tm_billing_eligibility_instances i join commercial_tm_valuations v on v.id=i.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id join employees worker on worker.id=h.employee_id where i.organization_id=$1 and i.legal_entity_id=$2 and i.engagement_id=$3 and (${workerWhere}) and ($${args.length}::uuid is null or i.id>$${args.length}::uuid) order by i.id limit 51`,
+          args,
+        )
+      ).rows;
+      return {
+        ...(await envelope(c, r)),
+        approvals: await Promise.all(rows.slice(0, 50).map((x) => view(c, x))),
+        nextAfter: rows.length > 50 ? rows[49].id : null,
+      };
+    }),
+  );
+  router.get(
+    '/sources/:id',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r);
+      const source = await snapshot(c, r, parse(uuid, r.params.id));
+      return { ...(await envelope(c, r)), source: source.evidence, current: source.row.current };
+    }),
+  );
+  router.post(
+    '/requests',
+    handle(true, async (c, r) => {
+      const d = parse(
+        z
+          .object({ ...baseBody, snapshotId: uuid, expectedPolicyId: uuid, ownerUserId: uuid, ownerRole: id })
+          .strict(),
+        r.body,
+      );
+      fence(r, d.expectedOwnerKey);
+      await authorize(c, r, 'manager');
+      const source = await snapshot(c, r, d.snapshotId, true, true),
+        digest = fingerprint(d);
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `tm-billing-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`,
+      ]);
+      const old = (
+        await c.query(
+          'select * from tm_billing_eligibility_instances where organization_id=$1 and legal_entity_id=$2 and requester_user_id=$3 and request_id=$4',
+          [...scope(r), r.user.sub, d.requestId],
+        )
+      ).rows[0];
+      if (old) {
+        if (old.request_fingerprint !== digest || old.active_role !== r.user.activeRole)
+          throw fail(409, 'TM_BILLING_KEY', 'Original review request differs.');
+        return { ...(await envelope(c, r)), approval: await view(c, old), replayed: true };
+      }
+      const p = (
+        await c.query(
+          'select * from tm_billing_eligibility_policies where id=$1 and organization_id=$2 and legal_entity_id=$3 and engagement_id=$4',
+          [d.expectedPolicyId, ...scope(r), source.row.engagementId],
+        )
+      ).rows[0];
+      if (!p) throw fail(409, 'TM_BILLING_POLICY', 'Exact billing policy unavailable.');
+      const instanceId = randomUUID();
+      await context(c, r, instanceId);
+      const i = (
+        await c.query(
+          'insert into tm_billing_eligibility_instances(id,organization_id,legal_entity_id,engagement_id,snapshot_id,policy_id,owner_user_id,owner_role,requester_user_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)returning *',
+          [
+            instanceId,
+            ...scope(r),
+            source.row.engagementId,
+            d.snapshotId,
+            p.id,
+            d.ownerUserId,
+            d.ownerRole,
+            r.user.sub,
+            r.user.activeRole,
+            d.requestId,
+            digest,
+            d.reason,
+            r.operationId,
+          ],
+        )
+      ).rows[0];
+      await c.query(
+        "insert into approval_records(id,entity_type,entity_id,subject_employee_id,status,source)values($1,'TmBillingEligibilityApproval',$2,$3,'Pending','Web')",
+        ['tm-billing-' + instanceId, instanceId, source.row.workerId],
+      );
+      await emit(c, r, i, p, 0, 0, 'approval.action_required');
+      await audit(c, r, 'Request Review', instanceId, instanceId, i.snapshot_id);
+      return { ...(await envelope(c, r)), approval: await view(c, i), replayed: false };
+    }),
+  );
+  router.get(
+    '/instances/:id',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r);
+      const i = await instance(c, r, parse(uuid, r.params.id));
+      return {
+        ...(await envelope(c, r)),
+        approval: await view(c, i),
+        source: (await snapshot(c, r, i.snapshot_id)).evidence,
+      };
+    }),
+  );
+  router.post(
+    '/instances/:id/decisions',
+    handle(true, async (c, r) => {
+      const instanceId = parse(uuid, r.params.id),
+        d = parse(
+          z
+            .object({
+              ...baseBody,
+              expectedSequence: z.number().int().min(0).max(9),
+              decision: z.enum(['Approved', 'Rejected']),
+            })
+            .strict(),
+          r.body,
+        );
+      fence(r, d.expectedOwnerKey);
+      await authorize(c, r, 'decider');
+      const i = await instance(c, r, instanceId, true),
+        digest = fingerprint(d);
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `tm-billing-decision-request:${i.id}:${r.user.sub}:${d.requestId}`,
+      ]);
+      const old = (
+        await c.query(
+          'select * from tm_billing_eligibility_transitions where instance_id=$1 and request_id=$2',
+          [i.id, d.requestId],
+        )
+      ).rows[0];
+      if (old) {
+        if (
+          old.actor_id !== r.user.sub ||
+          old.active_role !== r.user.activeRole ||
+          old.request_fingerprint !== digest
+        )
+          throw fail(409, 'TM_BILLING_KEY', 'Original decision request differs.');
+        return {
+          ...(await envelope(c, r)),
+          approval: await view(c, i),
+          ...(await outcome(c, i.id)),
+          replayed: true,
+        };
+      }
+      const p = (await c.query('select * from tm_billing_eligibility_policies where id=$1', [i.policy_id]))
+          .rows[0],
+        transitions = (
+          await c.query(
+            'select sequence,stage,decision from tm_billing_eligibility_transitions where instance_id=$1 order by sequence',
+            [i.id],
+          )
+        ).rows,
+        state = tmEligibilityState(p.definition, transitions);
+      if (state.status !== 'Pending' || state.sequence !== d.expectedSequence)
+        throw fail(409, 'TM_BILLING_STALE', 'Review stage changed. Reload.');
+      const final = d.decision === 'Approved' && state.sequence + 1 === p.definition.stages.length,
+        eventId = final ? randomUUID() : null,
+        itemId = final ? randomUUID() : null,
+        transitionId = randomUUID();
+      await context(c, r, i.id, eventId, itemId);
+      await c.query(
+        'insert into tm_billing_eligibility_transitions(id,instance_id,sequence,stage,decision,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+        [
+          transitionId,
+          i.id,
+          state.sequence + 1,
+          state.currentStage,
+          d.decision,
+          r.user.sub,
+          r.user.activeRole,
+          d.requestId,
+          digest,
+          d.reason,
+          r.operationId,
+        ],
+      );
+      const status = d.decision === 'Rejected' ? 'Rejected' : final ? 'Approved' : 'Pending';
+      await c.query(
+        "update approval_records set status=$2,updated_at=now() where entity_type='TmBillingEligibilityApproval' and entity_id=$1",
+        [i.id, status],
+      );
+      if (final) {
+        const source = await snapshot(c, r, i.snapshot_id, true, true),
+          e = await engagement(c, r, i.engagement_id, true);
+        await c.query(
+          `insert into billing_eligibility_events(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,source_type,snapshot_id,instance_id,decision_id,version,eligible_on,currency,amount,billing_evidence,actor_id,active_role,operation_id,created_at) select $1,$2,$3,$4,$5,$6,'TM_SNAPSHOT',$7,$8,$9,1,(v.ts at time zone 'UTC')::date,$10,$11,$12::jsonb,$13,$14,$15,v.ts from (select clock_timestamp() ts)v`,
+          [
+            eventId,
+            ...scope(r),
+            e.client_id,
+            e.contract_id,
+            e.id,
+            i.snapshot_id,
+            i.id,
+            transitionId,
+            source.evidence.currency,
+            source.evidence.amount,
+            JSON.stringify(source.evidence),
+            r.user.sub,
+            r.user.activeRole,
+            r.operationId,
+          ],
+        );
+        await c.query(
+          'insert into approved_unbilled_items(id,event_id,organization_id,legal_entity_id,version)values($1,$2,$3,$4,1)',
+          [itemId, eventId, ...scope(r)],
+        );
+      }
+      await audit(c, r, 'Decide Review', transitionId, i.id, i.snapshot_id);
+      if (!final && d.decision === 'Approved')
+        await emit(c, r, i, p, state.sequence + 1, state.currentStage + 1, 'approval.action_required');
+      else if (d.decision === 'Rejected')
+        await emit(
+          c,
+          r,
+          i,
+          p,
+          state.sequence + 1,
+          state.currentStage,
+          'approval.rejected_or_correction_required',
+        );
+      else {
+        await c.query('savepoint optional_tm_billing_notice');
+        try {
+          await emit(c, r, i, p, state.sequence + 1, state.currentStage, 'approval.completed');
+          await c.query('set constraints complete_tm_billing_review_transition immediate');
+          await c.query('set constraints complete_tm_billing_review_transition deferred');
+          await c.query('release savepoint optional_tm_billing_notice');
+        } catch {
+          await c.query('rollback to savepoint optional_tm_billing_notice');
+          await c.query(
+            "insert into tm_billing_eligibility_notice_failures(id,instance_id,transition_sequence,code)values($1,$2,$3,'INFORMATIONAL_NOTIFICATION_UNAVAILABLE')",
+            [randomUUID(), i.id, state.sequence + 1],
+          );
+          await c.query('release savepoint optional_tm_billing_notice');
+        }
+      }
+      return { ...(await envelope(c, r)), approval: await view(c, i), eventId, itemId, replayed: false };
+    }),
+  );
+  router.post(
+    '/instances/:id/cancellations',
+    handle(true, async (c, r) => {
+      const instanceId = parse(uuid, r.params.id),
+        d = parse(z.object(baseBody).strict(), r.body);
+      fence(r, d.expectedOwnerKey);
+      await authorize(c, r, 'manager');
+      const i = await instance(c, r, instanceId, true),
+        digest = fingerprint(d);
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `tm-billing-cancel:${i.id}:${r.user.sub}:${d.requestId}`,
+      ]);
+      const old = (
+        await c.query(
+          'select * from tm_billing_eligibility_invalidations where actor_id=$1 and request_id=$2',
+          [r.user.sub, d.requestId],
+        )
+      ).rows[0];
+      if (old) {
+        if (
+          old.instance_id !== i.id ||
+          old.active_role !== r.user.activeRole ||
+          old.request_fingerprint !== digest
+        )
+          throw fail(409, 'TM_BILLING_KEY', 'Original cancellation differs.');
+        return { ...(await envelope(c, r)), approval: await view(c, i), replayed: true };
+      }
+      const cid = randomUUID();
+      await context(c, r, i.id);
+      await c.query(
+        'insert into tm_billing_eligibility_invalidations(id,instance_id,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8)',
+        [cid, i.id, r.user.sub, r.user.activeRole, d.requestId, digest, d.reason, r.operationId],
+      );
+      await c.query(
+        "update approval_records set status='Cancelled',updated_at=now() where entity_type='TmBillingEligibilityApproval' and entity_id=$1",
+        [i.id],
+      );
+      await o.audit(c, r, {
+        module: 'T&M Billing Eligibility',
+        action: 'Cancel Review',
+        entityType: 'TmBillingEligibilityApproval',
+        entityId: cid,
+        newValue: { cancellationId: cid, instanceId: i.id },
+        reason: 'Protected review cancelled.',
+        details: 'No billing item was created.',
+      });
+      return { ...(await envelope(c, r)), approval: await view(c, i), replayed: false };
+    }),
+  );
+  router.get(
+    '/register',
+    handle(false, async (c, r) => {
+      const q = parse(z.object({ after: uuid.optional() }).strict(), r.query);
+      await authorize(c, r);
+      const args = [...scope(r)],
+        workerWhere = o.buildEmployeeScopeWhere(r, args, 'worker');
+      args.push(q.after ?? null);
+      const rows = (
+        await c.query(
+          `select item.id,item.version,ev.id as "eventId",ev.snapshot_id as "snapshotId",ev.client_id as "clientId",ev.contract_id as "contractId",ev.engagement_id as "engagementId",ev.eligible_on::text as "eligibleOn",ev.currency,ev.amount::text as amount,ev.billing_evidence as evidence,ev.created_at as "createdAt" from approved_unbilled_items item join billing_eligibility_events ev on ev.id=item.event_id join commercial_tm_valuations v on v.id=ev.snapshot_id join work_submission_evidence sub on sub.id=v.submission_id join timesheets h on h.id=sub.timesheet_id join employees worker on worker.id=h.employee_id where item.organization_id=$1 and item.legal_entity_id=$2 and (${workerWhere}) and tm_billing_source_valid(v.organization_id,v.legal_entity_id,v.engagement_id,v.id) and ($${args.length}::uuid is null or item.id>$${args.length}::uuid) order by item.id limit 51`,
+          args,
+        )
+      ).rows;
+      return {
+        ...(await envelope(c, r)),
+        items: rows.slice(0, 50),
+        nextAfter: rows.length > 50 ? rows[49].id : null,
+      };
+    }),
+  );
+  router.get(
+    '/receipts/:type/:requestId',
+    handle(false, async (c, r) => {
+      parse(z.object({}).strict(), r.query);
+      await authorize(c, r);
+      const typ = parse(z.enum(['policy', 'request', 'decision', 'cancellation']), r.params.type),
+        requestId = parse(uuid, r.params.requestId);
+      if (typ === 'policy') {
+        const p = await ownedPolicy(c, r, requestId);
+        if (!p) throw fail(404, 'TM_BILLING_UNCONFIRMED', 'Original receipt unavailable.');
+        await engagement(c, r, p.engagement_id);
+        return { ...(await envelope(c, r)), type: typ, policy: policyView(p) };
+      }
+      let row;
+      if (typ === 'request')
+        row = (
+          await c.query(
+            'select * from tm_billing_eligibility_instances where organization_id=$1 and legal_entity_id=$2 and requester_user_id=$3 and active_role=$4 and request_id=$5',
+            [...scope(r), r.user.sub, r.user.activeRole, requestId],
+          )
+        ).rows[0];
+      else {
+        const table =
+          typ === 'decision' ? 'tm_billing_eligibility_transitions' : 'tm_billing_eligibility_invalidations';
+        row = (
+          await c.query(
+            `select i.* from ${table} t join tm_billing_eligibility_instances i on i.id=t.instance_id where i.organization_id=$1 and i.legal_entity_id=$2 and t.actor_id=$3 and t.active_role=$4 and t.request_id=$5`,
+            [...scope(r), r.user.sub, r.user.activeRole, requestId],
+          )
+        ).rows[0];
+      }
+      if (!row) throw fail(404, 'TM_BILLING_UNCONFIRMED', 'Original receipt unavailable.');
+      await instance(c, r, row.id);
+      return {
+        ...(await envelope(c, r)),
+        type: typ,
+        approval: await view(c, row),
+        ...(await outcome(c, row.id)),
+      };
+    }),
+  );
+  return router;
 };

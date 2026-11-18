@@ -551,4 +551,10 @@ WOS-COM-001–004 and COM-014/015 are partially implemented by effective-dated b
 
 ### WOS-06 commercial rate governance
 
-Ownership, approval and adoption are tracked in the commercial owner, canonical candidate approval and approved rate adoption task specifications. The governed T&M valuation and T&M eligibility specifications cover separate downstream decisions. The release gates exercise their PostgreSQL upgrade paths and scoped browser journeys.
+| Requirement | Implementation evidence |
+| --- | --- |
+| WOS-COM-001–003, 014–015 | [Version ownership](../tasks/WOS-06-COMMERCIAL-OWNER-APPROVAL.md), [independent approval](../tasks/WOS-06-CANONICAL-CANDIDATE-APPROVAL.md) and [explicit adoption](../tasks/WOS-06-APPROVED-RATE-ADOPTION.md) |
+| WOS-COM-001–004, 006, 013–015 | [Native-currency T&M valuation snapshots](../tasks/WOS-06-GOVERNED-TM-VALUATION.md) |
+| WOS-COM billing eligibility | [Independent T&M eligibility review](../tasks/WOS-06-TM-ELIGIBILITY.md) |
+
+Migrations 065b–065f retain immutable versions and existing commercial history. To roll back application access, revoke the new opt-in permissions and redeploy the previous application. Preserve the migration ledger, rate evidence, valuation snapshots and eligibility decisions.

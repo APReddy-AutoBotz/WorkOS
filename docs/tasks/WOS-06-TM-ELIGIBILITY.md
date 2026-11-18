@@ -1,5 +1,7 @@
 # Explicit T&M billing eligibility — bounded development plan
 
+The original design and evidence notes below describe the earlier draft. The current mainline integration uses migrations 065b–065f and the acceptance gates in the WorkOS CI workflow.
+
 ## Requirement and dependency
 
 WOS-INV-001/003, COM-006/011/014/015, APR-001/003/006, INT-002, CORE-003–005 and IAM-003/005/010 require a source-specific eligibility decision, approved-unbilled registration, retained approved evidence and scoped authorization. The commercial specification's source-specific rules require an approved eligible T&M snapshot and its underlying approved work; a calculation alone does not authorize billing. Start the isolated development branch from PR104 head `a17afeec2c2d1a638a70cb74395a6588d032bcc4`, tree `9e55f9397f83e142e3d94aaadb8455ded91e5b77`. This branch is development only; PR104's exact-head hosted acceptance must pass before publication of a dependent Draft.

@@ -1,6 +1,184 @@
-import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';
-process.env.APP_MODE='production';process.env.VITE_APP_MODE='production';process.env.ALLOW_TEST_FALLBACK='false';process.env.VITE_ALLOW_TEST_FALLBACK='false';const values=new Map(),calls=[],fallback=[];globalThis.sessionStorage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,String(v)),removeItem:k=>values.delete(k)};globalThis.localStorage=Object.fromEntries(['getItem','setItem','removeItem','clear'].map(k=>[k,()=>{fallback.push(k);throw Error('No fallback');}]));globalThis.window={localStorage,location:{pathname:'/commercial-drafting',href:'/commercial-drafting'},dispatchEvent:()=>true};
-const scope={organizationId:'synthetic-org',legalEntityId:'synthetic-legal'},u={id:'synthetic-actor-record',employeeId:'SYN-ACTOR',userName:'synthetic-actor',role:'Admin',permissionRole:'Admin',permissions:['commercial.contracts.view','commercial.contracts.manage','commercial.rate_candidates.view','commercial.rate_candidates.manage','commercial.rate_approvals.decide','employees.view','notifications.view','approvals.view']},reset=()=>{values.set('workos_session',JSON.stringify(u));values.set('workos_organization_scope',JSON.stringify(scope));values.set('workos_api_token','synthetic-token');};reset();const {commercialCandidateApprovals:s,captureRateContext:capture}=await import('../src/services/commercialCandidateApprovals.ts');const actor=randomUUID(),candidateId=randomUUID(),ownerId=randomUUID(),policyId=randomUUID(),stages=[{userId:actor,role:'Admin'}],keys=['approval.action_required','approval.rejected_or_correction_required','approval.completed'],definition={entityType:'CommercialCandidate',kind:'billing',candidateId,stages,locale:'en-US',templates:keys.map(key=>({key,subject:'Review {{stageNumber}}',body:'Source {{sourceRef}}'})),completionInApp:false},base={...scope,ownerKey:createHash('sha256').update(JSON.stringify([u.userName,u.id,u.role,scope.organizationId,scope.legalEntityId])).digest('hex'),actorUserId:actor,activeRole:'Admin',serverDate:'2026-10-28',previewOnly:true},cmd={type:'policy',data:{requestId:randomUUID(),expectedLatestId:null,effectiveFrom:'2026-10-28',definition,reason:'Synthetic policy'}},p={id:policyId,candidateId,sequence:1,previousId:null,effectiveFrom:cmd.data.effectiveFrom,definition,actorId:actor,activeRole:'Admin',reason:cmd.data.reason,requestId:cmd.data.requestId,createdAt:'2026-10-28T00:00:00.000Z'};let raw={...base,policy:p,replayed:false},status=201,change=()=>{};globalThis.fetch=async(url,init)=>{calls.push({url,init});change();return new Response(JSON.stringify(raw),{status,headers:{'Content-Type':'application/json'}});};assert.equal((await s.run(cmd,candidateId,'billing',capture())).id,policyId);
-for(const bad of [{...raw,organizationId:'foreign'},{...raw,ownerKey:'b'.repeat(64)},{...raw,actorUserId:randomUUID()},{...raw,policy:{...p,previousId:randomUUID()}},{...raw,policy:{...p,definition:{...definition,candidateId:randomUUID()}}},{...raw,policy:{...p,extra:true}}]){raw=bad;await assert.rejects(s.run(cmd,candidateId,'billing',capture()),{status:503});}
-status=200;raw={...base,type:'policy',policy:p};assert.equal((await s.run(cmd,candidateId,'billing',capture(),true)).id,policyId);assert.equal(calls.at(-1).init.method,'GET');const request={type:'request',data:{requestId:randomUUID(),candidateId,expectedOwnerEventId:ownerId,expectedPolicyId:policyId,reason:'Synthetic request'}},approval={id:randomUUID(),candidateId,ownerEventId:ownerId,policy:p,requesterUserId:actor,activeRole:'Admin',requestId:request.data.requestId,reason:request.data.reason,createdAt:'2026-10-28T00:00:00.000Z',state:{status:'Pending',sequence:0,currentStage:0},current:true,transitions:[],cancellation:null};status=201;raw={...base,approval,replayed:false};assert.equal((await s.run(request,candidateId,'billing',capture())).id,approval.id);raw={...raw,approval:{...approval,ownerEventId:randomUUID()}};await assert.rejects(s.run(request,candidateId,'billing',capture()),{status:503});
-raw={...base,policy:p,replayed:false};for(const mutate of [()=>values.set('workos_api_token','other-token'),()=>values.set('workos_session',JSON.stringify({...u,role:'Employee',permissionRole:'Employee'})),()=>values.set('workos_organization_scope',JSON.stringify({...scope,legalEntityId:'foreign'}))]){reset();const ctx=capture();change=mutate;await assert.rejects(s.run(cmd,candidateId,'billing',ctx),{status:403});const n=calls.length;await assert.rejects(s.run(cmd,candidateId,'billing',ctx),{status:403});assert.equal(calls.length,n);}reset();change=()=>{};const count=calls.length;globalThis.fetch=async()=>{calls.push({});throw Error('Synthetic uncertain transport');};await assert.rejects(s.run(cmd,candidateId,'billing',capture()));assert.equal(calls.length,count+1);assert.deepEqual(fallback,[]);console.log('Commercial approval strict owned policy/request receipts, source pins, session fences and no retry passed.');
+import assert from 'node:assert/strict';
+import { randomUUID, createHash } from 'node:crypto';
+process.env.APP_MODE = 'production';
+process.env.VITE_APP_MODE = 'production';
+process.env.ALLOW_TEST_FALLBACK = 'false';
+process.env.VITE_ALLOW_TEST_FALLBACK = 'false';
+const values = new Map(),
+  calls = [],
+  fallback = [];
+globalThis.sessionStorage = {
+  getItem: (k) => values.get(k) ?? null,
+  setItem: (k, v) => values.set(k, String(v)),
+  removeItem: (k) => values.delete(k),
+};
+globalThis.localStorage = Object.fromEntries(
+  ['getItem', 'setItem', 'removeItem', 'clear'].map((k) => [
+    k,
+    () => {
+      fallback.push(k);
+      throw Error('No fallback');
+    },
+  ]),
+);
+globalThis.window = {
+  localStorage,
+  location: { pathname: '/commercial-drafting', href: '/commercial-drafting' },
+  dispatchEvent: () => true,
+};
+const scope = { organizationId: 'synthetic-org', legalEntityId: 'synthetic-legal' },
+  u = {
+    id: 'synthetic-actor-record',
+    employeeId: 'SYN-ACTOR',
+    userName: 'synthetic-actor',
+    role: 'Admin',
+    permissionRole: 'Admin',
+    permissions: [
+      'commercial.contracts.view',
+      'commercial.contracts.manage',
+      'commercial.rate_candidates.view',
+      'commercial.rate_candidates.manage',
+      'commercial.rate_approvals.decide',
+      'employees.view',
+      'notifications.view',
+      'approvals.view',
+    ],
+  },
+  reset = () => {
+    values.set('workos_session', JSON.stringify(u));
+    values.set('workos_organization_scope', JSON.stringify(scope));
+    values.set('workos_api_token', 'synthetic-token');
+  };
+reset();
+const { commercialCandidateApprovals: s, captureRateContext: capture } = await import(
+  '../src/services/commercialCandidateApprovals.ts'
+);
+const actor = randomUUID(),
+  candidateId = randomUUID(),
+  ownerId = randomUUID(),
+  policyId = randomUUID(),
+  stages = [{ userId: actor, role: 'Admin' }],
+  keys = ['approval.action_required', 'approval.rejected_or_correction_required', 'approval.completed'],
+  definition = {
+    entityType: 'CommercialCandidate',
+    kind: 'billing',
+    candidateId,
+    stages,
+    locale: 'en-US',
+    templates: keys.map((key) => ({ key, subject: 'Review {{stageNumber}}', body: 'Source {{sourceRef}}' })),
+    completionInApp: false,
+  },
+  base = {
+    ...scope,
+    ownerKey: createHash('sha256')
+      .update(JSON.stringify([u.userName, u.id, u.role, scope.organizationId, scope.legalEntityId]))
+      .digest('hex'),
+    actorUserId: actor,
+    activeRole: 'Admin',
+    serverDate: '2026-10-28',
+    previewOnly: true,
+  },
+  cmd = {
+    type: 'policy',
+    data: {
+      requestId: randomUUID(),
+      expectedLatestId: null,
+      effectiveFrom: '2026-10-28',
+      definition,
+      reason: 'Synthetic policy',
+    },
+  },
+  p = {
+    id: policyId,
+    candidateId,
+    sequence: 1,
+    previousId: null,
+    effectiveFrom: cmd.data.effectiveFrom,
+    definition,
+    actorId: actor,
+    activeRole: 'Admin',
+    reason: cmd.data.reason,
+    requestId: cmd.data.requestId,
+    createdAt: '2026-10-28T00:00:00.000Z',
+  };
+let raw = { ...base, policy: p, replayed: false },
+  status = 201,
+  change = () => {};
+globalThis.fetch = async (url, init) => {
+  calls.push({ url, init });
+  change();
+  return new Response(JSON.stringify(raw), { status, headers: { 'Content-Type': 'application/json' } });
+};
+assert.equal((await s.run(cmd, candidateId, 'billing', capture())).id, policyId);
+for (const bad of [
+  { ...raw, organizationId: 'foreign' },
+  { ...raw, ownerKey: 'b'.repeat(64) },
+  { ...raw, actorUserId: randomUUID() },
+  { ...raw, policy: { ...p, previousId: randomUUID() } },
+  { ...raw, policy: { ...p, definition: { ...definition, candidateId: randomUUID() } } },
+  { ...raw, policy: { ...p, extra: true } },
+]) {
+  raw = bad;
+  await assert.rejects(s.run(cmd, candidateId, 'billing', capture()), { status: 503 });
+}
+status = 200;
+raw = { ...base, type: 'policy', policy: p };
+assert.equal((await s.run(cmd, candidateId, 'billing', capture(), true)).id, policyId);
+assert.equal(calls.at(-1).init.method, 'GET');
+const request = {
+    type: 'request',
+    data: {
+      requestId: randomUUID(),
+      candidateId,
+      expectedOwnerEventId: ownerId,
+      expectedPolicyId: policyId,
+      reason: 'Synthetic request',
+    },
+  },
+  approval = {
+    id: randomUUID(),
+    candidateId,
+    ownerEventId: ownerId,
+    policy: p,
+    requesterUserId: actor,
+    activeRole: 'Admin',
+    requestId: request.data.requestId,
+    reason: request.data.reason,
+    createdAt: '2026-10-28T00:00:00.000Z',
+    state: { status: 'Pending', sequence: 0, currentStage: 0 },
+    current: true,
+    transitions: [],
+    cancellation: null,
+  };
+status = 201;
+raw = { ...base, approval, replayed: false };
+assert.equal((await s.run(request, candidateId, 'billing', capture())).id, approval.id);
+raw = { ...raw, approval: { ...approval, ownerEventId: randomUUID() } };
+await assert.rejects(s.run(request, candidateId, 'billing', capture()), { status: 503 });
+raw = { ...base, policy: p, replayed: false };
+for (const mutate of [
+  () => values.set('workos_api_token', 'other-token'),
+  () => values.set('workos_session', JSON.stringify({ ...u, role: 'Employee', permissionRole: 'Employee' })),
+  () => values.set('workos_organization_scope', JSON.stringify({ ...scope, legalEntityId: 'foreign' })),
+]) {
+  reset();
+  const ctx = capture();
+  change = mutate;
+  await assert.rejects(s.run(cmd, candidateId, 'billing', ctx), { status: 403 });
+  const n = calls.length;
+  await assert.rejects(s.run(cmd, candidateId, 'billing', ctx), { status: 403 });
+  assert.equal(calls.length, n);
+}
+reset();
+change = () => {};
+const count = calls.length;
+globalThis.fetch = async () => {
+  calls.push({});
+  throw Error('Synthetic uncertain transport');
+};
+await assert.rejects(s.run(cmd, candidateId, 'billing', capture()));
+assert.equal(calls.length, count + 1);
+assert.deepEqual(fallback, []);
+console.log(
+  'Commercial approval strict owned policy/request receipts, source pins, session fences and no retry passed.',
+);

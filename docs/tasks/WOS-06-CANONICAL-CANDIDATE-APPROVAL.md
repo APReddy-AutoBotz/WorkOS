@@ -1,5 +1,7 @@
 # Configured canonical commercial candidate approval — implementation plan
 
+The original design and evidence notes below describe the earlier draft. The current mainline integration uses migrations 065b–065f and the acceptance gates in the WorkOS CI workflow.
+
 ## Requirement and dependency
 
 WOS-COM-014/015, APR001–003/006, INT002/005, CORE003–005 and the approved approval/notification specification require explicitly configured named stages, scoped source evidence, independent current actor/role authority and complete protected in-app recipient effects. Start from PR101's exact owner head `2d99f97a035933d04a5e25988d17644c7c47304d`, tree `8419b89d1495bdb3477b0c0c894120a823f95f71`; its exact-head hosted validation completed successfully (run 40717483383). This is an isolated development continuation, not integration or acceptance of PR101. Do not publish a dependent approval Draft until PR101 exact-head gates pass; reconcile if its source changes or checks fail.

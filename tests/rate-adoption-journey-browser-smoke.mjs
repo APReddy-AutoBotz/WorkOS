@@ -1,23 +1,990 @@
-import assert from 'node:assert/strict';import {fileURLToPath} from 'node:url';import {startFixtureServer} from './support/compiled-fixture-server.mjs';import {chromium} from 'playwright';
-import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,withCommercialApi} from './support/commercial-drafting-test.mjs';import {seedCapacity} from './support/worker-capacity-test.mjs';import {workPermissions} from './support/work-assignment-test.mjs';import {shiftCapacityDate as shift} from '../shared/worker-capacity.mjs';
-const root=fileURLToPath(new URL('../',import.meta.url)),base='/api/v1/rate-candidates';
-await withCommercialDatabase(async({pool,databaseUrl})=>{await migrateCommercialDatabase(pool);const fx=await seedCapacity(pool),ids=fx.identities,keys=['commercial.rate_candidates.view','commercial.rate_candidates.manage','commercial.cost_candidates.view','commercial.cost_candidates.manage'];for(const k of keys)await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Admin',$1,true)on conflict(role_name,permission_key)do update set enabled=true",[k]);for(const k of ['commercial.contracts.view','commercial.rate_candidates.view','commercial.rate_approvals.decide','notifications.view','approvals.view','employees.view'])await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true)on conflict(role_name,permission_key)do update set enabled=true",[k]);await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Admin','commercial.cost_approvals.decide',true),('Employee','notifications.view',true),('Employee','employees.view',true)on conflict(role_name,permission_key)do update set enabled=true");for(const k of ['commercial.contracts.view','commercial.rate_candidates.view','commercial.rate_approvals.decide','approvals.view'])await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Employee',$1,true)on conflict(role_name,permission_key)do update set enabled=true",[k]);await pool.query("insert into user_roles(user_id,role_id)select $1,id from roles where name='Admin' on conflict do nothing",[ids.denied.id]);await withCommercialApi({databaseUrl,identities:ids,timeZone:'Pacific/Kiritimati',onServerError:s=>process.stderr.write(s)},async({tokenFor,baseUrl:apiUrl,request})=>{
- const ok=(r,status=201)=>{assert.equal(r.status,status,JSON.stringify(r.body));return r.body;},last=shift(fx.today,90);const contract=ok(await request('/contracts',{method:'POST',body:{number:'SYN-UI-RATE',clientId:f.clientId,name:'Synthetic UI contract',model:'time_and_materials',startsOn:fx.today,endsOn:last,effectiveFrom:fx.today,currency:'USD',value:'1000.0000',billingTerms:'Synthetic terms',documents:[],reason:'Synthetic UI contract'}}));const engagement=ok(await request('/engagements',{method:'POST',body:{code:'SYN-UI-ENG',name:'Synthetic UI engagement',model:'time_and_materials',ownerId:f.ownerId,startsOn:fx.today,endsOn:last,currency:'USD',budget:'1000.0000',clientId:f.clientId,contractId:contract.id,contractVersionId:contract.versions[0].id,attributionId:null,reason:'Synthetic UI engagement'}}));
- const fixture=await startFixtureServer({root:fileURLToPath(new URL('../',import.meta.url)),fixtures:['commercial-approval-inbox', 'rate-candidates'],apiUrl});let browser;
- try{const origin=fixture.url;browser=await chromium.launch({headless:true});const ctx=await browser.newContext({viewport:{width:1800,height:1400},timezoneId:'Pacific/Kiritimati'});await ctx.addInitScript(({user,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(user));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{user:{id:ids.manager.id,employeeId:ids.manager.id,userName:ids.manager.username,name:'Synthetic rate actor',role:'Admin',permissionRole:'Admin',permissions:[...workPermissions,'commercial.contracts.view','commercial.contracts.manage','employees.manage',...keys]},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(ids.manager)});const p=await ctx.newPage(),writes=[],errors=[],external=[];p.setDefaultTimeout(25000);p.on('pageerror',e=>errors.push(e.stack??e.message));p.on('request',q=>{if(/^https?:/.test(q.url())&&new URL(q.url()).origin!==origin)external.push(q.url());if(q.method()==='POST'&&new URL(q.url()).pathname===base+'/candidates')writes.push(q.postDataJSON());});const reply=(path,method='GET')=>p.waitForResponse(r=>new URL(r.url()).pathname===path&&r.request().method()===method),body=async(w,status=200)=>{const r=await w;assert.equal(r.status(),status,await r.text());return r.json();};
- await p.goto(origin+'/tests/fixtures/rate-candidates.html');const billing=p.getByRole('region',{name:'Billing rate candidates',exact:true});await billing.getByLabel('Candidate source',{exact:true}).selectOption('contract:'+contract.id);let w=reply(base+'/candidates');await billing.getByRole('button',{name:'Load candidates',exact:true}).click();await body(w);const fill=async(area,value)=>{await area.getByLabel('Effective from UTC',{exact:true}).fill(fx.today);await area.getByLabel('Effective to UTC',{exact:true}).fill(last);await area.getByLabel('Currency',{exact:true}).fill('USD');await area.getByLabel('Unit code',{exact:true}).fill('HOUR');await area.getByLabel('Exact rate amount',{exact:true}).fill(value);await area.getByLabel('Explicit priority',{exact:true}).fill('10');await area.getByLabel('Candidate reason',{exact:true}).fill('Synthetic unapproved candidate');await area.getByLabel('Confirm this unapproved candidate',{exact:true}).check();};await fill(billing,'12345678901234.1234');await p.route('**/api/v1/rate-candidates/candidates',async route=>{const accepted=await route.fetch();assert.equal(accepted.status(),201,await accepted.text());await route.abort('failed');},{times:1});await billing.getByRole('button',{name:'Record candidate',exact:true}).click();await billing.getByText(/may still be in flight/).waitFor();const original=writes.at(-1);w=reply(base+'/receipts/'+original.requestId);await billing.getByRole('button',{name:'Read original candidate receipt',exact:true}).click();const receipt=await body(w);assert.equal(receipt.candidate.amount,'12345678901234.1234');assert.equal(writes.length,1);w=reply(base+'/candidates');await billing.getByRole('button',{name:'Load candidates',exact:true}).click();await body(w);await billing.getByRole('button',{name:'Change owner for version 1',exact:true}).click();const owner=billing.getByRole('region',{name:'Candidate change owner',exact:true});w=reply(base+'/owners/'+receipt.candidate.id);await owner.getByRole('button',{name:'Inspect change owner',exact:true}).click();await body(w);await owner.getByText('No owner has been assigned.').waitFor();await owner.getByLabel('Existing owner account ID',{exact:true}).fill(ids.manager.id);await owner.getByLabel('Existing owner role',{exact:true}).fill('Admin');await owner.getByLabel('Owner change reason',{exact:true}).fill('Synthetic owner assignment');w=reply(base+'/owners','POST');await owner.getByRole('button',{name:'Record change owner',exact:true}).click();const assigned=await body(w,201);assert.equal(assigned.owner.ownerUserId,ids.manager.id);w=reply(base+'/owners/'+receipt.candidate.id);await owner.getByRole('button',{name:'Inspect change owner',exact:true}).click();const ownerView=await body(w);assert.equal(ownerView.current.eligible,true);await owner.getByText(/Currently eligible/).waitFor();await owner.getByRole('button',{name:'Close owner editor',exact:true}).click();await billing.getByRole('button',{name:'Review approval for version 1',exact:true}).click();const review=billing.getByRole('region',{name:'Commercial candidate approval',exact:true});let waitPolicy=reply('/api/v1/commercial-candidate-approvals/policies');await review.getByRole('button',{name:'Load approval and owner',exact:true}).click();await body(waitPolicy);await review.getByLabel('Policy effective date UTC',{exact:true}).fill(fx.today);await review.getByLabel('Template locale',{exact:true}).fill('en-US');await review.getByLabel('Completion in-app preference',{exact:true}).selectOption('no');await review.getByLabel('Approver account 1',{exact:true}).fill(ids.denied.id);await review.getByLabel('Approver role 1',{exact:true}).fill('TeamLead');await review.getByRole('button',{name:'Add approval stage',exact:true}).click();await review.getByLabel('Approver account 2',{exact:true}).fill(ids.reader.id);await review.getByLabel('Approver role 2',{exact:true}).fill('Employee');for(const key of ['approval.action_required','approval.rejected_or_correction_required','approval.completed']){await review.getByLabel('Subject '+key,{exact:true}).fill('Review {{stageNumber}}');await review.getByLabel('Body '+key,{exact:true}).fill('Source {{sourceRef}}');}await review.getByLabel('Policy reason',{exact:true}).fill('Synthetic approval policy');waitPolicy=reply('/api/v1/commercial-candidate-approvals/policies','POST');await review.getByRole('button',{name:'Record approval policy',exact:true}).click();const configured=await body(waitPolicy,201);await review.getByText('Operation recorded. Reload the current source before another action.').waitFor();waitPolicy=reply('/api/v1/commercial-candidate-approvals/policies');await review.getByRole('button',{name:'Load approval and owner',exact:true}).click();await body(waitPolicy);await review.getByLabel('Approval policy',{exact:true}).selectOption(configured.policy.id);await review.getByLabel('Approval request reason',{exact:true}).fill('Synthetic approval request');let sentRequest,submitted,acceptedResolve;const approvalAccepted=new Promise(resolve=>{acceptedResolve=resolve;});await p.route('**/api/v1/commercial-candidate-approvals/requests',async route=>{sentRequest=route.request().postDataJSON();const result=await route.fetch();assert.equal(result.status(),201,await result.text());submitted=await result.json();acceptedResolve();await route.abort('failed');},{times:1});await review.getByRole('button',{name:'Request candidate approval',exact:true}).click();await approvalAccepted;await review.getByText(/may still be in flight/).waitFor();assert(sentRequest&&submitted);assert.equal(submitted.approval.state.status,'Pending');let waitRequest=reply('/api/v1/commercial-candidate-approvals/receipts/request/'+sentRequest.requestId);await review.getByRole('button',{name:'Read original approval receipt',exact:true}).click();const recovered=await body(waitRequest);assert.equal(recovered.approval.id,submitted.approval.id);await review.getByText('The original request was confirmed by read-only receipt. Reload.').waitFor();await review.getByRole('button',{name:'Close commercial approval',exact:true}).click();
- const rc=await browser.newContext({viewport:{width:1800,height:1400},timezoneId:'Pacific/Kiritimati'});await rc.addInitScript(({user,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(user));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{user:{id:ids.denied.id,employeeId:ids.denied.id,userName:ids.denied.username,name:'Synthetic approver',role:'TeamLead',permissionRole:'TeamLead',permissions:[...workPermissions,'commercial.contracts.view','commercial.rate_candidates.view','commercial.rate_approvals.decide','notifications.view','approvals.view','employees.view']},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(ids.denied)});const rp=await rc.newPage();rp.setDefaultTimeout(25000);await rp.goto(origin+'/tests/fixtures/rate-candidates.html');const rb=rp.getByRole('region',{name:'Billing rate candidates',exact:true});await rb.getByLabel('Candidate source',{exact:true}).selectOption('contract:'+contract.id);let rw=rp.waitForResponse(r=>new URL(r.url()).pathname===base+'/candidates');await rb.getByRole('button',{name:'Load candidates',exact:true}).click();assert.equal((await rw).status(),200);await rb.getByRole('button',{name:'Review approval for version 1',exact:true}).click();const rview=rb.getByRole('region',{name:'Commercial candidate approval',exact:true});rw=rp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/commercial-candidate-approvals/requests'&&r.request().method()==='GET');await rview.getByRole('button',{name:'Load approval and owner',exact:true}).click();assert.equal((await rw).status(),200);await rview.getByLabel('Approval request',{exact:true}).selectOption(submitted.approval.id);await rview.getByLabel('Commercial decision',{exact:true}).selectOption('Approved');await rview.getByLabel('Commercial decision reason',{exact:true}).fill('Synthetic stage decision');rw=rp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/commercial-candidate-approvals/instances/'+submitted.approval.id+'/decisions'&&r.request().method()==='POST');await rview.getByRole('button',{name:'Record commercial decision',exact:true}).click();const decided=await rw;assert.equal(decided.status(),201,await decided.text());assert.deepEqual((await decided.json()).approval.state,{status:'Pending',sequence:1,currentStage:1});await rc.close();
- const fc=await browser.newContext({viewport:{width:1800,height:1400},timezoneId:'Pacific/Kiritimati'});await fc.addInitScript(({user,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(user));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{user:{id:ids.reader.employeeRecordId,employeeId:ids.reader.employeeId,userName:ids.reader.username,name:'Synthetic final approver',role:'Employee',permissionRole:'Employee',permissions:[...workPermissions,'commercial.contracts.view','commercial.rate_candidates.view','commercial.rate_approvals.decide','notifications.view','approvals.view','employees.view']},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(ids.reader)});const fp=await fc.newPage();fp.setDefaultTimeout(25000);await fp.goto(origin+'/tests/fixtures/rate-candidates.html');const fb=fp.getByRole('region',{name:'Billing rate candidates',exact:true});await fb.getByLabel('Candidate source',{exact:true}).selectOption('contract:'+contract.id);let fw=fp.waitForResponse(r=>new URL(r.url()).pathname===base+'/candidates');await fb.getByRole('button',{name:'Load candidates',exact:true}).click();const finalLoaded=await fw;assert.equal(finalLoaded.status(),200);const finalLoadedBody=await finalLoaded.json();assert.equal(finalLoadedBody.candidates.length,1);await fb.getByRole('button',{name:'Review approval for version 1',exact:true}).click();const fview=fb.getByRole('region',{name:'Commercial candidate approval',exact:true});fw=fp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/commercial-candidate-approvals/requests'&&r.request().method()==='GET');await fview.getByRole('button',{name:'Load approval and owner',exact:true}).click();assert.equal((await fw).status(),200);await fview.getByLabel('Approval request',{exact:true}).selectOption(submitted.approval.id);await fview.getByLabel('Commercial decision',{exact:true}).selectOption('Approved');await fview.getByLabel('Commercial decision reason',{exact:true}).fill('Synthetic final decision');fw=fp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/commercial-candidate-approvals/instances/'+submitted.approval.id+'/decisions'&&r.request().method()==='POST');await fview.getByRole('button',{name:'Record commercial decision',exact:true}).click();const finalDecision=await fw;assert.equal(finalDecision.status(),201,await finalDecision.text());assert.equal((await finalDecision.json()).approval.state.status,'Approved');await fc.close();
- await billing.getByRole('button',{name:'Inspect adoption for version 1',exact:true}).click();const adoption=billing.getByRole('region',{name:'Adopt approved source',exact:true});let aw=reply('/api/v1/approved-rate-sources/candidates/'+receipt.candidate.id);await adoption.getByRole('button',{name:'Inspect approved reviews',exact:true}).click();const adoptedView=await body(aw);assert.equal(adoptedView.reviews[0].approvalId,submitted.approval.id);await adoption.getByLabel('Completed review',{exact:true}).selectOption(submitted.approval.id);await adoption.getByLabel('Adoption reason',{exact:true}).fill('Synthetic source adoption');let adoptionCommand,acceptedAdoption,readyAdoption;const adoptionAccepted=new Promise(resolve=>{readyAdoption=resolve;});await p.route('**/api/v1/approved-rate-sources/adoptions',async route=>{adoptionCommand=route.request().postDataJSON();const res=await route.fetch();assert.equal(res.status(),201,await res.text());acceptedAdoption=await res.json();readyAdoption();await route.abort('failed');},{times:1});await adoption.getByRole('button',{name:'Adopt approved rate source',exact:true}).click();await adoptionAccepted;await adoption.getByText(/may still be in flight/).waitFor();aw=reply('/api/v1/approved-rate-sources/receipts/'+adoptionCommand.requestId);await adoption.getByRole('button',{name:'Read original adoption receipt',exact:true}).click();assert.equal((await body(aw)).adoption.id,acceptedAdoption.adoption.id);await adoption.getByRole('button',{name:'Close source adoption',exact:true}).click();
- await billing.getByLabel('Engagement for preview',{exact:true}).selectOption(engagement.id);const resolvedBilling=billing.getByRole('region',{name:'Resolve adopted rate source',exact:true});await resolvedBilling.getByLabel('Adopted source as-of UTC',{exact:true}).fill(fx.today);await resolvedBilling.getByLabel('Adopted source currency',{exact:true}).fill('USD');await resolvedBilling.getByLabel('Adopted source unit',{exact:true}).fill('HOUR');aw=reply('/api/v1/approved-rate-sources/resolve');await resolvedBilling.getByRole('button',{name:'Resolve adopted source',exact:true}).click();const resolved=await body(aw);assert.equal(resolved.result,'source');assert.equal(resolved.source.approvalId,submitted.approval.id);assert.equal(resolved.source.adoptionId,acceptedAdoption.adoption.id);await resolvedBilling.getByText(/Adopted resolution: source.*12345678901234.1234/).waitFor();
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { startFixtureServer } from './support/compiled-fixture-server.mjs';
+import { chromium } from 'playwright';
+import {
+  commercialFixture as f,
+  withCommercialDatabase,
+  migrateCommercialDatabase,
+  withCommercialApi,
+} from './support/commercial-drafting-test.mjs';
+import { seedCapacity } from './support/worker-capacity-test.mjs';
+import { workPermissions } from './support/work-assignment-test.mjs';
+import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
+const root = fileURLToPath(new URL('../', import.meta.url)),
+  base = '/api/v1/rate-candidates';
+await withCommercialDatabase(async ({ pool, databaseUrl }) => {
+  await migrateCommercialDatabase(pool);
+  const fx = await seedCapacity(pool),
+    ids = fx.identities,
+    keys = [
+      'commercial.rate_candidates.view',
+      'commercial.rate_candidates.manage',
+      'commercial.cost_candidates.view',
+      'commercial.cost_candidates.manage',
+    ];
+  for (const k of keys)
+    await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled)values('Admin',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+      [k],
+    );
+  for (const k of [
+    'commercial.contracts.view',
+    'commercial.rate_candidates.view',
+    'commercial.rate_approvals.decide',
+    'notifications.view',
+    'approvals.view',
+    'employees.view',
+  ])
+    await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+      [k],
+    );
+  await pool.query(
+    "insert into role_permissions(role_name,permission_key,enabled)values('Admin','commercial.cost_approvals.decide',true),('Employee','notifications.view',true),('Employee','employees.view',true)on conflict(role_name,permission_key)do update set enabled=true",
+  );
+  for (const k of [
+    'commercial.contracts.view',
+    'commercial.rate_candidates.view',
+    'commercial.rate_approvals.decide',
+    'approvals.view',
+  ])
+    await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled)values('Employee',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
+      [k],
+    );
+  await pool.query(
+    "insert into user_roles(user_id,role_id)select $1,id from roles where name='Admin' on conflict do nothing",
+    [ids.denied.id],
+  );
+  await withCommercialApi(
+    {
+      databaseUrl,
+      identities: ids,
+      timeZone: 'Pacific/Kiritimati',
+      onServerError: (s) => process.stderr.write(s),
+    },
+    async ({ tokenFor, baseUrl: apiUrl, request }) => {
+      const ok = (r, status = 201) => {
+          assert.equal(r.status, status, JSON.stringify(r.body));
+          return r.body;
+        },
+        last = shift(fx.today, 90);
+      const contract = ok(
+        await request('/contracts', {
+          method: 'POST',
+          body: {
+            number: 'SYN-UI-RATE',
+            clientId: f.clientId,
+            name: 'Synthetic UI contract',
+            model: 'time_and_materials',
+            startsOn: fx.today,
+            endsOn: last,
+            effectiveFrom: fx.today,
+            currency: 'USD',
+            value: '1000.0000',
+            billingTerms: 'Synthetic terms',
+            documents: [],
+            reason: 'Synthetic UI contract',
+          },
+        }),
+      );
+      const engagement = ok(
+        await request('/engagements', {
+          method: 'POST',
+          body: {
+            code: 'SYN-UI-ENG',
+            name: 'Synthetic UI engagement',
+            model: 'time_and_materials',
+            ownerId: f.ownerId,
+            startsOn: fx.today,
+            endsOn: last,
+            currency: 'USD',
+            budget: '1000.0000',
+            clientId: f.clientId,
+            contractId: contract.id,
+            contractVersionId: contract.versions[0].id,
+            attributionId: null,
+            reason: 'Synthetic UI engagement',
+          },
+        }),
+      );
+      const fixture = await startFixtureServer({
+        root: fileURLToPath(new URL('../', import.meta.url)),
+        fixtures: ['commercial-approval-inbox', 'rate-candidates'],
+        apiUrl,
+      });
+      let browser;
+      try {
+        const origin = fixture.url;
+        browser = await chromium.launch({ headless: true });
+        const ctx = await browser.newContext({
+          viewport: { width: 1800, height: 1400 },
+          timezoneId: 'Pacific/Kiritimati',
+        });
+        await ctx.addInitScript(
+          ({ user, scope, token }) => {
+            sessionStorage.setItem('workos_session', JSON.stringify(user));
+            sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
+            sessionStorage.setItem('workos_api_token', token);
+          },
+          {
+            user: {
+              id: ids.manager.id,
+              employeeId: ids.manager.id,
+              userName: ids.manager.username,
+              name: 'Synthetic rate actor',
+              role: 'Admin',
+              permissionRole: 'Admin',
+              permissions: [
+                ...workPermissions,
+                'commercial.contracts.view',
+                'commercial.contracts.manage',
+                'employees.manage',
+                ...keys,
+              ],
+            },
+            scope: { organizationId: f.organizationId, legalEntityId: f.legalEntityId },
+            token: tokenFor(ids.manager),
+          },
+        );
+        const p = await ctx.newPage(),
+          writes = [],
+          errors = [],
+          external = [];
+        p.setDefaultTimeout(25000);
+        p.on('pageerror', (e) => errors.push(e.stack ?? e.message));
+        p.on('request', (q) => {
+          if (/^https?:/.test(q.url()) && new URL(q.url()).origin !== origin) external.push(q.url());
+          if (q.method() === 'POST' && new URL(q.url()).pathname === base + '/candidates')
+            writes.push(q.postDataJSON());
+        });
+        const reply = (path, method = 'GET') =>
+            p.waitForResponse((r) => new URL(r.url()).pathname === path && r.request().method() === method),
+          body = async (w, status = 200) => {
+            const r = await w;
+            assert.equal(r.status(), status, await r.text());
+            return r.json();
+          };
+        await p.goto(origin + '/tests/fixtures/rate-candidates.html');
+        const billing = p.getByRole('region', { name: 'Billing rate candidates', exact: true });
+        await billing.getByLabel('Candidate source', { exact: true }).selectOption('contract:' + contract.id);
+        let w = reply(base + '/candidates');
+        await billing.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        await body(w);
+        const fill = async (area, value) => {
+          await area.getByLabel('Effective from UTC', { exact: true }).fill(fx.today);
+          await area.getByLabel('Effective to UTC', { exact: true }).fill(last);
+          await area.getByLabel('Currency', { exact: true }).fill('USD');
+          await area.getByLabel('Unit code', { exact: true }).fill('HOUR');
+          await area.getByLabel('Exact rate amount', { exact: true }).fill(value);
+          await area.getByLabel('Explicit priority', { exact: true }).fill('10');
+          await area.getByLabel('Candidate reason', { exact: true }).fill('Synthetic unapproved candidate');
+          await area.getByLabel('Confirm this unapproved candidate', { exact: true }).check();
+        };
+        await fill(billing, '12345678901234.1234');
+        await p.route(
+          '**/api/v1/rate-candidates/candidates',
+          async (route) => {
+            const accepted = await route.fetch();
+            assert.equal(accepted.status(), 201, await accepted.text());
+            await route.abort('failed');
+          },
+          { times: 1 },
+        );
+        await billing.getByRole('button', { name: 'Record candidate', exact: true }).click();
+        await billing.getByText(/may still be in flight/).waitFor();
+        const original = writes.at(-1);
+        w = reply(base + '/receipts/' + original.requestId);
+        await billing.getByRole('button', { name: 'Read original candidate receipt', exact: true }).click();
+        const receipt = await body(w);
+        assert.equal(receipt.candidate.amount, '12345678901234.1234');
+        assert.equal(writes.length, 1);
+        w = reply(base + '/candidates');
+        await billing.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        await body(w);
+        await billing.getByRole('button', { name: 'Change owner for version 1', exact: true }).click();
+        const owner = billing.getByRole('region', { name: 'Candidate change owner', exact: true });
+        w = reply(base + '/owners/' + receipt.candidate.id);
+        await owner.getByRole('button', { name: 'Inspect change owner', exact: true }).click();
+        await body(w);
+        await owner.getByText('No owner has been assigned.').waitFor();
+        await owner.getByLabel('Existing owner account ID', { exact: true }).fill(ids.manager.id);
+        await owner.getByLabel('Existing owner role', { exact: true }).fill('Admin');
+        await owner.getByLabel('Owner change reason', { exact: true }).fill('Synthetic owner assignment');
+        w = reply(base + '/owners', 'POST');
+        await owner.getByRole('button', { name: 'Record change owner', exact: true }).click();
+        const assigned = await body(w, 201);
+        assert.equal(assigned.owner.ownerUserId, ids.manager.id);
+        w = reply(base + '/owners/' + receipt.candidate.id);
+        await owner.getByRole('button', { name: 'Inspect change owner', exact: true }).click();
+        const ownerView = await body(w);
+        assert.equal(ownerView.current.eligible, true);
+        await owner.getByText(/Currently eligible/).waitFor();
+        await owner.getByRole('button', { name: 'Close owner editor', exact: true }).click();
+        await billing.getByRole('button', { name: 'Review approval for version 1', exact: true }).click();
+        const review = billing.getByRole('region', { name: 'Commercial candidate approval', exact: true });
+        let waitPolicy = reply('/api/v1/commercial-candidate-approvals/policies');
+        await review.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
+        await body(waitPolicy);
+        await review.getByLabel('Policy effective date UTC', { exact: true }).fill(fx.today);
+        await review.getByLabel('Template locale', { exact: true }).fill('en-US');
+        await review.getByLabel('Completion in-app preference', { exact: true }).selectOption('no');
+        await review.getByLabel('Approver account 1', { exact: true }).fill(ids.denied.id);
+        await review.getByLabel('Approver role 1', { exact: true }).fill('TeamLead');
+        await review.getByRole('button', { name: 'Add approval stage', exact: true }).click();
+        await review.getByLabel('Approver account 2', { exact: true }).fill(ids.reader.id);
+        await review.getByLabel('Approver role 2', { exact: true }).fill('Employee');
+        for (const key of [
+          'approval.action_required',
+          'approval.rejected_or_correction_required',
+          'approval.completed',
+        ]) {
+          await review.getByLabel('Subject ' + key, { exact: true }).fill('Review {{stageNumber}}');
+          await review.getByLabel('Body ' + key, { exact: true }).fill('Source {{sourceRef}}');
+        }
+        await review.getByLabel('Policy reason', { exact: true }).fill('Synthetic approval policy');
+        waitPolicy = reply('/api/v1/commercial-candidate-approvals/policies', 'POST');
+        await review.getByRole('button', { name: 'Record approval policy', exact: true }).click();
+        const configured = await body(waitPolicy, 201);
+        await review
+          .getByText('Operation recorded. Reload the current source before another action.')
+          .waitFor();
+        waitPolicy = reply('/api/v1/commercial-candidate-approvals/policies');
+        await review.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
+        await body(waitPolicy);
+        await review.getByLabel('Approval policy', { exact: true }).selectOption(configured.policy.id);
+        await review
+          .getByLabel('Approval request reason', { exact: true })
+          .fill('Synthetic approval request');
+        let sentRequest, submitted, acceptedResolve;
+        const approvalAccepted = new Promise((resolve) => {
+          acceptedResolve = resolve;
+        });
+        await p.route(
+          '**/api/v1/commercial-candidate-approvals/requests',
+          async (route) => {
+            sentRequest = route.request().postDataJSON();
+            const result = await route.fetch();
+            assert.equal(result.status(), 201, await result.text());
+            submitted = await result.json();
+            acceptedResolve();
+            await route.abort('failed');
+          },
+          { times: 1 },
+        );
+        await review.getByRole('button', { name: 'Request candidate approval', exact: true }).click();
+        await approvalAccepted;
+        await review.getByText(/may still be in flight/).waitFor();
+        assert(sentRequest && submitted);
+        assert.equal(submitted.approval.state.status, 'Pending');
+        let waitRequest = reply(
+          '/api/v1/commercial-candidate-approvals/receipts/request/' + sentRequest.requestId,
+        );
+        await review.getByRole('button', { name: 'Read original approval receipt', exact: true }).click();
+        const recovered = await body(waitRequest);
+        assert.equal(recovered.approval.id, submitted.approval.id);
+        await review.getByText('The original request was confirmed by read-only receipt. Reload.').waitFor();
+        await review.getByRole('button', { name: 'Close commercial approval', exact: true }).click();
+        const rc = await browser.newContext({
+          viewport: { width: 1800, height: 1400 },
+          timezoneId: 'Pacific/Kiritimati',
+        });
+        await rc.addInitScript(
+          ({ user, scope, token }) => {
+            sessionStorage.setItem('workos_session', JSON.stringify(user));
+            sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
+            sessionStorage.setItem('workos_api_token', token);
+          },
+          {
+            user: {
+              id: ids.denied.id,
+              employeeId: ids.denied.id,
+              userName: ids.denied.username,
+              name: 'Synthetic approver',
+              role: 'TeamLead',
+              permissionRole: 'TeamLead',
+              permissions: [
+                ...workPermissions,
+                'commercial.contracts.view',
+                'commercial.rate_candidates.view',
+                'commercial.rate_approvals.decide',
+                'notifications.view',
+                'approvals.view',
+                'employees.view',
+              ],
+            },
+            scope: { organizationId: f.organizationId, legalEntityId: f.legalEntityId },
+            token: tokenFor(ids.denied),
+          },
+        );
+        const rp = await rc.newPage();
+        rp.setDefaultTimeout(25000);
+        await rp.goto(origin + '/tests/fixtures/rate-candidates.html');
+        const rb = rp.getByRole('region', { name: 'Billing rate candidates', exact: true });
+        await rb.getByLabel('Candidate source', { exact: true }).selectOption('contract:' + contract.id);
+        let rw = rp.waitForResponse((r) => new URL(r.url()).pathname === base + '/candidates');
+        await rb.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        assert.equal((await rw).status(), 200);
+        await rb.getByRole('button', { name: 'Review approval for version 1', exact: true }).click();
+        const rview = rb.getByRole('region', { name: 'Commercial candidate approval', exact: true });
+        rw = rp.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname === '/api/v1/commercial-candidate-approvals/requests' &&
+            r.request().method() === 'GET',
+        );
+        await rview.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
+        assert.equal((await rw).status(), 200);
+        await rview.getByLabel('Approval request', { exact: true }).selectOption(submitted.approval.id);
+        await rview.getByLabel('Commercial decision', { exact: true }).selectOption('Approved');
+        await rview
+          .getByLabel('Commercial decision reason', { exact: true })
+          .fill('Synthetic stage decision');
+        rw = rp.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname ===
+              '/api/v1/commercial-candidate-approvals/instances/' + submitted.approval.id + '/decisions' &&
+            r.request().method() === 'POST',
+        );
+        await rview.getByRole('button', { name: 'Record commercial decision', exact: true }).click();
+        const decided = await rw;
+        assert.equal(decided.status(), 201, await decided.text());
+        assert.deepEqual((await decided.json()).approval.state, {
+          status: 'Pending',
+          sequence: 1,
+          currentStage: 1,
+        });
+        await rc.close();
+        const fc = await browser.newContext({
+          viewport: { width: 1800, height: 1400 },
+          timezoneId: 'Pacific/Kiritimati',
+        });
+        await fc.addInitScript(
+          ({ user, scope, token }) => {
+            sessionStorage.setItem('workos_session', JSON.stringify(user));
+            sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
+            sessionStorage.setItem('workos_api_token', token);
+          },
+          {
+            user: {
+              id: ids.reader.employeeRecordId,
+              employeeId: ids.reader.employeeId,
+              userName: ids.reader.username,
+              name: 'Synthetic final approver',
+              role: 'Employee',
+              permissionRole: 'Employee',
+              permissions: [
+                ...workPermissions,
+                'commercial.contracts.view',
+                'commercial.rate_candidates.view',
+                'commercial.rate_approvals.decide',
+                'notifications.view',
+                'approvals.view',
+                'employees.view',
+              ],
+            },
+            scope: { organizationId: f.organizationId, legalEntityId: f.legalEntityId },
+            token: tokenFor(ids.reader),
+          },
+        );
+        const fp = await fc.newPage();
+        fp.setDefaultTimeout(25000);
+        await fp.goto(origin + '/tests/fixtures/rate-candidates.html');
+        const fb = fp.getByRole('region', { name: 'Billing rate candidates', exact: true });
+        await fb.getByLabel('Candidate source', { exact: true }).selectOption('contract:' + contract.id);
+        let fw = fp.waitForResponse((r) => new URL(r.url()).pathname === base + '/candidates');
+        await fb.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        const finalLoaded = await fw;
+        assert.equal(finalLoaded.status(), 200);
+        const finalLoadedBody = await finalLoaded.json();
+        assert.equal(finalLoadedBody.candidates.length, 1);
+        await fb.getByRole('button', { name: 'Review approval for version 1', exact: true }).click();
+        const fview = fb.getByRole('region', { name: 'Commercial candidate approval', exact: true });
+        fw = fp.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname === '/api/v1/commercial-candidate-approvals/requests' &&
+            r.request().method() === 'GET',
+        );
+        await fview.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
+        assert.equal((await fw).status(), 200);
+        await fview.getByLabel('Approval request', { exact: true }).selectOption(submitted.approval.id);
+        await fview.getByLabel('Commercial decision', { exact: true }).selectOption('Approved');
+        await fview
+          .getByLabel('Commercial decision reason', { exact: true })
+          .fill('Synthetic final decision');
+        fw = fp.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname ===
+              '/api/v1/commercial-candidate-approvals/instances/' + submitted.approval.id + '/decisions' &&
+            r.request().method() === 'POST',
+        );
+        await fview.getByRole('button', { name: 'Record commercial decision', exact: true }).click();
+        const finalDecision = await fw;
+        assert.equal(finalDecision.status(), 201, await finalDecision.text());
+        assert.equal((await finalDecision.json()).approval.state.status, 'Approved');
+        await fc.close();
+        await billing.getByRole('button', { name: 'Inspect adoption for version 1', exact: true }).click();
+        const adoption = billing.getByRole('region', { name: 'Adopt approved source', exact: true });
+        let aw = reply('/api/v1/approved-rate-sources/candidates/' + receipt.candidate.id);
+        await adoption.getByRole('button', { name: 'Inspect approved reviews', exact: true }).click();
+        const adoptedView = await body(aw);
+        assert.equal(adoptedView.reviews[0].approvalId, submitted.approval.id);
+        await adoption.getByLabel('Completed review', { exact: true }).selectOption(submitted.approval.id);
+        await adoption.getByLabel('Adoption reason', { exact: true }).fill('Synthetic source adoption');
+        let adoptionCommand, acceptedAdoption, readyAdoption;
+        const adoptionAccepted = new Promise((resolve) => {
+          readyAdoption = resolve;
+        });
+        await p.route(
+          '**/api/v1/approved-rate-sources/adoptions',
+          async (route) => {
+            adoptionCommand = route.request().postDataJSON();
+            const res = await route.fetch();
+            assert.equal(res.status(), 201, await res.text());
+            acceptedAdoption = await res.json();
+            readyAdoption();
+            await route.abort('failed');
+          },
+          { times: 1 },
+        );
+        await adoption.getByRole('button', { name: 'Adopt approved rate source', exact: true }).click();
+        await adoptionAccepted;
+        await adoption.getByText(/may still be in flight/).waitFor();
+        aw = reply('/api/v1/approved-rate-sources/receipts/' + adoptionCommand.requestId);
+        await adoption.getByRole('button', { name: 'Read original adoption receipt', exact: true }).click();
+        assert.equal((await body(aw)).adoption.id, acceptedAdoption.adoption.id);
+        await adoption.getByRole('button', { name: 'Close source adoption', exact: true }).click();
+        await billing.getByLabel('Engagement for preview', { exact: true }).selectOption(engagement.id);
+        const resolvedBilling = billing.getByRole('region', {
+          name: 'Resolve adopted rate source',
+          exact: true,
+        });
+        await resolvedBilling.getByLabel('Adopted source as-of UTC', { exact: true }).fill(fx.today);
+        await resolvedBilling.getByLabel('Adopted source currency', { exact: true }).fill('USD');
+        await resolvedBilling.getByLabel('Adopted source unit', { exact: true }).fill('HOUR');
+        aw = reply('/api/v1/approved-rate-sources/resolve');
+        await resolvedBilling.getByRole('button', { name: 'Resolve adopted source', exact: true }).click();
+        const resolved = await body(aw);
+        assert.equal(resolved.result, 'source');
+        assert.equal(resolved.source.approvalId, submitted.approval.id);
+        assert.equal(resolved.source.adoptionId, acceptedAdoption.adoption.id);
+        await resolvedBilling.getByText(/Adopted resolution: source.*12345678901234.1234/).waitFor();
 
- await billing.getByLabel('Engagement for preview',{exact:true}).selectOption(engagement.id);await billing.getByLabel('Preview as-of UTC',{exact:true}).fill(fx.today);w=reply(base+'/preview');await billing.getByRole('button',{name:'Preview resolution',exact:true}).click();assert.equal((await body(w)).result,'candidate');await billing.getByText(/Preview: candidate.*12345678901234.1234/).waitFor();
- await p.getByRole('link',{name:'Directory',exact:true}).click();await p.getByLabel('Directory search',{exact:true}).fill('SYNTHETIC-COMMERCIAL-LOCAL');w=reply('/api/v1/workforce-directory');await p.getByRole('button',{name:'Load scoped directory',exact:true}).click();await body(w);w=reply('/api/v1/workforce-directory');await p.getByRole('button',{name:'Open reporting context SYNTHETIC-COMMERCIAL-LOCAL',exact:true}).click();await body(w);await p.getByRole('button',{name:'Inspect selected worker cost candidates',exact:true}).click();const cost=p.getByRole('region',{name:'Worker cost candidates',exact:true});w=reply(base+'/candidates');await cost.getByRole('button',{name:'Load candidates',exact:true}).click();await body(w);await fill(cost,'73.0123');w=reply(base+'/candidates','POST');await cost.getByRole('button',{name:'Record candidate',exact:true}).click();const costReceipt=await body(w,201);assert.equal(costReceipt.candidate.amount,'73.0123');w=reply(base+'/candidates');await cost.getByRole('button',{name:'Load candidates',exact:true}).click();await body(w);await cost.getByRole('button',{name:'Change owner for version 1',exact:true}).click();const costOwner=cost.getByRole('region',{name:'Candidate change owner',exact:true});w=reply(base+'/owners/'+costReceipt.candidate.id);await costOwner.getByRole('button',{name:'Inspect change owner',exact:true}).click();await body(w);await costOwner.getByLabel('Existing owner account ID',{exact:true}).fill(ids.manager.id);await costOwner.getByLabel('Existing owner role',{exact:true}).fill('Admin');await costOwner.getByLabel('Owner change reason',{exact:true}).fill('Synthetic confidential owner');w=reply(base+'/owners','POST');await costOwner.getByRole('button',{name:'Record change owner',exact:true}).click();const costAssigned=await body(w,201);assert.equal(costAssigned.owner.candidateId,costReceipt.candidate.id);await costOwner.getByRole('button',{name:'Close owner editor',exact:true}).click();await cost.getByRole('button',{name:'Review approval for version 1',exact:true}).click();const ca=cost.getByRole('region',{name:'Commercial candidate approval',exact:true});let cp=reply('/api/v1/commercial-candidate-approvals/policies');await ca.getByRole('button',{name:'Load approval and owner',exact:true}).click();await body(cp);await ca.getByLabel('Policy effective date UTC',{exact:true}).fill(fx.today);await ca.getByLabel('Template locale',{exact:true}).fill('en-US');await ca.getByLabel('Completion in-app preference',{exact:true}).selectOption('no');await ca.getByLabel('Approver account 1',{exact:true}).fill(ids.denied.id);await ca.getByLabel('Approver role 1',{exact:true}).fill('Admin');for(const key of ['approval.action_required','approval.rejected_or_correction_required','approval.completed']){await ca.getByLabel('Subject '+key,{exact:true}).fill('Review {{stageNumber}}');await ca.getByLabel('Body '+key,{exact:true}).fill('Source {{sourceRef}}');}await ca.getByLabel('Policy reason',{exact:true}).fill('Synthetic cost policy');cp=reply('/api/v1/commercial-candidate-approvals/policies','POST');await ca.getByRole('button',{name:'Record approval policy',exact:true}).click();const costPolicy=await body(cp,201);await ca.getByText('Operation recorded. Reload the current source before another action.').waitFor();cp=reply('/api/v1/commercial-candidate-approvals/policies');await ca.getByRole('button',{name:'Load approval and owner',exact:true}).click();await body(cp);await ca.getByLabel('Approval policy',{exact:true}).selectOption(costPolicy.policy.id);await ca.getByLabel('Approval request reason',{exact:true}).fill('Synthetic cost request');cp=reply('/api/v1/commercial-candidate-approvals/requests','POST');await ca.getByRole('button',{name:'Request candidate approval',exact:true}).click();const costRequest=await body(cp,201);await ca.getByRole('button',{name:'Close commercial approval',exact:true}).click();
- const crc=await browser.newContext({viewport:{width:1800,height:1400},timezoneId:'Pacific/Kiritimati'});const costIdentity={...ids.denied,role:'Admin'};await crc.addInitScript(({user,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(user));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{user:{id:costIdentity.id,employeeId:costIdentity.id,userName:costIdentity.username,name:'Synthetic cost reviewer',role:'Admin',permissionRole:'Admin',permissions:[...workPermissions,'commercial.contracts.view',...keys,'commercial.cost_approvals.decide','notifications.view','approvals.view','employees.view']},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(costIdentity)});const crp=await crc.newPage();crp.setDefaultTimeout(25000);await crp.goto(origin+'/workforce/directory');await crp.getByLabel('Directory search',{exact:true}).fill('SYNTHETIC-COMMERCIAL-LOCAL');let crw=crp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/workforce-directory');await crp.getByRole('button',{name:'Load scoped directory',exact:true}).click();assert.equal((await crw).status(),200);crw=crp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/workforce-directory');await crp.getByRole('button',{name:'Open reporting context SYNTHETIC-COMMERCIAL-LOCAL',exact:true}).click();assert.equal((await crw).status(),200);await crp.getByRole('button',{name:'Inspect selected worker cost candidates',exact:true}).click();const crCost=crp.getByRole('region',{name:'Worker cost candidates',exact:true});crw=crp.waitForResponse(r=>new URL(r.url()).pathname===base+'/candidates');await crCost.getByRole('button',{name:'Load candidates',exact:true}).click();assert.equal((await crw).status(),200);await crCost.getByRole('button',{name:'Review approval for version 1',exact:true}).click();const crApproval=crCost.getByRole('region',{name:'Commercial candidate approval',exact:true});crw=crp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/commercial-candidate-approvals/requests'&&r.request().method()==='GET');await crApproval.getByRole('button',{name:'Load approval and owner',exact:true}).click();assert.equal((await crw).status(),200);await crApproval.getByLabel('Approval request',{exact:true}).selectOption(costRequest.approval.id);await crApproval.getByLabel('Commercial decision',{exact:true}).selectOption('Rejected');await crApproval.getByLabel('Commercial decision reason',{exact:true}).fill('Synthetic private cost review');crw=crp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/commercial-candidate-approvals/instances/'+costRequest.approval.id+'/decisions'&&r.request().method()==='POST');await crApproval.getByRole('button',{name:'Record commercial decision',exact:true}).click();const costDecided=await crw;assert.equal(costDecided.status(),201,await costDecided.text());assert.equal((await costDecided.json()).approval.state.status,'Rejected');await crc.close();
- const wc=await browser.newContext({viewport:{width:1400,height:1000},timezoneId:'UTC'});await wc.addInitScript(({user,scope,token})=>{sessionStorage.setItem('workos_session',JSON.stringify(user));sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));sessionStorage.setItem('workos_api_token',token);},{user:{id:ids.reader.employeeRecordId,employeeId:ids.reader.employeeId,userName:ids.reader.username,name:'Synthetic affected worker',role:'Employee',permissionRole:'Employee',permissions:['employees.view','notifications.view']},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(ids.reader)});const wp=await wc.newPage();wp.setDefaultTimeout(25000);await wp.goto(origin+'/tests/fixtures/commercial-approval-inbox.html');const inbox=wp.getByRole('region',{name:'Canonical work approval notifications',exact:true});let ww=wp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/work-approvals/inbox');await inbox.getByRole('button',{name:'Load my governed notifications',exact:true}).click();const wr=await ww;assert.equal(wr.status(),200,await wr.text());const bodyInbox=await wr.json(),workerNotice=bodyInbox.notifications.find(n=>n.kind==='commercial-candidate-approval'&&n.instanceId===costRequest.approval.id);assert(workerNotice);assert.deepEqual(workerNotice.reasons,['affected_worker']);assert(!JSON.stringify(workerNotice).includes('73.0123'));assert(!JSON.stringify(workerNotice).includes('Synthetic private cost review'));const article=inbox.getByRole('article',{name:'Governed notification '+workerNotice.id,exact:true});await article.waitFor();assert(!((await article.textContent())??'').includes('73.0123'));ww=wp.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/work-approvals/inbox/'+workerNotice.id+'/read');await article.getByRole('button',{name:'Mark governed notification read '+workerNotice.id,exact:true}).click();assert.equal((await ww).status(),200);await wc.close();
- const cost2=ok(await request(base+'/candidates',{method:'POST',body:{requestId:crypto.randomUUID(),streamId:crypto.randomUUID(),expectedLatestId:null,kind:'cost',bindingType:'worker',bindingId:ids.reader.employeeRecordId,effectiveFrom:fx.today,effectiveTo:last,currency:'USD',unit:'HOUR',amount:'80.0123',priority:11,reason:'Synthetic cost adoption'}})).candidate,cost2Owner=ok(await request(base+'/owners',{method:'POST',body:{requestId:crypto.randomUUID(),candidateId:cost2.id,expectedOwnerEventId:null,ownerUserId:ids.manager.id,ownerRole:'Admin',reason:'Synthetic cost owner'}})),cost2Policy=ok(await request('/api/v1/commercial-candidate-approvals/policies',{method:'POST',body:{expectedOwnerKey:cost2Owner.ownerKey,requestId:crypto.randomUUID(),expectedLatestId:null,effectiveFrom:fx.today,definition:{entityType:'CommercialCandidate',kind:'cost',candidateId:cost2.id,stages:[{userId:ids.denied.id,role:'Admin'}],locale:'en-US',templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(key=>({key,subject:'Review {{stageNumber}}',body:'Source {{sourceRef}}'})),completionInApp:false},reason:'Synthetic cost approval'}})),cost2Request=ok(await request('/api/v1/commercial-candidate-approvals/requests',{method:'POST',body:{expectedOwnerKey:cost2Owner.ownerKey,requestId:crypto.randomUUID(),candidateId:cost2.id,expectedOwnerEventId:cost2Owner.owner.id,expectedPolicyId:cost2Policy.policy.id,reason:'Synthetic review'}})),cost2View=ok(await request('/api/v1/commercial-candidate-approvals/instances/'+cost2Request.approval.id,{identity:costIdentity}),200);ok(await request('/api/v1/commercial-candidate-approvals/instances/'+cost2Request.approval.id+'/decisions',{method:'POST',identity:costIdentity,body:{expectedOwnerKey:cost2View.ownerKey,requestId:crypto.randomUUID(),expectedCandidateId:cost2.id,expectedOwnerEventId:cost2Owner.owner.id,expectedPolicyId:cost2Policy.policy.id,expectedSequence:0,decision:'Approved',reason:'Synthetic cost decision'}}));
- w=reply(base+'/candidates');await cost.getByRole('button',{name:'Load candidates',exact:true}).click();await body(w);const cost2row=cost.getByRole('listitem').filter({hasText:'80.0123'});await cost2row.getByRole('button',{name:'Inspect adoption for version 1',exact:true}).click();const adoptCost=cost2row.getByRole('region',{name:'Adopt approved source',exact:true});let cv=reply('/api/v1/approved-rate-sources/candidates/'+cost2.id);await adoptCost.getByRole('button',{name:'Inspect approved reviews',exact:true}).click();await body(cv);await adoptCost.getByLabel('Completed review',{exact:true}).selectOption(cost2Request.approval.id);await adoptCost.getByLabel('Adoption reason',{exact:true}).fill('Synthetic cost source');cv=reply('/api/v1/approved-rate-sources/adoptions','POST');await adoptCost.getByRole('button',{name:'Adopt approved rate source',exact:true}).click();const cost2Adoption=await body(cv,201);await adoptCost.getByRole('button',{name:'Close source adoption',exact:true}).click();const resolvedCost=cost.getByRole('region',{name:'Resolve adopted rate source',exact:true});await resolvedCost.getByLabel('Adopted source as-of UTC',{exact:true}).fill(fx.today);await resolvedCost.getByLabel('Adopted source currency',{exact:true}).fill('USD');await resolvedCost.getByLabel('Adopted source unit',{exact:true}).fill('HOUR');cv=reply('/api/v1/approved-rate-sources/resolve');await resolvedCost.getByRole('button',{name:'Resolve adopted source',exact:true}).click();const costResolved=await body(cv);assert.equal(costResolved.result,'source');assert.equal(costResolved.source.adoptionId,cost2Adoption.adoption.id);assert.equal(costResolved.source.amount,'80.0123');
- await cost.getByLabel('Preview as-of UTC',{exact:true}).fill(fx.today);w=reply(base+'/preview');await cost.getByRole('button',{name:'Preview resolution',exact:true}).click();assert.equal((await body(w)).candidate.amount,'80.0123');await cost.getByText(/Preview: candidate.*80.0123/).waitFor();const prior=(await pool.query('select amount::text,request_id from commercial_rate_candidates where id=$1',[costReceipt.candidate.id])).rows[0];
- const late=ok(await request(base+'/candidates',{method:'POST',body:{requestId:crypto.randomUUID(),streamId:crypto.randomUUID(),expectedLatestId:null,kind:'cost',bindingType:'worker',bindingId:ids.reader.employeeRecordId,effectiveFrom:fx.today,effectiveTo:last,currency:'USD',unit:'HOUR',amount:'81.0123',priority:12,reason:'Synthetic late adoption'}})).candidate,lateOwner=ok(await request(base+'/owners',{method:'POST',body:{requestId:crypto.randomUUID(),candidateId:late.id,expectedOwnerEventId:null,ownerUserId:ids.manager.id,ownerRole:'Admin',reason:'Synthetic late owner'}})),latePolicy=ok(await request('/api/v1/commercial-candidate-approvals/policies',{method:'POST',body:{expectedOwnerKey:lateOwner.ownerKey,requestId:crypto.randomUUID(),expectedLatestId:null,effectiveFrom:fx.today,definition:{entityType:'CommercialCandidate',kind:'cost',candidateId:late.id,stages:[{userId:ids.denied.id,role:'Admin'}],locale:'en-US',templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(key=>({key,subject:'Review {{stageNumber}}',body:'Source {{sourceRef}}'})),completionInApp:false},reason:'Synthetic late policy'}})),lateRequest=ok(await request('/api/v1/commercial-candidate-approvals/requests',{method:'POST',body:{expectedOwnerKey:lateOwner.ownerKey,requestId:crypto.randomUUID(),candidateId:late.id,expectedOwnerEventId:lateOwner.owner.id,expectedPolicyId:latePolicy.policy.id,reason:'Synthetic late request'}})),lateView=ok(await request('/api/v1/commercial-candidate-approvals/instances/'+lateRequest.approval.id,{identity:costIdentity}),200);ok(await request('/api/v1/commercial-candidate-approvals/instances/'+lateRequest.approval.id+'/decisions',{method:'POST',identity:costIdentity,body:{expectedOwnerKey:lateView.ownerKey,requestId:crypto.randomUUID(),expectedCandidateId:late.id,expectedOwnerEventId:lateOwner.owner.id,expectedPolicyId:latePolicy.policy.id,expectedSequence:0,decision:'Approved',reason:'Synthetic late review'}}));w=reply(base+'/candidates');await cost.getByRole('button',{name:'Load candidates',exact:true}).click();await body(w);const lateRow=cost.getByRole('listitem').filter({hasText:'81.0123'});await lateRow.getByRole('button',{name:'Inspect adoption for version 1',exact:true}).click();const lateEditor=lateRow.getByRole('region',{name:'Adopt approved source',exact:true});let lw=reply('/api/v1/approved-rate-sources/candidates/'+late.id);await lateEditor.getByRole('button',{name:'Inspect approved reviews',exact:true}).click();await body(lw);await lateEditor.getByLabel('Completed review',{exact:true}).selectOption(lateRequest.approval.id);await lateEditor.getByLabel('Adoption reason',{exact:true}).fill('Synthetic late source');let release,accepted;const held=new Promise(r=>{release=r;}),received=new Promise(r=>{accepted=r;});await p.route('**/api/v1/approved-rate-sources/adoptions',async route=>{const response=await route.fetch();assert.equal(response.status(),201,await response.text());accepted();await held;await route.fulfill({response});},{times:1});await lateEditor.getByRole('button',{name:'Adopt approved rate source',exact:true}).click();await received;await p.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));release();await p.getByText('Account, role or scope changed. Directory and unsent handoffs cleared. Reload explicitly.',{exact:true}).waitFor();assert.equal(await cost.count(),0);assert.equal((await pool.query('select count(*)::int n from commercial_rate_adoptions where candidate_id=$1',[late.id])).rows[0].n,1);assert.deepEqual((await pool.query('select amount::text,request_id from commercial_rate_candidates where id=$1',[costReceipt.candidate.id])).rows[0],prior);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);await ctx.close();console.log('Approved source React/API/PostgreSQL billing and cost adoption receipt:',JSON.stringify({commercialBindingChoice:true,workerScopeHandoff:true,decimalExact:true,previewOnly:true,lostAckReadOnly:true,scopeChangeClears:true,acceptedLateOwnerSuppressed:true,priorEvidenceRetained:true,noExternalRequests:true}));
- }finally{await browser?.close();await fixture.close();}
- });});
+        await billing.getByLabel('Engagement for preview', { exact: true }).selectOption(engagement.id);
+        await billing.getByLabel('Preview as-of UTC', { exact: true }).fill(fx.today);
+        w = reply(base + '/preview');
+        await billing.getByRole('button', { name: 'Preview resolution', exact: true }).click();
+        assert.equal((await body(w)).result, 'candidate');
+        await billing.getByText(/Preview: candidate.*12345678901234.1234/).waitFor();
+        await p.getByRole('link', { name: 'Directory', exact: true }).click();
+        await p.getByLabel('Directory search', { exact: true }).fill('SYNTHETIC-COMMERCIAL-LOCAL');
+        w = reply('/api/v1/workforce-directory');
+        await p.getByRole('button', { name: 'Load scoped directory', exact: true }).click();
+        await body(w);
+        w = reply('/api/v1/workforce-directory');
+        await p
+          .getByRole('button', { name: 'Open reporting context SYNTHETIC-COMMERCIAL-LOCAL', exact: true })
+          .click();
+        await body(w);
+        await p.getByRole('button', { name: 'Inspect selected worker cost candidates', exact: true }).click();
+        const cost = p.getByRole('region', { name: 'Worker cost candidates', exact: true });
+        w = reply(base + '/candidates');
+        await cost.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        await body(w);
+        await fill(cost, '73.0123');
+        w = reply(base + '/candidates', 'POST');
+        await cost.getByRole('button', { name: 'Record candidate', exact: true }).click();
+        const costReceipt = await body(w, 201);
+        assert.equal(costReceipt.candidate.amount, '73.0123');
+        w = reply(base + '/candidates');
+        await cost.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        await body(w);
+        await cost.getByRole('button', { name: 'Change owner for version 1', exact: true }).click();
+        const costOwner = cost.getByRole('region', { name: 'Candidate change owner', exact: true });
+        w = reply(base + '/owners/' + costReceipt.candidate.id);
+        await costOwner.getByRole('button', { name: 'Inspect change owner', exact: true }).click();
+        await body(w);
+        await costOwner.getByLabel('Existing owner account ID', { exact: true }).fill(ids.manager.id);
+        await costOwner.getByLabel('Existing owner role', { exact: true }).fill('Admin');
+        await costOwner
+          .getByLabel('Owner change reason', { exact: true })
+          .fill('Synthetic confidential owner');
+        w = reply(base + '/owners', 'POST');
+        await costOwner.getByRole('button', { name: 'Record change owner', exact: true }).click();
+        const costAssigned = await body(w, 201);
+        assert.equal(costAssigned.owner.candidateId, costReceipt.candidate.id);
+        await costOwner.getByRole('button', { name: 'Close owner editor', exact: true }).click();
+        await cost.getByRole('button', { name: 'Review approval for version 1', exact: true }).click();
+        const ca = cost.getByRole('region', { name: 'Commercial candidate approval', exact: true });
+        let cp = reply('/api/v1/commercial-candidate-approvals/policies');
+        await ca.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
+        await body(cp);
+        await ca.getByLabel('Policy effective date UTC', { exact: true }).fill(fx.today);
+        await ca.getByLabel('Template locale', { exact: true }).fill('en-US');
+        await ca.getByLabel('Completion in-app preference', { exact: true }).selectOption('no');
+        await ca.getByLabel('Approver account 1', { exact: true }).fill(ids.denied.id);
+        await ca.getByLabel('Approver role 1', { exact: true }).fill('Admin');
+        for (const key of [
+          'approval.action_required',
+          'approval.rejected_or_correction_required',
+          'approval.completed',
+        ]) {
+          await ca.getByLabel('Subject ' + key, { exact: true }).fill('Review {{stageNumber}}');
+          await ca.getByLabel('Body ' + key, { exact: true }).fill('Source {{sourceRef}}');
+        }
+        await ca.getByLabel('Policy reason', { exact: true }).fill('Synthetic cost policy');
+        cp = reply('/api/v1/commercial-candidate-approvals/policies', 'POST');
+        await ca.getByRole('button', { name: 'Record approval policy', exact: true }).click();
+        const costPolicy = await body(cp, 201);
+        await ca.getByText('Operation recorded. Reload the current source before another action.').waitFor();
+        cp = reply('/api/v1/commercial-candidate-approvals/policies');
+        await ca.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
+        await body(cp);
+        await ca.getByLabel('Approval policy', { exact: true }).selectOption(costPolicy.policy.id);
+        await ca.getByLabel('Approval request reason', { exact: true }).fill('Synthetic cost request');
+        cp = reply('/api/v1/commercial-candidate-approvals/requests', 'POST');
+        await ca.getByRole('button', { name: 'Request candidate approval', exact: true }).click();
+        const costRequest = await body(cp, 201);
+        await ca.getByRole('button', { name: 'Close commercial approval', exact: true }).click();
+        const crc = await browser.newContext({
+          viewport: { width: 1800, height: 1400 },
+          timezoneId: 'Pacific/Kiritimati',
+        });
+        const costIdentity = { ...ids.denied, role: 'Admin' };
+        await crc.addInitScript(
+          ({ user, scope, token }) => {
+            sessionStorage.setItem('workos_session', JSON.stringify(user));
+            sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
+            sessionStorage.setItem('workos_api_token', token);
+          },
+          {
+            user: {
+              id: costIdentity.id,
+              employeeId: costIdentity.id,
+              userName: costIdentity.username,
+              name: 'Synthetic cost reviewer',
+              role: 'Admin',
+              permissionRole: 'Admin',
+              permissions: [
+                ...workPermissions,
+                'commercial.contracts.view',
+                ...keys,
+                'commercial.cost_approvals.decide',
+                'notifications.view',
+                'approvals.view',
+                'employees.view',
+              ],
+            },
+            scope: { organizationId: f.organizationId, legalEntityId: f.legalEntityId },
+            token: tokenFor(costIdentity),
+          },
+        );
+        const crp = await crc.newPage();
+        crp.setDefaultTimeout(25000);
+        await crp.goto(origin + '/tests/fixtures/rate-candidates.html');
+        await crp.getByRole('link', { name: 'Directory', exact: true }).click();
+        await crp.getByLabel('Directory search', { exact: true }).fill('SYNTHETIC-COMMERCIAL-LOCAL');
+        let crw = crp.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/workforce-directory');
+        await crp.getByRole('button', { name: 'Load scoped directory', exact: true }).click();
+        assert.equal((await crw).status(), 200);
+        crw = crp.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/workforce-directory');
+        await crp
+          .getByRole('button', { name: 'Open reporting context SYNTHETIC-COMMERCIAL-LOCAL', exact: true })
+          .click();
+        assert.equal((await crw).status(), 200);
+        await crp
+          .getByRole('button', { name: 'Inspect selected worker cost candidates', exact: true })
+          .click();
+        const crCost = crp.getByRole('region', { name: 'Worker cost candidates', exact: true });
+        crw = crp.waitForResponse((r) => new URL(r.url()).pathname === base + '/candidates');
+        await crCost.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        assert.equal((await crw).status(), 200);
+        await crCost.getByRole('button', { name: 'Review approval for version 1', exact: true }).click();
+        const crApproval = crCost.getByRole('region', { name: 'Commercial candidate approval', exact: true });
+        crw = crp.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname === '/api/v1/commercial-candidate-approvals/requests' &&
+            r.request().method() === 'GET',
+        );
+        await crApproval.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
+        assert.equal((await crw).status(), 200);
+        await crApproval
+          .getByLabel('Approval request', { exact: true })
+          .selectOption(costRequest.approval.id);
+        await crApproval.getByLabel('Commercial decision', { exact: true }).selectOption('Rejected');
+        await crApproval
+          .getByLabel('Commercial decision reason', { exact: true })
+          .fill('Synthetic private cost review');
+        crw = crp.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname ===
+              '/api/v1/commercial-candidate-approvals/instances/' + costRequest.approval.id + '/decisions' &&
+            r.request().method() === 'POST',
+        );
+        await crApproval.getByRole('button', { name: 'Record commercial decision', exact: true }).click();
+        const costDecided = await crw;
+        assert.equal(costDecided.status(), 201, await costDecided.text());
+        assert.equal((await costDecided.json()).approval.state.status, 'Rejected');
+        await crc.close();
+        const wc = await browser.newContext({ viewport: { width: 1400, height: 1000 }, timezoneId: 'UTC' });
+        await wc.addInitScript(
+          ({ user, scope, token }) => {
+            sessionStorage.setItem('workos_session', JSON.stringify(user));
+            sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
+            sessionStorage.setItem('workos_api_token', token);
+          },
+          {
+            user: {
+              id: ids.reader.employeeRecordId,
+              employeeId: ids.reader.employeeId,
+              userName: ids.reader.username,
+              name: 'Synthetic affected worker',
+              role: 'Employee',
+              permissionRole: 'Employee',
+              permissions: ['employees.view', 'notifications.view'],
+            },
+            scope: { organizationId: f.organizationId, legalEntityId: f.legalEntityId },
+            token: tokenFor(ids.reader),
+          },
+        );
+        const wp = await wc.newPage();
+        wp.setDefaultTimeout(25000);
+        await wp.goto(origin + '/tests/fixtures/commercial-approval-inbox.html');
+        const inbox = wp.getByRole('region', { name: 'Canonical work approval notifications', exact: true });
+        let ww = wp.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/work-approvals/inbox');
+        await inbox.getByRole('button', { name: 'Load my governed notifications', exact: true }).click();
+        const wr = await ww;
+        assert.equal(wr.status(), 200, await wr.text());
+        const bodyInbox = await wr.json(),
+          workerNotice = bodyInbox.notifications.find(
+            (n) => n.kind === 'commercial-candidate-approval' && n.instanceId === costRequest.approval.id,
+          );
+        assert(workerNotice);
+        assert.deepEqual(workerNotice.reasons, ['affected_worker']);
+        assert(!JSON.stringify(workerNotice).includes('73.0123'));
+        assert(!JSON.stringify(workerNotice).includes('Synthetic private cost review'));
+        const article = inbox.getByRole('article', {
+          name: 'Governed notification ' + workerNotice.id,
+          exact: true,
+        });
+        await article.waitFor();
+        assert(!((await article.textContent()) ?? '').includes('73.0123'));
+        ww = wp.waitForResponse(
+          (r) => new URL(r.url()).pathname === '/api/v1/work-approvals/inbox/' + workerNotice.id + '/read',
+        );
+        await article
+          .getByRole('button', { name: 'Mark governed notification read ' + workerNotice.id, exact: true })
+          .click();
+        assert.equal((await ww).status(), 200);
+        await wc.close();
+        const cost2 = ok(
+            await request(base + '/candidates', {
+              method: 'POST',
+              body: {
+                requestId: crypto.randomUUID(),
+                streamId: crypto.randomUUID(),
+                expectedLatestId: null,
+                kind: 'cost',
+                bindingType: 'worker',
+                bindingId: ids.reader.employeeRecordId,
+                effectiveFrom: fx.today,
+                effectiveTo: last,
+                currency: 'USD',
+                unit: 'HOUR',
+                amount: '80.0123',
+                priority: 11,
+                reason: 'Synthetic cost adoption',
+              },
+            }),
+          ).candidate,
+          cost2Owner = ok(
+            await request(base + '/owners', {
+              method: 'POST',
+              body: {
+                requestId: crypto.randomUUID(),
+                candidateId: cost2.id,
+                expectedOwnerEventId: null,
+                ownerUserId: ids.manager.id,
+                ownerRole: 'Admin',
+                reason: 'Synthetic cost owner',
+              },
+            }),
+          ),
+          cost2Policy = ok(
+            await request('/api/v1/commercial-candidate-approvals/policies', {
+              method: 'POST',
+              body: {
+                expectedOwnerKey: cost2Owner.ownerKey,
+                requestId: crypto.randomUUID(),
+                expectedLatestId: null,
+                effectiveFrom: fx.today,
+                definition: {
+                  entityType: 'CommercialCandidate',
+                  kind: 'cost',
+                  candidateId: cost2.id,
+                  stages: [{ userId: ids.denied.id, role: 'Admin' }],
+                  locale: 'en-US',
+                  templates: [
+                    'approval.action_required',
+                    'approval.rejected_or_correction_required',
+                    'approval.completed',
+                  ].map((key) => ({ key, subject: 'Review {{stageNumber}}', body: 'Source {{sourceRef}}' })),
+                  completionInApp: false,
+                },
+                reason: 'Synthetic cost approval',
+              },
+            }),
+          ),
+          cost2Request = ok(
+            await request('/api/v1/commercial-candidate-approvals/requests', {
+              method: 'POST',
+              body: {
+                expectedOwnerKey: cost2Owner.ownerKey,
+                requestId: crypto.randomUUID(),
+                candidateId: cost2.id,
+                expectedOwnerEventId: cost2Owner.owner.id,
+                expectedPolicyId: cost2Policy.policy.id,
+                reason: 'Synthetic review',
+              },
+            }),
+          ),
+          cost2View = ok(
+            await request('/api/v1/commercial-candidate-approvals/instances/' + cost2Request.approval.id, {
+              identity: costIdentity,
+            }),
+            200,
+          );
+        ok(
+          await request(
+            '/api/v1/commercial-candidate-approvals/instances/' + cost2Request.approval.id + '/decisions',
+            {
+              method: 'POST',
+              identity: costIdentity,
+              body: {
+                expectedOwnerKey: cost2View.ownerKey,
+                requestId: crypto.randomUUID(),
+                expectedCandidateId: cost2.id,
+                expectedOwnerEventId: cost2Owner.owner.id,
+                expectedPolicyId: cost2Policy.policy.id,
+                expectedSequence: 0,
+                decision: 'Approved',
+                reason: 'Synthetic cost decision',
+              },
+            },
+          ),
+        );
+        w = reply(base + '/candidates');
+        await cost.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        await body(w);
+        const cost2row = cost.getByRole('listitem').filter({ hasText: '80.0123' });
+        await cost2row.getByRole('button', { name: 'Inspect adoption for version 1', exact: true }).click();
+        const adoptCost = cost2row.getByRole('region', { name: 'Adopt approved source', exact: true });
+        let cv = reply('/api/v1/approved-rate-sources/candidates/' + cost2.id);
+        await adoptCost.getByRole('button', { name: 'Inspect approved reviews', exact: true }).click();
+        await body(cv);
+        await adoptCost
+          .getByLabel('Completed review', { exact: true })
+          .selectOption(cost2Request.approval.id);
+        await adoptCost.getByLabel('Adoption reason', { exact: true }).fill('Synthetic cost source');
+        cv = reply('/api/v1/approved-rate-sources/adoptions', 'POST');
+        await adoptCost.getByRole('button', { name: 'Adopt approved rate source', exact: true }).click();
+        const cost2Adoption = await body(cv, 201);
+        await adoptCost.getByRole('button', { name: 'Close source adoption', exact: true }).click();
+        const resolvedCost = cost.getByRole('region', { name: 'Resolve adopted rate source', exact: true });
+        await resolvedCost.getByLabel('Adopted source as-of UTC', { exact: true }).fill(fx.today);
+        await resolvedCost.getByLabel('Adopted source currency', { exact: true }).fill('USD');
+        await resolvedCost.getByLabel('Adopted source unit', { exact: true }).fill('HOUR');
+        cv = reply('/api/v1/approved-rate-sources/resolve');
+        await resolvedCost.getByRole('button', { name: 'Resolve adopted source', exact: true }).click();
+        const costResolved = await body(cv);
+        assert.equal(costResolved.result, 'source');
+        assert.equal(costResolved.source.adoptionId, cost2Adoption.adoption.id);
+        assert.equal(costResolved.source.amount, '80.0123');
+        await cost.getByLabel('Preview as-of UTC', { exact: true }).fill(fx.today);
+        w = reply(base + '/preview');
+        await cost.getByRole('button', { name: 'Preview resolution', exact: true }).click();
+        assert.equal((await body(w)).candidate.amount, '80.0123');
+        await cost.getByText(/Preview: candidate.*80.0123/).waitFor();
+        const prior = (
+          await pool.query('select amount::text,request_id from commercial_rate_candidates where id=$1', [
+            costReceipt.candidate.id,
+          ])
+        ).rows[0];
+        const late = ok(
+            await request(base + '/candidates', {
+              method: 'POST',
+              body: {
+                requestId: crypto.randomUUID(),
+                streamId: crypto.randomUUID(),
+                expectedLatestId: null,
+                kind: 'cost',
+                bindingType: 'worker',
+                bindingId: ids.reader.employeeRecordId,
+                effectiveFrom: fx.today,
+                effectiveTo: last,
+                currency: 'USD',
+                unit: 'HOUR',
+                amount: '81.0123',
+                priority: 12,
+                reason: 'Synthetic late adoption',
+              },
+            }),
+          ).candidate,
+          lateOwner = ok(
+            await request(base + '/owners', {
+              method: 'POST',
+              body: {
+                requestId: crypto.randomUUID(),
+                candidateId: late.id,
+                expectedOwnerEventId: null,
+                ownerUserId: ids.manager.id,
+                ownerRole: 'Admin',
+                reason: 'Synthetic late owner',
+              },
+            }),
+          ),
+          latePolicy = ok(
+            await request('/api/v1/commercial-candidate-approvals/policies', {
+              method: 'POST',
+              body: {
+                expectedOwnerKey: lateOwner.ownerKey,
+                requestId: crypto.randomUUID(),
+                expectedLatestId: null,
+                effectiveFrom: fx.today,
+                definition: {
+                  entityType: 'CommercialCandidate',
+                  kind: 'cost',
+                  candidateId: late.id,
+                  stages: [{ userId: ids.denied.id, role: 'Admin' }],
+                  locale: 'en-US',
+                  templates: [
+                    'approval.action_required',
+                    'approval.rejected_or_correction_required',
+                    'approval.completed',
+                  ].map((key) => ({ key, subject: 'Review {{stageNumber}}', body: 'Source {{sourceRef}}' })),
+                  completionInApp: false,
+                },
+                reason: 'Synthetic late policy',
+              },
+            }),
+          ),
+          lateRequest = ok(
+            await request('/api/v1/commercial-candidate-approvals/requests', {
+              method: 'POST',
+              body: {
+                expectedOwnerKey: lateOwner.ownerKey,
+                requestId: crypto.randomUUID(),
+                candidateId: late.id,
+                expectedOwnerEventId: lateOwner.owner.id,
+                expectedPolicyId: latePolicy.policy.id,
+                reason: 'Synthetic late request',
+              },
+            }),
+          ),
+          lateView = ok(
+            await request('/api/v1/commercial-candidate-approvals/instances/' + lateRequest.approval.id, {
+              identity: costIdentity,
+            }),
+            200,
+          );
+        ok(
+          await request(
+            '/api/v1/commercial-candidate-approvals/instances/' + lateRequest.approval.id + '/decisions',
+            {
+              method: 'POST',
+              identity: costIdentity,
+              body: {
+                expectedOwnerKey: lateView.ownerKey,
+                requestId: crypto.randomUUID(),
+                expectedCandidateId: late.id,
+                expectedOwnerEventId: lateOwner.owner.id,
+                expectedPolicyId: latePolicy.policy.id,
+                expectedSequence: 0,
+                decision: 'Approved',
+                reason: 'Synthetic late review',
+              },
+            },
+          ),
+        );
+        w = reply(base + '/candidates');
+        await cost.getByRole('button', { name: 'Load candidates', exact: true }).click();
+        await body(w);
+        const lateRow = cost.getByRole('listitem').filter({ hasText: '81.0123' });
+        await lateRow.getByRole('button', { name: 'Inspect adoption for version 1', exact: true }).click();
+        const lateEditor = lateRow.getByRole('region', { name: 'Adopt approved source', exact: true });
+        let lw = reply('/api/v1/approved-rate-sources/candidates/' + late.id);
+        await lateEditor.getByRole('button', { name: 'Inspect approved reviews', exact: true }).click();
+        await body(lw);
+        await lateEditor
+          .getByLabel('Completed review', { exact: true })
+          .selectOption(lateRequest.approval.id);
+        await lateEditor.getByLabel('Adoption reason', { exact: true }).fill('Synthetic late source');
+        let release, accepted;
+        const held = new Promise((r) => {
+            release = r;
+          }),
+          received = new Promise((r) => {
+            accepted = r;
+          });
+        await p.route(
+          '**/api/v1/approved-rate-sources/adoptions',
+          async (route) => {
+            const response = await route.fetch();
+            assert.equal(response.status(), 201, await response.text());
+            accepted();
+            await held;
+            await route.fulfill({ response });
+          },
+          { times: 1 },
+        );
+        await lateEditor.getByRole('button', { name: 'Adopt approved rate source', exact: true }).click();
+        await received;
+        await p.evaluate(() => window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+        release();
+        await p
+          .getByText(
+            'Account, role or scope changed. Directory and unsent handoffs cleared. Reload explicitly.',
+            { exact: true },
+          )
+          .waitFor();
+        assert.equal(await cost.count(), 0);
+        assert.equal(
+          (
+            await pool.query('select count(*)::int n from commercial_rate_adoptions where candidate_id=$1', [
+              late.id,
+            ])
+          ).rows[0].n,
+          1,
+        );
+        assert.deepEqual(
+          (
+            await pool.query('select amount::text,request_id from commercial_rate_candidates where id=$1', [
+              costReceipt.candidate.id,
+            ])
+          ).rows[0],
+          prior,
+        );
+        assert.deepEqual(errors, []);
+        assert.deepEqual(external, []);
+        await ctx.close();
+        console.log(
+          'Approved source React/API/PostgreSQL billing and cost adoption receipt:',
+          JSON.stringify({
+            commercialBindingChoice: true,
+            workerScopeHandoff: true,
+            decimalExact: true,
+            previewOnly: true,
+            lostAckReadOnly: true,
+            scopeChangeClears: true,
+            acceptedLateOwnerSuppressed: true,
+            priorEvidenceRetained: true,
+            noExternalRequests: true,
+          }),
+        );
+      } finally {
+        await browser?.close();
+        await fixture.close();
+      }
+    },
+  );
+});

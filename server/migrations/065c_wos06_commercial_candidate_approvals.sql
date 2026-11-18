@@ -102,9 +102,9 @@ begin
  if target.id is null then raise exception 'Scoped worker unavailable.' using errcode='CCA02';end if;
  if role_name='TeamLead' then
   loop
-   with recursive chain as(select id,reporting_manager_id from employees where id=candidate.binding_id union select e.id,e.reporting_manager_id from employees e join chain x on e.id=x.reporting_manager_id)select coalesce(array_agg(id order by id),array[]::text[]) into before_ids from chain;
+   with recursive chain as(select id,reporting_manager_id from employees where id=candidate.binding_id and organization_id=candidate.organization_id and legal_entity_id=candidate.legal_entity_id union select e.id,e.reporting_manager_id from employees e join chain x on e.id=x.reporting_manager_id where e.organization_id=candidate.organization_id and e.legal_entity_id=candidate.legal_entity_id)select coalesce(array_agg(id order by id),array[]::text[]) into before_ids from chain;
    perform e.id from employees e where e.id=any(before_ids) order by e.id for share;
-   with recursive chain as(select id,reporting_manager_id from employees where id=candidate.binding_id union select e.id,e.reporting_manager_id from employees e join chain x on e.id=x.reporting_manager_id)select coalesce(array_agg(id order by id),array[]::text[]) into after_ids from chain;
+   with recursive chain as(select id,reporting_manager_id from employees where id=candidate.binding_id and organization_id=candidate.organization_id and legal_entity_id=candidate.legal_entity_id union select e.id,e.reporting_manager_id from employees e join chain x on e.id=x.reporting_manager_id where e.organization_id=candidate.organization_id and e.legal_entity_id=candidate.legal_entity_id)select coalesce(array_agg(id order by id),array[]::text[]) into after_ids from chain;
    exit when before_ids=after_ids;
    n=n+1;if n>=3 then raise exception 'Worker relationship changed.' using errcode='CCA02';end if;
   end loop;
@@ -112,8 +112,8 @@ begin
   if actor.id is not null and (lower(actor.designation) in ('country director','regional lead','director') or lower(actor.department)='regional leadership') and target.primary_country_director_id=actor.primary_country_director_id then return;end if;
   perform m.employee_id from employee_country_director_map m where m.employee_id=target.id and actor.id is not null and (lower(actor.designation) in ('country director','regional lead','director') or lower(actor.department)='regional leadership') and m.country_director_id=actor.primary_country_director_id for share;
   if not found then raise exception 'Worker relationship unavailable.' using errcode='CCA02';end if;
- elsif role_name='ProjectManager' and target.id is distinct from u.employee_record_id and target.employee_id is distinct from u.employee_id then
-  perform a.employee_id from project_allocations a join projects p on p.id=a.project_id where a.employee_id=target.id and p.manager_id in(u.employee_record_id,u.employee_id) limit 1 for share of a,p;
+ elsif role_name='ProjectManager' and target.id is distinct from u.employee_record_id and target.employee_id is distinct from actor.employee_id then
+  perform a.employee_id from project_allocations a join projects p on p.id=a.project_id where a.employee_id=target.id and p.organization_id=candidate.organization_id and p.legal_entity_id=candidate.legal_entity_id and p.manager_id in(actor.id,actor.employee_id) limit 1 for share of a,p;
   if not found then raise exception 'Worker relationship unavailable.' using errcode='CCA02';end if;
  end if;
 end $$;

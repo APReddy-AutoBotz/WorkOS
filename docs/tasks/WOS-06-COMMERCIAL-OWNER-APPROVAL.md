@@ -1,5 +1,7 @@
 # Commercial candidate owner and governed approval — acceptance plan
 
+The original design and evidence notes below describe the earlier draft. The current mainline integration uses migrations 065b–065f and the acceptance gates in the WorkOS CI workflow.
+
 ## Lineage and selected decisions
 
 WOS-COM-014/015, APR001–003/006, INT002/005 and CORE003–005 require auditable scoped commercial changes, configured named-stage decisions, segregated confidential costs and mandatory server-resolved recipients. APPROVAL_AND_POLICY_ENGINE_SPEC defines generic stage and notification contracts. The approved source decision is an explicit append-only owner relationship per immutable commercial candidate version, an existing active, scoped account and held role; no creator, project, engagement or title fallback. Ownership does not confer approval, administration or financial authority. Assignment and reassignment are explicit and preserve prior ownership history; a changed or ineligible owner makes decisions based on earlier owner evidence stale and requires fresh governed review. No live account or role grants are made.

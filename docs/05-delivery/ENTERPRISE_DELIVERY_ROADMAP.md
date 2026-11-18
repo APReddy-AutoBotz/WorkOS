@@ -4,7 +4,7 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
-The commercial rate candidate package adds dated billing and cost inputs, separate permissions and exact-decimal resolution previews. It uses scoped workforce selection and current employment status. The next delivery gate covers candidate ownership, independent approval, adoption, time-and-materials valuation snapshots and a separate billing-eligibility decision. Non-T&M policy profiles and invoice issuance remain open. [Rate candidate scope](../tasks/WOS-06-RATE-COST-CANDIDATES.md)
+The commercial rate candidate package adds dated billing and cost inputs, separate permissions and exact-decimal resolution previews. It uses scoped workforce selection and current employment status. Candidate versions now have named owners, independent approval and explicit adoption. Adopted rates support time-and-materials valuation snapshots and a separate billing-eligibility decision. Non-T&M policy profiles and invoice issuance remain open. [Rate candidate scope](../tasks/WOS-06-RATE-COST-CANDIDATES.md)
 
 The scoped workforce directory establishes worker selection for upcoming cost-rate maintenance. Directory access grants no commercial permissions. Worker classification and dated worker-type maintenance remain open.
 
