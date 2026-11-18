@@ -544,3 +544,7 @@ WOS-CORE-003/005 and WOS-NFR-OBS-005/UX-005 cover commercial save recovery. The 
 ## Scoped workforce directory
 
 WOS-WKF-008, ORG-004 and IAM-003/005/010 are covered by scoped directory API, PostgreSQL and browser tests. Team-lead traversal stays inside the current legal entity at every reporting level.
+
+## Commercial rate candidates
+
+WOS-COM-001–004 and COM-014/015 are partially implemented by effective-dated billing and cost candidates. API, migration and browser tests cover decimal precision, explicit priority, conflict and missing outcomes, read-after-write recovery and confidential cost permissions. Approval and authoritative financial calculations remain pending.

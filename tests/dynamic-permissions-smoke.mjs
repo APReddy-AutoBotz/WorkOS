@@ -40,6 +40,11 @@ assert.equal(canManagePermissions(admin), true, 'Admin should manage permission 
 
 const config = await adminService.getPermissionConfig();
 assert.ok(config.permissions.length >= 20, 'permission registry should expose enterprise permission keys');
+for (const key of ['commercial.rate_candidates.view','commercial.rate_candidates.manage','commercial.cost_candidates.view','commercial.cost_candidates.manage']) {
+  assert.ok(PERMISSION_DEFINITIONS.some(permission => permission.key === key && permission.optIn), `${key} must be explicitly opt-in`);
+  assert.ok(!config.rolePermissions.some(item => item.permissionKey === key && item.enabled), `${key} must not be granted by default`);
+  assert.equal(hasPermission(admin,key),false,`${key} must not be inferred for Admin`);
+}
 assert.ok(config.rolePermissions.some(item => item.roleName === 'Admin' && item.permissionKey === 'permissions.manage' && item.enabled), 'Admin must retain permission management by default');
 assert.ok(PROTECTED_PERMISSION_KEYS.has('permissions.manage'), 'permission management must be protected');
 assert.ok(PERMISSION_DEFINITIONS.some(permission => permission.key === 'allocations.manage'), 'allocation management permission must exist');
