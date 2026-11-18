@@ -450,9 +450,11 @@ export const createInvoiceBatchApprovalRouter = (o) => {
           args,
         )
       ).rows;
+      const approvals = [];
+      for (const row of rows.slice(0, 50)) approvals.push(await approvalView(c, row));
       return {
         ...(await envelope(c, r)),
-        approvals: await Promise.all(rows.slice(0, 50).map((x) => approvalView(c, x))),
+        approvals,
         nextAfter: rows.length > 50 ? rows[49].id : null,
       };
     }),

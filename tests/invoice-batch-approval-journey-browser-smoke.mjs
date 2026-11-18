@@ -931,7 +931,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           );
           await ui.getByRole('button', { name: 'Submit invoice Draft for review' }).click();
           await done;
-          const review = accepted.approval;
+          let review = accepted.approval;
           await ui.getByText(/may still be in flight/).waitFor();
           w = wait(p, approvalRoute + '/receipts/request/' + review.requestId);
           await ui.getByRole('button', { name: 'Read original invoice approval receipt' }).click();
@@ -972,17 +972,254 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                 .click();
               assert((await body(readWait)).notification.readAt);
             }
-            await a.getByLabel('Invoice batch review', { exact: true }).selectOption(review.id);
-            w = wait(page, approvalRoute + '/instances/' + review.id);
-            await a.getByRole('button', { name: 'Inspect invoice review' }).click();
-            const inspected = await body(w);
-            assert.equal(inspected.batch.lineCount, 1);
-            await a.getByLabel('Invoice approval decision', { exact: true }).selectOption('Approved');
-            await a.getByLabel('Invoice approval decision reason').fill('Synthetic stage');
-            w = wait(page, approvalRoute + '/instances/' + review.id + '/decisions', 'POST');
-            await a.getByRole('button', { name: 'Record invoice approval decision' }).click();
-            const decided = await body(w, 201);
-            assert.equal(decided.approval.state.sequence, sequence + 1);
+            if (sequence === 0) {
+              const bulk = page.getByRole('region', { name: 'Reviewed invoice bulk decisions' });
+              await bulk.getByLabel('Invoice bulk engagement').selectOption(roots.engagement.id);
+              await bulk.getByLabel('Invoice bulk review reference').fill(review.id);
+              w = wait(page, approvalRoute + '/instances/' + review.id);
+              await bulk.getByRole('button', { name: 'Inspect invoice bulk source' }).click();
+              const inspected = await body(w);
+              assert.equal(inspected.batch.lineCount, 1);
+              await bulk.getByLabel('Invoice bulk decision').selectOption('Approved');
+              await bulk.getByLabel('Invoice bulk reason').fill('Synthetic reviewed decision');
+              await bulk.getByLabel('I inspected this retained source and stage').check();
+              await bulk.getByRole('button', { name: 'Add reviewed invoice' }).click();
+              const staleReview = review,
+                staleRow = bulk.getByRole('article', { name: 'Reviewed invoice ' + staleReview.id });
+              const withdraw = await request(
+                approvalRoute + '/instances/' + staleReview.id + '/withdrawals',
+                {
+                  method: 'POST',
+                  identity: ids.requester,
+                  body: {
+                    expectedOwnerKey: invoiceRequesterKey,
+                    requestId: randomUUID(),
+                    reason: 'Synthetic stale source withdrawal',
+                  },
+                },
+              );
+              assert.equal(withdraw.status, 201, JSON.stringify(withdraw.body));
+              const submitAgain = async () => {
+                const nextSource = ok(
+                  await request(approvalRoute + '/sources/' + draft.batch.id, { identity: ids.requester }),
+                );
+                return ok(
+                  await request(approvalRoute + '/requests', {
+                    method: 'POST',
+                    identity: ids.requester,
+                    body: {
+                      expectedOwnerKey: nextSource.ownerKey,
+                      requestId: randomUUID(),
+                      batchId: draft.batch.id,
+                      expectedPolicyId: policy.id,
+                      expectedLineCount: nextSource.batch.lineCount,
+                      expectedLineageHash: nextSource.batch.lineageHash,
+                      reason: 'Synthetic fresh review',
+                    },
+                  }),
+                  201,
+                ).approval;
+              };
+              review = await submitAgain();
+              assert.equal(
+                (
+                  await pool.query(
+                    'select count(*)::int n from invoice_draft_occupancies where batch_id=$1',
+                    [draft.batch.id],
+                  )
+                ).rows[0].n,
+                1,
+              );
+              const queue = async (region, p, instance, choice, why) => {
+                await region.getByLabel('Invoice bulk review reference').fill(instance.id);
+                const lookup = wait(p, approvalRoute + '/instances/' + instance.id);
+                await region.getByRole('button', { name: 'Inspect invoice bulk source' }).click();
+                await body(lookup);
+                await region.getByText('named approver ' + ids.manager.id, { exact: false }).waitFor();
+                await region.getByText('stage 1', { exact: false }).waitFor();
+                await region.getByLabel('Invoice bulk decision').selectOption(choice);
+                await region.getByLabel('Invoice bulk reason').fill(why);
+                await region.getByLabel('I inspected this retained source and stage').check();
+                await region.getByRole('button', { name: 'Add reviewed invoice' }).click();
+                return region.getByRole('article', { name: 'Reviewed invoice ' + instance.id });
+              };
+              const selfBulk = requester.p.getByRole('region', { name: 'Reviewed invoice bulk decisions' });
+              await selfBulk.getByLabel('Invoice bulk engagement').selectOption(roots.engagement.id);
+              const selfRow = await queue(
+                selfBulk,
+                requester.p,
+                review,
+                'Approved',
+                'Synthetic self refusal',
+              );
+              let selfReply = wait(
+                requester.p,
+                approvalRoute + '/instances/' + review.id + '/decisions',
+                'POST',
+              );
+              await selfBulk.getByRole('button', { name: 'Execute reviewed invoice decisions' }).click();
+              assert.equal((await selfReply).status(), 409);
+              await selfRow.getByText(/Denied/).waitFor();
+              assert.equal(
+                (
+                  await pool.query(
+                    'select count(*)::int n from invoice_batch_approval_transitions where instance_id=$1',
+                    [review.id],
+                  )
+                ).rows[0].n,
+                0,
+              );
+              const rejectedReview = review;
+              let rejectedRow = await queue(
+                bulk,
+                page,
+                rejectedReview,
+                'Rejected',
+                'Synthetic reviewed rejection',
+              );
+              await pool.query(
+                "create function synthetic_invoice_bulk_recipient_refusal() returns trigger language plpgsql as $$begin raise exception 'synthetic recipient refusal' using errcode='IBA03';end$$;create trigger synthetic_invoice_bulk_recipient_refusal before insert on invoice_batch_approval_recipients for each row execute function synthetic_invoice_bulk_recipient_refusal()",
+              );
+              w = wait(page, approvalRoute + '/instances/' + rejectedReview.id + '/decisions', 'POST');
+              await bulk.getByRole('button', { name: 'Execute reviewed invoice decisions' }).click();
+              assert.equal((await w).status(), 409);
+              await staleRow.getByText(/Denied/).waitFor();
+              await rejectedRow.getByText(/Denied/).waitFor();
+              assert.equal(
+                (
+                  await pool.query(
+                    'select count(*)::int n from invoice_batch_approval_transitions where instance_id=$1',
+                    [rejectedReview.id],
+                  )
+                ).rows[0].n,
+                0,
+              );
+              assert.equal(
+                (
+                  await pool.query(
+                    'select count(*)::int n from invoice_draft_occupancies where batch_id=$1',
+                    [draft.batch.id],
+                  )
+                ).rows[0].n,
+                1,
+              );
+              await pool.query(
+                'drop trigger synthetic_invoice_bulk_recipient_refusal on invoice_batch_approval_recipients;drop function synthetic_invoice_bulk_recipient_refusal()',
+              );
+              await rejectedRow
+                .getByRole('button', { name: 'Remove reviewed invoice ' + rejectedReview.id })
+                .click();
+              rejectedRow = await queue(
+                bulk,
+                page,
+                rejectedReview,
+                'Rejected',
+                'Synthetic deliberate fresh review',
+              );
+              w = wait(page, approvalRoute + '/instances/' + rejectedReview.id + '/decisions', 'POST');
+              await bulk.getByRole('button', { name: 'Execute reviewed invoice decisions' }).click();
+              assert.equal((await body(w, 201)).approval.state.status, 'Rejected');
+              await rejectedRow.getByText(/Confirmed/).waitFor();
+              assert.equal(
+                (
+                  await pool.query(
+                    'select count(*)::int n from invoice_batch_approval_transitions where instance_id=$1',
+                    [staleReview.id],
+                  )
+                ).rows[0].n,
+                0,
+              );
+              assert.equal(
+                (
+                  await pool.query(
+                    'select count(*)::int n from invoice_draft_occupancies where batch_id=$1',
+                    [draft.batch.id],
+                  )
+                ).rows[0].n,
+                1,
+              );
+              review = await submitAgain();
+              const row = await queue(bulk, page, review, 'Approved', 'Synthetic current decision');
+              let recorded, finished;
+              const confirmed = new Promise((resolve) => {
+                finished = resolve;
+              });
+              await page.route(
+                '**/api/v1/invoice-batch-approvals/instances/' + review.id + '/decisions',
+                async (intercepted) => {
+                  const response = await intercepted.fetch();
+                  assert.equal(response.status(), 201, await response.text());
+                  recorded = await response.json();
+                  finished();
+                  await intercepted.abort('failed');
+                },
+                { times: 1 },
+              );
+              await bulk.getByRole('button', { name: 'Execute reviewed invoice decisions' }).click();
+              await confirmed;
+              await row.getByText(/Uncertain/).waitFor();
+              assert.equal(
+                await row.getByRole('button', { name: 'Remove reviewed invoice ' + review.id }).isDisabled(),
+                true,
+              );
+              assert.equal(
+                (
+                  await pool.query(
+                    'select count(*)::int n from invoice_batch_approval_transitions where instance_id=$1',
+                    [review.id],
+                  )
+                ).rows[0].n,
+                1,
+              );
+              assert.equal(
+                await bulk.getByRole('button', { name: 'Execute reviewed invoice decisions' }).isDisabled(),
+                true,
+              );
+              const originalScope = await page.evaluate(() =>
+                sessionStorage.getItem('workos_organization_scope'),
+              );
+              await page.evaluate(() => {
+                const scope = JSON.parse(sessionStorage.getItem('workos_organization_scope'));
+                sessionStorage.setItem(
+                  'workos_organization_scope',
+                  JSON.stringify({ ...scope, legalEntityId: 'synthetic-other-entity' }),
+                );
+                window.dispatchEvent(new Event('workos:organization-scope-changed'));
+              });
+              await bulk.getByRole('button', { name: 'Show queue for current account and scope' }).click();
+              assert.equal(
+                await bulk.getByRole('article').count(),
+                0,
+                'A different entity cannot see prior decisions or reasons',
+              );
+              await page.evaluate((scope) => {
+                sessionStorage.setItem('workos_organization_scope', scope);
+                window.dispatchEvent(new Event('workos:organization-scope-changed'));
+              }, originalScope);
+              await bulk.getByRole('button', { name: 'Show queue for current account and scope' }).click();
+              await row.getByText(/Uncertain/).waitFor();
+              const requestId = recorded.approval.transitions[0].requestId;
+              w = wait(page, approvalRoute + '/receipts/decision/' + requestId);
+              await row.getByRole('button', { name: 'Read original invoice decision receipt' }).click();
+              assert.equal((await body(w)).approval.state.sequence, 1);
+              await row.getByText(/Confirmed/).waitFor();
+              assert.equal(
+                await row.getByRole('button', { name: 'Remove reviewed invoice ' + review.id }).isEnabled(),
+                true,
+              );
+            } else {
+              await a.getByLabel('Invoice batch review', { exact: true }).selectOption(review.id);
+              w = wait(page, approvalRoute + '/instances/' + review.id);
+              await a.getByRole('button', { name: 'Inspect invoice review' }).click();
+              const inspected = await body(w);
+              assert.equal(inspected.batch.lineCount, 1);
+              await a.getByLabel('Invoice approval decision', { exact: true }).selectOption('Approved');
+              await a.getByLabel('Invoice approval decision reason').fill('Synthetic stage');
+              w = wait(page, approvalRoute + '/instances/' + review.id + '/decisions', 'POST');
+              await a.getByRole('button', { name: 'Record invoice approval decision' }).click();
+              const decided = await body(w, 201);
+              assert.equal(decided.approval.state.sequence, sequence + 1);
+            }
             assert.equal(
               (
                 await pool.query('select count(*)::int n from invoice_draft_occupancies where batch_id=$1', [

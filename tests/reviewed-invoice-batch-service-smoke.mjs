@@ -1,0 +1,169 @@
+import assert from 'node:assert/strict';
+import { randomUUID, createHash } from 'node:crypto';
+process.env.APP_MODE = 'production';
+process.env.VITE_APP_MODE = 'production';
+process.env.ALLOW_TEST_FALLBACK = 'false';
+process.env.VITE_ALLOW_TEST_FALLBACK = 'false';
+const store = new Map();
+globalThis.sessionStorage = {
+  getItem: (k) => store.get(k) ?? null,
+  setItem: (k, v) => store.set(k, String(v)),
+  removeItem: (k) => store.delete(k),
+};
+globalThis.localStorage = { getItem: () => null };
+globalThis.window = {
+  localStorage,
+  location: { pathname: '/commercial-drafting', href: '/commercial-drafting' },
+  dispatchEvent: () => true,
+};
+const actor = randomUUID(),
+  scope = { organizationId: 'synthetic-org', legalEntityId: 'synthetic-legal' },
+  user = {
+    id: actor,
+    employeeId: 'SYN-ACTOR',
+    userName: 'synthetic-actor',
+    role: 'Admin',
+    permissionRole: 'Admin',
+    permissions: [
+      'commercial.contracts.view',
+      'commercial.tm_billing.view',
+      'commercial.invoice_drafts.view',
+      'commercial.invoice_approval.decide',
+      'approvals.view',
+      'employees.view',
+      'notifications.view',
+    ],
+  },
+  reset = () => {
+    store.set('workos_session', JSON.stringify(user));
+    store.set('workos_organization_scope', JSON.stringify(scope));
+    store.set('workos_api_token', 'synthetic-token');
+  };
+reset();
+const { invoiceBatchApprovals, captureRateContext } = await import(
+  '../src/services/invoiceBatchApprovals.ts'
+);
+const { reviewInvoiceDecision, executeReviewedInvoices, reconcileReviewedInvoice } = await import(
+  '../src/services/reviewedInvoiceBatch.ts'
+);
+const { ApiClientError } = await import('../src/services/apiClient.ts');
+const ownerKey = createHash('sha256')
+  .update(JSON.stringify([user.userName, user.id, user.role, scope.organizationId, scope.legalEntityId]))
+  .digest('hex');
+const sample = () => {
+  const id = randomUUID(),
+    batchId = randomUUID();
+  return {
+    ownerKey,
+    actorUserId: actor,
+    activeRole: 'Admin',
+    batch: {
+      id: batchId,
+      engagementId: 'synthetic-engagement',
+      current: true,
+      state: 'Under Review',
+      lineageHash: 'a'.repeat(64),
+      lineCount: 1,
+      currency: 'USD',
+      total: '100.00',
+    },
+    approval: {
+      id,
+      batchId,
+      current: true,
+      state: { status: 'Pending', sequence: 0, currentStage: 0 },
+      lineageHash: 'a'.repeat(64),
+      lineCount: 1,
+      currency: 'USD',
+      total: '100',
+    },
+  };
+};
+const p = sample(),
+  first = reviewInvoiceDecision(p, 'Approved', 'Synthetic reviewed decision'),
+  second = reviewInvoiceDecision(sample(), 'Rejected', 'Synthetic reviewed rejection'),
+  third = reviewInvoiceDecision(sample(), 'Approved', 'Synthetic third decision');
+assert(Object.isFrozen(first) && Object.isFrozen(first.operation.data));
+assert.throws(() =>
+  reviewInvoiceDecision({ ...p, batch: { ...p.batch, total: '101' } }, 'Approved', 'Synthetic reason'),
+);
+assert.throws(() =>
+  reviewInvoiceDecision(
+    { ...p, approval: { ...p.approval, current: false } },
+    'Approved',
+    'Synthetic reason',
+  ),
+);
+assert.throws(() => reviewInvoiceDecision(p, 'Approved', '  '));
+const original = invoiceBatchApprovals.run;
+let calls = [],
+  out = [];
+invoiceBatchApprovals.run = async (op) => {
+  calls.push(op.data.requestId);
+  if (op.id === second.approval.id) throw new ApiClientError('stale', { status: 409 });
+  return { batchId: p.batch.id };
+};
+await executeReviewedInvoices(
+  [first, second, third],
+  captureRateContext(),
+  () => true,
+  (r) => out.push(r),
+);
+assert.deepEqual(
+  out.map((x) => x.status),
+  ['Confirmed', 'Denied', 'Confirmed'],
+);
+assert.deepEqual(calls, [
+  first.operation.data.requestId,
+  second.operation.data.requestId,
+  third.operation.data.requestId,
+]);
+calls = [];
+out = [];
+invoiceBatchApprovals.run = async (op) => {
+  calls.push(op.data.requestId);
+  throw Error('Synthetic lost response');
+};
+await executeReviewedInvoices(
+  [first, second],
+  captureRateContext(),
+  () => true,
+  (r) => out.push(r),
+);
+assert.deepEqual(
+  out.map((x) => x.status),
+  ['Uncertain', 'NotAttempted'],
+);
+assert.deepEqual(calls, [first.operation.data.requestId]);
+reset();
+calls = [];
+out = [];
+invoiceBatchApprovals.run = async (op) => {
+  calls.push(op.data.requestId);
+  store.set('workos_organization_scope', JSON.stringify({ ...scope, legalEntityId: 'foreign' }));
+  return { batchId: p.batch.id };
+};
+await executeReviewedInvoices(
+  [first, second],
+  captureRateContext(),
+  () => true,
+  (r) => out.push(r),
+);
+assert.deepEqual(
+  out.map((x) => x.status),
+  ['Uncertain', 'NotAttempted'],
+);
+assert.equal(calls.length, 1);
+await assert.rejects(reconcileReviewedInvoice(first, captureRateContext()));
+reset();
+calls = [];
+invoiceBatchApprovals.run = async (op, engagement, ctx, receipt) => {
+  calls.push({ requestId: op.data.requestId, receipt });
+  return { batchId: p.batch.id };
+};
+await reconcileReviewedInvoice(first, captureRateContext());
+assert.deepEqual(calls, [{ requestId: first.operation.data.requestId, receipt: true }]);
+invoiceBatchApprovals.run = original;
+console.log(
+  'Reviewed invoice queue preserves per-item outcomes, context fences, uncertain writes and read-only receipt recovery.',
+);
