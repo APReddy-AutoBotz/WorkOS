@@ -4,6 +4,8 @@ Updated 2026-11-16. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+Commercial drafting recovery covers failed reconciliation reads after a lost or invalid save response. The rate and cost candidate work still depends on scoped worker classification and worker-type controls. Rate approval, adoption, valuation and billing follow that integration.
+
 Material assignment changes can now follow named approval stages. The work package covers edits and ending existing assignments, including import controls. Creation approvals are a separate package. [Material assignment approvals](../tasks/WOS-05-MATERIAL-ASSIGNMENT-APPROVALS.md)
 
 Weekly submission notices cover operator-initiated evaluation of configured UTC deadlines and audited in-app delivery. Automatic scheduling and external delivery remain open. [Deadline notice work package](../tasks/WOS-04-DEADLINE-INAPP-NOTICES.md)

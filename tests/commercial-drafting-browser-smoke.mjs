@@ -120,7 +120,27 @@ try {
     assert.equal(await page.locator('form').count(), 0);
     for (const name of ['New contract / SOW','New engagement','New purchase order','New draft milestone']) assert.equal(await button(name).isDisabled(), true);
     const lockedCalls = await calls();await invoke(['uncertain-discard']);await noDispatch(lockedCalls, 'discard cannot release an uncertain operation lock');
-    after = await lastId();await button('Reload workspace').click();request = await pending('workspace', after);assert.equal(request.method, 'GET');await settle(request, workspace());await ready();assert.equal(await button('New contract / SOW').isEnabled(), true);
+    const writesBeforeReload = (await calls()).filter(call => call.method === 'POST').length;
+    after = await lastId();
+    await button('Reload workspace').click();
+    request = await pending('workspace', after);
+    assert.equal(request.method, 'GET');
+    await settle(request, undefined, 503);
+    await button('Retry workspace').waitFor();
+    assert.equal(await button('New contract / SOW').count(), 0);
+    assert.equal(await page.locator('form').count(), 0);
+    const afterFailure = await calls();
+    await invoke(['uncertain-discard']);
+    await noDispatch(afterFailure, 'an old discard callback cannot bypass a failed reconciliation read');
+
+    after = await lastId();
+    await button('Retry workspace').click();
+    request = await pending('workspace', after);
+    assert.equal(request.method, 'GET');
+    await settle(request, workspace());
+    await ready();
+    assert.equal(await button('New contract / SOW').isEnabled(), true);
+    assert.equal((await calls()).filter(call => call.method === 'POST').length, writesBeforeReload);
   }
 
   // No completed read or save may restore content after a scope/access switch.
