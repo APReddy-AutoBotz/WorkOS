@@ -560,3 +560,5 @@ WOS-COM-001–004 and COM-014/015 are partially implemented by effective-dated b
 Migrations 065b–065f retain immutable versions and existing commercial history. To roll back application access, revoke the new opt-in permissions and redeploy the previous application. Preserve the migration ledger, rate evidence, valuation snapshots and eligibility decisions.
 
 WOS-INV-001–003/005/006/008 are partially covered by scoped draft membership and cancellation. Migration 065g enforces item-version reservation, event provenance and retained history. See [invoice draft acceptance](../tasks/WOS-06-INVOICE-BATCH-OCCUPANCY.md).
+
+WOS-INV-006/008, APR-001–003/006/008 and INT-002/005 are covered for configured invoice batch review by migration 065h, protected in-app notices, independent named decisions and pinned batch membership. Roll back access by revoking the new approval permissions. Preserve review history and reservations, and resolve under-review batches before reverting the application. [Batch approval specification and acceptance](../tasks/WOS-06-INVOICE-BATCH-APPROVAL.md)

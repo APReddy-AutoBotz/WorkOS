@@ -62,7 +62,7 @@ const batch = z
     reason,
     createdAt: instant,
     ownerCurrent: z.boolean(),
-    state: z.enum(['Draft', 'Cancelled']),
+    state: z.enum(['Draft', 'Under Review', 'Approved', 'Cancelled']),
   })
   .strict()
   .refine((x) => x.periodStart <= x.periodEnd);

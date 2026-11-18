@@ -1,0 +1,229 @@
+import assert from 'node:assert/strict';
+import { randomUUID, createHash } from 'node:crypto';
+process.env.APP_MODE = 'production';
+process.env.VITE_APP_MODE = 'production';
+process.env.ALLOW_TEST_FALLBACK = 'false';
+process.env.VITE_ALLOW_TEST_FALLBACK = 'false';
+const store = new Map(),
+  fallback = [],
+  calls = [];
+globalThis.sessionStorage = {
+  getItem: (k) => store.get(k) ?? null,
+  setItem: (k, v) => store.set(k, String(v)),
+  removeItem: (k) => store.delete(k),
+};
+globalThis.localStorage = Object.fromEntries(
+  ['getItem', 'setItem', 'removeItem', 'clear'].map((k) => [
+    k,
+    () => {
+      fallback.push(k);
+      throw Error('No fallback');
+    },
+  ]),
+);
+globalThis.window = {
+  localStorage,
+  location: { pathname: '/commercial-drafting', href: '/commercial-drafting' },
+  dispatchEvent: () => true,
+};
+const actor = randomUUID(),
+  scope = { organizationId: 'synthetic-org', legalEntityId: 'synthetic-legal' },
+  user = {
+    id: actor,
+    employeeId: 'SYN-ACTOR',
+    userName: 'synthetic-actor',
+    role: 'Admin',
+    permissionRole: 'Admin',
+    permissions: [
+      'commercial.contracts.view',
+      'commercial.tm_billing.view',
+      'commercial.invoice_drafts.view',
+      'commercial.invoice_drafts.prepare',
+      'commercial.invoice_approval.manage',
+      'commercial.invoice_approval.decide',
+      'approvals.view',
+      'employees.view',
+      'notifications.view',
+    ],
+  },
+  reset = () => {
+    store.set('workos_session', JSON.stringify(user));
+    store.set('workos_organization_scope', JSON.stringify(scope));
+    store.set('workos_api_token', 'synthetic-token');
+  };
+reset();
+const { invoiceBatchApprovals: s, captureRateContext: capture } = await import(
+  '../src/services/invoiceBatchApprovals.ts'
+);
+const ownerKey = createHash('sha256')
+    .update(JSON.stringify([user.userName, user.id, user.role, scope.organizationId, scope.legalEntityId]))
+    .digest('hex'),
+  base = { ...scope, ownerKey, actorUserId: actor, activeRole: 'Admin', serverDate: '2026-10-28' },
+  batchId = randomUUID(),
+  snapshotId = randomUUID(),
+  policyId = randomUUID(),
+  requestId = randomUUID(),
+  approver = randomUUID(),
+  refs = ['Project', 'Engagement', 'Contract'].map((entityType) => ({
+    entityType,
+    entityId:
+      entityType === 'Project'
+        ? 'synthetic-project'
+        : entityType === 'Engagement'
+          ? 'synthetic-engagement'
+          : 'synthetic-contract',
+    lifecycleEventId: 'synthetic-lifecycle',
+    contractVersionId: 'synthetic-version',
+  })),
+  evidence = {
+    snapshotId,
+    engagementId: 'synthetic-engagement',
+    policyId: randomUUID(),
+    submissionId: 'synthetic-submission',
+    decisionId: 'synthetic-decision',
+    entryId: randomUUID(),
+    billingAdoptionId: randomUUID(),
+    projectId: 'synthetic-project',
+    bindingId: 'synthetic-binding',
+    workDate: '2026-10-28',
+    references: refs,
+    currency: 'USD',
+    amount: '125.15',
+  },
+  line = {
+    id: randomUUID(),
+    sequence: 1,
+    itemId: randomUUID(),
+    itemVersion: 1,
+    eventId: randomUUID(),
+    snapshotId,
+    currency: 'USD',
+    amount: '125.15',
+    evidence,
+  },
+  source = {
+    id: batchId,
+    state: 'Draft',
+    current: true,
+    currency: 'USD',
+    clientId: 'synthetic-client',
+    contractId: 'synthetic-contract',
+    engagementId: 'synthetic-engagement',
+    periodStart: '2026-10-28',
+    periodEnd: '2026-10-28',
+    periodBasis: 'WORK_DATE',
+    lineageHash: 'a'.repeat(64),
+    lines: [line],
+    total: '125.15',
+    lineCount: 1,
+  },
+  templates = [
+    'approval.action_required',
+    'approval.rejected_or_correction_required',
+    'approval.completed',
+  ].map((key) => ({ key, subject: 'Review {{sourceRef}}', body: 'Stage {{stageNumber}}' })),
+  policy = {
+    id: policyId,
+    engagementId: source.engagementId,
+    sequence: 1,
+    previousId: null,
+    effectiveFrom: '2026-10-28',
+    definition: {
+      entityType: 'InvoiceBatch',
+      engagementId: source.engagementId,
+      stages: [{ userId: approver, role: 'Admin' }],
+      locale: 'en-US',
+      templates,
+      completionInApp: false,
+    },
+    actorId: actor,
+    activeRole: 'Admin',
+    reason: 'Synthetic policy',
+    requestId: randomUUID(),
+    createdAt: '2026-10-28T00:00:00Z',
+  },
+  approval = {
+    id: randomUUID(),
+    batchId,
+    sequence: 1,
+    ownerUserId: actor,
+    ownerRole: 'Admin',
+    preparerUserId: actor,
+    preparerRole: 'Admin',
+    requesterUserId: actor,
+    activeRole: 'Admin',
+    requestId,
+    reason: 'Synthetic review',
+    lineCount: 1,
+    lineageHash: source.lineageHash,
+    currency: 'USD',
+    total: '125.15',
+    createdAt: '2026-10-28T00:00:00Z',
+    policy,
+    state: { status: 'Pending', sequence: 0, currentStage: 0 },
+    current: true,
+    transitions: [],
+    cancellation: null,
+  };
+let raw = { ...base, batch: source },
+  mutate = () => {};
+globalThis.fetch = async (url, init) => {
+  calls.push({ url, init });
+  mutate();
+  return new Response(JSON.stringify(raw), { status: 200, headers: { 'Content-Type': 'application/json' } });
+};
+assert.equal((await s.source(batchId, capture())).id, batchId);
+const valid = raw;
+for (const bad of [
+  { ...valid, legalEntityId: 'foreign' },
+  { ...valid, actorUserId: randomUUID() },
+  { ...valid, batch: { ...source, total: '125.16' } },
+  { ...valid, batch: { ...source, lines: [{ ...line, evidence: { ...evidence, costValue: '50' } }] } },
+  { ...valid, batch: { ...source, lines: [{ ...line, sequence: 2 }] } },
+]) {
+  raw = bad;
+  await assert.rejects(s.source(batchId, capture()), { status: 503 });
+}
+raw = valid;
+for (const change of [
+  () => store.set('workos_api_token', 'other'),
+  () => store.set('workos_organization_scope', JSON.stringify({ ...scope, legalEntityId: 'foreign' })),
+  () =>
+    store.set('workos_session', JSON.stringify({ ...user, role: 'Employee', permissionRole: 'Employee' })),
+]) {
+  reset();
+  const c = capture();
+  mutate = change;
+  await assert.rejects(s.source(batchId, c), { status: 403 });
+  const n = calls.length;
+  await assert.rejects(s.source(batchId, c), { status: 403 });
+  assert.equal(calls.length, n);
+}
+reset();
+mutate = () => {};
+raw = { ...base, approval, replayed: false };
+const op = {
+  type: 'request',
+  data: {
+    requestId,
+    batchId,
+    expectedPolicyId: policyId,
+    expectedLineCount: 1,
+    expectedLineageHash: source.lineageHash,
+    reason: 'Synthetic review',
+  },
+};
+assert.equal((await s.run(op, source.engagementId, capture())).id, approval.id);
+raw = { ...raw, approval: { ...approval, lineageHash: 'b'.repeat(64) } };
+await assert.rejects(s.run(op, source.engagementId, capture()), { status: 503 });
+const n = calls.length;
+globalThis.fetch = async () => {
+  calls.push({});
+  throw Error('Synthetic uncertain transport');
+};
+await assert.rejects(s.run(op, source.engagementId, capture()));
+assert.equal(calls.length, n + 1, 'An uncertain request is not retried automatically');
+assert.deepEqual(fallback, []);
+console.log(
+  'Invoice approval response, totals, source pins, scope fences and uncertain-write behavior passed.',
+);
