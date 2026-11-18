@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Full-day leave requests use the worker’s effective schedule and calendar once adopted. Each request retains the dates counted, so approvals, leave balances and utilization can use the same evidence. [Calendar leave intake](docs/tasks/WOS-04-CALENDAR-LEAVE-INTAKE.md)
+
 Actual Utilization reconciles approved hours against eligible capacity for a selected worker and period. The report shows excluded hours, unresolved classifications and the sources behind its percentage. [Actual work reconciliation](docs/tasks/WOS-04-ACTUAL-WORK-RECONCILIATION.md)
 
 Buyers can adopt effective-dated work categories for project, descriptive client and non-client work. Capture and CSV imports retain the selected catalog version with the submitted entry. [Work category specification](docs/tasks/WOS-04-WORK-CATEGORY-CONTEXT.md)

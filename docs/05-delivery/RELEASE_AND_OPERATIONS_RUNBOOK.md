@@ -490,3 +490,5 @@ Migration 058a serializes source and policy writes per organization and legal en
 Apply migration 059 before enabling the work category editor. Existing entries retain their original classification. Adopt a catalog explicitly for each participating legal entity. Preserve the catalog versions and retained entry references on rollback. Resume category-aware writes with a compatible application.
 
 Apply migration 060 before exposing actual work evidence exports. Preserve the immutable evidence rows, request identities and artifact checksums on rollback. Use a compatible reader to retrieve existing evidence. A missing capacity or classification source leaves the percentage unavailable.
+
+Apply migration 061 before serving calendar-backed full-day leave. Retain the immutable request evidence and its date allocations on rollback. Use a compatible application for subsequent edits and decisions. If the schedule changes before approval, review the dates and submit an updated request.
