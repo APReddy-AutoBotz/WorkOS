@@ -29,3 +29,7 @@ Finance can load older policies by descending version and more approved entries 
 Inspect a retained snapshot to see the original native currency, hourly amounts, candidate IDs, bindings, priorities and effective periods. The governed-tm/1 calculation selects a unique highest-priority adopted match for each source. The opt-in read follows the snapshot’s immutable adoption IDs. It requires valuation, billing, cost and worker scope. Reverting the application preserves retained financial records.
 
 After calculation, original receipt recovery or historical inspection, the workspace displays both pre-rounding products and per-entry rounded amounts from the retained snapshot. The explanation uses the exact policy version attached to the calculation. The existing financial and worker access checks protect its cost figures. An application revert preserves all receipts.
+
+## Period gross margin
+
+Select an engagement and inclusive work dates, then load the period margin. Each currency row totals the retained rounded values of entries visible under the current workforce and confidential cost permissions. Gross-margin percentage divides total margin by total billable value and rounds to two decimals, with ties away from zero. A zero denominator displays as undefined. Reload to include newly retained entries. Billing eligibility remains a separate decision. The report performs no writes and requires no migration. Reverting the application removes the report. Frozen period-close records and portfolio reporting remain open.

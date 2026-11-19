@@ -523,6 +523,30 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.ok(!JSON.stringify(denied.body).includes(cost.id));
         await result.getByText(/billable 125.15, cost 50.00, margin 75.15/).waitFor();
         await verifyCalculation();
+        const periodPath = (start, end) =>
+          base + '/period-summary?' + new URLSearchParams({ engagementId: roots.engagement.id, start, end });
+        const range = periodPath(fx.today, fx.today);
+        await tm.getByLabel('Work date from').fill(fx.today);
+        await tm.getByLabel('Work date through').fill(fx.today);
+        const report = reply(base + '/period-summary');
+        await tm.getByRole('button', { name: 'Load period margin' }).click();
+        assert.deepEqual((await body(report)).totals, [
+          {
+            currency: 'USD',
+            entryCount: '1',
+            hours: '1.25',
+            billable: '125.15',
+            cost: '50.00',
+            margin: '75.15',
+            marginPercent: '60.05',
+          },
+        ]);
+        await tm.getByRole('cell', { name: '60.05%' }).waitFor();
+        await tm.getByLabel('Work date through').fill(end);
+        assert.equal(await tm.getByRole('region', { name: 'Period margin results' }).count(), 0);
+        assert.deepEqual(ok(await request(periodPath(end, end))).totals, []);
+        assert.equal((await request(periodPath(end, fx.today))).status, 400);
+        assert.equal((await request(range, { identity: ids.reader })).status, 403);
         await tm.getByLabel('T&M approved work', { exact: true }).selectOption(second.entryId);
         await tm.getByLabel('Retained T&M policy', { exact: true }).selectOption(policy.id);
         const bw2 = rateWait('billing'),
@@ -586,6 +610,32 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             { entry_id: entryId, billing_adoption_id: adoptionId, amount },
           );
         }
+        assert.deepEqual(ok(await request(range)).totals, [
+          {
+            currency: 'USD',
+            entryCount: '2',
+            hours: '3.75',
+            billable: '625.15',
+            cost: '150.01',
+            margin: '475.14',
+            marginPercent: '76.00',
+          },
+        ]);
+        // A finance reader with employee-only scope can see their own totals alone.
+        await pool.query(
+          "insert into role_permissions(role_name,permission_key,enabled) select 'Employee',k,true from unnest($1::text[]) k on conflict(role_name,permission_key) do update set enabled=true",
+          [
+            [
+              'commercial.contracts.view',
+              'commercial.rate_candidates.view',
+              'commercial.cost_candidates.view',
+              'employees.view',
+              'commercial.tm_valuation.view',
+            ],
+          ],
+        );
+        assert.deepEqual(ok(await request(range, { identity: ids.first })).totals, []);
+        assert.equal(ok(await request(range, { identity: ids.reader })).totals[0].entryCount, '2');
         assert.deepEqual(errors, []);
         assert.deepEqual(external, []);
         await ctx.close();

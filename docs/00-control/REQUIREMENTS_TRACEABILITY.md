@@ -596,3 +596,5 @@ WOS-COM-014/015 — The commercial candidate approval journey schedules eleven f
 WOS-COM-002/003/011 — Snapshot inspection reads effective periods, binding and priority through the exact billing and cost adoption IDs retained at calculation. The browser test adopts a higher-priority billing rate, verifies the earlier snapshot and uses the new rate for a different entry. Cost and worker access apply to the read.
 
 WOS-COM-003/004/011 — T&M calculation evidence presents the approved quantity, hourly rates, exact products and rounded billable and cost amounts, gross margin arithmetic, policy version, calculation version, actor and timestamp. The real browser journey verifies receipt recovery and later inspection with a different prospective rounding policy.
+
+WOS-COM-011, WOS-COM-002 and WOS-COM-004 — The T&M period report totals retained valuation snapshots by currency. The governed T&M journey verifies the weighted margin across a rate change, date boundaries and restricted access. Frozen period-close records remain open.

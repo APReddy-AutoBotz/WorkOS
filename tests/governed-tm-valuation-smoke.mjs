@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict';
 import { calculateTmEntry, validTmValuationPolicy } from '../shared/governed-tm-valuation.mjs';
+import { periodMarginPercent } from '../server/modules/commercial-tm/period-margin.mjs';
+for (const [billable, cost, expected] of [
+  ['0.00', '20', null],
+  ['0', '0', null],
+  ['20', '30', '-50.00'],
+  ['32', '31', '3.13'],
+  ['32', '33', '-3.13'],
+  ['1000000000000000000.00', '1000000000000000000.01', '0.00'],
+  ['11', '0', '100.00'],
+])
+  assert.equal(periodMarginPercent(billable, cost), expected);
 const p = {
     version: 'governed-tm/1',
     currency: 'USD',

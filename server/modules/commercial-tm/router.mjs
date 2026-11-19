@@ -1,3 +1,4 @@
+import { periodMarginPercent } from './period-margin.mjs';
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -258,6 +259,47 @@ export const createGovernedTmRouter = (o) => {
         details: 'No seeded rounding, grant or invoice authority.',
       });
       return { ...env, policy: row, replayed: false };
+    }),
+  );
+  router.get(
+    '/period-summary',
+    handle(false, async (c, r) => {
+      const q = parse(
+        z
+          .object({ engagementId: textId, start: date, end: date })
+          .strict()
+          .refine((v) => v.start <= v.end),
+        r.query,
+      );
+      await authorize(c, r);
+      await engagement(c, r, q.engagementId);
+      const params = [...scope(r), q.engagementId, q.start, q.end];
+      const workerScope = o.buildEmployeeScopeWhere(r, params, 'worker');
+      const totals = await c.query(
+        `
+        select v.result->>'currency' currency,count(*)::text as "entryCount",
+          sum((v.result->>'hoursExact')::numeric)::text as hours,
+          sum((v.result->>'billableValue')::numeric)::text as billable,
+          sum((v.result->>'costValue')::numeric)::text as cost,
+          sum((v.result->>'marginValue')::numeric)::text as margin
+        from commercial_tm_valuations v
+        join work_submission_evidence s on s.id=v.submission_id and s.organization_id=v.organization_id and s.legal_entity_id=v.legal_entity_id
+        join timesheets t on t.id=s.timesheet_id and t.organization_id=s.organization_id and t.legal_entity_id=s.legal_entity_id
+        join employees worker on worker.id=t.employee_id
+        where v.organization_id=$1 and v.legal_entity_id=$2 and v.engagement_id=$3
+          and (v.source_evidence->>'workDate')::date between $4::date and $5::date and (${workerScope})
+        group by v.result->>'currency' order by currency`,
+        params,
+      );
+      return {
+        ...(await envelope(c, r)),
+        version: 'tm-period-margin/1',
+        ...q,
+        totals: totals.rows.map((row) => ({
+          ...row,
+          marginPercent: periodMarginPercent(row.billable, row.cost),
+        })),
+      };
     }),
   );
   router.get(

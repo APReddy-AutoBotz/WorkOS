@@ -75,6 +75,11 @@ const TmEngagement = ({
     [selectedSource, setSelectedSource] = useState(''),
     [selectedPolicy, setSelectedPolicy] = useState(''),
     [rates, setRates] = useState<TmRates | null>(null),
+    [periodStart, setPeriodStart] = useState(''),
+    [periodEnd, setPeriodEnd] = useState(''),
+    [summary, setSummary] = useState<Awaited<ReturnType<typeof governedTmValuations.periodSummary>> | null>(
+      null,
+    ),
     [snapshot, setSnapshot] = useState<{
       valuation: TmValuation;
       policy: TmPolicy;
@@ -111,6 +116,9 @@ const TmEngagement = ({
     setSelectedSource('');
     setSelectedPolicy('');
     setRates(null);
+    setSummary(null);
+    setPeriodStart('');
+    setPeriodEnd('');
     setSnapshot(null);
     setPending(null);
     setEffective('');
@@ -336,6 +344,7 @@ const TmEngagement = ({
     void run(async (c) => {
       setPending({ kind: 'valuation', command, policy: chosenPolicy, source: chosenSource, rates });
       try {
+        setSummary(null);
         const v = await governedTmValuations.calculate(command, chosenPolicy, chosenSource, rates, c);
         setPending(null);
         setSnapshot({ valuation: v, policy: chosenPolicy });
@@ -375,6 +384,7 @@ const TmEngagement = ({
         const v = await governedTmValuations.policy(pending.command, c, true);
         setNotice('Original policy ' + v.id + ' confirmed by read-only receipt.');
       } else {
+        setSummary(null);
         const v = await governedTmValuations.calculate(
           pending.command,
           pending.policy,
@@ -400,6 +410,96 @@ const TmEngagement = ({
       <button type="button" onClick={load} disabled={busy || !!pending}>
         Load T&M policy and approved work
       </button>
+      <fieldset disabled={busy || !!pending} className="space-y-2">
+        <legend>Period gross margin</legend>
+        <label>
+          Work date from{' '}
+          <input
+            type="date"
+            value={periodStart}
+            onChange={(e) => {
+              setPeriodStart(e.target.value);
+              setSummary(null);
+            }}
+          />
+        </label>
+        <label>
+          Work date through{' '}
+          <input
+            type="date"
+            value={periodEnd}
+            onChange={(e) => {
+              setPeriodEnd(e.target.value);
+              setSummary(null);
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={!periodStart || !periodEnd || periodStart > periodEnd}
+          onClick={() =>
+            void run(async (c) => {
+              setSummary(null);
+              setSummary(await governedTmValuations.periodSummary(engagementId, periodStart, periodEnd, c));
+            })
+          }
+        >
+          Load period margin
+        </button>
+      </fieldset>
+      {summary && (
+        <section aria-label="Period margin results">
+          <h3>
+            Period margin · {summary.start} through {summary.end}
+          </h3>
+          {!summary.totals.length ? (
+            <p>No visible valuation snapshots for this period.</p>
+          ) : (
+            <>
+              <p>Gross margin divided by billable value, rounded to two decimal places per currency.</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left tabular-nums">
+                  <caption>Retained valuations by work date</caption>
+                  <thead>
+                    <tr>
+                      {[
+                        'Currency',
+                        'Entries',
+                        'Hours',
+                        'Billable value',
+                        'Cost',
+                        'Gross margin',
+                        'Margin %',
+                      ].map((h) => (
+                        <th key={h} scope="col">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.totals.map((x) => (
+                      <tr key={x.currency}>
+                        <th scope="row">{x.currency}</th>
+                        <td>{x.entryCount}</td>
+                        <td>{x.hours}</td>
+                        <td>{x.billable}</td>
+                        <td>{x.cost}</td>
+                        <td>{x.margin}</td>
+                        <td>
+                          {x.marginPercent === null
+                            ? 'Undefined (zero billable value)'
+                            : x.marginPercent + '%'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
+      )}
       {policies && morePolicies && (
         <button type="button" onClick={loadPolicies} disabled={busy || !!pending}>
           Load older T&amp;M policies
