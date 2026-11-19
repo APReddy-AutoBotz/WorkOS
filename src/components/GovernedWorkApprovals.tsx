@@ -1,3 +1,4 @@
+import type { ReversalInspection } from '../services/reversalReviewDecisions';
 import { useEffect, useRef, useState } from 'react';
 import { APPROVAL_EVENT_KEYS, validWorkApprovalPolicy, approvalUuid } from '../../shared/work-approval.mjs';
 import { compareCapabilityIds, validCapabilityDate } from '../../shared/workforce-capabilities.mjs';
@@ -109,5 +110,44 @@ export const CanonicalApprovalInbox = () => {
     } });
     if (!captureWorkApprovalContext('inbox'))
         return null;
-    return <section aria-label="Canonical work approval notifications" className="my-4 rounded-xl border p-4 space-y-3"><h2 className="font-semibold">My governed work notifications</h2><p>These are retained canonical in-app events addressed to your account in the current scope. A message is a retained observation; inspect the current work or approval source before acting. External delivery is not invoked.</p><button disabled={lease.waiting} onClick={() => void load()}>Load my governed notifications</button>{next && <button disabled={lease.waiting} onClick={() => void load(next)}>More governed notifications</button>}{lease.notice && <p role="status">{lease.notice}</p>}{rows.map(n => <article key={n.id} aria-label={`Governed notification ${n.id}`} className="rounded border p-3"><h3>{n.title}</h3><p>{n.body}</p><p>{n.eventKey} · {n.policyClass} · {n.locale} · {n.createdAt}</p><p>Recipient reasons: {n.reasons.join(', ')} · In-app {n.channelDecision} · {n.readAt ? 'Read ' + n.readAt : 'Unread'}</p>{'kind'in n&&n.kind==='milestone-billing-eligibility'?<p>Milestone {n.milestoneId} · Approval instance {n.instanceId} · Delivery {n.deliveryStatus}</p>:'kind'in n&&n.kind==='invoice-action'?<p>Invoice batch {n.batchId} · Action required</p>:'kind'in n&&n.kind==='invoice-export'?<p>Invoice batch {n.batchId} · Delivery {n.deliveryStatus}</p>:'kind'in n&&n.kind==='invoice-reversal-review'?<p>Full-line reversal review {n.instanceId} · Invoice batch {n.batchId}</p>:'kind'in n&&n.kind==='invoice-batch-approval'?<p>Invoice batch {n.batchId} · Approval instance {n.instanceId}</p>:'kind'in n&&n.kind==='tm-billing-eligibility'?<p>Billing eligibility · Snapshot {n.snapshotId}</p>:'kind'in n&&n.kind==='commercial-candidate-approval'?<p>Commercial candidate {n.candidateId} · Approval instance {n.instanceId}</p>:'kind'in n&&n.kind==='assignment-approval'?<p>Assignment {n.assignmentId} · Approval instance {n.instanceId} · Accepted in-app delivery {n.deliveryStatus}</p>:'kind'in n?<p>Work period {n.periodId} · Accepted in-app delivery {n.deliveryStatus}</p>:<p>Approval instance {n.instanceId}</p>}{!n.readAt && <button disabled={lease.waiting || lease.phase === 'uncertain'} onClick={() => void read(n)}>Mark governed notification read {n.id}</button>}</article>)}</section>;
+    return <section aria-label="Canonical work approval notifications" className="my-4 rounded-xl border p-4 space-y-3"><h2 className="font-semibold">My governed work notifications</h2><p>These are retained canonical in-app events addressed to your account in the current scope. A message is a retained observation; inspect the current work or approval source before acting. External delivery is not invoked.</p><button disabled={lease.waiting} onClick={() => void load()}>Load my governed notifications</button>{next && <button disabled={lease.waiting} onClick={() => void load(next)}>More governed notifications</button>}{lease.notice && <p role="status">{lease.notice}</p>}{rows.map(n => <article key={n.id} aria-label={`Governed notification ${n.id}`} className="rounded border p-3"><h3>{n.title}</h3><p>{n.body}</p><p>{n.eventKey} · {n.policyClass} · {n.locale} · {n.createdAt}</p><p>Recipient reasons: {n.reasons.join(', ')} · In-app {n.channelDecision} · {n.readAt ? 'Read ' + n.readAt : 'Unread'}</p>{'kind'in n&&n.kind==='milestone-billing-eligibility'?<p>Milestone {n.milestoneId} · Approval instance {n.instanceId} · Delivery {n.deliveryStatus}</p>:'kind'in n&&n.kind==='invoice-action'?<p>Invoice batch {n.batchId} · Action required</p>:'kind'in n&&n.kind==='invoice-export'?<p>Invoice batch {n.batchId} · Delivery {n.deliveryStatus}</p>:'kind'in n&&n.kind==='invoice-reversal-decision'&&n.reasons.every(reason=>reason==='affected_worker')?<p>Full-line reversal review {n.instanceId}</p>:'kind'in n&&(n.kind==='invoice-reversal-review'||n.kind==='invoice-reversal-decision')?<ReversalDecisionPanel id={n.instanceId} batchId={n.batchId}/>:'kind'in n&&n.kind==='invoice-batch-approval'?<p>Invoice batch {n.batchId} · Approval instance {n.instanceId}</p>:'kind'in n&&n.kind==='tm-billing-eligibility'?<p>Billing eligibility · Snapshot {n.snapshotId}</p>:'kind'in n&&n.kind==='commercial-candidate-approval'?<p>Commercial candidate {n.candidateId} · Approval instance {n.instanceId}</p>:'kind'in n&&n.kind==='assignment-approval'?<p>Assignment {n.assignmentId} · Approval instance {n.instanceId} · Accepted in-app delivery {n.deliveryStatus}</p>:'kind'in n?<p>Work period {n.periodId} · Accepted in-app delivery {n.deliveryStatus}</p>:<p>Approval instance {n.instanceId}</p>}{!n.readAt && <button disabled={lease.waiting || lease.phase === 'uncertain'} onClick={() => void read(n)}>Mark governed notification read {n.id}</button>}</article>)}</section>;
 };
+
+
+function ReversalDecisionPanel({id,batchId}:{id:string;batchId:string}) {
+  const [source,setSource]=useState<ReversalInspection|null>(null);
+  const [choice,setChoice]=useState<'Approved'|'Rejected'|''>('');
+  const [reason,setReason]=useState('');
+  const clear=()=>{setSource(null);setReason('');setChoice('');};
+  const lease=useApprovalLease(clear);
+  const inspect=()=>lease.run('inbox',false,async(c,live)=>{
+    clear();
+    const result=await workApprovals.reversalReview(id,batchId,c);
+    if(live())setSource(result);
+  });
+  const decide=()=>source?.canDecide && choice && reason.trim().length>=3 && lease.run('inbox',true,async(c,live)=>{
+    const input={source,decision:choice,reason:reason.trim()};
+    clear();
+    const result=await workApprovals.reversalReview(id,batchId,c,input);
+    if(live())setSource(result);
+  });
+  return <section aria-label="Reversal review evidence">
+    <p>Full-line reversal review {id} · Invoice batch {batchId}</p>
+    <button type="button" disabled={lease.waiting} onClick={()=>void inspect()}>Inspect reversal evidence</button>
+    {lease.notice && <p role="status">{lease.notice}</p>}
+    {source && <div>
+      <p>Requested full reversal of {source.currency} {source.amount} · {source.requestReason}</p>
+      <p>Line {source.lineId} · Original export {source.artifactId} · SHA-256 {source.sha256}</p>
+      <p>{source.externalReference ? 'Downstream confirmation '+source.externalReference : 'Awaiting downstream confirmation'}</p>
+      <p>Policy {source.policyId} · Review {source.status} · {source.decisions.length} of {source.stageCount} decisions recorded</p>
+      <ol>{source.decisions.map(d=><li key={d.id}>Stage {d.sequence} · {d.decision} · {d.activeRole} {d.actorId} · {d.reason}</li>)}</ol>
+      {source.canDecide && <fieldset disabled={lease.waiting}>
+        <label>Reversal decision <select aria-label="Reversal decision" value={choice} onChange={e=>setChoice(e.target.value as typeof choice)}>
+          <option value="">Choose a decision</option><option>Approved</option><option>Rejected</option>
+        </select></label>
+        <label>Reversal decision reason <input aria-label="Reversal decision reason" value={reason} maxLength={1000} onChange={e=>setReason(e.target.value)}/></label>
+        <button type="button" disabled={!choice||reason.trim().length<3} onClick={()=>void decide()}>Record reversal decision</button>
+      </fieldset>}
+    </div>}
+  </section>;
+}

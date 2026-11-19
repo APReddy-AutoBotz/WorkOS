@@ -464,7 +464,7 @@ const reviewRoute = z.discriminatedUnion('status', [
 ]);
 const submittedReview = z.object({
   id: uuid, requestId: uuid, policyId: uuid, confirmationId: uuid.nullable(), reviewerId: uuid,
-  reviewerRole: id, createdAt: instant,
+  reviewerRole: id, createdAt: instant, state: z.enum(['Pending','Approved','Rejected']).optional(),
 }).strict();
 export type SubmittedReversalReview = z.infer<typeof submittedReview>;
 export type InvoiceReversalRoute = z.infer<typeof reviewRoute>;
