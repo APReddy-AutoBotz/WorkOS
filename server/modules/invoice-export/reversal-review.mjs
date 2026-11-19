@@ -15,7 +15,12 @@ export function registerReversalReview(router, { path, handle, inspect, envelope
   const load = async (c, r, write) => {
     const data = await inspect(c, r, write);
     if (!data.existing) throw fail(404, 'Reversal request unavailable.');
-    const saved = await c.query('select ' + fields + ' from invoice_reversal_reviews where request_id=$1', [data.existing.id]);
+    const saved = await c.query(
+      'select ' + fields + `,(select case when bool_or(d.decision='Rejected') then 'Rejected'
+        when count(*)=jsonb_array_length(p.definition->'stages') then 'Approved' else 'Pending' end
+        from invoice_reversal_decisions d where d.review_id=s.id) as state
+       from invoice_reversal_reviews s join lateral (select definition from invoice_batch_approval_policies where id=s.policy_id) p on true
+       where s.request_id=$1`, [data.existing.id]);
     return { ...data, review: saved.rows[0] ?? null };
   };
   const canSubmit = async (c, r, row, existing) => existing.actorId === r.user.sub && existing.activeRole === r.user.activeRole &&

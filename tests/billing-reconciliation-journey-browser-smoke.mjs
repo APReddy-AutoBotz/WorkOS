@@ -1504,6 +1504,55 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await reversalCard.getByRole('button', { name: /read/i }).click();
           assert.ok((await body(reversalRead)).notification.readAt);
 
+          const reviewPath = work + '/reversal-reviews/' + submittedReview.id;
+          await reversalCard.getByRole('button', { name: 'Inspect reversal evidence' }).click();
+          await reversalCard.getByText(/Requested full reversal of USD/).waitFor();
+          const evidence = ok(await request(reviewPath, { identity: ids.manager })).review;
+          assert.equal(evidence.sha256, artifact.sha256);
+          assert.equal(evidence.canDecide, true);
+          assert.equal((await request(reviewPath, {identity:ids.second})).status, 404);
+          const firstCommand = { expectedOwnerKey: await readApprovalOwner(request, ids.manager), expectedSequence: 0,
+            confirmationId: evidence.confirmationId,policyId: policy.id,decision:'Approved',reason:'Synthetic reviewed export' };
+          const decideReversal = (identity, data) => request(reviewPath + '/decisions', {method:'POST',identity,body:data});
+          assert.equal((await decideReversal(ids.manager, {...firstCommand, confirmationId: null})).status,409);
+          await pool.query("create function synthetic_refuse_stage() returns trigger language plpgsql as $$begin if new.action='Decide Full Line Reversal' then raise exception 'audit refused'; end if;return new;end$$;create trigger synthetic_refuse_stage before insert on audit_logs for each row execute function synthetic_refuse_stage()");
+          assert.equal((await decideReversal(ids.manager,firstCommand)).status,503);
+          assert.equal((await pool.query('select count(*)::int n from invoice_reversal_decision_notices')).rows[0].n,0);
+          await pool.query('drop trigger synthetic_refuse_stage on audit_logs');
+          await reversalCard.getByLabel('Reversal decision', {exact:true}).selectOption('Approved');
+          await reversalCard.getByLabel('Reversal decision reason').fill(firstCommand.reason);
+          await reversalCard.getByRole('button', {name:'Record reversal decision'}).click();
+          await reversalCard.getByText(/1 of 2 decisions recorded/).waitFor();
+          assert.equal(ok(await decideReversal(ids.manager,firstCommand)).replayed,true);
+          assert.equal((await decideReversal(ids.manager,{...firstCommand,decision:'Rejected'})).status,409);
+          const secondInbox = ok(await request(work+'/inbox',{identity:ids.second})).notifications;
+          const assigned = secondInbox.find(n=>n.kind==='invoice-reversal-decision' && n.instanceId===submittedReview.id);
+          assert.equal(assigned.eventKey,'approval.action_required');
+          assert.equal(ok(await request(work+'/inbox/'+assigned.id+'/read',{method:'POST',identity:ids.second,
+            body:{expectedOwnerKey:await readApprovalOwner(request,ids.second)}})).notification.id,assigned.id);
+          const lastDecision = process.argv.includes('--reject-reversal') ? 'Rejected' : 'Approved';
+          const lastCommand = {...firstCommand, decision:lastDecision, expectedSequence:1, expectedOwnerKey:await readApprovalOwner(request,ids.second), reason:'Synthetic final review'};
+          assert.equal(ok(await decideReversal(ids.second,lastCommand),201).review.status,lastDecision);
+          assert.equal(ok(await decideReversal(ids.second,lastCommand)).replayed,true);
+          assert.equal(ok(await request(submittedPath, {identity:ids.requester})).review.state,lastDecision);
+          const eventKey = lastDecision === 'Approved' ? 'approval.completed' : 'approval.rejected_or_correction_required';
+          const recipients = (await pool.query(
+            "select recipient_id,reasons,channel from invoice_reversal_decision_notices where event_key=$1", [eventKey],
+          )).rows;
+          assert.ok(recipients.some(n => n.reasons.includes('requester')));
+          assert.ok(recipients.some(n => n.reasons.includes('affected_worker')));
+          assert.equal(recipients.length,new Set(recipients.map(n => n.recipient_id)).size);
+          if (lastDecision === 'Rejected') {
+            const workerInbox = ok(await request(work+'/inbox',{identity:ids.reader})).notifications;
+            const workerNotice = workerInbox.find(n=>n.kind==='invoice-reversal-decision' && n.instanceId===submittedReview.id);
+            assert.ok(workerNotice.reasons.includes('affected_worker'));
+            assert.equal((await request(reviewPath,{identity:ids.reader})).status,404);
+
+            assert.ok(recipients.some(n => n.reasons.includes('invoice_batch_owner')));
+            assert.ok(recipients.some(n => n.reasons.includes('finance_preparer')));
+            assert.ok(recipients.every(n => n.channel === 'Required'));
+          }
+          assert.equal((await pool.query('select count(*)::int n from invoice_draft_occupancies where line_id=$1',[evidence.lineId])).rows[0].n,1);
           const exportCard = inboxUi.getByRole('article', {
             name: 'Governed notification ' + exportNotice.id,
           });

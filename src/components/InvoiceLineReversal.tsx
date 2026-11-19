@@ -64,7 +64,7 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
     </>}
     {receipt && <p role="status">Reversal requested · {receipt.id} · {receipt.createdAt} · {receipt.reason}</p>}
     {receipt && <button type="button" onClick={inspectRoute}>Check reversal reviewers</button>}
-    {receipt && review && <p role="status">Submitted reversal review {review.id} · policy {review.policyId} · first reviewer {review.reviewerRole} {review.reviewerId}</p>}
+    {receipt && review && <p role="status">Submitted reversal review {review.id} · {review.state ?? 'Pending'} · policy {review.policyId} · first reviewer {review.reviewerRole} {review.reviewerId}</p>}
     {route?.status === 'NO_REVERSAL_POLICY' && <p>No effective policy enables full-line reversal review.</p>}
     {route?.status === 'REVIEWERS_UNAVAILABLE' && <p>The named reviewers do not meet current access or independence requirements.</p>}
     {route?.status === 'AVAILABLE' && <div>

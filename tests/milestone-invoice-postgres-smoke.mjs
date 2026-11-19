@@ -788,6 +788,26 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         });
         assert.equal(noPolicyReview.status, 409);
         assert.equal(ok(await request(reversalPath + '/review')).review, null);
+        const enabledPolicy = ok(await request(invoiceApproval + '/policies', {
+          method:'POST',identity:ids.requester,body:{expectedOwnerKey:requesterInvoiceKey,requestId:randomUUID(),
+            engagementId:roots.engagement.id,expectedLatestId:invoicePolicy.id,effectiveFrom:fx.today,
+            definition:{...invoicePolicyDefinition,stages:[{userId:ids.second.id,role:'Admin'}],fullLineReversals:true},
+            reason:'Synthetic milestone correction review policy'},
+        }),201).policy;
+        const milestoneReview = ok(await request(reversalPath + '/review',{
+          method:'POST',body:{expectedOwnerKey:inspection.ownerKey,requestId:retainedReversal.id,policyId:enabledPolicy.id,inspectedState:'Billed/Confirmed'},
+        }),201).review;
+        const correctionPath = '/api/v1/work-approvals/reversal-reviews/' + milestoneReview.id;
+        const correctionSource = ok(await request(correctionPath,{identity:ids.second})).review;
+        assert.equal(correctionSource.sourceType,'MILESTONE_ACCEPTANCE');
+        assert.equal(correctionSource.externalReference,confirm.reference);
+        const acceptedCorrection = ok(await request(correctionPath+'/decisions',{
+          method:'POST',identity:ids.second,body:{expectedOwnerKey:await readApprovalOwner(request,ids.second),expectedSequence:0,
+            policyId:enabledPolicy.id,confirmationId:correctionSource.confirmationId,decision:'Approved',reason:'Synthetic milestone reversal approval'},
+        }),201).review;
+        assert.equal(acceptedCorrection.status,'Approved');
+        assert.equal(ok(await request(reversalPath+'/review')).review.state,'Approved');
+
 
         const validReviewPolicy = async definition => (await pool.query('select valid_invoice_batch_approval_policy($1::jsonb) valid', [JSON.stringify(definition)])).rows[0].valid;
         assert.equal(await validReviewPolicy({ ...invoicePolicyDefinition, fullLineReversals: true }), true);

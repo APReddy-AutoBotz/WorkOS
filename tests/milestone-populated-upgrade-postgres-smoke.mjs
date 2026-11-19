@@ -1367,7 +1367,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           '065p_wos06_milestone_invoice_export',
           '065q_wos06_milestone_invoice_cancel_notice',
           '065r_wos06_milestone_invoice_confirmation',
-          '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen', '065v_wos06_billing_eligibility_period', '065w_wos06_exported_line_reversal_requests', '065x_wos06_reversal_review_policy', '065y_wos06_reversal_review_submission',
+          '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen', '065v_wos06_billing_eligibility_period', '065w_wos06_exported_line_reversal_requests', '065x_wos06_reversal_review_policy', '065y_wos06_reversal_review_submission', '065z_wos06_reversal_review_decisions',
         ]);
         assert.deepEqual((await pool.query('select id from commercial_tm_period_versions')).rows, []);
         const afterUpgrade = (

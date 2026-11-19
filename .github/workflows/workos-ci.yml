@@ -358,6 +358,7 @@ jobs:
           node tests/billing-reconciliation-boundaries-smoke.mjs
           node tests/billing-reconciliation-postgres-smoke.mjs
           node tests/billing-reconciliation-journey-browser-smoke.mjs
+          node tests/billing-reconciliation-journey-browser-smoke.mjs --reject-reversal
 
       - name: Verify milestone invoice lifecycle, mixed decisions and populated upgrade
         run: |
