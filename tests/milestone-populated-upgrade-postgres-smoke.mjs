@@ -1367,7 +1367,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           '065p_wos06_milestone_invoice_export',
           '065q_wos06_milestone_invoice_cancel_notice',
           '065r_wos06_milestone_invoice_confirmation',
-          '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen',
+          '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen', '065v_wos06_billing_eligibility_period',
         ]);
         assert.deepEqual((await pool.query('select id from commercial_tm_period_versions')).rows, []);
         const afterUpgrade = (
@@ -1381,6 +1381,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               [draft.batch.id],
             )
           ).rows;
+        assert.equal((await pool.query(
+          "select count(*)::int n from pg_trigger where tgrelid='billing_eligibility_events'::regclass and tgname='verify_billing_eligibility_period' and tgenabled='O'",
+        )).rows[0].n, 1);
         assert.deepEqual(afterUpgrade, beforeUpgrade);
         assert.deepEqual(afterOccupancy, beforeOccupancy);
         assert.equal(

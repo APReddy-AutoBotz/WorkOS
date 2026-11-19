@@ -70,6 +70,8 @@ export const createTmBillingRouter = (o) => {
     } catch (e) {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
+      else if (e.code === 'CTM04')
+        res.status(409).json({ code: 'BILLING_ELIGIBILITY_PERIOD_CLOSED', error: 'The eligibility date is outside an open financial period. Review the reporting calendar before approving.' });
       else if (['TBE01', 'TBE02', 'TBE03', 'TBE04', '23505', '23514', '40001', '40P01'].includes(e.code))
         res.status(e.code === 'TBE01' ? 403 : 409).json({
           code: e.code === 'TBE01' ? 'TM_BILLING_AUTHORITY' : 'TM_BILLING_CONFLICT',

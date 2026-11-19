@@ -517,7 +517,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal((await body(receipt)).approval.id, review.id);
         await ui.getByText('The original request was confirmed by a read-only receipt. Reload.').waitFor();
         assert.equal((await pool.query('select count(*)::int n from approved_unbilled_items')).rows[0].n, 0);
-        const decideUI = async (identity) => {
+        const decideUI = async (identity, blocked = false) => {
           const actor = await open(identity),
             u = actor.ui,
             page = actor.p;
@@ -537,15 +537,27 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await u.getByLabel('Billing decision reason', { exact: true }).fill('Synthetic stage decision');
           const d = wait(page, b + '/instances/' + review.id + '/decisions', 'POST');
           await u.getByRole('button', { name: 'Record billing decision', exact: true }).click();
+          if (blocked) {
+            assert.equal((await body(d, 409)).error.code, 'BILLING_ELIGIBILITY_PERIOD_CLOSED');
+            await u.getByText('The eligibility date is outside an open financial period. Review the reporting calendar before approving.').waitFor();
+            return;
+          }
           const out = await body(d, 201);
           await u
             .getByText('Operation recorded. Reload the current evidence before another action.')
             .waitFor();
           return { actor, out };
         };
+        await pool.query(
+          "insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency) values('synthetic-finance-month',$1,$2,'FIN','Synthetic finance month',$3,$3,'Financially Locked','Monthly')",
+          [f.organizationId, f.legalEntityId, fx.today],
+        );
         const first = await decideUI(ids.manager);
         assert.equal(first.out.approval.state.status, 'Pending');
         assert.equal((await pool.query('select count(*)::int n from approved_unbilled_items')).rows[0].n, 0);
+        await decideUI(ids.second, true);
+        assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events')).rows[0].n, 0);
+        await pool.query("delete from reporting_periods where id='synthetic-finance-month'");
         const last = await decideUI(ids.second);
         assert.equal(last.out.approval.state.status, 'Approved');
         const reg = wait(last.actor.p, b + '/register');
