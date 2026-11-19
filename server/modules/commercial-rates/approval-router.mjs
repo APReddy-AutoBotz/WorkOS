@@ -582,7 +582,10 @@ export const createCommercialCandidateApprovalRouter = (o) => {
   router.get(
     '/policies',
     handle(false, async (c, r) => {
-      const q = parse(z.object({ candidateId: uuid }).strict(), r.query);
+      const q = parse(
+        z.object({ candidateId: uuid, includeEffective: z.literal('true').optional() }).strict(),
+        r.query,
+      );
       await candidate(c, r, q.candidateId);
       const rows = (
         await c.query(
@@ -590,12 +593,21 @@ export const createCommercialCandidateApprovalRouter = (o) => {
           [...scope(r), q.candidateId],
         )
       ).rows;
-      return {
-        ...(await rateCandidateContext(c, r)),
+      const env = await rateCandidateContext(c, r);
+      const result = {
+        ...env,
         candidateId: q.candidateId,
         policies: rows.slice(0, 10).map(policyView),
         truncated: rows.length > 10,
       };
+      if (q.includeEffective) {
+        const active = await c.query(
+          'select *,effective_from::text from commercial_candidate_approval_policies where organization_id=$1 and legal_entity_id=$2 and candidate_id=$3 and effective_from<=$4::date order by sequence desc limit 1',
+          [...scope(r), q.candidateId, env.serverDate],
+        );
+        result.effectivePolicy = active.rowCount ? policyView(active.rows[0]) : null;
+      }
+      return result;
     }),
   );
   router.get(
