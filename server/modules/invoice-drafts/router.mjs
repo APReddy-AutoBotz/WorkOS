@@ -3,6 +3,7 @@ import {
   RECONCILIATION_VERSION,
   reconciliationToken,
   reconciliationCsv,
+  portfolioReconciliationCsv,
 } from './reconciliation-csv.mjs';
 import { readBillingReconciliation, readPortfolioReconciliation } from './reconciliation.mjs';
 import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
@@ -381,25 +382,33 @@ export const createInvoiceDraftRouter = (o) => {
     };
     return { ...value, reportToken: reconciliationToken(reportScope(r), value) };
   };
+  const portfolioFilters = {
+    start: z.string().date(),
+    end: z.string().date(),
+    source: z.enum(['both', 'time_and_materials', 'milestone']),
+  };
+  const portfolioPermissions = (source) => [
+    'commercial.invoice_export.view',
+    ...(source === 'time_and_materials' ? [] : ['commercial.milestone_billing.view']),
+  ];
   router.get(
     '/reconciliation/portfolio',
     handle(false, async (c, r) => {
       const q = parse(
         z
           .object({
-            start: z.string().date(),
-            end: z.string().date(),
-            source: z.enum(['both', 'time_and_materials', 'milestone']),
+            ...portfolioFilters,
+            forExport: z.literal('true').optional(),
           })
           .strict()
           .refine((v) => v.start <= v.end),
         r.query,
       );
-      await authorize(c, r, 'view', [
-        'commercial.invoice_export.view',
-        ...(q.source === 'time_and_materials' ? [] : ['commercial.milestone_billing.view']),
-      ]);
-      return { ...(await envelope(c, r)), ...(await readPortfolioReconciliation(c, r, o, q)) };
+      await authorize(c, r, 'view', portfolioPermissions(q.source));
+      return {
+        ...(await envelope(c, r)),
+        ...(await readPortfolioReconciliation(c, r, o, q, Boolean(q.forExport))),
+      };
     }),
   );
   router.get(
@@ -410,27 +419,32 @@ export const createInvoiceDraftRouter = (o) => {
       return { ...(await envelope(c, r)), ...(await report(c, r, q.engagementId)) };
     }),
   );
-  router.post(
-    '/reconciliation/exports',
+  const exportReport = (portfolio) =>
     handle('snapshot', async (c, r) => {
-      const d = parse(
-        z
-          .object({
-            expectedOwnerKey: key,
-            engagementId: id,
-            expectedReportToken: key,
-            requestId: uuid,
-            reason,
-          })
-          .strict(),
-        r.body,
-      );
+      const command = { expectedOwnerKey: key, expectedReportToken: key, requestId: uuid, reason };
+      const d = portfolio
+        ? parse(
+            z
+              .object({ ...command, ...portfolioFilters })
+              .strict()
+              .refine((v) => v.start <= v.end),
+            r.body,
+          )
+        : parse(z.object({ ...command, engagementId: id }).strict(), r.body);
       fence(r, d.expectedOwnerKey);
-      await authorize(c, r, 'view', ['commercial.invoice_export.view', 'reports.export']);
-      const value = await report(c, r, d.engagementId);
+      await authorize(c, r, 'view', [
+        ...(portfolio ? portfolioPermissions(d.source) : ['commercial.invoice_export.view']),
+        'reports.export',
+      ]);
+      const value = portfolio
+        ? await readPortfolioReconciliation(c, r, o, d, true)
+        : await report(c, r, d.engagementId);
+      const filters = portfolio
+        ? { start: d.start, end: d.end, source: d.source }
+        : { engagementId: d.engagementId };
       const prior = (
         await c.query(
-          "select 1 from audit_logs where organization_id=$1 and legal_entity_id=$2 and user_id=$3 and module='Reports' and action in ('Export T&M Billing Reconciliation','Export Milestone Billing Reconciliation') and entity_id=$4",
+          "select 1 from audit_logs where organization_id=$1 and legal_entity_id=$2 and user_id=$3 and module='Reports' and action in ('Export T&M Billing Reconciliation','Export Milestone Billing Reconciliation','Export Portfolio Billing Reconciliation') and entity_id=$4",
           [...scope(r), r.user.sub, d.requestId],
         )
       ).rowCount;
@@ -444,29 +458,35 @@ export const createInvoiceDraftRouter = (o) => {
         throw fail(409, 'BILLING_REPORT_STALE', 'The report changed. Reload before exporting.');
       if (value.exceptionCount)
         throw fail(409, 'BILLING_REPORT_EXCEPTION', 'Resolve reconciliation exceptions before exporting.');
-      const csv = reconciliationCsv(reportScope(r), value, value.reportToken),
+      const csv = portfolio
+          ? portfolioReconciliationCsv(reportScope(r), value)
+          : reconciliationCsv(reportScope(r), value, value.reportToken),
         sha256 = capacityHash(csv),
         bytes = Buffer.byteLength(csv, 'utf8');
       await o.audit(c, r, {
         module: 'Reports',
-        action:
-          value.version === MILESTONE_RECONCILIATION_VERSION
+        action: portfolio
+          ? 'Export Portfolio Billing Reconciliation'
+          : value.version === MILESTONE_RECONCILIATION_VERSION
             ? 'Export Milestone Billing Reconciliation'
             : 'Export T&M Billing Reconciliation',
-        entityType:
-          value.version === MILESTONE_RECONCILIATION_VERSION
+        entityType: portfolio
+          ? 'PortfolioBillingReconciliationExport'
+          : value.version === MILESTONE_RECONCILIATION_VERSION
             ? 'MilestoneBillingReconciliationExport'
             : 'TmBillingReconciliationExport',
         entityId: d.requestId,
         newValue: {
           requestId: d.requestId,
-          engagementId: d.engagementId,
+          ...filters,
           version: value.version,
           asOf: new Date(value.asOf).toISOString(),
           reportToken: value.reportToken,
           artifactSha256: sha256,
           artifactBytes: bytes,
-          itemCount: value.items.length,
+          ...(portfolio
+            ? { controlCount: value.controls.length, registerStateCount: value.totals.length }
+            : { itemCount: value.items.length }),
         },
         reason: d.reason,
         details: 'Scoped report download; no financial delivery or invoice state change.',
@@ -474,7 +494,7 @@ export const createInvoiceDraftRouter = (o) => {
       return {
         ...(await envelope(c, r)),
         requestId: d.requestId,
-        engagementId: d.engagementId,
+        ...filters,
         version: value.version,
         asOf: value.asOf,
         reportToken: value.reportToken,
@@ -482,8 +502,9 @@ export const createInvoiceDraftRouter = (o) => {
         bytes,
         csv,
       };
-    }),
-  );
+    });
+  router.post('/reconciliation/exports', exportReport(false));
+  router.post('/reconciliation/portfolio/exports', exportReport(true));
   router.get(
     '/batches/:id',
     handle(false, async (c, r) => {

@@ -904,7 +904,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           );
         }
         const combined = ok(
-          await request(portfolioPath(eligibleDate, eligibleDate, 'both'), { identity: ids.manager }),
+          await request(portfolioPath(eligibleDate, eligibleDate, 'both') + '&forExport=true', {
+            identity: ids.manager,
+          }),
         );
         assert.equal(combined.exceptionCount, 0);
         assert.deepEqual(
@@ -915,8 +917,37 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           combined.controls.find((x) => x.boundary === 'MANUALLY_CONFIRMED_LINE').amount,
           '125.15',
         );
+        const portfolioExportPath = drafts + '/reconciliation/portfolio/exports',
+          portfolioCommand = {
+            start: eligibleDate,
+            end: eligibleDate,
+            source: 'both',
+            expectedOwnerKey: combined.ownerKey,
+            expectedReportToken: combined.reportToken,
+            requestId: randomUUID(),
+            reason: 'Synthetic combined totals',
+          };
+        const race = await Promise.all(
+          [1, 2].map(() =>
+            request(portfolioExportPath, { method: 'POST', identity: ids.manager, body: portfolioCommand }),
+          ),
+        );
+        assert.deepEqual(race.map((x) => x.status).sort(), [201, 409]);
+        const combinedCsv = race.find((x) => x.status === 201).body.csv;
+        assert.ok(combinedCsv.includes('"USD","REGISTER_ITEM","2","150.15"'));
+        assert.ok(combinedCsv.includes('"USD","MANUALLY_CONFIRMED_LINE","1","125.15"'));
         await pool.query(
           "update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'",
+        );
+        assert.equal(
+          (
+            await request(portfolioExportPath, {
+              method: 'POST',
+              identity: ids.manager,
+              body: { ...portfolioCommand, requestId: randomUUID() },
+            })
+          ).status,
+          403,
         );
         for (const path of [
           drafts + '/batches/' + draft.batch.id,

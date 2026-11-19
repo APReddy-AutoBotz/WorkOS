@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { reconciliationToken } from './reconciliation-csv.mjs';
 import { sumHours } from '../../../shared/work-hours.mjs';
 import { invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
 
@@ -219,7 +221,25 @@ export const readBillingReconciliation = async (
   };
 };
 
-export async function readPortfolioReconciliation(client, req, options, { start, end, source }) {
+export async function readPortfolioReconciliation(
+  client,
+  req,
+  options,
+  { start, end, source },
+  includeToken = false,
+) {
+  const fingerprint = includeToken ? createHash('sha256') : null;
+  fingerprint?.update(
+    JSON.stringify([
+      'workos.portfolio-reconciliation/1',
+      req.organizationScope.organizationId,
+      req.organizationScope.legalEntityId,
+      start,
+      end,
+      source,
+    ]),
+  );
+
   const grouped = new Map(),
     boundaries = new Map();
   const add = (target, label, row) => {
@@ -248,6 +268,18 @@ export async function readPortfolioReconciliation(client, req, options, { start,
         afterItem,
         afterEvent,
       });
+      if (fingerprint)
+        fingerprint.update(
+          model +
+            ':' +
+            reconciliationToken(
+              {
+                organizationId: req.organizationScope.organizationId,
+                legalEntityId: req.organizationScope.legalEntityId,
+              },
+              report,
+            ),
+        );
       asOf = report.asOf;
       exceptionCount += report.exceptionCount;
       for (const row of report.totals) add(grouped, 'status', row);
@@ -260,6 +292,7 @@ export async function readPortfolioReconciliation(client, req, options, { start,
   const sorted = (map) => [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, row]) => row);
   return {
     version: 'workos.portfolio-reconciliation/1',
+    ...(fingerprint ? { reportToken: fingerprint.digest('hex') } : {}),
     start,
     end,
     source,

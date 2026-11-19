@@ -5,6 +5,7 @@ import {
 } from '../server/modules/invoice-drafts/reconciliation.mjs';
 import {
   reconciliationCsv,
+  portfolioReconciliationCsv,
   reconciliationToken,
 } from '../server/modules/invoice-drafts/reconciliation-csv.mjs';
 
@@ -164,4 +165,21 @@ assert.deepEqual(
 assert.equal(
   portfolio.controls.find((x) => x.currency === 'USD' && x.boundary === 'ELIGIBILITY_EVENT').amount,
   '501.0503',
+);
+
+const emptyCsv = portfolioReconciliationCsv(
+  { ...scope, organizationId: '=synthetic' },
+  { ...portfolio, controls: [], totals: [], reportToken: token },
+);
+assert.equal(emptyCsv.trimEnd().split('\r\n').length, 2);
+assert.ok(emptyCsv.includes("'=synthetic"));
+
+const filters = { start: '2026-01-01', end: '2026-01-31', source: 'time_and_materials' };
+const inspected = await readPortfolioReconciliation(fake([row(1)]), req, options, filters, true);
+const replaced = await readPortfolioReconciliation(fake([row(2)]), req, options, filters, true);
+assert.deepEqual(inspected.controls, replaced.controls);
+assert.notEqual(
+  inspected.reportToken,
+  replaced.reportToken,
+  'Equal totals must preserve distinct source membership',
 );
