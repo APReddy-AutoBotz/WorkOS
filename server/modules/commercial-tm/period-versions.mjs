@@ -111,6 +111,59 @@ export function registerPeriodRoutes(
       return view(await envelope(c, r), q, row);
     }),
   );
+  router.get(
+    '/period-versions/:id/members',
+    handle(false, async (c, r) => {
+      const periodId = parse(z.string().uuid(), r.params.id);
+      const q = parse(
+        z
+          .object({
+            ...range,
+            sequence: z.coerce.number().int().positive().max(2147483647),
+            offset: z.coerce.number().int().min(0).max(2147483546).default(0),
+            limit: z.coerce.number().int().min(1).max(100).default(25),
+          })
+          .strict()
+          .refine(validRange),
+        r.query,
+      );
+      await authorize(c, r);
+      await engagement(c, r, q.engagementId);
+      const period = await visibleVersion(c, r, q);
+      if (period?.id !== periodId)
+        throw fail(404, 'TM_PERIOD_UNAVAILABLE', 'This period version is unavailable.');
+      const params = [...scope(r), q.engagementId, periodId, q.offset + 1, q.offset + q.limit];
+      const where = o.buildEmployeeScopeWhere(r, params, 'worker');
+      const members = (
+        await c.query(
+          `select v.id "valuationId",v.submission_id "submissionId",v.decision_id "decisionId",v.entry_id "entryId",
+      v.source_evidence->>'workDate' "workDate",v.source_evidence->>'projectId' "projectId",v.source_evidence->>'bindingId' "bindingId",
+      v.result->>'hoursExact' "hoursExact",v.result->>'currency' currency,v.result->>'billableValue' billable,v.result->>'costValue' cost,v.result->>'marginValue' margin,
+      worker.id "workerId",worker.name "workerName",worker.status "workerStatus"
+      from commercial_tm_period_versions p
+      cross join lateral unnest(p.valuation_ids[$5::int:$6::int]) with ordinality as member(id,position)
+      join commercial_tm_valuations v on v.id=member.id and v.organization_id=p.organization_id and v.legal_entity_id=p.legal_entity_id and v.engagement_id=p.engagement_id
+      join work_submission_evidence s on s.id=v.submission_id and s.organization_id=v.organization_id and s.legal_entity_id=v.legal_entity_id
+      join timesheets t on t.id=s.timesheet_id and t.organization_id=s.organization_id and t.legal_entity_id=s.legal_entity_id
+      join employees worker on worker.id=t.employee_id
+      where p.organization_id=$1 and p.legal_entity_id=$2 and p.engagement_id=$3 and p.id=$4 and (${where}) order by member.position`,
+          params,
+        )
+      ).rows;
+      const count = period.totals.reduce((n, row) => n + Number(row.entryCount), 0);
+      if (members.length !== Math.min(q.limit, Math.max(0, count - q.offset)))
+        throw fail(409, 'TM_PERIOD_UNAVAILABLE', 'Some retained entries are unavailable.');
+      return {
+        ...(await envelope(c, r)),
+        periodId,
+        engagementId: q.engagementId,
+        sequence: q.sequence,
+        offset: q.offset,
+        count,
+        members,
+      };
+    }),
+  );
   router.post(
     '/period-versions',
     handle(true, async (c, r) => {

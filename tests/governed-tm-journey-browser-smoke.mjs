@@ -565,6 +565,27 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await tm.getByRole('button', { name: 'Open retained period' }).click();
         assert.equal((await body(opening)).id, frozen.id);
         await tm.getByRole('cell', { name: '60.05%' }).waitFor();
+        const memberPath = (period, offset = 0, limit = 25) =>
+          base +
+          '/period-versions/' +
+          period.id +
+          '/members?' +
+          new URLSearchParams({
+            engagementId: roots.engagement.id,
+            start: fx.today,
+            end: fx.today,
+            sequence: String(period.sequence),
+            offset: String(offset),
+            limit: String(limit),
+          });
+        const pageReply = reply(base + '/period-versions/' + frozen.id + '/members');
+        await tm.getByRole('button', { name: 'Show contributing entries' }).click();
+        assert.equal((await body(pageReply)).members[0].valuationId, accepted.valuation.id);
+        const membersTable = tm.getByRole('table', { name: 'Entries in retained period version 1' });
+        await membersTable.getByRole('cell', { name: '125.15', exact: true }).waitFor();
+        const detailReply = reply(base + '/valuations/' + accepted.valuation.id);
+        await membersTable.getByRole('button', { name: 'Inspect valuation ' + entry.entryId }).click();
+        assert.equal((await body(detailReply)).billingRate.adoptionId, billing.id);
         await tm.getByLabel('Work date through').fill(end);
         assert.equal(await tm.getByRole('region', { name: 'Period margin results' }).count(), 0);
         assert.deepEqual(ok(await request(periodPath(end, end))).totals, []);
@@ -673,6 +694,22 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal(writes[0].body.id, writes[1].body.id);
         const latestPeriod = ok(await request(versionPath));
         assert.equal(latestPeriod.sequence, 2);
+        assert.deepEqual(
+          ok(await request(memberPath(frozen))).members.map((x) => x.entryId),
+          [entry.entryId],
+        );
+        const firstPage = ok(await request(memberPath(latestPeriod, 0, 1))),
+          nextPage = ok(await request(memberPath(latestPeriod, 1, 1)));
+        assert.equal(firstPage.count, 2);
+        assert.deepEqual(
+          [...firstPage.members, ...nextPage.members].map((x) => x.entryId).sort(),
+          [entry.entryId, second.entryId].sort(),
+        );
+        assert.deepEqual(ok(await request(memberPath(latestPeriod, 2, 1))).members, []);
+        assert.equal((await request(memberPath({ ...frozen, sequence: 2 }))).status, 404);
+        assert.equal((await request(memberPath(frozen, -1, 1))).status, 400);
+        assert.equal((await request(memberPath(frozen), { identity: ids.first })).status, 403);
+
         assert.equal(
           ok(await request(base + '/period-versions', { method: 'POST', body: firstCommand })).id,
           frozen.id,
@@ -725,6 +762,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         });
         assert.equal(limitedWrite.status, 409);
         assert.ok(!JSON.stringify(limitedWrite.body).includes(frozen.id));
+        const hiddenMembers = await request(memberPath(frozen), { identity: ids.first });
+        assert.equal(hiddenMembers.status, 404);
+        assert.ok(!JSON.stringify(hiddenMembers.body).includes(entry.entryId));
+        assert.equal(
+          ok(await request(memberPath(frozen), { identity: ids.reader })).members[0].entryId,
+          entry.entryId,
+        );
         assert.deepEqual(errors, []);
         assert.deepEqual(external, []);
         await ctx.close();

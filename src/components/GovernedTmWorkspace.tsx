@@ -72,6 +72,9 @@ const TmEngagement = ({
     [sources, setSources] = useState<TmSource[]>([]),
     [morePolicies, setMorePolicies] = useState(false),
     [moreSources, setMoreSources] = useState(false),
+    [memberPage, setMemberPage] = useState<Awaited<
+      ReturnType<typeof governedTmValuations.periodMembers>
+    > | null>(null),
     [selectedSource, setSelectedSource] = useState(''),
     [selectedPolicy, setSelectedPolicy] = useState(''),
     [rates, setRates] = useState<TmRates | null>(null),
@@ -108,6 +111,10 @@ const TmEngagement = ({
     onLockChange(busy || !!pending);
     return () => onLockChange(false);
   }, [busy, pending, onLockChange]);
+  const clearSummary = () => {
+    setMemberPage(null);
+    setSummary(null);
+  };
   const clear = (message: string) => {
     ++generation.current;
     owner.current = null;
@@ -117,7 +124,7 @@ const TmEngagement = ({
     setSelectedSource('');
     setSelectedPolicy('');
     setRates(null);
-    setSummary(null);
+    clearSummary();
     setPeriodStart('');
     setPeriodEnd('');
     setPeriodVersion('');
@@ -346,7 +353,7 @@ const TmEngagement = ({
     void run(async (c) => {
       setPending({ kind: 'valuation', command, policy: chosenPolicy, source: chosenSource, rates });
       try {
-        setSummary(null);
+        clearSummary();
         const v = await governedTmValuations.calculate(command, chosenPolicy, chosenSource, rates, c);
         setPending(null);
         setSnapshot({ valuation: v, policy: chosenPolicy });
@@ -368,10 +375,12 @@ const TmEngagement = ({
       }
     });
   };
-  const inspectSaved = () => {
-    if (!chosenSource?.valuationId) return;
+  const inspectSaved = (target?: TmSource) => {
+    const selected = target ?? chosenSource;
+    if (!selected?.valuationId) return;
     void run(async (c) => {
-      const v = await governedTmValuations.inspect(chosenSource.valuationId!, engagementId, chosenSource, c);
+      setSnapshot(null);
+      const v = await governedTmValuations.inspect(selected.valuationId!, engagementId, selected, c);
       setSnapshot({
         valuation: v.valuation,
         policy: v.policy,
@@ -386,7 +395,7 @@ const TmEngagement = ({
         const v = await governedTmValuations.policy(pending.command, c, true);
         setNotice('Original policy ' + v.id + ' confirmed by read-only receipt.');
       } else {
-        setSummary(null);
+        clearSummary();
         const v = await governedTmValuations.calculate(
           pending.command,
           pending.policy,
@@ -402,6 +411,24 @@ const TmEngagement = ({
       setPolicies(null);
       setSources([]);
       setRates(null);
+    });
+  };
+  const loadPeriodMembers = (offset: number) => {
+    if (!summary?.id || !summary.sequence) return;
+    const periodId = summary.id,
+      sequence = summary.sequence;
+    void run(async (c) => {
+      setMemberPage(null);
+      const page = await governedTmValuations.periodMembers(
+        periodId,
+        engagementId,
+        summary.start,
+        summary.end,
+        sequence,
+        offset,
+        c,
+      );
+      setMemberPage(page);
     });
   };
   const shown = snapshot?.valuation;
@@ -421,7 +448,7 @@ const TmEngagement = ({
             value={periodStart}
             onChange={(e) => {
               setPeriodStart(e.target.value);
-              setSummary(null);
+              clearSummary();
             }}
           />
         </label>
@@ -432,7 +459,7 @@ const TmEngagement = ({
             value={periodEnd}
             onChange={(e) => {
               setPeriodEnd(e.target.value);
-              setSummary(null);
+              clearSummary();
             }}
           />
         </label>
@@ -441,7 +468,7 @@ const TmEngagement = ({
           disabled={!periodStart || !periodEnd || periodStart > periodEnd}
           onClick={() =>
             void run(async (c) => {
-              setSummary(null);
+              clearSummary();
               setSummary(await governedTmValuations.periodSummary(engagementId, periodStart, periodEnd, c));
             })
           }
@@ -468,7 +495,7 @@ const TmEngagement = ({
           }
           onClick={() =>
             void run(async (c) => {
-              setSummary(null);
+              clearSummary();
               setSummary(
                 await governedTmValuations.periodSummary(
                   engagementId,
@@ -489,7 +516,7 @@ const TmEngagement = ({
             onClick={() =>
               void run(async (c) => {
                 const key = summary.membershipKey;
-                setSummary(null);
+                clearSummary();
                 setSummary(
                   await governedTmValuations.periodSummary(engagementId, periodStart, periodEnd, c, {
                     retainKey: key,
@@ -553,6 +580,85 @@ const TmEngagement = ({
                 </table>
               </div>
             </>
+          )}
+          {summary.id && (
+            <fieldset disabled={busy || !!pending}>
+              <legend>Contributing valuations</legend>
+              {!memberPage && (
+                <button type="button" onClick={() => loadPeriodMembers(0)}>
+                  Show contributing entries
+                </button>
+              )}
+              {memberPage && (
+                <>
+                  <p>
+                    Entries {memberPage.offset + 1}–{memberPage.offset + memberPage.members.length} of{' '}
+                    {memberPage.count}
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left tabular-nums">
+                      <caption>Entries in retained period version {summary.sequence}</caption>
+                      <thead>
+                        <tr>
+                          {[
+                            'Worker',
+                            'Work date',
+                            'Hours',
+                            'Currency',
+                            'Billable value',
+                            'Cost',
+                            'Gross margin',
+                            'Rate evidence',
+                          ].map((label) => (
+                            <th scope="col" key={label}>
+                              {label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {memberPage.members.map((item) => (
+                          <tr key={item.valuationId}>
+                            <th scope="row">{item.workerName}</th>
+                            <td>{item.workDate}</td>
+                            <td>{item.hoursExact}</td>
+                            <td>{item.currency}</td>
+                            <td>{item.billable}</td>
+                            <td>{item.cost}</td>
+                            <td>{item.margin}</td>
+                            <td>
+                              <button
+                                type="button"
+                                aria-label={'Inspect valuation ' + item.entryId}
+                                onClick={() => inspectSaved(item)}
+                              >
+                                Inspect receipt
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {memberPage.offset > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => loadPeriodMembers(Math.max(0, memberPage.offset - 25))}
+                    >
+                      Previous entries
+                    </button>
+                  )}
+                  {memberPage.offset + memberPage.members.length < memberPage.count && (
+                    <button
+                      type="button"
+                      onClick={() => loadPeriodMembers(memberPage.offset + memberPage.members.length)}
+                    >
+                      Next entries
+                    </button>
+                  )}
+                </>
+              )}
+            </fieldset>
           )}
         </section>
       )}
@@ -737,7 +843,7 @@ const TmEngagement = ({
             </p>
           )}
           {chosenSource?.valuationId ? (
-            <button type="button" disabled={busy || !!pending} onClick={inspectSaved}>
+            <button type="button" disabled={busy || !!pending} onClick={() => inspectSaved()}>
               Inspect retained T&M snapshot
             </button>
           ) : (
