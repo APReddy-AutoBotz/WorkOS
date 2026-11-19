@@ -834,11 +834,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           defs = (
             await pool.query('select to_jsonb(x)v from permission_definitions x order by to_jsonb(x)::text')
           ).rows,
-          keys = ['commercial.invoice_approval.manage', 'commercial.invoice_approval.decide', 'commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm', 'commercial.milestone_billing.view', 'commercial.milestone_billing.manage', 'commercial.milestone_billing.decide'];
+          keys = ['commercial.invoice_approval.manage', 'commercial.invoice_approval.decide', 'commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm', 'commercial.milestone_billing.view', 'commercial.milestone_billing.manage', 'commercial.milestone_billing.decide', 'periods.financial_reopen'];
         assert(!defs.some((x) => keys.includes(x.v.permission_key)));
         assert.equal(before.invoice_draft_occupancies.length, 1);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-          '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility', '065n_wos06_milestone_invoice_lineage', '065o_wos06_milestone_invoice_approval', '065p_wos06_milestone_invoice_export', '065q_wos06_milestone_invoice_cancel_notice', '065r_wos06_milestone_invoice_confirmation', '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock',
+          '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility', '065n_wos06_milestone_invoice_lineage', '065o_wos06_milestone_invoice_approval', '065p_wos06_milestone_invoice_export', '065q_wos06_milestone_invoice_cancel_notice', '065r_wos06_milestone_invoice_confirmation', '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen',
         ]);
         assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
         const after = (

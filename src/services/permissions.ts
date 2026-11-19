@@ -66,6 +66,7 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'audit.view', module: 'Admin', label: 'Audit Trail', description: 'View immutable platform audit logs.', protected: true },
   { key: 'audit.deployment.view', module: 'Admin', label: 'Deployment Audit View', description: 'Read null-scope deployment audit records through an explicit individual user grant.', protected: true },
   { key: 'audit.organization.view', module: 'Admin', label: 'Organization Audit View', description: 'Read organization-owned audit records through an explicit organization-specific designation.', protected: true },
+  { key: 'periods.financial_reopen', module: 'Admin', label: 'Reopen Financial Periods', description: 'Return a financial lock to Approval Closed with a recorded reason.', optIn: true },
   { key: 'settings.manage', module: 'Admin', label: 'Governance Settings', description: 'Manage business settings and catalogs.' },
   { key: 'permissions.manage', module: 'Admin', label: 'Permission Settings', description: 'Manage role permissions and user-specific permission grants.', protected: true },
 ];

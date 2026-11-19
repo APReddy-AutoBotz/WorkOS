@@ -1,3 +1,4 @@
+import { registerFinancialPeriodRoutes } from './modules/financial-periods.mjs';
 import {asyncHandler} from './api/async-handler.mjs';
 import {lockCommercialLifecycle} from './modules/commercial-drafting/project-mutation.mjs';
 import { Router } from 'express';
@@ -453,6 +454,7 @@ export const registerOrganizationSetupRoutes = ({
       await client.query('commit');res.json(result.rows[0]);
     }catch(error){await client.query('rollback');res.status(500).json({error:'Calendar holiday retirement failed'});}finally{client.release();}
   }));
+  registerFinancialPeriodRoutes(router,{pool,requirePermission,audit});
   router.get('/reporting-periods', requirePermission('settings.manage'), asyncHandler(async (req,res) => {
     const result=await pool.query(`select * from reporting_periods where organization_id=$1
       and (legal_entity_id is null or legal_entity_id=$2) order by starts_on desc limit $3`,
