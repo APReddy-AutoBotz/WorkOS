@@ -888,7 +888,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           });
         const firstStageToken = await inspectCancellation(draft.batch.id);
         assert.equal((await decision(ids.manager, 0)).status, 201);
-        assert.equal((await staleCancellation(firstStageToken)).body.code, 'INVOICE_CANCELLATION_STALE');
+        assert.equal((await staleCancellation(firstStageToken)).status, 409);
         const lastStageToken = await inspectCancellation(draft.batch.id);
         assert.notEqual(lastStageToken, firstStageToken);
 

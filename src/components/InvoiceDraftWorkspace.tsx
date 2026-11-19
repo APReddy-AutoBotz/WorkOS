@@ -206,8 +206,8 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
           setDetail(null);
           setCancelReason('');
           setNotice(
-            e.code === 'INVOICE_CANCELLATION_STALE'
-              ? 'The review changed. Reload and inspect the batch before cancelling.'
+            op.type === 'cancellation' && e.status === 409
+              ? 'Cancellation conflicted with the current batch. Reload and inspect it before cancelling.'
               : 'The operation was refused. Reload before a deliberate new request.',
           );
           return;
