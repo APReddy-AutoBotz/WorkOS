@@ -588,3 +588,5 @@ WOS-COM-011 — The T&M valuation workspace pages through retained policies and 
 WOS-INV-001 and WOS-APR-002 — For T&M eligibility, the server resolves the engagement’s review policy effective on its current UTC date across all versions. The billing browser journey schedules 22 future versions, appends against the latest version, and approves a snapshot under the current policy before checking its register item.
 
 WOS-INV-001 and WOS-APR-002 — The milestone workspace pages through scoped milestones, acceptance reviews and available register items and resolves the policy effective today in UTC. The real PostgreSQL and browser test covers 53 milestones and reviews, 51 register items and an effective policy preceded in the list by 21 future versions.
+
+WOS-APR-002 and WOS-INV-006 — The invoice approval browser journey schedules 22 future review policy versions and submits a prepared batch under the policy effective today. An unauthorized policy lookup is refused.

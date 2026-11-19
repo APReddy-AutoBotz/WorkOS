@@ -151,7 +151,10 @@ export const createInvoiceBatchApprovalRouter = (o) => {
   router.get(
     '/policies',
     handle(false, async (c, r) => {
-      const q = parse(z.object({ engagementId: id }).strict(), r.query);
+      const q = parse(
+        z.object({ engagementId: id, includeEffective: z.literal('true').optional() }).strict(),
+        r.query,
+      );
       await authorize(c, r);
       await engagement(c, r, q.engagementId);
       const rows = (
@@ -160,11 +163,20 @@ export const createInvoiceBatchApprovalRouter = (o) => {
           [...scope(r), q.engagementId],
         )
       ).rows;
-      return {
-        ...(await envelope(c, r)),
+      const env = await envelope(c, r);
+      const result = {
+        ...env,
         policies: rows.slice(0, 20).map(policyView),
         truncated: rows.length > 20,
       };
+      if (q.includeEffective) {
+        const active = await c.query(
+          'select p.*,p.effective_from::text from invoice_batch_approval_policies p where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and effective_from<=$4::date order by p.effective_from desc,p.sequence desc limit 1',
+          [...scope(r), q.engagementId, env.serverDate],
+        );
+        result.effectivePolicy = active.rowCount ? policyView(active.rows[0]) : null;
+      }
+      return result;
     }),
   );
   router.post(

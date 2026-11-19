@@ -72,7 +72,7 @@ const InvoiceApprovalEngagement = ({
     [approvals, setApprovals] = useState<InvoiceBatchApproval[]>([]),
     [draftNext, setDraftNext] = useState<string | null>(null),
     [approvalNext, setApprovalNext] = useState<string | null>(null),
-    [policyTruncated, setPolicyTruncated] = useState(false),
+    [effectivePolicy, setEffectivePolicy] = useState<InvoiceBatchPolicy | null>(null),
     [loaded, setLoaded] = useState(false),
     [batchId, setBatchId] = useState(''),
     [source, setSource] = useState<InvoiceApprovalSource | null>(null),
@@ -113,7 +113,7 @@ const InvoiceApprovalEngagement = ({
     setApprovals([]);
     setDraftNext(null);
     setApprovalNext(null);
-    setPolicyTruncated(false);
+    setEffectivePolicy(null);
     setLoaded(false);
     setBatchId('');
     setSource(null);
@@ -189,7 +189,8 @@ const InvoiceApprovalEngagement = ({
       const [a, b] = await Promise.all([invoiceBatchApprovals.load(engagementId, c), invoiceDrafts.list(c)]);
       setPolicies(a.policies);
       setApprovals(a.approvals);
-      setPolicyTruncated(a.policiesTruncated);
+      setEffectivePolicy(a.effectivePolicy);
+      setPolicyId('');
       setApprovalNext(a.approvalsNext);
       setDrafts(b.batches);
       setDraftNext(b.nextAfter);
@@ -307,18 +308,18 @@ const InvoiceApprovalEngagement = ({
       },
     });
   };
+  const readyToRequest =
+    source &&
+    source.id === batchId &&
+    source.state === 'Draft' &&
+    source.current &&
+    source.lineCount > 0 &&
+    confirmed &&
+    policyId &&
+    effectivePolicy?.id === policyId &&
+    requestReason.trim().length >= 3;
   const request = () => {
-    if (
-      !source ||
-      source.id !== batchId ||
-      source.state !== 'Draft' ||
-      !source.current ||
-      !source.lineCount ||
-      !confirmed ||
-      !policyId ||
-      requestReason.trim().length < 3
-    )
-      return;
+    if (!readyToRequest) return;
     perform({
       type: 'request',
       data: {
@@ -378,9 +379,20 @@ const InvoiceApprovalEngagement = ({
       )}
       {loaded && (
         <>
-          {policyTruncated && <p>Only the latest 20 policies are displayed.</p>}
+          {policies.length > 0 && (
+            <details>
+              <summary>Recent invoice review policies</summary>
+              <ul>
+                {policies.map((p) => (
+                  <li key={p.id}>
+                    Version {p.sequence} · effective {p.effectiveFrom} UTC
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {canConfigure && (
-            <fieldset disabled={busy || !!pending || policyTruncated}>
+            <fieldset disabled={busy || !!pending}>
               <legend>Prospective invoice approval policy</legend>
               <label>
                 Effective from UTC
@@ -557,12 +569,16 @@ const InvoiceApprovalEngagement = ({
                   value={policyId}
                   onChange={(e) => setPolicyId(e.target.value)}
                 >
-                  <option value="">Choose a policy</option>
-                  {policies.map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.effectiveFrom} · version {x.sequence}
+                  <option value="">
+                    {effectivePolicy
+                      ? 'Choose the effective policy'
+                      : 'No invoice review policy is effective today'}
+                  </option>
+                  {effectivePolicy && (
+                    <option value={effectivePolicy.id}>
+                      {effectivePolicy.effectiveFrom} · version {effectivePolicy.sequence}
                     </option>
-                  ))}
+                  )}
                 </select>
               </label>
               <label>
@@ -573,7 +589,7 @@ const InvoiceApprovalEngagement = ({
                   onChange={(e) => setRequestReason(e.target.value)}
                 />
               </label>
-              <button type="button" onClick={request}>
+              <button type="button" disabled={!readyToRequest} onClick={request}>
                 Submit invoice Draft for review
               </button>
             </fieldset>
