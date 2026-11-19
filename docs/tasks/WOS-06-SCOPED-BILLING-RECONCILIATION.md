@@ -19,3 +19,8 @@ Finance can run the same engagement-level controls for accepted milestones. The 
 Milestone exports use `workos.milestone-reconciliation/1` and include a milestone identifier. Existing T&M exports retain their original schema. The export creates a scoped audit record containing the report token and file digest. To roll back, revert the report application change and retain its export audit records. No database migration is required. Portfolio-wide totals, other models and corrections remain open.
 
 WOS-INV-004, WOS-INV-008 (partial) — Migration 065w retains a finance preparer's full-line reversal request against an occupied, exported T&M or milestone line and the confirmation current at intake. Readers and writers require both export inspection and draft preparation authority. The PostgreSQL and browser journeys cover concurrency, audit rollback, stale billing state and reopening the receipt. Approval, corrective eligibility, correction batches and supersession remain open. During rollback retain the additive request table and its audit records.
+
+
+### Full-line reversal eligibility (migration 066)
+
+After final approval, a finance preparer with the explicitly granted `commercial.reversal_eligibility.create` permission can inspect the original line and issue one approved-unbilled credit. The database uses the original currency and full line amount, checks the financial calendar for the UTC issue date, and retains the original export, final decision and credit receipt. Correction batches, credit export and supersession remain pending. This advances WOS-INV-001, WOS-INV-004, WOS-INV-008 and WOS-APR-007. To suspend issuance, revoke the issuance permission and retain all event, item and audit history.

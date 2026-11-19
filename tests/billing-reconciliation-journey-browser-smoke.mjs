@@ -902,6 +902,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                     'commercial.tm_billing.view',
                     'commercial.invoice_drafts.view',
                     'commercial.invoice_drafts.prepare',
+                    'commercial.reversal_eligibility.create',
                     'commercial.invoice_drafts.cancel',
                     'commercial.invoice_approval.manage',
                     'commercial.invoice_approval.decide',
@@ -1551,6 +1552,53 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             assert.ok(recipients.some(n => n.reasons.includes('invoice_batch_owner')));
             assert.ok(recipients.some(n => n.reasons.includes('finance_preparer')));
             assert.ok(recipients.every(n => n.channel === 'Required'));
+          }
+          const creditPath = reversalBase + '/eligibility';
+          const creditView = () => request(creditPath,{identity:ids.requester});
+          const inspectedCredit = ok(await creditView());
+          const creditCommand = {
+            expectedOwnerKey:requesterKey, reviewId:submittedReview.id,
+            decisionId:inspectedCredit.source?.decisionId ?? submittedReview.id,
+            confirmationId:lastCommand.confirmationId, eligibleOn:inspectedCredit.serverDate,
+            reason:'Synthetic approved line credit',
+          };
+          const issueCredit = (changes={}) => request(creditPath,{identity:ids.requester,method:'POST',body:{...creditCommand,...changes}});
+          assert.equal((await issueCredit()).status,403);
+          await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Admin','commercial.reversal_eligibility.create',true) on conflict(role_name,permission_key) do update set enabled=true");
+          if(lastDecision==='Approved'){
+            assert.equal(inspectedCredit.source.amount,'-'+evidence.amount);
+            assert.equal((await issueCredit({amount:'-1'})).status,400);
+            assert.equal((await issueCredit({eligibleOn:'2000-01-01'})).status,409);
+            assert.equal((await issueCredit({confirmationId:submittedReview.id})).status,409);
+            assert.equal(ok(await creditView()).receipt,null);
+            await pool.query("insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency) values('synthetic-credit-close',$1,$2,'CREDIT-CLOSE','Synthetic finance close',$3,$3,'Financially Locked','Monthly')",[f.organizationId,f.legalEntityId,inspectedCredit.serverDate]);
+            const closed = await issueCredit();
+            assert.equal(closed.status,409);
+            assert.ok(JSON.stringify(closed.body).includes('BILLING_ELIGIBILITY_PERIOD_CLOSED'));
+            await pool.query("delete from reporting_periods where id='synthetic-credit-close'");
+            await pool.query(`create function synthetic_refuse_credit_audit() returns trigger language plpgsql as $$
+              begin raise exception 'Synthetic credit audit failure'; end $$;
+              create trigger synthetic_refuse_credit before insert on audit_logs for each row
+              when(new.action='Issue Full Line Reversal') execute function synthetic_refuse_credit_audit()`);
+            assert.equal((await issueCredit()).status,503);
+            assert.equal(ok(await creditView()).receipt,null);
+            assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events where reversal_decision_id=$1',[creditCommand.decisionId])).rows[0].n,0);
+            await pool.query('drop trigger synthetic_refuse_credit on audit_logs');
+            await lineSelect.selectOption(evidence.lineId);
+            await exportUi.getByRole('button',{name:'Check reversal request'}).click();
+            await checkRoute.click();
+            await exportUi.getByRole('button',{name:'Inspect corrective billing eligibility'}).click();
+            await exportUi.getByLabel('Credit issuance reason').fill(creditCommand.reason);
+            await exportUi.getByRole('button',{name:'Issue approved-unbilled credit'}).click();
+            await exportUi.getByText(/Approved-unbilled credit .*eligibility date/).waitFor();
+            const receipt = ok(await creditView()).receipt;
+            assert.equal(receipt.amount,inspectedCredit.source.amount);
+            assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);
+            assert.equal(ok(await issueCredit()).replayed,true);
+            assert.equal((await issueCredit({reason:'Changed reason'})).status,409);
+          } else {
+            assert.equal(inspectedCredit.source,null);
+            assert.equal((await issueCredit()).status,409);
           }
           assert.equal((await pool.query('select count(*)::int n from invoice_draft_occupancies where line_id=$1',[evidence.lineId])).rows[0].n,1);
           const exportCard = inboxUi.getByRole('article', {

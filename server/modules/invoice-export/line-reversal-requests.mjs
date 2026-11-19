@@ -1,3 +1,4 @@
+import { registerReversalEligibility } from './reversal-eligibility.mjs';
 import { registerReversalReview } from './reversal-review.mjs';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -17,9 +18,9 @@ const fields = 'id,line_id as "lineId",artifact_id as "artifactId",confirmation_
 
 export function registerLineReversalRequests(router, { handle, authorize, batch, envelope, audit }) {
   const path = '/batches/:batchId/lines/:lineId/reversal-request';
-  const inspect = async (c, r, write) => {
+  const inspect = async (c, r, write, kind = 'reversal') => {
     if (!params.safeParse(r.params).success || Object.keys(r.query).length) throw fail(400, 'Select a valid exported line.');
-    await authorize(c, r, 'reversal');
+    await authorize(c, r, kind);
     const { row, source } = await batch(c, r, r.params.batchId, write);
     if (!['Exported', 'Billed/Confirmed'].includes(row.state) || !source.lines.some(l => l.lineId === r.params.lineId))
       throw fail(404, 'Exported line unavailable.');
@@ -31,6 +32,7 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
     const existing = (await c.query('select ' + fields + ' from invoice_line_reversal_requests where line_id=$1', [r.params.lineId])).rows[0] ?? null;
     return { row, artifact, existing };
   };
+  registerReversalEligibility(router, { path, handle, inspect, envelope, audit });
   registerReversalReview(router, { path, handle, inspect, envelope, audit });
   router.get(path, handle(false, async (c, r) => {
     const { existing } = await inspect(c, r, false);

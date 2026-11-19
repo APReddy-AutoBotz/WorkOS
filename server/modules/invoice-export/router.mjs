@@ -56,6 +56,7 @@ export const createInvoiceCsvRouter = (o) => {
     } catch (e) {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
+      else if (e.code === 'CTM04') res.status(409).json({code:'BILLING_ELIGIBILITY_PERIOD_CLOSED',error:'The UTC eligibility date is outside an open financial period.'});
       else if (
         [
           'ICV01',
@@ -109,7 +110,8 @@ export const createInvoiceCsvRouter = (o) => {
         'commercial.invoice_export.view',
         'employees.view',
         'notifications.view',
-        ...(kind === 'reversal' ? ['commercial.invoice_drafts.prepare'] : []),
+        ...(kind === 'issue-reversal' ? ['commercial.reversal_eligibility.create'] : []),
+        ...(['reversal','issue-reversal'].includes(kind) ? ['commercial.invoice_drafts.prepare'] : []),
         ...(kind === 'create' ? ['commercial.invoice_export.create'] : []),
       ].sort(),
       held = await c.query(

@@ -468,7 +468,28 @@ const submittedReview = z.object({
 }).strict();
 export type SubmittedReversalReview = z.infer<typeof submittedReview>;
 export type InvoiceReversalRoute = z.infer<typeof reviewRoute>;
+const creditAmount = z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).refine(v => /[1-9]/.test(v));
+const creditSource = z.object({ reviewId:uuid, decisionId:uuid, originalEventId:uuid, confirmationId:uuid.nullable(),
+  currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount }).strict();
+const creditReceipt = z.object({eventId:uuid,itemId:uuid,eligibleOn:date,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount,
+  decisionId:uuid,originalEventId:uuid,confirmationId:uuid.nullable(),actorId:uuid,activeRole:id,reason:z.string().min(3).max(1000)}).strict();
+export type ReversalCredit = {source:z.infer<typeof creditSource>;receipt:z.infer<typeof creditReceipt>|null;eligibleOn:string};
 export const invoiceCsv = {
+  reversalCredit: async (batch:InvoiceCsvSource, lineId:string, requestId:string, reviewId:string, c:RateContext, write?:{credit:ReversalCredit;reason:string}):Promise<ReversalCredit> => {
+    const line=batch.lines.find(l=>l.lineId===lineId);
+    if (!line || !hasRatePermission('commercial.invoice_drafts.prepare') || (write && !hasRatePermission('commercial.reversal_eligibility.create'))) return bad();
+    const path='/batches/'+batch.id+'/lines/'+lineId+'/reversal-request/eligibility';
+    const data=write?{reviewId,decisionId:write.credit.source.decisionId,confirmationId:write.credit.source.confirmationId,eligibleOn:write.credit.eligibleOn,reason:write.reason}:undefined;
+    const raw=await call(write?'POST':'GET',path,c,'view',data);
+    const result=z.object({...envelope,requestId:uuid,source:creditSource.nullable(),receipt:creditReceipt.nullable(),...(write?{replayed:z.boolean()}:{})}).strict().safeParse(raw);
+    if(!result.success || result.data.requestId!==requestId || !result.data.source) return bad();
+    const {source,receipt,serverDate}=result.data;
+    if(source.reviewId!==reviewId || source.originalEventId!==line.eventId || source.currency!==line.currency || source.amount!=='-'+line.amount ||
+      (receipt && (receipt.decisionId!==source.decisionId || receipt.originalEventId!==source.originalEventId || receipt.currency!==source.currency || receipt.amount!==source.amount))) return bad();
+    if(write && (!receipt || receipt.actorId!==result.data.actorUserId || receipt.activeRole!==result.data.activeRole ||
+      receipt.eligibleOn!==data?.eligibleOn || receipt.reason!==write.reason || receipt.confirmationId!==data.confirmationId || receipt.decisionId!==data.decisionId)) return bad();
+    return {source,receipt,eligibleOn:serverDate};
+  },
   submittedReversal: async (batchId: string, request: InvoiceLineReversalRequest, c: RateContext, submission?: {
     policyId: string; inspectedState: 'Exported' | 'Billed/Confirmed'; firstReviewer: {userId: string; role: string};
   }) => {

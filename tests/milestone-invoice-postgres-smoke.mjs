@@ -806,6 +806,22 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             policyId:enabledPolicy.id,confirmationId:correctionSource.confirmationId,decision:'Approved',reason:'Synthetic milestone reversal approval'},
         }),201).review;
         assert.equal(acceptedCorrection.status,'Approved');
+        const creditPath = reversalPath + '/eligibility';
+        const credit = ok(await request(creditPath));
+        assert.equal(credit.source.amount,'-'+correctionSource.amount);
+        assert.equal(credit.source.confirmationId,correctionSource.confirmationId);
+        const issue = () => request(creditPath,{method:'POST',body:{
+          expectedOwnerKey:inspection.ownerKey, reviewId:milestoneReview.id, decisionId:credit.source.decisionId,
+          confirmationId:credit.source.confirmationId,eligibleOn:credit.serverDate,reason:'Synthetic milestone credit',
+        }});
+        assert.equal((await issue()).status,403);
+        await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Admin','commercial.reversal_eligibility.create',true) on conflict(role_name,permission_key) do update set enabled=true");
+        const issues = await Promise.all([issue(),issue()]);
+        assert.deepEqual(issues.map(x=>x.status).sort(),[200,201],JSON.stringify(issues));
+        const issued = ok(await request(creditPath)).receipt;
+        assert.equal(issued.amount,credit.source.amount);
+        assert.equal(issued.originalEventId,credit.source.originalEventId);
+
         assert.equal(ok(await request(reversalPath+'/review')).review.state,'Approved');
 
 

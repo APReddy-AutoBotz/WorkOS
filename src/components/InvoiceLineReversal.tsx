@@ -1,5 +1,6 @@
+import { hasRatePermission } from '../services/rateCandidates';
 import { useState } from 'react';
-import { invoiceCsv, type SubmittedReversalReview, type InvoiceReversalRoute, type InvoiceCsvArtifact, type InvoiceCsvSource, type InvoiceLineReversalRequest } from '../services/invoiceCsv';
+import { invoiceCsv, type SubmittedReversalReview, type InvoiceReversalRoute, type ReversalCredit, type InvoiceCsvArtifact, type InvoiceCsvSource, type InvoiceLineReversalRequest } from '../services/invoiceCsv';
 import type { RateContext } from '../services/rateCandidates';
 
 export function InvoiceLineReversal({ source, state, artifact, run, disabled }: {
@@ -65,6 +66,7 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
     {receipt && <p role="status">Reversal requested · {receipt.id} · {receipt.createdAt} · {receipt.reason}</p>}
     {receipt && <button type="button" onClick={inspectRoute}>Check reversal reviewers</button>}
     {receipt && review && <p role="status">Submitted reversal review {review.id} · {review.state ?? 'Pending'} · policy {review.policyId} · first reviewer {review.reviewerRole} {review.reviewerId}</p>}
+    {review?.state === 'Approved' && receipt && <CorrectiveEligibility key={review.id} batch={source} lineId={line} requestId={receipt.id} reviewId={review.id} run={run}/>}
     {route?.status === 'NO_REVERSAL_POLICY' && <p>No effective policy enables full-line reversal review.</p>}
     {route?.status === 'REVIEWERS_UNAVAILABLE' && <p>The named reviewers do not meet current access or independence requirements.</p>}
     {route?.status === 'AVAILABLE' && <div>
@@ -73,4 +75,36 @@ export function InvoiceLineReversal({ source, state, artifact, run, disabled }: 
       <ol>{route.stages.map(stage => <li key={stage.userId}>{stage.role} · {stage.userId}</li>)}</ol>
     </div>}
   </fieldset>;
+}
+
+
+function CorrectiveEligibility({batch,lineId,requestId,reviewId,run}:{
+  key?:string;batch:InvoiceCsvSource;lineId:string;requestId:string;reviewId:string;
+  run:(fn:(context:RateContext)=>Promise<void>)=>Promise<void>;
+}){
+  const [credit,setCredit]=useState<ReversalCredit|null>(null);
+  const [reason,setReason]=useState('');
+  const inspect=()=>void run(async c=>{
+    setCredit(null);setReason('');
+    setCredit(await invoiceCsv.reversalCredit(batch,lineId,requestId,reviewId,c));
+  });
+  const issue=()=>credit && void run(async c=>{
+    const write={credit,reason:reason.trim()};
+    setCredit(null);
+    setCredit(await invoiceCsv.reversalCredit(batch,lineId,requestId,reviewId,c,write));
+    setReason('');
+  });
+  return <section aria-label="Corrective billing eligibility">
+    <button type="button" onClick={inspect}>Inspect corrective billing eligibility</button>
+    {credit && <div>
+      <p>Full reversal · {credit.source.currency} {credit.source.amount} · original event {credit.source.originalEventId}</p>
+      {credit.receipt ? <p role="status">Approved-unbilled credit {credit.receipt.itemId} · eligibility date {credit.receipt.eligibleOn} · {credit.receipt.reason}</p>
+        : <><p>UTC eligibility date {credit.eligibleOn}</p>
+          {hasRatePermission('commercial.reversal_eligibility.create') && <>
+            <label>Credit issuance reason <input value={reason} maxLength={1000} onChange={e=>setReason(e.target.value)}/></label>
+            <button type="button" disabled={reason.trim().length<3} onClick={issue}>Issue approved-unbilled credit</button>
+          </>}
+        </>}
+    </div>}
+  </section>;
 }
