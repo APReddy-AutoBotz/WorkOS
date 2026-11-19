@@ -75,7 +75,9 @@ const MilestoneReview = ({
     [sources, setSources] = useState<MilestoneSource[]>([]),
     [approvals, setApprovals] = useState<MilestoneApproval[]>([]),
     [loaded, setLoaded] = useState(false),
-    [limited, setLimited] = useState(false),
+    [effectivePolicy, setEffectivePolicy] = useState<MilestonePolicy | null>(null),
+    [sourceNext, setSourceNext] = useState<string | null>(null),
+    [reviewNext, setReviewNext] = useState<string | null>(null),
     [selected, setSelected] = useState(''),
     [inspected, setInspected] = useState<{ approval: MilestoneApproval; source: MilestoneSource } | null>(
       null,
@@ -102,7 +104,7 @@ const MilestoneReview = ({
     [register, setRegister] = useState<Awaited<ReturnType<typeof milestoneBilling.register>>['items'] | null>(
       null,
     ),
-    [registerLimited, setRegisterLimited] = useState(false),
+    [registerNext, setRegisterNext] = useState<string | null>(null),
     [batchSupport, setBatchSupport] = useState(false);
   const mounted = useRef(false),
     generation = useRef(0),
@@ -120,7 +122,9 @@ const MilestoneReview = ({
     setSources([]);
     setApprovals([]);
     setLoaded(false);
-    setLimited(false);
+    setEffectivePolicy(null);
+    setSourceNext(null);
+    setReviewNext(null);
     setSelected('');
     setInspected(null);
     setFrom('');
@@ -143,7 +147,7 @@ const MilestoneReview = ({
     setBusy(false);
     setRegister(null);
     setBatchSupport(false);
-    setRegisterLimited(false);
+    setRegisterNext(null);
     setNotice(message);
   };
   useEffect(() => {
@@ -201,10 +205,35 @@ const MilestoneReview = ({
       setPolicies(x.policies);
       setSources(x.sources);
       setApprovals(x.approvals);
-      setLimited(x.truncated);
+      setEffectivePolicy(x.effectivePolicy);
+      setPolicyId('');
+      setReferences({});
+      setSourceNext(x.sourceNext);
+      setReviewNext(x.reviewNext);
       setLoaded(true);
       setSelected('');
       setInspected(null);
+    });
+  const moreSources = () =>
+    void run(async (c) => {
+      if (!sourceNext) return;
+      const page = await milestoneBilling.sourcesPage(engagementId, c, sourceNext);
+      setSources((old) => [...old, ...page.sources]);
+      setSourceNext(page.nextAfter);
+    });
+  const moreReviews = () =>
+    void run(async (c) => {
+      if (!reviewNext) return;
+      const page = await milestoneBilling.reviewsPage(engagementId, c, reviewNext);
+      setApprovals((old) => [...old, ...page.approvals]);
+      setReviewNext(page.nextAfter);
+    });
+  const moreItems = () =>
+    void run(async (c) => {
+      if (!registerNext) return;
+      const page = await milestoneBilling.register(engagementId, c, registerNext);
+      setRegister((old) => [...(old ?? []), ...page.items]);
+      setRegisterNext(page.nextAfter);
     });
   const inspect = () => {
     if (!selected) return;
@@ -253,7 +282,7 @@ const MilestoneReview = ({
       hasRatePermission,
     ),
     chosen = inspected?.approval,
-    selectedPolicy = policies.find((p) => p.id === policyId);
+    selectedPolicy = effectivePolicy?.id === policyId ? effectivePolicy : null;
   const reviewer = authService.getCurrentUser(),
     stage =
       chosen?.state.currentStage == null
@@ -348,7 +377,7 @@ const MilestoneReview = ({
           void run(async (c) => {
             const result = await milestoneBilling.register(engagementId, c);
             setRegister(result.items);
-            setRegisterLimited(!!result.nextAfter);
+            setRegisterNext(result.nextAfter);
             setBatchSupport(result.batchSupport);
           })
         }
@@ -370,7 +399,11 @@ const MilestoneReview = ({
       {register && (
         <section aria-label="Milestone approved-unbilled register">
           <h3>Milestone approved-unbilled register</h3>
-          {registerLimited && <p role="status">Only the first 50 visible items are shown.</p>}
+          {registerNext && (
+            <button type="button" disabled={busy || !!pending} onClick={moreItems}>
+              More approved milestone items
+            </button>
+          )}
           <p>
             {batchSupport
               ? 'Eligible milestones can be selected in invoice preparation.'
@@ -387,13 +420,30 @@ const MilestoneReview = ({
       )}
       {loaded && (
         <>
-          {limited && (
-            <p role="status">
-              Only the first page is shown; additional records are not yet available in this workspace.
-            </p>
+          {sourceNext && (
+            <button type="button" disabled={busy || !!pending} onClick={moreSources}>
+              More milestones
+            </button>
+          )}
+          {reviewNext && (
+            <button type="button" disabled={busy || !!pending} onClick={moreReviews}>
+              More milestone reviews
+            </button>
+          )}
+          {policies.length > 0 && (
+            <details>
+              <summary>Recent milestone review policies</summary>
+              <ul>
+                {policies.map((p) => (
+                  <li key={p.id}>
+                    Version {p.sequence} · effective {p.effectiveFrom} UTC
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
           {canManage && (
-            <fieldset disabled={busy || !!pending || limited}>
+            <fieldset disabled={busy || !!pending}>
               <legend>Prospective milestone review policy</legend>
               <label>
                 Effective from UTC{' '}
@@ -537,12 +587,16 @@ const MilestoneReview = ({
                     setReferences({});
                   }}
                 >
-                  <option value="">Choose an explicit policy</option>
-                  {policies.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.effectiveFrom} · version {p.sequence}
+                  <option value="">
+                    {effectivePolicy
+                      ? 'Choose the effective policy'
+                      : 'No milestone review policy is effective today'}
+                  </option>
+                  {effectivePolicy && (
+                    <option value={effectivePolicy.id}>
+                      {effectivePolicy.effectiveFrom} · version {effectivePolicy.sequence}
                     </option>
-                  ))}
+                  )}
                 </select>
               </label>
               <label>

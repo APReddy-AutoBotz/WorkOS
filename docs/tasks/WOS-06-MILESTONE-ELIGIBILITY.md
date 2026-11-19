@@ -9,3 +9,5 @@ Migration `065m_wos06_milestone_billing_eligibility` adds the review ledger, sou
 For operational rollback, withdraw milestone permissions and retain the eligibility ledger. Once milestone batches exist, keep a source-aware application running against this database. See the [invoice lifecycle and recovery procedure](WOS-06-MILESTONE-INVOICING.md). Amended milestone terms and operational earned-management valuation remain separate work.
 
 The real React, API and PostgreSQL journey covers staged approval, concurrent submission, final-decision replay, rejection, superseded policy, self-approval, foreign scope, lost access and failed required delivery. The populated invoice upgrade verifies existing T&M eligibility events, register items, occupancies and artifacts before and after migration and replay.
+
+Load more milestones, reviews or approved-unbilled items within the selected engagement. Each continuation uses the current authorization context. The policy selector offers the effective policy on the server’s UTC date. Maintaining a policy uses the latest recorded version. Reverting the application preserves the approval and eligibility ledgers.
