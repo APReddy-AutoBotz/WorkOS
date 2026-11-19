@@ -35,6 +35,11 @@ const actor = {
   inboxPermission: true,
 };
 assert.equal(validInvoiceBatchApprovalPolicy(policy), true);
+assert.equal(validInvoiceBatchApprovalPolicy({ ...policy, fullLineReversals: true }), true);
+for (const value of [false, null, 'true', 1])
+  assert.equal(validInvoiceBatchApprovalPolicy({ ...policy, fullLineReversals: value }), false);
+assert.equal(validInvoiceBatchApprovalPolicy({ ...policy, fullLineReversals: true, stages: [policy.stages[0], policy.stages[0]] }), false);
+
 assert.equal(
   validInvoiceBatchApprovalPolicy({
     ...policy,

@@ -782,6 +782,12 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.deepEqual(requests.map(x => x.status).sort(), [200, 201]);
         const retainedReversal = ok(await request(reversalPath)).request;
         assert.equal(retainedReversal.reason, command.reason);
+        assert.deepEqual(ok(await request(reversalPath + '/review-route')).route, { status: 'NO_REVERSAL_POLICY' });
+        const validReviewPolicy = async definition => (await pool.query('select valid_invoice_batch_approval_policy($1::jsonb) valid', [JSON.stringify(definition)])).rows[0].valid;
+        assert.equal(await validReviewPolicy({ ...invoicePolicyDefinition, fullLineReversals: true }), true);
+        assert.equal(await validReviewPolicy({ ...invoicePolicyDefinition, fullLineReversals: 'true' }), false);
+        assert.equal(await validReviewPolicy({ ...invoicePolicyDefinition, fullLineReversals: true, stages: [invoicePolicyDefinition.stages[0], invoicePolicyDefinition.stages[0]] }), false);
+
         assert.ok(retainedReversal.confirmationId);
         assert.equal((await submitReversal({ reason: 'Synthetic changed motive' })).status, 409);
         assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and module='Invoice Corrections' and reason=$2", [retainedReversal.id, command.reason])).rows[0].n, 1);

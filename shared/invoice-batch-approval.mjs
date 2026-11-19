@@ -9,7 +9,10 @@ import {
 
 // Configuration identifies named stages; server and database transactions must
 // independently establish current authority, retained source, and scope.
-export const validInvoiceBatchApprovalPolicy = (d) => {
+export const validInvoiceBatchApprovalPolicy = (definition) => {
+  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return false;
+  const { fullLineReversals, ...d } = definition;
+  if (Object.hasOwn(definition, 'fullLineReversals') && fullLineReversals !== true) return false;
   if (
     !approvalKeys(d, ['entityType', 'engagementId', 'stages', 'locale', 'templates', 'completionInApp']) ||
     d.entityType !== 'InvoiceBatch' ||
@@ -19,6 +22,7 @@ export const validInvoiceBatchApprovalPolicy = (d) => {
   const { entityType: _entity, engagementId: _engagement, ...shared } = d;
   return (
     validWorkApprovalPolicy({ ...shared, entityType: 'Timesheet', workerIds: [] }) &&
+    (!fullLineReversals || new Set(d.stages.map(s => s.userId.toLowerCase())).size === d.stages.length) &&
     d.templates.every((t) =>
       [t.subject, t.body].every((s) => !s.includes('{{decisionReason}}') && !s.includes('{{workerCode}}')),
     )

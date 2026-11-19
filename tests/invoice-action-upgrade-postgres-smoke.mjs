@@ -113,7 +113,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert(before.invoice_draft_batches.some((x) => x.v.id === draft.id));
         assert.equal((await pool.query("select to_regclass('invoice_action_events') t")).rows[0].t, null);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
-          '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility', '065n_wos06_milestone_invoice_lineage', '065o_wos06_milestone_invoice_approval', '065p_wos06_milestone_invoice_export', '065q_wos06_milestone_invoice_cancel_notice', '065r_wos06_milestone_invoice_confirmation', '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen', '065v_wos06_billing_eligibility_period', '065w_wos06_exported_line_reversal_requests',
+          '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility', '065n_wos06_milestone_invoice_lineage', '065o_wos06_milestone_invoice_approval', '065p_wos06_milestone_invoice_export', '065q_wos06_milestone_invoice_cancel_notice', '065r_wos06_milestone_invoice_confirmation', '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen', '065v_wos06_billing_eligibility_period', '065w_wos06_exported_line_reversal_requests', '065x_wos06_reversal_review_policy',
         ]);
         assert.deepEqual(await snapshot(), expectedMilestoneUpgradeSnapshot(before));
         for (const t of [
