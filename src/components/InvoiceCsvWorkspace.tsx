@@ -564,7 +564,7 @@ function ExportedCredits({original,run,disabled}:{key?:string;original:InvoiceCs
   return <section aria-label="Exported credits against original lines">
     <button type="button" disabled={disabled} onClick={()=>load(null)}>Check exported credits</button>
     {links && (links.length ? <ul>{links.map(l=><li key={l.lineId}>{l.currency} {l.amount} · original line {l.originalLineId}
-      {' · credit batch '}{l.batchId} · credit artifact {l.artifactId} · SHA-256 {l.sha256}</li>)}</ul> : <p>No exported credits on this page.</p>)}
+      {' · credit batch '}{l.batchId} · credit artifact {l.artifactId} · SHA-256 {l.sha256} · {l.applicationAttested ? 'Downstream application attested' : 'Awaiting downstream attestation'}</li>)}</ul> : <p>No exported credits on this page.</p>)}
     {next && <button type="button" disabled={disabled} onClick={()=>load(next)}>Next exported credits</button>}
   </section>;
 }

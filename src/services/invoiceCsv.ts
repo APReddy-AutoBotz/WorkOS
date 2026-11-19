@@ -509,7 +509,7 @@ const correctionEvidence=z.object({
     artifactId:uuid,artifactSha256:hash,reserved:z.boolean()}).strict()).min(1).max(50),
 }).strict();
 export type CorrectionEvidence=z.infer<typeof correctionEvidence>;
-const creditLink=z.object({originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
+const creditLink=z.object({applicationAttested:z.boolean(),originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
 export type CreditExportLink=z.infer<typeof creditLink>;
 export const invoiceCsv = {
   correctionBatches:async(engagementId:string,after:string|null,c:RateContext,purpose?:'confirmation')=>{
