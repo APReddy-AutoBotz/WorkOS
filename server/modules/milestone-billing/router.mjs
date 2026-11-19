@@ -140,10 +140,11 @@ export const createMilestoneBillingRouter = (o) => {
       reason: 'Protected milestone billing review.',
       details: 'No source evidence or commercial amount is included in general audit.',
     });
+  const milestoneSourceRows = `select m.id,m.engagement_id as "engagementId",m.code,m.name,m.due_on::text as "dueOn",m.currency,m.amount::text,e.client_id as "clientId",e.contract_id as "contractId",e.contract_version_id as "contractVersionId",(select id from commercial_lifecycle_events where organization_id=m.organization_id and legal_entity_id=m.legal_entity_id and entity_type='Engagement' and entity_id=m.engagement_id order by sequence desc limit 1) as "engagementLifecycleId",(select id from commercial_lifecycle_events where organization_id=m.organization_id and legal_entity_id=m.legal_entity_id and entity_type='Contract' and entity_id=e.contract_id order by sequence desc limit 1) as "contractLifecycleId" from commercial_milestones m join commercial_engagements e on e.id=m.engagement_id and e.organization_id=m.organization_id and e.legal_entity_id=m.legal_entity_id`;
   const source = async (c, r, milestoneId, lock = false) => {
     const x = (
       await c.query(
-        `select m.id,m.engagement_id as "engagementId",m.code,m.name,m.due_on::text as "dueOn",m.currency,m.amount::text,e.client_id as "clientId",e.contract_id as "contractId",e.contract_version_id as "contractVersionId",(select id from commercial_lifecycle_events where organization_id=m.organization_id and legal_entity_id=m.legal_entity_id and entity_type='Engagement' and entity_id=m.engagement_id order by sequence desc limit 1) as "engagementLifecycleId",(select id from commercial_lifecycle_events where organization_id=m.organization_id and legal_entity_id=m.legal_entity_id and entity_type='Contract' and entity_id=e.contract_id order by sequence desc limit 1) as "contractLifecycleId" from commercial_milestones m join commercial_engagements e on e.id=m.engagement_id and e.organization_id=m.organization_id and e.legal_entity_id=m.legal_entity_id where m.id=$1 and m.organization_id=$2 and m.legal_entity_id=$3${lock ? ' for share of m,e' : ''}`,
+        `${milestoneSourceRows} where m.id=$1 and m.organization_id=$2 and m.legal_entity_id=$3${lock ? ' for share of m,e' : ''}`,
         [milestoneId, ...scope(r)],
       )
     ).rows[0];
@@ -169,54 +170,72 @@ export const createMilestoneBillingRouter = (o) => {
     if (!row) throw fail(404, 'MILESTONE_BILLING_SOURCE', 'Scoped review unavailable.');
     return row;
   };
-  const view = async (c, i) => {
-    const p = (
-        await c.query('select *,effective_from::text from milestone_billing_policies where id=$1', [
-          i.policy_id,
-        ])
-      ).rows[0],
-      transitions = (
+  const views = async (c, instances) => {
+    if (!instances.length) return [];
+    const instanceIds = instances.map((i) => i.id);
+    const policies = new Map(
+      (
         await c.query(
-          'select id,sequence,stage,decision,actor_id as "actorId",active_role as "activeRole",request_id as "requestId",reason,created_at as "createdAt" from milestone_billing_transitions where instance_id=$1 order by sequence',
-          [i.id],
+          'select *,effective_from::text from milestone_billing_policies where id=any($1::uuid[])',
+          [[...new Set(instances.map((i) => i.policy_id))]],
         )
-      ).rows,
-      cancel =
-        (
-          await c.query(
-            'select id,actor_id as "actorId",active_role as "activeRole",request_id as "requestId",reason,created_at as "createdAt" from milestone_billing_invalidations where instance_id=$1',
-            [i.id],
-          )
-        ).rows[0] ?? null,
-      current = (
+      ).rows.map((p) => [p.id, p]),
+    );
+    const histories = new Map();
+    const decisions = await c.query(
+      'select instance_id,id,sequence,stage,decision,actor_id as "actorId",active_role as "activeRole",request_id as "requestId",reason,created_at as "createdAt" from milestone_billing_transitions where instance_id=any($1::uuid[]) order by instance_id,sequence',
+      [instanceIds],
+    );
+    for (const { instance_id, ...decision } of decisions.rows) {
+      if (!histories.has(instance_id)) histories.set(instance_id, []);
+      histories.get(instance_id).push(decision);
+    }
+    const cancellations = new Map(
+      (
         await c.query(
-          'select milestone_billing_review_current(i) current from milestone_billing_instances i where i.id=$1',
-          [i.id],
+          'select instance_id,id,actor_id as "actorId",active_role as "activeRole",request_id as "requestId",reason,created_at as "createdAt" from milestone_billing_invalidations where instance_id=any($1::uuid[])',
+          [instanceIds],
         )
-      ).rows[0].current;
-    return {
-      id: i.id,
-      engagementId: i.engagement_id,
-      milestoneId: i.milestone_id,
-      ownerUserId: i.owner_user_id,
-      ownerRole: i.owner_role,
-      requesterUserId: i.requester_user_id,
-      activeRole: i.active_role,
-      requestId: i.request_id,
-      reason: i.reason,
-      evidence: i.evidence,
-      engagementLifecycleId: i.engagement_lifecycle_id,
-      contractLifecycleId: i.contract_lifecycle_id,
-      createdAt: i.created_at,
-      policy: policyView(p),
-      state: cancel
-        ? { status: 'Cancelled', sequence: transitions.length, currentStage: null }
-        : milestoneBillingState(p.definition, transitions),
-      current,
-      transitions,
-      cancellation: cancel,
-    };
+      ).rows.map(({ instance_id, ...cancel }) => [instance_id, cancel]),
+    );
+    const statuses = new Map(
+      (
+        await c.query(
+          'select i.id,milestone_billing_review_current(i) current from milestone_billing_instances i where i.id=any($1::uuid[])',
+          [instanceIds],
+        )
+      ).rows.map((row) => [row.id, row.current]),
+    );
+    return instances.map((i) => {
+      const p = policies.get(i.policy_id),
+        transitions = histories.get(i.id) ?? [],
+        cancel = cancellations.get(i.id) ?? null,
+        current = statuses.get(i.id);
+      return {
+        id: i.id,
+        engagementId: i.engagement_id,
+        milestoneId: i.milestone_id,
+        ownerUserId: i.owner_user_id,
+        ownerRole: i.owner_role,
+        requesterUserId: i.requester_user_id,
+        activeRole: i.active_role,
+        requestId: i.request_id,
+        reason: i.reason,
+        evidence: i.evidence,
+        engagementLifecycleId: i.engagement_lifecycle_id,
+        contractLifecycleId: i.contract_lifecycle_id,
+        createdAt: i.created_at,
+        policy: policyView(p),
+        state: cancel
+          ? { status: 'Cancelled', sequence: transitions.length, currentStage: null }
+          : milestoneBillingState(p.definition, transitions),
+        current,
+        transitions,
+        cancellation: cancel,
+      };
+    });
   };
+  const view = async (c, i) => (await views(c, [i]))[0];
   const outcome = async (c, instanceId) =>
     (
       await c.query(
@@ -298,7 +317,10 @@ export const createMilestoneBillingRouter = (o) => {
   router.get(
     '/policies',
     handle(false, async (c, r) => {
-      const q = parse(z.object({ engagementId: id }).strict(), r.query);
+      const q = parse(
+        z.object({ engagementId: id, includeEffective: z.literal('true').optional() }).strict(),
+        r.query,
+      );
       await authorize(c, r);
       const rows = (
         await c.query(
@@ -306,11 +328,20 @@ export const createMilestoneBillingRouter = (o) => {
           [...scope(r), q.engagementId],
         )
       ).rows;
-      return {
-        ...(await envelope(c, r)),
+      const env = await envelope(c, r);
+      const result = {
+        ...env,
         policies: rows.slice(0, 20).map(policyView),
         truncated: rows.length > 20,
       };
+      if (q.includeEffective) {
+        const effective = await c.query(
+          'select *,effective_from::text from milestone_billing_policies p where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and effective_from<=$4::date order by p.effective_from desc,p.sequence desc limit 1',
+          [...scope(r), q.engagementId, env.serverDate],
+        );
+        result.effectivePolicy = effective.rowCount ? policyView(effective.rows[0]) : null;
+      }
+      return result;
     }),
   );
   router.post(
@@ -400,13 +431,15 @@ export const createMilestoneBillingRouter = (o) => {
       await authorize(c, r);
       const rows = (
         await c.query(
-          'select id from commercial_milestones where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and ($4::text is null or id>$4) order by id limit 51',
+          `select page.*,milestone_billing_source_valid($1,$2,page."engagementId",page.id,page."engagementLifecycleId",page."contractLifecycleId") as current
+            from (${milestoneSourceRows} where m.organization_id=$1 and m.legal_entity_id=$2 and m.engagement_id=$3
+              and ($4::text is null or m.id>$4) order by m.id limit 51) page order by page.id`,
           [...scope(r), q.engagementId, q.after ?? null],
         )
       ).rows;
       return {
         ...(await envelope(c, r)),
-        sources: await Promise.all(rows.slice(0, 50).map((x) => source(c, r, x.id))),
+        sources: rows.slice(0, 50),
         nextAfter: rows.length > 50 ? rows[49].id : null,
       };
     }),
@@ -432,7 +465,7 @@ export const createMilestoneBillingRouter = (o) => {
       ).rows;
       return {
         ...(await envelope(c, r)),
-        approvals: await Promise.all(rows.slice(0, 50).map((x) => view(c, x))),
+        approvals: await views(c, rows.slice(0, 50)),
         nextAfter: rows.length > 50 ? rows[49].id : null,
       };
     }),

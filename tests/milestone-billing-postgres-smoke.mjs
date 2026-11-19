@@ -248,6 +248,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               name: 'Synthetic reviewer',
               permissions: [
                 'commercial.contracts.view',
+                'commercial.contracts.manage',
+                'commercial.milestone_billing.manage',
                 'employees.view',
                 'notifications.view',
                 'approvals.view',
@@ -284,131 +286,214 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           .getByRole('region', { name: 'Milestone approved-unbilled register' })
           .getByText(new RegExp(final.eventId))
           .waitFor();
-      } finally {
-        await browser?.close();
-        await fixture.close();
-      }
-      assert.equal(final.approval.state.status, 'Approved');
-      assert(final.eventId && final.itemId);
-      assert.equal(ok(await decision(ids.second, 1, 'Approved', finalKey)).itemId, final.itemId);
-      const register = ok(await request(route + '/register'));
-      assert.equal(register.batchSupport, true);
-      assert.equal(register.items.length, 1);
-      assert.equal(register.items[0].id, final.itemId);
-      assert.equal(register.items[0].evidence.milestoneId, milestone.id);
-      assert.equal(register.items[0].currency, 'USD');
-      assert.equal(
-        (
-          await pool.query(
-            "select count(*)::int n from billing_eligibility_events where source_type='MILESTONE_ACCEPTANCE'",
-          )
-        ).rows[0].n,
-        1,
-      );
-      await assert.rejects(
-        pool.query("update approved_unbilled_items set source_type='TM_SNAPSHOT' where id=$1", [
-          final.itemId,
-        ]),
-        (e) => e.code === '55000',
-      );
-      assert.equal((await request(route + '/register', { identity: ids.reader })).status, 403);
-      assert.deepEqual(ok(await request(route + '/register?engagementId=another-engagement')).items, []);
-      assert.equal(
-        (
-          await request(route + '/instances/' + created.id, {
-            identity: ids.requester,
-            scope: { organizationId: f.organizationId, legalEntityId: f.foreignLegalEntityId },
-          })
-        ).status,
-        403,
-      );
-      const inbox = '/api/v1/work-approvals/inbox';
-      const another = async (code) => {
-        const m = ok(
-          await request('/milestones', {
+        assert.equal(final.approval.state.status, 'Approved');
+        assert(final.eventId && final.itemId);
+        assert.equal(ok(await decision(ids.second, 1, 'Approved', finalKey)).itemId, final.itemId);
+        const register = ok(await request(route + '/register'));
+        assert.equal(register.batchSupport, true);
+        assert.equal(register.items.length, 1);
+        assert.equal(register.items[0].id, final.itemId);
+        assert.equal(register.items[0].evidence.milestoneId, milestone.id);
+        assert.equal(register.items[0].currency, 'USD');
+        assert.equal(
+          (
+            await pool.query(
+              "select count(*)::int n from billing_eligibility_events where source_type='MILESTONE_ACCEPTANCE'",
+            )
+          ).rows[0].n,
+          1,
+        );
+        await assert.rejects(
+          pool.query("update approved_unbilled_items set source_type='TM_SNAPSHOT' where id=$1", [
+            final.itemId,
+          ]),
+          (e) => e.code === '55000',
+        );
+        assert.equal((await request(route + '/register', { identity: ids.reader })).status, 403);
+        assert.deepEqual(ok(await request(route + '/register?engagementId=another-engagement')).items, []);
+        assert.equal(
+          (
+            await request(route + '/instances/' + created.id, {
+              identity: ids.requester,
+              scope: { organizationId: f.organizationId, legalEntityId: f.foreignLegalEntityId },
+            })
+          ).status,
+          403,
+        );
+        const inbox = '/api/v1/work-approvals/inbox';
+        const another = async (code, expectedPolicyId = policy.id) => {
+          const m = ok(
+            await request('/milestones', {
+              method: 'POST',
+              body: {
+                engagementId: roots.engagement.id,
+                code,
+                name: 'Synthetic delivery',
+                dueOn: fx.today,
+                amount: '42.0000',
+                currency: 'USD',
+                reason: 'Synthetic milestone',
+              },
+            }),
+            201,
+          );
+          return ok(
+            await request(route + '/requests', {
+              method: 'POST',
+              identity: ids.requester,
+              body: { ...requestBody, milestoneId: m.id, expectedPolicyId, requestId: randomUUID() },
+            }),
+            201,
+          ).approval;
+        };
+        const firstDecision = (id, decision) =>
+          request(route + '/instances/' + id + '/decisions', {
+            method: 'POST',
+            identity: ids.manager,
+            body: {
+              expectedOwnerKey: managerKey,
+              requestId: randomUUID(),
+              expectedSequence: 0,
+              decision,
+              reason: 'Synthetic independent decision',
+            },
+          });
+        const managerKey = await readApprovalOwner(request, ids.manager);
+        const declined = await another('SYN-MILESTONE-2');
+        assert.equal(ok(await firstDecision(declined.id, 'Rejected'), 201).approval.state.status, 'Rejected');
+        const stale = await another('SYN-MILESTONE-3');
+        ok(
+          await request(route + '/policies', {
             method: 'POST',
             body: {
+              expectedOwnerKey: initial.ownerKey,
+              requestId: randomUUID(),
               engagementId: roots.engagement.id,
-              code,
-              name: 'Synthetic delivery',
-              dueOn: fx.today,
-              amount: '42.0000',
-              currency: 'USD',
-              reason: 'Synthetic milestone',
+              expectedLatestId: policy.id,
+              effectiveFrom: fx.today,
+              definition,
+              reason: 'Synthetic policy revision',
             },
           }),
           201,
         );
-        return ok(
-          await request(route + '/requests', {
-            method: 'POST',
-            identity: ids.requester,
-            body: { ...requestBody, milestoneId: m.id, requestId: randomUUID() },
-          }),
-          201,
-        ).approval;
-      };
-      const firstDecision = (id, decision) =>
-        request(route + '/instances/' + id + '/decisions', {
-          method: 'POST',
-          identity: ids.manager,
-          body: {
-            expectedOwnerKey: managerKey,
-            requestId: randomUUID(),
-            expectedSequence: 0,
-            decision,
-            reason: 'Synthetic independent decision',
-          },
-        });
-      const managerKey = await readApprovalOwner(request, ids.manager);
-      const declined = await another('SYN-MILESTONE-2');
-      assert.equal(ok(await firstDecision(declined.id, 'Rejected'), 201).approval.state.status, 'Rejected');
-      const stale = await another('SYN-MILESTONE-3');
-      ok(
-        await request(route + '/policies', {
-          method: 'POST',
-          body: {
-            expectedOwnerKey: initial.ownerKey,
-            requestId: randomUUID(),
-            engagementId: roots.engagement.id,
-            expectedLatestId: policy.id,
-            effectiveFrom: fx.today,
-            definition,
-            reason: 'Synthetic policy revision',
-          },
-        }),
-        201,
-      );
-      assert.equal((await firstDecision(stale.id, 'Approved')).status, 409);
-      assert.equal(
-        (
-          await pool.query(
-            "select count(*)::int n from approved_unbilled_items where source_type='MILESTONE_ACCEPTANCE'",
-          )
-        ).rows[0].n,
-        1,
-      );
-      const original = ok(await request(inbox, { identity: ids.manager }));
-      const notice = original.notifications.find(
-        (n) => n.kind === 'milestone-billing-eligibility' && n.instanceId === created.id,
-      );
-      assert(notice);
-      await pool.query(
-        "update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'",
-      );
-      assert(
-        !ok(await request(inbox, { identity: ids.manager })).notifications.some((n) => n.id === notice.id),
-      );
-      assert.equal(
-        (
-          await request(inbox + '/' + notice.id + '/read', {
-            method: 'POST',
-            identity: ids.manager,
-            body: { expectedOwnerKey: original.ownerKey },
-          })
-        ).status,
-        404,
-      );
+        assert.equal((await firstDecision(stale.id, 'Approved')).status, 409);
+        assert.equal(
+          (
+            await pool.query(
+              "select count(*)::int n from approved_unbilled_items where source_type='MILESTONE_ACCEPTANCE'",
+            )
+          ).rows[0].n,
+          1,
+        );
+        const original = ok(await request(inbox, { identity: ids.manager }));
+        const notice = original.notifications.find(
+          (n) => n.kind === 'milestone-billing-eligibility' && n.instanceId === created.id,
+        );
+        assert(notice);
+        const query = '?engagementId=' + encodeURIComponent(roots.engagement.id);
+        const current = ok(
+          await request(route + '/policies' + query + '&includeEffective=true'),
+        ).effectivePolicy;
+        let latest = current.id;
+        for (let day = 1; day <= 21; day++) {
+          latest = ok(
+            await request(route + '/policies', {
+              method: 'POST',
+              body: {
+                expectedOwnerKey: initial.ownerKey,
+                requestId: randomUUID(),
+                engagementId: roots.engagement.id,
+                expectedLatestId: latest,
+                effectiveFrom: shiftCapacityDate(fx.today, day),
+                definition,
+                reason: 'Synthetic future policy',
+              },
+            }),
+            201,
+          ).policy.id;
+        }
+        const selection = ok(await request(route + '/policies' + query + '&includeEffective=true'));
+        assert.equal(selection.effectivePolicy.id, current.id);
+        assert.ok(selection.truncated && !selection.policies.some((p) => p.id === current.id));
+        const itemIds = new Set([final.itemId]);
+        const secondOwner = await readApprovalOwner(request, ids.second);
+        for (let n = 0; n < 50; n++) {
+          const review = await another('SYN-PAGED-' + n, current.id);
+          ok(await firstDecision(review.id, 'Approved'), 201);
+          const completed = ok(
+            await request(route + '/instances/' + review.id + '/decisions', {
+              method: 'POST',
+              identity: ids.second,
+              body: {
+                expectedOwnerKey: secondOwner,
+                requestId: randomUUID(),
+                expectedSequence: 1,
+                decision: 'Approved',
+                reason: 'Synthetic second decision',
+              },
+            }),
+            201,
+          );
+          itemIds.add(completed.itemId);
+        }
+        await page.getByRole('button', { name: 'Load milestone billing reviews' }).click();
+        await page.getByRole('button', { name: 'More milestones', exact: true }).click();
+        await page.getByRole('button', { name: 'More milestone reviews', exact: true }).click();
+        const assertOptions = async (label, count) => {
+          const options = page.getByLabel(label, { exact: true }).locator('option');
+          await options.nth(count).waitFor({ state: 'attached' });
+          const ids = await options.evaluateAll((nodes) => nodes.map((node) => node.value).filter(Boolean));
+          assert.equal(ids.length, count);
+          assert.equal(new Set(ids).size, count);
+        };
+        await assertOptions('Milestone billing review', 53);
+        await assertOptions('Billing milestone', 53);
+        await page.getByLabel('Milestone review policy', { exact: true }).selectOption(current.id);
+        assert.equal(await page.getByLabel('Milestone policy effective from').isEnabled(), true);
+        await page.getByRole('button', { name: 'Load milestone register', exact: true }).click();
+        await page.getByRole('button', { name: 'More approved milestone items', exact: true }).click();
+        const items = page
+          .getByRole('region', { name: 'Milestone approved-unbilled register' })
+          .locator('li');
+        await items.nth(50).waitFor();
+        assert.deepEqual(
+          new Set((await items.allTextContents()).map((text) => text.split('item ').at(-1))),
+          itemIds,
+        );
+        assert.equal(
+          (await request(route + '/policies' + query + '&includeEffective=true', { identity: ids.reader }))
+            .status,
+          403,
+        );
+        for (const [path, cursor] of [
+          ['/sources', milestone.id],
+          ['/instances', created.id],
+          ['/register', final.itemId],
+        ]) {
+          const continuation = route + path + query + '&after=' + encodeURIComponent(cursor);
+          assert.equal((await request(continuation, { identity: ids.reader })).status, 403);
+        }
+        await pool.query(
+          "update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'",
+        );
+        assert(
+          !ok(await request(inbox, { identity: ids.manager })).notifications.some((n) => n.id === notice.id),
+        );
+        assert.equal(
+          (
+            await request(inbox + '/' + notice.id + '/read', {
+              method: 'POST',
+              identity: ids.manager,
+              body: { expectedOwnerKey: original.ownerKey },
+            })
+          ).status,
+          404,
+        );
+      } finally {
+        await browser?.close();
+        await fixture.close();
+      }
     },
   );
 });

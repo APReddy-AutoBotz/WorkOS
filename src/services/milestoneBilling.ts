@@ -318,41 +318,73 @@ const canonical = (value: unknown) =>
       : v,
   );
 export { captureRateContext };
+const sourcesPage = async (engagementId: string, c: RateContext | null, after?: string) => {
+  const query = new URLSearchParams({ engagementId });
+  if (after) query.set('after', after);
+  const raw = await call('GET', '/sources?' + query, c, 'viewer');
+  const page = z
+    .object({ ...envelope, sources: z.array(source).max(50), nextAfter: id.nullable() })
+    .strict()
+    .safeParse(raw);
+  if (
+    !page.success ||
+    page.data.sources.some((s) => s.engagementId !== engagementId || s.id === after) ||
+    (page.data.nextAfter !== null && page.data.nextAfter !== page.data.sources.at(-1)?.id)
+  )
+    return bad();
+  return page.data;
+};
+const reviewsPage = async (engagementId: string, c: RateContext | null, after?: string) => {
+  const query = new URLSearchParams({ engagementId });
+  if (after) query.set('after', after);
+  const raw = await call('GET', '/instances?' + query, c, 'viewer');
+  const page = z
+    .object({ ...envelope, approvals: z.array(approval).max(50), nextAfter: uuid.nullable() })
+    .strict()
+    .safeParse(raw);
+  if (
+    !page.success ||
+    page.data.approvals.some((a) => a.engagementId !== engagementId || a.id === after) ||
+    (page.data.nextAfter !== null && page.data.nextAfter !== page.data.approvals.at(-1)?.id)
+  )
+    return bad();
+  return page.data;
+};
 export const milestoneBilling = {
+  sourcesPage,
+  reviewsPage,
   load: async (engagementId: string, c: RateContext | null) => {
     if (!id.safeParse(engagementId).success) return bad();
-    const query = '?' + new URLSearchParams({ engagementId }),
-      [a, b, d] = await Promise.all([
-        call('GET', '/policies' + query, c, 'viewer'),
-        call('GET', '/sources' + query, c, 'viewer'),
-        call('GET', '/instances' + query, c, 'viewer'),
-      ]);
-    const policies = z
-        .object({ ...envelope, policies: z.array(policy).max(20), truncated: z.boolean() })
-        .strict()
-        .safeParse(a),
-      sources = z
-        .object({ ...envelope, sources: z.array(source).max(50), nextAfter: id.nullable() })
-        .strict()
-        .safeParse(b),
-      approvals = z
-        .object({ ...envelope, approvals: z.array(approval).max(50), nextAfter: uuid.nullable() })
-        .strict()
-        .safeParse(d);
+    const query = new URLSearchParams({ engagementId, includeEffective: 'true' });
+    const [raw, sources, approvals] = await Promise.all([
+      call('GET', '/policies?' + query, c, 'viewer'),
+      sourcesPage(engagementId, c),
+      reviewsPage(engagementId, c),
+    ]);
+    const p = z
+      .object({
+        ...envelope,
+        policies: z.array(policy).max(20),
+        truncated: z.boolean(),
+        effectivePolicy: policy.nullable(),
+      })
+      .strict()
+      .safeParse(raw);
     if (
-      !policies.success ||
-      !sources.success ||
-      !approvals.success ||
-      policies.data.policies.some((x) => x.engagementId !== engagementId) ||
-      sources.data.sources.some((x) => x.engagementId !== engagementId) ||
-      approvals.data.approvals.some((x) => x.engagementId !== engagementId)
+      !p.success ||
+      p.data.policies.some((x) => x.engagementId !== engagementId) ||
+      (p.data.effectivePolicy &&
+        (p.data.effectivePolicy.engagementId !== engagementId ||
+          p.data.effectivePolicy.effectiveFrom > p.data.serverDate))
     )
       return bad();
     return {
-      policies: policies.data.policies,
-      sources: sources.data.sources,
-      approvals: approvals.data.approvals,
-      truncated: policies.data.truncated || !!sources.data.nextAfter || !!approvals.data.nextAfter,
+      policies: p.data.policies,
+      effectivePolicy: p.data.effectivePolicy,
+      sources: sources.sources,
+      approvals: approvals.approvals,
+      sourceNext: sources.nextAfter,
+      reviewNext: approvals.nextAfter,
     };
   },
   inspect: async (approvalId: string, c: RateContext | null) => {
@@ -413,7 +445,10 @@ export const milestoneBilling = {
         .safeParse(raw);
     if (
       !out.success ||
-      (engagementId !== null && out.data.items.some((x) => x.engagementId !== engagementId))
+      out.data.items.some(
+        (x) => x.id === after || (engagementId !== null && x.engagementId !== engagementId),
+      ) ||
+      (out.data.nextAfter !== null && out.data.nextAfter !== out.data.items.at(-1)?.id)
     )
       return bad();
     return out.data;
