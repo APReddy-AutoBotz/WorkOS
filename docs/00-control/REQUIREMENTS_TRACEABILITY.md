@@ -594,3 +594,5 @@ WOS-APR-002 and WOS-INV-006 — The invoice approval browser journey schedules 2
 WOS-COM-014/015 — The commercial candidate approval journey schedules eleven future policies for both a billing and a confidential cost candidate, then uses the effective policy to complete independent review.
 
 WOS-COM-002/003/011 — Snapshot inspection reads effective periods, binding and priority through the exact billing and cost adoption IDs retained at calculation. The browser test adopts a higher-priority billing rate, verifies the earlier snapshot and uses the new rate for a different entry. Cost and worker access apply to the read.
+
+WOS-COM-003/004/011 — T&M calculation evidence presents the approved quantity, hourly rates, exact products and rounded billable and cost amounts, gross margin arithmetic, policy version, calculation version, actor and timestamp. The real browser journey verifies receipt recovery and later inspection with a different prospective rounding policy.

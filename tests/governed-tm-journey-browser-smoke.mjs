@@ -308,7 +308,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                 requestId: randomUUID(),
                 engagementId: roots.engagement.id,
                 effectiveFrom: shift(fx.today, day),
-                definition: policy.definition,
+                definition: { ...policy.definition, rounding: 'DOWN', precision: 0 },
                 reason: 'Synthetic future valuation policy',
               },
             }),
@@ -451,6 +451,31 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal((await body(vw)).valuation.id, accepted.valuation.id);
         const result = tm.getByRole('region', { name: 'Retained T&M snapshot', exact: true });
         await result.getByText(/billable 125.15, cost 50.00, margin 75.15/).waitFor();
+        const verifyCalculation = async () => {
+          const audit = result.getByRole('region', { name: 'Calculation evidence' });
+          await audit
+            .getByText(
+              'Policy version 1, effective ' +
+                fx.today +
+                ' UTC. Amounts rounded per entry using half up at 2 decimal places.',
+            )
+            .waitFor();
+          const table = audit.getByRole('table', { name: 'Amounts in USD for 1.25 approved hours' });
+          assert.deepEqual(
+            await table
+              .getByRole('row', { name: /Billable value/ })
+              .getByRole('cell')
+              .allTextContents(),
+            ['100.1234', '125.15425', '125.15'],
+          );
+          assert.deepEqual(
+            await table.getByRole('row', { name: /Cost/ }).getByRole('cell').allTextContents(),
+            ['40.0020', '50.0025', '50.00'],
+          );
+          await audit.getByText('USD gross margin · 125.15 − 50.00 = 75.15.').waitFor();
+          assert.equal(await audit.locator('time').getAttribute('datetime'), accepted.valuation.createdAt);
+        };
+        await verifyCalculation();
         assert.equal(
           (
             await pool.query('select count(*)::int n from commercial_tm_valuations where entry_id=$1', [
@@ -497,6 +522,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal(denied.status, 403);
         assert.ok(!JSON.stringify(denied.body).includes(cost.id));
         await result.getByText(/billable 125.15, cost 50.00, margin 75.15/).waitFor();
+        await verifyCalculation();
         await tm.getByLabel('T&M approved work', { exact: true }).selectOption(second.entryId);
         await tm.getByLabel('Retained T&M policy', { exact: true }).selectOption(policy.id);
         const bw2 = rateWait('billing'),

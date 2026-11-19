@@ -77,6 +77,7 @@ const TmEngagement = ({
     [rates, setRates] = useState<TmRates | null>(null),
     [snapshot, setSnapshot] = useState<{
       valuation: TmValuation;
+      policy: TmPolicy;
       rates?: Pick<Awaited<ReturnType<typeof governedTmValuations.inspect>>, 'billingRate' | 'costRate'>;
     } | null>(null),
     [pending, setPending] = useState<Pending | null>(null),
@@ -262,18 +263,7 @@ const TmEngagement = ({
   };
   const chosenSource = sources.find((x) => x.entryId === selectedSource),
     chosenPolicy = policies?.find((x) => x.id === selectedPolicy);
-  const policyDetails = chosenPolicy?.definition as
-    | {
-        currency: string;
-        precision: number;
-        rounding: string;
-        aggregation: string;
-        capTreatment: string;
-        exclusions: string;
-        approvalTreatment: string;
-        unit: string;
-      }
-    | undefined;
+  const policyDetails = chosenPolicy?.definition;
   const inspectRates = () => {
     if (
       !chosenSource ||
@@ -282,7 +272,7 @@ const TmEngagement = ({
       chosenPolicy.effectiveFrom > chosenSource.workDate
     )
       return;
-    const p = chosenPolicy.definition as { currency: string; unit: string };
+    const p = chosenPolicy.definition;
     void run(async (c) => {
       const [billing, cost] = await Promise.all([
         approvedRateSources.resolve(
@@ -348,7 +338,7 @@ const TmEngagement = ({
       try {
         const v = await governedTmValuations.calculate(command, chosenPolicy, chosenSource, rates, c);
         setPending(null);
-        setSnapshot({ valuation: v });
+        setSnapshot({ valuation: v, policy: chosenPolicy });
         setPolicies(null);
         setSources([]);
         setRates(null);
@@ -371,7 +361,11 @@ const TmEngagement = ({
     if (!chosenSource?.valuationId) return;
     void run(async (c) => {
       const v = await governedTmValuations.inspect(chosenSource.valuationId!, engagementId, chosenSource, c);
-      setSnapshot({ valuation: v.valuation, rates: { billingRate: v.billingRate, costRate: v.costRate } });
+      setSnapshot({
+        valuation: v.valuation,
+        policy: v.policy,
+        rates: { billingRate: v.billingRate, costRate: v.costRate },
+      });
     });
   };
   const reconcile = () => {
@@ -389,7 +383,7 @@ const TmEngagement = ({
           c,
           true,
         );
-        setSnapshot({ valuation: v });
+        setSnapshot({ valuation: v, policy: pending.policy });
         setNotice('Original T&M snapshot ' + v.id + ' confirmed by read-only receipt.');
       }
       setPending(null);
@@ -646,7 +640,7 @@ const TmEngagement = ({
           </button>
         </div>
       )}
-      {shown && (
+      {shown && snapshot && (
         <section aria-label="Retained T&M snapshot">
           <h3>Retained calculation</h3>
           <p>
@@ -654,7 +648,58 @@ const TmEngagement = ({
             margin {shown.result.marginValue}. Work entry {shown.entryId}; policy {shown.policyId}; billing
             adoption {shown.billingAdoptionId}; cost adoption {shown.costAdoptionId}.
           </p>
-          {snapshot?.rates && (
+          <section aria-label="Calculation evidence" className="space-y-2">
+            <h4>Calculation evidence</h4>
+            <p>
+              Policy version {snapshot.policy.sequence}, effective {snapshot.policy.effectiveFrom} UTC.{' '}
+              Amounts rounded per entry using{' '}
+              {
+                { HALF_UP: 'half up', HALF_EVEN: 'half even', DOWN: 'round down' }[
+                  snapshot.policy.definition.rounding
+                ]
+              }{' '}
+              at {snapshot.policy.definition.precision} decimal places.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left tabular-nums [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1">
+                <caption>
+                  Amounts in {shown.result.currency} for {shown.result.hoursExact} approved hours
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Amount</th>
+                    <th scope="col">Hourly rate</th>
+                    <th scope="col">Before rounding</th>
+                    <th scope="col">After rounding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">Billable value</th>
+                    <td>{shown.result.billingRateExact}</td>
+                    <td>{shown.result.unroundedBillableExact}</td>
+                    <td>{shown.result.billableValue}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Cost</th>
+                    <td>{shown.result.costRateExact}</td>
+                    <td>{shown.result.unroundedCostExact}</td>
+                    <td>{shown.result.costValue}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              {shown.result.currency} gross margin · {shown.result.billableValue} − {shown.result.costValue} ={' '}
+              {shown.result.marginValue}.
+            </p>
+            <p>
+              Recorded by {shown.actorId} ({shown.activeRole}) on{' '}
+              <time dateTime={shown.createdAt}>{shown.createdAt}</time>. Calculation version{' '}
+              {shown.result.version}.
+            </p>
+          </section>
+          {snapshot.rates && (
             <section aria-label="Historical rate selection">
               <h4>Rate selection for {shown.sourceEvidence.workDate}</h4>
               <p>

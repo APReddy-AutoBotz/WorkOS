@@ -16,7 +16,17 @@ const policy = z
     sequence: z.number().int().positive(),
     previousId: uuid.nullable(),
     effectiveFrom: date,
-    definition,
+    definition: z.custom<{
+      version: 'governed-tm/1';
+      currency: string;
+      precision: number;
+      rounding: 'HALF_UP' | 'HALF_EVEN' | 'DOWN';
+      aggregation: 'PER_ENTRY';
+      capTreatment: 'NONE';
+      exclusions: 'NONE';
+      unit: 'HOUR';
+      approvalTreatment: 'NONE';
+    }>(validTmValuationPolicy),
     actorId: uuid,
     activeRole: z.string().min(1),
     requestId: uuid,
