@@ -470,6 +470,9 @@ export const registerOrganizationSetupRoutes = ({
       await client.query('select pg_advisory_xact_lock(hashtext($1))',[`reporting-period:${req.organizationScope.organizationId}:${req.organizationScope.legalEntityId}:${parsed.data.frequency}`]);
       const previous=(await client.query(`select * from reporting_periods where organization_id=$1 and legal_entity_id=$2 and frequency=$3 and code=$4 for update`,
         [req.organizationScope.organizationId,req.organizationScope.legalEntityId,parsed.data.frequency,parsed.data.code])).rows[0];
+      if(['Financially Locked','Closed'].includes(parsed.data.status) && previous?.status!==parsed.data.status){
+        await client.query('rollback');return res.status(409).json({error:'Inspect the period and use its financial transition action',code:'REPORTING_PERIOD_REVIEW_REQUIRED'});
+      }
       if(previous&&!canTransitionReportingPeriod(previous.status,parsed.data.status)){
         await client.query('rollback');return res.status(409).json({error:'Reporting period state transition is not allowed',code:'REPORTING_PERIOD_TRANSITION_CONFLICT'});
       }

@@ -83,7 +83,8 @@ export function FinancialPeriodControl() {
     (reopen
       ? hasRatePermission('periods.financial_reopen')
       : ['Open', 'Submission Closed', 'Approval Closed'].includes(current.status));
-  const run = async (write: boolean) => {
+  const canClose = current && current.status !== 'Closed';
+  const run = async (action?: 'lock' | 'reopen' | 'close') => {
     if (inFlight.current) return;
     if (owner.current && !isOrganizationProfileContextCurrent(owner.current)) {
       clear();
@@ -100,13 +101,13 @@ export function FinancialPeriodControl() {
     setBusy(true);
     setNotice('');
     try {
-      if (write) {
-        if (!current || !data || !canAct || reason.trim().length < 3) return;
+      if (action) {
+        if (!current || !data || !(action === 'close' ? canClose : canAct) || reason.trim().length < 3) return;
         const raw = await api.requestWithContext(
           'POST',
           base + '/' + encodeURIComponent(current.id) + '/transitions',
           {
-            action: reopen ? 'reopen' : 'lock',
+            action,
             expectedOwnerKey: data.ownerKey,
             expectedRevision: current.revision,
             reason: reason.trim(),
@@ -121,7 +122,7 @@ export function FinancialPeriodControl() {
           result.legalEntityId !== c.scope.legalEntityId ||
           result.period.id !== current.id ||
           result.period.revision !== current.revision + 1 ||
-          result.period.status !== (reopen ? 'Approval Closed' : 'Financially Locked')
+          result.period.status !== { reopen: 'Approval Closed', lock: 'Financially Locked', close: 'Closed' }[action]
         )
           throw new Error();
         setData({ ...data, periods: data.periods.map((p) => (p.id === current.id ? result.period : p)) });
@@ -183,7 +184,7 @@ export function FinancialPeriodControl() {
             }}
           />
         </label>
-        <button type="button" disabled={!date} onClick={() => void run(false)}>
+        <button type="button" disabled={!date} onClick={() => void run()}>
           Inspect reporting periods
         </button>
         {data &&
@@ -216,9 +217,9 @@ export function FinancialPeriodControl() {
             {current.revision}
           </p>
         )}
-        {canAct && (
+        {(canAct || canClose) && (
           <>
-            {reopen && (
+            {reopen && canAct && (
               <p>
                 Reopening permits valuation of approved work. Submissions and approval decisions stay closed.
               </p>
@@ -227,9 +228,20 @@ export function FinancialPeriodControl() {
               Financial transition reason{' '}
               <input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
             </label>
-            <button type="button" disabled={reason.trim().length < 3} onClick={() => void run(true)}>
-              {reopen ? 'Reopen for financial valuation' : 'Financially lock period'}
-            </button>
+            {canAct && (
+              <button
+                type="button"
+                disabled={reason.trim().length < 3}
+                onClick={() => void run(reopen ? 'reopen' : 'lock')}
+              >
+                {reopen ? 'Reopen for financial valuation' : 'Financially lock period'}
+              </button>
+            )}
+            {canClose && (
+              <button type="button" disabled={reason.trim().length < 3} onClick={() => void run('close')}>
+                Permanently close period
+              </button>
+            )}
           </>
         )}
       </fieldset>

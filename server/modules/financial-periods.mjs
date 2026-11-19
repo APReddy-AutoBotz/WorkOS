@@ -1,3 +1,4 @@
+import { canTransitionReportingPeriod } from '../reporting-periods.mjs';
 import { z } from 'zod';
 import { assertCommercialAuthority } from './commercial-drafting/service.mjs';
 import { workApprovalOwner } from './approvals/work-approval-service.mjs';
@@ -69,7 +70,7 @@ export function registerFinancialPeriodRoutes(router, { pool, requirePermission,
         .object({
           expectedOwnerKey: z.string().regex(/^[a-f0-9]{64}$/),
           expectedRevision: z.number().int().positive(),
-          action: z.enum(['lock', 'reopen']),
+          action: z.enum(['lock', 'reopen', 'close']),
           reason: z.string().trim().min(3).max(1000),
         })
         .strict()
@@ -93,26 +94,26 @@ export function registerFinancialPeriodRoutes(router, { pool, requirePermission,
           args,
         )
       ).rows[0]?.data;
+      const target = { reopen: 'Approval Closed', lock: 'Financially Locked', close: 'Closed' }[d.action];
       if (
         !previous ||
         previous.frequency !== found.frequency ||
         previous.revision !== d.expectedRevision ||
-        !(reopen
-          ? previous.status === 'Financially Locked'
-          : ['Open', 'Submission Closed', 'Approval Closed'].includes(previous.status))
+        previous.status === target ||
+        !(reopen ? previous.status === 'Financially Locked' : canTransitionReportingPeriod(previous.status, target))
       )
         throw bad(409, 'The inspected period cannot make this transition. Reload.');
       await c.query("select set_config('workos.financial_period_operation',$1,true)", [r.operationId]);
       const updated = (
         await c.query(
           `update reporting_periods p set status=$4 where ${where} returning to_jsonb(p) as data,${fields}`,
-          [...args, reopen ? 'Approval Closed' : 'Financially Locked'],
+          [...args, target],
         )
       ).rows[0];
       const { data, ...period } = updated;
       await audit(c, r, {
         module: 'Organization Setup',
-        action: reopen ? 'Reopen Financial Period' : 'Lock Financial Period',
+        action: { reopen: 'Reopen Financial Period', lock: 'Lock Financial Period', close: 'Close Financial Period' }[d.action],
         entityType: 'Reporting Period',
         entityId: period.id,
         oldValue: previous,
