@@ -63,6 +63,8 @@ export const createMilestoneBillingRouter = (o) => {
     } catch (e) {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
+      else if (e.code === 'CTM04')
+        res.status(409).json({ code: 'BILLING_ELIGIBILITY_PERIOD_CLOSED', error: 'The eligibility date is outside an open financial period. Review the reporting calendar before approving.' });
       else if (['MBE01', 'MBE02', 'MBE03', 'MBE04', '23505', '23514', '40001', '40P01'].includes(e.code))
         res.status(e.code === 'MBE01' ? 403 : 409).json({
           code: e.code === 'MBE01' ? 'MILESTONE_BILLING_AUTHORITY' : 'MILESTONE_BILLING_CONFLICT',

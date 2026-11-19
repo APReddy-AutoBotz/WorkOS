@@ -252,7 +252,9 @@ const TmBillingEngagement = ({
           setSources([]);
           setApprovals([]);
           setInspected(null);
-          setNotice('The operation was refused. Reload before a deliberate new request.');
+          setNotice(e.code === 'BILLING_ELIGIBILITY_PERIOD_CLOSED'
+            ? 'The eligibility date is outside an open financial period. Review the reporting calendar before approving.'
+            : 'The operation was refused. Reload before a deliberate new request.');
           return;
         }
         throw e;

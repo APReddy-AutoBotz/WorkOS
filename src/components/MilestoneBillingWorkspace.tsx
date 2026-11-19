@@ -258,7 +258,9 @@ const MilestoneReview = ({
           setPending(null);
           setLoaded(false);
           setInspected(null);
-          setNotice('Operation refused. Reload before a deliberate new request.');
+          setNotice(e.code === 'BILLING_ELIGIBILITY_PERIOD_CLOSED'
+            ? 'The eligibility date is outside an open financial period. Review the reporting calendar before approving.'
+            : 'Operation refused. Reload before a deliberate new request.');
           return;
         }
         throw e;

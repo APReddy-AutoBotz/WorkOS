@@ -223,6 +223,15 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ).rows[0].n,
         0,
       );
+      await pool.query(
+        "insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency) values('synthetic-eligibility-fiscal',$1,$2,'FIN','Synthetic fiscal period',$3,$3,'Planned','Fiscal')",
+        [f.organizationId, f.legalEntityId, fx.today],
+      );
+      const blockedDecision = await decision(ids.second, 1);
+      assert.equal(blockedDecision.status, 409);
+      assert.equal(blockedDecision.body.error.code, 'BILLING_ELIGIBILITY_PERIOD_CLOSED');
+      assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events')).rows[0].n, 0);
+      await pool.query("update reporting_periods set status='Open' where id='synthetic-eligibility-fiscal'");
       const fixture = await startFixtureServer({
         root: fileURLToPath(new URL('../', import.meta.url)),
         fixtures: ['milestone-review'],
@@ -288,7 +297,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           .waitFor();
         assert.equal(final.approval.state.status, 'Approved');
         assert(final.eventId && final.itemId);
+        await pool.query("update reporting_periods set status='Closed' where id='synthetic-eligibility-fiscal'");
         assert.equal(ok(await decision(ids.second, 1, 'Approved', finalKey)).itemId, final.itemId);
+        await pool.query("delete from reporting_periods where id='synthetic-eligibility-fiscal'");
         const register = ok(await request(route + '/register'));
         assert.equal(register.batchSupport, true);
         assert.equal(register.items.length, 1);
