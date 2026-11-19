@@ -415,9 +415,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           sw = wait(p, b + '/sources'),
           iw = wait(p, b + '/instances');
         await ui.getByRole('button', { name: 'Load billing evidence and reviews', exact: true }).click();
-        await body(pw);
+        assert.equal((await body(pw)).effectivePolicy, null);
         assert.equal((await body(sw)).sources.length, 1);
         await body(iw);
+        assert.equal(
+          await ui.getByRole('button', { name: 'Request billing review', exact: true }).isDisabled(),
+          true,
+        );
         await ui.getByLabel('Billing policy effective from', { exact: true }).fill(fx.today);
         await ui.getByLabel('Billing policy locale', { exact: true }).fill('en-US');
         await ui.getByLabel('Billing completion in-app', { exact: true }).selectOption('yes');
@@ -439,13 +443,51 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await ui
           .getByText('Operation recorded. Reload the current evidence before another action.')
           .waitFor();
-        pw = wait(p, b + '/policies');
-        sw = wait(p, b + '/sources');
-        iw = wait(p, b + '/instances');
-        await ui.getByRole('button', { name: 'Load billing evidence and reviews', exact: true }).click();
-        await body(pw);
-        await body(sw);
-        await body(iw);
+        let latest = pOut.policy.id;
+        for (let day = 1; day <= 21; day++) {
+          latest = ok(
+            await request(b + '/policies', {
+              method: 'POST',
+              identity: ids.requester,
+              body: {
+                expectedOwnerKey: pOut.ownerKey,
+                requestId: randomUUID(),
+                engagementId: roots.engagement.id,
+                expectedLatestId: latest,
+                effectiveFrom: shift(fx.today, day),
+                definition: pOut.policy.definition,
+                reason: 'Synthetic future billing review policy',
+              },
+            }),
+            201,
+          ).policy.id;
+        }
+        const loadPolicySelection = async () => {
+          const responses = ['/policies', '/sources', '/instances'].map((path) => wait(p, b + path));
+          await ui.getByRole('button', { name: 'Load billing evidence and reviews', exact: true }).click();
+          const [selection] = await Promise.all(responses.map((response) => body(response)));
+          assert.equal(selection.effectivePolicy.id, pOut.policy.id);
+          assert.ok(selection.truncated && !selection.policies.some((x) => x.id === pOut.policy.id));
+          return selection.policies[0].id;
+        };
+        assert.equal(await loadPolicySelection(), latest);
+        await ui.getByLabel('Billing policy effective from', { exact: true }).fill(shift(fx.today, 22));
+        pw = wait(p, b + '/policies', 'POST');
+        await ui.getByRole('button', { name: 'Record billing review policy', exact: true }).click();
+        const scheduled = (await body(pw, 201)).policy;
+        assert.equal(scheduled.previousId, latest);
+        await ui
+          .getByText('Operation recorded. Reload the current evidence before another action.')
+          .waitFor();
+        assert.equal(await loadPolicySelection(), scheduled.id);
+        const scopedQuery =
+          '?engagementId=' + encodeURIComponent(roots.engagement.id) + '&includeEffective=true';
+        assert.equal((await request(b + '/policies' + scopedQuery, { identity: ids.reader })).status, 403);
+        const available = ui.getByLabel('Billing review policy', { exact: true });
+        assert.deepEqual(
+          await available.locator('option').evaluateAll((nodes) => nodes.map((node) => node.value)),
+          ['', pOut.policy.id],
+        );
         await ui.getByLabel('Billing snapshot', { exact: true }).selectOption(calc.id);
         await ui.getByLabel('Billing review policy', { exact: true }).selectOption(pOut.policy.id);
         await ui.getByLabel('Billing change owner user ID', { exact: true }).fill(ids.manager.id);

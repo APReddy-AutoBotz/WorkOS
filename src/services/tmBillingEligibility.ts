@@ -288,12 +288,17 @@ export const tmBillingEligibility = {
     if (!id.safeParse(engagementId).success) return bad();
     const query = '?' + new URLSearchParams({ engagementId }),
       [a, b, d] = await Promise.all([
-        call('GET', '/policies' + query, c, 'read'),
+        call('GET', '/policies' + query + '&includeEffective=true', c, 'read'),
         call('GET', '/sources' + query, c, 'read'),
         call('GET', '/instances' + query, c, 'read'),
       ]);
     const p = z
-        .object({ ...envelope, policies: z.array(policy).max(20), truncated: z.boolean() })
+        .object({
+          ...envelope,
+          policies: z.array(policy).max(20),
+          truncated: z.boolean(),
+          effectivePolicy: policy.nullable(),
+        })
         .strict()
         .safeParse(a),
       s = z
@@ -310,16 +315,24 @@ export const tmBillingEligibility = {
       !i.success ||
       p.data.actorUserId !== s.data.actorUserId ||
       p.data.actorUserId !== i.data.actorUserId ||
-      p.data.policies.some((x) => x.engagementId !== engagementId) ||
+      (p.data.effectivePolicy &&
+        (p.data.effectivePolicy.engagementId !== engagementId ||
+          p.data.effectivePolicy.effectiveFrom > p.data.serverDate)) ||
+      p.data.policies.some(
+        (x) =>
+          x.engagementId !== engagementId ||
+          (x.effectiveFrom <= p.data.serverDate &&
+            (!p.data.effectivePolicy || x.sequence > p.data.effectivePolicy.sequence)),
+      ) ||
       s.data.sources.some((x) => x.engagementId !== engagementId) ||
       i.data.approvals.some((x) => x.engagementId !== engagementId)
     )
       return bad();
     return {
       policies: p.data.policies,
+      effectivePolicy: p.data.effectivePolicy,
       sources: s.data.sources,
       approvals: i.data.approvals,
-      policiesTruncated: p.data.truncated,
       sourcesNext: s.data.nextAfter,
       approvalsNext: i.data.nextAfter,
     };

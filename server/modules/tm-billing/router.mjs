@@ -71,20 +71,16 @@ export const createTmBillingRouter = (o) => {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
       else if (['TBE01', 'TBE02', 'TBE03', 'TBE04', '23505', '23514', '40001', '40P01'].includes(e.code))
-        res
-          .status(e.code === 'TBE01' ? 403 : 409)
-          .json({
-            code: e.code === 'TBE01' ? 'TM_BILLING_AUTHORITY' : 'TM_BILLING_CONFLICT',
-            error: 'Current billing scope, source, owner or stage changed. Reload.',
-          });
+        res.status(e.code === 'TBE01' ? 403 : 409).json({
+          code: e.code === 'TBE01' ? 'TM_BILLING_AUTHORITY' : 'TM_BILLING_CONFLICT',
+          error: 'Current billing scope, source, owner or stage changed. Reload.',
+        });
       else {
         o.logError?.(e);
-        res
-          .status(503)
-          .json({
-            code: 'TM_BILLING_UNCONFIRMED',
-            error: 'The operation could not be confirmed. Read the original receipt.',
-          });
+        res.status(503).json({
+          code: 'TM_BILLING_UNCONFIRMED',
+          error: 'The operation could not be confirmed. Read the original receipt.',
+        });
       }
     } finally {
       c?.release();
@@ -333,7 +329,10 @@ export const createTmBillingRouter = (o) => {
   router.get(
     '/policies',
     handle(false, async (c, r) => {
-      const q = parse(z.object({ engagementId: id }).strict(), r.query);
+      const q = parse(
+        z.object({ engagementId: id, includeEffective: z.literal('true').optional() }).strict(),
+        r.query,
+      );
       await authorize(c, r);
       await engagement(c, r, q.engagementId);
       const rows = (
@@ -342,11 +341,20 @@ export const createTmBillingRouter = (o) => {
           [...scope(r), q.engagementId],
         )
       ).rows;
-      return {
-        ...(await envelope(c, r)),
+      const env = await envelope(c, r);
+      const result = {
+        ...env,
         policies: rows.slice(0, 20).map(policyView),
         truncated: rows.length > 20,
       };
+      if (q.includeEffective) {
+        const active = await c.query(
+          'select *,effective_from::text from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and effective_from<=$4::date order by sequence desc limit 1',
+          [...scope(r), q.engagementId, env.serverDate],
+        );
+        result.effectivePolicy = active.rowCount ? policyView(active.rows[0]) : null;
+      }
+      return result;
     }),
   );
   router.post(
