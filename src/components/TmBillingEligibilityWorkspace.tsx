@@ -71,7 +71,7 @@ const TmBillingEngagement = ({
     [approvals, setApprovals] = useState<TmBillingApproval[]>([]),
     [sourceNext, setSourceNext] = useState<string | null>(null),
     [approvalNext, setApprovalNext] = useState<string | null>(null),
-    [policyTruncated, setPolicyTruncated] = useState(false),
+    [effectivePolicy, setEffectivePolicy] = useState<TmBillingPolicy | null>(null),
     [loaded, setLoaded] = useState(false),
     [snapshotId, setSnapshotId] = useState(''),
     [policyId, setPolicyId] = useState(''),
@@ -116,7 +116,7 @@ const TmBillingEngagement = ({
     setApprovals([]);
     setSourceNext(null);
     setApprovalNext(null);
-    setPolicyTruncated(false);
+    setEffectivePolicy(null);
     setLoaded(false);
     setSnapshotId('');
     setPolicyId('');
@@ -198,7 +198,8 @@ const TmBillingEngagement = ({
       setApprovals(x.approvals);
       setSourceNext(x.sourcesNext);
       setApprovalNext(x.approvalsNext);
-      setPolicyTruncated(x.policiesTruncated);
+      setEffectivePolicy(x.effectivePolicy);
+      setPolicyId('');
       setLoaded(true);
       setInspected(null);
       setSelected('');
@@ -299,8 +300,16 @@ const TmBillingEngagement = ({
       },
     });
   };
+  const requestReady = Boolean(
+    snapshotId &&
+      policyId &&
+      effectivePolicy?.id === policyId &&
+      ownerId &&
+      ownerRole &&
+      requestReason.trim().length >= 3,
+  );
   const request = () => {
-    if (!snapshotId || !policyId || !ownerId || !ownerRole || requestReason.trim().length < 3) return;
+    if (!requestReady) return;
     perform({
       type: 'request',
       data: {
@@ -385,12 +394,21 @@ const TmBillingEngagement = ({
       )}
       {loaded && (
         <>
-          <p>
-            {policyTruncated ? 'Only the latest 20 policies are displayed.' : ''} Billing evidence excludes
-            confidential cost and margin.
-          </p>
+          <p>Billing evidence excludes confidential cost and margin.</p>
+          {policies.length > 0 && (
+            <details>
+              <summary>Recent billing review policies</summary>
+              <ul>
+                {policies.map((x) => (
+                  <li key={x.id}>
+                    Version {x.sequence} · effective {x.effectiveFrom} UTC
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {canManage && (
-            <fieldset disabled={busy || !!pending || policyTruncated}>
+            <fieldset disabled={busy || !!pending}>
               <legend>Prospective named review policy</legend>
               <label>
                 Effective from UTC
@@ -530,12 +548,16 @@ const TmBillingEngagement = ({
                   value={policyId}
                   onChange={(e) => setPolicyId(e.target.value)}
                 >
-                  <option value="">Choose an explicit policy</option>
-                  {policies.map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.effectiveFrom} · version {x.sequence}
+                  <option value="">
+                    {effectivePolicy
+                      ? 'Choose the effective policy'
+                      : 'No billing review policy is effective today'}
+                  </option>
+                  {effectivePolicy && (
+                    <option value={effectivePolicy.id}>
+                      {effectivePolicy.effectiveFrom} · version {effectivePolicy.sequence}
                     </option>
-                  ))}
+                  )}
                 </select>
               </label>
               <label>
@@ -562,7 +584,7 @@ const TmBillingEngagement = ({
                   onChange={(e) => setRequestReason(e.target.value)}
                 />
               </label>
-              <button type="button" onClick={request}>
+              <button type="button" disabled={!requestReady} onClick={request}>
                 Request billing review
               </button>
             </fieldset>
