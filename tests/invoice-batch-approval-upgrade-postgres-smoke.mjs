@@ -834,7 +834,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           defs = (
             await pool.query('select to_jsonb(x)v from permission_definitions x order by to_jsonb(x)::text')
           ).rows,
-          keys = ['commercial.invoice_approval.manage', 'commercial.invoice_approval.decide', 'commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm', 'commercial.milestone_billing.view', 'commercial.milestone_billing.manage', 'commercial.milestone_billing.decide'];
+          keys = ['commercial.invoice_approval.manage', 'commercial.invoice_approval.decide', 'commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage', 'commercial.invoice_batch.confirm', 'commercial.milestone_billing.view', 'commercial.milestone_billing.manage', 'commercial.milestone_billing.decide', 'periods.financial_reopen'];
         assert(!defs.some((x) => keys.includes(x.v.permission_key)));
         assert.equal(before.invoice_draft_occupancies.length, 1);
         assert.deepEqual((await migrateCommercialDatabase(pool)).applied, [
