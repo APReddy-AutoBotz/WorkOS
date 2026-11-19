@@ -1354,6 +1354,68 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               .status,
             403,
           );
+          const portfolioExports = route + '/reconciliation/portfolio/exports';
+          const command = {
+            expectedOwnerKey: portfolio.ownerKey,
+            start: portfolio.start,
+            end: portfolio.end,
+            source: portfolio.source,
+            expectedReportToken: portfolio.reportToken,
+            requestId: randomUUID(),
+            reason: 'Synthetic portfolio export',
+          };
+          assert.equal(
+            (
+              await request(portfolioExports, {
+                method: 'POST',
+                identity: ids.requester,
+                body: { ...command, source: 'both' },
+              })
+            ).status,
+            403,
+          );
+          assert.equal(
+            (
+              await request(portfolioExports, {
+                method: 'POST',
+                identity: ids.requester,
+                body: { ...command, start: '2000-01-01' },
+              })
+            ).status,
+            409,
+          );
+          await reconUi.getByLabel('Portfolio export reason').fill(command.reason);
+          const portfolioDownload = requester.p.waitForEvent('download'),
+            exportResponse = wait(requester.p, portfolioExports, 'POST');
+          await reconUi.getByRole('button', { name: 'Download audited portfolio CSV' }).click();
+          const receipt = await body(exportResponse, 201),
+            download = await portfolioDownload;
+          assert.match(download.suggestedFilename(), /^portfolio-billing-reconciliation-/);
+          assert.deepEqual(await readFile(await download.path()), Buffer.from(receipt.csv));
+          assert.equal(receipt.reportToken, portfolio.reportToken);
+          assert(receipt.csv.includes('"MANUALLY_CONFIRMED_LINE"'));
+          assert(receipt.csv.includes('"REGISTER_STATE"'));
+          assert(receipt.csv.includes('"' + eligible + '","' + eligible + '","time_and_materials"'));
+          const recorded = (
+            await pool.query(
+              "select new_value,reason from audit_logs where action='Export Portfolio Billing Reconciliation' and entity_id=$1",
+              [receipt.requestId],
+            )
+          ).rows;
+          assert.equal(recorded.length, 1);
+          assert.equal(recorded[0].new_value.artifactSha256, receipt.sha256);
+          assert.equal(recorded[0].new_value.source, command.source);
+          assert.equal(recorded[0].reason, command.reason);
+          assert.equal(
+            (
+              await request(portfolioExports, {
+                method: 'POST',
+                identity: ids.requester,
+                body: { ...command, requestId: receipt.requestId },
+              })
+            ).status,
+            409,
+          );
           await reconUi.getByLabel('Report export reason').fill('Synthetic reconciled report');
           const reportDownload = requester.p.waitForEvent('download'),
             reportExportWait = wait(requester.p, route + '/reconciliation/exports', 'POST');

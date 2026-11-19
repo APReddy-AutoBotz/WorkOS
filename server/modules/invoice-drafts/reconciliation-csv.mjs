@@ -107,3 +107,37 @@ export const reconciliationCsv = (scope, report, token) => {
       );
   return lines.join('\r\n') + '\r\n';
 };
+
+export const portfolioReconciliationCsv = (scope, report) => {
+  const columns = [
+    'record_type',
+    'report_version',
+    'organization_id',
+    'legal_entity_id',
+    'eligible_from',
+    'eligible_through',
+    'source_models',
+    'as_of_utc',
+    'source_token',
+    'currency',
+    'boundary_or_status',
+    'count',
+    'amount',
+  ];
+  const metadata = [
+    report.version,
+    scope.organizationId,
+    scope.legalEntityId,
+    report.start,
+    report.end,
+    report.source,
+    new Date(report.asOf).toISOString(),
+    report.reportToken,
+  ];
+  const rows = [columns, ['REPORT', ...metadata, '', '', '', '']];
+  for (const row of report.controls)
+    rows.push(['CONTROL', ...metadata, row.currency, row.boundary, row.lineCount, row.amount]);
+  for (const row of report.totals)
+    rows.push(['REGISTER_STATE', ...metadata, row.currency, row.status, row.lineCount, row.amount]);
+  return rows.map((cells) => cells.map(quoteCsvCell).join(',')).join('\r\n') + '\r\n';
+};

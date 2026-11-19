@@ -346,7 +346,7 @@ export const invoiceDrafts = {
       return bad();
     const raw = await call(
       'GET',
-      '/reconciliation/portfolio?' + new URLSearchParams({ start, end, source }),
+      '/reconciliation/portfolio?' + new URLSearchParams({ start, end, source, includeReportToken: 'true' }),
       c,
       'view',
     );
@@ -354,6 +354,7 @@ export const invoiceDrafts = {
       .object({
         ...envelope,
         version: z.literal('workos.portfolio-reconciliation/1'),
+        reportToken: z.string().regex(/^[a-f0-9]{64}$/),
         start: date,
         end: date,
         source: z.enum(['both', 'time_and_materials', 'milestone']),
@@ -577,7 +578,15 @@ export const invoiceDrafts = {
     return value;
   },
   exportReconciliation: async (
-    report: { engagementId: string; reportToken: string; version?: string },
+    report:
+      | { engagementId: string; reportToken: string; version?: string }
+      | {
+          start: string;
+          end: string;
+          source: 'both' | 'time_and_materials' | 'milestone';
+          reportToken: string;
+          version: 'workos.portfolio-reconciliation/1';
+        },
     requestId: string,
     why: string,
     c: RateContext | null,
@@ -589,38 +598,72 @@ export const invoiceDrafts = {
       !hasRatePermission('reports.export')
     )
       return bad();
-    const raw = await call('POST', '/reconciliation/exports', c, 'view', {
-      engagementId: report.engagementId,
-      expectedReportToken: report.reportToken,
-      requestId,
-      reason: why,
-    });
-    if (!hasRatePermission('commercial.invoice_export.view') || !hasRatePermission('reports.export'))
+    const portfolio = 'source' in report;
+    const filters = portfolio
+      ? { start: report.start, end: report.end, source: report.source }
+      : { engagementId: report.engagementId };
+    const milestone = portfolio
+      ? report.source !== 'time_and_materials'
+      : report.version === 'workos.milestone-reconciliation/1';
+    if (milestone && !hasRatePermission('commercial.milestone_billing.view')) return bad();
+    const raw = await call(
+      'POST',
+      portfolio ? '/reconciliation/portfolio/exports' : '/reconciliation/exports',
+      c,
+      'view',
+      { ...filters, expectedReportToken: report.reportToken, requestId, reason: why },
+    );
+    if (
+      !hasRatePermission('commercial.invoice_export.view') ||
+      !hasRatePermission('reports.export') ||
+      (milestone && !hasRatePermission('commercial.milestone_billing.view'))
+    )
       return bad();
+    const receipt = {
+      ...envelope,
+      requestId: uuid,
+      asOf: instant,
+      reportToken: z.string().regex(/^[a-f0-9]{64}$/),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      bytes: z.number().int().nonnegative(),
+      csv: z.string(),
+    };
     const out = z
-      .object({
-        ...envelope,
-        requestId: uuid,
-        engagementId: id,
-        version: z.enum(['workos.tm-reconciliation/1', 'workos.milestone-reconciliation/1']),
-        asOf: instant,
-        reportToken: z.string().regex(/^[a-f0-9]{64}$/),
-        sha256: z.string().regex(/^[a-f0-9]{64}$/),
-        bytes: z.number().int().nonnegative(),
-        csv: z.string(),
-      })
-      .strict()
+      .discriminatedUnion('version', [
+        z
+          .object({
+            ...receipt,
+            engagementId: id,
+            version: z.enum(['workos.tm-reconciliation/1', 'workos.milestone-reconciliation/1']),
+          })
+          .strict(),
+        z
+          .object({
+            ...receipt,
+            start: date,
+            end: date,
+            source: z.enum(['both', 'time_and_materials', 'milestone']),
+            version: z.literal('workos.portfolio-reconciliation/1'),
+          })
+          .strict(),
+      ])
       .safeParse(raw);
     if (
       !out.success ||
-      out.data.version !== (report.version ?? 'workos.tm-reconciliation/1') ||
-      (out.data.version === 'workos.milestone-reconciliation/1' &&
-        !hasRatePermission('commercial.milestone_billing.view')) ||
       out.data.requestId !== requestId ||
-      out.data.engagementId !== report.engagementId ||
-      out.data.reportToken !== report.reportToken
+      out.data.reportToken !== report.reportToken ||
+      out.data.version !== (report.version ?? 'workos.tm-reconciliation/1')
     )
       return bad();
+    if ('source' in out.data) {
+      if (
+        !portfolio ||
+        out.data.start !== report.start ||
+        out.data.end !== report.end ||
+        out.data.source !== report.source
+      )
+        return bad();
+    } else if (portfolio || out.data.engagementId !== report.engagementId) return bad();
     const data = new TextEncoder().encode(out.data.csv),
       hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)))
         .map((x) => x.toString(16).padStart(2, '0'))

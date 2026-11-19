@@ -779,6 +779,25 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       assert.equal(availableReport.items[0].itemId, itemId);
       assert.equal(availableReport.totals[0].amount, '125.15');
       assert.equal(availableReport.exceptionCount, 0);
+      const portfolioFilter = {
+        start: availableReport.items[0].eligibleOn,
+        end: availableReport.items[0].eligibleOn,
+        source: 'time_and_materials',
+      };
+      const inspectedPortfolio = ok(
+        await request(
+          route +
+            '/reconciliation/portfolio?' +
+            new URLSearchParams({ ...portfolioFilter, includeReportToken: 'true' }),
+        ),
+      );
+      const originalPortfolioCommand = {
+        ...portfolioFilter,
+        expectedOwnerKey: inspectedPortfolio.ownerKey,
+        expectedReportToken: inspectedPortfolio.reportToken,
+        requestId: randomUUID(),
+        reason: 'Synthetic original portfolio',
+      };
       const control = (r, boundary) =>
         r.controls.find((x) => x.currency === 'USD' && x.boundary === boundary);
       for (const boundary of ['EVENT_BACKED_SOURCE', 'ELIGIBILITY_EVENT', 'REGISTER_ITEM']) {
@@ -826,7 +845,21 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         1,
       );
       await pool.query(
-        "create function synthetic_report_audit_failure() returns trigger language plpgsql as $$begin if new.module='Reports' and new.action='Export T&M Billing Reconciliation' then raise exception 'Synthetic report audit refusal';end if;return new;end$$;create trigger synthetic_report_audit_failure before insert on audit_logs for each row execute function synthetic_report_audit_failure()",
+        "create function synthetic_report_audit_failure() returns trigger language plpgsql as $$begin if new.module='Reports' and new.action in ('Export T&M Billing Reconciliation','Export Portfolio Billing Reconciliation') then raise exception 'Synthetic report audit refusal';end if;return new;end$$;create trigger synthetic_report_audit_failure before insert on audit_logs for each row execute function synthetic_report_audit_failure()",
+      );
+      const failedPortfolio = await request(route + '/reconciliation/portfolio/exports', {
+        method: 'POST',
+        body: originalPortfolioCommand,
+      });
+      assert.equal(failedPortfolio.status, 503);
+      assert.equal(failedPortfolio.body.csv, undefined);
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from audit_logs where entity_id=$1', [
+            originalPortfolioCommand.requestId,
+          ])
+        ).rows[0].n,
+        0,
       );
       const failedReportRequest = { ...reportRequest, requestId: randomUUID() };
       assert.equal(
@@ -962,6 +995,19 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       );
       await pool.query(
         "insert into role_permissions(role_name,permission_key,enabled)values('TeamLead','commercial.invoice_export.view',true)on conflict(role_name,permission_key)do update set enabled=true",
+      );
+      const stalePortfolio = await request(route + '/reconciliation/portfolio/exports', {
+        method: 'POST',
+        body: originalPortfolioCommand,
+      });
+      assert.equal(stalePortfolio.status, 409);
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from audit_logs where entity_id=$1', [
+            originalPortfolioCommand.requestId,
+          ])
+        ).rows[0].n,
+        0,
       );
       const limitedReport = ok(await request(reportPath, { identity: ids.denied }));
       assert.equal(limitedReport.items.length, 0);

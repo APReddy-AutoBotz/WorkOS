@@ -10,6 +10,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
   const [report, setReport] = useState<Report | null>(null);
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState('');
+  const [portfolioReason, setPortfolioReason] = useState('');
   const [busy, setBusy] = useState(false);
   type Portfolio = Awaited<ReturnType<typeof invoiceDrafts.portfolio>>;
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -25,6 +26,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
       setPortfolio(null);
       setReport(null);
       setReason('');
+      setPortfolioReason('');
       setBusy(false);
       setMessage('Account, role or scope changed. Reload the report.');
     };
@@ -96,25 +98,24 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
       if (generation.current === run) setBusy(false);
     }
   };
-  const exportReport = async () => {
+  const exportReport = async (selected: Report | Portfolio, exportReason: string) => {
     const context = current.current,
-      selected = report,
       run = generation.current;
-    if (!context || !selected || !isRateContextCurrent(context) || reason.trim().length < 3) return;
+    if (!context || !selected || !isRateContextCurrent(context) || exportReason.trim().length < 3) return;
     setBusy(true);
     setMessage('');
     try {
       const result = await invoiceDrafts.exportReconciliation(
         selected,
         crypto.randomUUID(),
-        reason.trim(),
+        exportReason.trim(),
         context,
       );
       if (generation.current !== run) return;
       const url = URL.createObjectURL(new Blob([result.csv], { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${result.version === 'workos.milestone-reconciliation/1' ? 'milestone' : 'tm'}-billing-reconciliation-${result.requestId}.csv`;
+      link.download = `${result.version === 'workos.portfolio-reconciliation/1' ? 'portfolio' : result.version === 'workos.milestone-reconciliation/1' ? 'milestone' : 'tm'}-billing-reconciliation-${result.requestId}.csv`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setMessage(`Report export recorded. Reference ${result.requestId}; SHA-256 ${result.sha256}.`);
@@ -233,6 +234,26 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                   )}
                 </>
               )}
+              {hasRatePermission('reports.export') && (
+                <>
+                  <label>
+                    Portfolio export reason{' '}
+                    <input
+                      maxLength={1000}
+                      disabled={busy}
+                      value={portfolioReason}
+                      onChange={(e) => setPortfolioReason(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy || portfolioReason.trim().length < 3 || portfolio.exceptionCount > 0}
+                    onClick={() => void exportReport(portfolio, portfolioReason)}
+                  >
+                    Download audited portfolio CSV
+                  </button>
+                </>
+              )}
             </section>
           )}
           <label>
@@ -299,7 +320,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
                   <button
                     type="button"
                     disabled={busy || reason.trim().length < 3 || report.exceptionCount > 0}
-                    onClick={() => void exportReport()}
+                    onClick={() => void exportReport(report, reason)}
                   >
                     Download audited reconciliation CSV
                   </button>

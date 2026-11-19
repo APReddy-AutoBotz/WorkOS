@@ -13,3 +13,7 @@ Migrations `065n` through `065r` extend source lineage, review, CSV, cancellatio
 ## Portfolio billing reconciliation
 
 Finance can reconcile visible T&M and milestone billing across engagements for an inclusive eligibility-date range. The portfolio report shows current register states and source, reservation, export and confirmation control totals by currency. Select the source models and eligibility dates in Billing reconciliation. State and occupancy reflect the read transaction. Combined reports require milestone access. Read the engagement report for item-level evidence and audited CSV export. The portfolio view performs no writes. Revert the application change to roll back.
+
+## Portfolio CSV export
+
+Load the portfolio report, enter the business reason and select **Download audited portfolio CSV**. The server checks current report and export access, including milestone permission for combined or milestone reports. It recomputes the report in one database transaction. A changed report or unresolved control exception requires review. The CSV contains the selected dates, source models, organization and legal entity, timestamp, report token, native-currency totals and register states. An empty report includes its filter metadata. Audit history records the request, actor, reason, filters, report token, byte count and SHA-256. After an uncertain response, check audit history before requesting another export. Revert the application to remove the download while retaining its audit records.
