@@ -4,7 +4,7 @@ import {
   reconciliationToken,
   reconciliationCsv,
 } from './reconciliation-csv.mjs';
-import { readBillingReconciliation } from './reconciliation.mjs';
+import { readBillingReconciliation, readPortfolioReconciliation } from './reconciliation.mjs';
 import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -381,6 +381,27 @@ export const createInvoiceDraftRouter = (o) => {
     };
     return { ...value, reportToken: reconciliationToken(reportScope(r), value) };
   };
+  router.get(
+    '/reconciliation/portfolio',
+    handle(false, async (c, r) => {
+      const q = parse(
+        z
+          .object({
+            start: z.string().date(),
+            end: z.string().date(),
+            source: z.enum(['both', 'time_and_materials', 'milestone']),
+          })
+          .strict()
+          .refine((v) => v.start <= v.end),
+        r.query,
+      );
+      await authorize(c, r, 'view', [
+        'commercial.invoice_export.view',
+        ...(q.source === 'time_and_materials' ? [] : ['commercial.milestone_billing.view']),
+      ]);
+      return { ...(await envelope(c, r)), ...(await readPortfolioReconciliation(c, r, o, q)) };
+    }),
+  );
   router.get(
     '/reconciliation',
     handle(false, async (c, r) => {

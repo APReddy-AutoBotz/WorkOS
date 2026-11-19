@@ -1335,6 +1335,25 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             ),
             canonicalHours(reconciliation.items[0].amount),
           );
+          const eligible = reconciliation.items[0].eligibleOn;
+          await reconUi.getByLabel('Eligible from', { exact: true }).fill(eligible);
+          await reconUi.getByLabel('Eligible through', { exact: true }).fill(eligible);
+          const portfolioWait = wait(requester.p, route + '/reconciliation/portfolio');
+          await reconUi.getByRole('button', { name: 'Load portfolio reconciliation' }).click();
+          const portfolio = await body(portfolioWait);
+          assert.deepEqual(portfolio.controls, reconciliation.controls);
+          assert.deepEqual(portfolio.totals, reconciliation.totals);
+          await reconUi.getByRole('rowheader', { name: 'manually confirmed line' }).waitFor();
+          const portfolioPath =
+            route +
+            '/reconciliation/portfolio?' +
+            new URLSearchParams({ start: eligible, end: eligible, source: 'time_and_materials' });
+          assert.equal((await request(portfolioPath, { identity: ids.reader })).status, 403);
+          assert.equal(
+            (await request(portfolioPath.replace('time_and_materials', 'both'), { identity: ids.requester }))
+              .status,
+            403,
+          );
           await reconUi.getByLabel('Report export reason').fill('Synthetic reconciled report');
           const reportDownload = requester.p.waitForEvent('download'),
             reportExportWait = wait(requester.p, route + '/reconciliation/exports', 'POST');
@@ -1394,6 +1413,10 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             .waitFor();
           await reconUi.getByText('Account, role or scope changed. Reload the report.').waitFor();
           assert.equal(await reconUi.getByText(artifact.sha256, { exact: false }).count(), 0);
+          assert.equal(
+            await reconUi.getByRole('region', { name: 'Portfolio reconciliation results' }).count(),
+            0,
+          );
           await confirmUi
             .getByText('Account, role or scope changed. Unsent confirmation inputs were cleared.')
             .waitFor();

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readBillingReconciliation } from '../server/modules/invoice-drafts/reconciliation.mjs';
+import {
+  readBillingReconciliation,
+  readPortfolioReconciliation,
+} from '../server/modules/invoice-drafts/reconciliation.mjs';
 import {
   reconciliationCsv,
   reconciliationToken,
@@ -122,3 +125,43 @@ for (const unsafeId of ['\t=1+1', '\r=1+1', '  ＝1+1', '＠SUM(1)', '\nordinary
     'Reconciliation uses the shared literal-text prefix rule',
   );
 }
+
+const tmEntries = Array.from({ length: 502 }, (_, n) => ({
+  ...row(n),
+  engagementId: n % 2 ? 'alpha' : 'beta',
+}));
+const milestoneEntries = [
+  { ...row(503), acceptanceMatches: true },
+  { ...row(504, 'EUR'), acceptanceMatches: true },
+];
+const missingEvents = Array.from({ length: 501 }, (_, n) => ({ ...missing, eventId: 'missing-' + n }));
+const pagedClient = {
+  query: async (sql, args) => {
+    if (!args) return { rows: [{ ts: new Date('2026-01-01T00:00:00Z') }] };
+    const isMissing = sql.includes('select ev.id as "eventId"'),
+      isMilestone = sql.includes("eng.model='milestone'");
+    const data = isMissing ? (isMilestone ? [] : missingEvents) : isMilestone ? milestoneEntries : tmEntries,
+      label = isMissing ? 'eventId' : 'itemId';
+    const offset = args[4] === null ? 0 : data.findIndex((x) => x[label] === args[4]) + 1;
+    return { rows: data.slice(offset, offset + 501) };
+  },
+};
+const portfolio = await readPortfolioReconciliation(pagedClient, req, options, {
+  start: '2026-01-01',
+  end: '2026-01-31',
+  source: 'both',
+});
+assert.equal(portfolio.exceptionCount, 501);
+assert.deepEqual(
+  portfolio.controls
+    .filter((x) => x.boundary === 'REGISTER_ITEM')
+    .map((x) => [x.currency, x.lineCount, x.amount]),
+  [
+    ['EUR', 1, '0.0001'],
+    ['USD', 503, '0.0503'],
+  ],
+);
+assert.equal(
+  portfolio.controls.find((x) => x.currency === 'USD' && x.boundary === 'ELIGIBILITY_EVENT').amount,
+  '501.0503',
+);

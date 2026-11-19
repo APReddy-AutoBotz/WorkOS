@@ -602,3 +602,5 @@ WOS-COM-011, WOS-COM-002 and WOS-COM-004 — The T&M period report totals retain
 WOS-COM-011 and WOS-COM-015 — Numbered T&M period snapshots retain exact membership and protected historical totals. The governed T&M browser journey verifies replay, concurrent capture, immutable history across a rate change and current worker-scope restrictions.
 
 WOS-COM-003, WOS-COM-011 and WOS-COM-015 — Retained period versions expose paged contributing valuations and their source receipts. The browser and PostgreSQL journey covers historical membership after a second version, original adopted rate selection, pagination and reader scope.
+
+WOS-RPT-007 — Finance can reconcile visible T&M and milestone billing across engagements for an inclusive eligibility-date range. The portfolio report shows current register states and source, reservation, export and confirmation control totals by currency. The billing and milestone journeys verify same-day totals, source permissions and historical confirmation. The boundary test verifies complete totals across multiple pages, engagements, currencies and missing register items.

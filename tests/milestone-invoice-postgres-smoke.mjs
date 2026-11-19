@@ -269,6 +269,32 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       assert.equal(available.items[0].milestoneId, milestone.id);
       assert.equal(available.items[0].status, 'AVAILABLE');
       assert.equal(available.exceptionCount, 0);
+      const portfolioPath = (start, end, source) =>
+        drafts + '/reconciliation/portfolio?' + new URLSearchParams({ start, end, source });
+      const eligibleDate = available.items[0].eligibleOn;
+      const portfolio = ok(
+        await request(portfolioPath(eligibleDate, eligibleDate, 'both'), { identity: ids.manager }),
+      );
+      assert.deepEqual(portfolio.controls, available.controls);
+      assert.deepEqual(portfolio.totals, available.totals);
+      assert.deepEqual(
+        ok(
+          await request(portfolioPath(eligibleDate, eligibleDate, 'time_and_materials'), {
+            identity: ids.manager,
+          }),
+        ).controls,
+        [],
+      );
+      assert.deepEqual(
+        ok(await request(portfolioPath('2000-01-01', '2000-01-01', 'milestone'), { identity: ids.manager }))
+          .controls,
+        [],
+      );
+      assert.equal(
+        (await request(portfolioPath(eligibleDate, '2000-01-01', 'both'), { identity: ids.manager })).status,
+        400,
+      );
+
       const create = {
         expectedOwnerKey: initial.ownerKey,
         requestId: randomUUID(),
@@ -806,6 +832,89 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           (n) => n.kind === 'invoice-export' && n.batchId === draft.batch.id,
         );
         assert(exportNotice);
+        const secondRoots = await createAmendmentHierarchy(request, 'SYN-PORTFOLIO-SECOND', {
+          contract: {
+            model: 'milestone',
+            startsOn: fx.today,
+            endsOn: end,
+            effectiveFrom: fx.today,
+            currency: 'USD',
+          },
+          engagement: { startsOn: fx.today, endsOn: end, currency: 'USD' },
+          project: { startsOn: fx.today, endsOn: end },
+        });
+        const engagementId = secondRoots.engagement.id;
+        const secondMilestone = ok(
+          await request('/milestones', {
+            method: 'POST',
+            body: {
+              engagementId,
+              code: 'SYN-PORTFOLIO-M2',
+              name: 'Second portfolio delivery',
+              dueOn: fx.today,
+              amount: '25.0000',
+              currency: 'USD',
+              reason: 'Verify cross-engagement totals',
+            },
+          }),
+          201,
+        );
+        const secondPolicy = ok(
+          await request(route + '/policies', {
+            method: 'POST',
+            body: {
+              expectedOwnerKey: initial.ownerKey,
+              requestId: randomUUID(),
+              engagementId,
+              expectedLatestId: null,
+              effectiveFrom: fx.today,
+              definition: { ...definition, engagementId },
+              reason: 'Scoped second engagement policy',
+            },
+          }),
+          201,
+        ).policy;
+        const secondReview = ok(
+          await request(route + '/requests', {
+            method: 'POST',
+            identity: ids.requester,
+            body: {
+              ...requestBody,
+              requestId: randomUUID(),
+              milestoneId: secondMilestone.id,
+              expectedPolicyId: secondPolicy.id,
+            },
+          }),
+          201,
+        ).approval;
+        for (const [expectedSequence, identity] of [ids.manager, ids.second].entries()) {
+          ok(
+            await request(route + '/instances/' + secondReview.id + '/decisions', {
+              method: 'POST',
+              identity,
+              body: {
+                expectedOwnerKey: await readApprovalOwner(request, identity),
+                requestId: randomUUID(),
+                expectedSequence,
+                decision: 'Approved',
+                reason: 'Synthetic portfolio approval',
+              },
+            }),
+            201,
+          );
+        }
+        const combined = ok(
+          await request(portfolioPath(eligibleDate, eligibleDate, 'both'), { identity: ids.manager }),
+        );
+        assert.equal(combined.exceptionCount, 0);
+        assert.deepEqual(
+          combined.controls.find((x) => x.boundary === 'REGISTER_ITEM'),
+          { currency: 'USD', boundary: 'REGISTER_ITEM', lineCount: 2, amount: '150.15' },
+        );
+        assert.equal(
+          combined.controls.find((x) => x.boundary === 'MANUALLY_CONFIRMED_LINE').amount,
+          '125.15',
+        );
         await pool.query(
           "update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'",
         );
