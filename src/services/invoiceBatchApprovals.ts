@@ -78,7 +78,7 @@ const milestoneLine = z
   })
   .strict();
 const line = z.union([tmLine, milestoneLine]);
-const source = z
+const sourceBase = z
   .object({
     id: uuid,
     sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
@@ -96,8 +96,8 @@ const source = z
     total: money,
     lineCount: z.number().int().nonnegative(),
   })
-  .strict()
-  .refine((v) => {
+  .strict();
+const standardSource=sourceBase.refine((v) => {
     try {
       const sum = invoiceDraftTotal(v.lines.map((x) => x.amount));
       return (
@@ -126,6 +126,24 @@ const source = z
       return false;
     }
   });
+const negativeMoney=z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).refine(v=>/[1-9]/.test(v));
+const correctionEvidence=z.object({
+  sourceVersion:z.literal(1),reviewId:uuid,policyId:uuid,requestId:uuid,decisionId:uuid,
+  originalSourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE']),originalEventId:uuid,originalEventVersion:z.literal(1),
+  originalItemId:uuid,originalItemVersion:z.literal(1),originalLineId:uuid,originalBatchId:uuid,artifactId:uuid,
+  artifactSha256:hash,confirmationId:uuid.nullable(),currency:z.string().regex(/^[A-Z]{3}$/),originalAmount:money,amount:negativeMoney,
+}).strict();
+const correctionLine=tmLine.extend({snapshotId:z.null(),sourceType:z.literal('FULL_LINE_REVERSAL'),amount:negativeMoney,evidence:correctionEvidence});
+const correctionSource=sourceBase.extend({sourceType:z.literal('FULL_LINE_REVERSAL'),periodBasis:z.literal('ELIGIBLE_DATE'),
+  total:negativeMoney,lines:z.array(correctionLine).min(1).max(50)}).refine(v=>{
+  const first=v.lines[0]?.evidence;
+  return v.periodStart<=v.periodEnd && v.lineCount===v.lines.length && new Set(v.lines.map(l=>l.itemId)).size===v.lines.length
+    && v.lines.every((l,n)=>l.sequence===n+1 && l.currency===v.currency && l.evidence.currency===v.currency && l.amount===l.evidence.amount
+      && l.amount==='-'+l.evidence.originalAmount && l.evidence.originalBatchId===first.originalBatchId && l.evidence.artifactSha256===first.artifactSha256)
+    && v.total==='-'+invoiceDraftTotal(v.lines.map(l=>l.amount.slice(1))).amount;
+});
+const source=z.union([standardSource,correctionSource]);
+
 const policy = z
     .object({
       id: uuid,
@@ -174,7 +192,8 @@ const approval = z
     lineCount: z.number().int().positive(),
     lineageHash: hash,
     currency: z.string().regex(/^[A-Z]{3}$/),
-    total: money,
+    total: z.union([money,negativeMoney]),
+    sourceType:z.literal('FULL_LINE_REVERSAL').optional(),
     createdAt: instant,
     policy,
     state: z
@@ -197,6 +216,7 @@ const approval = z
         },
         state = invoiceBatchApprovalState(d, v.transitions);
       return (
+        v.total.startsWith('-') === (v.sourceType==='FULL_LINE_REVERSAL') &&
         d.engagementId === v.policy.engagementId &&
         v.transitions.every(
           (t) =>
@@ -418,6 +438,14 @@ export const invoiceBatchApprovals = {
       .safeParse(await call('GET', '/instances?' + new URLSearchParams({ engagementId, after }), c, 'read'));
     if (!out.success || out.data.approvals.some((x) => x.policy.engagementId !== engagementId)) return bad();
     return out.data;
+  },
+  correctionDrafts: async(engagementId:string,after:string|null,c:RateContext)=>{
+    const params=new URLSearchParams({engagementId});
+    if(after)params.set('after',after);
+    const result=z.object({...envelope,engagementId:id,drafts:z.array(z.object({id:uuid,currency:z.string().regex(/^[A-Z]{3}$/)}).strict()).max(50),nextAfter:uuid.nullable()})
+      .strict().safeParse(await call('GET','/correction-drafts?'+params,c,'read'));
+    if(!result.success || result.data.engagementId!==engagementId) return bad();
+    return result.data;
   },
   source: async (batchId: string, c: RateContext | null) => {
     if (!uuid.safeParse(batchId).success) return bad();

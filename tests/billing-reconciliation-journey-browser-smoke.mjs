@@ -1624,6 +1624,27 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
 
             assert.notEqual(occupied.correctionBatchId,draft.batch.id);
             assert.equal((await request('/api/v1/invoice-csv/batches/'+occupied.correctionBatchId,{identity:ids.requester})).status,404);
+            await load(requester);
+            await ui.getByRole('button',{name:'Find correction drafts'}).click();
+            await ui.getByLabel('Invoice approval Draft').selectOption(occupied.correctionBatchId);
+            await ui.getByRole('button',{name:'Inspect invoice Draft source'}).click();
+            await ui.getByText(new RegExp('correction for line '+evidence.lineId)).waitFor();
+            await ui.getByLabel('I inspected the retained lineage and control total').check();
+            await ui.getByLabel('Invoice batch review policy').selectOption(policy.id);
+            await ui.getByLabel('Invoice approval request reason').fill('Synthetic correction review');
+            const reviewResponse=wait(p,approvalRoute+'/requests','POST');
+            await ui.getByRole('button',{name:'Submit invoice Draft for review'}).click();
+            const creditReview=(await body(reviewResponse,201)).approval;
+            const correctionDecision=approvalRoute+'/instances/'+creditReview.id+'/decisions';
+            const firstCredit={expectedOwnerKey:await readApprovalOwner(request,ids.manager),requestId:randomUUID(),
+              expectedSequence:0,decision:'Approved',reason:'Synthetic first correction decision'};
+            assert.equal(ok(await request(correctionDecision,{method:'POST',identity:ids.manager,body:firstCredit}),201).approval.state.status,'Pending');
+            const rejectCredit={expectedOwnerKey:await readApprovalOwner(request,ids.second),requestId:randomUUID(),
+              expectedSequence:1,decision:'Rejected',reason:'Synthetic correction draft review'};
+            assert.equal(ok(await request(correctionDecision,{method:'POST',identity:ids.second,body:rejectCredit}),201).approval.state.status,'Rejected');
+            assert.equal(ok(await request(correctionDecision,{method:'POST',identity:ids.second,body:rejectCredit})).replayed,true);
+            const creditInbox=ok(await request('/api/v1/work-approvals/inbox',{identity:ids.reader})).notifications;
+            assert.ok(creditInbox.some(n=>n.instanceId===creditReview.id && n.reasons.includes('affected_worker')));
             await exportUi.getByLabel('Correction batch reason').fill('Synthetic release credit');
             await table.getByRole('button',{name:'Cancel correction batch'}).click();
             await table.getByRole('checkbox',{name:'Select credit '+receipt.itemId}).waitFor();
@@ -1633,6 +1654,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[permission]);
             }
             assert.deepEqual(ok(await request(register,{identity:ids.denied})).credits,[]);
+            const hiddenReviews=ok(await request(approvalRoute+'/instances?engagementId='+encodeURIComponent(roots.engagement.id),{identity:ids.denied})).approvals;
+            assert.ok(!hiddenReviews.some(x=>x.id===creditReview.id));
+            assert.equal((await request(approvalRoute+'/instances/'+creditReview.id,{identity:ids.denied})).status,404);
             assert.equal((await request(proofPath,{identity:ids.denied})).status,404);
 
             assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);

@@ -839,7 +839,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const reserved=reservations[0].body.receipt;
         assert.equal(reserved.total,issued.amount);
         const beforeEvidence=await pool.query('select to_jsonb(l) as line from invoice_draft_lines l where batch_id=$1',[reserved.batchId]);
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['068_wos06_correction_review_evidence']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['068_wos06_correction_review_evidence', '069_wos06_correction_batch_approval']);
         assert.deepEqual((await pool.query('select to_jsonb(l) as line from invoice_draft_lines l where batch_id=$1',[reserved.batchId])).rows,beforeEvidence.rows);
         const evidencePath=correctionDraftPath+'/'+reserved.batchId;
         const proof=ok(await request(evidencePath));
@@ -871,7 +871,38 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal(retainedProof.header.state,'Cancelled');
         assert.equal(retainedProof.lines[0].reserved,false);
         assert.equal(retainedProof.header.lineageHash,proof.header.lineageHash);
-        assert.equal(ok(await reserve({requestId:randomUUID()}),201).receipt.state,'Draft');
+        const reviewerKey=await readApprovalOwner(request,ids.second);
+        const reviewerOwned=ok(await request(correctionDraftPath,{method:'POST',identity:ids.second,
+          body:{...prepare,requestId:randomUUID(),expectedOwnerKey:reviewerKey}}),201).receipt;
+        const conflictSource=ok(await request(invoiceApproval+'/sources/'+reviewerOwned.batchId)).batch;
+        assert.equal((await request(invoiceApproval+'/requests',{method:'POST',body:{...submit,batchId:reviewerOwned.batchId,
+          requestId:randomUUID(),expectedOwnerKey:inspection.ownerKey,expectedPolicyId:enabledPolicy.id,
+          expectedLineCount:conflictSource.lineCount,expectedLineageHash:conflictSource.lineageHash}})).status,403);
+        assert.equal((await pool.query('select count(*)::int n from invoice_batch_approval_instances where batch_id=$1',[reviewerOwned.batchId])).rows[0].n,0);
+        ok(await request(correctionDraftPath+'/cancel',{method:'POST',body:{...cancelCredit,batchId:reviewerOwned.batchId,requestId:randomUUID()}}),201);
+        const replacement=ok(await reserve({requestId:randomUUID()}),201).receipt;
+        const correctionSourcePath=invoiceApproval+'/sources/'+replacement.batchId;
+        const correction=ok(await request(correctionSourcePath)).batch;
+        assert.equal(correction.sourceType,'FULL_LINE_REVERSAL');
+        assert.equal(correction.total,issued.amount);
+        const correctionSubmit={...submit,batchId:replacement.batchId,expectedOwnerKey:inspection.ownerKey,expectedPolicyId:enabledPolicy.id,
+          expectedLineCount:correction.lineCount,expectedLineageHash:correction.lineageHash,requestId:randomUUID()};
+        assert.equal((await request(invoiceApproval+'/requests',{method:'POST',body:{...correctionSubmit,expectedLineageHash:'0'.repeat(64)}})).status,409);
+        const correctionReview=ok(await request(invoiceApproval+'/requests',{method:'POST',body:correctionSubmit}),201).approval;
+        assert.equal(correctionReview.total,replacement.total);
+        assert.equal(ok(await request(invoiceApproval+'/requests',{method:'POST',body:correctionSubmit})).replayed,true);
+        const correctionDecisionPath=invoiceApproval+'/instances/'+correctionReview.id+'/decisions';
+        const choice={...stageCommand,expectedOwnerKey:await readApprovalOwner(request,ids.second),requestId:randomUUID()};
+        assert.equal((await request(correctionDecisionPath,{method:'POST',body:{...choice,expectedOwnerKey:inspection.ownerKey}})).status,409);
+        assert.equal(ok(await request(correctionDecisionPath,{method:'POST',identity:ids.second,body:choice}),201).approval.state.status,'Approved');
+        assert.equal(ok(await request(correctionDecisionPath,{method:'POST',identity:ids.second,body:choice})).replayed,true);
+        assert.equal(ok(await request(correctionSourcePath)).batch.state,'Approved');
+        assert.equal(ok(await request(correctionDraftPath+'/'+replacement.batchId)).header.state,'Approved');
+        const releaseApproved={...cancelCredit,batchId:replacement.batchId,requestId:randomUUID()};
+        assert.equal((await request(correctionDraftPath+'/cancel',{method:'POST',body:releaseApproved})).status,409);
+        assert.equal(ok(await request(correctionDraftPath+'/cancel',{method:'POST',body:{...releaseApproved,expectedState:'Approved'}}),201).receipt.state,'Cancelled');
+        assert.equal((await pool.query('select count(*)::int n from invoice_batch_approval_transitions where instance_id=$1 and decision=$2',[correctionReview.id,'Approved'])).rows[0].n,1);
+
         const creditRegister = '/api/v1/invoice-csv/issued-credits?engagementId='+encodeURIComponent(roots.engagement.id);
         assert.deepEqual(ok(await request(creditRegister)).credits.map(row=>row.itemId),[issued.itemId]);
         assert.equal(issued.originalEventId,credit.source.originalEventId);

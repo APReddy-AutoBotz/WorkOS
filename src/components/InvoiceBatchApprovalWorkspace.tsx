@@ -110,7 +110,7 @@ const InvoiceApprovalEngagement = ({
     context.current = null;
     inFlight.current = false;
     setPolicies([]);
-    setDrafts([]);
+    setDrafts([]);setCorrections([]);setCorrectionNext(null);
     setApprovals([]);
     setDraftNext(null);
     setApprovalNext(null);
@@ -186,6 +186,14 @@ const InvoiceApprovalEngagement = ({
       }
     }
   };
+  const [corrections,setCorrections]=useState<{id:string;currency:string}[]>([]);
+  const [correctionNext,setCorrectionNext]=useState<string|null>(null);
+  const findCorrections=(after:string|null)=>void run(async c=>{
+    const result=await invoiceBatchApprovals.correctionDrafts(engagementId,after,c);
+    setCorrections(old=>after?[...old,...result.drafts]:result.drafts);
+    setCorrectionNext(result.nextAfter);
+    if(!result.drafts.length)setNotice('No correction drafts on this page.');
+  });
   const load = () =>
     void run(async (c) => {
       const [a, b] = await Promise.all([invoiceBatchApprovals.load(engagementId, c), invoiceDrafts.list(c)]);
@@ -194,6 +202,7 @@ const InvoiceApprovalEngagement = ({
       setEffectivePolicy(a.effectivePolicy);
       setPolicyId('');
       setApprovalNext(a.approvalsNext);
+      setCorrections([]);setCorrectionNext(null);
       setDrafts(b.batches);
       setDraftNext(b.nextAfter);
       setLoaded(true);
@@ -245,7 +254,7 @@ const InvoiceApprovalEngagement = ({
         setPending(null);
         setLoaded(false);
         setPolicies([]);
-        setDrafts([]);
+        setDrafts([]);setCorrections([]);setCorrectionNext(null);
         setApprovals([]);
         setSource(null);
         setInspected(null);
@@ -529,6 +538,7 @@ const InvoiceApprovalEngagement = ({
                   }}
                 >
                   <option value="">Choose a Draft</option>
+                  {corrections.map(x=><option value={x.id} key={x.id}>Correction · {x.id} · {x.currency}</option>)}
                   {drafts
                     .filter((x) => x.engagementId === engagementId && x.state === 'Draft')
                     .map((x) => (
@@ -538,6 +548,8 @@ const InvoiceApprovalEngagement = ({
                     ))}
                 </select>
               </label>
+              <button type="button" onClick={()=>findCorrections(null)}>Find correction drafts</button>
+              {correctionNext && <button type="button" onClick={()=>findCorrections(correctionNext)}>More correction drafts</button>}
               {draftNext && (
                 <button type="button" onClick={moreDrafts}>
                   More invoice Drafts
@@ -557,7 +569,7 @@ const InvoiceApprovalEngagement = ({
                     {source.lines.map((x) => (
                       <li key={x.id}>
                         Item {x.itemId} version {x.itemVersion} · event {x.eventId} ·{' '}
-                        {'sourceType' in x
+                        {'sourceType' in x && x.sourceType === 'FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x
                           ? `milestone ${x.evidence.milestoneId}`
                           : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
@@ -643,7 +655,7 @@ const InvoiceApprovalEngagement = ({
                 {inspected.batch.lines.map((x) => (
                   <li key={x.id}>
                     Item {x.itemId} · event {x.eventId} ·{' '}
-                    {'sourceType' in x ? `milestone ${x.evidence.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
+                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x ? `milestone ${x.evidence.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
                   </li>
                 ))}

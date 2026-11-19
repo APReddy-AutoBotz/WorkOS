@@ -1,3 +1,4 @@
+import { correctionApprovalBatch, correctionScopeAvailable } from './correction-batch.mjs';
 import { milestoneBatchModel, loadMilestoneApprovalBatch } from './milestone-batch.mjs';
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -261,6 +262,8 @@ export const createInvoiceBatchApprovalRouter = (o) => {
     }),
   );
   const batch = async (c, r, batchId, lock = false) => {
+    const correction=await correctionApprovalBatch(c,r,batchId,lock);
+    if(correction) return correction;
     if (await milestoneBatchModel(c, r, batchId)) return loadMilestoneApprovalBatch(c, r, batchId, lock);
     const b = (
       await c.query(
@@ -346,6 +349,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       lineCount: i.line_count,
       lineageHash: i.lineage_hash,
       currency: i.currency,
+      ...(String(i.total).startsWith('-') ? {sourceType:'FULL_LINE_REVERSAL'} : {}),
       total: String(i.total),
       createdAt: i.created_at,
       policy: policyView(p),
@@ -359,7 +363,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
   };
   const sourceView = (source) => ({
     id: source.row.id,
-    ...(source.row.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: source.row.source_type } : {}),
+    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(source.row.source_type) ? { sourceType: source.row.source_type } : {}),
     state: source.row.state,
     current: source.row.current,
     currency: source.row.currency,
@@ -377,7 +381,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       itemVersion: x.item_version,
       eventId: x.event_id,
       snapshotId: x.snapshot_id,
-      ...(x.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: x.source_type } : {}),
+      ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
       currency: x.currency,
       amount: x.amount,
       evidence: x.billing_evidence,
@@ -466,10 +470,15 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       await engagement(c, r, q.engagementId);
       const args = [...scope(r), q.engagementId],
         workerWhere = o.buildEmployeeScopeWhere(r, args, 'worker');
+      const allowedCorrections=await correctionScopeAvailable(c);
+      if(allowedCorrections) args.push(r.user.sub,r.user.activeRole);
+      const correctionScope=allowedCorrections
+        ? `(coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')<>'FULL_LINE_REVERSAL' or correction_original_scope_current(b,$${args.length-1},$${args.length}))`
+        : "coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')<>'FULL_LINE_REVERSAL'";
       args.push(q.after ?? null);
       const rows = (
         await c.query(
-          `select i.* from invoice_batch_approval_instances i join invoice_draft_batches b on b.id=i.batch_id where i.organization_id=$1 and i.legal_entity_id=$2 and b.engagement_id=$3 and ($${args.length}::uuid is null or i.id>$${args.length}::uuid) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence e on e.id=v.submission_id join timesheets h on h.id=e.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by i.id limit 51`,
+          `select i.* from invoice_batch_approval_instances i join invoice_draft_batches b on b.id=i.batch_id where i.organization_id=$1 and i.legal_entity_id=$2 and b.engagement_id=$3 and ${correctionScope} and ($${args.length}::uuid is null or i.id>$${args.length}::uuid) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence e on e.id=v.submission_id join timesheets h on h.id=e.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by i.id limit 51`,
           args,
         )
       ).rows;
@@ -482,6 +491,16 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       };
     }),
   );
+  router.get('/correction-drafts',handle(false,async(c,r)=>{
+    const q=parse(z.object({engagementId:id,after:uuid.optional()}).strict(),r.query);
+    await authorize(c,r,'submitter');
+    await engagement(c,r,q.engagementId);
+    const rows=(await c.query(`select b.id,b.currency from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2
+      and b.engagement_id=$3 and b.source_type='FULL_LINE_REVERSAL' and invoice_batch_governed_state(b.id)='Draft'
+      and correction_original_scope_current(b,$4,$5) and ($6::uuid is null or b.id>$6) order by b.id limit 51`,
+      [...scope(r),q.engagementId,r.user.sub,r.user.activeRole,q.after??null])).rows;
+    return {...await envelope(c,r),engagementId:q.engagementId,drafts:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};
+  }));
   router.get(
     '/sources/:id',
     handle(false, async (c, r) => {
