@@ -466,9 +466,36 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await body(sw);
         await loadHistory();
         await tm.getByLabel('T&M approved work', { exact: true }).selectOption(entry.entryId);
+        const newerRate = await makeRate('billing', '200.0000', 2);
         vw = reply(base + '/valuations/' + accepted.valuation.id);
         await tm.getByRole('button', { name: 'Inspect retained T&M snapshot', exact: true }).click();
-        assert.equal((await body(vw)).valuation.id, accepted.valuation.id);
+        const historical = await body(vw);
+        assert.equal(historical.valuation.id, accepted.valuation.id);
+        assert.equal(historical.billingRate.adoptionId, billing.id);
+        assert.equal(historical.costRate.adoptionId, cost.id);
+        const history = result.getByRole('region', { name: 'Historical rate selection' });
+        for (const rate of [historical.billingRate, historical.costRate]) {
+          await history
+            .getByText('Effective ' + fx.today + ' through ' + end + ' · candidate ' + rate.candidateId)
+            .waitFor();
+          await history
+            .getByText(
+              'USD ' +
+                rate.amount +
+                ' per HOUR · ' +
+                rate.bindingType +
+                ' ' +
+                rate.bindingId +
+                ' · priority 1',
+            )
+            .waitFor();
+        }
+        const denied = await request(
+          base + '/valuations/' + accepted.valuation.id + '?includeRateEvidence=true',
+          { identity: ids.reader },
+        );
+        assert.equal(denied.status, 403);
+        assert.ok(!JSON.stringify(denied.body).includes(cost.id));
         await result.getByText(/billable 125.15, cost 50.00, margin 75.15/).waitFor();
         await tm.getByLabel('T&M approved work', { exact: true }).selectOption(second.entryId);
         await tm.getByLabel('Retained T&M policy', { exact: true }).selectOption(policy.id);
@@ -477,7 +504,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await tm
           .getByRole('button', { name: 'Inspect adopted billing and cost sources', exact: true })
           .click();
-        await body(bw2);
+        assert.equal((await body(bw2)).source.adoptionId, newerRate.id);
         await body(cw2);
         await tm
           .getByLabel('T&M calculation reason', { exact: true })
@@ -519,6 +546,20 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           ).rows[0].n,
           1,
         );
+        const retained = await pool.query(
+          "select entry_id, billing_adoption_id, result->>'billableValue' as amount from commercial_tm_valuations where entry_id=any($1::uuid[])",
+          [[entry.entryId, second.entryId]],
+        );
+        assert.equal(retained.rows.length, 2);
+        for (const [entryId, adoptionId, amount] of [
+          [entry.entryId, billing.id, '125.15'],
+          [second.entryId, newerRate.id, '500.00'],
+        ]) {
+          assert.deepEqual(
+            retained.rows.find((row) => row.entry_id === entryId),
+            { entry_id: entryId, billing_adoption_id: adoptionId, amount },
+          );
+        }
         assert.deepEqual(errors, []);
         assert.deepEqual(external, []);
         await ctx.close();

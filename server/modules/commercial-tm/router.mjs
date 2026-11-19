@@ -328,7 +328,7 @@ export const createGovernedTmRouter = (o) => {
   router.get(
     '/valuations/:id',
     handle(false, async (c, r) => {
-      parse(z.object({}).strict(), r.query);
+      const q = parse(z.object({ includeRateEvidence: z.literal('true').optional() }).strict(), r.query);
       await authorize(c, r);
       const v = (
         await c.query(
@@ -346,9 +346,12 @@ export const createGovernedTmRouter = (o) => {
         )
       ).rows[0];
       if (!p) throw fail(409, 'TM_SOURCE_UNAVAILABLE', 'Retained policy is unavailable.');
+      const rateFields = q.includeRateEvidence
+        ? ',c.effective_from::text as "effectiveFrom",c.effective_to::text as "effectiveTo",c.binding_type as "bindingType",c.binding_id as "bindingId",c.priority'
+        : '';
       const rates = (
           await c.query(
-            'select a.id "adoptionId",c.id "candidateId",c.kind,c.amount::text,c.currency,c.unit from commercial_rate_adoptions a join commercial_rate_candidates c on c.id=a.candidate_id and c.organization_id=a.organization_id and c.legal_entity_id=a.legal_entity_id where a.organization_id=$1 and a.legal_entity_id=$2 and a.id=any($3::uuid[])',
+            `select a.id "adoptionId",c.id "candidateId",c.kind,c.amount::text,c.currency,c.unit${rateFields} from commercial_rate_adoptions a join commercial_rate_candidates c on c.id=a.candidate_id and c.organization_id=a.organization_id and c.legal_entity_id=a.legal_entity_id where a.organization_id=$1 and a.legal_entity_id=$2 and a.id=any($3::uuid[])`,
             [...scope(r), [v.billingAdoptionId, v.costAdoptionId]],
           )
         ).rows,
@@ -356,7 +359,14 @@ export const createGovernedTmRouter = (o) => {
         costRate = rates.find((x) => x.adoptionId === v.costAdoptionId && x.kind === 'cost');
       if (!billingRate || !costRate)
         throw fail(409, 'TM_SOURCE_UNAVAILABLE', 'Retained rate sources are unavailable.');
-      return { ...(await envelope(c, r)), valuation: v, policy: p, billingRate, costRate };
+      return {
+        ...(await envelope(c, r)),
+        valuation: v,
+        policy: p,
+        billingRate,
+        costRate,
+        ...(q.includeRateEvidence ? { resolutionRule: 'UNIQUE_HIGHEST_PRIORITY' } : {}),
+      };
     }),
   );
   router.get(

@@ -129,6 +129,11 @@ const retainedRate = z
     amount: z.string(),
     currency: z.string(),
     unit: z.string(),
+    effectiveFrom: date,
+    effectiveTo: date,
+    bindingType: z.enum(['worker', 'contract', 'engagement']),
+    bindingId: id,
+    priority: z.number().int().min(0).max(1000000),
   })
   .strict();
 export type TmRates = {
@@ -305,9 +310,16 @@ export const governedTmValuations = {
     c: RateContext | null,
   ) => {
     if (!uuid.safeParse(valuationId).success || !id.safeParse(engagementId).success) return bad();
-    const raw = await call('GET', '/valuations/' + valuationId, c),
+    const raw = await call('GET', '/valuations/' + valuationId + '?includeRateEvidence=true', c),
       p = z
-        .object({ ...envelope, valuation, policy, billingRate: retainedRate, costRate: retainedRate })
+        .object({
+          ...envelope,
+          valuation,
+          policy,
+          resolutionRule: z.literal('UNIQUE_HIGHEST_PRIORITY'),
+          billingRate: retainedRate,
+          costRate: retainedRate,
+        })
         .strict()
         .safeParse(raw);
     if (!p.success) return bad();
@@ -336,6 +348,23 @@ export const governedTmValuations = {
       p.data.billingRate.kind !== 'billing' ||
       p.data.costRate.adoptionId !== x.costAdoptionId ||
       p.data.costRate.kind !== 'cost' ||
+      p.data.costRate.bindingType !== 'worker' ||
+      p.data.costRate.bindingId !== expectedSource.workerId ||
+      p.data.billingRate.bindingType === 'worker' ||
+      (p.data.billingRate.bindingType === 'contract' &&
+        !e.references.some(
+          (ref) =>
+            typeof ref === 'object' &&
+            ref !== null &&
+            'entityType' in ref &&
+            ref.entityType === 'Contract' &&
+            'entityId' in ref &&
+            ref.entityId === p.data.billingRate.bindingId,
+        )) ||
+      (p.data.billingRate.bindingType === 'engagement' && p.data.billingRate.bindingId !== engagementId) ||
+      [p.data.billingRate, p.data.costRate].some(
+        (rate) => rate.effectiveFrom > e.workDate || rate.effectiveTo < e.workDate,
+      ) ||
       p.data.billingRate.amount !== x.result.billingRateExact ||
       p.data.costRate.amount !== x.result.costRateExact ||
       p.data.billingRate.currency !== x.result.currency ||
@@ -357,7 +386,7 @@ export const governedTmValuations = {
     } catch {
       return bad();
     }
-    return { valuation: x, policy: pol };
+    return { valuation: x, policy: pol, billingRate: p.data.billingRate, costRate: p.data.costRate };
   },
   calculate: async (
     d: TmValuationCommand,
