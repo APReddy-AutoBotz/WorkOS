@@ -1593,6 +1593,23 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await exportUi.getByText(/Approved-unbilled credit .*eligibility date/).waitFor();
             const receipt = ok(await creditView()).receipt;
             assert.equal(receipt.amount,inspectedCredit.source.amount);
+            const register = '/api/v1/invoice-csv/issued-credits?engagementId=' + encodeURIComponent(roots.engagement.id);
+            const list = ok(await request(register,{identity:ids.requester}));
+            assert.deepEqual(list.credits.map(c=>[c.itemId,c.eventId,c.originalEventId,c.amount]),[[receipt.itemId,receipt.eventId,receipt.originalEventId,receipt.amount]]);
+            assert.equal(list.nextAfter,null);
+            assert.deepEqual(ok(await request(register+'&after='+receipt.itemId,{identity:ids.requester})).credits,[]);
+            assert.equal((await request(register+'&after=invalid',{identity:ids.requester})).status,400);
+            await exportUi.getByRole('button',{name:'View issued credits'}).click();
+            const table = exportUi.getByRole('table',{name:'Issued credits for this engagement'});
+            await table.getByText(receipt.itemId).waitFor();
+            await table.getByText(receipt.currency+' '+receipt.amount).waitFor();
+            await table.getByText('Credit evidence').click();
+            await table.getByText(receipt.decisionId).waitFor();
+            for(const permission of ['commercial.invoice_drafts.view','commercial.invoice_export.view','commercial.invoice_drafts.prepare']){
+              await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[permission]);
+            }
+            assert.deepEqual(ok(await request(register,{identity:ids.denied})).credits,[]);
+
             assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);
             assert.equal(ok(await issueCredit()).replayed,true);
             assert.equal((await issueCredit({reason:'Changed reason'})).status,409);

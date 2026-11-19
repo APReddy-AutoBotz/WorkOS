@@ -474,7 +474,23 @@ const creditSource = z.object({ reviewId:uuid, decisionId:uuid, originalEventId:
 const creditReceipt = z.object({eventId:uuid,itemId:uuid,eligibleOn:date,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount,
   decisionId:uuid,originalEventId:uuid,confirmationId:uuid.nullable(),actorId:uuid,activeRole:id,reason:z.string().min(3).max(1000)}).strict();
 export type ReversalCredit = {source:z.infer<typeof creditSource>;receipt:z.infer<typeof creditReceipt>|null;eligibleOn:string};
+const issuedCredit = z.object({
+  itemId:uuid, eventId:uuid, eligibleOn:date, currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount,
+  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid,
+}).strict();
+export type IssuedCredit = z.infer<typeof issuedCredit>;
 export const invoiceCsv = {
+  issuedCredits: async (engagementId:string, after:string|null, c:RateContext) => {
+    const params = new URLSearchParams({engagementId});
+    if(after) params.set('after',after);
+    const raw = await call('GET','/issued-credits?'+params,c,'view');
+    const parsed = z.object({...envelope, engagementId:id, credits:z.array(issuedCredit).max(50), nextAfter:uuid.nullable()}).strict().safeParse(raw);
+    if(!parsed.success || parsed.data.engagementId!==engagementId) return bad();
+    const {credits,nextAfter} = parsed.data;
+    if(credits.some((row,i)=>row.itemId <= (i ? credits[i-1].itemId : after ?? '')) ||
+      (nextAfter!==null && (credits.length!==50 || credits[49].itemId!==nextAfter))) return bad();
+    return {credits,nextAfter};
+  },
   reversalCredit: async (batch:InvoiceCsvSource, lineId:string, requestId:string, reviewId:string, c:RateContext, write?:{credit:ReversalCredit;reason:string}):Promise<ReversalCredit> => {
     const line=batch.lines.find(l=>l.lineId===lineId);
     if (!line || !hasRatePermission('commercial.invoice_drafts.prepare') || (write && !hasRatePermission('commercial.reversal_eligibility.create'))) return bad();
