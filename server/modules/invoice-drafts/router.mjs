@@ -398,7 +398,7 @@ export const createInvoiceDraftRouter = (o) => {
         z
           .object({
             ...portfolioFilters,
-            includeReportToken: z.literal('true').optional(),
+            forExport: z.literal('true').optional(),
           })
           .strict()
           .refine((v) => v.start <= v.end),
@@ -407,7 +407,7 @@ export const createInvoiceDraftRouter = (o) => {
       await authorize(c, r, 'view', portfolioPermissions(q.source));
       return {
         ...(await envelope(c, r)),
-        ...(await readPortfolioReconciliation(c, r, o, q, Boolean(q.includeReportToken))),
+        ...(await readPortfolioReconciliation(c, r, o, q, Boolean(q.forExport))),
       };
     }),
   );

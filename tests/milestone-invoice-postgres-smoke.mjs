@@ -904,7 +904,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           );
         }
         const combined = ok(
-          await request(portfolioPath(eligibleDate, eligibleDate, 'both') + '&includeReportToken=true', {
+          await request(portfolioPath(eligibleDate, eligibleDate, 'both') + '&forExport=true', {
             identity: ids.manager,
           }),
         );

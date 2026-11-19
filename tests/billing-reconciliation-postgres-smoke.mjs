@@ -788,7 +788,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await request(
           route +
             '/reconciliation/portfolio?' +
-            new URLSearchParams({ ...portfolioFilter, includeReportToken: 'true' }),
+            new URLSearchParams({ ...portfolioFilter, forExport: 'true' }),
         ),
       );
       const originalPortfolioCommand = {

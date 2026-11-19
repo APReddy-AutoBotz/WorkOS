@@ -346,7 +346,7 @@ export const invoiceDrafts = {
       return bad();
     const raw = await call(
       'GET',
-      '/reconciliation/portfolio?' + new URLSearchParams({ start, end, source, includeReportToken: 'true' }),
+      '/reconciliation/portfolio?' + new URLSearchParams({ start, end, source, forExport: 'true' }),
       c,
       'view',
     );

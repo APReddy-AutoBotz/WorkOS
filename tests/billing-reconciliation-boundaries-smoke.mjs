@@ -169,7 +169,7 @@ assert.equal(
 
 const emptyCsv = portfolioReconciliationCsv(
   { ...scope, organizationId: '=synthetic' },
-  { ...portfolio, controls: [], totals: [], reportToken: 'synthetic-token' },
+  { ...portfolio, controls: [], totals: [], reportToken: token },
 );
 assert.equal(emptyCsv.trimEnd().split('\r\n').length, 2);
 assert.ok(emptyCsv.includes("'=synthetic"));
