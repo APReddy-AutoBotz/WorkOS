@@ -766,8 +766,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           draft = ok(
             await request(route + '/batches', {
               method: 'POST',
+              identity: ids.requester,
               body: {
-                expectedOwnerKey: initial.ownerKey,
+                expectedOwnerKey: await readApprovalOwner(request, ids.requester),
                 requestId: randomUUID(),
                 definition: {
                   clientId: roots.contract.clientId,
@@ -788,6 +789,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ok(
           await request(route + '/batches/' + draft.batch.id + '/lines', {
             method: 'POST',
+            identity: ids.requester,
             body: {
               expectedOwnerKey: draft.ownerKey,
               requestId: randomUUID(),
@@ -953,6 +955,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await ui.getByLabel('Invoice approval policy effective from').fill(fx.today);
           await ui.getByLabel('Invoice approval policy locale').fill('en-US');
           await ui.getByLabel('Invoice approval completion in-app').selectOption('yes');
+          await ui.getByLabel('Use these named review stages for full-line reversal requests').check();
           await ui.getByLabel('Invoice approval stage 1 user ID').fill(ids.manager.id);
           await ui.getByLabel('Invoice approval stage 1 role').fill('Admin');
           await ui.getByRole('button', { name: 'Add invoice approval stage' }).click();
@@ -966,6 +969,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           let policyWait = wait(p, approvalRoute + '/policies', 'POST');
           await ui.getByRole('button', { name: 'Record invoice approval policy' }).click();
           const policy = (await body(policyWait, 201)).policy;
+          assert.equal(policy.definition.fullLineReversals, true);
           await ui
             .getByText('Operation recorded. Reload the current batch and reviews before another action.')
             .waitFor();
@@ -1242,6 +1246,14 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await exportUi.getByText(/Reversal requested.*Synthetic exported line needs full reversal/).waitFor();
           await exportUi.getByRole('button', { name: 'Check reversal request' }).click();
           await exportUi.getByText(/Reversal requested.*Synthetic exported line needs full reversal/).waitFor();
+          const checkRoute = exportUi.getByRole('button', { name: 'Check reversal reviewers' });
+          await checkRoute.click();
+          await exportUi.getByText('Review policy ' + policy.id, { exact: false }).waitFor();
+          await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.invoice_approval.decide'");
+          await checkRoute.click();
+          await exportUi.getByText('The named reviewers do not meet current access or independence requirements.').waitFor();
+          assert.equal(await exportUi.getByText('Review policy ' + policy.id, { exact: false }).count(), 0);
+          await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.invoice_approval.decide'");
           const redownload = requester.p.waitForEvent('download');
           await exportUi.getByRole('button', { name: 'Download verified invoice CSV' }).click();
           assert.deepEqual(

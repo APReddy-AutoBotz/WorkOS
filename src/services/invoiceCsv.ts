@@ -454,7 +454,23 @@ const reversalRequest = z.object({
   reason: z.string().min(3).max(1000), actorId: uuid, activeRole: z.string().min(1), createdAt: z.string().datetime(),
 }).strict();
 export type InvoiceLineReversalRequest = z.infer<typeof reversalRequest>;
+const reviewRoute = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('NO_REVERSAL_POLICY') }).strict(),
+  z.object({ status: z.literal('REVIEWERS_UNAVAILABLE') }).strict(),
+  z.object({
+    status: z.literal('AVAILABLE'), policyId: uuid, effectiveFrom: date,
+    stages: z.array(z.object({ userId: uuid, role: z.string().min(1) }).strict()).min(1).max(10),
+  }).strict(),
+]);
+export type InvoiceReversalRoute = z.infer<typeof reviewRoute>;
 export const invoiceCsv = {
+  reversalReviewRoute: async (batchId: string, request: InvoiceLineReversalRequest, c: RateContext) => {
+    if (!hasRatePermission('commercial.invoice_drafts.prepare') || !uuid.safeParse(batchId).success) return bad();
+    const raw = await call('GET', '/batches/' + batchId + '/lines/' + request.lineId + '/reversal-request/review-route', c, 'view');
+    const out = z.object({ ...envelope, requestId: uuid, lineId: uuid, route: reviewRoute }).strict().safeParse(raw);
+    if (!out.success || out.data.requestId !== request.id || out.data.lineId !== request.lineId) return bad();
+    return out.data.route;
+  },
   lineReversal: async (batchId: string, lineId: string, artifactId: string, c: RateContext, write?: {
     sha256: string; inspectedState: 'Exported' | 'Billed/Confirmed'; reason: string;
   }) => {

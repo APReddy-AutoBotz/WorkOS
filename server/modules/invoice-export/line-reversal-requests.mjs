@@ -34,6 +34,33 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
     const { existing } = await inspect(c, r, false);
     return { ...(await envelope(c, r)), request: existing };
   }));
+  router.get(path + '/review-route', handle(false, async (c, r) => {
+    const { row, existing } = await inspect(c, r, false);
+    if (!existing) throw fail(404, 'Record the reversal request before inspecting its review route.');
+    const context = await envelope(c, r);
+    const policy = (await c.query(
+      `select id, effective_from::text as "effectiveFrom", definition from invoice_batch_approval_policies
+       where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and effective_from <= $4::date
+       order by effective_from desc, sequence desc limit 1`,
+      [row.organization_id, row.legal_entity_id, row.engagement_id, context.serverDate],
+    )).rows[0];
+    const base = { ...context, requestId: existing.id, lineId: existing.lineId };
+    if (policy?.definition.fullLineReversals !== true)
+      return { ...base, route: { status: 'NO_REVERSAL_POLICY' } };
+    const stages = policy.definition.stages;
+    const eligible = (await c.query(
+      `select not exists (
+        select 1 from jsonb_to_recordset($1::jsonb) stage("userId" uuid, role text)
+        where stage."userId" in ($2::uuid, $3::uuid)
+          or invoice_batch_approval_actor_valid($4,$5,stage."userId",stage.role,'decider') is not true
+          or exists (select 1 from invoice_draft_lines l where l.batch_id=$6 and
+            invoice_source_line_visible($4,$5,l.batch_id,l.item_id,stage."userId",stage.role) is not true)
+      ) as eligible`,
+      [JSON.stringify(stages), existing.actorId, row.preparer_user_id, row.organization_id, row.legal_entity_id, row.id],
+    )).rows[0].eligible;
+    if (!eligible) return { ...base, route: { status: 'REVIEWERS_UNAVAILABLE' } };
+    return { ...base, route: { status: 'AVAILABLE', policyId: policy.id, effectiveFrom: policy.effectiveFrom, stages } };
+  }));
   router.post(path, handle(true, async (c, r) => {
     const parsed = command.safeParse(r.body);
     if (!parsed.success) throw fail(400, 'Supply the inspected export and a reason.');
