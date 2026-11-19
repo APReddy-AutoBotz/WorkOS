@@ -494,14 +494,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       await pool.query(
         "update reporting_periods set status='Approval Closed' where id='synthetic-category-current'",
       );
-      await pool.query(
-        "update reporting_periods set frequency='Fiscal' where id='synthetic-category-current'",
-      );
-      const missingWeekly = await calculateSecond();
-      assert.equal(missingWeekly.status, 409);
-      assert.equal(missingWeekly.body.error.code, 'TM_FINANCIAL_PERIOD_CLOSED');
-      await pool.query(
-        "update reporting_periods set frequency='Weekly' where id='synthetic-category-current'",
+      await assert.rejects(
+        pool.query('select assert_tm_financial_period($1,$2,$3::date)', [
+          f.organizationId,
+          f.legalEntityId,
+          '1990-01-01',
+        ]),
+        (e) => e.code === 'CTM04',
       );
       const closing = await pool.connect();
       try {
