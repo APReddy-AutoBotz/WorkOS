@@ -39,3 +39,9 @@ Select an engagement and inclusive work dates, then load the period margin. Each
 Load the period and choose **Retain this period** to save the inspected membership and native-currency totals. Creation requires valuation creation, cost access and visibility of all contributing workers. WorkOS records the scope, actor, calculation version, exact valuation IDs, worker IDs and audit event. Repeating the same selection returns its existing version. Later work adds a version when an authorized user inspects and retains the updated report. Open a version by number or leave the field empty for the latest. Current permissions and access to every retained worker govern historical reads. Open a retained version to page through its contributing entries and inspect the original billing and cost rate receipts.
 
 Migration `065s_wos06_tm_period_versions` adds append-only storage without grants or backfill. Roll back the application while preserving the table and its history. Period locking, non-T&M amounts and portfolio reporting remain open.
+
+## Financial period enforcement
+
+New T&M valuations use the approved entry's work date. A Weekly reporting period must cover it. Every covering Weekly, Monthly and Fiscal period must permit financial work. Open, Submission Closed and Approval Closed permit valuation of work already approved. Planned, Financially Locked and Closed prevent a new snapshot. PostgreSQL coordinates each insert with organization setup, including concurrent creation of a covering period. Existing receipts, report versions and same-request replays remain available under current access controls.
+
+Migration `065t_wos06_tm_financial_period_lock` adds an insert trigger without backfill, role grants or changes to existing amounts. Keep the database guard when reverting the application. Protected reopening and post-export corrections remain separate work.

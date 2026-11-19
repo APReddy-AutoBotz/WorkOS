@@ -368,7 +368,11 @@ const TmEngagement = ({
           setPolicies(null);
           setSources([]);
           setRates(null);
-          setNotice('Calculation refused. Reload exact work, policy and sources.');
+          setNotice(
+            e.code === 'TM_FINANCIAL_PERIOD_CLOSED'
+              ? 'The work date is outside an open financial period. Check the reporting period before creating a valuation.'
+              : 'Calculation refused. Reload exact work, policy and sources.',
+          );
           return;
         }
         throw e;
