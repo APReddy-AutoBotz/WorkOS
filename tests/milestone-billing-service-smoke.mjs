@@ -135,12 +135,24 @@ globalThis.fetch = async (url, init = {}) => {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 };
 const base = '/api/v1/milestone-billing';
-responses[base + '/policies'] = { ...envelope, policies: [policy], truncated: false };
+responses[base + '/policies'] = {
+  ...envelope,
+  policies: [policy],
+  truncated: false,
+  effectivePolicy: policy,
+};
 responses[base + '/sources'] = { ...envelope, sources: [source], nextAfter: null };
 responses[base + '/instances'] = { ...envelope, approvals: [approval], nextAfter: null };
 responses[base + '/instances/' + instanceId] = { ...envelope, approval, source, eventId: null, itemId: null };
 let result = await s.load(source.engagementId, capture());
 assert.equal(result.sources[0].id, source.id);
+assert.equal(result.effectivePolicy.id, policy.id);
+assert.ok(
+  calls.some(({ url }) => new URL(url, 'http://localhost').searchParams.get('includeEffective') === 'true'),
+);
+responses[base + '/policies'].effectivePolicy = { ...policy, effectiveFrom: '2026-10-30' };
+await assert.rejects(s.load(source.engagementId, capture()), (error) => error.status === 503);
+responses[base + '/policies'].effectivePolicy = policy;
 assert.equal(result.approvals[0].state.status, 'Pending');
 result = await s.inspect(instanceId, capture());
 assert.equal(result.approval.milestoneId, source.id);
