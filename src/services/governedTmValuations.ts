@@ -270,6 +270,70 @@ const sourcePage = async (engagementId: string, c: RateContext | null, after?: T
   return p.data;
 };
 export const governedTmValuations = {
+  periodMembers: async (
+    periodId: string,
+    engagementId: string,
+    start: string,
+    end: string,
+    sequence: number,
+    offset: number,
+    c: RateContext | null,
+  ) => {
+    if (
+      !uuid.safeParse(periodId).success ||
+      !id.safeParse(engagementId).success ||
+      !date.safeParse(start).success ||
+      !date.safeParse(end).success ||
+      start > end ||
+      !Number.isSafeInteger(sequence) ||
+      sequence < 1 ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0
+    )
+      return bad();
+    const query = new URLSearchParams({
+      engagementId,
+      start,
+      end,
+      sequence: String(sequence),
+      offset: String(offset),
+    });
+    const raw = await call('GET', '/period-versions/' + periodId + '/members?' + query, c);
+    const amount = z.string().regex(/^\d+(?:\.\d+)?$/);
+    const member = source.extend({
+      valuationId: uuid,
+      hoursExact: amount,
+      currency: z.string().regex(/^[A-Z]{3}$/),
+      billable: amount,
+      cost: amount,
+      margin: z.string().regex(/^-?\d+(?:\.\d+)?$/),
+    });
+    const parsed = z
+      .object({
+        ...envelope,
+        periodId: uuid,
+        engagementId: id,
+        sequence: z.number().int().positive(),
+        offset: z.number().int().nonnegative(),
+        count: z.number().int().positive(),
+        members: z.array(member).max(25),
+      })
+      .strict()
+      .safeParse(raw);
+    if (!parsed.success) return bad();
+    const page = parsed.data;
+    if (
+      page.periodId !== periodId ||
+      page.engagementId !== engagementId ||
+      page.sequence !== sequence ||
+      page.offset !== offset ||
+      page.members.length !== Math.min(25, Math.max(0, page.count - offset)) ||
+      page.members.some((x) => x.workDate < start || x.workDate > end) ||
+      new Set(page.members.map((x) => x.valuationId)).size !== page.members.length
+    )
+      return bad();
+    return page;
+  },
   periodSummary: async (
     engagementId: string,
     start: string,
