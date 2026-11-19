@@ -11,12 +11,18 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  type Portfolio = Awaited<ReturnType<typeof invoiceDrafts.portfolio>>;
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [start, setStart] = useState(''),
+    [end, setEnd] = useState('');
+  const [source, setSource] = useState<Portfolio['source']>('time_and_materials');
   const generation = useRef(0);
   const current = useRef<RateContext | null>(null);
   useEffect(() => {
     const clear = () => {
       generation.current++;
       current.current = null;
+      setPortfolio(null);
       setReport(null);
       setReason('');
       setBusy(false);
@@ -45,6 +51,27 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
     'employees.view',
     'notifications.view',
   ].every(hasRatePermission);
+  const loadPortfolio = async () => {
+    const run = ++generation.current,
+      context = captureRateContext(() => generation.current === run);
+    setPortfolio(null);
+    setMessage('');
+    if (!context) {
+      setMessage('An active scope is required.');
+      return;
+    }
+    current.current = context;
+    setBusy(true);
+    try {
+      const value = await invoiceDrafts.portfolio(start, end, source, context);
+      if (generation.current === run) setPortfolio(value);
+    } catch {
+      if (generation.current === run)
+        setMessage('Portfolio reconciliation could not be confirmed. Check access and reload.');
+    } finally {
+      if (generation.current === run) setBusy(false);
+    }
+  };
   const load = async () => {
     const run = ++generation.current,
       context = captureRateContext(() => generation.current === run);
@@ -104,14 +131,110 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
     <section aria-label="Billing reconciliation" className="my-4 space-y-3 rounded-xl border p-4">
       <h2>Billing reconciliation</h2>
       <p>
-        Reconcile approved T&amp;M work or accepted milestones for one engagement, from eligibility through
-        invoice reservation, export and manual confirmation. Totals reflect your current access and stay in
-        the original currency.
+        Reconcile approved T&amp;M work or accepted milestones across the portfolio or within one engagement,
+        from eligibility through invoice reservation, export and manual confirmation. Totals reflect your
+        current access and stay in the original currency.
       </p>
       {!allowed ? (
         <p role="status">Scoped invoice and export view access are required.</p>
       ) : (
         <>
+          <fieldset disabled={busy} className="space-y-2">
+            <legend>Portfolio reconciliation</legend>
+            <label>
+              Eligible from{' '}
+              <input
+                type="date"
+                value={start}
+                onChange={(e) => {
+                  setPortfolio(null);
+                  setStart(e.target.value);
+                }}
+              />
+            </label>
+            <label>
+              Eligible through{' '}
+              <input
+                type="date"
+                value={end}
+                onChange={(e) => {
+                  setPortfolio(null);
+                  setEnd(e.target.value);
+                }}
+              />
+            </label>
+            <label>
+              Portfolio sources{' '}
+              <select
+                value={source}
+                onChange={(e) => {
+                  setPortfolio(null);
+                  setSource(e.target.value as Portfolio['source']);
+                }}
+              >
+                <option value="time_and_materials">Time and materials</option>
+                {hasRatePermission('commercial.milestone_billing.view') && (
+                  <>
+                    <option value="milestone">Accepted milestones</option>
+                    <option value="both">Time and materials and accepted milestones</option>
+                  </>
+                )}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!start || !end || start > end}
+              onClick={() => void loadPortfolio()}
+            >
+              Load portfolio reconciliation
+            </button>
+          </fieldset>
+          {portfolio && (
+            <section aria-label="Portfolio reconciliation results">
+              <h3>
+                Portfolio reconciliation · {portfolio.start} through {portfolio.end}
+              </h3>
+              <p>
+                As of {portfolio.asOf}. Control exceptions: {portfolio.exceptionCount}.
+              </p>
+              {portfolio.controls.length === 0 ? (
+                <p>No visible eligibility events in this period.</p>
+              ) : (
+                <>
+                  <table className="w-full text-left tabular-nums">
+                    <caption>Portfolio billing control totals</caption>
+                    <thead>
+                      <tr>
+                        <th>Currency</th>
+                        <th>Boundary</th>
+                        <th>Lines</th>
+                        <th>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {portfolio.controls.map((x) => (
+                        <tr key={x.currency + x.boundary}>
+                          <td>{x.currency}</td>
+                          <th scope="row">{x.boundary.replaceAll('_', ' ').toLowerCase()}</th>
+                          <td>{x.lineCount}</td>
+                          <td>{x.amount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {portfolio.totals.length > 0 && (
+                    <ul aria-label="Portfolio register states">
+                      {portfolio.totals.map((x) => (
+                        <li key={x.currency + x.status}>
+                          {x.currency} {x.status}: {x.lineCount} items, {x.amount}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </section>
+          )}
           <label>
             Reconciliation engagement{' '}
             <select

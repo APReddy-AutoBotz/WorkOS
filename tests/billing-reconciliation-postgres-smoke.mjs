@@ -966,6 +966,19 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       const limitedReport = ok(await request(reportPath, { identity: ids.denied }));
       assert.equal(limitedReport.items.length, 0);
       assert.equal(limitedReport.totals.length, 0);
+      const eligibleOn = availableReport.items[0].eligibleOn;
+      const portfolioPath =
+        route +
+        '/reconciliation/portfolio?' +
+        new URLSearchParams({ start: eligibleOn, end: eligibleOn, source: 'time_and_materials' });
+      const scopedPortfolio = ok(await request(portfolioPath, { identity: ids.denied }));
+      assert.deepEqual(scopedPortfolio.controls, []);
+      assert.deepEqual(scopedPortfolio.totals, []);
+      assert.equal(
+        ok(await request(portfolioPath)).controls.find((x) => x.boundary === 'CURRENT_OCCUPANCY').lineCount,
+        1,
+      );
+
       assert(!JSON.stringify(limitedReport).includes(first.batch.id));
       const second = ok(
         await request(route + '/batches', {

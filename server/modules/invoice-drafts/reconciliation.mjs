@@ -1,3 +1,4 @@
+import { sumHours } from '../../../shared/work-hours.mjs';
 import { invoiceDraftTotal } from '../../../shared/invoice-batch-draft.mjs';
 
 // Read a bounded, scope-filtered population in the caller's repeatable-read transaction.
@@ -9,12 +10,20 @@ export const readBillingReconciliation = async (
   engagementId,
   options,
   model = 'time_and_materials',
+  page = null,
 ) => {
   const milestone = model === 'milestone';
   if (!milestone && model !== 'time_and_materials') throw new Error('Unsupported reconciliation model.');
-  const args = [req.organizationScope.organizationId, req.organizationScope.legalEntityId, engagementId];
+  const args = [req.organizationScope.organizationId, req.organizationScope.legalEntityId];
+  if (page) args.push(page.start, page.end, page.afterItem);
+  else args.push(engagementId);
+  const population = page
+    ? `ev.eligible_on between $3::date and $4::date and exists(select 1 from commercial_engagements eng where eng.id=ev.engagement_id and eng.organization_id=ev.organization_id and eng.legal_entity_id=ev.legal_entity_id and eng.model='${model}')`
+    : 'ev.engagement_id=$3';
+
   const visible = milestone ? 'true' : options.buildEmployeeScopeWhere(req, args, 'worker');
   const visibleArgs = [...args];
+  if (page) visibleArgs[4] = page.afterEvent;
   const batchVisible = milestone ? null : options.buildEmployeeScopeWhere(req, args, 'batch_worker');
   const relatedScope = milestone
     ? `and not exists (
@@ -112,13 +121,13 @@ export const readBillingReconciliation = async (
     left join invoice_csv_artifacts art on art.batch_id=occ.batch_id
     left join invoice_batch_confirmations conf on conf.batch_id=occ.batch_id
     where item.organization_id=$1 and item.legal_entity_id=$2 and ev.organization_id=$1
-      and ev.legal_entity_id=$2 and ev.engagement_id=$3 and ev.source_type='${sourceType}' and (${visible})
-      ${relatedScope}
+      and ev.legal_entity_id=$2 and ${population} and ev.source_type='${sourceType}' and (${visible})
+      ${relatedScope} ${page ? 'and ($5::uuid is null or item.id>$5)' : ''}
     order by item.id limit 501`,
       args,
     )
   ).rows;
-  if (rows.length > 500) {
+  if (!page && rows.length > 500) {
     throw Object.assign(
       new Error('This engagement has more than 500 visible items. A complete report is unavailable.'),
       { statusCode: 422, code: 'BILLING_RECONCILIATION_LIMIT' },
@@ -131,17 +140,23 @@ export const readBillingReconciliation = async (
       (${sourceAmount}) as "sourceAmount",(${sourceCurrency}) as "sourceCurrency"
     from billing_eligibility_events ev
     ${sourceJoins}
-    where ev.organization_id=$1 and ev.legal_entity_id=$2 and ev.engagement_id=$3 and ev.source_type='${sourceType}' and (${visible})
+    where ev.organization_id=$1 and ev.legal_entity_id=$2 and ${population} and ev.source_type='${sourceType}' and (${visible})
       and not exists(select 1 from approved_unbilled_items item where item.event_id=ev.id)
+      ${page ? 'and ($5::uuid is null or ev.id>$5)' : ''}
     order by ev.id limit 501`,
       visibleArgs,
     )
   ).rows;
-  if (rows.length + missing.length > 500) {
+  if (!page && rows.length + missing.length > 500) {
     throw Object.assign(
       new Error('This engagement has more than 500 visible events. A complete report is unavailable.'),
       { statusCode: 422, code: 'BILLING_RECONCILIATION_LIMIT' },
     );
+  }
+  const more = !!page && (rows.length > 500 || missing.length > 500);
+  if (page) {
+    rows.splice(500);
+    missing.splice(500);
   }
   const grouped = new Map();
   const controlGroups = new Map();
@@ -195,6 +210,7 @@ export const readBillingReconciliation = async (
   return {
     asOf,
     engagementId,
+    ...(page ? { more } : {}),
     items: rows,
     missingEvents: missing,
     totals,
@@ -202,3 +218,54 @@ export const readBillingReconciliation = async (
     exceptionCount: rows.filter((row) => !row.controlOk).length + missing.length,
   };
 };
+
+export async function readPortfolioReconciliation(client, req, options, { start, end, source }) {
+  const grouped = new Map(),
+    boundaries = new Map();
+  const add = (target, label, row) => {
+    const key = row.currency + ':' + row[label];
+    const prior = target.get(key);
+    target.set(
+      key,
+      prior
+        ? {
+            ...prior,
+            amount: sumHours([prior.amount, row.amount]),
+            lineCount: prior.lineCount + row.lineCount,
+          }
+        : row,
+    );
+  };
+  let asOf,
+    exceptionCount = 0;
+  for (const model of source === 'both' ? ['time_and_materials', 'milestone'] : [source]) {
+    let afterItem = null,
+      afterEvent = null;
+    for (;;) {
+      const report = await readBillingReconciliation(client, req, null, options, model, {
+        start,
+        end,
+        afterItem,
+        afterEvent,
+      });
+      asOf = report.asOf;
+      exceptionCount += report.exceptionCount;
+      for (const row of report.totals) add(grouped, 'status', row);
+      for (const row of report.controls) add(boundaries, 'boundary', row);
+      if (!report.more) break;
+      afterItem = report.items.at(-1)?.itemId ?? afterItem;
+      afterEvent = report.missingEvents.at(-1)?.eventId ?? afterEvent;
+    }
+  }
+  const sorted = (map) => [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, row]) => row);
+  return {
+    version: 'workos.portfolio-reconciliation/1',
+    start,
+    end,
+    source,
+    asOf,
+    exceptionCount,
+    totals: sorted(grouped),
+    controls: sorted(boundaries),
+  };
+}

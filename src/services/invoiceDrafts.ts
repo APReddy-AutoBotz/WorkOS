@@ -301,7 +301,79 @@ const canonical = (value: unknown) =>
       : v,
   );
 export { captureRateContext };
+const reconciliationTotals = {
+  controls: z.array(
+    z
+      .object({
+        currency: z.string().regex(/^[A-Z]{3}$/),
+        boundary: z.enum([
+          'EVENT_BACKED_SOURCE',
+          'ELIGIBILITY_EVENT',
+          'REGISTER_ITEM',
+          'CURRENT_OCCUPANCY',
+          'CURRENT_LINE',
+          'EXPORTED_LINE',
+          'MANUALLY_CONFIRMED_LINE',
+          'HISTORICAL_RELEASED_LINE',
+        ]),
+        lineCount: z.number().int().nonnegative(),
+        amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
+      })
+      .strict(),
+  ),
+  totals: z.array(
+    z
+      .object({
+        currency: z.string().regex(/^[A-Z]{3}$/),
+        status: z.enum(['OCCUPIED', 'AVAILABLE', 'SOURCE_UNAVAILABLE']),
+        lineCount: z.number().int().nonnegative(),
+        amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
+      })
+      .strict(),
+  ),
+};
 export const invoiceDrafts = {
+  portfolio: async (
+    start: string,
+    end: string,
+    source: 'both' | 'time_and_materials' | 'milestone',
+    c: RateContext | null,
+  ) => {
+    const allowed = () =>
+      hasRatePermission('commercial.invoice_export.view') &&
+      (source === 'time_and_materials' || hasRatePermission('commercial.milestone_billing.view'));
+    if (!date.safeParse(start).success || !date.safeParse(end).success || start > end || !allowed())
+      return bad();
+    const raw = await call(
+      'GET',
+      '/reconciliation/portfolio?' + new URLSearchParams({ start, end, source }),
+      c,
+      'view',
+    );
+    const parsed = z
+      .object({
+        ...envelope,
+        version: z.literal('workos.portfolio-reconciliation/1'),
+        start: date,
+        end: date,
+        source: z.enum(['both', 'time_and_materials', 'milestone']),
+        asOf: instant,
+        ...reconciliationTotals,
+        exceptionCount: z.number().int().nonnegative(),
+      })
+      .strict()
+      .safeParse(raw);
+    if (
+      !parsed.success ||
+      !allowed() ||
+      parsed.data.start !== start ||
+      parsed.data.end !== end ||
+      parsed.data.source !== source
+    )
+      return bad();
+    return parsed.data;
+  },
+
   reconciliation: async (engagementId: string, c: RateContext | null) => {
     if (!id.safeParse(engagementId).success || !hasRatePermission('commercial.invoice_export.view'))
       return bad();
@@ -402,35 +474,7 @@ export const invoiceDrafts = {
               .strict(),
           )
           .max(500),
-        controls: z.array(
-          z
-            .object({
-              currency: z.string().regex(/^[A-Z]{3}$/),
-              boundary: z.enum([
-                'EVENT_BACKED_SOURCE',
-                'ELIGIBILITY_EVENT',
-                'REGISTER_ITEM',
-                'CURRENT_OCCUPANCY',
-                'CURRENT_LINE',
-                'EXPORTED_LINE',
-                'MANUALLY_CONFIRMED_LINE',
-                'HISTORICAL_RELEASED_LINE',
-              ]),
-              lineCount: z.number().int().nonnegative(),
-              amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
-            })
-            .strict(),
-        ),
-        totals: z.array(
-          z
-            .object({
-              currency: z.string().regex(/^[A-Z]{3}$/),
-              status: z.enum(['OCCUPIED', 'AVAILABLE', 'SOURCE_UNAVAILABLE']),
-              lineCount: z.number().int().nonnegative(),
-              amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
-            })
-            .strict(),
-        ),
+        ...reconciliationTotals,
         exceptionCount: z.number().int().nonnegative(),
       })
       .strict()
