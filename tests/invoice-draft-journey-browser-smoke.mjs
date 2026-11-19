@@ -873,6 +873,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         let detail = await body(read);
         assert.equal(detail.lines[0].id, line.line.id);
         await ui.getByText(/Retained lines 1/).waitFor();
+        await ui.getByText('Supporting evidence', { exact: true }).click();
+        const source = detail.lines[0].evidence;
+        await ui.getByText('Work entry ' + source.entryId + ' · Submission ' + source.submissionId).waitFor();
+        await ui.getByText('Work approval decision ' + source.decisionId).waitFor();
+        await ui.getByText('Adopted billing rate ' + source.billingAdoptionId).waitFor();
         await ui.getByLabel('Invoice cancellation reason').fill('Synthetic cancellation');
         post = wait(route + '/batches/' + created.batch.id + '/cancellations', 'POST');
         await ui.getByRole('button', { name: 'Cancel invoice Draft' }).click();
