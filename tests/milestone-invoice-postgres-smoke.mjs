@@ -839,7 +839,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const reserved=reservations[0].body.receipt;
         assert.equal(reserved.total,issued.amount);
         const beforeEvidence=await pool.query('select to_jsonb(l) as line from invoice_draft_lines l where batch_id=$1',[reserved.batchId]);
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['068_wos06_correction_review_evidence', '069_wos06_correction_batch_approval']);
+        assert.deepEqual((await withCommercialMigrationsThrough(69,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}))).applied,['068_wos06_correction_review_evidence', '069_wos06_correction_batch_approval']);
         assert.deepEqual((await pool.query('select to_jsonb(l) as line from invoice_draft_lines l where batch_id=$1',[reserved.batchId])).rows,beforeEvidence.rows);
         const evidencePath=correctionDraftPath+'/'+reserved.batchId;
         const proof=ok(await request(evidencePath));
@@ -903,6 +903,37 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal(ok(await request(correctionDraftPath+'/cancel',{method:'POST',body:{...releaseApproved,expectedState:'Approved'}}),201).receipt.state,'Cancelled');
         assert.equal((await pool.query('select count(*)::int n from invoice_batch_approval_transitions where instance_id=$1 and decision=$2',[correctionReview.id,'Approved'])).rows[0].n,1);
 
+        const finalBatch=ok(await reserve({requestId:randomUUID()}),201).receipt.batchId;
+        const finalDraft=ok(await request(invoiceApproval+'/sources/'+finalBatch)).batch;
+        const finalReview=ok(await request(invoiceApproval+'/requests',{method:'POST',body:{...correctionSubmit,batchId:finalBatch,
+          requestId:randomUUID(),expectedLineageHash:finalDraft.lineageHash}}),201).approval;
+        ok(await request(invoiceApproval+'/instances/'+finalReview.id+'/decisions',{method:'POST',identity:ids.second,body:{...choice,requestId:randomUUID()}}),201);
+        const pinnedBefore=ok(await request(invoiceApproval+'/instances/'+finalReview.id)).approval;
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['070_wos06_credit_export_lineage']);
+        assert.deepEqual(ok(await request(invoiceApproval+'/instances/'+finalReview.id)).approval,pinnedBefore);
+        const ready=ok(await request(csv+'/batches/'+finalBatch)).batch;
+        const creditCommand={...exportCommand,batchId:finalBatch,requestId:randomUUID(),approvalId:finalReview.id,finalTransitionId:ready.finalTransitionId,
+          lineageHash:ready.lineageHash,schemaVersion:'workos.invoice-credit-csv/1',expectedTotal:issued.amount,expectedLineCount:1};
+        const issueCsv=(overrides={})=>request(csv+'/exports',{method:'POST',body:{...creditCommand,...overrides}});
+        assert.equal((await issueCsv({expectedTotal:issued.amount.slice(1)})).status,409);
+        await pool.query("create function synthetic_refuse_credit_export() returns trigger language plpgsql as $$begin raise exception 'Synthetic credit audit refusal';end$$;create trigger synthetic_refuse_credit_export before insert on audit_logs for each row when(new.action='Accept CSV') execute function synthetic_refuse_credit_export()");
+        assert.equal((await issueCsv()).status,503);
+        const linkPath=csv+'/batches/'+draft.batch.id+'/exported-credits';
+        assert.deepEqual(ok(await request(linkPath)).lines,[]);
+        await pool.query('drop trigger synthetic_refuse_credit_export on audit_logs');
+        const attempts=await Promise.all([issueCsv(),issueCsv()]);
+        assert.deepEqual(attempts.map(v=>v.status).sort(),[200,201],JSON.stringify(attempts));
+        const acceptedCredit=attempts[0].body.artifact;
+        assert.equal(acceptedCredit.total,issued.amount);
+        assert.equal(acceptedCredit.schemaVersion,'workos.invoice-credit-csv/1');
+        const reverse=ok(await request(linkPath)).lines;
+        assert.equal(reverse.length,1);
+        assert.equal(reverse[0].artifactId,acceptedCredit.id);
+        assert.equal(reverse[0].originalArtifactId,artifact.id);
+        assert.equal(reverse[0].sha256,acceptedCredit.sha256);
+        assert.equal(ok(await request(csv+'/artifacts/'+artifact.id)).artifact.payloadBase64,artifact.payloadBase64);
+        assert.equal(ok(await request(csv+'/artifacts/'+acceptedCredit.id)).artifact.payloadBase64,acceptedCredit.payloadBase64);
+        assert.equal((await request(correctionDraftPath+'/cancel',{method:'POST',body:{...releaseApproved,batchId:finalBatch,requestId:randomUUID(),expectedState:'Approved'}})).status,409);
         const creditRegister = '/api/v1/invoice-csv/issued-credits?engagementId='+encodeURIComponent(roots.engagement.id);
         assert.deepEqual(ok(await request(creditRegister)).credits.map(row=>row.itemId),[issued.itemId]);
         assert.equal(issued.originalEventId,credit.source.originalEventId);

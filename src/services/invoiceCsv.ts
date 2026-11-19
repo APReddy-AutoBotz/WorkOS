@@ -1,3 +1,4 @@
+import { CREDIT_CSV_SCHEMA,verifyCreditCsv,renderCreditCsv } from '../../shared/correction-invoice-csv.mjs';
 import { verifyMilestoneInvoiceCsv } from './milestoneInvoiceCsv';
 import { validInvoiceConfirmationCommand } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
@@ -13,7 +14,7 @@ const uuid = z.string().uuid(),
   hash = z.string().regex(/^[a-f0-9]{64}$/),
   money = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
   instant = z.string().refine((x) => Number.isFinite(Date.parse(x))),
-  schema = z.enum(['workos.invoice-tm-csv/1', 'workos.invoice-milestone-csv/1']),
+  schema = z.enum(['workos.invoice-tm-csv/1', 'workos.invoice-milestone-csv/1','workos.invoice-credit-csv/1']),
   envelope = {
     ownerKey: hash,
     actorUserId: uuid,
@@ -22,6 +23,7 @@ const uuid = z.string().uuid(),
     legalEntityId: id,
     serverDate: date,
   };
+const creditAmount = z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).refine(v => /[1-9]/.test(v));
 const reference = z
     .object({
       entityType: z.enum(['Project', 'Engagement', 'Contract']),
@@ -83,7 +85,7 @@ const milestoneLine = z
   })
   .strict();
 const line = z.union([tmLine, milestoneLine]);
-const source = z
+const sourceBase = z
   .object({
     id: uuid,
     sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
@@ -103,8 +105,8 @@ const source = z
     lines: z.array(line),
     control: control.nullable(),
   })
-  .strict()
-  .refine((v) => {
+  .strict();
+const standardSource=sourceBase.refine((v) => {
     if (
       v.periodStart > v.periodEnd ||
       (v.sourceType &&
@@ -139,6 +141,20 @@ const source = z
       return false;
     }
   });
+const creditLine=tmLine.omit({snapshotId:true,workDate:true}).extend({
+  sourceType:z.literal('FULL_LINE_REVERSAL'),eventVersion:z.literal(1),decisionId:uuid,originalBatchId:uuid,originalArtifactId:uuid,
+  originalArtifactSha256:hash,originalLineId:uuid,originalEventId:uuid,originalItemVersion:z.literal(1),amount:creditAmount,
+});
+const creditSourceForExport=sourceBase.extend({sourceType:z.literal('FULL_LINE_REVERSAL'),state:z.enum(['Approved','Exported']),
+  lines:z.array(creditLine).min(1).max(50),control:control.extend({total:creditAmount}),periodBasis:z.literal('ELIGIBLE_DATE'),
+  approvalId:uuid,finalTransitionId:uuid,lineageHash:hash}).refine(v=>{
+  try{
+    const totals=renderCreditCsv({...v,batchId:v.id});
+    return v.control.total===totals.total && v.control.currency===v.currency && v.control.lineCount===v.lines.length &&
+      (v.state==='Exported')===Boolean(v.artifactId);
+  }catch{return false;}
+});
+const source=z.union([standardSource,creditSourceForExport]);
 const artifact = z
     .object({
       id: uuid,
@@ -151,7 +167,7 @@ const artifact = z
       sha256: hash,
       lineCount: z.number().int().positive(),
       currency: z.string().regex(/^[A-Z]{3}$/),
-      total: money,
+      total: z.union([money,creditAmount]),
       actorId: uuid,
       activeRole: id,
       requestId: uuid,
@@ -160,7 +176,7 @@ const artifact = z
       generatedAt: instant,
       payloadBase64: z.string().regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
     })
-    .strict(),
+    .strict().refine(v=>v.total.startsWith('-')===(v.schemaVersion===CREDIT_CSV_SCHEMA)),
   failure = z
     .object({
       id: uuid,
@@ -182,7 +198,7 @@ export type InvoiceCsvOperation = {
   approvalId: string;
   finalTransitionId: string;
   lineageHash: string;
-  schemaVersion: 'workos.invoice-tm-csv/1' | 'workos.invoice-milestone-csv/1';
+  schemaVersion: 'workos.invoice-tm-csv/1' | 'workos.invoice-milestone-csv/1' | 'workos.invoice-credit-csv/1';
   expectedLineCount: number;
   expectedTotal: string;
   reason: string;
@@ -196,7 +212,7 @@ const operation = z
       lineageHash: hash,
       schemaVersion: schema,
       expectedLineCount: z.number().int().min(1).max(1000000),
-      expectedTotal: money,
+      expectedTotal:z.union([money,creditAmount]),
       reason,
     })
     .strict(),
@@ -271,10 +287,17 @@ const decodeBase64 = (v: string) => {
   }
 };
 const checkArtifact = async (a: InvoiceCsvArtifact) => {
+  if(a.schemaVersion===CREDIT_CSV_SCHEMA){
+    const bytes=decodeBase64(a.payloadBase64);
+    const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
+    if(digest!==a.sha256) return bad();
+    try{verifyCreditCsv(new TextDecoder('utf-8',{fatal:true}).decode(bytes),a);}catch{return bad();}
+    return bytes;
+  }
   if (a.schemaVersion === 'workos.invoice-milestone-csv/1') {
     if (!hasRatePermission('commercial.milestone_billing.view')) return bad();
     try {
-      return await verifyMilestoneInvoiceCsv(a);
+      return await verifyMilestoneInvoiceCsv({...a,total:a.total});
     } catch {
       return bad();
     }
@@ -468,7 +491,7 @@ const submittedReview = z.object({
 }).strict();
 export type SubmittedReversalReview = z.infer<typeof submittedReview>;
 export type InvoiceReversalRoute = z.infer<typeof reviewRoute>;
-const creditAmount = z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).refine(v => /[1-9]/.test(v));
+
 const creditSource = z.object({ reviewId:uuid, decisionId:uuid, originalEventId:uuid, confirmationId:uuid.nullable(),
   currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount }).strict();
 const creditReceipt = z.object({eventId:uuid,itemId:uuid,eligibleOn:date,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount,
@@ -476,19 +499,36 @@ const creditReceipt = z.object({eventId:uuid,itemId:uuid,eligibleOn:date,currenc
 export type ReversalCredit = {source:z.infer<typeof creditSource>;receipt:z.infer<typeof creditReceipt>|null;eligibleOn:string};
 const issuedCredit = z.object({
   itemId:uuid, eventId:uuid, eligibleOn:date, currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount,
-  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(), correctionState:z.enum(['Draft','Under Review','Approved']).nullable(),
+  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(), correctionState:z.enum(['Draft','Under Review','Approved','Exported']).nullable(),
 }).strict();
 export type IssuedCredit = z.infer<typeof issuedCredit>;
 const correctionEvidence=z.object({
   ...envelope,originalId:uuid,
   header:z.object({batchId:uuid,engagementId:id,currency:z.string().regex(/^[A-Z]{3}$/),ownerId:uuid,ownerRole:id,
-    ownerCurrent:z.boolean(),state:z.enum(['Draft','Under Review','Approved','Cancelled']),lineageHash:hash,periodStart:date,periodEnd:date,total:creditAmount}).strict(),
+    ownerCurrent:z.boolean(),state:z.enum(['Draft','Under Review','Approved','Exported','Cancelled']),lineageHash:hash,periodStart:date,periodEnd:date,total:creditAmount}).strict(),
   lines:z.array(z.object({lineId:uuid,sequence:z.number().int().positive(),itemId:uuid,itemVersion:z.literal(1),eventId:uuid,eventVersion:z.literal(1),
     eligibleOn:date,amount:creditAmount,currency:z.string().regex(/^[A-Z]{3}$/),decisionId:uuid,originalEventId:uuid,originalLineId:uuid,
     artifactId:uuid,artifactSha256:hash,reserved:z.boolean()}).strict()).min(1).max(50),
 }).strict();
 export type CorrectionEvidence=z.infer<typeof correctionEvidence>;
+const creditLink=z.object({originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
+export type CreditExportLink=z.infer<typeof creditLink>;
 export const invoiceCsv = {
+  correctionBatches:async(engagementId:string,after:string|null,c:RateContext)=>{
+    const q=new URLSearchParams({engagementId});if(after)q.set('after',after);
+    const raw=await call('GET','/correction-batches?'+q,c,'view');
+    const result=z.object({...envelope,engagementId:id,nextAfter:uuid.nullable(),batches:z.array(z.object({id:uuid,currency:z.string().regex(/^[A-Z]{3}$/),
+      state:z.enum(['Approved','Exported'])}).strict()).max(50)}).strict().safeParse(raw);
+    if(!result.success || result.data.engagementId!==engagementId) return bad();
+    return result.data;
+  },
+  exportedCredits:async(original:InvoiceCsvSource,after:string|null,c:RateContext)=>{
+    const raw=await call('GET','/batches/'+original.id+'/exported-credits'+(after?'?after='+after:''),c,'view');
+    const result=z.object({...envelope,originalBatchId:uuid,nextAfter:uuid.nullable(),lines:z.array(creditLink).max(50)}).strict().safeParse(raw);
+    if(!result.success || result.data.originalBatchId!==original.id || result.data.lines.some(x=>x.originalArtifactId!==original.artifactId ||
+      !original.lines.some(l=>l.lineId===x.originalLineId && l.currency===x.currency && x.amount==='-'+l.amount)))return bad();
+    return result.data;
+  },
   correctionEvidence: async (item:IssuedCredit,engagementId:string,ctx:RateContext) => {
     const raw=await call('GET','/batches/'+item.batchId+'/correction-drafts/'+item.correctionBatchId,ctx,'view');
     const result=correctionEvidence.safeParse(raw);
@@ -506,7 +546,7 @@ export const invoiceCsv = {
     const body=cancelling?{batchId:selection,expectedState}:{itemIds:selection};
     const raw=await call('POST','/batches/'+originalId+'/correction-drafts'+(cancelling?'/cancel':''),ctx,'view',{requestId,reason:why,...body});
     const parsed=z.object({...envelope,originalId:uuid,replayed:z.boolean(),receipt:z.object({
-      batchId:uuid,itemIds:z.array(uuid).min(1).max(50),currency:z.string().regex(/^[A-Z]{3}$/),total:creditAmount,state:z.enum(['Draft','Under Review','Approved','Cancelled']),
+      batchId:uuid,itemIds:z.array(uuid).min(1).max(50),currency:z.string().regex(/^[A-Z]{3}$/),total:creditAmount,state:z.enum(['Draft','Under Review','Approved','Exported','Cancelled']),
     }).strict()}).strict().safeParse(raw);
     if(!parsed.success || parsed.data.originalId!==originalId) return bad();
     const receipt=parsed.data.receipt;
@@ -626,7 +666,7 @@ export const invoiceCsv = {
         a.lineageHash !== op.lineageHash ||
         a.schemaVersion !== op.schemaVersion ||
         a.lineCount !== op.expectedLineCount ||
-        canonicalHours(a.total) !== canonicalHours(op.expectedTotal)
+        (a.schemaVersion===CREDIT_CSV_SCHEMA ? a.total!==op.expectedTotal : canonicalHours(a.total)!==canonicalHours(op.expectedTotal))
       )
         return bad();
       return { artifact: a, bytes: await checkArtifact(a), failure: null };

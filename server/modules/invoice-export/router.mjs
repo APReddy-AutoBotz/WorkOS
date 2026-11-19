@@ -1,3 +1,5 @@
+import { CREDIT_CSV_SCHEMA } from '../../../shared/correction-invoice-csv.mjs';
+import { correctionArtifact,correctionExportBatch } from './correction-batch.mjs';
 import { registerCorrectionReviewEvidence } from './correction-review-evidence.mjs';
 import { registerCorrectionDrafts } from './correction-drafts.mjs';
 import { registerIssuedCredits } from './issued-credits.mjs';
@@ -181,6 +183,14 @@ export const createInvoiceCsvRouter = (o) => {
       ).rows[0] ?? null;
     return { row: b, source, review };
   };
+  const exportBatch=async(c,r,id,lock=false)=>(await correctionExportBatch(c,r,id,lock)) ?? batch(c,r,id,lock);
+  const renderExport=source=>{
+    switch(source.lines[0]?.sourceType){
+      case 'FULL_LINE_REVERSAL': return correctionArtifact(source);
+      case 'MILESTONE_ACCEPTANCE': return milestoneInvoiceCsvArtifact(source);
+      default: return invoiceCsvArtifact(source);
+    }
+  };
   const artifactView = (a) => ({
     id: a.id,
     batchId: a.batch_id,
@@ -226,20 +236,39 @@ export const createInvoiceCsvRouter = (o) => {
   registerCorrectionDrafts(router,{handle,authorize,batch,envelope,audit:o.audit});
   registerIssuedCredits(router, { handle, authorize, envelope });
   registerLineReversalRequests(router, { handle, authorize, batch, envelope, audit: o.audit });
+  router.get('/correction-batches',handle(false,async(c,r)=>{
+    const q=parse(z.object({engagementId:z.string().min(1).max(200),after:uuid.optional()}).strict(),r.query);
+    await authorize(c,r);
+    const rows=(await c.query(`select b.id,b.currency,invoice_batch_governed_state(b.id) state from invoice_draft_batches b
+      where b.organization_id=$1 and b.legal_entity_id=$2 and b.engagement_id=$3 and b.source_type='FULL_LINE_REVERSAL'
+      and invoice_batch_governed_state(b.id) in ('Approved','Exported') and correction_original_scope_current(b,$4,$5)
+      and ($6::uuid is null or b.id>$6) order by b.id limit 51`,[...scope(r),q.engagementId,r.user.sub,r.user.activeRole,q.after??null])).rows;
+    return {...await envelope(c,r),engagementId:q.engagementId,batches:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};
+  }));
+  router.get('/batches/:id/exported-credits',handle(false,async(c,r)=>{
+    const id=parse(uuid,r.params.id),q=parse(z.object({after:uuid.optional()}).strict(),r.query);
+    await authorize(c,r);
+    await batch(c,r,id);
+    const rows=(await c.query(`select original_artifact_id as "originalArtifactId",original_line_id as "originalLineId",
+      correction_artifact_id as "artifactId",correction_batch_id as "batchId",correction_line_id as "lineId",correction_sha256 as sha256,
+      currency,trim_scale(amount)::text amount from invoice_export_line_corrections
+      where organization_id=$1 and legal_entity_id=$2 and original_batch_id=$3 and ($4::uuid is null or correction_line_id>$4)
+      and exists(select 1 from invoice_draft_batches cb where cb.id=correction_batch_id and correction_original_scope_current(cb,$5,$6))
+      order by correction_line_id limit 51`,[...scope(r),id,q.after??null,r.user.sub,r.user.activeRole])).rows;
+    return {...await envelope(c,r),originalBatchId:id,lines:rows.slice(0,50),nextAfter:rows.length>50?rows[49].lineId:null};
+  }));
   router.get(
     '/batches/:id',
     handle(false, async (c, r) => {
       parse(z.object({}).strict(), r.query);
       await authorize(c, r);
-      const { row, source, review } = await batch(c, r, parse(uuid, r.params.id)),
+      const { row, source, review } = await exportBatch(c, r, parse(uuid, r.params.id)),
         stored =
           (await c.query('select id from invoice_csv_artifacts where batch_id=$1', [row.id])).rows[0] ?? null;
       let total = null;
       try {
         const x =
-          source.lines[0]?.sourceType === 'MILESTONE_ACCEPTANCE'
-            ? milestoneInvoiceCsvArtifact(source)
-            : invoiceCsvArtifact(source);
+          renderExport(source);
         total = { lineCount: x.lineCount, total: x.total, currency: x.currency };
       } catch {
         /* Historical source can remain inspectable without becoming exportable. */
@@ -248,7 +277,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         batch: {
           id: row.id,
-          ...(row.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: row.source_type } : {}),
+          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
           state: row.state,
           clientId: row.client_id,
           contractId: row.contract_id,
@@ -263,7 +292,7 @@ export const createInvoiceCsvRouter = (o) => {
           sourceCurrent: review?.current === true,
           artifactId: stored?.id ?? null,
           lines: source.lines.map((x) =>
-            x.sourceType === 'MILESTONE_ACCEPTANCE'
+            x.sourceType === 'FULL_LINE_REVERSAL' ? x : x.sourceType === 'MILESTONE_ACCEPTANCE'
               ? {
                   lineId: x.lineId,
                   sequence: x.sequence,
@@ -306,9 +335,9 @@ export const createInvoiceCsvRouter = (o) => {
             approvalId: uuid,
             finalTransitionId: uuid,
             lineageHash: key,
-            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA]),
+            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA]),
             expectedLineCount: z.number().int().min(1).max(1000000),
-            expectedTotal: money,
+            expectedTotal: z.union([money,z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/)]),
             reason,
           })
           .strict(),
@@ -317,7 +346,7 @@ export const createInvoiceCsvRouter = (o) => {
       if (workApprovalOwner(r) !== d.expectedOwnerKey)
         throw fail(409, 'INVOICE_CSV_CONTEXT', 'Account, role or scope changed. Reload.');
       await authorize(c, r, 'create');
-      const { row, source, review } = await batch(c, r, d.batchId, true);
+      const { row, source, review } = await exportBatch(c, r, d.batchId, true);
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [
         `invoice-csv-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`,
       ]);
@@ -358,9 +387,7 @@ export const createInvoiceCsvRouter = (o) => {
       let rendered;
       try {
         rendered =
-          source.lines[0]?.sourceType === 'MILESTONE_ACCEPTANCE'
-            ? milestoneInvoiceCsvArtifact(source)
-            : invoiceCsvArtifact(source);
+          renderExport(source);
       } catch (e) {
         if (!(e instanceof TypeError)) throw e;
         const failureId = randomUUID();
@@ -706,7 +733,7 @@ export const createInvoiceCsvRouter = (o) => {
         )
       ).rows[0];
       if (!a) throw fail(404, 'INVOICE_CSV_SOURCE', 'Scoped artifact unavailable.');
-      await batch(c, r, a.batch_id);
+      await exportBatch(c, r, a.batch_id);
       return { ...(await envelope(c, r)), artifact: artifactView(a) };
     }),
   );
@@ -730,7 +757,7 @@ export const createInvoiceCsvRouter = (o) => {
         id = parse(uuid, r.params.batchId);
       await authorize(c, r);
       await assertCommercialAuthority(c, r, 'commercial.invoice_export.recover_notices');
-      await batch(c, r, id);
+      await exportBatch(c, r, id);
       const rows = (
         await c.query(
           `select * from (select f.id,'producer'::text kind,f.policy_id,f.created_at from invoice_export_notice_producer_failures f where f.batch_id=$1 and not exists(select 1 from invoice_export_notice_events e where (f.artifact_id is not null and e.artifact_id=f.artifact_id) or (f.failure_id is not null and e.failure_id=f.failure_id) or (f.confirmation_id is not null and e.confirmation_id=f.confirmation_id)) union all select e.id,'event'::text kind,e.policy_id,e.created_at from invoice_export_notice_events e join invoice_export_notice_failures f on f.event_id=e.id where e.batch_id=$1 and not exists(select 1 from invoice_export_notice_recipients x where x.event_id=e.id)) x where ($2::uuid is null or x.id>$2) order by x.id limit 21`,
@@ -759,7 +786,7 @@ export const createInvoiceCsvRouter = (o) => {
         )
       ).rows[0];
       if (!x) throw fail(404, 'INVOICE_NOTICE_UNCONFIRMED', 'Original recovery receipt unavailable.');
-      await batch(c, r, x.batch_id);
+      await exportBatch(c, r, x.batch_id);
       return { ...(await envelope(c, r)), recovery: recoveryView(x) };
     }),
   );
@@ -784,7 +811,7 @@ export const createInvoiceCsvRouter = (o) => {
         throw fail(409, 'INVOICE_CSV_CONTEXT', 'Account, role or scope changed. Reload.');
       await authorize(c, r);
       await assertCommercialAuthority(c, r, 'commercial.invoice_export.recover_notices');
-      const { row } = await batch(c, r, d.batchId, true);
+      const { row } = await exportBatch(c, r, d.batchId, true);
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [
         `invoice-notice-recovery:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`,
       ]);
@@ -938,7 +965,7 @@ export const createInvoiceCsvRouter = (o) => {
       if (Boolean(a) === Boolean(f))
         throw fail(404, 'INVOICE_CSV_UNCONFIRMED', 'Original notification status is unavailable.');
       const result = a ?? f;
-      await batch(c, r, result.batch_id);
+      await exportBatch(c, r, result.batch_id);
       const event =
           (
             await c.query(
@@ -993,7 +1020,7 @@ export const createInvoiceCsvRouter = (o) => {
         ).rows[0];
       if (Boolean(a) === Boolean(f))
         throw fail(404, 'INVOICE_CSV_UNCONFIRMED', 'Original receipt unavailable or ambiguous.');
-      await batch(c, r, (a ?? f).batch_id);
+      await exportBatch(c, r, (a ?? f).batch_id);
       return {
         ...(await envelope(c, r)),
         artifact: a ? artifactView(a) : null,

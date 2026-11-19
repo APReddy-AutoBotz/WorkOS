@@ -1659,6 +1659,35 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             assert.equal((await request(approvalRoute+'/instances/'+creditReview.id,{identity:ids.denied})).status,404);
             assert.equal((await request(proofPath,{identity:ids.denied})).status,404);
 
+            const finalDraft=ok(await request('/api/v1/invoice-csv/batches/'+draft.batch.id+'/correction-drafts',{identity:ids.requester,method:'POST',
+              body:{expectedOwnerKey:requesterKey,requestId:randomUUID(),reason:'Synthetic final correction',itemIds:[receipt.itemId]}}),201).receipt;
+            const finalSource=ok(await request(approvalRoute+'/sources/'+finalDraft.batchId,{identity:ids.requester})).batch;
+            const finalReview=ok(await request(approvalRoute+'/requests',{identity:ids.requester,method:'POST',body:{
+              expectedOwnerKey:requesterKey,requestId:randomUUID(),batchId:finalDraft.batchId,expectedPolicyId:policy.id,
+              expectedLineCount:1,expectedLineageHash:finalSource.lineageHash,reason:'Synthetic credit export approval'}}),201).approval;
+            const finalDecision=approvalRoute+'/instances/'+finalReview.id+'/decisions';
+            ok(await request(finalDecision,{identity:ids.manager,method:'POST',body:{...firstCredit,requestId:randomUUID()}}),201);
+            ok(await request(finalDecision,{identity:ids.second,method:'POST',body:{...rejectCredit,decision:'Approved',requestId:randomUUID()}}),201);
+            await exportUi.getByRole('button',{name:'Load invoice export batches'}).click();
+            await exportUi.getByRole('button',{name:'Find credit exports'}).click();
+            await exportUi.getByLabel('Invoice export batch').selectOption(finalDraft.batchId);
+            await exportUi.getByRole('button',{name:'Inspect invoice export source'}).click();
+            await exportUi.getByLabel('Invoice CSV schema').selectOption('workos.invoice-credit-csv/1');
+            await exportUi.getByLabel('I inspected the final approval, retained lineage and control total').check();
+            await exportUi.getByLabel('Invoice CSV reason').fill('Synthetic signed credit export');
+            const creditResponse=wait(requester.p,'/api/v1/invoice-csv/exports','POST');
+            await exportUi.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
+            const exportedCredit=(await body(creditResponse,201)).artifact;
+            assert.equal(exportedCredit.total,receipt.amount);
+            const downloadingCredit=requester.p.waitForEvent('download');
+            await exportUi.getByRole('button',{name:'Download verified invoice CSV'}).click();
+            assert.deepEqual(await readFile(await (await downloadingCredit).path()),Buffer.from(exportedCredit.payloadBase64,'base64'));
+            await exportUi.getByRole('button',{name:'Load invoice export batches'}).click();
+            await exportUi.getByLabel('Invoice export batch').selectOption(draft.batch.id);
+            await exportUi.getByRole('button',{name:'Inspect invoice export source'}).click();
+            await exportUi.getByRole('button',{name:'Check exported credits'}).click();
+            await exportUi.getByText(new RegExp('credit artifact '+exportedCredit.id)).waitFor();
+            assert.equal((await request('/api/v1/invoice-csv/artifacts/'+exportedCredit.id,{identity:ids.denied})).status,404);
             assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);
             assert.equal(ok(await issueCredit()).replayed,true);
             assert.equal((await issueCredit({reason:'Changed reason'})).status,409);

@@ -1,3 +1,4 @@
+import {renderCreditCsv,verifyCreditCsv} from '../shared/correction-invoice-csv.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { invoiceCsvArtifact, INVOICE_CSV_SCHEMA } from '../server/modules/invoice-export/csv.mjs';
@@ -56,3 +57,18 @@ assert.throws(() => invoiceCsvArtifact({ ...source, periodStart: '2026-10-29' })
 assert.throws(() => invoiceCsvArtifact({ ...source, periodBasis: 'UNSPECIFIED' }));
 assert.throws(() => invoiceCsvArtifact({ ...source, lines: [] }));
 console.log('Deterministic invoice CSV source lineage, exact totals and reversible safe fields passed.');
+
+const creditLine={lineId:randomUUID(),sequence:1,itemId:randomUUID(),itemVersion:1,eventId:randomUUID(),eventVersion:1,
+  eligibleDate:'2026-10-28',currency:'USD',amount:'-0.0001',decisionId:randomUUID(),originalBatchId:randomUUID(),
+  originalArtifactId:randomUUID(),originalArtifactSha256:'1'.repeat(64),originalLineId:randomUUID(),originalEventId:randomUUID(),originalItemVersion:1};
+const credits={batchId:randomUUID(),periodStart:'2026-10-28',periodEnd:'2026-10-28',currency:'USD',clientId:'=Synthetic client',contractId:'Δ,1',engagementId:'Synthetic',lines:[creditLine,
+  {...creditLine,sequence:2,lineId:randomUUID(),itemId:randomUUID(),eventId:randomUUID(),decisionId:randomUUID(),originalLineId:randomUUID(),originalEventId:randomUUID(),amount:'-9999999999999999.9999'}]};
+const renderedCredit=renderCreditCsv(credits);
+assert.equal(renderedCredit.total,'-10000000000000000');
+assert.equal(renderedCredit.text.includes(credits.clientId),false);
+const expectedCredit={...renderedCredit,batchId:credits.batchId};
+verifyCreditCsv(renderedCredit.text,expectedCredit);
+for(const changed of [renderedCredit.text.replace('-0.0001','-0.0002'),renderedCredit.text.replace('-0.0001','=1+1'),
+  renderedCredit.text.replace(creditLine.originalArtifactSha256,'a'.repeat(64)),renderedCredit.text.replace(creditLine.lineId,'invalid')]){
+  assert.throws(()=>verifyCreditCsv(changed,expectedCredit));
+}

@@ -6,6 +6,7 @@ import {
   captureRateContext,
   invoiceCsv,
   type IssuedCredit,
+  type CreditExportLink,
   type CorrectionEvidence,
   type InvoiceCsvSource,
   type InvoiceCsvArtifact,
@@ -89,6 +90,8 @@ const InvoiceCsvEngagement = ({
   const [evidence,setEvidence]=useState<CorrectionEvidence|null>(null);
   const [chosen,setChosen] = useState<IssuedCredit[]>([]);
   const [creditReason,setCreditReason] = useState('');
+  const [corrections,setCorrections]=useState<{id:string;currency:string;state:string}[]>([]);
+  const [correctionNext,setCorrectionNext]=useState<string|null>(null);
   const mounted = useRef(false),
     generation = useRef(0),
     inFlight = useRef(false),
@@ -106,7 +109,7 @@ const InvoiceCsvEngagement = ({
     setEvidence(null);
     setCredits(null);
     setCreditCursor(null);
-    setDrafts([]);
+    setDrafts([]);setCorrections([]);setCorrectionNext(null);
     setNext(null);
     setLoaded(false);
     setSelected('');
@@ -200,7 +203,7 @@ const InvoiceCsvEngagement = ({
   const load = () =>
     void run(async (c) => {
       const x = await invoiceDrafts.list(c);
-      setDrafts(x.batches);
+      setDrafts(x.batches);setCorrections([]);setCorrectionNext(null);
       setNext(x.nextAfter);
       setLoaded(true);
       setSelected('');
@@ -208,6 +211,12 @@ const InvoiceCsvEngagement = ({
       setVerified(null);
       setConfirmed(false);
     });
+  const findCorrections=(after:string|null)=>void run(async c=>{
+    const page=await invoiceCsv.correctionBatches(engagementId,after,c);
+    setCorrections(old=>after?[...old,...page.batches]:page.batches);
+    setCorrectionNext(page.nextAfter);
+    if(!page.batches.length)setNotice('No approved or exported correction batches on this page.');
+  });
   const more = () => {
     if (next)
       void run(async (c) => {
@@ -291,7 +300,7 @@ const InvoiceCsvEngagement = ({
       !source.lineageHash ||
       !source.control ||
       version !==
-        (source.sourceType === 'MILESTONE_ACCEPTANCE'
+        (source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
           ? 'workos.invoice-milestone-csv/1'
           : 'workos.invoice-tm-csv/1') ||
       !confirmed ||
@@ -305,7 +314,7 @@ const InvoiceCsvEngagement = ({
       finalTransitionId: source.finalTransitionId,
       lineageHash: source.lineageHash,
       schemaVersion:
-        source.sourceType === 'MILESTONE_ACCEPTANCE'
+        source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
           ? 'workos.invoice-milestone-csv/1'
           : 'workos.invoice-tm-csv/1',
       expectedLineCount: source.control.lineCount,
@@ -434,6 +443,7 @@ const InvoiceCsvEngagement = ({
               }}
             >
               <option value="">Choose a batch</option>
+              {corrections.map(x=><option value={x.id} key={x.id}>{x.state} credit · {x.id} · {x.currency}</option>)}
               {drafts
                 .filter(
                   (x) =>
@@ -447,6 +457,8 @@ const InvoiceCsvEngagement = ({
                 ))}
             </select>
           </label>
+          <button type="button" disabled={busy || !!pending} onClick={()=>findCorrections(null)}>Find credit exports</button>
+          {correctionNext && <button type="button" disabled={busy || !!pending} onClick={()=>findCorrections(correctionNext)}>More credit exports</button>}
           {next && (
             <button type="button" disabled={busy || !!pending} onClick={more}>
               More invoice export batches
@@ -470,7 +482,7 @@ const InvoiceCsvEngagement = ({
                 {source.lines.map((x) => (
                   <li key={x.lineId}>
                     Line {x.lineId} · item {x.itemId} · event {x.eventId} ·{' '}
-                    {'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
+                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `credit against original line ${x.originalLineId} · artifact ${x.originalArtifactId}` : 'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
                   </li>
                 ))}
@@ -486,11 +498,12 @@ const InvoiceCsvEngagement = ({
                   Retrieve retained invoice CSV
                 </button>
               )}
-              {verified && source.artifactId === verified.artifact.id && source.id === verified.artifact.batchId &&
+              {source.sourceType!=='FULL_LINE_REVERSAL' && verified && source.artifactId === verified.artifact.id && source.id === verified.artifact.batchId &&
                 (source.state === 'Exported' || source.state === 'Billed/Confirmed') && hasRatePermission('commercial.invoice_drafts.prepare') && (
                   <InvoiceLineReversal key={source.id + source.state} source={source} state={source.state} artifact={verified.artifact}
                     run={run} disabled={busy || !!pending} />
                 )}
+              {source.sourceType!=='FULL_LINE_REVERSAL' && source.artifactId && <ExportedCredits key={source.artifactId} original={source} run={run} disabled={busy || !!pending}/>}
               {canCreate && source.state === 'Approved' && (
                 <fieldset disabled={busy || !!pending}>
                   <legend>Accept approved CSV artifact</legend>
@@ -502,7 +515,7 @@ const InvoiceCsvEngagement = ({
                       onChange={(e) => setVersion(e.target.value)}
                     >
                       <option value="">Choose</option>
-                      {source.sourceType === 'MILESTONE_ACCEPTANCE' ? (
+                      {source.sourceType==='FULL_LINE_REVERSAL' ? <option value="workos.invoice-credit-csv/1">Credit CSV v1</option> : source.sourceType === 'MILESTONE_ACCEPTANCE' ? (
                         <option value="workos.invoice-milestone-csv/1">
                           Milestone invoice CSV v1
                         </option>
@@ -539,3 +552,19 @@ const InvoiceCsvEngagement = ({
     </div>
   );
 };
+
+
+function ExportedCredits({original,run,disabled}:{key?:string;original:InvoiceCsvSource;disabled:boolean;run:(f:(c:RateContext)=>Promise<void>)=>Promise<void>}){
+  const [links,setLinks]=useState<CreditExportLink[]|null>(null),[next,setNext]=useState<string|null>(null);
+  const load=(after:string|null)=>void run(async c=>{
+    setLinks(null);setNext(null);
+    const result=await invoiceCsv.exportedCredits(original,after,c);
+    setLinks(result.lines);setNext(result.nextAfter);
+  });
+  return <section aria-label="Exported credits against original lines">
+    <button type="button" disabled={disabled} onClick={()=>load(null)}>Check exported credits</button>
+    {links && (links.length ? <ul>{links.map(l=><li key={l.lineId}>{l.currency} {l.amount} · original line {l.originalLineId}
+      {' · credit batch '}{l.batchId} · credit artifact {l.artifactId} · SHA-256 {l.sha256}</li>)}</ul> : <p>No exported credits on this page.</p>)}
+    {next && <button type="button" disabled={disabled} onClick={()=>load(next)}>Next exported credits</button>}
+  </section>;
+}
