@@ -1,0 +1,35 @@
+-- Preserve positive invoice receipts and bind credit receipts to negative artifacts.
+alter table invoice_batch_confirmations drop constraint invoice_batch_confirmations_total_check;
+alter table invoice_batch_confirmations add check (
+  (source_type='FULL_LINE_REVERSAL' and total<0) or
+  (source_type in ('TM_SNAPSHOT','MILESTONE_ACCEPTANCE') and total>0)
+);
+
+alter function invoice_source_historical_visible(text,text,invoice_draft_lines,uuid,text)
+rename to invoice_original_source_historical_visible;
+create function invoice_source_historical_visible(org text,legal text,line invoice_draft_lines,who uuid,held_role text)
+returns boolean language sql stable as $$
+ select case when line.source_type='FULL_LINE_REVERSAL' then exists(
+   select 1 from invoice_draft_batches b where b.id=line.batch_id
+   and b.organization_id=org and b.legal_entity_id=legal
+   and correction_original_scope_current(b,who,held_role)
+ ) else invoice_original_source_historical_visible(org,legal,line,who,held_role) end
+$$;
+
+create or replace function guard_invoice_batch_confirmation() returns trigger language plpgsql as $$
+declare ctx jsonb;b invoice_draft_batches;a invoice_csv_artifacts;l invoice_draft_lines;begin
+ begin ctx=nullif(current_setting('workos.invoice_confirmation_context',true),'')::jsonb;exception when others then ctx=null;end;
+ select * into b from invoice_draft_batches where id=new.batch_id for update;select * into a from invoice_csv_artifacts where id=new.artifact_id for share;perform lock_commercial_candidate_identity(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role);
+ if ctx is null or b.id is null or a.id is null or new.id::text is distinct from ctx->>'confirmationId' or new.organization_id is distinct from ctx->>'organizationId' or new.legal_entity_id is distinct from ctx->>'legalEntityId' or new.actor_id::text is distinct from ctx->>'actorId' or new.active_role is distinct from ctx->>'activeRole' or new.operation_id is distinct from ctx->>'operationId' or b.organization_id<>new.organization_id or b.legal_entity_id<>new.legal_entity_id or a.batch_id<>b.id or invoice_batch_governed_state(b.id)<>'Exported' or new.artifact_version<>a.version or new.artifact_sha256<>a.sha256 or new.artifact_sha256<>encode(digest(a.payload,'sha256'),'hex') or new.currency<>a.currency or new.total<>a.total or not invoice_csv_actor_valid(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'view') or not invoice_notice_actor_has(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'commercial.invoice_batch.confirm') then raise exception 'Exact exported artifact, scoped actor and confirmation authority are required.' using errcode='IBC01';end if;
+ if new.source_type is distinct from b.source_type or a.schema_version is distinct from (case b.source_type when 'TM_SNAPSHOT' then 'workos.invoice-tm-csv/1' when 'MILESTONE_ACCEPTANCE' then 'workos.invoice-milestone-csv/1' when 'FULL_LINE_REVERSAL' then 'workos.invoice-credit-csv/1' else null end) then raise exception 'Retained artifact source and batch type must match.' using errcode='IBC01';end if;
+ new.confirmed_at=clock_timestamp();for l in select * from invoice_draft_lines where batch_id=b.id order by sequence loop perform invoice_lock_source_witness(b.organization_id,b.legal_entity_id,l,new.actor_id,new.active_role);if not invoice_source_historical_visible(b.organization_id,b.legal_entity_id,l,new.actor_id,new.active_role) then raise exception 'Current worker scope is required for every retained line.' using errcode='IBC01';end if;end loop;return new;
+end $$;
+
+create or replace function complete_invoice_batch_confirmation() returns trigger language plpgsql as $$
+declare b invoice_draft_batches;a invoice_csv_artifacts;begin
+ select * into b from invoice_draft_batches where id=new.batch_id;select * into a from invoice_csv_artifacts where id=new.artifact_id;
+ if b.id is null or a.id is null or invoice_batch_governed_state(b.id)<>'Billed/Confirmed' or a.batch_id<>b.id or new.artifact_version<>a.version or new.artifact_sha256<>a.sha256 or new.artifact_sha256<>encode(digest(a.payload,'sha256'),'hex') or new.currency<>a.currency or new.total<>a.total or exists(select 1 from invoice_draft_cancellations where batch_id=b.id) or exists(select 1 from invoice_draft_lines l where l.batch_id=b.id and not exists(select 1 from invoice_draft_occupancies o where o.batch_id=b.id and o.line_id=l.id and o.item_id=l.item_id and o.item_version=l.item_version)) or not invoice_csv_actor_valid(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'view') or not invoice_notice_actor_has(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,'commercial.invoice_batch.confirm') or exists(select 1 from invoice_draft_lines l where l.batch_id=b.id and not invoice_source_historical_visible(b.organization_id,b.legal_entity_id,l,new.actor_id,new.active_role)) then raise exception 'Confirmation, immutable artifact, occupancy and current scope must commit together.' using errcode='IBC02';end if;
+ if new.source_type is distinct from b.source_type or a.schema_version is distinct from (case b.source_type when 'TM_SNAPSHOT' then 'workos.invoice-tm-csv/1' when 'MILESTONE_ACCEPTANCE' then 'workos.invoice-milestone-csv/1' when 'FULL_LINE_REVERSAL' then 'workos.invoice-credit-csv/1' else null end) then raise exception 'Retained artifact source and batch type must persist.' using errcode='IBC02';end if;
+ if not exists(select 1 from audit_logs x where x.organization_id=b.organization_id and x.legal_entity_id=b.legal_entity_id and x.user_id=new.actor_id::text and x.active_role=new.active_role and x.module='Invoice Billing Confirmation' and x.action='Record Manual Attestation' and x.entity_id=new.id::text and x.operation_id=new.operation_id and x.new_value=jsonb_build_object('confirmationId',new.id,'batchId',b.id,'artifactId',a.id,'sha256',a.sha256)) then raise exception 'Confirmation and sanitized audit must commit together.' using errcode='IBC02';end if;
+ if not exists(select 1 from invoice_export_notice_events x where x.confirmation_id=new.id and x.batch_id=b.id and x.operation_id=new.operation_id and x.event_key='invoice_batch.exported_or_billed_confirmed') and not exists(select 1 from invoice_export_notice_producer_failures x where x.confirmation_id=new.id and x.batch_id=b.id and x.operation_id=new.operation_id) then raise exception 'Confirmation requires the canonical event or visible recovery evidence.' using errcode='IBC02';end if;return null;
+end $$;

@@ -2,7 +2,19 @@ import { approvalKeys, approvalUuid, approvalHash, approvalText } from './work-a
 import { canonicalHours, compareHours } from './work-hours.mjs';
 // A manually supplied reference is an authorized user attestation; it is not a
 // provider response, an invoice, a payment or independent external validation.
-export const validInvoiceConfirmationCommand = (x) => {
+export function validConfirmationTotal(total, sourceType = 'TM_SNAPSHOT') {
+  if (typeof total !== 'string') return false;
+  const credit = sourceType === 'FULL_LINE_REVERSAL';
+  if (!credit && !['TM_SNAPSHOT', 'MILESTONE_ACCEPTANCE'].includes(sourceType)) return false;
+  if (credit && !total.startsWith('-')) return false;
+  const magnitude = credit ? total.slice(1) : total;
+  try {
+    return canonicalHours(magnitude) === magnitude && compareHours(magnitude, '0') > 0;
+  } catch {
+    return false;
+  }
+}
+export const validInvoiceConfirmationCommand = (x, sourceType = 'TM_SNAPSHOT') => {
   try {
     return (
       approvalKeys(x, [
@@ -23,9 +35,7 @@ export const validInvoiceConfirmationCommand = (x) => {
       approvalHash(x.artifactSha256) &&
       typeof x.currency === 'string' &&
       /^[A-Z]{3}$/.test(x.currency) &&
-      typeof x.total === 'string' &&
-      canonicalHours(x.total) === x.total &&
-      compareHours(x.total, '0') > 0 &&
+      validConfirmationTotal(x.total, sourceType) &&
       approvalText(x.reference, 200) &&
       !/[\u0000-\u001f\u007f-\u009f]/u.test(x.reference) &&
       approvalText(x.reason, 1000) &&
@@ -35,8 +45,8 @@ export const validInvoiceConfirmationCommand = (x) => {
     return false;
   }
 };
-export const invoiceConfirmationAllowed = (command, source, actor) =>
-  validInvoiceConfirmationCommand(command) &&
+export const invoiceConfirmationAllowed = (command, source, actor, sourceType = 'TM_SNAPSHOT') =>
+  validInvoiceConfirmationCommand(command, sourceType) &&
   approvalKeys(source, [
     'state',
     'batchId',

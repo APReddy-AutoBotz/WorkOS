@@ -237,12 +237,12 @@ export const createInvoiceCsvRouter = (o) => {
   registerIssuedCredits(router, { handle, authorize, envelope });
   registerLineReversalRequests(router, { handle, authorize, batch, envelope, audit: o.audit });
   router.get('/correction-batches',handle(false,async(c,r)=>{
-    const q=parse(z.object({engagementId:z.string().min(1).max(200),after:uuid.optional()}).strict(),r.query);
+    const q=parse(z.object({engagementId:z.string().min(1).max(200),after:uuid.optional(),purpose:z.literal('confirmation').optional()}).strict(),r.query);
     await authorize(c,r);
     const rows=(await c.query(`select b.id,b.currency,invoice_batch_governed_state(b.id) state from invoice_draft_batches b
       where b.organization_id=$1 and b.legal_entity_id=$2 and b.engagement_id=$3 and b.source_type='FULL_LINE_REVERSAL'
-      and invoice_batch_governed_state(b.id) in ('Approved','Exported') and correction_original_scope_current(b,$4,$5)
-      and ($6::uuid is null or b.id>$6) order by b.id limit 51`,[...scope(r),q.engagementId,r.user.sub,r.user.activeRole,q.after??null])).rows;
+      and invoice_batch_governed_state(b.id) in ('Approved','Exported','Billed/Confirmed') and (not $7::boolean or invoice_batch_governed_state(b.id)<>'Approved') and correction_original_scope_current(b,$4,$5)
+      and ($6::uuid is null or b.id>$6) order by b.id limit 51`,[...scope(r),q.engagementId,r.user.sub,r.user.activeRole,q.after??null,q.purpose==='confirmation'])).rows;
     return {...await envelope(c,r),engagementId:q.engagementId,batches:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};
   }));
   router.get('/batches/:id/exported-credits',handle(false,async(c,r)=>{
@@ -464,9 +464,14 @@ export const createInvoiceCsvRouter = (o) => {
       return { ...(await envelope(c, r)), artifact: artifactView(a), failure: null, replayed: false };
     }),
   );
+  const confirmationSchema = (sourceType = 'TM_SNAPSHOT') => ({
+    TM_SNAPSHOT: INVOICE_CSV_SCHEMA,
+    MILESTONE_ACCEPTANCE: MILESTONE_INVOICE_CSV_SCHEMA,
+    FULL_LINE_REVERSAL: CREDIT_CSV_SCHEMA,
+  })[sourceType];
   const confirmationView = (x) => ({
     id: x.id,
-    ...(x.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: x.source_type } : {}),
+    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
     batchId: x.batch_id,
     artifactId: x.artifact_id,
     artifactVersion: x.artifact_version,
@@ -488,7 +493,7 @@ export const createInvoiceCsvRouter = (o) => {
       parse(z.object({}).strict(), r.query);
       await authorize(c, r);
       await assertCommercialAuthority(c, r, 'commercial.invoice_batch.confirm');
-      const { row } = await batch(c, r, parse(uuid, r.params.batchId)),
+      const { row } = await exportBatch(c, r, parse(uuid, r.params.batchId)),
         a =
           (
             await c.query(
@@ -506,7 +511,7 @@ export const createInvoiceCsvRouter = (o) => {
       if (
         !a ||
         a.schema_version !==
-          (row.source_type === 'MILESTONE_ACCEPTANCE' ? MILESTONE_INVOICE_CSV_SCHEMA : INVOICE_CSV_SCHEMA)
+          confirmationSchema(row.source_type)
       )
         throw fail(
           409,
@@ -517,7 +522,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         source: {
           batchId: row.id,
-          ...(row.source_type === 'MILESTONE_ACCEPTANCE' ? { sourceType: row.source_type } : {}),
+          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
           state: row.state,
           artifactId: a.id,
           artifactVersion: a.version,
@@ -543,7 +548,7 @@ export const createInvoiceCsvRouter = (o) => {
       ).rows[0];
       if (!x)
         throw fail(404, 'INVOICE_CONFIRMATION_UNCONFIRMED', 'Original confirmation receipt unavailable.');
-      await batch(c, r, x.batch_id);
+      await exportBatch(c, r, x.batch_id);
       return { ...(await envelope(c, r)), confirmation: confirmationView(x) };
     }),
   );
@@ -561,7 +566,7 @@ export const createInvoiceCsvRouter = (o) => {
           )
         ).rows[0];
       if (!x) throw fail(404, 'INVOICE_CONFIRMATION_UNCONFIRMED', 'Original confirmation is unavailable.');
-      await batch(c, r, x.batch_id);
+      await exportBatch(c, r, x.batch_id);
       const event =
           (
             await c.query(
@@ -603,7 +608,7 @@ export const createInvoiceCsvRouter = (o) => {
               artifactVersion: z.literal(1),
               artifactSha256: key,
               currency: z.string().regex(/^[A-Z]{3}$/),
-              total: money,
+              total: z.string().max(128),
               reference: z.string().trim().min(1).max(200),
               reason,
             })
@@ -613,11 +618,11 @@ export const createInvoiceCsvRouter = (o) => {
         { expectedOwnerKey, ...cmd } = input;
       if (expectedOwnerKey !== workApprovalOwner(r))
         throw fail(409, 'INVOICE_CONFIRMATION_CONTEXT', 'Account, role or scope changed.');
-      if (!validInvoiceConfirmationCommand(cmd))
-        throw fail(400, 'INVOICE_CONFIRMATION_INPUT', 'Explicit valid attestation inputs are required.');
       await authorize(c, r);
       await assertCommercialAuthority(c, r, 'commercial.invoice_batch.confirm');
-      const { row } = await batch(c, r, cmd.batchId, true);
+      const { row } = await exportBatch(c, r, cmd.batchId, true);
+      if (!validInvoiceConfirmationCommand(cmd, row.source_type))
+        throw fail(400, 'INVOICE_CONFIRMATION_INPUT', 'Explicit valid attestation inputs are required.');
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [
         `invoice-confirmation:${scope(r).join(':')}:${r.user.sub}:${cmd.requestId}`,
       ]);
@@ -646,7 +651,7 @@ export const createInvoiceCsvRouter = (o) => {
       if (
         !a ||
         a.schema_version !==
-          (row.source_type === 'MILESTONE_ACCEPTANCE' ? MILESTONE_INVOICE_CSV_SCHEMA : INVOICE_CSV_SCHEMA) ||
+          confirmationSchema(row.source_type) ||
         !invoiceConfirmationAllowed(
           cmd,
           {
@@ -659,6 +664,7 @@ export const createInvoiceCsvRouter = (o) => {
             total: a.exact_total,
           },
           { active: true, heldRole: true, scopedSourceAccess: true, confirmationPermission: true },
+          row.source_type,
         )
       )
         throw fail(
@@ -697,10 +703,10 @@ export const createInvoiceCsvRouter = (o) => {
         ],
         x = (
           await c.query(
-            row.source_type === 'MILESTONE_ACCEPTANCE'
-              ? "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16,'MILESTONE_ACCEPTANCE')returning *,trim_scale(total)::text total"
+            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type)
+              ? "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16,$17)returning *,trim_scale(total)::text total"
               : "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16)returning *,trim_scale(total)::text total",
-            confirmationArgs,
+            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type) ? [...confirmationArgs,row.source_type] : confirmationArgs,
           )
         ).rows[0];
       await o.audit(c, r, {

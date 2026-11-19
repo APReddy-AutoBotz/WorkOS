@@ -1688,6 +1688,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await exportUi.getByRole('button',{name:'Check exported credits'}).click();
             await exportUi.getByText(new RegExp('credit artifact '+exportedCredit.id)).waitFor();
             assert.equal((await request('/api/v1/invoice-csv/artifacts/'+exportedCredit.id,{identity:ids.denied})).status,404);
+            await confirmUi.getByLabel('Invoice confirmation engagement').selectOption(roots.engagement.id);
+            await confirmUi.getByRole('button',{name:'Find exported credits'}).click();
+            await confirmUi.getByLabel('Invoice confirmation batch').selectOption(finalDraft.batchId);
+            await confirmUi.getByRole('button',{name:'Inspect exported invoice artifact'}).click();
+            await confirmUi.getByLabel('Inspected confirmation source').getByText(new RegExp(exportedCredit.sha256)).waitFor();
+            await confirmUi.getByLabel('Invoice confirmation reference').fill('SYNTHETIC-CREDIT-APPLIED');
+            await confirmUi.getByLabel('Invoice confirmation reason').fill('Synthetic downstream credit application');
+            await confirmUi.getByLabel('I attest the referenced downstream confirmation matches this exact artifact and total').check();
+            const confirmedCredit=requester.p.waitForResponse(r=>r.url().endsWith('/invoice-csv/confirmations') && r.request().method()==='POST');
+            await confirmUi.getByRole('button',{name:'Record manual billing attestation'}).click();
+            assert.equal((await body(await confirmedCredit,201)).confirmation.total,receipt.amount);
             assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);
             assert.equal(ok(await issueCredit()).replayed,true);
             assert.equal((await issueCredit({reason:'Changed reason'})).status,409);

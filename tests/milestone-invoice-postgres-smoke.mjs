@@ -909,7 +909,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           requestId:randomUUID(),expectedLineageHash:finalDraft.lineageHash}}),201).approval;
         ok(await request(invoiceApproval+'/instances/'+finalReview.id+'/decisions',{method:'POST',identity:ids.second,body:{...choice,requestId:randomUUID()}}),201);
         const pinnedBefore=ok(await request(invoiceApproval+'/instances/'+finalReview.id)).approval;
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['070_wos06_credit_export_lineage']);
+        assert.deepEqual((await withCommercialMigrationsThrough(70,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}))).applied,['070_wos06_credit_export_lineage']);
         assert.deepEqual(ok(await request(invoiceApproval+'/instances/'+finalReview.id)).approval,pinnedBefore);
         const ready=ok(await request(csv+'/batches/'+finalBatch)).batch;
         const creditCommand={...exportCommand,batchId:finalBatch,requestId:randomUUID(),approvalId:finalReview.id,finalTransitionId:ready.finalTransitionId,
@@ -926,6 +926,26 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const acceptedCredit=attempts[0].body.artifact;
         assert.equal(acceptedCredit.total,issued.amount);
         assert.equal(acceptedCredit.schemaVersion,'workos.invoice-credit-csv/1');
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation']);
+        const creditSource=ok(await request(csv+'/confirmation-sources/'+finalBatch)).source;
+        assert.equal(creditSource.sourceType,'FULL_LINE_REVERSAL');
+        const creditAttestation={...confirm,requestId:randomUUID(),batchId:finalBatch,artifactId:acceptedCredit.id,
+          artifactSha256:acceptedCredit.sha256,total:issued.amount,reference:'Synthetic applied credit'};
+        const applyCredit=(changes={})=>request(csv+'/confirmations',{method:'POST',body:{...creditAttestation,...changes}});
+        assert.equal((await applyCredit({total:issued.amount.slice(1)})).status,400);
+        assert.equal((await applyCredit({artifactSha256:'0'.repeat(64)})).status,409);
+        assert.equal((await request(csv+'/confirmation-sources/'+finalBatch,{identity:ids.reader})).status,403);
+        await pool.query("create trigger synthetic_refuse_credit_receipt before insert on audit_logs for each row when(new.action='Record Manual Attestation') execute function synthetic_refuse_credit_export()");
+        assert.equal((await applyCredit()).status,503);
+        assert.equal(ok(await request(csv+'/confirmation-sources/'+finalBatch)).source.state,'Exported');
+        await pool.query('drop trigger synthetic_refuse_credit_receipt on audit_logs');
+        const receipts=await Promise.all([applyCredit(),applyCredit()]);
+        assert.deepEqual(receipts.map(v=>v.status).sort(),[200,201],JSON.stringify(receipts));
+        const recovered=ok(await request(csv+'/confirmation-receipts/'+creditAttestation.requestId)).confirmation;
+        assert.equal(recovered.total,issued.amount);
+        assert.equal(recovered.reference,creditAttestation.reference);
+        assert.equal(ok(await request(csv+'/confirmation-sources/'+finalBatch)).source.state,'Billed/Confirmed');
+        assert.equal(ok(await request(csv+'/confirmation-sources/'+draft.batch.id)).confirmation.reference,confirm.reference);
         const reverse=ok(await request(linkPath)).lines;
         assert.equal(reverse.length,1);
         assert.equal(reverse[0].artifactId,acceptedCredit.id);
