@@ -6,7 +6,7 @@ import { assertCommercialAuthority } from '../commercial-drafting/service.mjs';
 const uuid=z.string().uuid();
 const inputs={expectedOwnerKey:z.string().regex(/^[a-f0-9]{64}$/),requestId:uuid,reason:z.string().trim().min(3).max(1000)};
 const reserve=z.object({...inputs,itemIds:z.array(uuid).min(1).max(50).refine(ids=>new Set(ids).size===ids.length)}).strict();
-const cancel=z.object({...inputs,batchId:uuid}).strict();
+const cancel=z.object({...inputs,batchId:uuid,expectedState:z.enum(['Draft','Approved']).default('Draft')}).strict();
 const fail=(statusCode,message)=>Object.assign(new Error(message),{statusCode,code:'CORRECTION_DRAFT'});
 const context=(c,ctx)=>c.query("select set_config('workos.invoice_draft_context',$1,true)",[JSON.stringify(ctx)]);
 
@@ -25,7 +25,7 @@ export function registerCorrectionDrafts(router,{handle,authorize,batch,envelope
     const ctx={organizationId:orig.organization_id,legalEntityId:orig.legal_entity_id,actorId:r.user.sub,activeRole:r.user.activeRole,
       operationId:r.operationId,originalId:orig.id};
     const itemIds=isCancel?null:[...d.itemIds].sort();
-    const fingerprint=createHash('sha256').update(JSON.stringify([orig.id,isCancel?d.batchId:itemIds,d.reason])).digest('hex');
+    const fingerprint=createHash('sha256').update(JSON.stringify([orig.id,isCancel?d.batchId:itemIds,d.reason,...(d.expectedState==='Approved'?['Approved']:[])])).digest('hex');
     const previous=(await c.query(isCancel?
       `select batch_id as id,request_fingerprint,active_role as role,source_type from invoice_draft_cancellations
        where organization_id=$1 and legal_entity_id=$2 and actor_id=$3 and request_id=$4`:
@@ -46,10 +46,10 @@ export function registerCorrectionDrafts(router,{handle,authorize,batch,envelope
     };
     if(previous) return {...await envelope(c,r),receipt:await receipt(),originalId:orig.id,replayed:true};
     const cancellationId=isCancel?randomUUID():null;
-    await context(c,{...ctx,batchId,cancellationId});
+    await context(c,{...ctx,batchId,cancellationId,expectedState:d.expectedState});
     if(isCancel){
       const before=await receipt();
-      if(before.state!=='Draft') throw fail(409,'Only a current draft can be cancelled.');
+      if(before.state!==d.expectedState) throw fail(409,'The correction state changed. Inspect the batch again.');
       await c.query(`insert into invoice_draft_cancellations(id,organization_id,legal_entity_id,batch_id,expected_line_count,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'FULL_LINE_REVERSAL')`,
         [cancellationId,ctx.organizationId,ctx.legalEntityId,batchId,before.itemIds.length,ctx.actorId,ctx.activeRole,d.requestId,fingerprint,d.reason,ctx.operationId]);

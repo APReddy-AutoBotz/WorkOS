@@ -22,7 +22,7 @@ export function registerIssuedCredits(router, { handle, authorize, envelope }) {
     const credits = (await client.query(
       `select item.id as "itemId", credit.id as "eventId", credit.eligible_on::text as "eligibleOn",
         credit.currency,trim_scale(credit.amount)::text amount, original.id as "originalEventId",
-        line.id as "lineId", line.batch_id as "batchId", credit.reversal_decision_id as "decisionId", occ.batch_id as "correctionBatchId"
+        line.id as "lineId", line.batch_id as "batchId", credit.reversal_decision_id as "decisionId", occ.batch_id as "correctionBatchId", case when occ.batch_id is not null then invoice_batch_governed_state(occ.batch_id) end as "correctionState"
        from billing_eligibility_events credit
        join approved_unbilled_items item on item.event_id=credit.id and item.source_type=credit.source_type
        left join invoice_draft_occupancies occ on occ.item_id=item.id and occ.item_version=item.version

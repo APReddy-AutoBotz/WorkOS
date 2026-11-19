@@ -476,13 +476,13 @@ const creditReceipt = z.object({eventId:uuid,itemId:uuid,eligibleOn:date,currenc
 export type ReversalCredit = {source:z.infer<typeof creditSource>;receipt:z.infer<typeof creditReceipt>|null;eligibleOn:string};
 const issuedCredit = z.object({
   itemId:uuid, eventId:uuid, eligibleOn:date, currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount,
-  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(),
+  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(), correctionState:z.enum(['Draft','Under Review','Approved']).nullable(),
 }).strict();
 export type IssuedCredit = z.infer<typeof issuedCredit>;
 const correctionEvidence=z.object({
   ...envelope,originalId:uuid,
   header:z.object({batchId:uuid,engagementId:id,currency:z.string().regex(/^[A-Z]{3}$/),ownerId:uuid,ownerRole:id,
-    ownerCurrent:z.boolean(),state:z.enum(['Draft','Cancelled']),lineageHash:hash,periodStart:date,periodEnd:date,total:creditAmount}).strict(),
+    ownerCurrent:z.boolean(),state:z.enum(['Draft','Under Review','Approved','Cancelled']),lineageHash:hash,periodStart:date,periodEnd:date,total:creditAmount}).strict(),
   lines:z.array(z.object({lineId:uuid,sequence:z.number().int().positive(),itemId:uuid,itemVersion:z.literal(1),eventId:uuid,eventVersion:z.literal(1),
     eligibleOn:date,amount:creditAmount,currency:z.string().regex(/^[A-Z]{3}$/),decisionId:uuid,originalEventId:uuid,originalLineId:uuid,
     artifactId:uuid,artifactSha256:hash,reserved:z.boolean()}).strict()).min(1).max(50),
@@ -501,12 +501,12 @@ export const invoiceCsv = {
       new Set(lines.map(x=>x.itemId)).size!==lines.length || header.total!=='-'+invoiceDraftTotal(lines.map(x=>x.amount.slice(1))).amount) return bad();
     return result.data;
   },
-  correctionDraft: async (originalId:string, requestId:string, why:string, selection:string[]|string, ctx:RateContext) => {
+  correctionDraft: async (originalId:string, requestId:string, why:string, selection:string[]|string, ctx:RateContext,expectedState:'Draft'|'Approved'='Draft') => {
     const cancelling=typeof selection==='string';
-    const body=cancelling?{batchId:selection}:{itemIds:selection};
+    const body=cancelling?{batchId:selection,expectedState}:{itemIds:selection};
     const raw=await call('POST','/batches/'+originalId+'/correction-drafts'+(cancelling?'/cancel':''),ctx,'view',{requestId,reason:why,...body});
     const parsed=z.object({...envelope,originalId:uuid,replayed:z.boolean(),receipt:z.object({
-      batchId:uuid,itemIds:z.array(uuid).min(1).max(50),currency:z.string().regex(/^[A-Z]{3}$/),total:creditAmount,state:z.enum(['Draft','Cancelled']),
+      batchId:uuid,itemIds:z.array(uuid).min(1).max(50),currency:z.string().regex(/^[A-Z]{3}$/),total:creditAmount,state:z.enum(['Draft','Under Review','Approved','Cancelled']),
     }).strict()}).strict().safeParse(raw);
     if(!parsed.success || parsed.data.originalId!==originalId) return bad();
     const receipt=parsed.data.receipt;
