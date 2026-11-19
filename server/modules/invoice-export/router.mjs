@@ -1,3 +1,4 @@
+import { registerIssuedCredits } from './issued-credits.mjs';
 import { registerLineReversalRequests } from './line-reversal-requests.mjs';
 import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { loadMilestoneExportBatch } from './milestone-batch.mjs';
@@ -219,6 +220,7 @@ export const createInvoiceCsvRouter = (o) => {
       reason: 'Scoped invoice-ready CSV operation.',
       details: 'No cost, ledger posting or provider delivery.',
     });
+  registerIssuedCredits(router, { handle, authorize, envelope });
   registerLineReversalRequests(router, { handle, authorize, batch, envelope, audit: o.audit });
   router.get(
     '/batches/:id',

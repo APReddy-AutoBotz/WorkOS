@@ -4,6 +4,7 @@ import { ApiClientError } from '../services/apiClient';
 import {
   captureRateContext,
   invoiceCsv,
+  type IssuedCredit,
   type InvoiceCsvSource,
   type InvoiceCsvArtifact,
   type InvoiceCsvOperation,
@@ -81,6 +82,8 @@ const InvoiceCsvEngagement = ({
     [notice, setNotice] = useState(''),
     [lastRequestId, setLastRequestId] = useState(''),
     [notificationStatus, setNotificationStatus] = useState('');
+  const [credits,setCredits] = useState<IssuedCredit[]|null>(null);
+  const [creditCursor,setCreditCursor] = useState<string|null>(null);
   const mounted = useRef(false),
     generation = useRef(0),
     inFlight = useRef(false),
@@ -93,6 +96,8 @@ const InvoiceCsvEngagement = ({
     ++generation.current;
     context.current = null;
     inFlight.current = false;
+    setCredits(null);
+    setCreditCursor(null);
     setDrafts([]);
     setNext(null);
     setLoaded(false);
@@ -158,6 +163,13 @@ const InvoiceCsvEngagement = ({
       }
     }
   };
+  const loadCredits = (after:string|null) => void run(async c => {
+    setCredits(null);
+    setCreditCursor(null);
+    const result = await invoiceCsv.issuedCredits(engagementId,after,c);
+    setCredits(result.credits);
+    setCreditCursor(result.nextAfter);
+  });
   const load = () =>
     void run(async (c) => {
       const x = await invoiceDrafts.list(c);
@@ -310,6 +322,22 @@ const InvoiceCsvEngagement = ({
       <button type="button" disabled={busy || !!pending} onClick={load}>
         Load invoice export batches
       </button>
+      {hasRatePermission('commercial.invoice_drafts.prepare') && <section aria-label="Issued billing credits">
+        <button type="button" disabled={busy || !!pending} onClick={()=>loadCredits(null)}>View issued credits</button>
+        {credits && (credits.length ? <table>
+          <caption>Issued credits for this engagement</caption>
+          <thead><tr><th>Eligibility date</th><th>Credit</th><th>Original batch</th><th>Original line</th><th>Register item</th></tr></thead>
+          <tbody>{credits.map(row=><tr key={row.itemId}><td>{row.eligibleOn}</td><td>{row.currency} {row.amount}</td>
+            <td>{row.batchId}</td><td>{row.lineId}</td><td><span>{row.itemId}</span>
+              <details><summary>Credit evidence</summary><dl>
+                <dt>Eligibility event</dt><dd>{row.eventId}</dd>
+                <dt>Original eligibility event</dt><dd>{row.originalEventId}</dd>
+                <dt>Final reversal decision</dt><dd>{row.decisionId}</dd>
+              </dl></details></td></tr>)}</tbody>
+        </table> : <p>No issued credits on this page.</p>)}
+        {creditCursor && <button type="button" disabled={busy || !!pending} onClick={()=>loadCredits(creditCursor)}>Next credit page</button>}
+      </section>}
+
       {notice && <p role="status">{notice}</p>}
       {lastRequestId && !pending && (
         <button type="button" disabled={busy} onClick={checkNotification}>

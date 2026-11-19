@@ -820,6 +820,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.deepEqual(issues.map(x=>x.status).sort(),[200,201],JSON.stringify(issues));
         const issued = ok(await request(creditPath)).receipt;
         assert.equal(issued.amount,credit.source.amount);
+        const creditRegister = '/api/v1/invoice-csv/issued-credits?engagementId='+encodeURIComponent(roots.engagement.id);
+        assert.deepEqual(ok(await request(creditRegister)).credits.map(row=>row.itemId),[issued.itemId]);
         assert.equal(issued.originalEventId,credit.source.originalEventId);
 
         assert.equal(ok(await request(reversalPath+'/review')).review.state,'Approved');
@@ -1017,6 +1019,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await pool.query(
           "update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'",
         );
+        assert.equal((await request('/api/v1/invoice-csv/issued-credits?engagementId='+encodeURIComponent(roots.engagement.id))).status,403);
         assert.equal(
           (
             await request(portfolioExportPath, {
