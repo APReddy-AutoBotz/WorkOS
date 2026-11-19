@@ -756,6 +756,36 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             .payload,
           bytes.payload,
         );
+        const line = csvSource.lines[0], reversalPath = csv + '/batches/' + draft.batch.id + '/lines/' + line.lineId + '/reversal-request';
+        const command = { artifactId: artifact.id, sha256: artifact.sha256, expectedOwnerKey: inspection.ownerKey,
+          inspectedState: 'Billed/Confirmed', reason: 'Synthetic downstream full reversal review' };
+        const submitReversal = (overrides = {}) => request(reversalPath, { method: 'POST', body: { ...command, ...overrides } });
+        assert.equal(ok(await request(reversalPath)).request, null);
+        assert.equal((await request(reversalPath.replace(line.lineId, randomUUID()))).status, 404);
+        for (const values of [{ inspectedState: 'Exported' }, { expectedOwnerKey: '0'.repeat(64) }, { sha256: '0'.repeat(64) }])
+          assert.equal((await submitReversal(values)).status, 409);
+        assert.equal((await submitReversal({ amount: '1.00' })).status, 400);
+        await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.invoice_drafts.prepare'");
+        assert.equal((await submitReversal()).status, 403);
+        await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.invoice_drafts.prepare'");
+        await pool.query("create function synthetic_refuse_reversal_audit() returns trigger language plpgsql as $$begin if new.module='Invoice Corrections' then raise exception 'synthetic audit refusal'; end if; return new; end$$; create trigger synthetic_refuse_reversal before insert on audit_logs for each row execute function synthetic_refuse_reversal_audit()");
+        assert.equal((await submitReversal()).status, 503);
+        assert.equal(ok(await request(reversalPath)).request, null);
+        await pool.query('drop trigger synthetic_refuse_reversal on audit_logs');
+        await assert.rejects(pool.query(
+          `insert into invoice_line_reversal_requests(id,organization_id,legal_entity_id,line_id,artifact_id,confirmation_id,actor_id,active_role,reason,operation_id)
+           select $1,c.organization_id,c.legal_entity_id,$2,c.artifact_id,c.id,c.actor_id,c.active_role,$3,'synthetic-missing-audit'
+           from invoice_batch_confirmations c where c.artifact_id=$4`,
+          [randomUUID(), line.lineId, command.reason, artifact.id],
+        ), e => e.code === '23514' && e.message.includes('matching audit evidence'));
+        const requests = await Promise.all([submitReversal(), submitReversal()]);
+        assert.deepEqual(requests.map(x => x.status).sort(), [200, 201]);
+        const retainedReversal = ok(await request(reversalPath)).request;
+        assert.equal(retainedReversal.reason, command.reason);
+        assert.ok(retainedReversal.confirmationId);
+        assert.equal((await submitReversal({ reason: 'Synthetic changed motive' })).status, 409);
+        assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and module='Invoice Corrections' and reason=$2", [retainedReversal.id, command.reason])).rows[0].n, 1);
+        assert.equal((await pool.query("select count(*)::int n from invoice_draft_occupancies where line_id=$1", [line.lineId])).rows[0].n, 1);
         const reportExportPath = drafts + '/reconciliation/exports';
         const reportExportCommand = {
           engagementId: roots.engagement.id,
@@ -953,6 +983,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           drafts + '/batches/' + draft.batch.id,
           invoiceApproval + '/sources/' + draft.batch.id,
           invoiceApproval + '/receipts/policy/' + invoicePolicy.requestId,
+          reversalPath,
           csv + '/artifacts/' + artifact.id,
         ]) {
           assert.equal((await request(path, { identity: ids.requester })).status, 403, path);

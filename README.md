@@ -110,3 +110,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [AGENTS.
 Legacy approval and delegation checks enforce current delegator authority and retain ownership on edits. The browser journey verifies that operators see a refusal when a save is denied. [Approval scope and acceptance](docs/tasks/WOS-05-LEGACY-APPROVAL-SCOPE.md)
 
 Settings show a saved confirmation only after the API acknowledges the change. Operators can retry a failed load and reconcile an uncertain save. [Settings recovery](docs/tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md)
+
+### Request a full reversal of an exported line
+
+In Invoice CSV export, inspect an exported or billed batch and retrieve its retained CSV. Finance preparers can select a line, check for an existing request and record the reason for a full reversal. Reopen the line to retrieve the receipt after an interrupted response. The request preserves the original export, control totals and occupancy. Reversal approval and financial posting are pending.
