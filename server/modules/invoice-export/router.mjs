@@ -64,6 +64,7 @@ export const createInvoiceCsvRouter = (o) => {
           'INC01',
           'INC02',
           'INC03',
+          'IBA01',
           'IBC01',
           'IBC02',
           'CCA02',
@@ -74,8 +75,8 @@ export const createInvoiceCsvRouter = (o) => {
           '40P01',
         ].includes(e.code)
       )
-        res.status(['ICV01', 'INC01', 'IBC01'].includes(e.code) ? 403 : 409).json({
-          code: ['ICV01', 'INC01', 'IBC01'].includes(e.code)
+        res.status(['ICV01', 'INC01', 'IBC01', 'IBA01'].includes(e.code) ? 403 : 409).json({
+          code: ['ICV01', 'INC01', 'IBC01', 'IBA01'].includes(e.code)
             ? 'INVOICE_CSV_AUTHORITY'
             : 'INVOICE_CSV_CONFLICT',
           error: 'Current batch, approval, scope or artifact changed. Reload.',

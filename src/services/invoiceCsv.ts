@@ -462,8 +462,34 @@ const reviewRoute = z.discriminatedUnion('status', [
     stages: z.array(z.object({ userId: uuid, role: z.string().min(1) }).strict()).min(1).max(10),
   }).strict(),
 ]);
+const submittedReview = z.object({
+  id: uuid, requestId: uuid, policyId: uuid, confirmationId: uuid.nullable(), reviewerId: uuid,
+  reviewerRole: id, createdAt: instant,
+}).strict();
+export type SubmittedReversalReview = z.infer<typeof submittedReview>;
 export type InvoiceReversalRoute = z.infer<typeof reviewRoute>;
 export const invoiceCsv = {
+  submittedReversal: async (batchId: string, request: InvoiceLineReversalRequest, c: RateContext, submission?: {
+    policyId: string; inspectedState: 'Exported' | 'Billed/Confirmed'; firstReviewer: {userId: string; role: string};
+  }) => {
+    if (!hasRatePermission('commercial.invoice_drafts.prepare') || !uuid.safeParse(batchId).success) return bad();
+    const path = '/batches/' + batchId + '/lines/' + request.lineId + '/reversal-request/review';
+    if (submission) {
+      const raw = await call('POST', path, c, 'view', {
+        requestId: request.id, policyId: submission.policyId, inspectedState: submission.inspectedState,
+      });
+      const record = z.object({ ...envelope, requestId: uuid, review: submittedReview, replayed: z.boolean() }).strict().safeParse(raw);
+      if (!record.success || record.data.requestId !== request.id || record.data.review.requestId !== request.id ||
+        record.data.review.policyId !== submission.policyId || record.data.review.reviewerId !== submission.firstReviewer.userId ||
+        record.data.review.reviewerRole !== submission.firstReviewer.role ||
+        Boolean(record.data.review.confirmationId) !== (submission.inspectedState === 'Billed/Confirmed')) return bad();
+      return { review: record.data.review, canSubmit: false };
+    }
+    const raw = await call('GET', path, c, 'view');
+    const result = z.object({ ...envelope, requestId: uuid, review: submittedReview.nullable(), canSubmit: z.boolean() }).strict().safeParse(raw);
+    if (!result.success || result.data.requestId !== request.id || (result.data.review && result.data.review.requestId !== request.id)) return bad();
+    return { review: result.data.review, canSubmit: result.data.canSubmit };
+  },
   reversalReviewRoute: async (batchId: string, request: InvoiceLineReversalRequest, c: RateContext) => {
     if (!hasRatePermission('commercial.invoice_drafts.prepare') || !uuid.safeParse(batchId).success) return bad();
     const raw = await call('GET', '/batches/' + batchId + '/lines/' + request.lineId + '/reversal-request/review-route', c, 'view');

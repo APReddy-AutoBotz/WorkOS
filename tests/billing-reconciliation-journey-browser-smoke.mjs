@@ -1254,6 +1254,39 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await exportUi.getByText('The named reviewers do not meet current access or independence requirements.').waitFor();
           assert.equal(await exportUi.getByText('Review policy ' + policy.id, { exact: false }).count(), 0);
           await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.invoice_approval.decide'");
+          const reversalBase = '/api/v1/invoice-csv/batches/' + draft.batch.id + '/lines/' + await lineSelect.inputValue() + '/reversal-request';
+          const submittedPath = reversalBase + '/review';
+          const originalRequest = ok(await request(reversalBase, { identity: ids.requester })).request;
+          const submission = { requestId: originalRequest.id, expectedOwnerKey: requesterKey, policyId: policy.id, inspectedState: 'Exported' };
+          const submitReview = (changes = {}, identity = ids.requester) => request(submittedPath, {
+            method: 'POST', identity, body: { ...submission, ...changes },
+          });
+          assert.equal((await submitReview({ expectedOwnerKey: await readApprovalOwner(request, ids.manager) }, ids.manager)).status, 403);
+          assert.equal((await submitReview({ inspectedState: 'Billed/Confirmed' })).status, 409);
+          assert.equal((await submitReview({ policyId: randomUUID() })).status, 409);
+          await pool.query("create function synthetic_refuse_review_submit() returns trigger language plpgsql as $$begin if new.action='Submit Full Line Reversal' then raise exception 'synthetic audit refusal'; end if; return new;end$$; create trigger synthetic_refuse_review_submit before insert on audit_logs for each row execute function synthetic_refuse_review_submit()");
+          assert.equal((await submitReview()).status, 503);
+          assert.equal(ok(await request(submittedPath, { identity: ids.requester })).review, null);
+          await pool.query("drop trigger synthetic_refuse_review_submit on audit_logs");
+          await checkRoute.click();
+          await exportUi.getByRole('button', { name: 'Submit reversal for independent review' }).waitFor();
+          const sentReview = wait(requester.p, submittedPath, 'POST');
+          await exportUi.getByRole('button', { name: 'Submit reversal for independent review' }).click();
+          const submittedReview = (await body(sentReview, 201)).review;
+          assert.equal(submittedReview.reviewerId, ids.manager.id);
+          await exportUi.getByText('Submitted reversal review ' + submittedReview.id, { exact: false }).waitFor();
+          assert.equal(ok(await submitReview()).review.id, submittedReview.id);
+          assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and action='Submit Full Line Reversal'", [submittedReview.id])).rows[0].n, 1);
+          await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.invoice_approval.decide'");
+          assert.equal((await request(work + '/inbox/' + submittedReview.id + '/read', {
+            method: 'POST', identity: ids.manager, body: { expectedOwnerKey: await readApprovalOwner(request, ids.manager) },
+          })).status, 404);
+          await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.invoice_approval.decide'");
+
+          assert.equal((await submitReview({ policyId: randomUUID() })).status, 409);
+          assert.equal((await request(work + '/inbox/' + submittedReview.id + '/read', {
+            method: 'POST', identity: ids.second, body: { expectedOwnerKey: await readApprovalOwner(request, ids.second) },
+          })).status, 404);
           const redownload = requester.p.waitForEvent('download');
           await exportUi.getByRole('button', { name: 'Download verified invoice CSV' }).click();
           assert.deepEqual(
@@ -1462,6 +1495,15 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               (x) => x.kind === 'invoice-export' && x.batchId === draft.batch.id,
             );
           assert(exportNotice);
+          const reversalNotice = inboxData.notifications.find(n => n.id === submittedReview.id);
+          assert.equal(reversalNotice.kind, 'invoice-reversal-review');
+          assert.equal(reversalNotice.eventKey, 'approval.action_required');
+          const reversalCard = inboxUi.getByRole('article', { name: 'Governed notification ' + reversalNotice.id });
+          await reversalCard.getByText(/Full-line reversal review/).waitFor();
+          const reversalRead = wait(ownerUi.p, work + '/inbox/' + reversalNotice.id + '/read', 'POST');
+          await reversalCard.getByRole('button', { name: /read/i }).click();
+          assert.ok((await body(reversalRead)).notification.readAt);
+
           const exportCard = inboxUi.getByRole('article', {
             name: 'Governed notification ' + exportNotice.id,
           });
