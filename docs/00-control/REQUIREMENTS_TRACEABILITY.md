@@ -578,3 +578,5 @@ WOS-COM-008, WOS-INV-001/003/005/008, WOS-APR-001/003/006 and WOS-INT-002 cover 
 WOS-COM-008 and WOS-INV-001/003/005/006/008 cover [milestone invoice lineage](../tasks/WOS-06-MILESTONE-INVOICING.md). Evidence includes competing reservations, cancellation, mixed-source review outcomes, exact CSV and confirmation, access loss and populated T&M upgrade/replay.
 
 WOS-COM-008, WOS-INV-001/003/006/008 and WOS-RPT-007 cover [milestone reconciliation](../tasks/WOS-06-SCOPED-BILLING-RECONCILIATION.md). The PostgreSQL and browser journey checks availability, reservation history, confirmed amounts, saved CSV bytes, audit, stale export and access revocation.
+
+WOS-INV-006 and WOS-INV-008 — Pre-export cancellation pins invoice membership and review progress. The invoice approval PostgreSQL journey verifies stale-stage refusal, retained reservations, successful release and exact receipt replay.

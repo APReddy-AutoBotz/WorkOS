@@ -181,6 +181,7 @@ const checkDetail = (
 export type InvoiceDraft = z.infer<typeof batch>;
 export type InvoiceDraftLine = z.infer<typeof line>;
 export type InvoiceDraftDetail = {
+  cancellationToken?: string;
   batch: InvoiceDraft;
   lines: InvoiceDraftLine[];
   total: z.infer<typeof total>;
@@ -196,7 +197,12 @@ export type InvoiceDraftOperation =
   | {
       type: 'cancellation';
       batchId: string;
-      data: { requestId: string; expectedLineCount: number; reason: string };
+      data: {
+        requestId: string;
+        expectedLineCount: number;
+        expectedCancellationToken?: string;
+        reason: string;
+      };
     };
 const operation = z.discriminatedUnion('type', [
   z
@@ -222,7 +228,15 @@ const operation = z.discriminatedUnion('type', [
       type: z.literal('cancellation'),
       batchId: uuid,
       data: z
-        .object({ requestId: uuid, expectedLineCount: z.number().int().min(0).max(1000000), reason })
+        .object({
+          requestId: uuid,
+          expectedLineCount: z.number().int().min(0).max(1000000),
+          expectedCancellationToken: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+          reason,
+        })
         .strict(),
     })
     .strict(),
@@ -586,12 +600,27 @@ export const invoiceDrafts = {
     if (!out.success) return bad();
     return out.data;
   },
-  inspect: async (batchId: string, c: RateContext | null) => {
+  inspect: async (batchId: string, c: RateContext | null, forCancellation = false) => {
     if (!uuid.safeParse(batchId).success) return bad();
-    const raw = await call('GET', '/batches/' + batchId, c, 'view'),
-      out = z.object(detail).strict().safeParse(raw);
+    const raw = await call(
+        'GET',
+        '/batches/' + batchId + (forCancellation ? '?forCancellation=true' : ''),
+        c,
+        forCancellation ? 'cancel' : 'view',
+      ),
+      out = z
+        .object({
+          ...detail,
+          cancellationToken: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+        })
+        .strict()
+        .safeParse(raw);
     if (
       !out.success ||
+      (forCancellation && !out.data.cancellationToken) ||
       out.data.batch.id !== batchId ||
       !checkDetail(out.data.batch, out.data.lines, out.data.total, out.data.cancellation)
     )

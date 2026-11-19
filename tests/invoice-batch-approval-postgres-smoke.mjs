@@ -873,7 +873,25 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             },
           });
         };
+        const inspectCancellation = async (id) =>
+          ok(await request(route + '/batches/' + id + '?forCancellation=true')).cancellationToken;
+        const staleCancellation = async (token) =>
+          request(route + '/batches/' + draft.batch.id + '/cancellations', {
+            method: 'POST',
+            body: {
+              expectedOwnerKey: draft.ownerKey,
+              requestId: randomUUID(),
+              expectedLineCount: 1,
+              expectedCancellationToken: token,
+              reason: 'Synthetic stale inspected cancellation',
+            },
+          });
+        const firstStageToken = await inspectCancellation(draft.batch.id);
         assert.equal((await decision(ids.manager, 0)).status, 201);
+        assert.equal((await staleCancellation(firstStageToken)).status, 409);
+        const lastStageToken = await inspectCancellation(draft.batch.id);
+        assert.notEqual(lastStageToken, firstStageToken);
+
         assert.equal(ok(await request(route + '/batches/' + draft.batch.id)).batch.state, 'Under Review');
         assert.equal(
           (
@@ -885,6 +903,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         );
         const final = ok(await decision(ids.second, 1), 201);
         assert.equal(final.approval.state.status, 'Approved');
+        assert.equal((await staleCancellation(lastStageToken)).status, 409);
+        assert.equal((await staleCancellation(undefined)).status, 409);
+        assert.equal(
+          (
+            await pool.query('select count(*)::int n from invoice_draft_occupancies where batch_id=$1', [
+              draft.batch.id,
+            ])
+          ).rows[0].n,
+          1,
+        );
+
         assert.equal(ok(await request(route + '/batches/' + draft.batch.id)).batch.state, 'Approved');
         await assert.rejects(
           pool.query(
@@ -926,17 +955,22 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           ).status,
           409,
         );
-        const cancelled = ok(
-          await request(route + '/batches/' + draft.batch.id + '/cancellations', {
-            method: 'POST',
-            body: {
-              expectedOwnerKey: draft.ownerKey,
-              requestId: randomUUID(),
-              expectedLineCount: 1,
-              reason: 'Synthetic approved cancellation',
-            },
-          }),
-          201,
+        const cancelCommand = {
+          expectedOwnerKey: draft.ownerKey,
+          requestId: randomUUID(),
+          expectedLineCount: 1,
+          expectedCancellationToken: await inspectCancellation(draft.batch.id),
+          reason: 'Synthetic approved cancellation',
+        };
+        const cancelApproved = (body) =>
+          request(route + '/batches/' + draft.batch.id + '/cancellations', { method: 'POST', body });
+        const cancelled = ok(await cancelApproved(cancelCommand), 201);
+        const replay = ok(await cancelApproved(cancelCommand));
+        assert.equal(replay.replayed, true);
+        assert.equal(replay.cancellation.id, cancelled.cancellation.id);
+        assert.equal(
+          (await cancelApproved({ ...cancelCommand, expectedCancellationToken: firstStageToken })).status,
+          409,
         );
         assert.equal(cancelled.batch.state, 'Cancelled');
         assert.equal(cancelled.lines.length, 1);
@@ -1205,6 +1239,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               expectedOwnerKey: draft2.ownerKey,
               requestId: randomUUID(),
               expectedLineCount: 1,
+              expectedCancellationToken: await inspectCancellation(draft2.batch.id),
               reason: 'Synthetic pending cancellation',
             },
           }),
@@ -1331,6 +1366,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               expectedOwnerKey: draft3.ownerKey,
               requestId: randomUUID(),
               expectedLineCount: 1,
+              expectedCancellationToken: await inspectCancellation(draft3.batch.id),
               reason: 'Synthetic stale cancellation',
             },
           }),

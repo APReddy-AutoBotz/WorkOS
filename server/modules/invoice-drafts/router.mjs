@@ -193,6 +193,24 @@ export const createInvoiceDraftRouter = (o) => {
         [batchId],
       )
     ).rows.map(lineView);
+  // Called in the inspection's repeatable-read snapshot, or after locking the batch for cancellation.
+  const cancellationObservation = async (c, r, batchId) => {
+    const row = (
+      await c.query(
+        `
+      select invoice_batch_governed_state(b.id) as state, invoice_draft_owner_current(b) as owner_current,
+        invoice_batch_lineage_hash(b.id) as lineage, review.id as review_id,
+        (select t.id from invoice_batch_approval_transitions t where t.instance_id=review.id
+          order by t.sequence desc limit 1) as decision_id,
+        (select x.id from invoice_batch_approval_invalidations x where x.instance_id=review.id) as invalidation_id
+      from invoice_draft_batches b left join lateral (
+        select i.id from invoice_batch_approval_instances i where i.batch_id=b.id order by i.sequence desc limit 1
+      ) review on true where b.id=$1`,
+        [batchId],
+      )
+    ).rows[0];
+    return { ...row, token: fingerprint({ batchId, owner: workApprovalOwner(r), ...row }) };
+  };
   const detail = async (c, r, b) => {
     const records = await lines(c, b.id),
       total = (
@@ -448,9 +466,12 @@ export const createInvoiceDraftRouter = (o) => {
   router.get(
     '/batches/:id',
     handle(false, async (c, r) => {
-      parse(z.object({}).strict(), r.query);
-      await authorize(c, r);
-      return detail(c, r, await batch(c, r, parse(uuid, r.params.id)));
+      const query = parse(z.object({ forCancellation: z.literal('true').optional() }).strict(), r.query);
+      await authorize(c, r, query.forCancellation ? 'cancel' : 'view');
+      const b = await batch(c, r, parse(uuid, r.params.id));
+      const result = await detail(c, r, b);
+      if (query.forCancellation) result.cancellationToken = (await cancellationObservation(c, r, b.id)).token;
+      return result;
     }),
   );
   router.post(
@@ -559,7 +580,12 @@ export const createInvoiceDraftRouter = (o) => {
     '/batches/:id/cancellations',
     handle(true, async (c, r) => {
       const batchId = parse(uuid, r.params.id),
-        d = parse(z.object({ ...bodyBase, expectedLineCount: count }).strict(), r.body);
+        d = parse(
+          z
+            .object({ ...bodyBase, expectedLineCount: count, expectedCancellationToken: key.optional() })
+            .strict(),
+          r.body,
+        );
       fence(r, d.expectedOwnerKey);
       await authorize(c, r, 'cancel');
       const b = await batch(c, r, batchId, true),
@@ -579,8 +605,21 @@ export const createInvoiceDraftRouter = (o) => {
         delete old.fingerprint;
         return { ...(await detail(c, r, b)), cancellation: old, replayed: true };
       }
+      const observed = await cancellationObservation(c, r, batchId);
+      // Older clients can cancel only an original, never-submitted draft. Existing receipts replay above.
+      if (
+        d.expectedCancellationToken
+          ? d.expectedCancellationToken !== observed.token
+          : observed.state !== 'Draft' || observed.review_id !== null
+      ) {
+        throw fail(
+          409,
+          'INVOICE_CANCELLATION_STALE',
+          'Invoice review changed. Inspect the batch again before cancelling.',
+        );
+      }
       const cancellationId = randomUUID();
-      if (b.state === 'Under Review') {
+      if (observed.state === 'Under Review') {
         const i = (
           await c.query(
             'select * from invoice_batch_approval_instances where batch_id=$1 order by sequence desc limit 1',
