@@ -904,6 +904,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                     'commercial.invoice_drafts.prepare',
                     'commercial.reversal_eligibility.create',
                     'commercial.invoice_drafts.cancel',
+                    'commercial.invoice_drafts.own',
                     'commercial.invoice_approval.manage',
                     'commercial.invoice_approval.decide',
                     'commercial.invoice_export.view',
@@ -1601,10 +1602,23 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             assert.equal((await request(register+'&after=invalid',{identity:ids.requester})).status,400);
             await exportUi.getByRole('button',{name:'View issued credits'}).click();
             const table = exportUi.getByRole('table',{name:'Issued credits for this engagement'});
-            await table.getByText(receipt.itemId).waitFor();
+            await table.getByText(receipt.itemId,{exact:true}).waitFor();
             await table.getByText(receipt.currency+' '+receipt.amount).waitFor();
             await table.getByText('Credit evidence').click();
             await table.getByText(receipt.decisionId).waitFor();
+            await table.getByRole('checkbox',{name:'Select credit '+receipt.itemId}).check();
+            await exportUi.getByLabel('Correction batch reason').fill('Synthetic reserve credit');
+            await exportUi.getByRole('button',{name:'Reserve selected credits'}).click();
+            await table.getByRole('button',{name:'Cancel correction batch'}).waitFor();
+            const occupied = ok(await request(register,{identity:ids.requester})).credits[0];
+            assert.ok(occupied.correctionBatchId);
+            assert.notEqual(occupied.correctionBatchId,draft.batch.id);
+            assert.equal((await request('/api/v1/invoice-csv/batches/'+occupied.correctionBatchId,{identity:ids.requester})).status,404);
+            await exportUi.getByLabel('Correction batch reason').fill('Synthetic release credit');
+            await table.getByRole('button',{name:'Cancel correction batch'}).click();
+            await table.getByRole('checkbox',{name:'Select credit '+receipt.itemId}).waitFor();
+            assert.equal(ok(await request(register,{identity:ids.requester})).credits[0].correctionBatchId,null);
+            assert.equal((await pool.query('select count(*)::int n from invoice_draft_lines where batch_id=$1',[occupied.correctionBatchId])).rows[0].n,1);
             for(const permission of ['commercial.invoice_drafts.view','commercial.invoice_export.view','commercial.invoice_drafts.prepare']){
               await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[permission]);
             }
