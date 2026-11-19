@@ -6,6 +6,7 @@ import {
   captureRateContext,
   invoiceCsv,
   type IssuedCredit,
+  type CorrectionEvidence,
   type InvoiceCsvSource,
   type InvoiceCsvArtifact,
   type InvoiceCsvOperation,
@@ -85,6 +86,7 @@ const InvoiceCsvEngagement = ({
     [notificationStatus, setNotificationStatus] = useState('');
   const [credits,setCredits] = useState<IssuedCredit[]|null>(null);
   const [creditCursor,setCreditCursor] = useState<string|null>(null);
+  const [evidence,setEvidence]=useState<CorrectionEvidence|null>(null);
   const [chosen,setChosen] = useState<IssuedCredit[]>([]);
   const [creditReason,setCreditReason] = useState('');
   const mounted = useRef(false),
@@ -101,6 +103,7 @@ const InvoiceCsvEngagement = ({
     inFlight.current = false;
     setChosen([]);
     setCreditReason('');
+    setEvidence(null);
     setCredits(null);
     setCreditCursor(null);
     setDrafts([]);
@@ -171,6 +174,7 @@ const InvoiceCsvEngagement = ({
   const loadCredits = (after:string|null) => void run(async c => {
     setChosen([]);
     setCreditReason('');
+    setEvidence(null);
     setCredits(null);
     setCreditCursor(null);
     const result = await invoiceCsv.issuedCredits(engagementId,after,c);
@@ -180,6 +184,7 @@ const InvoiceCsvEngagement = ({
   const changeReservation = (originalId:string,selection:string[]|string) => void run(async c=>{
     const why=creditReason.trim();
     setChosen([]);
+    setEvidence(null);
     setCredits(null);
     setCreditReason('');
     setCreditCursor(null);
@@ -356,6 +361,10 @@ const InvoiceCsvEngagement = ({
                 <dt>Original eligibility event</dt><dd>{row.originalEventId}</dd>
                 <dt>Final reversal decision</dt><dd>{row.decisionId}</dd>
               </dl></details></td><td>{row.correctionBatchId ? <>{row.correctionBatchId}
+              <button type="button" disabled={busy || !!pending} onClick={()=>void run(async c=>{
+                setEvidence(null);
+                setEvidence(await invoiceCsv.correctionEvidence(row,engagementId,c));
+              })}>Inspect correction draft</button>
               {hasRatePermission('commercial.invoice_drafts.cancel') && <button type="button" disabled={busy || !!pending || creditReason.trim().length<3}
                 onClick={()=>changeReservation(row.batchId,row.correctionBatchId!)}>Cancel correction batch</button>}</>
               : hasRatePermission('commercial.invoice_drafts.own') ? <label><input type="checkbox" checked={chosen.some(x=>x.itemId===row.itemId)}
@@ -363,6 +372,15 @@ const InvoiceCsvEngagement = ({
                 onChange={e=>setChosen(e.target.checked?[...chosen,row]:chosen.filter(x=>x.itemId!==row.itemId))}/>Select credit {row.itemId}</label> : 'Available'}
             </td></tr>)}</tbody>
         </table> : <p>No issued credits on this page.</p>)}
+        {evidence && <section aria-label="Correction draft evidence">
+          <h3>Correction draft {evidence.header.batchId}</h3>
+          <p>{evidence.header.state} · {evidence.header.currency} {evidence.header.total} · eligible {evidence.header.periodStart} to {evidence.header.periodEnd}</p>
+          <p>{evidence.header.ownerCurrent ? 'Current owner' : 'Owner unavailable'} · {evidence.header.ownerRole} · {evidence.header.ownerId}</p>
+          <p>Original export {evidence.originalId} · CSV checksum {evidence.lines[0].artifactSha256}</p>
+          <p>Correction line checksum {evidence.header.lineageHash}</p>
+          <ol>{evidence.lines.map(x=><li key={x.lineId}>{x.currency} {x.amount} · {x.reserved?'Reserved':'Released'} · original line {x.originalLineId}
+            {' · credit item '}{x.itemId} v{x.itemVersion} · eligibility event {x.eventId} v{x.eventVersion} · decision {x.decisionId}</li>)}</ol>
+        </section>}
         {!!credits?.length && (hasRatePermission('commercial.invoice_drafts.own') || hasRatePermission('commercial.invoice_drafts.cancel')) && <label>
           Correction batch reason <input disabled={busy || !!pending} maxLength={1000} value={creditReason} onChange={e=>setCreditReason(e.target.value)}/></label>}
         {chosen.length>0 && <p>Selected credits · {chosen[0].currency} -{invoiceDraftTotal(chosen.map(row=>row.amount.slice(1))).amount} · original batch {chosen[0].batchId}</p>}

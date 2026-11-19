@@ -1612,6 +1612,16 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await table.getByRole('button',{name:'Cancel correction batch'}).waitFor();
             const occupied = ok(await request(register,{identity:ids.requester})).credits[0];
             assert.ok(occupied.correctionBatchId);
+            await table.getByRole('button',{name:'Inspect correction draft'}).click();
+            const proofPanel=exportUi.getByRole('region',{name:'Correction draft evidence'});
+            await proofPanel.getByText('Correction draft '+occupied.correctionBatchId).waitFor();
+            await proofPanel.getByText(/Current owner/).waitFor();
+            await proofPanel.getByText(new RegExp(receipt.decisionId)).waitFor();
+            const proofPath='/api/v1/invoice-csv/batches/'+draft.batch.id+'/correction-drafts/'+occupied.correctionBatchId;
+            const proof=ok(await request(proofPath,{identity:ids.requester}));
+            assert.equal(proof.lines[0].amount,receipt.amount);
+            assert.equal(proof.header.ownerCurrent,true);
+
             assert.notEqual(occupied.correctionBatchId,draft.batch.id);
             assert.equal((await request('/api/v1/invoice-csv/batches/'+occupied.correctionBatchId,{identity:ids.requester})).status,404);
             await exportUi.getByLabel('Correction batch reason').fill('Synthetic release credit');
@@ -1623,6 +1633,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[permission]);
             }
             assert.deepEqual(ok(await request(register,{identity:ids.denied})).credits,[]);
+            assert.equal((await request(proofPath,{identity:ids.denied})).status,404);
 
             assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);
             assert.equal(ok(await issueCredit()).replayed,true);

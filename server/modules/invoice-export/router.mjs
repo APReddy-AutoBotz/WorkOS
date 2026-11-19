@@ -1,3 +1,4 @@
+import { registerCorrectionReviewEvidence } from './correction-review-evidence.mjs';
 import { registerCorrectionDrafts } from './correction-drafts.mjs';
 import { registerIssuedCredits } from './issued-credits.mjs';
 import { registerLineReversalRequests } from './line-reversal-requests.mjs';
@@ -221,6 +222,7 @@ export const createInvoiceCsvRouter = (o) => {
       reason: 'Scoped invoice-ready CSV operation.',
       details: 'No cost, ledger posting or provider delivery.',
     });
+  registerCorrectionReviewEvidence(router,{handle,authorize,batch,envelope});
   registerCorrectionDrafts(router,{handle,authorize,batch,envelope,audit:o.audit});
   registerIssuedCredits(router, { handle, authorize, envelope });
   registerLineReversalRequests(router, { handle, authorize, batch, envelope, audit: o.audit });

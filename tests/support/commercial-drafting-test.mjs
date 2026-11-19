@@ -64,13 +64,15 @@ export const withCommercialDatabase = async test => {
 
 export const migrateCommercialDatabase = pool => runMigrations({pool, rootDir: commercialServerDir, logger: {log() {}}});
 
-export const withPreCommercialMigrations = async test => {
+export const withPreCommercialMigrations = test => withCommercialMigrationsThrough(39,test);
+
+export const withCommercialMigrationsThrough = async (lastVersion,test) => {
   const directory = await mkdtemp(join(tmpdir(), 'workos-commercial-upgrade-'));
   try {
     await mkdir(join(directory, 'migrations'));
     await copyFile(join(commercialServerDir, 'schema.sql'), join(directory, 'schema.sql'));
     for (const file of (await readdir(join(commercialServerDir, 'migrations'))).sort()) {
-      if (/^\d{3}[a-z]?_[a-z0-9_]+\.sql$/.test(file) && Number(file.slice(0, 3)) <= 39) {
+      if (/^\d{3}[a-z]?_[a-z0-9_]+\.sql$/.test(file) && Number(file.slice(0, 3)) <= lastVersion) {
         await copyFile(join(commercialServerDir, 'migrations', file), join(directory, 'migrations', file));
       }
     }

@@ -1,9 +1,11 @@
+import { runMigrations } from '../server/migration-runner.mjs';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
   commercialFixture as f,
   withCommercialDatabase,
+  withCommercialMigrationsThrough,
   migrateCommercialDatabase,
   withCommercialApi,
 } from './support/commercial-drafting-test.mjs';
@@ -24,7 +26,7 @@ const ok = (r, status = 200) => {
 };
 const events = ['approval.action_required', 'approval.rejected_or_correction_required', 'approval.completed'];
 await withCommercialDatabase(async ({ pool, databaseUrl }) => {
-  await migrateCommercialDatabase(pool);
+  await withCommercialMigrationsThrough(67,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const fx = await seedWorkApproval(pool),
     ids = fx.identities;
   await grantAmendmentPermissions(pool);
@@ -836,11 +838,39 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.deepEqual(reservations.map(v=>v.status).sort(),[200,201],JSON.stringify(reservations));
         const reserved=reservations[0].body.receipt;
         assert.equal(reserved.total,issued.amount);
+        const beforeEvidence=await pool.query('select to_jsonb(l) as line from invoice_draft_lines l where batch_id=$1',[reserved.batchId]);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['068_wos06_correction_review_evidence']);
+        assert.deepEqual((await pool.query('select to_jsonb(l) as line from invoice_draft_lines l where batch_id=$1',[reserved.batchId])).rows,beforeEvidence.rows);
+        const evidencePath=correctionDraftPath+'/'+reserved.batchId;
+        const proof=ok(await request(evidencePath));
+        assert.equal(proof.header.ownerCurrent,true);
+        assert.equal(proof.header.total,issued.amount);
+        assert.equal(proof.lines[0].artifactSha256,artifact.sha256);
+        assert.equal(proof.lines[0].eventId,issued.eventId);
+        assert.equal(proof.lines[0].reserved,true);
+        assert.equal((await request(evidencePath+'?role=Admin')).status,400);
+        const connection=await pool.connect();
+        try {
+          await connection.query('begin');
+          await connection.query("set constraints all immediate");
+          await connection.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'");
+          await connection.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.milestone_billing.view'");
+          assert.equal((await connection.query('select invoice_draft_owner_current(b) as current from invoice_draft_batches b where id=$1',[reserved.batchId])).rows[0].current,false);
+          assert.equal((await connection.query('select count(*)::int n from invoice_draft_owner_losses where batch_id=$1',[reserved.batchId])).rows[0].n,1);
+        } finally {
+          await connection.query('rollback');
+          connection.release();
+        }
+
         assert.equal((await reserve({reason:'Changed command'})).status,409);
         assert.equal((await reserve({requestId:randomUUID()})).status,409);
         const cancelCredit={expectedOwnerKey:inspection.ownerKey,batchId:reserved.batchId,requestId:randomUUID(),reason:'Synthetic correction release'};
         assert.equal(ok(await request(correctionDraftPath+'/cancel',{method:'POST',body:cancelCredit}),201).receipt.state,'Cancelled');
         assert.equal(ok(await request(correctionDraftPath+'/cancel',{method:'POST',body:cancelCredit})).replayed,true);
+        const retainedProof=ok(await request(evidencePath));
+        assert.equal(retainedProof.header.state,'Cancelled');
+        assert.equal(retainedProof.lines[0].reserved,false);
+        assert.equal(retainedProof.header.lineageHash,proof.header.lineageHash);
         assert.equal(ok(await reserve({requestId:randomUUID()}),201).receipt.state,'Draft');
         const creditRegister = '/api/v1/invoice-csv/issued-credits?engagementId='+encodeURIComponent(roots.engagement.id);
         assert.deepEqual(ok(await request(creditRegister)).credits.map(row=>row.itemId),[issued.itemId]);

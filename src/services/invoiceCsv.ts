@@ -479,7 +479,28 @@ const issuedCredit = z.object({
   originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(),
 }).strict();
 export type IssuedCredit = z.infer<typeof issuedCredit>;
+const correctionEvidence=z.object({
+  ...envelope,originalId:uuid,
+  header:z.object({batchId:uuid,engagementId:id,currency:z.string().regex(/^[A-Z]{3}$/),ownerId:uuid,ownerRole:id,
+    ownerCurrent:z.boolean(),state:z.enum(['Draft','Cancelled']),lineageHash:hash,periodStart:date,periodEnd:date,total:creditAmount}).strict(),
+  lines:z.array(z.object({lineId:uuid,sequence:z.number().int().positive(),itemId:uuid,itemVersion:z.literal(1),eventId:uuid,eventVersion:z.literal(1),
+    eligibleOn:date,amount:creditAmount,currency:z.string().regex(/^[A-Z]{3}$/),decisionId:uuid,originalEventId:uuid,originalLineId:uuid,
+    artifactId:uuid,artifactSha256:hash,reserved:z.boolean()}).strict()).min(1).max(50),
+}).strict();
+export type CorrectionEvidence=z.infer<typeof correctionEvidence>;
 export const invoiceCsv = {
+  correctionEvidence: async (item:IssuedCredit,engagementId:string,ctx:RateContext) => {
+    const raw=await call('GET','/batches/'+item.batchId+'/correction-drafts/'+item.correctionBatchId,ctx,'view');
+    const result=correctionEvidence.safeParse(raw);
+    if(!result.success) return bad();
+    const {header,lines,originalId}=result.data;
+    if(originalId!==item.batchId || header.batchId!==item.correctionBatchId || header.engagementId!==engagementId || header.currency!==item.currency ||
+      !lines.some(x=>x.itemId===item.itemId && x.eventId===item.eventId && x.originalLineId===item.lineId && x.amount===item.amount && x.decisionId===item.decisionId && x.originalEventId===item.originalEventId) ||
+      lines.some((x,i)=>x.sequence!==i+1 || x.currency!==header.currency || x.eligibleOn<header.periodStart || x.eligibleOn>header.periodEnd ||
+        x.artifactId!==lines[0].artifactId || x.artifactSha256!==lines[0].artifactSha256) ||
+      new Set(lines.map(x=>x.itemId)).size!==lines.length || header.total!=='-'+invoiceDraftTotal(lines.map(x=>x.amount.slice(1))).amount) return bad();
+    return result.data;
+  },
   correctionDraft: async (originalId:string, requestId:string, why:string, selection:string[]|string, ctx:RateContext) => {
     const cancelling=typeof selection==='string';
     const body=cancelling?{batchId:selection}:{itemIds:selection};
