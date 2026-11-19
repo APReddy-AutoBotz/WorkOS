@@ -21,7 +21,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    assert.equal((await read({after:prior.nextAfter,expectedRosterToken:prior.rosterToken})).status,409);
    await pool.query('update organization_catalog_items set '+field+'=$1 where id=$2',[restore,'directory-kind']);
   }
-  await pool.query("update worker_profiles set effective_to=current_date-1 where employee_id=$1",[f.ownerId]);
+  await pool.query("update worker_profiles set effective_to=(current_timestamp at time zone 'UTC')::date-1 where employee_id=$1",[f.ownerId]);
   assert.equal((await typed()).totalMatching,0);
   await pool.query("update worker_profiles set effective_to=null where employee_id=$1",[f.ownerId]);
   assert.equal(ok(await read({parentId:f.ownerId})).parent.workerType,'Synthetic visiting fellow');

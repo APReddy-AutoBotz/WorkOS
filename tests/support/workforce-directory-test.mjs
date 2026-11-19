@@ -19,9 +19,9 @@ export const seedDirectory=async pool=>{
  }
  await pool.query(`insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,billable,status,organization_id,legal_entity_id)values('synthetic-directory-pm-allocation',$1,$2,10,$3,$4,true,'Active',$5,$6)`,[children[0],f.projectId,fx.monday,fx.dates[4],f.organizationId,f.legalEntityId]);
  await pool.query(`insert into organization_catalog_items(id,organization_id,legal_entity_id,catalog_type,code,name,effective_from)
-   values('directory-kind',$1,$2,'worker_type','SYN-KIND','Synthetic visiting fellow',current_date-2)`,[f.organizationId,f.legalEntityId]);
+   values('directory-kind',$1,$2,'worker_type','SYN-KIND','Synthetic visiting fellow',(current_timestamp at time zone 'UTC')::date-2)`,[f.organizationId,f.legalEntityId]);
  await pool.query(`insert into worker_profiles(employee_id,organization_id,legal_entity_id,worker_type_id,effective_from)
-   values($1,$2,$3,'directory-kind',current_date-2) on conflict(employee_id) do update set worker_type_id=excluded.worker_type_id,
+   values($1,$2,$3,'directory-kind',(current_timestamp at time zone 'UTC')::date-2) on conflict(employee_id) do update set worker_type_id=excluded.worker_type_id,
    effective_from=excluded.effective_from,effective_to=null`,[f.ownerId,f.organizationId,f.legalEntityId]);
  return{...fx,root,children,grandchild,unrelated,other};
 };
