@@ -76,20 +76,16 @@ export const createGovernedTmRouter = (o) => {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
       else if (['CTM01', 'CTM02', 'CTM03', '23505', '23514', '40001', '40P01'].includes(e.code))
-        res
-          .status(e.code === 'CTM01' ? 403 : 409)
-          .json({
-            code: e.code === 'CTM01' ? 'TM_AUTHORITY' : 'TM_CONFLICT',
-            error: 'Current scoped work, policy or rate source changed. Reload.',
-          });
+        res.status(e.code === 'CTM01' ? 403 : 409).json({
+          code: e.code === 'CTM01' ? 'TM_AUTHORITY' : 'TM_CONFLICT',
+          error: 'Current scoped work, policy or rate source changed. Reload.',
+        });
       else {
         o.logError?.(e);
-        res
-          .status(503)
-          .json({
-            code: 'TM_UNCONFIRMED',
-            error: 'Operation could not be confirmed. Read the original receipt.',
-          });
+        res.status(503).json({
+          code: 'TM_UNCONFIRMED',
+          error: 'Operation could not be confirmed. Read the original receipt.',
+        });
       }
     } finally {
       c?.release();
@@ -162,13 +158,21 @@ export const createGovernedTmRouter = (o) => {
   router.get(
     '/policies',
     handle(false, async (c, r) => {
-      const q = parse(z.object({ engagementId: textId }).strict(), r.query);
+      const q = parse(
+        z
+          .object({
+            engagementId: textId,
+            beforeSequence: z.coerce.number().int().min(1).max(2147483647).optional(),
+          })
+          .strict(),
+        r.query,
+      );
       await authorize(c, r);
       await engagement(c, r, q.engagementId);
       const rows = (
         await c.query(
-          `select ${policyProjection} from commercial_tm_policy_versions where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence desc limit 21`,
-          [...scope(r), q.engagementId],
+          `select ${policyProjection} from commercial_tm_policy_versions where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and ($4::int is null or sequence<$4) order by sequence desc limit 21`,
+          [...scope(r), q.engagementId, q.beforeSequence ?? null],
         )
       ).rows;
       return {
@@ -259,22 +263,33 @@ export const createGovernedTmRouter = (o) => {
   router.get(
     '/sources',
     handle(false, async (c, r) => {
-      const q = parse(z.object({ engagementId: textId }).strict(), r.query);
+      const q = parse(
+        z
+          .object({
+            engagementId: textId,
+            afterDate: date.optional(),
+            afterEntryId: uuid.optional(),
+            limit: z.coerce.number().int().min(1).max(100).default(100),
+          })
+          .strict()
+          .refine((v) => Boolean(v.afterDate) === Boolean(v.afterEntryId)),
+        r.query,
+      );
       await authorize(c, r);
       await engagement(c, r, q.engagementId);
-      const params = [...scope(r), q.engagementId],
+      const params = [...scope(r), q.engagementId, q.afterDate ?? null, q.afterEntryId ?? null, q.limit + 1],
         where = o.buildEmployeeScopeWhere(r, params, 'worker');
       const rows = (
         await c.query(
-          `select s.id "submissionId",d.id "decisionId",entry.id "entryId",entry.work_date::text "workDate",trim_scale(entry.hours)::text "hoursExact",entry.project_id "projectId",t.employee_id "workerId",worker.name "workerName",worker.status "workerStatus",b.id "bindingId",v.id "valuationId" from work_submission_evidence s join work_submission_decisions d on d.submission_id=s.id and d.status='Approved' join timesheets t on t.id=s.timesheet_id and t.status='Approved' and t.organization_id=s.organization_id and t.legal_entity_id=s.legal_entity_id join employees worker on worker.id=t.employee_id join timesheet_entries entry on entry.timesheet_id=t.id and entry.billable and entry.hours>0 join lateral(select x from jsonb_array_elements(s.entries)x where x->>'entryId'=entry.id::text and x->>'kind'='governed') retained on true join commercial_project_bindings b on b.id=retained.x->>'bindingId' and b.project_id=entry.project_id and b.engagement_id=$3 and b.organization_id=s.organization_id and b.legal_entity_id=s.legal_entity_id and b.model='time_and_materials' left join commercial_tm_valuations v on v.entry_id=entry.id and v.organization_id=s.organization_id and v.legal_entity_id=s.legal_entity_id where s.organization_id=$1 and s.legal_entity_id=$2 and ${where} order by entry.work_date desc,entry.id limit 101`,
+          `select s.id "submissionId",d.id "decisionId",entry.id "entryId",entry.work_date::text "workDate",trim_scale(entry.hours)::text "hoursExact",entry.project_id "projectId",t.employee_id "workerId",worker.name "workerName",worker.status "workerStatus",b.id "bindingId",v.id "valuationId" from work_submission_evidence s join work_submission_decisions d on d.submission_id=s.id and d.status='Approved' join timesheets t on t.id=s.timesheet_id and t.status='Approved' and t.organization_id=s.organization_id and t.legal_entity_id=s.legal_entity_id join employees worker on worker.id=t.employee_id join timesheet_entries entry on entry.timesheet_id=t.id and entry.billable and entry.hours>0 join lateral(select x from jsonb_array_elements(s.entries)x where x->>'entryId'=entry.id::text and x->>'kind'='governed') retained on true join commercial_project_bindings b on b.id=retained.x->>'bindingId' and b.project_id=entry.project_id and b.engagement_id=$3 and b.organization_id=s.organization_id and b.legal_entity_id=s.legal_entity_id and b.model='time_and_materials' left join commercial_tm_valuations v on v.entry_id=entry.id and v.organization_id=s.organization_id and v.legal_entity_id=s.legal_entity_id where s.organization_id=$1 and s.legal_entity_id=$2 and ($4::date is null or entry.work_date<$4 or (entry.work_date=$4 and entry.id>$5::uuid)) and ${where} order by entry.work_date desc,entry.id limit $6`,
           params,
         )
       ).rows;
       return {
         ...(await envelope(c, r)),
         engagementId: q.engagementId,
-        sources: rows.slice(0, 100),
-        truncated: rows.length > 100,
+        sources: rows.slice(0, q.limit),
+        truncated: rows.length > q.limit,
       };
     }),
   );

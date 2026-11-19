@@ -294,6 +294,48 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await tm.getByRole('button', { name: 'Record explicit T&M policy', exact: true }).click();
         const policy = (await body(pw, 201)).policy;
         await tm.getByText(/Policy .* recorded/).waitFor();
+        // Put today's policy beyond the default history page using ordinary, prospective writes.
+        let latest = policy.id;
+        const policyOwnerKey = await readApprovalOwner(request, ids.manager);
+        for (let day = 1; day <= 20; day++) {
+          latest = ok(
+            await request(base + '/policies', {
+              method: 'POST',
+              identity: ids.manager,
+              body: {
+                expectedOwnerKey: policyOwnerKey,
+                expectedLatestId: latest,
+                requestId: randomUUID(),
+                engagementId: roots.engagement.id,
+                effectiveFrom: shift(fx.today, day),
+                definition: policy.definition,
+                reason: 'Synthetic future valuation policy',
+              },
+            }),
+            201,
+          ).policy.id;
+        }
+        // Use one real database row per page to exercise a same-date boundary.
+        await p.route('**/api/v1/governed-tm-valuations/sources?*', async (route) => {
+          const url = new URL(route.request().url());
+          url.searchParams.set('limit', '1');
+          await route.continue({ url: url.href });
+        });
+        const loadHistory = async () => {
+          let next = reply(base + '/sources');
+          await tm.getByRole('button', { name: 'Load more approved work' }).click();
+          const last = await body(next);
+          assert.equal(last.sources.length, 1);
+          assert.equal(last.truncated, false);
+          next = reply(base + '/policies');
+          await tm.getByRole('button', { name: 'Load older T&M policies' }).click();
+          assert.deepEqual(
+            (await body(next)).policies.map((x) => x.id),
+            [policy.id],
+          );
+          assert.equal(await tm.getByRole('button', { name: 'Load more approved work' }).count(), 0);
+          return last.sources[0];
+        };
         const submitted = await submitStagedWork(request, ids.reader, fx.today, {
             entries: [
               {
@@ -348,7 +390,26 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         sw = reply(base + '/sources');
         await tm.getByRole('button', { name: 'Load T&M policy and approved work', exact: true }).click();
         await body(pw);
-        assert.equal((await body(sw)).sources.length, 2);
+        const first = await body(sw);
+        assert.equal(first.truncated, true);
+        const last = await loadHistory();
+        assert.deepEqual([first.sources[0].entryId, last.entryId], [entry.entryId, second.entryId].sort());
+        const query = '?engagementId=' + encodeURIComponent(roots.engagement.id);
+        assert.equal((await request(base + '/sources' + query + '&afterDate=' + fx.today)).status, 400);
+        assert.equal((await request(base + '/policies' + query + '&beforeSequence=0')).status, 400);
+        const continuation = new URLSearchParams({
+          engagementId: roots.engagement.id,
+          afterDate: first.sources[0].workDate,
+          afterEntryId: first.sources[0].entryId,
+        });
+        assert.equal(
+          (await request(base + '/sources?' + continuation, { identity: ids.reader })).status,
+          403,
+        );
+        assert.equal(
+          (await request(base + '/policies' + query + '&beforeSequence=2', { identity: ids.reader })).status,
+          403,
+        );
         await tm.getByLabel('T&M approved work', { exact: true }).selectOption(entry.entryId);
         await tm.getByLabel('Retained T&M policy', { exact: true }).selectOption(policy.id);
         const rateWait = (kind) =>
@@ -403,6 +464,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await tm.getByRole('button', { name: 'Load T&M policy and approved work', exact: true }).click();
         await body(pw);
         await body(sw);
+        await loadHistory();
         await tm.getByLabel('T&M approved work', { exact: true }).selectOption(entry.entryId);
         vw = reply(base + '/valuations/' + accepted.valuation.id);
         await tm.getByRole('button', { name: 'Inspect retained T&M snapshot', exact: true }).click();
