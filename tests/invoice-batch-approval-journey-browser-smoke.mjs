@@ -969,7 +969,16 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                 },
               })
             ).status,
-            409,
+            403,
+          );
+          assert.equal(
+            (
+              await pool.query(
+                'select count(*)::int n from invoice_batch_approval_instances where batch_id=$1',
+                [draft.batch.id],
+              )
+            ).rows[0].n,
+            0,
           );
           await ui.getByLabel('I inspected the retained lineage and control total').check();
           await ui.getByLabel('Invoice batch review policy').selectOption(policy.id);
