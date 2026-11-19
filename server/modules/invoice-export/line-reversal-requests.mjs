@@ -1,3 +1,4 @@
+import { registerReversalReview } from './reversal-review.mjs';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { workApprovalOwner } from '../approvals/work-approval-service.mjs';
@@ -30,6 +31,7 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
     const existing = (await c.query('select ' + fields + ' from invoice_line_reversal_requests where line_id=$1', [r.params.lineId])).rows[0] ?? null;
     return { row, artifact, existing };
   };
+  registerReversalReview(router, { path, handle, inspect, envelope, audit });
   router.get(path, handle(false, async (c, r) => {
     const { existing } = await inspect(c, r, false);
     return { ...(await envelope(c, r)), request: existing };

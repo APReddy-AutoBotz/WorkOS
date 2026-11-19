@@ -783,6 +783,12 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const retainedReversal = ok(await request(reversalPath)).request;
         assert.equal(retainedReversal.reason, command.reason);
         assert.deepEqual(ok(await request(reversalPath + '/review-route')).route, { status: 'NO_REVERSAL_POLICY' });
+        const noPolicyReview = await request(reversalPath + '/review', {
+          method: 'POST', body: { expectedOwnerKey: inspection.ownerKey, requestId: retainedReversal.id, policyId: invoicePolicy.id, inspectedState: 'Billed/Confirmed' },
+        });
+        assert.equal(noPolicyReview.status, 409);
+        assert.equal(ok(await request(reversalPath + '/review')).review, null);
+
         const validReviewPolicy = async definition => (await pool.query('select valid_invoice_batch_approval_policy($1::jsonb) valid', [JSON.stringify(definition)])).rows[0].valid;
         assert.equal(await validReviewPolicy({ ...invoicePolicyDefinition, fullLineReversals: true }), true);
         assert.equal(await validReviewPolicy({ ...invoicePolicyDefinition, fullLineReversals: 'true' }), false);
