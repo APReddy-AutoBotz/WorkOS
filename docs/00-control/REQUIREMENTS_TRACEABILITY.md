@@ -610,3 +610,5 @@ WOS-RPT-006 and WOS-RPT-007 — Portfolio CSV export binds the inspected scope, 
 WOS-APR-007, WOS-TIM-009 and WOS-COM-006 — New T&M valuations require financial-period authority for the approved work date. PostgreSQL and browser tests cover closed periods, missing Weekly authority, concurrent period creation, retained receipts and eligible post-approval valuation. Protected reopening remains open.
 
 WOS-APR-007 and WOS-TIM-009 — Governance can close a reporting period financially and reopen it to Approval Closed. The T&M PostgreSQL and browser journeys cover explicit authority, reason, exact revision, concurrent and stale requests, audit rollback and resumed valuation of approved work. Generic work and invoice reopening remain separate.
+
+WOS-APR-007 and WOS-TIM-009 — Create an editable period before financial lock or permanent closure. Both transitions require a current, scoped inspection and an audited reason. Closed is terminal. The T&M PostgreSQL and browser journeys exercise the financial transition API and permanent closure.

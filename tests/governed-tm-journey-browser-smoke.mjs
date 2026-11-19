@@ -458,7 +458,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await controls.getByLabel('Financial transition reason').fill('Synthetic correction window');
         await controls.getByRole('button', { name: 'Reopen for financial valuation' }).click();
         await controls.getByText(/is now Approval Closed/).waitFor();
-        await admin.close();
+
 
         pw = reply(base + '/policies');
         sw = reply(base + '/sources');
@@ -820,6 +820,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           ok(await request(memberPath(frozen), { identity: ids.reader })).members[0].entryId,
           entry.entryId,
         );
+        await controls.getByLabel('Financial transition reason').fill('Synthetic final close');
+        await controls.getByRole('button', { name: 'Permanently close period' }).click();
+        await controls.getByText(/is now Closed/).waitFor();
+        assert.equal(await controls.getByLabel('Financial transition reason').count(), 0);
+        await admin.close();
         assert.deepEqual(errors, []);
         assert.deepEqual(external, []);
         await ctx.close();

@@ -604,9 +604,20 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       assert.deepEqual(attempts.map((x) => x.status).sort(), [200, 409], JSON.stringify(attempts));
       const reopened = attempts.find((x) => x.status === 200).body.period;
       assert.equal(reopened.status, 'Approval Closed');
+      const setup = (status, code = monthly.code) => request('/api/v1/organization-setup/reporting-periods', {
+        method: 'POST',
+        body: { code, name: monthly.name, frequency: monthly.frequency, startsOn: monthly.startsOn, endsOn: monthly.endsOn, status },
+      });
+      for (const status of ['Closed', 'Financially Locked']) {
+        for (const code of [monthly.code, 'synthetic-new-period']) {
+          const rejected = await setup(status, code);
+          assert.equal(rejected.status, 409);
+          assert.equal(rejected.body.error.code, 'REPORTING_PERIOD_REVIEW_REQUIRED', JSON.stringify(rejected.body));
+        }
+      }
       const relocked = ok(await transition(reopened.revision, 'lock')).period;
       assert.equal((await transition(monthly.revision)).status, 409);
-      ok(await transition(relocked.revision));
+      const finalOpen = ok(await transition(relocked.revision)).period;
       assert.equal(
         (
           await pool.query(
@@ -778,6 +789,10 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ),
         (e) => e.code === 'CTM01',
       );
+      assert.equal((await transition(monthly.revision, 'close')).status, 409);
+      assert.equal(ok(await transition(finalOpen.revision, 'close')).period.status, 'Closed');
+      assert.equal((await transition(finalOpen.revision + 1)).status, 409);
+      assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and action='Close Financial Period' and reason='Synthetic finance review'", [monthly.id])).rows[0].n, 1);
       assert(tied.id);
       console.log(
         'Real governed work approval to adopted billing/cost sources and exact T&M snapshot passed.',
