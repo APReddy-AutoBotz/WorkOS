@@ -270,6 +270,53 @@ const sourcePage = async (engagementId: string, c: RateContext | null, after?: T
   return p.data;
 };
 export const governedTmValuations = {
+  periodSummary: async (engagementId: string, start: string, end: string, c: RateContext | null) => {
+    if (
+      !id.safeParse(engagementId).success ||
+      !date.safeParse(start).success ||
+      !date.safeParse(end).success ||
+      start > end
+    )
+      return bad();
+    const query = new URLSearchParams({ engagementId, start, end });
+    const raw = await call('GET', '/period-summary?' + query, c);
+    const unsigned = z.string().regex(/^\d+(?:\.\d+)?$/);
+    const row = z
+      .object({
+        currency: z.string().regex(/^[A-Z]{3}$/),
+        entryCount: z.string().regex(/^[1-9]\d*$/),
+        hours: unsigned,
+        billable: unsigned,
+        cost: unsigned,
+        margin: z.string().regex(/^-?\d+(?:\.\d+)?$/),
+        marginPercent: z
+          .string()
+          .regex(/^-?\d+\.\d{2}$/)
+          .nullable(),
+      })
+      .strict();
+    const parsed = z
+      .object({
+        ...envelope,
+        version: z.literal('tm-period-margin/1'),
+        engagementId: id,
+        start: date,
+        end: date,
+        totals: z.array(row),
+      })
+      .strict()
+      .safeParse(raw);
+    if (
+      !parsed.success ||
+      parsed.data.engagementId !== engagementId ||
+      parsed.data.start !== start ||
+      parsed.data.end !== end ||
+      new Set(parsed.data.totals.map((x) => x.currency)).size !== parsed.data.totals.length ||
+      parsed.data.totals.some((x) => (x.marginPercent === null) !== !/[1-9]/.test(x.billable))
+    )
+      return bad();
+    return parsed.data;
+  },
   sourcePage,
   policyPage,
   load: async (engagementId: string, c: RateContext | null) => {
