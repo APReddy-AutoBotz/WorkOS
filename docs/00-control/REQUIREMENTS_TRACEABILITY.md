@@ -597,4 +597,6 @@ WOS-COM-002/003/011 — Snapshot inspection reads effective periods, binding and
 
 WOS-COM-003/004/011 — T&M calculation evidence presents the approved quantity, hourly rates, exact products and rounded billable and cost amounts, gross margin arithmetic, policy version, calculation version, actor and timestamp. The real browser journey verifies receipt recovery and later inspection with a different prospective rounding policy.
 
-WOS-COM-011, WOS-COM-002 and WOS-COM-004 — The T&M period report totals retained valuation snapshots by currency. The governed T&M journey verifies the weighted margin across a rate change, date boundaries and restricted access. Frozen period-close records remain open.
+WOS-COM-011, WOS-COM-002 and WOS-COM-004 — The T&M period report totals retained valuation snapshots by currency. The governed T&M journey verifies the weighted margin across a rate change, date boundaries and restricted access. Formal period locking is tracked separately.
+
+WOS-COM-011 and WOS-COM-015 — Numbered T&M period snapshots retain exact membership and protected historical totals. The governed T&M browser journey verifies replay, concurrent capture, immutable history across a rate change and current worker-scope restrictions.

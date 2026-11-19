@@ -32,4 +32,10 @@ After calculation, original receipt recovery or historical inspection, the works
 
 ## Period gross margin
 
-Select an engagement and inclusive work dates, then load the period margin. Each currency row totals the retained rounded values of entries visible under the current workforce and confidential cost permissions. Gross-margin percentage divides total margin by total billable value and rounds to two decimals, with ties away from zero. A zero denominator displays as undefined. Reload to include newly retained entries. Billing eligibility remains a separate decision. The report performs no writes and requires no migration. Reverting the application removes the report. Frozen period-close records and portfolio reporting remain open.
+Select an engagement and inclusive work dates, then load the period margin. Each currency row totals the retained rounded values of entries visible under the current workforce and confidential cost permissions. Gross-margin percentage divides total margin by total billable value and rounds to two decimals, with ties away from zero. A zero denominator displays as undefined. Reload to include newly retained entries. Billing eligibility remains a separate decision. The report performs no writes and requires no migration. Reverting the application removes the report. For retained figures, use the numbered period versions below.
+
+## Retained period versions
+
+Load the period and choose **Retain this period** to save the inspected membership and native-currency totals. Creation requires valuation creation, cost access and visibility of all contributing workers. WorkOS records the scope, actor, calculation version, exact valuation IDs, worker IDs and audit event. Repeating the same selection returns its existing version. Later work adds a version when an authorized user inspects and retains the updated report. Open a version by number or leave the field empty for the latest. Current permissions and access to every retained worker govern historical reads.
+
+Migration `065s_wos06_tm_period_versions` adds append-only storage without grants or backfill. Roll back the application while preserving the table and its history. Period locking, non-T&M amounts and portfolio reporting remain open.

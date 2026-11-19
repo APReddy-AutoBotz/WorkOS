@@ -77,6 +77,7 @@ const TmEngagement = ({
     [rates, setRates] = useState<TmRates | null>(null),
     [periodStart, setPeriodStart] = useState(''),
     [periodEnd, setPeriodEnd] = useState(''),
+    [periodVersion, setPeriodVersion] = useState(''),
     [summary, setSummary] = useState<Awaited<ReturnType<typeof governedTmValuations.periodSummary>> | null>(
       null,
     ),
@@ -119,6 +120,7 @@ const TmEngagement = ({
     setSummary(null);
     setPeriodStart('');
     setPeriodEnd('');
+    setPeriodVersion('');
     setSnapshot(null);
     setPending(null);
     setEffective('');
@@ -446,11 +448,65 @@ const TmEngagement = ({
         >
           Load period margin
         </button>
+        <label>
+          Retained period version{' '}
+          <input
+            type="number"
+            min="1"
+            placeholder="Latest"
+            value={periodVersion}
+            onChange={(e) => setPeriodVersion(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={
+            !periodStart ||
+            !periodEnd ||
+            periodStart > periodEnd ||
+            (!!periodVersion && !/^[1-9]\d*$/.test(periodVersion))
+          }
+          onClick={() =>
+            void run(async (c) => {
+              setSummary(null);
+              setSummary(
+                await governedTmValuations.periodSummary(
+                  engagementId,
+                  periodStart,
+                  periodEnd,
+                  c,
+                  periodVersion ? { sequence: Number(periodVersion) } : {},
+                ),
+              );
+            })
+          }
+        >
+          Open retained period
+        </button>
+        {canCreate && summary && !summary.id && summary.totals.length > 0 && (
+          <button
+            type="button"
+            onClick={() =>
+              void run(async (c) => {
+                const key = summary.membershipKey;
+                setSummary(null);
+                setSummary(
+                  await governedTmValuations.periodSummary(engagementId, periodStart, periodEnd, c, {
+                    retainKey: key,
+                  }),
+                );
+              })
+            }
+          >
+            Retain this period
+          </button>
+        )}
       </fieldset>
       {summary && (
         <section aria-label="Period margin results">
           <h3>
-            Period margin · {summary.start} through {summary.end}
+            {summary.sequence ? 'Retained version ' + summary.sequence + ' · ' : ''}Period margin ·{' '}
+            {summary.start} through {summary.end}
           </h3>
           {!summary.totals.length ? (
             <p>No visible valuation snapshots for this period.</p>
