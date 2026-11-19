@@ -337,6 +337,12 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await ui.getByLabel('Invoice draft', { exact: true }).selectOption(uiDraft.batch.id);
         await ui.getByRole('button', { name: 'Inspect invoice draft' }).click();
         await ui.getByText(/Retained lines 1/).waitFor();
+        await ui.getByText('Supporting evidence', { exact: true }).click();
+        for (const assertion of evidence) {
+          const link = ui.getByRole('link', { name: assertion.reference, exact: true });
+          assert.equal(await link.getAttribute('href'), assertion.url);
+          assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
+        }
         await ui.getByLabel('Invoice cancellation reason').fill('Synthetic browser cancellation');
         await ui.getByRole('button', { name: 'Cancel invoice Draft' }).click();
         await ui

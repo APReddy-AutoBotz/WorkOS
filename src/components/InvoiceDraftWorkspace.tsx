@@ -526,6 +526,38 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                           ? `milestone ${x.evidence.milestoneId}`
                           : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
+                        <details>
+                          <summary>Supporting evidence</summary>
+                          {'sourceType' in x ? (
+                            <>
+                              <p>Milestone acceptance decision {x.evidence.decisionId}</p>
+                              <ul>
+                                {x.evidence.evidence.map((assertion) => (
+                                  <li key={assertion.kind}>
+                                    {assertion.kind === 'CLIENT_EVIDENCE_ASSERTION'
+                                      ? 'Client evidence'
+                                      : 'Internal evidence'}{' '}
+                                    ·{' '}
+                                    <a href={assertion.url} target="_blank" rel="noopener noreferrer">
+                                      {assertion.reference}
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          ) : (
+                            <>
+                              <p>
+                                Work date {x.evidence.workDate} · Project {x.evidence.projectId}
+                              </p>
+                              <p>
+                                Work entry {x.evidence.entryId} · Submission {x.evidence.submissionId}
+                              </p>
+                              <p>Work approval decision {x.evidence.decisionId}</p>
+                              <p>Adopted billing rate {x.evidence.billingAdoptionId}</p>
+                            </>
+                          )}
+                        </details>
                       </li>
                     ))}
                   </ul>
