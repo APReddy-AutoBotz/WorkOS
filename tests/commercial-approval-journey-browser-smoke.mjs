@@ -247,12 +247,36 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         waitPolicy = reply('/api/v1/commercial-candidate-approvals/policies', 'POST');
         await review.getByRole('button', { name: 'Record approval policy', exact: true }).click();
         const configured = await body(waitPolicy, 201);
+        const schedulePolicies = async (saved) => {
+          let latest = saved.policy.id;
+          for (let day = 1; day <= 11; day++) {
+            latest = ok(
+              await request('/api/v1/commercial-candidate-approvals/policies', {
+                method: 'POST',
+                identity: ids.manager,
+                body: {
+                  expectedOwnerKey: saved.ownerKey,
+                  requestId: crypto.randomUUID(),
+                  expectedLatestId: latest,
+                  effectiveFrom: shift(fx.today, day),
+                  definition: saved.policy.definition,
+                  reason: 'Synthetic scheduled candidate policy',
+                },
+              }),
+            ).policy.id;
+          }
+        };
+        const assertEffective = (page, id) => {
+          assert.equal(page.effectivePolicy.id, id);
+          assert.ok(page.truncated && !page.policies.some((p) => p.id === id));
+        };
+        await schedulePolicies(configured);
         await review
           .getByText('Operation recorded. Reload the current source before another action.')
           .waitFor();
         waitPolicy = reply('/api/v1/commercial-candidate-approvals/policies');
         await review.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
-        await body(waitPolicy);
+        assertEffective(await body(waitPolicy), configured.policy.id);
         await review.getByLabel('Approval policy', { exact: true }).selectOption(configured.policy.id);
         await review
           .getByLabel('Approval request reason', { exact: true })
@@ -489,10 +513,19 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         cp = reply('/api/v1/commercial-candidate-approvals/policies', 'POST');
         await ca.getByRole('button', { name: 'Record approval policy', exact: true }).click();
         const costPolicy = await body(cp, 201);
+        await schedulePolicies(costPolicy);
+        const readPolicy = (candidateId, identity) =>
+          request(
+            '/api/v1/commercial-candidate-approvals/policies?' +
+              new URLSearchParams({ candidateId, includeEffective: 'true' }),
+            { identity },
+          );
+        assert.equal((await readPolicy(configured.policy.candidateId, ids.denied)).status, 200);
+        assert.equal((await readPolicy(costPolicy.policy.candidateId, ids.denied)).status, 403);
         await ca.getByText('Operation recorded. Reload the current source before another action.').waitFor();
         cp = reply('/api/v1/commercial-candidate-approvals/policies');
         await ca.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
-        await body(cp);
+        assertEffective(await body(cp), costPolicy.policy.id);
         await ca.getByLabel('Approval policy', { exact: true }).selectOption(costPolicy.policy.id);
         await ca.getByLabel('Approval request reason', { exact: true }).fill('Synthetic cost request');
         cp = reply('/api/v1/commercial-candidate-approvals/requests', 'POST');

@@ -276,11 +276,17 @@ export const commercialCandidateApprovals = {
     if (!uuid.safeParse(candidateId).success) return bad();
     const q = '?' + new URLSearchParams({ candidateId });
     const [a, b] = await Promise.all([
-      call('GET', '/policies' + q, c, k, 'read'),
+      call('GET', '/policies' + q + '&includeEffective=true', c, k, 'read'),
       call('GET', '/requests' + q, c, k, 'read'),
     ]);
     const p = z
-        .object({ ...envelope, candidateId: uuid, policies: z.array(policy).max(10), truncated: z.boolean() })
+        .object({
+          ...envelope,
+          candidateId: uuid,
+          policies: z.array(policy).max(10),
+          truncated: z.boolean(),
+          effectivePolicy: policy.nullable(),
+        })
         .strict()
         .safeParse(a),
       r = z
@@ -298,6 +304,10 @@ export const commercialCandidateApprovals = {
       p.data.actorUserId !== r.data.actorUserId ||
       p.data.candidateId !== candidateId ||
       r.data.candidateId !== candidateId ||
+      (p.data.effectivePolicy &&
+        (p.data.effectivePolicy.candidateId !== candidateId ||
+          (p.data.effectivePolicy.definition as { kind: string }).kind !== k ||
+          p.data.effectivePolicy.effectiveFrom > p.data.serverDate)) ||
       p.data.policies.some(
         (x) => x.candidateId !== candidateId || (x.definition as { kind: string }).kind !== k,
       )
@@ -305,6 +315,7 @@ export const commercialCandidateApprovals = {
       return bad();
     return {
       policies: p.data.policies,
+      effectivePolicy: p.data.effectivePolicy,
       approvals: r.data.approvals.map((x) => checked(x, candidateId, k)),
       truncated: p.data.truncated || r.data.truncated,
     };

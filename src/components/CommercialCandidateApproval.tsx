@@ -26,6 +26,7 @@ export const CommercialCandidateApproval = ({
 }) => {
   const [owner, setOwner] = useState<Owner | undefined>(),
     [policies, setPolicies] = useState<CommercialPolicy[]>([]),
+    [effectivePolicy, setEffectivePolicy] = useState<CommercialPolicy | null>(null),
     [approvals, setApprovals] = useState<CommercialApproval[]>([]),
     [truncated, setTruncated] = useState(false),
     [selected, setSelected] = useState(''),
@@ -53,6 +54,7 @@ export const CommercialCandidateApproval = ({
     inFlight.current = false;
     setOwner(undefined);
     setPolicies([]);
+    setEffectivePolicy(null);
     setApprovals([]);
     setSelected('');
     setPolicyId('');
@@ -127,6 +129,7 @@ export const CommercialCandidateApproval = ({
       ]);
       setOwner(o.current);
       setPolicies(v.policies);
+      setEffectivePolicy(v.effectivePolicy);
       setApprovals(v.approvals);
       setTruncated(v.truncated);
       setSelected('');
@@ -141,6 +144,7 @@ export const CommercialCandidateApproval = ({
         setPending(null);
         setOwner(undefined);
         setPolicies([]);
+        setEffectivePolicy(null);
         setApprovals([]);
         setSelected('');
         setPolicyId('');
@@ -150,6 +154,7 @@ export const CommercialCandidateApproval = ({
           setPending(null);
           setOwner(undefined);
           setPolicies([]);
+          setEffectivePolicy(null);
           setApprovals([]);
           setSelected('');
           setNotice('The operation was refused. Reload before a deliberate new request.');
@@ -166,6 +171,7 @@ export const CommercialCandidateApproval = ({
       setPending(null);
       setOwner(undefined);
       setPolicies([]);
+      setEffectivePolicy(null);
       setApprovals([]);
       setSelected('');
       setNotice('The original request was confirmed by read-only receipt. Reload.');
@@ -212,7 +218,8 @@ export const CommercialCandidateApproval = ({
       });
     };
   const makeRequest = () => {
-    if (!owner?.eligible || !policyId || requestReason.trim().length < 3) return;
+    if (!owner?.eligible || !policyId || effectivePolicy?.id !== policyId || requestReason.trim().length < 3)
+      return;
     perform({
       type: 'request',
       data: {
@@ -288,7 +295,19 @@ export const CommercialCandidateApproval = ({
               : 'No explicit owner is assigned.'}{' '}
             The approval path also requires the existing inbox access.
           </p>
-          {truncated && <p>Only the latest ten policies and requests are shown.</p>}
+          {truncated && <p>Recent history shows up to ten policies and ten requests.</p>}
+          {policies.length > 0 && (
+            <details>
+              <summary>Recent approval policies</summary>
+              <ul>
+                {policies.map((p) => (
+                  <li key={p.id}>
+                    Version {p.sequence} · effective {p.effectiveFrom} UTC
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {canManage && (
             <fieldset disabled={busy || !!pending}>
               <legend>Configure named stages</legend>
@@ -415,12 +434,16 @@ export const CommercialCandidateApproval = ({
                   value={policyId}
                   onChange={(e) => setPolicyId(e.target.value)}
                 >
-                  <option value="">Select an explicit policy</option>
-                  {policies.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      Version {p.sequence} · effective {p.effectiveFrom}
+                  <option value="">
+                    {effectivePolicy
+                      ? 'Select the effective policy'
+                      : 'No approval policy is effective today'}
+                  </option>
+                  {effectivePolicy && (
+                    <option value={effectivePolicy.id}>
+                      Version {effectivePolicy.sequence} · effective {effectivePolicy.effectiveFrom}
                     </option>
-                  ))}
+                  )}
                 </select>
               </label>
               <label>
@@ -434,7 +457,12 @@ export const CommercialCandidateApproval = ({
               <button
                 type="button"
                 onClick={makeRequest}
-                disabled={!owner?.eligible || !policyId || requestReason.trim().length < 3}
+                disabled={
+                  !owner?.eligible ||
+                  !policyId ||
+                  effectivePolicy?.id !== policyId ||
+                  requestReason.trim().length < 3
+                }
               >
                 Request candidate approval
               </button>

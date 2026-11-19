@@ -423,6 +423,22 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal(finalDecision.status(), 201, await finalDecision.text());
         assert.equal((await finalDecision.json()).approval.state.status, 'Approved');
         await fc.close();
+        // A prospective routing change preserves the approved decision for adoption today.
+        const scheduled = ok(
+          await request('/api/v1/commercial-candidate-approvals/policies', {
+            method: 'POST',
+            identity: ids.manager,
+            body: {
+              expectedOwnerKey: configured.ownerKey,
+              requestId: crypto.randomUUID(),
+              expectedLatestId: configured.policy.id,
+              effectiveFrom: shift(fx.today, 1),
+              definition: configured.policy.definition,
+              reason: 'Synthetic future routing change',
+            },
+          }),
+        );
+        assert.equal(scheduled.policy.previousId, configured.policy.id);
         await billing.getByRole('button', { name: 'Inspect adoption for version 1', exact: true }).click();
         const adoption = billing.getByRole('region', { name: 'Adopt approved source', exact: true });
         let aw = reply('/api/v1/approved-rate-sources/candidates/' + receipt.candidate.id);
