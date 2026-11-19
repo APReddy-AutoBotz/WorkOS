@@ -18,5 +18,10 @@ export const seedDirectory=async pool=>{
   await pool.query('insert into user_roles(user_id,role_id)select $1,id from roles where name=$2 on conflict do nothing',[ids.reader.id,role]);ids[name]={...ids.reader,role,countryDirectorId:'director-commercial'};
  }
  await pool.query(`insert into project_allocations(id,employee_id,project_id,percentage,start_date,end_date,billable,status,organization_id,legal_entity_id)values('synthetic-directory-pm-allocation',$1,$2,10,$3,$4,true,'Active',$5,$6)`,[children[0],f.projectId,fx.monday,fx.dates[4],f.organizationId,f.legalEntityId]);
+ await pool.query(`insert into organization_catalog_items(id,organization_id,legal_entity_id,catalog_type,code,name,effective_from)
+   values('directory-kind',$1,$2,'worker_type','SYN-KIND','Synthetic visiting fellow',current_date-2)`,[f.organizationId,f.legalEntityId]);
+ await pool.query(`insert into worker_profiles(employee_id,organization_id,legal_entity_id,worker_type_id,effective_from)
+   values($1,$2,$3,'directory-kind',current_date-2) on conflict(employee_id) do update set worker_type_id=excluded.worker_type_id,
+   effective_from=excluded.effective_from,effective_to=null`,[f.ownerId,f.organizationId,f.legalEntityId]);
  return{...fx,root,children,grandchild,unrelated,other};
 };
