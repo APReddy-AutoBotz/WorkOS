@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { InvoiceLineReversal } from './InvoiceLineReversal';
 import { ApiClientError } from '../services/apiClient';
 import {
   captureRateContext,
@@ -406,6 +407,11 @@ const InvoiceCsvEngagement = ({
                   Retrieve retained invoice CSV
                 </button>
               )}
+              {verified && source.artifactId === verified.artifact.id && source.id === verified.artifact.batchId &&
+                (source.state === 'Exported' || source.state === 'Billed/Confirmed') && hasRatePermission('commercial.invoice_drafts.prepare') && (
+                  <InvoiceLineReversal key={source.id + source.state} source={source} state={source.state} artifact={verified.artifact}
+                    run={run} disabled={busy || !!pending} />
+                )}
               {canCreate && source.state === 'Approved' && (
                 <fieldset disabled={busy || !!pending}>
                   <legend>Accept approved CSV artifact</legend>

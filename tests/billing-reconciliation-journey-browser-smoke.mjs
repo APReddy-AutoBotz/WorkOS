@@ -1234,6 +1234,14 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await exportUi.getByRole('button', { name: 'Retrieve retained invoice CSV' }).click();
           assert.equal((await body(ew)).artifact.sha256, artifact.sha256);
           await exportUi.getByText('The retained artifact bytes and checksum were verified.').waitFor();
+          const lineSelect = exportUi.getByLabel('Exported line to review');
+          await lineSelect.selectOption({ index: 1 });
+          await exportUi.getByRole('button', { name: 'Check reversal request' }).click();
+          await exportUi.getByLabel('Full reversal reason').fill('Synthetic exported line needs full reversal');
+          await exportUi.getByRole('button', { name: 'Request full line reversal' }).click();
+          await exportUi.getByText(/Reversal requested.*Synthetic exported line needs full reversal/).waitFor();
+          await exportUi.getByRole('button', { name: 'Check reversal request' }).click();
+          await exportUi.getByText(/Reversal requested.*Synthetic exported line needs full reversal/).waitFor();
           const redownload = requester.p.waitForEvent('download');
           await exportUi.getByRole('button', { name: 'Download verified invoice CSV' }).click();
           assert.deepEqual(

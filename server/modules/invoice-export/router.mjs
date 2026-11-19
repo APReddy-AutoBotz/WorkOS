@@ -1,3 +1,4 @@
+import { registerLineReversalRequests } from './line-reversal-requests.mjs';
 import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { loadMilestoneExportBatch } from './milestone-batch.mjs';
 import { milestoneInvoiceCsvArtifact, MILESTONE_INVOICE_CSV_SCHEMA } from './milestone-csv.mjs';
@@ -107,6 +108,7 @@ export const createInvoiceCsvRouter = (o) => {
         'commercial.invoice_export.view',
         'employees.view',
         'notifications.view',
+        ...(kind === 'reversal' ? ['commercial.invoice_drafts.prepare'] : []),
         ...(kind === 'create' ? ['commercial.invoice_export.create'] : []),
       ].sort(),
       held = await c.query(
@@ -214,6 +216,7 @@ export const createInvoiceCsvRouter = (o) => {
       reason: 'Scoped invoice-ready CSV operation.',
       details: 'No cost, ledger posting or provider delivery.',
     });
+  registerLineReversalRequests(router, { handle, authorize, batch, envelope, audit: o.audit });
   router.get(
     '/batches/:id',
     handle(false, async (c, r) => {
