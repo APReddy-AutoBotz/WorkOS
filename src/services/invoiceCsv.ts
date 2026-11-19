@@ -476,10 +476,23 @@ const creditReceipt = z.object({eventId:uuid,itemId:uuid,eligibleOn:date,currenc
 export type ReversalCredit = {source:z.infer<typeof creditSource>;receipt:z.infer<typeof creditReceipt>|null;eligibleOn:string};
 const issuedCredit = z.object({
   itemId:uuid, eventId:uuid, eligibleOn:date, currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount,
-  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid,
+  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(),
 }).strict();
 export type IssuedCredit = z.infer<typeof issuedCredit>;
 export const invoiceCsv = {
+  correctionDraft: async (originalId:string, requestId:string, why:string, selection:string[]|string, ctx:RateContext) => {
+    const cancelling=typeof selection==='string';
+    const body=cancelling?{batchId:selection}:{itemIds:selection};
+    const raw=await call('POST','/batches/'+originalId+'/correction-drafts'+(cancelling?'/cancel':''),ctx,'view',{requestId,reason:why,...body});
+    const parsed=z.object({...envelope,originalId:uuid,replayed:z.boolean(),receipt:z.object({
+      batchId:uuid,itemIds:z.array(uuid).min(1).max(50),currency:z.string().regex(/^[A-Z]{3}$/),total:creditAmount,state:z.enum(['Draft','Cancelled']),
+    }).strict()}).strict().safeParse(raw);
+    if(!parsed.success || parsed.data.originalId!==originalId) return bad();
+    const receipt=parsed.data.receipt;
+    if(cancelling ? (receipt.batchId!==selection || receipt.state!=='Cancelled') :
+      JSON.stringify(receipt.itemIds)!==JSON.stringify([...selection].sort())) return bad();
+    return receipt;
+  },
   issuedCredits: async (engagementId:string, after:string|null, c:RateContext) => {
     const params = new URLSearchParams({engagementId});
     if(after) params.set('after',after);

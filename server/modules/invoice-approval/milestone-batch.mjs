@@ -4,7 +4,7 @@ const fail = (statusCode, code, message) => Object.assign(new Error(message), { 
 export const milestoneBatchModel = async (c, r, batchId) => {
   const row = (
     await c.query(
-      'select e.model from invoice_draft_batches b join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3',
+      `select e.model from invoice_draft_batches b join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3 and coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT') in ('TM_SNAPSHOT','MILESTONE_ACCEPTANCE')`,
       [batchId, r.organizationScope.organizationId, r.organizationScope.legalEntityId],
     )
   ).rows[0];

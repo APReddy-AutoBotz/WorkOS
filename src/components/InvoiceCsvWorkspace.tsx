@@ -1,3 +1,4 @@
+import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { useEffect, useRef, useState } from 'react';
 import { InvoiceLineReversal } from './InvoiceLineReversal';
 import { ApiClientError } from '../services/apiClient';
@@ -84,6 +85,8 @@ const InvoiceCsvEngagement = ({
     [notificationStatus, setNotificationStatus] = useState('');
   const [credits,setCredits] = useState<IssuedCredit[]|null>(null);
   const [creditCursor,setCreditCursor] = useState<string|null>(null);
+  const [chosen,setChosen] = useState<IssuedCredit[]>([]);
+  const [creditReason,setCreditReason] = useState('');
   const mounted = useRef(false),
     generation = useRef(0),
     inFlight = useRef(false),
@@ -96,6 +99,8 @@ const InvoiceCsvEngagement = ({
     ++generation.current;
     context.current = null;
     inFlight.current = false;
+    setChosen([]);
+    setCreditReason('');
     setCredits(null);
     setCreditCursor(null);
     setDrafts([]);
@@ -164,11 +169,28 @@ const InvoiceCsvEngagement = ({
     }
   };
   const loadCredits = (after:string|null) => void run(async c => {
+    setChosen([]);
+    setCreditReason('');
     setCredits(null);
     setCreditCursor(null);
     const result = await invoiceCsv.issuedCredits(engagementId,after,c);
     setCredits(result.credits);
     setCreditCursor(result.nextAfter);
+  });
+  const changeReservation = (originalId:string,selection:string[]|string) => void run(async c=>{
+    const why=creditReason.trim();
+    setChosen([]);
+    setCredits(null);
+    setCreditReason('');
+    setCreditCursor(null);
+    const receipt=await invoiceCsv.correctionDraft(originalId,crypto.randomUUID(),why,selection,c);
+    if(Array.isArray(selection) && (receipt.currency!==chosen[0]?.currency || receipt.total!== '-'+invoiceDraftTotal(chosen.map(x=>x.amount.slice(1))).amount)) {
+      throw Error('Correction total changed');
+    }
+    const result=await invoiceCsv.issuedCredits(engagementId,null,c);
+    setCredits(result.credits);
+    setCreditCursor(result.nextAfter);
+    setNotice('Correction batch '+receipt.batchId+' · '+receipt.state+' · '+receipt.currency+' '+receipt.total);
   });
   const load = () =>
     void run(async (c) => {
@@ -326,15 +348,26 @@ const InvoiceCsvEngagement = ({
         <button type="button" disabled={busy || !!pending} onClick={()=>loadCredits(null)}>View issued credits</button>
         {credits && (credits.length ? <table>
           <caption>Issued credits for this engagement</caption>
-          <thead><tr><th>Eligibility date</th><th>Credit</th><th>Original batch</th><th>Original line</th><th>Register item</th></tr></thead>
+          <thead><tr><th>Eligibility date</th><th>Credit</th><th>Original batch</th><th>Original line</th><th>Register item</th><th>Correction batch</th></tr></thead>
           <tbody>{credits.map(row=><tr key={row.itemId}><td>{row.eligibleOn}</td><td>{row.currency} {row.amount}</td>
             <td>{row.batchId}</td><td>{row.lineId}</td><td><span>{row.itemId}</span>
               <details><summary>Credit evidence</summary><dl>
                 <dt>Eligibility event</dt><dd>{row.eventId}</dd>
                 <dt>Original eligibility event</dt><dd>{row.originalEventId}</dd>
                 <dt>Final reversal decision</dt><dd>{row.decisionId}</dd>
-              </dl></details></td></tr>)}</tbody>
+              </dl></details></td><td>{row.correctionBatchId ? <>{row.correctionBatchId}
+              {hasRatePermission('commercial.invoice_drafts.cancel') && <button type="button" disabled={busy || !!pending || creditReason.trim().length<3}
+                onClick={()=>changeReservation(row.batchId,row.correctionBatchId!)}>Cancel correction batch</button>}</>
+              : hasRatePermission('commercial.invoice_drafts.own') ? <label><input type="checkbox" checked={chosen.some(x=>x.itemId===row.itemId)}
+                disabled={busy || !!pending || (chosen.length>0 && chosen[0].batchId!==row.batchId)}
+                onChange={e=>setChosen(e.target.checked?[...chosen,row]:chosen.filter(x=>x.itemId!==row.itemId))}/>Select credit {row.itemId}</label> : 'Available'}
+            </td></tr>)}</tbody>
         </table> : <p>No issued credits on this page.</p>)}
+        {!!credits?.length && (hasRatePermission('commercial.invoice_drafts.own') || hasRatePermission('commercial.invoice_drafts.cancel')) && <label>
+          Correction batch reason <input disabled={busy || !!pending} maxLength={1000} value={creditReason} onChange={e=>setCreditReason(e.target.value)}/></label>}
+        {chosen.length>0 && <p>Selected credits · {chosen[0].currency} -{invoiceDraftTotal(chosen.map(row=>row.amount.slice(1))).amount} · original batch {chosen[0].batchId}</p>}
+        {chosen.length>0 && <button type="button" disabled={busy || !!pending || creditReason.trim().length<3}
+          onClick={()=>changeReservation(chosen[0].batchId,chosen.map(row=>row.itemId))}>Reserve selected credits</button>}
         {creditCursor && <button type="button" disabled={busy || !!pending} onClick={()=>loadCredits(creditCursor)}>Next credit page</button>}
       </section>}
 

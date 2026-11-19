@@ -120,7 +120,7 @@ export const createInvoiceActionRouter = (o) => {
   const batch = async (c, r, batchId, lock = false) => {
     const b = (
       await c.query(
-        `select b.*,invoice_batch_governed_state(b.id) state,invoice_draft_owner_current(b) owner_current,invoice_batch_lineage_hash(b.id) lineage_hash,(select count(*)::int from invoice_draft_lines l where l.batch_id=b.id) line_count from invoice_draft_batches b where invoice_action_engagement_supported(b.organization_id,b.legal_entity_id,b.engagement_id) and b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
+        `select b.*,invoice_batch_governed_state(b.id) state,invoice_draft_owner_current(b) owner_current,invoice_batch_lineage_hash(b.id) lineage_hash,(select count(*)::int from invoice_draft_lines l where l.batch_id=b.id) line_count from invoice_draft_batches b where coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='TM_SNAPSHOT' and invoice_action_engagement_supported(b.organization_id,b.legal_entity_id,b.engagement_id) and b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
         [batchId, ...scope(r)],
       )
     ).rows[0];
