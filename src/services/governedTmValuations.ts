@@ -209,33 +209,64 @@ const call = async (
   return v.data;
 };
 export { captureRateContext };
+const policyPage = async (engagementId: string, c: RateContext | null, beforeSequence?: number) => {
+  const q = new URLSearchParams({ engagementId });
+  if (beforeSequence !== undefined) q.set('beforeSequence', String(beforeSequence));
+  const raw = await call('GET', '/policies?' + q, c);
+  const p = z
+    .object({ ...envelope, engagementId: id, policies: z.array(policy).max(20), truncated: z.boolean() })
+    .strict()
+    .safeParse(raw);
+  if (
+    !p.success ||
+    p.data.engagementId !== engagementId ||
+    p.data.policies.some(
+      (x, i, a) =>
+        x.engagementId !== engagementId || x.sequence >= (a[i - 1]?.sequence ?? beforeSequence ?? Infinity),
+    ) ||
+    (p.data.truncated && !p.data.policies.length)
+  )
+    return bad();
+  return p.data;
+};
+const sourcePage = async (engagementId: string, c: RateContext | null, after?: TmSource) => {
+  const q = new URLSearchParams({ engagementId });
+  if (after) {
+    q.set('afterDate', after.workDate);
+    q.set('afterEntryId', after.entryId);
+  }
+  const raw = await call('GET', '/sources?' + q, c);
+  const p = z
+    .object({ ...envelope, engagementId: id, sources: z.array(source).max(100), truncated: z.boolean() })
+    .strict()
+    .safeParse(raw);
+  if (
+    !p.success ||
+    p.data.engagementId !== engagementId ||
+    (p.data.truncated && !p.data.sources.length) ||
+    p.data.sources.some((x, i, a) => {
+      const prev = a[i - 1] ?? after;
+      return (
+        prev && (x.workDate > prev.workDate || (x.workDate === prev.workDate && x.entryId <= prev.entryId))
+      );
+    })
+  )
+    return bad();
+  return p.data;
+};
 export const governedTmValuations = {
+  sourcePage,
+  policyPage,
   load: async (engagementId: string, c: RateContext | null) => {
     if (!id.safeParse(engagementId).success) return bad();
-    const q = '?' + new URLSearchParams({ engagementId }),
-      [p, s] = await Promise.all([call('GET', '/policies' + q, c), call('GET', '/sources' + q, c)]),
-      a = z
-        .object({ ...envelope, engagementId: id, policies: z.array(policy).max(20), truncated: z.boolean() })
-        .strict()
-        .safeParse(p),
-      b = z
-        .object({ ...envelope, engagementId: id, sources: z.array(source).max(100), truncated: z.boolean() })
-        .strict()
-        .safeParse(s);
-    if (
-      !a.success ||
-      !b.success ||
-      a.data.engagementId !== engagementId ||
-      b.data.engagementId !== engagementId ||
-      a.data.actorUserId !== b.data.actorUserId ||
-      a.data.policies.some((x) => x.engagementId !== engagementId)
-    )
-      return bad();
+    const [p, s] = await Promise.all([policyPage(engagementId, c), sourcePage(engagementId, c)]);
+    if (p.actorUserId !== s.actorUserId) return bad();
     return {
-      policies: a.data.policies,
-      sources: b.data.sources,
-      truncated: a.data.truncated || b.data.truncated,
-      serverDate: a.data.serverDate,
+      policies: p.policies,
+      sources: s.sources,
+      morePolicies: p.truncated,
+      moreSources: s.truncated,
+      serverDate: p.serverDate,
     };
   },
   policy: async (d: TmPolicyCommand, c: RateContext | null, receipt = false) => {

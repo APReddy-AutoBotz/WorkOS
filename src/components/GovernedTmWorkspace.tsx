@@ -70,7 +70,8 @@ const TmEngagement = ({
 }) => {
   const [policies, setPolicies] = useState<TmPolicy[] | null>(null),
     [sources, setSources] = useState<TmSource[]>([]),
-    [truncated, setTruncated] = useState(false),
+    [morePolicies, setMorePolicies] = useState(false),
+    [moreSources, setMoreSources] = useState(false),
     [selectedSource, setSelectedSource] = useState(''),
     [selectedPolicy, setSelectedPolicy] = useState(''),
     [rates, setRates] = useState<TmRates | null>(null),
@@ -176,11 +177,30 @@ const TmEngagement = ({
       const v = await governedTmValuations.load(engagementId, c);
       setPolicies(v.policies);
       setSources(v.sources);
-      setTruncated(v.truncated);
+      setMorePolicies(v.morePolicies);
+      setMoreSources(v.moreSources);
       setSelectedSource('');
       setSelectedPolicy('');
       setRates(null);
       setShown(null);
+    });
+  const loadPolicies = () =>
+    void run(async (c) => {
+      if (!policies?.length || !morePolicies) return;
+      const page = await governedTmValuations.policyPage(
+        engagementId,
+        c,
+        policies[policies.length - 1].sequence,
+      );
+      setPolicies([...policies, ...page.policies]);
+      setMorePolicies(page.truncated);
+    });
+  const loadSources = () =>
+    void run(async (c) => {
+      if (!sources.length || !moreSources) return;
+      const page = await governedTmValuations.sourcePage(engagementId, c, sources[sources.length - 1]);
+      setSources([...sources, ...page.sources]);
+      setMoreSources(page.truncated);
     });
   const savePolicy = () => {
     if (
@@ -382,7 +402,16 @@ const TmEngagement = ({
       <button type="button" onClick={load} disabled={busy || !!pending}>
         Load T&M policy and approved work
       </button>
-      {truncated && <p>Only the first page of sources or recent policies is shown.</p>}
+      {policies && morePolicies && (
+        <button type="button" onClick={loadPolicies} disabled={busy || !!pending}>
+          Load older T&amp;M policies
+        </button>
+      )}
+      {policies && moreSources && (
+        <button type="button" onClick={loadSources} disabled={busy || !!pending}>
+          Load more approved work
+        </button>
+      )}
       {policies && (
         <>
           {canPolicy && (
