@@ -178,8 +178,8 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
   const inspect = () => {
     if (!selected) return;
     void run(async (c) => {
-      const x = await invoiceDrafts.inspect(selected, c);
-      setDetail({ batch: x.batch, lines: x.lines, total: x.total, cancellation: x.cancellation });
+      const x = await invoiceDrafts.inspect(selected, c, canCancel);
+      setDetail(x);
       setItemId('');
     });
   };
@@ -204,7 +204,12 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
           setBatches([]);
           setRegister([]);
           setDetail(null);
-          setNotice('The operation was refused. Reload before a deliberate new request.');
+          setCancelReason('');
+          setNotice(
+            e.code === 'INVOICE_CANCELLATION_STALE'
+              ? 'The review changed. Reload and inspect the batch before cancelling.'
+              : 'The operation was refused. Reload before a deliberate new request.',
+          );
           return;
         }
         throw e;
@@ -337,6 +342,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
   const cancel = () => {
     if (
       !detail ||
+      !detail.cancellationToken ||
       !['Draft', 'Under Review', 'Approved'].includes(detail.batch.state) ||
       cancelReason.trim().length < 3
     )
@@ -347,6 +353,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
       data: {
         requestId: crypto.randomUUID(),
         expectedLineCount: detail.total.lineCount,
+        expectedCancellationToken: detail.cancellationToken,
         reason: cancelReason.trim(),
       },
     });
