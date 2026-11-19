@@ -881,10 +881,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               ins = wait(p, approvalRoute + '/instances'),
               drafts = wait(p, route + '/batches');
             await ui.getByRole('button', { name: 'Load invoice batches and reviews' }).click();
-            await Promise.all([body(pol), body(ins), body(drafts)]);
+            const [selection] = await Promise.all([body(pol), body(ins), body(drafts)]);
+            return selection;
           };
           const requester = await open(ids.requester);
-          await load(requester);
+          assert.equal((await load(requester)).effectivePolicy, null);
           let { p, ui } = requester;
           await ui.getByLabel('Invoice approval policy effective from').fill(fx.today);
           await ui.getByLabel('Invoice approval policy locale').fill('en-US');
@@ -901,16 +902,84 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await ui.getByLabel('Invoice approval policy reason').fill('Synthetic policy');
           let policyWait = wait(p, approvalRoute + '/policies', 'POST');
           await ui.getByRole('button', { name: 'Record invoice approval policy' }).click();
-          const policy = (await body(policyWait, 201)).policy;
+          const savedPolicy = await body(policyWait, 201),
+            policy = savedPolicy.policy;
           await ui
             .getByText('Operation recorded. Reload the current batch and reviews before another action.')
             .waitFor();
-          await load(requester);
+          let latest = policy.id;
+          for (let day = 1; day <= 21; day++) {
+            latest = ok(
+              await request(approvalRoute + '/policies', {
+                method: 'POST',
+                identity: ids.requester,
+                body: {
+                  expectedOwnerKey: savedPolicy.ownerKey,
+                  requestId: randomUUID(),
+                  expectedLatestId: latest,
+                  engagementId: roots.engagement.id,
+                  effectiveFrom: shift(fx.today, day),
+                  definition: policy.definition,
+                  reason: 'Synthetic scheduled invoice review',
+                },
+              }),
+              201,
+            ).policy.id;
+          }
+          const scheduled = await load(requester);
+          assert.equal(scheduled.effectivePolicy.id, policy.id);
+          assert.ok(scheduled.truncated && !scheduled.policies.some((row) => row.id === policy.id));
+          await ui.getByLabel('Invoice approval policy effective from').fill(shift(fx.today, 22));
+          policyWait = wait(p, approvalRoute + '/policies', 'POST');
+          await ui.getByRole('button', { name: 'Record invoice approval policy' }).click();
+          const nextPolicy = (await body(policyWait, 201)).policy;
+          assert.equal(nextPolicy.previousId, latest);
+          await ui
+            .getByText('Operation recorded. Reload the current batch and reviews before another action.')
+            .waitFor();
+          assert.equal((await load(requester)).effectivePolicy.id, policy.id);
+          const query = '?engagementId=' + encodeURIComponent(roots.engagement.id) + '&includeEffective=true';
+          assert.equal(
+            (await request(approvalRoute + '/policies' + query, { identity: ids.reader })).status,
+            403,
+          );
+
           await ui.getByLabel('Invoice approval Draft').selectOption(draft.batch.id);
           let w = wait(p, approvalRoute + '/sources/' + draft.batch.id);
           await ui.getByRole('button', { name: 'Inspect invoice Draft source' }).click();
           const source = await body(w);
           assert.equal(source.batch.lineCount, 1);
+          assert.equal(
+            await ui.getByRole('button', { name: 'Submit invoice Draft for review' }).isDisabled(),
+            true,
+          );
+          assert.equal(
+            (
+              await request(approvalRoute + '/requests', {
+                method: 'POST',
+                identity: ids.requester,
+                body: {
+                  expectedOwnerKey: source.ownerKey,
+                  requestId: randomUUID(),
+                  batchId: draft.batch.id,
+                  expectedPolicyId: nextPolicy.id,
+                  expectedLineCount: source.batch.lineCount,
+                  expectedLineageHash: source.batch.lineageHash,
+                  reason: 'Synthetic future policy refused',
+                },
+              })
+            ).status,
+            403,
+          );
+          assert.equal(
+            (
+              await pool.query(
+                'select count(*)::int n from invoice_batch_approval_instances where batch_id=$1',
+                [draft.batch.id],
+              )
+            ).rows[0].n,
+            0,
+          );
           await ui.getByLabel('I inspected the retained lineage and control total').check();
           await ui.getByLabel('Invoice batch review policy').selectOption(policy.id);
           await ui.getByLabel('Invoice approval request reason').fill('Synthetic review');

@@ -376,11 +376,16 @@ export const invoiceBatchApprovals = {
     if (!id.safeParse(engagementId).success) return bad();
     const query = '?' + new URLSearchParams({ engagementId }),
       [a, b] = await Promise.all([
-        call('GET', '/policies' + query, c, 'read'),
+        call('GET', '/policies' + query + '&includeEffective=true', c, 'read'),
         call('GET', '/instances' + query, c, 'read'),
       ]),
       p = z
-        .object({ ...envelope, policies: z.array(policy).max(20), truncated: z.boolean() })
+        .object({
+          ...envelope,
+          policies: z.array(policy).max(20),
+          truncated: z.boolean(),
+          effectivePolicy: policy.nullable(),
+        })
         .strict()
         .safeParse(a),
       i = z
@@ -391,6 +396,9 @@ export const invoiceBatchApprovals = {
       !p.success ||
       !i.success ||
       p.data.actorUserId !== i.data.actorUserId ||
+      (p.data.effectivePolicy &&
+        (p.data.effectivePolicy.engagementId !== engagementId ||
+          p.data.effectivePolicy.effectiveFrom > p.data.serverDate)) ||
       p.data.policies.some((x) => x.engagementId !== engagementId) ||
       i.data.approvals.some((x) => x.policy.engagementId !== engagementId)
     )
@@ -398,7 +406,7 @@ export const invoiceBatchApprovals = {
     return {
       policies: p.data.policies,
       approvals: i.data.approvals,
-      policiesTruncated: p.data.truncated,
+      effectivePolicy: p.data.effectivePolicy,
       approvalsNext: i.data.nextAfter,
     };
   },
