@@ -608,3 +608,5 @@ WOS-RPT-007 — Finance can reconcile visible T&M and milestone billing across e
 WOS-RPT-006 and WOS-RPT-007 — Portfolio CSV export binds the inspected scope, filters, source membership and controls. Browser and PostgreSQL tests cover downloaded bytes, audit evidence, permission loss, changed filters, stale occupancy and duplicate requests.
 
 WOS-APR-007, WOS-TIM-009 and WOS-COM-006 — New T&M valuations require financial-period authority for the approved work date. PostgreSQL and browser tests cover closed periods, missing Weekly authority, concurrent period creation, retained receipts and eligible post-approval valuation. Protected reopening remains open.
+
+WOS-APR-007 and WOS-TIM-009 — Governance can close a reporting period financially and reopen it to Approval Closed. The T&M PostgreSQL and browser journeys cover explicit authority, reason, exact revision, concurrent and stale requests, audit rollback and resumed valuation of approved work. Generic work and invoice reopening remain separate.

@@ -1,3 +1,4 @@
+import {FinancialPeriodControl} from '../components/admin/FinancialPeriodControl';
 import { useState, useEffect, useRef } from 'react';
 import {Link} from 'react-router-dom';
 import {hasPermission} from '../services/permissions';
@@ -367,6 +368,7 @@ export const AdminSettings = () => {
         onCancel={() => setConfirmAction(null)}
       />
 
+      {hasPermission(currentUser,'settings.manage') && <FinancialPeriodControl/>}
       {canOpenPermissionSettings && <PermissionSettings onNotice={setNotice} />}
 
       {setupReadiness && (

@@ -45,6 +45,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     'commercial.cost_approvals.decide',
     'commercial.tm_valuation.view',
     'commercial.tm_valuation.create',
+    'settings.manage',
+    'periods.financial_reopen',
   ])
     await pool.query(
       "insert into role_permissions(role_name,permission_key,enabled)values('Admin',$1,true)on conflict(role_name,permission_key)do update set enabled=true",
@@ -217,7 +219,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         cost = await makeRate('cost', '40.0020');
       const fixture = await startFixtureServer({
         root: fileURLToPath(new URL('../', import.meta.url)),
-        fixtures: ['rate-candidates'],
+        fixtures: ['rate-candidates', 'settings-outcomes'],
         apiUrl,
       });
       let browser;
@@ -251,6 +253,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                 'commercial.cost_approvals.decide',
                 'commercial.tm_valuation.view',
                 'commercial.tm_valuation.create',
+                'settings.manage',
+                'periods.financial_reopen',
               ],
             },
             scope: { organizationId: f.organizationId, legalEntityId: f.legalEntityId },
@@ -427,9 +431,18 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal((await body(cw)).source.adoptionId, cost.id);
         await tm.getByText(/100.1234\/HOUR; cost adoption .*40.0020\/HOUR/).waitFor();
         await tm.getByLabel('T&M calculation reason', { exact: true }).fill('Synthetic explicit calculation');
-        await pool.query(
-          "update reporting_periods set status='Financially Locked' where id='synthetic-category-current'",
-        );
+        const admin = await ctx.newPage();
+        await admin.goto(origin + '/tests/fixtures/settings-outcomes.html');
+        const controls = admin.getByRole('region', { name: 'Financial period controls' });
+        await controls.getByLabel('Reporting date').fill(fx.today);
+        await controls.getByRole('button', { name: 'Inspect reporting periods' }).click();
+        await controls
+          .getByLabel('Reporting period', { exact: true })
+          .selectOption('synthetic-category-current');
+        await controls.getByLabel('Financial transition reason').fill('Synthetic financial close');
+        await controls.getByRole('button', { name: 'Financially lock period' }).click();
+        await controls.getByText(/is now Financially Locked/).waitFor();
+
         const lockResponse = reply(base + '/valuations', 'POST');
         await tm.getByRole('button', { name: 'Retain T&M snapshot', exact: true }).click();
         assert.equal((await body(lockResponse, 409)).error.code, 'TM_FINANCIAL_PERIOD_CLOSED');
@@ -442,9 +455,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           ).rows[0].n,
           0,
         );
-        await pool.query(
-          "update reporting_periods set status='Approval Closed' where id='synthetic-category-current'",
-        );
+        await controls.getByLabel('Financial transition reason').fill('Synthetic correction window');
+        await controls.getByRole('button', { name: 'Reopen for financial valuation' }).click();
+        await controls.getByText(/is now Approval Closed/).waitFor();
+        await admin.close();
+
         pw = reply(base + '/policies');
         sw = reply(base + '/sources');
         await tm.getByRole('button', { name: 'Load T&M policy and approved work', exact: true }).click();

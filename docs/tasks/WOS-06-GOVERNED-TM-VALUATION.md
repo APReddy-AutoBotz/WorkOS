@@ -45,3 +45,9 @@ Migration `065s_wos06_tm_period_versions` adds append-only storage without grant
 New T&M valuations use the approved entry's work date. A Weekly reporting period must cover it. Every covering Weekly, Monthly and Fiscal period must permit financial work. Open, Submission Closed and Approval Closed permit valuation of work already approved. Planned, Financially Locked and Closed prevent a new snapshot. PostgreSQL coordinates each insert with organization setup, including concurrent creation of a covering period. Existing receipts, report versions and same-request replays remain available under current access controls.
 
 Migration `065t_wos06_tm_financial_period_lock` adds an insert trigger without backfill, role grants or changes to existing amounts. Keep the database guard when reverting the application. Protected reopening and post-export corrections remain separate work.
+
+## Protected financial reopening
+
+In Governance, inspect a reporting date, select the frequency and review the full date range, status and revision. Locking requires settings management and a reason. Reopening also requires the explicit `periods.financial_reopen` permission. It returns Financially Locked to Approval Closed. Other covering locks still apply. Previously approved work may be valued once every covering period permits it. Work submission, approval, retained valuations, invoice batches and exported artifacts retain their existing history and rules. A stale or uncertain result requires inspecting the current revision before another action.
+
+Migration `065u_wos06_financial_period_reopen` adds reporting-period revisions and a deferred database check for the authority and audit evidence of a financial reopen. Existing periods start at revision 1. No role or user grant is seeded. Keep the database migration and history when reverting the application.

@@ -541,9 +541,82 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ).rows[0].n,
         0,
       );
+      const periodApi = '/api/v1/organization-setup/financial-periods';
       await pool.query(
-        "update reporting_periods set status='Submission Closed' where id='synthetic-financial-lock'",
+        "insert into role_permissions(role_name,permission_key,enabled) values('Admin','settings.manage',true) on conflict(role_name,permission_key) do update set enabled=true",
       );
+      const observed = ok(await request(periodApi + '?date=' + fx.today));
+      const monthly = observed.periods.find((p) => p.id === 'synthetic-financial-lock');
+      assert.equal(
+        (
+          await request(periodApi + '?date=' + fx.today, {
+            scope: { organizationId: f.organizationId, legalEntityId: 'synthetic-foreign' },
+          })
+        ).status,
+        403,
+      );
+      const genericReopen = await request('/api/v1/organization-setup/reporting-periods', {
+        method: 'POST',
+        body: {
+          code: monthly.code,
+          name: monthly.name,
+          frequency: monthly.frequency,
+          startsOn: monthly.startsOn,
+          endsOn: monthly.endsOn,
+          status: 'Open',
+        },
+      });
+      assert.equal(genericReopen.status, 409);
+      const transition = (revision, action = 'reopen', overrides = {}) =>
+        request(periodApi + '/' + monthly.id + '/transitions', {
+          method: 'POST',
+          body: {
+            expectedOwnerKey: observed.ownerKey,
+            expectedRevision: revision,
+            action,
+            reason: 'Synthetic finance review',
+            ...overrides,
+          },
+        });
+      assert.equal((await transition(monthly.revision)).status, 403);
+      await assert.rejects(
+        pool.query("update reporting_periods set status='Approval Closed' where id=$1", [monthly.id]),
+        (e) => e.code === 'RPF01',
+      );
+      await pool.query(
+        "insert into role_permissions(role_name,permission_key,enabled) values('Admin','periods.financial_reopen',true) on conflict(role_name,permission_key) do update set enabled=true",
+      );
+      assert.equal((await transition(monthly.revision, 'reopen', { reason: ' ' })).status, 400);
+      assert.equal(
+        (await transition(monthly.revision, 'reopen', { expectedOwnerKey: '0'.repeat(64) })).status,
+        409,
+      );
+      await pool.query(
+        "create function synthetic_financial_reopen_failure() returns trigger language plpgsql as $$begin if new.action='Reopen Financial Period' then raise exception 'Synthetic audit failure'; end if;return new;end$$;create trigger synthetic_financial_reopen_failure before insert on audit_logs for each row execute function synthetic_financial_reopen_failure()",
+      );
+      assert.equal((await transition(monthly.revision)).status, 503);
+      assert.equal(
+        (await pool.query('select status from reporting_periods where id=$1', [monthly.id])).rows[0].status,
+        'Financially Locked',
+      );
+      await pool.query('drop trigger synthetic_financial_reopen_failure on audit_logs');
+      const attempts = await Promise.all([transition(monthly.revision), transition(monthly.revision)]);
+      assert.deepEqual(attempts.map((x) => x.status).sort(), [200, 409], JSON.stringify(attempts));
+      const reopened = attempts.find((x) => x.status === 200).body.period;
+      assert.equal(reopened.status, 'Approval Closed');
+      const relocked = ok(await transition(reopened.revision, 'lock')).period;
+      assert.equal((await transition(monthly.revision)).status, 409);
+      ok(await transition(relocked.revision));
+      assert.equal(
+        (
+          await pool.query(
+            "select count(*)::int n from audit_logs where entity_id=$1 and action='Reopen Financial Period' and reason='Synthetic finance review'",
+            [monthly.id],
+          )
+        ).rows[0].n,
+        2,
+      );
+
       const [differentA, differentB] = await Promise.all([
         request(base + '/valuations', { method: 'POST', body: secondCmd }),
         request(base + '/valuations', { method: 'POST', body: { ...secondCmd, requestId: randomUUID() } }),
