@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.reversal_eligibility.create',module:'Commercial',label:'Issue approved reversal eligibility',description:'Create a signed approved-unbilled item from an independently approved full-line reversal.',protected:false},
  {permission_key:'periods.financial_reopen',module:'Admin',label:'Reopen financial periods',description:'Permit a financial lock to return to Approval Closed with a recorded reason.',protected:false},
  {permission_key:'commercial.milestone_billing.view',module:'Commercial',label:'View milestone billing review',description:'View scoped milestone acceptance and eligibility evidence.',protected:false},
  {permission_key:'commercial.milestone_billing.manage',module:'Commercial',label:'Manage milestone billing review',description:'Configure and request scoped milestone billing review.',protected:false},

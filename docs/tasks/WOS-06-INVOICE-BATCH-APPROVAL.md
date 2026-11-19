@@ -25,3 +25,8 @@ Full-line reversal submission (WOS-INV-004, WOS-INV-008, partial). The original 
 Migration 065y stores submission, delivery identity and recipient acknowledgment. Roll back the application and inbox reader together if needed, preserving the additive tables and audit history for recovery.
 
 WOS-INV-004, WOS-INV-008, WOS-APR-003 and WOS-APR-006 (partial). Migration 065z retains independent reversal stage decisions, recipient-specific delivery evidence and acknowledgments. Stage decisions pin the inspected downstream confirmation and require the named reviewer's current authority and source scope. Reviewers and the requester can recover retained outcomes. The original export, occupancy and amounts remain intact. The T&M browser journey exercises final approval and rejection, replay, rollback and recipient scope. Corrective eligibility and correction batch export remain separate delivery items. Preserve the additive history tables when rolling back the application.
+
+
+### Full-line reversal eligibility (migration 066)
+
+After final approval, a finance preparer with the explicitly granted `commercial.reversal_eligibility.create` permission can inspect the original line and issue one approved-unbilled credit. The database uses the original currency and full line amount, checks the financial calendar for the UTC issue date, and retains the original export, final decision and credit receipt. Correction batches, credit export and supersession remain pending. This advances WOS-INV-001, WOS-INV-004, WOS-INV-008 and WOS-APR-007. To suspend issuance, revoke the issuance permission and retain all event, item and audit history.
