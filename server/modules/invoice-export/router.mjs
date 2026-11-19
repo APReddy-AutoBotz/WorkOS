@@ -251,7 +251,11 @@ export const createInvoiceCsvRouter = (o) => {
     await batch(c,r,id);
     const rows=(await c.query(`select original_artifact_id as "originalArtifactId",original_line_id as "originalLineId",
       correction_artifact_id as "artifactId",correction_batch_id as "batchId",correction_line_id as "lineId",correction_sha256 as sha256,
-      currency,trim_scale(amount)::text amount from invoice_export_line_corrections
+      currency,trim_scale(amount)::text amount,
+      exists(select 1 from invoice_batch_confirmations conf where conf.batch_id=correction_batch_id
+        and conf.artifact_id=correction_artifact_id and conf.artifact_sha256=correction_sha256
+        and conf.source_type='FULL_LINE_REVERSAL') as "applicationAttested"
+      from invoice_export_line_corrections
       where organization_id=$1 and legal_entity_id=$2 and original_batch_id=$3 and ($4::uuid is null or correction_line_id>$4)
       and exists(select 1 from invoice_draft_batches cb where cb.id=correction_batch_id and correction_original_scope_current(cb,$5,$6))
       order by correction_line_id limit 51`,[...scope(r),id,q.after??null,r.user.sub,r.user.activeRole])).rows;

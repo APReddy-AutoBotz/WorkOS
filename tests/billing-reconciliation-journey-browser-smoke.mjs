@@ -1686,7 +1686,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await exportUi.getByLabel('Invoice export batch').selectOption(draft.batch.id);
             await exportUi.getByRole('button',{name:'Inspect invoice export source'}).click();
             await exportUi.getByRole('button',{name:'Check exported credits'}).click();
-            await exportUi.getByText(new RegExp('credit artifact '+exportedCredit.id)).waitFor();
+            const creditLink=exportUi.getByRole('listitem').filter({hasText:'credit artifact '+exportedCredit.id});
+            await creditLink.filter({hasText:'Awaiting downstream attestation'}).waitFor();
             assert.equal((await request('/api/v1/invoice-csv/artifacts/'+exportedCredit.id,{identity:ids.denied})).status,404);
             await confirmUi.getByLabel('Invoice confirmation engagement').selectOption(roots.engagement.id);
             await confirmUi.getByRole('button',{name:'Find exported credits'}).click();
@@ -1699,6 +1700,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             const confirmedCredit=requester.p.waitForResponse(r=>r.url().endsWith('/invoice-csv/confirmations') && r.request().method()==='POST');
             await confirmUi.getByRole('button',{name:'Record manual billing attestation'}).click();
             assert.equal((await body(await confirmedCredit,201)).confirmation.total,receipt.amount);
+            await exportUi.getByRole('button',{name:'Check exported credits'}).click();
+            await creditLink.filter({hasText:'Downstream application attested'}).waitFor();
+            assert.equal((await request('/api/v1/invoice-csv/batches/'+draft.batch.id+'/exported-credits',{identity:ids.denied})).status,404);
             assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);
             assert.equal(ok(await issueCredit()).replayed,true);
             assert.equal((await issueCredit({reason:'Changed reason'})).status,409);
