@@ -3,7 +3,7 @@ import { invoiceCsv, type InvoiceCsvArtifact, type InvoiceCsvSource, type Invoic
 import type { RateContext } from '../services/rateCandidates';
 
 export function InvoiceLineReversal({ source, state, artifact, run, disabled }: {
-  source: InvoiceCsvSource; state: 'Exported' | 'Billed/Confirmed'; artifact: InvoiceCsvArtifact;
+  key?: string; source: InvoiceCsvSource; state: 'Exported' | 'Billed/Confirmed'; artifact: InvoiceCsvArtifact;
   run: (fn: (context: RateContext) => Promise<void>) => Promise<void>; disabled: boolean;
 }) {
   const [line, select] = useState(''), [reason, setReason] = useState('');

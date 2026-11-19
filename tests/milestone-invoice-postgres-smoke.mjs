@@ -772,6 +772,12 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal((await submitReversal()).status, 503);
         assert.equal(ok(await request(reversalPath)).request, null);
         await pool.query('drop trigger synthetic_refuse_reversal on audit_logs');
+        await assert.rejects(pool.query(
+          `insert into invoice_line_reversal_requests(id,organization_id,legal_entity_id,line_id,artifact_id,confirmation_id,actor_id,active_role,reason,operation_id)
+           select $1,c.organization_id,c.legal_entity_id,$2,c.artifact_id,c.id,c.actor_id,c.active_role,$3,'synthetic-missing-audit'
+           from invoice_batch_confirmations c where c.artifact_id=$4`,
+          [randomUUID(), line.lineId, command.reason, artifact.id],
+        ), e => e.code === '23514' && e.message.includes('matching audit evidence'));
         const requests = await Promise.all([submitReversal(), submitReversal()]);
         assert.deepEqual(requests.map(x => x.status).sort(), [200, 201]);
         const retainedReversal = ok(await request(reversalPath)).request;
@@ -977,6 +983,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           drafts + '/batches/' + draft.batch.id,
           invoiceApproval + '/sources/' + draft.batch.id,
           invoiceApproval + '/receipts/policy/' + invoicePolicy.requestId,
+          reversalPath,
           csv + '/artifacts/' + artifact.id,
         ]) {
           assert.equal((await request(path, { identity: ids.requester })).status, 403, path);
