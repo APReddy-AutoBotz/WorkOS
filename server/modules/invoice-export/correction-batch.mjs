@@ -11,7 +11,7 @@ export function correctionArtifact(source){
 export async function correctionExportBatch(c,r,id,lock){
   const row=await correctionBatchHeader(c,r,id,lock);
   if(!row) return null;
-  if(!['Approved','Exported'].includes(row.state))throw Object.assign(new Error('Approved correction export unavailable.'),{statusCode:404,code:'CREDIT_EXPORT_SOURCE'});
+  if(!['Approved','Exported','Billed/Confirmed'].includes(row.state))throw Object.assign(new Error('Approved correction export unavailable.'),{statusCode:404,code:'CREDIT_EXPORT_SOURCE'});
   const lines=(await c.query(`select l.id as "lineId",l.sequence,l.item_id as "itemId",l.item_version as "itemVersion",ev.id as "eventId",
     ev.version as "eventVersion",ev.eligible_on::text as "eligibleDate",l.source_type as "sourceType",l.currency,trim_scale(l.amount)::text amount,
     ev.reversal_decision_id as "decisionId",ev.reverses_event_id as "originalEventId",l.billing_evidence->>'originalBatchId' as "originalBatchId",

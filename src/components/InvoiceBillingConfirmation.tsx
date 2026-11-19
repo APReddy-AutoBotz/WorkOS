@@ -14,6 +14,8 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
   const [engagement, setEngagement] = useState(''),
     [drafts, setDrafts] = useState<InvoiceDraft[]>([]),
     [next, setNext] = useState<string | null>(null),
+    [credits,setCredits] = useState<{id:string;state:string}[]>([]),
+    [creditNext,setCreditNext] = useState<string|null>(null),
     [batch, setBatch] = useState(''),
     [source, setSource] = useState<InvoiceConfirmationSource | null>(null),
     [existing, setExisting] = useState<InvoiceConfirmation | null>(null),
@@ -44,6 +46,8 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
     inFlight.current = false;
     setEngagement('');
     setDrafts([]);
+    setCredits([]);
+    setCreditNext(null);
     setNext(null);
     setBatch('');
     setSource(null);
@@ -149,6 +153,11 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
         throw e;
       }
     });
+  const loadCredits = (after: string | null = null) => run(async c => {
+    const result = await invoiceCsv.correctionBatches(engagement, after, c, 'confirmation');
+    setCredits(old => after ? [...old, ...result.batches] : result.batches);
+    setCreditNext(result.nextAfter);
+  });
   const submit = () => {
     if (!source || source.state !== 'Exported' || !attested || !reference.trim() || reason.trim().length < 3)
       return;
@@ -182,7 +191,7 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
     <section aria-label="Invoice billing confirmation" className="my-4 space-y-3 rounded-xl border p-4">
       <h2>Invoice billing confirmation</h2>
       <p>
-        Confirm that this exported batch was billed downstream. Enter the external reference and check the
+        Confirm that a downstream system billed this invoice or applied this credit. Enter the external reference and check the
         exported total before submitting. The receipt records your attestation.
       </p>
       {!allowed ? (
@@ -198,6 +207,9 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
               onChange={(e) => {
                 setEngagement(e.target.value);
                 setDrafts([]);
+                setCredits([]);
+                setCreditNext(null);
+                setNext(null);
                 setBatch('');
                 setSource(null);
                 setExisting(null);
@@ -214,6 +226,8 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
           <button type="button" disabled={!engagement || busy || !!pending} onClick={() => load()}>
             Load invoice confirmation batches
           </button>
+          <button type="button" disabled={!engagement || busy || !!pending} onClick={() => loadCredits()}>Find exported credits</button>
+          {creditNext && <button type="button" disabled={busy || !!pending} onClick={() => loadCredits(creditNext)}>More credit batches</button>}
           {next && (
             <button type="button" disabled={busy || !!pending} onClick={() => load(next)}>
               More invoice confirmation batches
@@ -232,6 +246,7 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
               }}
             >
               <option value="">Choose</option>
+              {credits.map(x => <option key={x.id} value={x.id}>Credit · {x.state} · {x.id}</option>)}
               {drafts
                 .filter(
                   (x) => x.engagementId === engagement && ['Exported', 'Billed/Confirmed'].includes(x.state),
@@ -249,7 +264,7 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
           {source && (
             <section aria-label="Inspected confirmation source">
               <p>
-                {source.state} · {source.sourceType === 'MILESTONE_ACCEPTANCE' ? 'milestone source · ' : ''}
+                {source.state} · {source.sourceType === 'MILESTONE_ACCEPTANCE' ? 'milestone source · ' : source.sourceType === 'FULL_LINE_REVERSAL' ? 'credit · ' : ''}
                 artifact {source.artifactId} v{source.artifactVersion} · SHA-256 {source.artifactSha256} ·{' '}
                 {source.currency} {source.total}.
               </p>

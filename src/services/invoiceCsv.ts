@@ -1,9 +1,9 @@
 import { CREDIT_CSV_SCHEMA,verifyCreditCsv,renderCreditCsv } from '../../shared/correction-invoice-csv.mjs';
 import { verifyMilestoneInvoiceCsv } from './milestoneInvoiceCsv';
-import { validInvoiceConfirmationCommand } from '../../shared/invoice-billing-confirmation.mjs';
+import { validInvoiceConfirmationCommand, validConfirmationTotal } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
-import { canonicalHours, compareHours } from '../../shared/work-hours.mjs';
+import { canonicalHours } from '../../shared/work-hours.mjs';
 import { api, ApiClientError } from './apiClient';
 import { captureRateContext } from './rateCandidates';
 import { hasRatePermission, isRateContextCurrent, type RateContext } from './rateCandidates';
@@ -145,13 +145,13 @@ const creditLine=tmLine.omit({snapshotId:true,workDate:true}).extend({
   sourceType:z.literal('FULL_LINE_REVERSAL'),eventVersion:z.literal(1),decisionId:uuid,originalBatchId:uuid,originalArtifactId:uuid,
   originalArtifactSha256:hash,originalLineId:uuid,originalEventId:uuid,originalItemVersion:z.literal(1),amount:creditAmount,
 });
-const creditSourceForExport=sourceBase.extend({sourceType:z.literal('FULL_LINE_REVERSAL'),state:z.enum(['Approved','Exported']),
+const creditSourceForExport=sourceBase.extend({sourceType:z.literal('FULL_LINE_REVERSAL'),state:z.enum(['Approved','Exported','Billed/Confirmed']),
   lines:z.array(creditLine).min(1).max(50),control:control.extend({total:creditAmount}),periodBasis:z.literal('ELIGIBLE_DATE'),
   approvalId:uuid,finalTransitionId:uuid,lineageHash:hash}).refine(v=>{
   try{
     const totals=renderCreditCsv({...v,batchId:v.id});
     return v.control.total===totals.total && v.control.currency===v.currency && v.control.lineCount===v.lines.length &&
-      (v.state==='Exported')===Boolean(v.artifactId);
+      (v.state!=='Approved')===Boolean(v.artifactId);
   }catch{return false;}
 });
 const source=z.union([standardSource,creditSourceForExport]);
@@ -405,13 +405,13 @@ export type InvoiceNoticeRecoveryOperation = {
 const confirmation = z
   .object({
     id: uuid,
-    sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL']).optional(),
     batchId: uuid,
     artifactId: uuid,
     artifactVersion: z.literal(1),
     artifactSha256: hash,
     currency: z.string().regex(/^[A-Z]{3}$/),
-    total: money,
+    total: z.union([money,creditAmount]),
     method: z.literal('MANUAL_ATTESTATION'),
     reference: id,
     actorId: uuid,
@@ -425,10 +425,9 @@ const confirmation = z
   .refine((v) => {
     try {
       return (
-        (!v.sourceType || hasRatePermission('commercial.milestone_billing.view')) &&
+        (v.sourceType !== 'MILESTONE_ACCEPTANCE' || hasRatePermission('commercial.milestone_billing.view')) &&
         !/[\u0000-\u001f\u007f-\u009f]/u.test(v.reference) &&
-        canonicalHours(v.total) === v.total &&
-        compareHours(v.total, '0') > 0
+        validConfirmationTotal(v.total,v.sourceType)
       );
     } catch {
       return false;
@@ -436,22 +435,21 @@ const confirmation = z
   });
 const confirmationSource = z
   .object({
-    sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL']).optional(),
     batchId: uuid,
     state: z.enum(['Exported', 'Billed/Confirmed']),
     artifactId: uuid,
     artifactVersion: z.literal(1),
     artifactSha256: hash,
     currency: z.string().regex(/^[A-Z]{3}$/),
-    total: money,
+    total: z.union([money,creditAmount]),
   })
   .strict()
   .refine((v) => {
     try {
       return (
-        (!v.sourceType || hasRatePermission('commercial.milestone_billing.view')) &&
-        canonicalHours(v.total) === v.total &&
-        compareHours(v.total, '0') > 0
+        (v.sourceType !== 'MILESTONE_ACCEPTANCE' || hasRatePermission('commercial.milestone_billing.view')) &&
+        validConfirmationTotal(v.total,v.sourceType)
       );
     } catch {
       return false;
@@ -460,7 +458,7 @@ const confirmationSource = z
 export type InvoiceConfirmationSource = z.infer<typeof confirmationSource>;
 export type InvoiceConfirmation = z.infer<typeof confirmation>;
 export type InvoiceConfirmationOperation = {
-  sourceType?: 'MILESTONE_ACCEPTANCE';
+  sourceType?: 'MILESTONE_ACCEPTANCE'|'FULL_LINE_REVERSAL';
   requestId: string;
   batchId: string;
   artifactId: string;
@@ -499,13 +497,13 @@ const creditReceipt = z.object({eventId:uuid,itemId:uuid,eligibleOn:date,currenc
 export type ReversalCredit = {source:z.infer<typeof creditSource>;receipt:z.infer<typeof creditReceipt>|null;eligibleOn:string};
 const issuedCredit = z.object({
   itemId:uuid, eventId:uuid, eligibleOn:date, currency:z.string().regex(/^[A-Z]{3}$/), amount:creditAmount,
-  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(), correctionState:z.enum(['Draft','Under Review','Approved','Exported']).nullable(),
+  originalEventId:uuid, lineId:uuid, batchId:uuid, decisionId:uuid, correctionBatchId:uuid.nullable(), correctionState:z.enum(['Draft','Under Review','Approved','Exported','Billed/Confirmed']).nullable(),
 }).strict();
 export type IssuedCredit = z.infer<typeof issuedCredit>;
 const correctionEvidence=z.object({
   ...envelope,originalId:uuid,
   header:z.object({batchId:uuid,engagementId:id,currency:z.string().regex(/^[A-Z]{3}$/),ownerId:uuid,ownerRole:id,
-    ownerCurrent:z.boolean(),state:z.enum(['Draft','Under Review','Approved','Exported','Cancelled']),lineageHash:hash,periodStart:date,periodEnd:date,total:creditAmount}).strict(),
+    ownerCurrent:z.boolean(),state:z.enum(['Draft','Under Review','Approved','Exported','Billed/Confirmed','Cancelled']),lineageHash:hash,periodStart:date,periodEnd:date,total:creditAmount}).strict(),
   lines:z.array(z.object({lineId:uuid,sequence:z.number().int().positive(),itemId:uuid,itemVersion:z.literal(1),eventId:uuid,eventVersion:z.literal(1),
     eligibleOn:date,amount:creditAmount,currency:z.string().regex(/^[A-Z]{3}$/),decisionId:uuid,originalEventId:uuid,originalLineId:uuid,
     artifactId:uuid,artifactSha256:hash,reserved:z.boolean()}).strict()).min(1).max(50),
@@ -514,11 +512,11 @@ export type CorrectionEvidence=z.infer<typeof correctionEvidence>;
 const creditLink=z.object({originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
 export type CreditExportLink=z.infer<typeof creditLink>;
 export const invoiceCsv = {
-  correctionBatches:async(engagementId:string,after:string|null,c:RateContext)=>{
-    const q=new URLSearchParams({engagementId});if(after)q.set('after',after);
+  correctionBatches:async(engagementId:string,after:string|null,c:RateContext,purpose?:'confirmation')=>{
+    const q=new URLSearchParams({engagementId});if(purpose)q.set('purpose',purpose);if(after)q.set('after',after);
     const raw=await call('GET','/correction-batches?'+q,c,'view');
     const result=z.object({...envelope,engagementId:id,nextAfter:uuid.nullable(),batches:z.array(z.object({id:uuid,currency:z.string().regex(/^[A-Z]{3}$/),
-      state:z.enum(['Approved','Exported'])}).strict()).max(50)}).strict().safeParse(raw);
+      state:z.enum(['Approved','Exported','Billed/Confirmed'])}).strict()).max(50)}).strict().safeParse(raw);
     if(!result.success || result.data.engagementId!==engagementId) return bad();
     return result.data;
   },
@@ -546,7 +544,7 @@ export const invoiceCsv = {
     const body=cancelling?{batchId:selection,expectedState}:{itemIds:selection};
     const raw=await call('POST','/batches/'+originalId+'/correction-drafts'+(cancelling?'/cancel':''),ctx,'view',{requestId,reason:why,...body});
     const parsed=z.object({...envelope,originalId:uuid,replayed:z.boolean(),receipt:z.object({
-      batchId:uuid,itemIds:z.array(uuid).min(1).max(50),currency:z.string().regex(/^[A-Z]{3}$/),total:creditAmount,state:z.enum(['Draft','Under Review','Approved','Exported','Cancelled']),
+      batchId:uuid,itemIds:z.array(uuid).min(1).max(50),currency:z.string().regex(/^[A-Z]{3}$/),total:creditAmount,state:z.enum(['Draft','Under Review','Approved','Exported','Billed/Confirmed','Cancelled']),
     }).strict()}).strict().safeParse(raw);
     if(!parsed.success || parsed.data.originalId!==originalId) return bad();
     const receipt=parsed.data.receipt;
@@ -702,7 +700,7 @@ export const invoiceCsv = {
         out.data.confirmation.artifactVersion !== out.data.source.artifactVersion ||
         out.data.confirmation.artifactSha256 !== out.data.source.artifactSha256 ||
         out.data.confirmation.currency !== out.data.source.currency ||
-        canonicalHours(out.data.confirmation.total) !== canonicalHours(out.data.source.total))
+        out.data.confirmation.total !== out.data.source.total)
     )
       return bad();
     return out.data;
@@ -710,9 +708,9 @@ export const invoiceCsv = {
   confirm: async (op: InvoiceConfirmationOperation, c: RateContext | null, receipt = false) => {
     const { sourceType, ...command } = op;
     if (
-      (sourceType !== undefined && sourceType !== 'MILESTONE_ACCEPTANCE') ||
-      (sourceType && !hasRatePermission('commercial.milestone_billing.view')) ||
-      !validInvoiceConfirmationCommand(command)
+      (sourceType !== undefined && !['FULL_LINE_REVERSAL','MILESTONE_ACCEPTANCE'].includes(sourceType)) ||
+      (sourceType === 'MILESTONE_ACCEPTANCE' && !hasRatePermission('commercial.milestone_billing.view')) ||
+      !validInvoiceConfirmationCommand(command,sourceType)
     )
       return bad();
     const raw = await call(
@@ -736,7 +734,7 @@ export const invoiceCsv = {
       x.artifactVersion !== op.artifactVersion ||
       x.artifactSha256 !== op.artifactSha256 ||
       x.currency !== op.currency ||
-      canonicalHours(x.total) !== canonicalHours(op.total) ||
+      x.total !== op.total ||
       x.reference !== op.reference ||
       x.reason !== op.reason ||
       x.actorId !== out.data.actorUserId ||
