@@ -427,6 +427,42 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal((await body(cw)).source.adoptionId, cost.id);
         await tm.getByText(/100.1234\/HOUR; cost adoption .*40.0020\/HOUR/).waitFor();
         await tm.getByLabel('T&M calculation reason', { exact: true }).fill('Synthetic explicit calculation');
+        await pool.query(
+          "update reporting_periods set status='Financially Locked' where id='synthetic-category-current'",
+        );
+        const lockResponse = reply(base + '/valuations', 'POST');
+        await tm.getByRole('button', { name: 'Retain T&M snapshot', exact: true }).click();
+        assert.equal((await body(lockResponse, 409)).error.code, 'TM_FINANCIAL_PERIOD_CLOSED');
+        await tm.getByText(/work date is outside an open financial period/).waitFor();
+        assert.equal(
+          (
+            await pool.query('select count(*)::int n from commercial_tm_valuations where entry_id=$1', [
+              entry.entryId,
+            ])
+          ).rows[0].n,
+          0,
+        );
+        await pool.query(
+          "update reporting_periods set status='Approval Closed' where id='synthetic-category-current'",
+        );
+        pw = reply(base + '/policies');
+        sw = reply(base + '/sources');
+        await tm.getByRole('button', { name: 'Load T&M policy and approved work', exact: true }).click();
+        await body(pw);
+        await body(sw);
+        await loadHistory();
+        await tm.getByLabel('T&M approved work', { exact: true }).selectOption(entry.entryId);
+        await tm.getByLabel('Retained T&M policy', { exact: true }).selectOption(policy.id);
+        const newBilling = rateWait('billing'),
+          newCost = rateWait('cost');
+        await tm
+          .getByRole('button', { name: 'Inspect adopted billing and cost sources', exact: true })
+          .click();
+        await body(newBilling);
+        await body(newCost);
+        await tm
+          .getByLabel('T&M calculation reason', { exact: true })
+          .fill('Synthetic valuation after approval closure');
         let sent, accepted, ready;
         const submittedOnce = new Promise((resolve) => {
           ready = resolve;

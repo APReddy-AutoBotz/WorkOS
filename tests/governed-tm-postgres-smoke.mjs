@@ -473,11 +473,81 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ).rows[0].n,
         1,
       );
-      const secondCmd = { ...cmd, requestId: randomUUID(), entryId: second.entryId },
-        [differentA, differentB] = await Promise.all([
-          request(base + '/valuations', { method: 'POST', body: secondCmd }),
-          request(base + '/valuations', { method: 'POST', body: { ...secondCmd, requestId: randomUUID() } }),
+      const secondCmd = { ...cmd, requestId: randomUUID(), entryId: second.entryId };
+      const calculateSecond = () => request(base + '/valuations', { method: 'POST', body: secondCmd });
+      for (const status of ['Planned', 'Financially Locked', 'Closed']) {
+        await pool.query("update reporting_periods set status=$1 where id='synthetic-category-current'", [
+          status,
         ]);
+        const denied = await calculateSecond();
+        assert.equal(denied.status, 409);
+        assert.equal(denied.body.error.code, 'TM_FINANCIAL_PERIOD_CLOSED');
+        assert.equal(
+          ok(await request(base + '/valuations', { method: 'POST', body: cmd })).valuation.id,
+          created.id,
+        );
+        assert.equal(
+          ok(await request(base + '/receipts/valuation/' + cmd.requestId)).valuation.id,
+          created.id,
+        );
+      }
+      await pool.query(
+        "update reporting_periods set status='Approval Closed' where id='synthetic-category-current'",
+      );
+      await assert.rejects(
+        pool.query('select assert_tm_financial_period($1,$2,$3::date)', [
+          f.organizationId,
+          f.legalEntityId,
+          '1990-01-01',
+        ]),
+        (e) => e.code === 'CTM04',
+      );
+      const closing = await pool.connect();
+      try {
+        await closing.query('begin');
+        await closing.query('select pg_advisory_xact_lock(hashtext($1))', [
+          'reporting-period:' + f.organizationId + ':' + f.legalEntityId + ':Monthly',
+        ]);
+        await closing.query(
+          "insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency) values('synthetic-financial-lock',$1,$2,'FIN-LOCK','Synthetic close',$3,$3,'Financially Locked','Monthly')",
+          [f.organizationId, f.legalEntityId, fx.today],
+        );
+        const waiting = calculateSecond();
+        let blocked = false;
+        for (let i = 0; i < 100; i++) {
+          blocked =
+            (
+              await pool.query(
+                "select 1 from pg_stat_activity where datname=current_database() and wait_event='advisory' and query like 'insert into commercial_tm_valuations%'",
+              )
+            ).rowCount > 0;
+          if (blocked) break;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        await closing.query('commit');
+        const denied = await waiting;
+        assert.ok(blocked, 'A new valuation waits for in-flight period setup');
+        assert.equal(denied.status, 409);
+        assert.equal(denied.body.error.code, 'TM_FINANCIAL_PERIOD_CLOSED');
+      } finally {
+        await closing.query('rollback');
+        closing.release();
+      }
+      assert.equal(
+        (
+          await pool.query('select count(*)::int n from commercial_tm_valuations where entry_id=$1', [
+            second.entryId,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      await pool.query(
+        "update reporting_periods set status='Submission Closed' where id='synthetic-financial-lock'",
+      );
+      const [differentA, differentB] = await Promise.all([
+        request(base + '/valuations', { method: 'POST', body: secondCmd }),
+        request(base + '/valuations', { method: 'POST', body: { ...secondCmd, requestId: randomUUID() } }),
+      ]);
       assert.deepEqual([differentA.status, differentB.status].sort(), [201, 409]);
       assert.equal(
         (

@@ -76,6 +76,13 @@ export const createGovernedTmRouter = (o) => {
     } catch (e) {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });
+      else if (e.code === 'CTM04')
+        res
+          .status(409)
+          .json({
+            code: 'TM_FINANCIAL_PERIOD_CLOSED',
+            error: 'The reporting periods covering this work date do not permit a new valuation.',
+          });
       else if (['CTM01', 'CTM02', 'CTM03', '23505', '23514', '40001', '40P01'].includes(e.code))
         res.status(e.code === 'CTM01' ? 403 : 409).json({
           code: e.code === 'CTM01' ? 'TM_AUTHORITY' : 'TM_CONFLICT',

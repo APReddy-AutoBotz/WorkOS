@@ -606,3 +606,5 @@ WOS-COM-003, WOS-COM-011 and WOS-COM-015 — Retained period versions expose pag
 WOS-RPT-007 — Finance can reconcile visible T&M and milestone billing across engagements for an inclusive eligibility-date range. The portfolio report shows current register states and source, reservation, export and confirmation control totals by currency. The billing and milestone journeys verify same-day totals, source permissions and historical confirmation. The boundary test verifies complete totals across multiple pages, engagements, currencies and missing register items.
 
 WOS-RPT-006 and WOS-RPT-007 — Portfolio CSV export binds the inspected scope, filters, source membership and controls. Browser and PostgreSQL tests cover downloaded bytes, audit evidence, permission loss, changed filters, stale occupancy and duplicate requests.
+
+WOS-APR-007, WOS-TIM-009 and WOS-COM-006 — New T&M valuations require financial-period authority for the approved work date. PostgreSQL and browser tests cover closed periods, missing Weekly authority, concurrent period creation, retained receipts and eligible post-approval valuation. Protected reopening remains open.
