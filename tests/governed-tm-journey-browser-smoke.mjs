@@ -542,6 +542,29 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           },
         ]);
         await tm.getByRole('cell', { name: '60.05%' }).waitFor();
+        const versionPath = range.replace('/period-summary', '/period-versions');
+        const snapshotCommand = async (key) => ({
+          engagementId: roots.engagement.id,
+          start: fx.today,
+          end: fx.today,
+          membershipKey: key,
+          expectedOwnerKey: await readApprovalOwner(request, ids.manager),
+        });
+        const firstWrite = reply(base + '/period-versions', 'POST');
+        await tm.getByRole('button', { name: 'Retain this period' }).click();
+        const frozen = await body(firstWrite, 201);
+        assert.equal(frozen.sequence, 1);
+        await tm.getByRole('heading', { name: /Retained version 1/ }).waitFor();
+        const firstCommand = await snapshotCommand(frozen.membershipKey);
+        assert.equal(
+          ok(await request(base + '/period-versions', { method: 'POST', body: firstCommand })).id,
+          frozen.id,
+        );
+        await tm.getByLabel('Retained period version').fill('1');
+        const opening = reply(base + '/period-versions');
+        await tm.getByRole('button', { name: 'Open retained period' }).click();
+        assert.equal((await body(opening)).id, frozen.id);
+        await tm.getByRole('cell', { name: '60.05%' }).waitFor();
         await tm.getByLabel('Work date through').fill(end);
         assert.equal(await tm.getByRole('region', { name: 'Period margin results' }).count(), 0);
         assert.deepEqual(ok(await request(periodPath(end, end))).totals, []);
@@ -621,6 +644,54 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             marginPercent: '76.00',
           },
         ]);
+        const original = ok(await request(versionPath + '&sequence=1'));
+        assert.deepEqual(original.totals, frozen.totals);
+        assert.equal(
+          (
+            await request(base + '/period-versions', {
+              method: 'POST',
+              body: { ...firstCommand, membershipKey: 'f'.repeat(64) },
+            })
+          ).status,
+          409,
+        );
+        const updated = ok(await request(range + '&includeMembershipKey=true'));
+        const nextCommand = await snapshotCommand(updated.membershipKey);
+        await pool.query(
+          "create function synthetic_period_audit_failure() returns trigger language plpgsql as $$begin if new.action='Retain Period' then raise exception 'synthetic period audit failure' using errcode='CTM03'; end if; return new; end$$; create trigger synthetic_period_audit_failure before insert on audit_logs for each row execute function synthetic_period_audit_failure()",
+        );
+        assert.equal(
+          (await request(base + '/period-versions', { method: 'POST', body: nextCommand })).status,
+          409,
+        );
+        assert.equal(ok(await request(versionPath)).sequence, 1);
+        await pool.query('drop trigger synthetic_period_audit_failure on audit_logs');
+        const writes = await Promise.all(
+          [1, 2].map(() => request(base + '/period-versions', { method: 'POST', body: nextCommand })),
+        );
+        assert.deepEqual(writes.map((x) => x.status).sort(), [200, 201]);
+        assert.equal(writes[0].body.id, writes[1].body.id);
+        const latestPeriod = ok(await request(versionPath));
+        assert.equal(latestPeriod.sequence, 2);
+        assert.equal(
+          ok(await request(base + '/period-versions', { method: 'POST', body: firstCommand })).id,
+          frozen.id,
+        );
+        assert.deepEqual(latestPeriod.totals, updated.totals);
+        assert.deepEqual(ok(await request(versionPath + '&sequence=1')).totals, frozen.totals);
+        assert.equal((await request(versionPath, { identity: ids.first })).status, 403);
+        await assert.rejects(
+          pool.query('update commercial_tm_period_versions set sequence=99 where id=$1', [frozen.id]),
+        );
+        assert.equal(
+          (
+            await pool.query(
+              "select count(*)::int n from audit_logs where action='Retain Period' and entity_id=any($1::text[])",
+              [[frozen.id, latestPeriod.id]],
+            )
+          ).rows[0].n,
+          2,
+        );
         // A finance reader with employee-only scope can see their own totals alone.
         await pool.query(
           "insert into role_permissions(role_name,permission_key,enabled) select 'Employee',k,true from unnest($1::text[]) k on conflict(role_name,permission_key) do update set enabled=true",
@@ -636,6 +707,24 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         );
         assert.deepEqual(ok(await request(range, { identity: ids.first })).totals, []);
         assert.equal(ok(await request(range, { identity: ids.reader })).totals[0].entryCount, '2');
+        assert.equal((await request(versionPath, { identity: ids.first })).status, 404);
+        assert.deepEqual(
+          ok(await request(versionPath, { identity: ids.reader })).totals,
+          latestPeriod.totals,
+        );
+        await pool.query(
+          "insert into role_permissions(role_name,permission_key,enabled) values('Employee','commercial.tm_valuation.create',true) on conflict(role_name,permission_key) do update set enabled=true",
+        );
+        const limitedWrite = await request(base + '/period-versions', {
+          method: 'POST',
+          identity: ids.first,
+          body: {
+            ...firstCommand,
+            expectedOwnerKey: ok(await request(range, { identity: ids.first })).ownerKey,
+          },
+        });
+        assert.equal(limitedWrite.status, 409);
+        assert.ok(!JSON.stringify(limitedWrite.body).includes(frozen.id));
         assert.deepEqual(errors, []);
         assert.deepEqual(external, []);
         await ctx.close();

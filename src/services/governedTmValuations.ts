@@ -270,7 +270,13 @@ const sourcePage = async (engagementId: string, c: RateContext | null, after?: T
   return p.data;
 };
 export const governedTmValuations = {
-  periodSummary: async (engagementId: string, start: string, end: string, c: RateContext | null) => {
+  periodSummary: async (
+    engagementId: string,
+    start: string,
+    end: string,
+    c: RateContext | null,
+    options?: { sequence?: number; retainKey?: string },
+  ) => {
     if (
       !id.safeParse(engagementId).success ||
       !date.safeParse(start).success ||
@@ -278,8 +284,21 @@ export const governedTmValuations = {
       start > end
     )
       return bad();
-    const query = new URLSearchParams({ engagementId, start, end });
-    const raw = await call('GET', '/period-summary?' + query, c);
+    const range = { engagementId, start, end };
+    const query = new URLSearchParams(range);
+    let raw;
+    if (options?.retainKey) {
+      raw = await call('POST', '/period-versions', c, true, false, {
+        ...range,
+        membershipKey: options.retainKey,
+      });
+    } else if (options) {
+      if (options.sequence !== undefined) query.set('sequence', String(options.sequence));
+      raw = await call('GET', '/period-versions?' + query, c);
+    } else {
+      query.set('includeMembershipKey', 'true');
+      raw = await call('GET', '/period-summary?' + query, c);
+    }
     const unsigned = z.string().regex(/^\d+(?:\.\d+)?$/);
     const row = z
       .object({
@@ -295,7 +314,7 @@ export const governedTmValuations = {
           .nullable(),
       })
       .strict();
-    const parsed = z
+    const schema = z
       .object({
         ...envelope,
         version: z.literal('tm-period-margin/1'),
@@ -303,14 +322,22 @@ export const governedTmValuations = {
         start: date,
         end: date,
         totals: z.array(row),
+        membershipKey: z.string().regex(/^[0-9a-f]{64}$/),
+        id: uuid.optional(),
+        sequence: z.number().int().positive().optional(),
+        createdAt: instant.optional(),
+        replayed: z.boolean().optional(),
       })
-      .strict()
-      .safeParse(raw);
+      .strict();
+    const parsed = schema.safeParse(raw);
     if (
       !parsed.success ||
       parsed.data.engagementId !== engagementId ||
       parsed.data.start !== start ||
       parsed.data.end !== end ||
+      Boolean(options) !== Boolean(parsed.data.id && parsed.data.sequence && parsed.data.createdAt) ||
+      (options?.sequence !== undefined && parsed.data.sequence !== options.sequence) ||
+      (options?.retainKey !== undefined && parsed.data.membershipKey !== options.retainKey) ||
       new Set(parsed.data.totals.map((x) => x.currency)).size !== parsed.data.totals.length ||
       parsed.data.totals.some((x) => (x.marginPercent === null) !== !/[1-9]/.test(x.billable))
     )

@@ -1367,7 +1367,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           '065p_wos06_milestone_invoice_export',
           '065q_wos06_milestone_invoice_cancel_notice',
           '065r_wos06_milestone_invoice_confirmation',
+          '065s_wos06_tm_period_versions',
         ]);
+        assert.deepEqual((await pool.query('select id from commercial_tm_period_versions')).rows, []);
         const afterUpgrade = (
             await pool.query('select payload,sha256,version from invoice_csv_artifacts where id=$1', [
               result.artifact.id,
