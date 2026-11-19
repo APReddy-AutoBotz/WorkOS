@@ -174,6 +174,11 @@ const rates = {
     adoptionId: billingId,
     candidateId: randomUUID(),
     kind: 'billing',
+    bindingType: 'engagement',
+    bindingId: engagementId,
+    priority: 1,
+    effectiveFrom: source.workDate,
+    effectiveTo: source.workDate,
     amount: rates.billingAmount,
     currency: 'USD',
     unit: 'HOUR',
@@ -182,6 +187,11 @@ const rates = {
     adoptionId: costId,
     candidateId: randomUUID(),
     kind: 'cost',
+    bindingType: 'worker',
+    bindingId: source.workerId,
+    priority: 1,
+    effectiveFrom: source.workDate,
+    effectiveTo: source.workDate,
     amount: rates.costAmount,
     currency: 'USD',
     unit: 'HOUR',
@@ -229,12 +239,29 @@ status = 200;
 raw = { ...base, valuation: snapshot };
 assert.equal((await s.calculate(command, policy, source, rates, capture(), true)).id, snapshot.id);
 assert.equal(calls.at(-1).init.method, 'GET');
-raw = { ...base, valuation: snapshot, policy, billingRate, costRate };
+raw = {
+  ...base,
+  valuation: snapshot,
+  policy,
+  resolutionRule: 'UNIQUE_HIGHEST_PRIORITY',
+  billingRate,
+  costRate,
+};
 assert.equal(
   (await s.inspect(snapshot.id, engagementId, { ...source, valuationId: snapshot.id }, capture())).valuation
     .id,
   snapshot.id,
 );
+for (const billing of [
+  { ...billingRate, effectiveTo: '2026-10-27' },
+  { ...billingRate, bindingType: 'contract', bindingId: 'unrelated-contract' },
+]) {
+  raw = { ...raw, billingRate: billing };
+  await assert.rejects(
+    s.inspect(snapshot.id, engagementId, { ...source, valuationId: snapshot.id }, capture()),
+    { status: 503 },
+  );
+}
 raw = { ...raw, billingRate: { ...billingRate, amount: '999.0000' } };
 await assert.rejects(
   s.inspect(snapshot.id, engagementId, { ...source, valuationId: snapshot.id }, capture()),

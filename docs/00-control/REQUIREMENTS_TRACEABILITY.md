@@ -592,3 +592,5 @@ WOS-INV-001 and WOS-APR-002 — The milestone workspace pages through scoped mil
 WOS-APR-002 and WOS-INV-006 — The invoice approval browser journey schedules 22 future review policy versions and submits a prepared batch under the policy effective today. An unauthorized policy lookup is refused.
 
 WOS-COM-014/015 — The commercial candidate approval journey schedules eleven future policies for both a billing and a confidential cost candidate, then uses the effective policy to complete independent review.
+
+WOS-COM-002/003/011 — Snapshot inspection reads effective periods, binding and priority through the exact billing and cost adoption IDs retained at calculation. The browser test adopts a higher-priority billing rate, verifies the earlier snapshot and uses the new rate for a different entry. Cost and worker access apply to the read.

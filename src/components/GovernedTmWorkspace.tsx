@@ -75,7 +75,10 @@ const TmEngagement = ({
     [selectedSource, setSelectedSource] = useState(''),
     [selectedPolicy, setSelectedPolicy] = useState(''),
     [rates, setRates] = useState<TmRates | null>(null),
-    [shown, setShown] = useState<TmValuation | null>(null),
+    [snapshot, setSnapshot] = useState<{
+      valuation: TmValuation;
+      rates?: Pick<Awaited<ReturnType<typeof governedTmValuations.inspect>>, 'billingRate' | 'costRate'>;
+    } | null>(null),
     [pending, setPending] = useState<Pending | null>(null),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState('');
@@ -107,7 +110,7 @@ const TmEngagement = ({
     setSelectedSource('');
     setSelectedPolicy('');
     setRates(null);
-    setShown(null);
+    setSnapshot(null);
     setPending(null);
     setEffective('');
     setCurrency('');
@@ -182,7 +185,7 @@ const TmEngagement = ({
       setSelectedSource('');
       setSelectedPolicy('');
       setRates(null);
-      setShown(null);
+      setSnapshot(null);
     });
   const loadPolicies = () =>
     void run(async (c) => {
@@ -303,7 +306,7 @@ const TmEngagement = ({
           c,
         ),
       ]);
-      setShown(null);
+      setSnapshot(null);
       if (billing.result !== 'source' || cost.result !== 'source' || !billing.source || !cost.source) {
         setRates(null);
         setNotice(`Adopted sources unavailable: billing ${billing.result}, cost ${cost.result}.`);
@@ -345,7 +348,7 @@ const TmEngagement = ({
       try {
         const v = await governedTmValuations.calculate(command, chosenPolicy, chosenSource, rates, c);
         setPending(null);
-        setShown(v);
+        setSnapshot({ valuation: v });
         setPolicies(null);
         setSources([]);
         setRates(null);
@@ -368,7 +371,7 @@ const TmEngagement = ({
     if (!chosenSource?.valuationId) return;
     void run(async (c) => {
       const v = await governedTmValuations.inspect(chosenSource.valuationId!, engagementId, chosenSource, c);
-      setShown(v.valuation);
+      setSnapshot({ valuation: v.valuation, rates: { billingRate: v.billingRate, costRate: v.costRate } });
     });
   };
   const reconcile = () => {
@@ -386,7 +389,7 @@ const TmEngagement = ({
           c,
           true,
         );
-        setShown(v);
+        setSnapshot({ valuation: v });
         setNotice('Original T&M snapshot ' + v.id + ' confirmed by read-only receipt.');
       }
       setPending(null);
@@ -395,6 +398,7 @@ const TmEngagement = ({
       setRates(null);
     });
   };
+  const shown = snapshot?.valuation;
   const canCreate = hasRatePermission('commercial.tm_valuation.create'),
     canPolicy = canCreate && hasRatePermission('commercial.contracts.manage');
   return (
@@ -536,7 +540,7 @@ const TmEngagement = ({
               onChange={(e) => {
                 setSelectedSource(e.target.value);
                 setRates(null);
-                setShown(null);
+                setSnapshot(null);
               }}
             >
               <option value="">Choose approved work</option>
@@ -557,7 +561,7 @@ const TmEngagement = ({
               onChange={(e) => {
                 setSelectedPolicy(e.target.value);
                 setRates(null);
-                setShown(null);
+                setSnapshot(null);
               }}
             >
               <option value="">Choose explicit policy</option>
@@ -650,6 +654,28 @@ const TmEngagement = ({
             margin {shown.result.marginValue}. Work entry {shown.entryId}; policy {shown.policyId}; billing
             adoption {shown.billingAdoptionId}; cost adoption {shown.costAdoptionId}.
           </p>
+          {snapshot?.rates && (
+            <section aria-label="Historical rate selection">
+              <h4>Rate selection for {shown.sourceEvidence.workDate}</h4>
+              <p>
+                Each rate was the unique highest-priority adopted match for the work date, currency and unit.
+              </p>
+              <dl>
+                {[snapshot.rates.billingRate, snapshot.rates.costRate].map((rate) => (
+                  <div key={rate.kind}>
+                    <dt>{rate.kind === 'billing' ? 'Billing rate' : 'Cost rate'}</dt>
+                    <dd>
+                      {rate.currency} {rate.amount} per {rate.unit} · {rate.bindingType} {rate.bindingId} ·
+                      priority {rate.priority}
+                    </dd>
+                    <dd>
+                      Effective {rate.effectiveFrom} through {rate.effectiveTo} · candidate {rate.candidateId}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
         </section>
       )}
       {notice && <p role="status">{notice}</p>}
