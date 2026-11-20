@@ -275,12 +275,12 @@ export const CommercialDraftingWorkspace = () => {
     {owned && state.message && state.status !== 'loading' && <p role={state.status === 'error' ? 'alert' : 'status'} className="mb-5 rounded-xl border border-slate-300 p-4">{state.message}</p>}
     {workspace && <>
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceNoticeConfiguration choices={invoiceChoices}/>
+      <InvoiceNoticeConfiguration choices={approvalChoices}/>
       <InvoiceBillingConfirmation choices={invoiceChoices}/>
       <BillingReconciliation choices={invoiceChoices}/>
       <MilestoneBillingWorkspace choices={workspace.engagements.filter(x=>x.model==='milestone').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceActionNotice choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
-      <InvoiceCsvWorkspace choices={invoiceChoices}/>
+      <InvoiceCsvWorkspace choices={approvalChoices}/>
       <InvoiceNoticeRecovery choices={invoiceChoices}/>
       <ReviewedInvoiceBatch choices={approvalChoices}/>
       <InvoiceBatchApprovalWorkspace choices={approvalChoices}/>

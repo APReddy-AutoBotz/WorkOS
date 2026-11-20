@@ -1,3 +1,4 @@
+import { INVOICE_EXPORT_EVENT_KEYS } from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {startFixtureServer} from './support/compiled-fixture-server.mjs';
@@ -322,6 +323,53 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const decided=await decisionPost;assert.equal(decided.status(),201,await decided.text());
     assert.equal((await readSource(identities.manager)).batch.state,'Approved');
     assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
+    const exportGrants=[...reviewerGrants,'reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
+      'commercial.invoice_export.configure','integrations.invoice_alert_routes.manage'];
+    for (const key of exportGrants) await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
+    const config='/api/v1/invoice-export-notice-config', csv='/api/v1/invoice-csv';
+    const configCommand={expectedOwnerKey:managerSource.ownerKey,requestId:crypto.randomUUID(),expectedLatestId:null,reason:'Deliver fixed-fee invoice notices'};
+    const {route}=await postAs(config+'/routes',identities.manager,{...configCommand,routeKey:crypto.randomUUID(),label:'Synthetic billing alert',active:true});
+    await postAs(config+'/policies',identities.manager,{...configCommand,requestId:crypto.randomUUID(),effectiveFrom:today,
+      definition:{entityType:'InvoiceExport',engagementId:engagement.result.id,financeOwner:{userId:identities.manager.id,role:'Admin'},
+        integrationAdmin:{userId:identities.reader.id,role:'Employee'},alertRouteId:route.id,locale:'en-US',completionInApp:true,
+        templates:INVOICE_EXPORT_EVENT_KEYS.map(key=>({key,subject:'Invoice {{sourceRef}}',body:'Invoice status {{sourceRef}}'}))}});
+    const exporting=await createContext(identities.manager,exportGrants);
+    await exporting.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const exportUi=exporting.page.getByRole('region',{name:'Invoice CSV export'});
+    await exportUi.getByLabel('Invoice export engagement').selectOption(engagement.result.id);
+    await exportUi.getByRole('button',{name:'Load invoice export batches'}).click();
+    await exportUi.getByLabel('Invoice export batch',{exact:true}).selectOption(nextId);
+    await exportUi.getByRole('button',{name:'Inspect invoice export source'}).click();
+    await exportUi.getByText(/installment 1 · due/).first().waitFor();
+    await exportUi.getByLabel('Invoice CSV schema').selectOption('workos.invoice-fixed-fee-csv/1');
+    await exportUi.getByRole('checkbox',{name:/I inspected the final approval/}).check();
+    await exportUi.getByLabel('Invoice CSV reason').fill('Retain approved fixed-fee installment');
+    const inspection=await apiRequest(csv+'/batches/'+nextId,{identity:identities.manager});
+    const {batch:approved,ownerKey:exportOwner}=inspection.body;
+    const stale=await apiRequest(csv+'/exports',{identity:identities.manager,method:'POST',body:{
+      batchId:nextId,expectedOwnerKey:exportOwner,requestId:crypto.randomUUID(),approvalId:approved.approvalId,
+      finalTransitionId:approved.finalTransitionId,lineageHash:approved.lineageHash,schemaVersion:'workos.invoice-fixed-fee-csv/1',
+      expectedLineCount:approved.control.lineCount+1,expectedTotal:approved.control.total,reason:'Reject stale control total'}});
+    assert.equal(stale.status,409);
+    assert.equal((await readSource(identities.manager)).batch.state,'Approved');
+    const exported=exporting.page.waitForResponse(r=>r.url().endsWith('/exports') && r.request().method()==='POST');
+    await exportUi.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
+    const generated=await exported;assert.equal(generated.status(),201,await generated.text());
+    const {artifact}=await generated.json();
+    const exportReplay=await apiRequest(csv+'/exports',{identity:identities.manager,method:'POST',body:generated.request().postDataJSON()});
+    assert.equal(exportReplay.status,200);
+    assert.equal(exportReplay.body.artifact.id,artifact.id);
+    assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
+    await exportUi.getByText('Download verified invoice CSV').waitFor();
+    const retained=await apiRequest(csv+'/artifacts/'+artifact.id,{identity:identities.manager});
+    assert.equal(retained.body.artifact.payloadBase64,artifact.payloadBase64);
+    const rows=Buffer.from(artifact.payloadBase64,'base64').toString('utf8').split('\r\n');
+    assert.deepEqual(rows[1].split(',').slice(4,8),[registered.itemId,'1',registered.eventId,'FIXED_FEE_INSTALLMENT']);
+    assert.equal(JSON.parse(Buffer.from(rows[1].split(',')[9].slice(4),'base64')).installment,1);
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);
+    assert.equal((await apiRequest(csv+'/artifacts/'+artifact.id,{identity:identities.manager})).status,403);
+    await exporting.context.close();
     await deciding.context.close();
     await preparing.context.close();
     await billing.context.close();

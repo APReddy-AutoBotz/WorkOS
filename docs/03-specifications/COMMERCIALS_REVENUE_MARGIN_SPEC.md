@@ -187,3 +187,5 @@ Commercial tables are additive and feature gated. Seeded vectors and neutral def
 ## Invoice-batch correction boundary
 
 An approved batch is never returned to review. Before export, protected cancellation releases current occupancy atomically and a replacement/new approval is built only from currently eligible items. Failed export retains approved occupancy and final approval. Exported or billed/confirmed history is immutable; correction is forward-only through reversal/supersession eligibility and a new correction batch and approval. This specialization extends the canonical invoice lifecycle and does not create a competing state machine.
+
+Fixed-fee exports use the versioned schema workos.invoice-fixed-fee-csv/1. Each line identifies the approved-unbilled item, eligibility event and retained contract version. The encoded evidence includes the installment number, due date, currency and native amount. PostgreSQL verifies source lineage, bytes and totals when accepting the artifact. Configure an effective invoice notification policy before exporting.
