@@ -486,7 +486,7 @@ const InvoiceCsvEngagement = ({
                     Line {x.lineId} · item {x.itemId} · event {x.eventId} ·{' '}
                     {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `credit against original line ${x.originalLineId} · artifact ${x.originalArtifactId}` : 'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
-                    {!('sourceType' in x) && canAssignPurchaseOrder() && <LinePurchaseOrder
+                    {(!('sourceType' in x) || (x.sourceType==='MILESTONE_ACCEPTANCE' && hasRatePermission('commercial.milestone_billing.view'))) && canAssignPurchaseOrder() && <LinePurchaseOrder
                       batchId={source.id} lineId={x.lineId} approved={source.state==='Approved'} disabled={busy || !!pending} run={run}/>}
                     {!('sourceType' in x) && hasRatePermission('commercial.rate_candidates.view') &&
                       <LinePricing disabled={busy || !!pending} run={run} load={c=>invoiceCsv.linePricing(source.id,x,c)}/>}
