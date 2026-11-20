@@ -493,12 +493,13 @@ export const createInvoiceCsvRouter = (o) => {
   );
   const confirmationSchema = (sourceType = 'TM_SNAPSHOT') => ({
     TM_SNAPSHOT: INVOICE_CSV_SCHEMA,
+    FIXED_FEE_INSTALLMENT: 'workos.invoice-fixed-fee-csv/1',
     MILESTONE_ACCEPTANCE: MILESTONE_INVOICE_CSV_SCHEMA,
     FULL_LINE_REVERSAL: CREDIT_CSV_SCHEMA,
   })[sourceType];
   const confirmationView = (x) => ({
     id: x.id,
-    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
+    ...(['FIXED_FEE_INSTALLMENT','MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
     batchId: x.batch_id,
     artifactId: x.artifact_id,
     artifactVersion: x.artifact_version,
@@ -549,7 +550,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         source: {
           batchId: row.id,
-          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
+          ...(['FIXED_FEE_INSTALLMENT','MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
           state: row.state,
           artifactId: a.id,
           artifactVersion: a.version,
@@ -730,10 +731,10 @@ export const createInvoiceCsvRouter = (o) => {
         ],
         x = (
           await c.query(
-            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type)
+            ['FIXED_FEE_INSTALLMENT','MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type)
               ? "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16,$17)returning *,trim_scale(total)::text total"
               : "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16)returning *,trim_scale(total)::text total",
-            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type) ? [...confirmationArgs,row.source_type] : confirmationArgs,
+            ['FIXED_FEE_INSTALLMENT','MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type) ? [...confirmationArgs,row.source_type] : confirmationArgs,
           )
         ).rows[0];
       await o.audit(c, r, {

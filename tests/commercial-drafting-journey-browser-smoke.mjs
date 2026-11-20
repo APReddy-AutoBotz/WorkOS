@@ -369,6 +369,44 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal(JSON.parse(Buffer.from(rows[1].split(',')[9].slice(4),'base64')).installment,1);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);
     assert.equal((await apiRequest(csv+'/artifacts/'+artifact.id,{identity:identities.manager})).status,403);
+    const confirmPath=csv+'/confirmation-sources/'+nextId;
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.invoice_batch.confirm',true) on conflict(role_name,permission_key) do update set enabled=true");
+    assert.equal((await apiRequest(confirmPath,{identity:identities.manager})).status,403);
+    await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key=$1",[grant]);
+    const {body:confirmationInspection}=await apiRequest(confirmPath,{identity:identities.manager});
+    const exact=confirmationInspection.source;
+    assert.deepEqual([exact.sourceType,exact.state,exact.artifactSha256],['FIXED_FEE_INSTALLMENT','Exported',artifact.sha256]);
+    const attestation={expectedOwnerKey:confirmationInspection.ownerKey,requestId:crypto.randomUUID(),batchId:nextId,
+      artifactId:artifact.id,artifactVersion:artifact.version,artifactSha256:'0'.repeat(64),currency:exact.currency,total:exact.total,
+      reference:'SYNTHETIC-FEE',reason:'Match the downstream billing reference to the retained installment'};
+    assert.equal((await apiRequest(csv+'/confirmations',{identity:identities.manager,method:'POST',body:attestation})).status,409);
+    const confirmer=await createContext(identities.manager,[...exportGrants,'commercial.invoice_batch.confirm']);
+    await confirmer.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const confirmUi=confirmer.page.getByRole('region',{name:'Invoice billing confirmation'});
+    await confirmUi.getByLabel('Invoice confirmation engagement').selectOption(engagement.result.id);
+    await confirmUi.getByRole('button',{name:'Load invoice confirmation batches'}).click();
+    await confirmUi.getByLabel('Invoice confirmation batch',{exact:true}).selectOption(nextId);
+    await confirmUi.getByRole('button',{name:'Inspect exported invoice artifact'}).click();
+    await confirmUi.getByText(/fixed-fee installment ·/).waitFor();
+    await confirmUi.getByLabel('Invoice confirmation reference').fill(attestation.reference);
+    await confirmUi.getByLabel('Invoice confirmation reason').fill(attestation.reason);
+    await confirmUi.getByRole('checkbox',{name:/I attest the referenced/}).check();
+    const attested=confirmer.page.waitForResponse(r=>r.url().endsWith('/confirmations') && r.request().method()==='POST');
+    await confirmUi.getByRole('button',{name:'Record manual billing attestation'}).click();
+    const receiptResponse=await attested;
+    assert.equal(receiptResponse.status(),201,await receiptResponse.text());
+    const confirmedReceipt=(await receiptResponse.json()).confirmation;
+    await confirmUi.getByText('Retained manual attestation '+confirmedReceipt.id,{exact:false}).waitFor();
+    const originalReceipt=await apiRequest(csv+'/confirmation-receipts/'+confirmedReceipt.requestId,{identity:identities.manager});
+    assert.deepEqual(originalReceipt.body.confirmation,confirmedReceipt);
+    const repeated=await apiRequest(csv+'/confirmations',{identity:identities.manager,method:'POST',body:receiptResponse.request().postDataJSON()});
+    assert.equal(repeated.status,200);
+    assert.equal(repeated.body.confirmation.id,confirmedReceipt.id);
+    const terminal=await apiRequest(confirmPath,{identity:identities.manager});
+    assert.deepEqual([terminal.body.source.state,confirmedReceipt.sourceType,confirmedReceipt.artifactSha256,confirmedReceipt.reference],
+      ['Billed/Confirmed','FIXED_FEE_INSTALLMENT',artifact.sha256,attestation.reference]);
+    assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
+    await confirmer.context.close();
     await exporting.context.close();
     await deciding.context.close();
     await preparing.context.close();

@@ -408,7 +408,7 @@ export type InvoiceNoticeRecoveryOperation = {
 const confirmation = z
   .object({
     id: uuid,
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','FULL_LINE_REVERSAL']).optional(),
     batchId: uuid,
     artifactId: uuid,
     artifactVersion: z.literal(1),
@@ -428,6 +428,7 @@ const confirmation = z
   .refine((v) => {
     try {
       return (
+        (v.sourceType !== 'FIXED_FEE_INSTALLMENT' || hasRatePermission('commercial.fixed_fee_eligibility.issue')) &&
         (v.sourceType !== 'MILESTONE_ACCEPTANCE' || hasRatePermission('commercial.milestone_billing.view')) &&
         !/[\u0000-\u001f\u007f-\u009f]/u.test(v.reference) &&
         validConfirmationTotal(v.total,v.sourceType)
@@ -438,7 +439,7 @@ const confirmation = z
   });
 const confirmationSource = z
   .object({
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','FULL_LINE_REVERSAL']).optional(),
     batchId: uuid,
     state: z.enum(['Exported', 'Billed/Confirmed']),
     artifactId: uuid,
@@ -451,6 +452,7 @@ const confirmationSource = z
   .refine((v) => {
     try {
       return (
+        (v.sourceType !== 'FIXED_FEE_INSTALLMENT' || hasRatePermission('commercial.fixed_fee_eligibility.issue')) &&
         (v.sourceType !== 'MILESTONE_ACCEPTANCE' || hasRatePermission('commercial.milestone_billing.view')) &&
         validConfirmationTotal(v.total,v.sourceType)
       );
@@ -461,7 +463,7 @@ const confirmationSource = z
 export type InvoiceConfirmationSource = z.infer<typeof confirmationSource>;
 export type InvoiceConfirmation = z.infer<typeof confirmation>;
 export type InvoiceConfirmationOperation = {
-  sourceType?: 'MILESTONE_ACCEPTANCE'|'FULL_LINE_REVERSAL';
+  sourceType?: 'MILESTONE_ACCEPTANCE'|'FIXED_FEE_INSTALLMENT'|'FULL_LINE_REVERSAL';
   requestId: string;
   batchId: string;
   artifactId: string;
@@ -747,7 +749,8 @@ export const invoiceCsv = {
   confirm: async (op: InvoiceConfirmationOperation, c: RateContext | null, receipt = false) => {
     const { sourceType, ...command } = op;
     if (
-      (sourceType !== undefined && !['FULL_LINE_REVERSAL','MILESTONE_ACCEPTANCE'].includes(sourceType)) ||
+      (sourceType !== undefined && !['FULL_LINE_REVERSAL','MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT'].includes(sourceType)) ||
+      (sourceType === 'FIXED_FEE_INSTALLMENT' && !hasRatePermission('commercial.fixed_fee_eligibility.issue')) ||
       (sourceType === 'MILESTONE_ACCEPTANCE' && !hasRatePermission('commercial.milestone_billing.view')) ||
       !validInvoiceConfirmationCommand(command,sourceType)
     )
