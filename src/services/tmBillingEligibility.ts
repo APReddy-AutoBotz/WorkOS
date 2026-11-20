@@ -9,7 +9,7 @@ const uuid = z.string().uuid(),
   date = z.string().date(),
   reason = z.string().trim().min(3).max(1000),
   instant = z.string().refine((x) => Number.isFinite(Date.parse(x)));
-const def = z.unknown().refine(validTmEligibilityPolicy),
+const def = z.custom<{ stages: { userId: string; role: string }[]; engagementId: string }>(validTmEligibilityPolicy),
   reference = z
     .object({
       entityType: z.enum(['Project', 'Engagement', 'Contract']),
@@ -284,6 +284,19 @@ const canonical = (value: unknown) =>
   );
 export { captureRateContext };
 export const tmBillingEligibility = {
+  olderPolicies: async (engagementId: string, last: TmBillingPolicy, c: RateContext | null) => {
+    const q = new URLSearchParams({engagementId, beforeSequence: String(last.sequence)});
+    const raw = await call('GET', '/policies?' + q, c, 'read');
+    const result = z.object({...envelope, policies: z.array(policy).min(1).max(20), truncated: z.boolean()}).strict().safeParse(raw);
+    if (!result.success) return bad();
+    const page = result.data;
+    if (page.policies.some((row, i) => {
+      const previous = i === 0 ? last : page.policies[i - 1];
+      return row.engagementId !== engagementId || row.definition.engagementId !== engagementId ||
+        row.id !== previous.previousId || row.sequence !== previous.sequence - 1;
+    }) || page.truncated !== (page.policies[page.policies.length - 1].previousId !== null)) return bad();
+    return page;
+  },
   load: async (engagementId: string, c: RateContext | null) => {
     if (!id.safeParse(engagementId).success) return bad();
     const query = '?' + new URLSearchParams({ engagementId }),
@@ -330,6 +343,7 @@ export const tmBillingEligibility = {
       return bad();
     return {
       policies: p.data.policies,
+      morePolicies: p.data.truncated,
       effectivePolicy: p.data.effectivePolicy,
       sources: s.data.sources,
       approvals: i.data.approvals,

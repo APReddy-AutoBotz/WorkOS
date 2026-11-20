@@ -471,6 +471,18 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           return selection.policies[0].id;
         };
         assert.equal(await loadPolicySelection(), latest);
+        await ui.getByText('Billing review policy history',{exact:true}).click();
+        const historyWait=wait(p,b+'/policies');
+        await ui.getByRole('button',{name:'Load older billing policies'}).click();
+        const history=await body(historyWait);
+        assert.deepEqual(history.policies.map(x=>x.sequence),[2,1]);
+        assert.equal(history.truncated,false);
+        assert.equal(history.policies[1].id,pOut.policy.id);
+        await ui.getByText('Version 1 · effective '+fx.today+' UTC',{exact:false}).waitFor();
+        assert.equal(await ui.getByRole('button',{name:'Load older billing policies'}).count(),0);
+        const olderPath=b+'/policies?engagementId='+encodeURIComponent(roots.engagement.id)+'&beforeSequence=';
+        assert.equal((await request(olderPath+'0')).status,400);
+        assert.equal((await request(olderPath+'3',{identity:ids.reader})).status,403);
         await ui.getByLabel('Billing policy effective from', { exact: true }).fill(shift(fx.today, 22));
         pw = wait(p, b + '/policies', 'POST');
         await ui.getByRole('button', { name: 'Record billing review policy', exact: true }).click();

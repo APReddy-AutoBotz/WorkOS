@@ -67,6 +67,7 @@ const TmBillingEngagement = ({
   key?: string;
 }) => {
   const [policies, setPolicies] = useState<TmBillingPolicy[]>([]),
+    [morePolicies, setMorePolicies] = useState(false),
     [sources, setSources] = useState<TmBillingEvidence[]>([]),
     [approvals, setApprovals] = useState<TmBillingApproval[]>([]),
     [sourceNext, setSourceNext] = useState<string | null>(null),
@@ -112,6 +113,7 @@ const TmBillingEngagement = ({
     context.current = null;
     inFlight.current = false;
     setPolicies([]);
+    setMorePolicies(false);
     setSources([]);
     setApprovals([]);
     setSourceNext(null);
@@ -194,6 +196,7 @@ const TmBillingEngagement = ({
     void run(async (c) => {
       const x = await tmBillingEligibility.load(engagementId, c);
       setPolicies(x.policies);
+      setMorePolicies(x.morePolicies);
       setSources(x.sources);
       setApprovals(x.approvals);
       setSourceNext(x.sourcesNext);
@@ -215,6 +218,15 @@ const TmBillingEngagement = ({
         setApprovalNext(x.nextAfter);
       }
     });
+  const loadOlderPolicies = () => {
+    const last = policies[policies.length - 1];
+    if (!morePolicies || !last) return;
+    void run(async c => {
+      const page = await tmBillingEligibility.olderPolicies(engagementId, last, c);
+      setPolicies(old => [...old, ...page.policies]);
+      setMorePolicies(page.truncated);
+    });
+  };
   const inspect = () => {
     if (!selected) return;
     void run(async (c) => {
@@ -399,14 +411,17 @@ const TmBillingEngagement = ({
           <p>Billing evidence excludes confidential cost and margin.</p>
           {policies.length > 0 && (
             <details>
-              <summary>Recent billing review policies</summary>
+              <summary>Billing review policy history</summary>
               <ul>
                 {policies.map((x) => (
                   <li key={x.id}>
-                    Version {x.sequence} · effective {x.effectiveFrom} UTC
+                    Version {x.sequence} · effective {x.effectiveFrom} UTC · {x.reason}
+                    <ol>{x.definition.stages.map((stage, i) =>
+                      <li key={i}>{stage.role} · {stage.userId}</li>)}</ol>
                   </li>
                 ))}
               </ul>
+              {morePolicies && <button type="button" disabled={busy || !!pending} onClick={loadOlderPolicies}>Load older billing policies</button>}
             </details>
           )}
           {canManage && (

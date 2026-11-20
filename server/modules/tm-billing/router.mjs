@@ -332,15 +332,15 @@ export const createTmBillingRouter = (o) => {
     '/policies',
     handle(false, async (c, r) => {
       const q = parse(
-        z.object({ engagementId: id, includeEffective: z.literal('true').optional() }).strict(),
+        z.object({ engagementId: id, includeEffective: z.literal('true').optional(), beforeSequence: z.coerce.number().int().min(1).max(2147483647).optional() }).strict(),
         r.query,
       );
       await authorize(c, r);
       await engagement(c, r, q.engagementId);
       const rows = (
         await c.query(
-          'select *,effective_from::text from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence desc limit 21',
-          [...scope(r), q.engagementId],
+          'select *,effective_from::text from tm_billing_eligibility_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and ($4::integer is null or sequence<$4) order by sequence desc limit 21',
+          [...scope(r), q.engagementId, q.beforeSequence ?? null],
         )
       ).rows;
       const env = await envelope(c, r);
