@@ -75,3 +75,9 @@ WOS-COM-006 and WOS-RPT-003. Open a retained period version and select **Reconci
 ### Project allocations and period actuals
 
 WOS-COM-005 and WOS-RPT-003. Select **Compare project budgets and actuals** on a retained period. Each row links the project budget source referenced by the approved work to the hours, billable value and labor cost for the matching valuations. The allocation covers the entire project. Actuals cover only contributing entries in the selected version. Current worker scope must cover the entire retained period. The report reads immutable project bindings, commercial terms and valuation membership. It does not forecast remaining cost or infer a separate cost budget.
+
+### Approved work under amended terms
+
+WOS-COM-005, WOS-COM-006 and WOS-COM-014. Migration 075 validates each project, engagement and contract reference against the activation terms or the named, effective amendment for that entity. All three references must identify one T&M contract version in the engagement currency covering the work date. A partial adoption prevents valuation until qualifying work evidence exists. The snapshot retains amendment IDs and the adopted rate sources. Billing review and invoice evidence link back to that snapshot. A later amendment does not rewrite a saved valuation.
+
+The real PostgreSQL/browser journeys cover amendment adoption at all three levels, valuation, the amended project allocation, independent billing eligibility and invoice export. Negative checks cover a mixed contract version, an amendment on a different entity and work before the amendment took effect. To suspend creation under amended terms, restore the previous valuation write guard through a forward migration and retain read support for existing evidence.

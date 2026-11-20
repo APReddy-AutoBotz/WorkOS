@@ -24,6 +24,7 @@ import { actualCatalog } from './support/actual-work-test.mjs';
 import {
   grantAmendmentPermissions,
   createAmendmentHierarchy,
+  adoptTmHierarchyAmendment,
 } from './support/commercial-amendments-test.mjs';
 import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
 const base = '/api/v1/governed-tm-valuations',
@@ -92,14 +93,15 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         roots = await createAmendmentHierarchy(request, 'SYN-TM-VAL', {
           contract: {
             model: 'time_and_materials',
-            startsOn: fx.today,
+            startsOn: shift(fx.today,-1),
             endsOn: end,
-            effectiveFrom: fx.today,
+            effectiveFrom: shift(fx.today,-1),
             currency: 'USD',
           },
           engagement: { startsOn: fx.today, endsOn: end, currency: 'USD' },
           project: { startsOn: fx.today, endsOn: end },
         });
+      await adoptTmHierarchyAmendment(pool, request, ids.manager, roots, fx.today, end);
       ok(
         await request('/api/v1/work-categories/catalogs', {
           method: 'POST',

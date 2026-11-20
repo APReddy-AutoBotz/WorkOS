@@ -21,6 +21,7 @@ import { actualCatalog } from './support/actual-work-test.mjs';
 import {
   grantAmendmentPermissions,
   createAmendmentHierarchy,
+  adoptTmHierarchyAmendment,
 } from './support/commercial-amendments-test.mjs';
 import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
 const base = '/api/v1/governed-tm-valuations',
@@ -59,14 +60,16 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
         roots = await createAmendmentHierarchy(request, 'SYN-TM-VAL', {
           contract: {
             model: 'time_and_materials',
-            startsOn: fx.today,
+            startsOn: shift(fx.today,-1),
             endsOn: end,
-            effectiveFrom: fx.today,
+            effectiveFrom: shift(fx.today,-1),
             currency: 'USD',
           },
           engagement: { startsOn: fx.today, endsOn: end, currency: 'USD' },
           project: { startsOn: fx.today, endsOn: end },
         });
+      const amendment = pricingCase === 'standard'
+        ? await adoptTmHierarchyAmendment(pool, request, ids.manager, roots, fx.today, end) : null;
       ok(
         await request('/api/v1/work-categories/catalogs', {
           method: 'POST',
@@ -536,6 +539,18 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
           return;
         }
         await result.getByText(/billable 125.15, cost 50.00, margin 75.15/).waitFor();
+        const refs = accepted.valuation.sourceEvidence.references;
+        for (const ref of refs) {
+          assert.equal(ref.amendmentId, amendment.events[ref.entityType].id);
+          assert.equal(ref.contractVersionId, amendment.version.id);
+        }
+        const match = async (references, date) => (await pool.query(
+          'select commercial_tm_terms_match(b,e,$3::jsonb,$4::date) ok from commercial_project_bindings b join commercial_engagements e on e.id=b.engagement_id where b.id=$1 and e.id=$2',
+          [roots.project.bindingId,roots.engagement.id,JSON.stringify(references),date])).rows[0].ok;
+        assert.equal(await match(refs,fx.today),true);
+        assert.equal(await match(refs,shift(fx.today,-1)),false);
+        assert.equal(await match(refs.map(r=>r.entityType==='Project'?{...r,amendmentId:null,contractVersionId:roots.pin}:r),fx.today),false);
+        assert.equal(await match(refs.map(r=>r.entityType==='Project'?{...r,amendmentId:amendment.events.Contract.id}:r),fx.today),false);
         const verifyCalculation = async () => {
           const audit = result.getByRole('region', { name: 'Calculation evidence' });
           await audit
@@ -654,11 +669,11 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
         await tm.getByRole('button', {name:'Compare project budgets and actuals'}).click();
         const budgetRows = (await body(budgetResponse)).projects;
         assert.equal(budgetRows.length,1);
-        assert.equal(budgetRows[0].budgetSourceId, roots.project.bindingId);
+        assert.equal(budgetRows[0].budgetSourceId, amendment.events.Project.id);
         const budgetTable = tm.getByRole('table', {name:'Project allocations and valued work in retained version 1'});
         await budgetTable.waitFor();
         assert.deepEqual(await budgetTable.getByRole('cell').allTextContents(),
-          ['Project activation','USD','4000.0001','1.25','125.15','50.00']);
+          ['Amendment 1','USD','4500.0002','1.25','125.15','50.00']);
         const memberPath = (period, offset = 0, limit = 25) =>
           base +
           '/period-versions/' +

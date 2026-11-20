@@ -1,0 +1,79 @@
+-- Approved work owns the retained pins. Later amendments cannot reprice it.
+create function commercial_tm_terms_match(binding commercial_project_bindings, eng commercial_engagements,
+  refs jsonb, work_day date) returns boolean language sql stable as $$
+  with entities as (
+    select r->>'entityType' kind, r->>'entityId' entity_id, r->>'contractVersionId' version_id,
+      r->>'amendmentId' amendment_id, r ? 'amendmentId' as has_amendment_field
+    from jsonb_array_elements(case when jsonb_typeof(refs)='array' then refs else '[]'::jsonb end) r
+  ), resolved as (
+    select e.*, cv.id as version_found,
+      case when e.amendment_id is not null then
+        a.id is not null and a.contract_version_id=e.version_id and a.effective_on<=work_day
+          and work_day between a.starts_on and a.ends_on
+      when e.kind='Project' then e.version_id=binding.contract_version_id and work_day between binding.starts_on and binding.ends_on
+      when e.kind='Engagement' then e.version_id=eng.contract_version_id and work_day between eng.starts_on and eng.ends_on
+      when e.kind='Contract' then exists (
+        select 1 from commercial_lifecycle_events l where l.organization_id=eng.organization_id
+          and l.legal_entity_id=eng.legal_entity_id and l.entity_type='Contract' and l.entity_id=eng.contract_id
+          and l.sequence=1 and l.contract_version_id=e.version_id
+      ) else false end as terms_valid
+    from entities e
+    left join commercial_contract_versions cv on cv.id=e.version_id and cv.contract_id=eng.contract_id
+      and cv.organization_id=eng.organization_id and cv.legal_entity_id=eng.legal_entity_id
+      and cv.model=eng.model and cv.currency=eng.currency and cv.effective_from<=work_day
+      and work_day between cv.starts_on and cv.ends_on
+    left join commercial_amendments a on a.id=e.amendment_id and a.entity_id=e.entity_id and a.entity_type=e.kind
+      and a.contract_id=eng.contract_id and a.organization_id=eng.organization_id and a.legal_entity_id=eng.legal_entity_id
+  )
+  select count(*)=3 and count(distinct kind)=3 and count(distinct version_id)=1 and
+    bool_and(coalesce(has_amendment_field and version_found is not null and terms_valid
+      and entity_id=case kind when 'Contract' then eng.contract_id when 'Engagement' then eng.id when 'Project' then binding.project_id end,false))
+  from resolved
+$$;
+
+create or replace function guard_commercial_tm_append() returns trigger language plpgsql as $$
+declare ctx jsonb;p commercial_tm_policy_versions;prior commercial_tm_policy_versions;eng commercial_engagements;binding commercial_project_bindings;s work_submission_evidence;d work_submission_decisions;h timesheets;e timesheet_entries;item jsonb;ba commercial_rate_adoptions;ca commercial_rate_adoptions;bc commercial_rate_candidates;cc commercial_rate_candidates;source jsonb;result jsonb;mode text;prec int;billable_basis numeric;
+begin
+ begin ctx=nullif(current_setting('workos.commercial_tm_context',true),'')::jsonb;exception when others then ctx=null;end;
+ if ctx is null or new.id::text is distinct from ctx->>'eventId' or new.organization_id is distinct from ctx->>'organizationId' or new.legal_entity_id is distinct from ctx->>'legalEntityId' or new.actor_id::text is distinct from ctx->>'actorId' or new.active_role is distinct from ctx->>'activeRole' or new.operation_id is distinct from ctx->>'operationId' then raise exception 'Use the exact scoped valuation command.' using errcode='CTM01';end if;
+ perform lock_commercial_candidate_identity(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role);
+ if not commercial_tm_actor_valid(new.organization_id,new.legal_entity_id,new.actor_id,new.active_role,tg_table_name='commercial_tm_policy_versions') then raise exception 'Current separate valuation and source authority is required.' using errcode='CTM01';end if;
+ select * into eng from commercial_engagements where organization_id=new.organization_id and legal_entity_id=new.legal_entity_id and id=new.engagement_id for share;
+ if eng.id is null or eng.model<>'time_and_materials' or eng.origin<>'manual' or eng.contract_id is null then raise exception 'An explicit governed T&M engagement is required.' using errcode='CTM02';end if;
+ perform pg_advisory_xact_lock(hashtext('commercial-tm-policy:'||new.organization_id||':'||new.legal_entity_id||':'||new.engagement_id));
+ if tg_table_name='commercial_tm_policy_versions' then
+  select * into prior from commercial_tm_policy_versions where organization_id=new.organization_id and legal_entity_id=new.legal_entity_id and engagement_id=new.engagement_id order by sequence desc limit 1;
+  if new.sequence<>coalesce(prior.sequence,0)+1 or new.previous_id is distinct from prior.id or new.effective_from<(clock_timestamp() at time zone 'UTC')::date or (prior.id is not null and new.effective_from<=prior.effective_from) or new.definition->>'currency' is distinct from eng.currency then raise exception 'A prospective explicit policy version is required.' using errcode='CTM02';end if;return new;
+ end if;
+ perform pg_advisory_xact_lock(hashtext('commercial-tm-entry:'||new.organization_id||':'||new.legal_entity_id||':'||new.submission_id||':'||new.entry_id::text));
+ select * into p from commercial_tm_policy_versions where id=new.policy_id and engagement_id=new.engagement_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id;
+ select * into s from work_submission_evidence where id=new.submission_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id;
+ select * into d from work_submission_decisions where id=new.decision_id and submission_id=new.submission_id and status='Approved';
+ if s.id is not null then select * into h from timesheets where id=s.timesheet_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id for share;end if;
+ select * into e from timesheet_entries where id=new.entry_id and timesheet_id=s.timesheet_id for share;
+ if (select count(*) from jsonb_array_elements(s.entries) x where x->>'entryId'=new.entry_id::text)<>1 then raise exception 'One retained work entry is required.' using errcode='CTM02';end if;
+ select x into item from jsonb_array_elements(s.entries) x where x->>'entryId'=new.entry_id::text;
+ select * into binding from commercial_project_bindings where id=item->>'bindingId' and project_id=e.project_id and engagement_id=new.engagement_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id;
+ if p.id is null or s.id is null or d.id is null or h.id is null or h.status<>'Approved' or e.id is null or e.hours<=0 or not e.billable or item->>'kind' is distinct from 'governed' or item->>'entryId' is distinct from e.id::text or item->>'projectId' is distinct from e.project_id or item->>'workDate' is distinct from to_char(e.work_date,'YYYY-MM-DD') or (item->>'hours')::numeric is distinct from e.hours or (item->>'billable')::boolean is distinct from e.billable or binding.id is null or binding.model<>'time_and_materials' or not binding.billable or binding.currency is distinct from eng.currency or eng.currency is distinct from p.definition->>'currency' or not commercial_tm_terms_match(binding,eng,item->'references',e.work_date) or p.id is distinct from(select id from commercial_tm_policy_versions where organization_id=new.organization_id and legal_entity_id=new.legal_entity_id and engagement_id=new.engagement_id and effective_from<=e.work_date order by sequence desc limit 1) or jsonb_typeof(item->'references') is distinct from 'array' or jsonb_typeof(item->'assignmentSnapshots') is distinct from 'array' or jsonb_array_length(item->'assignmentSnapshots')=0 or jsonb_array_length(item->'references')<>3 or exists(select 1 from jsonb_array_elements(item->'references') x where x->>'entityType' not in ('Project','Engagement','Contract') or x->>'entityId' is distinct from case x->>'entityType' when 'Project' then e.project_id when 'Engagement' then eng.id when 'Contract' then eng.contract_id end or not exists(select 1 from commercial_lifecycle_events l where l.id=x->>'lifecycleEventId' and l.organization_id=new.organization_id and l.legal_entity_id=new.legal_entity_id and l.entity_type=x->>'entityType' and l.entity_id=x->>'entityId' and l.state='Active' and l.effective_on<=e.work_date)) or (select count(distinct x->>'entityType') from jsonb_array_elements(item->'references') x)<>3 or not exists(select 1 from jsonb_array_elements(item->'assignmentSnapshots') x where x->>'workerId'=h.employee_id and x->>'projectId'=e.project_id and x->>'billable'='true' and x->>'startsOn'<=to_char(e.work_date,'YYYY-MM-DD') and x->>'endsOn'>=to_char(e.work_date,'YYYY-MM-DD')) then raise exception 'Exact approved governed T&M evidence and root terms are required.' using errcode='CTM02';end if;
+ perform pg_advisory_xact_lock(hashtext('commercial-tm-rate:'||new.organization_id||':'||new.legal_entity_id||':billing:contract:'||eng.contract_id));
+ perform pg_advisory_xact_lock(hashtext('commercial-tm-rate:'||new.organization_id||':'||new.legal_entity_id||':billing:engagement:'||eng.id));
+ perform pg_advisory_xact_lock(hashtext('commercial-tm-rate:'||new.organization_id||':'||new.legal_entity_id||':cost:worker:'||h.employee_id));
+ select * into ba from commercial_rate_adoptions where id=new.billing_adoption_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id;
+ select * into ca from commercial_rate_adoptions where id=new.cost_adoption_id and organization_id=new.organization_id and legal_entity_id=new.legal_entity_id;
+ select * into bc from commercial_rate_candidates where id=ba.candidate_id;select * into cc from commercial_rate_candidates where id=ca.candidate_id;
+ if cc.id is not null then perform lock_commercial_candidate_worker_witness(cc,new.actor_id,new.active_role);end if;
+ if ba.id is null or ca.id is null or bc.kind<>'billing' or cc.kind<>'cost' or cc.binding_type<>'worker' or cc.binding_id<>h.employee_id or rate_candidate_worker_visible(jsonb_build_object('actorId',new.actor_id,'activeRole',new.active_role,'organizationId',new.organization_id,'legalEntityId',new.legal_entity_id),h.employee_id) is distinct from true or not ((bc.binding_type='engagement' and bc.binding_id=eng.id) or (bc.binding_type='contract' and bc.binding_id=eng.contract_id)) or bc.currency<>eng.currency or cc.currency<>eng.currency or bc.unit<>'HOUR' or cc.unit<>'HOUR' or e.work_date not between bc.effective_from and bc.effective_to or e.work_date not between cc.effective_from and cc.effective_to then raise exception 'Uniquely resolved native adopted sources are required.' using errcode='CTM02';end if;
+ if exists(select 1 from commercial_rate_candidates x join commercial_rate_adoptions a on a.candidate_id=x.id and a.organization_id=x.organization_id and a.legal_entity_id=x.legal_entity_id where x.organization_id=new.organization_id and x.legal_entity_id=new.legal_entity_id and x.kind='billing' and x.id<>bc.id and x.currency=eng.currency and x.unit='HOUR' and e.work_date between x.effective_from and x.effective_to and ((x.binding_type='engagement' and x.binding_id=eng.id) or (x.binding_type='contract' and x.binding_id=eng.contract_id)) and x.priority>=bc.priority) or exists(select 1 from commercial_rate_candidates x join commercial_rate_adoptions a on a.candidate_id=x.id and a.organization_id=x.organization_id and a.legal_entity_id=x.legal_entity_id where x.organization_id=new.organization_id and x.legal_entity_id=new.legal_entity_id and x.kind='cost' and x.id<>cc.id and x.currency=eng.currency and x.unit='HOUR' and x.binding_type='worker' and x.binding_id=h.employee_id and e.work_date between x.effective_from and x.effective_to and x.priority>=cc.priority) then raise exception 'Missing or tied highest-priority source is unavailable.' using errcode='CTM02';end if;
+ prec=(p.definition->>'precision')::int;mode=p.definition->>'rounding';source=jsonb_build_object('submissionId',s.id,'decisionId',d.id,'entryId',e.id,'projectId',e.project_id,'bindingId',binding.id,'workDate',to_char(e.work_date,'YYYY-MM-DD'),'hours',trim_scale(e.hours)::text,'references',item->'references','assignmentSnapshots',item->'assignmentSnapshots','billingAdoptionId',ba.id,'costAdoptionId',ca.id,'policyId',p.id);
+ billable_basis=e.hours*bc.amount;
+ if p.definition->>'version'='governed-tm/2' then
+   billable_basis=least(billable_basis,(p.definition->>'capAmount')::numeric);
+ elsif p.definition->>'exclusions'='ALL_BILLING' then
+   billable_basis=0;
+ end if;
+ result=jsonb_build_object('version',p.definition->>'version','currency',eng.currency,'unit','HOUR','hoursExact',trim_scale(e.hours)::text,'billingRateExact',bc.amount::text,'costRateExact',cc.amount::text,'unroundedBillableExact',trim_scale(e.hours*bc.amount)::text,'unroundedCostExact',trim_scale(e.hours*cc.amount)::text,'billableValue',commercial_tm_fixed(billable_basis,prec,mode),'costValue',commercial_tm_fixed(e.hours*cc.amount,prec,mode),'marginValue',commercial_tm_fixed((commercial_tm_fixed(billable_basis,prec,mode))::numeric-(commercial_tm_fixed(e.hours*cc.amount,prec,mode))::numeric,prec,'DOWN'));
+ if p.definition->>'version'='governed-tm/2' then
+   result=result||jsonb_build_object('capAmount',p.definition->>'capAmount','billableAfterCapExact',trim_scale(billable_basis)::text);
+ end if;
+ if new.source_evidence is distinct from source or new.result is distinct from result then raise exception 'Retain exact protected sources and deterministic decimal results.' using errcode='CTM03';end if;return new;
+end $$;
