@@ -91,7 +91,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await history.getByRole('heading', {name: /^Version 2/}).waitFor();await history.getByRole('heading', {name: /^Version 1/}).waitFor();
     assert((await page.getByRole('region', {name: 'Contracts and SOWs'}).innerText()).includes('Currently effective version 1: GBP 12345.6789.'));
     assert.equal(await page.evaluate(() => window.syntheticCommercialExecuted), undefined);assert.equal(await history.locator('script,img').count(), 0);
-    await page.reload();await ready();await page.getByRole('heading', {name: 'SYN-JOURNEY-PO · Draft', exact: true}).waitFor();await page.getByText('Draft, not accepted, not billing eligible.', {exact: false}).waitFor();
+    await page.reload();await ready();await page.getByRole('heading', {name: 'SYN-JOURNEY-PO', exact: true}).waitFor();await page.getByText('Draft, not accepted, not billing eligible.', {exact: false}).waitFor();
     assert.equal(await page.getByRole('heading', {name: /^SYN-JOURNEY-ENGAGEMENT/}).count(), 1);assert.equal(await page.getByRole('heading', {name: /^SYN-JOURNEY-MILESTONE/}).count(), 1);
 
     const contracts = (await pool.query('select * from commercial_contracts where id=$1', [contractId])).rows;
@@ -118,6 +118,43 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const writeCount = writes.length;assert.equal(writeCount, 5);assert(writes.every(write => write.method === 'POST' && write.path.startsWith(prefix)));
     const reader = await createContext(identities.reader, ['commercial.contracts.view']);await reader.page.goto(`${baseUrl}/tests/fixtures/commercial-drafting.html?live=1`);await reader.page.getByText('Read-only commercial access.', {exact: false}).waitFor();assert.equal(await reader.page.getByRole('button', {name: /^New /}).count(), 0);assert.equal(writes.length, writeCount);
     const denied = await createContext(identities.denied, []);let deniedApiCalls = 0;denied.page.on('request', request => {if (new URL(request.url()).pathname.startsWith('/api/')) deniedApiCalls++;});await denied.page.goto(`${baseUrl}/tests/fixtures/commercial-drafting.html?live=1`);await denied.page.getByRole('alert').getByText('Scope or access changed.', {exact: false}).waitFor();assert.equal(deniedApiCalls, 0);assert.equal(writes.length, writeCount);
+    const releasePath='/purchase-orders/'+po.result.id+'/release';
+    const releaseCommand={contractVersionId:versionId,approvalReference:'SYN-PO-AUTH-001',reason:'Verified signed purchase order'};
+    const postRelease=(identity,body=releaseCommand)=>apiRequest(releasePath,{method:'POST',identity,body});
+    assert.equal((await postRelease(identities.reader)).status,403);
+    for (const [role,key] of [['Admin','commercial.lifecycle.manage'],['Admin','commercial.purchase_orders.release'],
+      ['Employee','commercial.contracts.manage'],['Employee','commercial.purchase_orders.release']])
+      await pool.query('insert into role_permissions(role_name,permission_key,enabled) values($1,$2,true) on conflict(role_name,permission_key) do update set enabled=true',[role,key]);
+    assert.equal((await postRelease(identities.manager)).status,403);
+    assert.equal((await postRelease(identities.reader)).status,409);
+    const active=await apiRequest('/lifecycle/Contract/'+contractId+'/transitions',{method:'POST',
+      body:{expectedSequence:0,state:'Active',contractVersionId:versionId,reason:'Synthetic contract activation',approvalReference:null}});
+    assert.equal(active.status,201,JSON.stringify(active.body));
+    assert.equal((await postRelease(identities.reader,{...releaseCommand,value:'1.00'})).status,400);
+    const missingScope=await apiRequest(releasePath,{identity:identities.reader,headers:{'x-legal-entity-id':'other-synthetic-entity'}});
+    assert.equal(missingScope.status,403);
+    await pool.query("create function reject_test_po_audit() returns trigger language plpgsql as $$begin raise exception 'Synthetic rollback probe'; end $$");
+    await pool.query("create trigger reject_test_po_audit before insert on audit_logs for each row when(new.action='Release') execute function reject_test_po_audit()");
+    assert.equal((await postRelease(identities.reader)).status,503);
+    assert.equal((await apiRequest(releasePath)).body.release,null);
+    await pool.query('drop trigger reject_test_po_audit on audit_logs');
+    const reviewer=await createContext(identities.reader,['commercial.contracts.view','commercial.contracts.manage','commercial.purchase_orders.release']);
+    await reviewer.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    await reviewer.page.getByRole('button',{name:'Inspect release'}).click();
+    await reviewer.page.getByText('Awaiting release').waitFor();
+    await reviewer.page.getByLabel('Approval reference',{exact:true}).fill(releaseCommand.approvalReference);
+    await reviewer.page.getByLabel('Release reason',{exact:true}).fill(releaseCommand.reason);
+    const releasing=reviewer.page.waitForResponse(r=>r.url().endsWith(releasePath) && r.request().method()==='POST');
+    await reviewer.page.getByRole('button',{name:'Release purchase order',exact:true}).click();
+    const released=await releasing;
+    assert.equal(released.status(),201,await released.text());
+    await reviewer.page.getByText(/Released .*SYN-PO-AUTH-001/).waitFor();
+    const receipt=await apiRequest(releasePath);
+    assert.equal(receipt.body.release.actorId,identities.reader.id);
+    assert.deepEqual((await postRelease(identities.reader)).body,receipt.body);
+    assert.equal((await postRelease(identities.reader,{...releaseCommand,reason:'Changed instructions'})).status,409);
+    assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and action='Release'",[po.result.id])).rows[0].n,1);
+    await reviewer.context.close();
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
     console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
   } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
