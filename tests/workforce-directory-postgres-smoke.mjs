@@ -5,8 +5,26 @@ const path='/api/v1/workforce-directory',ok=r=>{assert.equal(r.status,200,JSON.s
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);const fx=await seedDirectory(pool),ids=fx.identities;
  await withCommercialApi({databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s)},async({request})=>{
-  const read=(q={},identity=ids.denied)=>request(path+'?'+new URLSearchParams(q),{identity}),all=async(identity,q={})=>{let p=ok(await read(q,identity)),rows=[...p.workers];while(p.nextAfter){p=ok(await read({...q,after:p.nextAfter,expectedRosterToken:p.rosterToken},identity));rows.push(...p.workers);}return rows;};
+  const read=(q={},identity=ids.denied)=>request(path+'?'+new URLSearchParams({contractVersion:'workforce-directory/2',...q}),{identity}),all=async(identity,q={})=>{let p=ok(await read(q,identity)),rows=[...p.workers];while(p.nextAfter){p=ok(await read({...q,after:p.nextAfter,expectedRosterToken:p.rosterToken},identity));rows.push(...p.workers);}return rows;};
   const tables=['employees','users','user_roles','role_permissions','project_allocations','timesheets','leave_requests','workforce_capability_versions','worker_capacity_versions','worker_capacity_evidence','audit_logs'],snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async t=>[t,(await pool.query('select to_jsonb(t)v from '+t+' t order by to_jsonb(t)::text')).rows]))),before=await snapshot();
+  const legacy=ok(await request(path,{identity:ids.denied}));
+  assert.equal(legacy.contractVersion,'workforce-directory/1');
+  assert.ok(legacy.workers.every(w=>!Object.hasOwn(w,'workerType')));
+  const typed=async()=>ok(await read({search:'Synthetic visiting fellow'}));
+  assert.deepEqual((await typed()).workers.map(w=>[w.id,w.workerType]),[[f.ownerId,'Synthetic visiting fellow']]);
+  const prior=ok(await read());
+  for(const [field,value,restore] of [['active',false,true],['legal_entity_id',f.otherLegalEntityId,f.legalEntityId],
+    ['catalog_type','department','worker_type'],['effective_from','2099-01-01','2000-01-01']]){
+   await pool.query('update organization_catalog_items set '+field+'=$1 where id=$2',[value,'directory-kind']);
+   assert.equal((await typed()).totalMatching,0);
+   assert.equal(ok(await read({parentId:f.ownerId})).parent.workerType,null);
+   assert.equal((await read({after:prior.nextAfter,expectedRosterToken:prior.rosterToken})).status,409);
+   await pool.query('update organization_catalog_items set '+field+'=$1 where id=$2',[restore,'directory-kind']);
+  }
+  await pool.query("update worker_profiles set effective_to=(current_timestamp at time zone 'UTC')::date-1 where employee_id=$1",[f.ownerId]);
+  assert.equal((await typed()).totalMatching,0);
+  await pool.query("update worker_profiles set effective_to=null where employee_id=$1",[f.ownerId]);
+  assert.equal(ok(await read({parentId:f.ownerId})).parent.workerType,'Synthetic visiting fellow');
   const first=ok(await read());assert.equal(first.workers.length,20);assert.equal(first.totalMatching,25);const visible=await all(ids.denied);assert.equal(visible.length,25);assert.equal(new Set(visible.map(w=>w.id)).size,25);assert(!JSON.stringify(visible).includes(fx.root));assert(!JSON.stringify(visible).includes(fx.other));assert(!JSON.stringify(visible).includes(fx.unrelated));assert.equal(visible.find(w=>w.id===f.ownerId).manager,null);assert.equal(visible.find(w=>w.id===f.ownerId).visibleDirectReports,23);
   const direct=ok(await read({parentId:f.ownerId,expectedRosterToken:first.rosterToken}));assert.equal(direct.parent.id,f.ownerId);assert.equal(direct.totalMatching,23);assert.equal(direct.parent.manager,null);assert(direct.workers.every(w=>w.manager.id===f.ownerId));assert.equal((await all(ids.denied,{parentId:f.ownerId})).length,23);
   const nested=ok(await read({parentId:fx.children[0]}));assert.equal(nested.parent.manager.id,f.ownerId);assert.equal(nested.totalMatching,1);assert.equal(nested.workers[0].id,fx.grandchild);assert.equal((await read({parentId:fx.root})).status,404);assert.equal((await read({parentId:fx.other})).status,404);
