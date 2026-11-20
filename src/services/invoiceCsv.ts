@@ -511,7 +511,28 @@ const correctionEvidence=z.object({
 export type CorrectionEvidence=z.infer<typeof correctionEvidence>;
 const creditLink=z.object({applicationAttested:z.boolean(),originalArtifactId:uuid,originalLineId:uuid,artifactId:uuid,batchId:uuid,lineId:uuid,sha256:hash,currency:z.string().regex(/^[A-Z]{3}$/),amount:creditAmount}).strict();
 export type CreditExportLink=z.infer<typeof creditLink>;
+const exactProduct = z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,8})?$/);
+const linePricing = z.object({
+  batchId:uuid,lineId:uuid,snapshotId:uuid,policyId:uuid,policyEffectiveFrom:date,billingAdoptionId:uuid,rateCandidateId:uuid,
+  rateFrom:date,rateTo:date,workDate:date,version:z.enum(['governed-tm/1','governed-tm/2']),currency:z.string().regex(/^[A-Z]{3}$/),
+  hours:money,rate:money,rawAmount:exactProduct,ceiling:money.nullable(),roundingBasis:exactProduct,
+  rounding:z.enum(['HALF_UP','HALF_EVEN','DOWN']),precision:z.number().int().min(0).max(4),amount:money,
+}).strict();
+export type InvoiceLinePricing=z.infer<typeof linePricing>;
 export const invoiceCsv = {
+  linePricing:async(batchId:string,line:z.infer<typeof tmLine>,c:RateContext)=>{
+    if(!hasRatePermission('commercial.rate_candidates.view'))return bad();
+    const raw=await call('GET','/batches/'+batchId+'/lines/'+line.lineId+'/pricing',c,'view');
+    const result=z.object({...envelope,pricing:linePricing}).strict().safeParse(raw);
+    if(!result.success)return bad();
+    const p=result.data.pricing;
+    if(p.batchId!==batchId || p.lineId!==line.lineId || p.snapshotId!==line.snapshotId || p.workDate!==line.workDate ||
+      p.currency!==line.currency || canonicalHours(p.amount)!==canonicalHours(line.amount) ||
+      p.policyEffectiveFrom>p.workDate || p.rateFrom>p.workDate || p.workDate>p.rateTo ||
+      (p.version==='governed-tm/2')!==(p.ceiling!==null) ||
+      (p.version==='governed-tm/1' && p.rawAmount!==p.roundingBasis))return bad();
+    return p;
+  },
   correctionBatches:async(engagementId:string,after:string|null,c:RateContext,purpose?:'confirmation')=>{
     const q=new URLSearchParams({engagementId});if(purpose)q.set('purpose',purpose);if(after)q.set('after',after);
     const raw=await call('GET','/correction-batches?'+q,c,'view');

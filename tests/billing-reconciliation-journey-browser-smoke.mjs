@@ -250,12 +250,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         cost = await makeRate('cost', '40.0020'),
         policies = ok(await request(base + '/policies?engagementId=' + roots.engagement.id)),
         definition = {
-          version: 'governed-tm/1',
+          version: 'governed-tm/2',
           currency: 'USD',
           precision: 2,
           rounding: 'HALF_UP',
           aggregation: 'PER_ENTRY',
-          capTreatment: 'NONE',
+          capTreatment: 'PER_ENTRY_VALUE',
+          capAmount: '80.00',
           exclusions: 'NONE',
           unit: 'HOUR',
           approvalTreatment: 'NONE',
@@ -908,6 +909,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                     'commercial.invoice_approval.manage',
                     'commercial.invoice_approval.decide',
                     'commercial.invoice_export.view',
+                    'commercial.rate_candidates.view',
                     'commercial.invoice_export.create',
                     'commercial.invoice_export.configure',
                     'integrations.invoice_alert_routes.manage',
@@ -1126,7 +1128,23 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await exportUi.getByLabel('Invoice export batch').selectOption(draft.batch.id);
           ew = wait(requester.p, '/api/v1/invoice-csv/batches/' + draft.batch.id);
           await exportUi.getByRole('button', { name: 'Inspect invoice export source' }).click();
-          assert.equal((await body(ew)).batch.state, 'Approved');
+          const inspectedBatch=(await body(ew)).batch;
+          assert.equal(inspectedBatch.state,'Approved');
+          const line=inspectedBatch.lines[0];
+          const pricingPath='/api/v1/invoice-csv/batches/'+draft.batch.id+'/lines/'+line.lineId+'/pricing';
+          const pricingWait=wait(requester.p,pricingPath);
+          await exportUi.getByRole('button',{name:'Inspect line pricing'}).first().click();
+          const {pricing}=await body(pricingWait);
+          assert.equal(pricing.snapshotId,line.snapshotId);
+          assert.equal(pricing.ceiling,'80.00');
+          assert.equal(pricing.amount,'80.00');
+          assert.equal(pricing.rateCandidateId,billing.candidateId);
+          assert.ok(!/cost|margin/i.test(Object.keys(pricing).join(' ')));
+          await exportUi.getByRole('region',{name:'Retained invoice line pricing'}).getByText(/Per-entry ceiling USD 80.00/).waitFor();
+          assert.equal((await request(pricingPath.replace(line.lineId,randomUUID()),{identity:ids.requester})).status,404);
+          await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.rate_candidates.view'");
+          assert.equal((await request(pricingPath,{identity:ids.requester})).status,403);
+          await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.rate_candidates.view'");
           await exportUi.getByLabel('Invoice CSV schema').selectOption('workos.invoice-tm-csv/1');
           await exportUi
             .getByLabel('I inspected the final approval, retained lineage and control total')
@@ -1650,10 +1668,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await table.getByRole('checkbox',{name:'Select credit '+receipt.itemId}).waitFor();
             assert.equal(ok(await request(register,{identity:ids.requester})).credits[0].correctionBatchId,null);
             assert.equal((await pool.query('select count(*)::int n from invoice_draft_lines where batch_id=$1',[occupied.correctionBatchId])).rows[0].n,1);
-            for(const permission of ['commercial.invoice_drafts.view','commercial.invoice_export.view','commercial.invoice_drafts.prepare']){
+            for(const permission of ['commercial.invoice_drafts.view','commercial.invoice_export.view','commercial.invoice_drafts.prepare','commercial.rate_candidates.view']){
               await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[permission]);
             }
             assert.deepEqual(ok(await request(register,{identity:ids.denied})).credits,[]);
+            assert.equal((await request(pricingPath,{identity:ids.denied})).status,404);
             const hiddenReviews=ok(await request(approvalRoute+'/instances?engagementId='+encodeURIComponent(roots.engagement.id),{identity:ids.denied})).approvals;
             assert.ok(!hiddenReviews.some(x=>x.id===creditReview.id));
             assert.equal((await request(approvalRoute+'/instances/'+creditReview.id,{identity:ids.denied})).status,404);
@@ -1702,6 +1721,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             assert.equal((await body(await confirmedCredit,201)).confirmation.total,receipt.amount);
             await exportUi.getByRole('button',{name:'Check exported credits'}).click();
             await creditLink.filter({hasText:'Downstream application attested'}).waitFor();
+            assert.deepEqual(ok(await request(pricingPath,{identity:ids.requester})).pricing,pricing);
             assert.equal((await request('/api/v1/invoice-csv/batches/'+draft.batch.id+'/exported-credits',{identity:ids.denied})).status,404);
             assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);
             assert.equal(ok(await issueCredit()).replayed,true);
