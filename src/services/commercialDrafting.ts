@@ -9,6 +9,7 @@ export type EngagementModel = typeof ENGAGEMENT_MODELS[number];
 export type CommercialDocument = {name: string; url: string};
 export type ContractTermsInput = {
   name: string; model: ContractModel; startsOn: string; endsOn: string; effectiveFrom: string;
+  installments?: {dueOn: string; amount: string}[];
   currency: string; value: string; billingTerms: string; documents: CommercialDocument[];
 };
 export type ContractTerms = ContractTermsInput & {id: string; version: number};
@@ -118,7 +119,11 @@ const normalizeTerms = (value: unknown): ContractTerms => {
   const item = object(value);
   return {id: text(item.id), version: integer(item.version, 1), name: text(item.name), model: model(item.model, COMMERCIAL_CONTRACT_MODELS),
     startsOn: date(item.startsOn), endsOn: date(item.endsOn), effectiveFrom: date(item.effectiveFrom), currency: currency(item.currency),
-    value: decimal(item.value), billingTerms: text(item.billingTerms), documents: documents(item.documents)};
+    value: decimal(item.value), billingTerms: text(item.billingTerms), documents: documents(item.documents),
+    ...(item.installments === undefined ? {} : {installments: rows(item.installments, value => {
+      const installment = object(value);
+      return {dueOn: date(installment.dueOn), amount: decimal(installment.amount)};
+    })})};
 };
 const normalizeContractSummary = (value: unknown): ContractSummary => {
   const item = object(value);
@@ -182,6 +187,7 @@ const request = async <T>(context: CommercialDraftingContext | null, method: 'GE
 // Explicit allowlists keep strict commands free of response/actor/scope fields.
 const termsBody = (input: ContractTermsInput) => ({name: input.name, model: input.model, startsOn: input.startsOn,
   endsOn: input.endsOn, effectiveFrom: input.effectiveFrom, currency: input.currency, value: input.value,
+  ...(input.installments && {installments: input.installments.map(({dueOn, amount}) => ({dueOn, amount}))}),
   billingTerms: input.billingTerms, documents: input.documents.map(document => ({name: document.name, url: document.url}))});
 export type PurchaseOrderRelease = {actorId:string; activeRole:string; approvalReference:string; reason:string; releasedAt:string};
 const releaseResponse = (value:unknown, order:PurchaseOrder): PurchaseOrderRelease | null => {

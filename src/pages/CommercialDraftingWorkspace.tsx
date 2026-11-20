@@ -29,6 +29,7 @@ type DraftKind = 'contract' | 'revision' | 'engagement' | 'purchaseOrder' | 'mil
 type Draft = {
   kind: DraftKind; lease: number; contractId: string; expectedVersion: number; number: string; clientId: string;
   name: string; code: string; model: EngagementModel; startsOn: string; endsOn: string; effectiveFrom: string;
+  installments: {dueOn: string; amount: string}[];
   currency: string; value: string; budget: string; billingTerms: string; documents: {name: string; url: string}[];
   ownerId: string; contractVersionId: string; attributionId: string; warningThresholdPercent: string;
   engagementId: string; dueOn: string; amount: string; reason: string;
@@ -46,11 +47,13 @@ const moneyPattern = '(0|[1-9]\\d{0,13})(\\.\\d{1,4})?';
 const modelLabel = (model: EngagementModel) => ({time_and_materials: 'Time and materials', fixed_fee: 'Fixed fee', milestone: 'Milestone based',
   retainer: 'Retainer', managed_service: 'Managed service', internal: 'Internal initiative', pre_sales: 'Pre-sales / non-billable'}[model]);
 const blankDraft = (kind: DraftKind, lease: number): Draft => ({kind, lease, contractId: '', expectedVersion: 0, number: '', clientId: '', name: '', code: '',
-  model: 'time_and_materials', startsOn: '', endsOn: '', effectiveFrom: '', currency: '', value: '', budget: '', billingTerms: '', documents: [],
+  model: 'time_and_materials', startsOn: '', endsOn: '', effectiveFrom: '', currency: '', value: '', budget: '', billingTerms: '', installments: [], documents: [],
   ownerId: '', contractVersionId: '', attributionId: '', warningThresholdPercent: '', engagementId: '', dueOn: '', amount: '', reason: ''});
 const safeError = (error: unknown, saving = false) => {
   const status = error instanceof ApiClientError ? error.status : 0;
   if ([401, 403].includes(status)) return 'Commercial drafting access could not be confirmed. Check your access, then reload.';
+  if (saving && error instanceof ApiClientError && error.code === 'COMMERCIAL_INSTALLMENTS_INVALID')
+    return 'Check the installment dates and amounts. Dates must fall within the contract in chronological order, and positive amounts must total the contract value.';
   if (saving && [400, 404, 422].includes(status)) return 'Draft not saved. Check the required fields, dates, decimal amounts and linked terms.';
   if (saving && status === 409) return 'Draft not saved because the latest server version or a linked record changed. Reload before retrying.';
   return saving ? 'Save outcome could not be confirmed. Keep this draft for reference and reload before trying again to avoid duplicates.'
@@ -142,7 +145,7 @@ export const CommercialDraftingWorkspace = () => {
       const detail = owner.detail?.status === 'ready' ? owner.detail.value : undefined;
       const latest = detail?.versions.find(version => version.version === detail.latestVersion);
       if (!detail || !latest) return;
-      draft = {...draft, ...latest, documents: latest.documents.map(document => ({...document})), contractId: detail.id,
+      draft = {...draft, ...latest, installments: latest.installments ?? [], documents: latest.documents.map(document => ({...document})), contractId: detail.id,
         number: detail.number, clientId: detail.clientId, expectedVersion: detail.latestVersion, effectiveFrom: ''};
     }
     publish({...owner, draft, uncertain: false, message: undefined, saveError: undefined});
@@ -182,8 +185,11 @@ export const CommercialDraftingWorkspace = () => {
       || owner.status !== 'ready' || !owner.context?.canManage || discardStale(owner)) return;
     const draft = owner.draft;
     publish({...owner, saving: true, message: undefined, saveError: undefined});
+    const hadSchedule = draft.kind === 'revision' && Boolean(owner.detail?.value?.versions[0]?.installments?.length);
+    const includeSchedule = draft.model === 'fixed_fee' && (draft.installments.length > 0 || hadSchedule);
     const terms = {name: draft.name, model: draft.model as ContractModel, startsOn: draft.startsOn, endsOn: draft.endsOn,
       effectiveFrom: draft.effectiveFrom, currency: draft.currency, value: draft.value, billingTerms: draft.billingTerms,
+      ...(includeSchedule ? {installments: draft.installments} : {}),
       documents: draft.documents.map(document => ({...document})), reason: draft.reason};
     try {
       let savedContract: ContractDetail | undefined;
@@ -307,6 +313,19 @@ export const CommercialDraftingWorkspace = () => {
                 {textInput('startsOn', 'Starts on', {type: 'date'})}{textInput('endsOn', 'Ends on', {type: 'date'})}
                 {textInput('effectiveFrom', 'Terms effective from', {type: 'date'})}{textInput('currency', 'Currency (ISO code)', {pattern: '[A-Z]{3}', maxLength: 3, disabled: draft.kind === 'revision'})}
                 {textInput('value', 'Contract value (decimal)', {pattern: moneyPattern, maxLength: 19})}
+                {draft.model === 'fixed_fee' && <fieldset className="min-w-0 md:col-span-2">
+                  <legend className="text-sm font-semibold">Fixed-fee billing schedule</legend>
+                  <p className="text-sm">Enter installments in date order. Their total must equal the contract value in {draft.currency || 'contract currency'}.</p>
+                  {draft.installments.map((row, index) => <div key={index} className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                    <Field label={`Installment ${index + 1} due date`}><input type="date" required className={inputClass} value={row.dueOn}
+                      onChange={e => edit({installments: draft.installments.map((x,i) => i === index ? {...x,dueOn:e.target.value} : x)})} /></Field>
+                    <Field label={`Installment ${index + 1} amount`}><input inputMode="decimal" required className={inputClass} value={row.amount}
+                      onChange={e => edit({installments: draft.installments.map((x,i) => i === index ? {...x,amount:e.target.value} : x)})} /></Field>
+                    <button type="button" className={buttonClass} onClick={() => edit({installments:draft.installments.filter((_,i) => i !== index)})}>Remove installment {index + 1}</button>
+                  </div>)}
+                  <button type="button" className={buttonClass} disabled={draft.installments.length >= 120}
+                    onClick={() => edit({installments:[...draft.installments,{dueOn:'',amount:''}]})}>Add installment</button>
+                </fieldset>}
                 <Field label="Billing terms"><textarea className={inputClass} required maxLength={4000} value={draft.billingTerms} onChange={event => edit({billingTerms: event.target.value})} /></Field>
                 <div className="min-w-0 md:col-span-2"><h3 className="text-sm font-semibold">Document link metadata (optional)</h3>
                   {draft.documents.map((document, index) => <div key={index} className="mt-3 grid min-w-0 gap-3 md:grid-cols-[1fr_2fr_auto]">
@@ -374,6 +393,8 @@ export const CommercialDraftingWorkspace = () => {
               <h4 className="break-words font-bold">Version {version.version} · {version.name}</h4>
               <p className="mt-2 text-sm">Effective {version.effectiveFrom}. Coverage {version.startsOn} to {version.endsOn}. {modelLabel(version.model)}.</p>
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
+              {version.installments?.length ? <div><h4>Fixed-fee billing schedule</h4>
+                <ol>{version.installments.map((item,i) => <li key={i}>{item.dueOn} · {version.currency} {item.amount}</li>)}</ol></div> : null}
               <p className="mt-2 whitespace-pre-wrap break-words text-sm">Billing terms: {version.billingTerms || 'No billing terms saved.'}</p>
               {!!version.documents.length && <ul className="mt-2 space-y-1">{version.documents.map((document, index) => <li key={index}><a className="break-all text-sm underline" href={document.url} target="_blank" rel="noopener noreferrer">{document.name}</a></li>)}</ul>}
             </li>)}</ol>
