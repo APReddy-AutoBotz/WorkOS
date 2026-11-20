@@ -191,6 +191,18 @@ export const createGovernedTmRouter = (o) => {
       };
     }),
   );
+  router.get('/effective-policy', handle(false, async (c, r) => {
+    const q = parse(z.object({ engagementId: textId, workDate: date }).strict(), r.query);
+    await authorize(c, r);
+    await engagement(c, r, q.engagementId);
+    const { rows } = await c.query(
+      `select ${policyProjection} from commercial_tm_policy_versions
+       where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 and effective_from<=$4
+       order by sequence desc limit 1`,
+      [...scope(r), q.engagementId, q.workDate],
+    );
+    return { ...(await envelope(c, r)), engagementId: q.engagementId, workDate: q.workDate, policy: rows[0] ?? null };
+  }));
   router.post(
     '/policies',
     handle(true, async (c, r) => {

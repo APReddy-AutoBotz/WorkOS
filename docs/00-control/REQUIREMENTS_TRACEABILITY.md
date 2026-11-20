@@ -583,7 +583,7 @@ WOS-INV-006 and WOS-INV-008 — Pre-export cancellation pins invoice membership 
 
 WOS-INV-005 — Invoice line inspection displays the retained T&M work submission, entry, approval and adopted billing-rate identifiers or the milestone acceptance decision and submitted evidence links. The invoice draft and milestone invoice browser journeys verify both sources against the scoped API.
 
-WOS-COM-011 — The T&M valuation workspace pages through retained policies and approved work. The governed T&M browser journey selects an older effective policy and traverses a same-date entry boundary before valuation.
+WOS-COM-011 — The T&M valuation workspace pages through retained policies and approved work. Select approved T&M work to see the valuation policy effective on its work date, then confirm that version before inspecting the adopted billing and cost rates. The governed T&M browser journey selects an older effective policy and traverses a same-date entry boundary before valuation.
 
 WOS-INV-001 and WOS-APR-002 — For T&M eligibility, the server resolves the engagement’s review policy effective on its current UTC date across all versions. The billing browser journey schedules 22 future versions, appends against the latest version, and approves a snapshot under the current policy before checking its register item.
 

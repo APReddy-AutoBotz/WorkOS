@@ -409,6 +409,15 @@ export const governedTmValuations = {
     return parsed.data;
   },
   sourcePage,
+  effectivePolicy: async (engagementId: string, workDate: string, c: RateContext | null) => {
+    const query = new URLSearchParams({ engagementId, workDate });
+    const raw = await call('GET', '/effective-policy?' + query, c);
+    const result = z.object({ ...envelope, engagementId: id, workDate: date, policy: policy.nullable() }).strict().safeParse(raw);
+    if (!result.success || result.data.engagementId !== engagementId || result.data.workDate !== workDate) return bad();
+    const selected = result.data.policy;
+    if (selected && (selected.engagementId !== engagementId || selected.effectiveFrom > workDate)) return bad();
+    return selected;
+  },
   policyPage,
   load: async (engagementId: string, c: RateContext | null) => {
     if (!id.safeParse(engagementId).success) return bad();

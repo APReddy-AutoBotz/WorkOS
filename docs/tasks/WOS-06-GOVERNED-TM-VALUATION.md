@@ -53,3 +53,5 @@ In Governance, inspect a reporting date, select the frequency and review the ful
 Migration `065u_wos06_financial_period_reopen` adds reporting-period revisions and a deferred database check for the authority and audit evidence of a financial reopen. Existing periods start at revision 1. No role or user grant is seeded. Keep the database migration and history when reverting the application.
 
 WOS-APR-007 and WOS-TIM-009 — Create an editable period before financial lock or permanent closure. Both transitions require a current, scoped inspection and an audited reason. Closed is terminal. The T&M PostgreSQL and browser journeys exercise the financial transition API and permanent closure.
+
+The work-date policy lookup uses organization, legal entity, engagement and the selected entry's work date. It returns the applicable retained version across all history pages. An empty result prevents rate inspection. The operator confirms the version before valuation, and the database rechecks it against the approved entry on write. Acceptance includes twenty scheduled successors, no effective policy, denied access and calculation from the original work-date policy.
