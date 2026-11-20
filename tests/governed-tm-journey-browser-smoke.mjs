@@ -650,6 +650,15 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
         await tm.getByRole('button', { name: 'Open retained period' }).click();
         assert.equal((await body(opening)).id, frozen.id);
         await tm.getByRole('cell', { name: '60.05%' }).waitFor();
+        const budgetResponse = reply(base + '/period-versions/' + frozen.id + '/project-budgets');
+        await tm.getByRole('button', {name:'Compare project budgets and actuals'}).click();
+        const budgetRows = (await body(budgetResponse)).projects;
+        assert.equal(budgetRows.length,1);
+        assert.equal(budgetRows[0].budgetSourceId, roots.project.bindingId);
+        const budgetTable = tm.getByRole('table', {name:'Project allocations and valued work in retained version 1'});
+        await budgetTable.waitFor();
+        assert.deepEqual(await budgetTable.getByRole('cell').allTextContents(),
+          ['Project activation','USD','4000.0001','1.25','125.15','50.00']);
         const memberPath = (period, offset = 0, limit = 25) =>
           base +
           '/period-versions/' +
@@ -779,6 +788,10 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
         assert.equal(writes[0].body.id, writes[1].body.id);
         const latestPeriod = ok(await request(versionPath));
         assert.equal(latestPeriod.sequence, 2);
+        const nextBudgetPath = base + '/period-versions/' + latestPeriod.id + '/project-budgets?' +
+          new URLSearchParams({engagementId:roots.engagement.id,start:fx.today,end:fx.today,sequence:'2'});
+        assert.deepEqual(ok(await request(nextBudgetPath)).projects, [{...budgetRows[0], entryCount:'2',
+          hours:'3.75', billable:latestPeriod.totals[0].billable, cost:latestPeriod.totals[0].cost}]);
         assert.deepEqual(
           ok(await request(memberPath(frozen))).members.map((x) => x.entryId),
           [entry.entryId],
@@ -850,6 +863,9 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
         const pricingPath = base + '/period-versions/' + frozen.id + '/pricing?' +
           new URLSearchParams({engagementId: roots.engagement.id, start:fx.today, end:fx.today, sequence:'1'});
         assert.equal((await request(pricingPath, {identity:ids.first})).status,404);
+        const budgetPath = pricingPath.replace('/pricing?', '/project-budgets?');
+        assert.equal((await request(budgetPath, {identity:ids.first})).status,404);
+        assert.deepEqual(ok(await request(budgetPath)).projects, budgetRows);
         assert.deepEqual(ok(await request(pricingPath)).totals,[{currency:'USD',entryCount:'1',
           gross:'125.15',capReduction:'0.00',excludedValue:'0',billable:'125.15'}]);
         const hiddenMembers = await request(memberPath(frozen), { identity: ids.first });

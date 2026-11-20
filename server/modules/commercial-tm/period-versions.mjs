@@ -111,17 +111,59 @@ export function registerPeriodRoutes(
       return view(await envelope(c, r), q, row);
     }),
   );
+  const requireVisiblePeriod = async (c, r) => {
+    const periodId = parse(z.string().uuid(), r.params.id);
+    const q = parse(z.object({...range, sequence: z.coerce.number().int().positive().max(2147483647)})
+      .strict().refine(validRange), r.query);
+    await authorize(c, r);
+    await engagement(c, r, q.engagementId);
+    const period = await visibleVersion(c, r, q);
+    if (period?.id !== periodId)
+      throw fail(404, 'TM_PERIOD_UNAVAILABLE', 'This period version is unavailable.');
+    return {periodId, q, period};
+  };
+  router.get(
+    '/period-versions/:id/project-budgets',
+    handle(false, async (c, r) => {
+      const {periodId, q, period} = await requireVisiblePeriod(c, r);
+      const {rows} = await c.query(
+        `with actuals as (
+          select v.source_evidence->>'bindingId' as binding_id, v.source_evidence->>'projectId' as project_id,
+            ref->>'amendmentId' as amendment_id, v.result->>'currency' as currency,
+            count(*)::text as "entryCount", sum((v.result->>'hoursExact')::numeric)::text as hours,
+            sum((v.result->>'billableValue')::numeric)::text as billable,
+            sum((v.result->>'costValue')::numeric)::text as cost
+          from commercial_tm_period_versions p cross join lateral unnest(p.valuation_ids) member(id)
+          join commercial_tm_valuations v on v.id=member.id and v.organization_id=p.organization_id
+            and v.legal_entity_id=p.legal_entity_id and v.engagement_id=p.engagement_id
+          cross join lateral jsonb_array_elements(v.source_evidence->'references') ref
+          where p.organization_id=$1 and p.legal_entity_id=$2 and p.engagement_id=$3 and p.id=$4
+            and ref->>'entityType'='Project' and ref->>'entityId'=v.source_evidence->>'projectId'
+          group by 1,2,3,4
+        )
+        select b.project_id as "projectId", b.name as "projectName", b.code as "projectCode",
+          coalesce(a.id,b.id) as "budgetSourceId", coalesce(a.sequence,0) as "amendmentSequence",
+          coalesce(a.budget,b.budget_allocation)::text as allocation,
+          x.currency,x."entryCount",x.hours,x.billable,x.cost
+        from actuals x join commercial_project_bindings b on b.organization_id=$1 and b.legal_entity_id=$2
+          and b.engagement_id=$3 and b.id=x.binding_id and b.project_id=x.project_id and b.currency=x.currency
+        left join commercial_amendments a on a.id=x.amendment_id and a.organization_id=$1 and a.legal_entity_id=$2
+          and a.entity_type='Project' and a.entity_id=x.project_id
+        where x.amendment_id is null or a.id is not null
+        order by b.code,b.project_id,coalesce(a.sequence,0)`,
+        [...scope(r), q.engagementId, periodId],
+      );
+      const counts = new Map();
+      for (const row of rows) counts.set(row.currency, (counts.get(row.currency) ?? 0n) + BigInt(row.entryCount));
+      if (counts.size !== period.totals.length || period.totals.some(total => counts.get(total.currency) !== BigInt(total.entryCount)))
+        throw fail(409, 'TM_PERIOD_UNAVAILABLE', 'The project budget evidence is incomplete.');
+      return {...await envelope(c, r), ...q, periodId, projects:rows};
+    }),
+  );
   router.get(
     '/period-versions/:id/pricing',
     handle(false, async (c, r) => {
-      const periodId = parse(z.string().uuid(), r.params.id);
-      const q = parse(z.object({...range, sequence: z.coerce.number().int().positive().max(2147483647)})
-        .strict().refine(validRange), r.query);
-      await authorize(c, r);
-      await engagement(c, r, q.engagementId);
-      const period = await visibleVersion(c, r, q);
-      if (period?.id !== periodId)
-        throw fail(404, 'TM_PERIOD_UNAVAILABLE', 'This period version is unavailable.');
+      const {periodId, q, period} = await requireVisiblePeriod(c, r);
       const {rows} = await c.query(
         `with entries as (
           select v.result->>'currency' as currency, v.result->>'version' as version,
