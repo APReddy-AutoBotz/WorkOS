@@ -390,14 +390,14 @@ export const CommercialDraftingWorkspace = () => {
           {detail?.status === 'ready' && detail.value && <>
             <h3 className="mb-3 break-words font-bold">{detail.value.number}</h3>
             {canManage && <button type="button" className={`${buttonClass} mb-4`} disabled={state.saving || state.uncertain} onClick={() => startDraft('revision')}>Append effective revision</button>}
-            <ol className="space-y-4">{[...detail.value.versions].sort((a, b) => b.version - a.version).map(version => <li key={version.id} className="min-w-0 rounded-xl border border-slate-200 p-4">
+            <ol className="space-y-4">{[...detail.value.versions].sort((a, b) => b.version - a.version).map(version => <li key={state.generation+'-'+version.id} className="min-w-0 rounded-xl border border-slate-200 p-4">
               <h4 className="break-words font-bold">Version {version.version} · {version.name}</h4>
               <p className="mt-2 text-sm">Effective {version.effectiveFrom}. Coverage {version.startsOn} to {version.endsOn}. {modelLabel(version.model)}.</p>
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
               {version.installments?.length ? <div><h4>Fixed-fee billing schedule</h4>
                 <ol>{version.installments.map((item,i) => <li key={i}>{item.dueOn} · {version.currency} {item.amount}</li>)}</ol></div> : null}
               {version.installments?.length && state.context?.canIssueInstallment ? <FixedFeeInstallmentRegister
-                key={state.generation+'-'+version.id} context={state.context} version={version}
+                context={state.context} version={version}
                 engagements={workspace.engagements.filter(e=>e.contractId===detail.id && e.model==='fixed_fee')} /> : null}
               <p className="mt-2 whitespace-pre-wrap break-words text-sm">Billing terms: {version.billingTerms || 'No billing terms saved.'}</p>
               {!!version.documents.length && <ul className="mt-2 space-y-1">{version.documents.map((document, index) => <li key={index}><a className="break-all text-sm underline" href={document.url} target="_blank" rel="noopener noreferrer">{document.name}</a></li>)}</ul>}
