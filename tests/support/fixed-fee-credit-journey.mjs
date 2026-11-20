@@ -17,6 +17,11 @@ export async function verifyFixedFeeCredit({apiRequest,postAs,pool,identities,cr
   assert.equal(held.status,201,JSON.stringify(held.body));
   const current=(await pool.query('select fixed_fee_invoice_item_current(b,l.item_id,$2,$3) current from invoice_draft_batches b join invoice_draft_lines l on l.batch_id=b.id where b.id=$1',[batchId,reader.id,reader.role])).rows[0].current;
   assert.equal(current,false);
+  const balancesPath='/api/v1/invoice-drafts/reconciliation/fixed-fee?engagementId='+encodeURIComponent(engagementId);
+  assert.equal((await apiRequest('/api/v1/invoice-drafts/reconciliation/fixed-fee?engagementId='+crypto.randomUUID(),{identity:manager})).status,404);
+  assert.equal((await apiRequest(balancesPath+'&organizationId=other',{identity:manager})).status,400);
+  const billed={currency:'GBP',status:'Confirmed',installments:1,credits:0,gross:'12000',adjustments:'0',net:'12000'};
+  assert.deepEqual((await get(balancesPath,manager)).balances,[billed]);
   const requestPath=root+'/lines/'+lineId+'/reversal-request';
   const request={expectedOwnerKey:readerKey,artifactId:artifact.id,sha256:artifact.sha256,inspectedState:'Billed/Confirmed',reason:'Reverse the entire invoiced installment'};
   assert.equal((await post(requestPath,reader,{...request,sha256:'0'.repeat(64)})).status,409);
@@ -40,8 +45,11 @@ export async function verifyFixedFeeCredit({apiRequest,postAs,pool,identities,cr
   await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Employee','commercial.reversal_eligibility.create',true) on conflict(role_name,permission_key) do update set enabled=true");
   const issued=(await postAs(eligibility,reader,issue)).receipt;
   assert.equal((await post(eligibility,reader,issue)).body.receipt.eventId,issued.eventId);
+  const pendingCredit={currency:'GBP',status:'Available',installments:0,credits:1,gross:'0',adjustments:'-12000',net:'-12000'};
+  assert.deepEqual((await get(balancesPath,manager)).balances,[pendingCredit,billed]);
   const reservePath=root+'/correction-drafts';
   const reserved=(await postAs(reservePath,reader,{expectedOwnerKey:readerKey,requestId:crypto.randomUUID(),itemIds:[issued.itemId],reason:'Reserve the issued installment credit'})).receipt;
+  assert.deepEqual((await get(balancesPath,manager)).balances,[{...pendingCredit,status:'Reserved'},billed]);
   const proof=await get(reservePath+'/'+reserved.batchId);
   assert.equal(proof.lines[0].artifactSha256,artifact.sha256);
   const source=(await get(reviewRoot+'/sources/'+reserved.batchId)).batch;
@@ -52,6 +60,7 @@ export async function verifyFixedFeeCredit({apiRequest,postAs,pool,identities,cr
   const exported=(await postAs(csv+'/exports',manager,{expectedOwnerKey:managerKey,requestId:crypto.randomUUID(),batchId:reserved.batchId,
     approvalId:approval.id,finalTransitionId:approved.finalTransitionId,lineageHash:approved.lineageHash,schemaVersion:'workos.invoice-credit-csv/1',
     expectedTotal:issued.amount,expectedLineCount:1,reason:'Retain the signed installment credit'})).artifact;
+  assert.deepEqual((await get(balancesPath,manager)).balances,[{...pendingCredit,status:'Exported'},billed]);
   const confirm=(await get(csv+'/confirmation-sources/'+reserved.batchId,manager)).source;
   const applied=(await postAs(csv+'/confirmations',manager,{expectedOwnerKey:managerKey,requestId:crypto.randomUUID(),batchId:reserved.batchId,
     artifactId:exported.id,artifactVersion:exported.version,artifactSha256:exported.sha256,currency:confirm.currency,total:confirm.total,
@@ -70,8 +79,15 @@ export async function verifyFixedFeeCredit({apiRequest,postAs,pool,identities,cr
   await desk.getByRole('button',{name:'Inspect invoice export source'}).click();
   await desk.getByRole('button',{name:'Check exported credits'}).click();
   await desk.getByText(/Downstream application attested/).waitFor();
+  const report=browser.page.getByRole('region',{name:'Billing reconciliation'});
+  await report.getByLabel('Reconciliation engagement').selectOption(engagementId);
+  await report.getByRole('button',{name:'Load billing reconciliation'}).click();
+  const balanceRow=report.getByRole('region',{name:'Fixed-fee billing balances'}).getByRole('row').nth(1);
+  await balanceRow.waitFor();
+  assert.deepEqual(await balanceRow.getByRole('cell').allTextContents(),['GBP','Confirmed','1','1','12000','-12000','0']);
   await browser.context.close();
   await pool.query("update role_permissions set enabled=false where role_name='Employee' and permission_key=$1",[grant]);
+  assert.equal((await apiRequest(balancesPath,{identity:reader})).status,403);
   assert.equal((await apiRequest(root+'/exported-credits',{identity:reader})).status,403);
   assert.equal((await apiRequest(csv+'/issued-credits?engagementId='+engagementId,{identity:reader})).status,403);
 }

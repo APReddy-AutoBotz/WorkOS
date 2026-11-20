@@ -167,3 +167,5 @@ The settings recovery journey uses the compiled fixture server with the real Pos
 Fixed-fee corrections use an explicit reversal policy, an independently approved full-line credit, a separate correction batch and a signed credit CSV. The original installment stays occupied. Purchase-order reporting retains gross consumption. Partial credits and net purchase-order adjustments require separate rules.
 
 Finance operators with fixed-fee source access and notification recovery permission can recover a failed export notification from the commercial workspace. The browser journey verifies recovery against the original artifact and checks that the failed event leaves the recovery queue.
+
+Fixed-fee engagement reporting now traces the current register through reservation, export and downstream confirmation. Finance can see a credit awaiting export separately from an already confirmed invoice, then see both in the confirmed balance once the credit is applied. The portfolio report continues to cover T&M and milestone sources.

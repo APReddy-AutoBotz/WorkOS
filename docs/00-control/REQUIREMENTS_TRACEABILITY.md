@@ -637,3 +637,5 @@ WOS-CTR-002 and WOS-COM-013. Migration 086 and the commercial drafting browser j
 WOS-INV-001, WOS-INV-006, WOS-INV-007 and WOS-INV-008. Migration 087 and the fixed-fee credit journey tie each full credit to the retained original artifact, item, event and line. Tests cover independent decisions, issuance permission, credit batch approval, signed export, downstream attestation, original line occupancy and current reader scope.
 
 WOS-INV-007. The commercial drafting browser journey exercises fixed-fee export notification recovery from a recorded producer failure, checks the retained artifact checksum and verifies denied recovery access after source permission is revoked.
+
+WOS-RPT-003 and WOS-RPT-007. The fixed-fee balance report groups installments and corrections by retained currency and current billing state. The fixed-fee credit journey checks gross, signed credit and net controls before reservation, after export and after downstream application, plus scope denial on revocation. Revoking fixed-fee source or invoice export view permission restricts reading this report.

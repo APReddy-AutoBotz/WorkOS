@@ -118,3 +118,5 @@ In Invoice CSV export, inspect an exported or billed batch and retrieve its reta
 To correct a billed fixed-fee installment, retrieve the original invoice in Invoice CSV export and request a full-line reversal. After independent review, finance can issue the credit, reserve it in a correction batch and export the approved negative amount. The original invoice shows the downstream credit attestation.
 
 To recover a failed fixed-fee export notification, open **Invoice notification recovery**, choose the engagement and batch, then select the failed event and record the reason. Recovery uses the accepted invoice artifact.
+
+In **Billing reconciliation**, choose a fixed-fee engagement to see registered installments and full-line credits by currency. Available, reserved, exported and confirmed rows show their gross charge, signed credit and net balance.
