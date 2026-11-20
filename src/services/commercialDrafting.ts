@@ -40,7 +40,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canReleasePurchaseOrder?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -60,6 +60,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   const permissions = getEffectivePermissions(user);
   if (!permissions.includes('commercial.contracts.view')) return null;
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
+    canIssueInstallment: permissions.includes('commercial.fixed_fee_eligibility.issue'),
     canReleasePurchaseOrder: permissions.includes('commercial.purchase_orders.release'),
     canManage: permissions.includes('commercial.contracts.manage'), isCurrent};
 };
@@ -200,7 +201,16 @@ const releaseResponse = (value:unknown, order:PurchaseOrder): PurchaseOrderRelea
   return {actorId:text(release.actorId), activeRole:text(release.activeRole), approvalReference:text(release.approvalReference),
     reason:text(release.reason), releasedAt};
 };
+const installmentReceipts = (value: unknown) => rows(object(value).receipts, entry => {
+  const r = object(entry);
+  return {eventId:text(r.eventId), itemId:text(r.itemId), installment:integer(r.installment,1),
+    contractVersionId:text(r.contractVersionId), engagementId:text(r.engagementId), eligibleOn:date(r.eligibleOn),
+    dueOn:date(r.dueOn), currency:currency(r.currency), amount:decimal(r.amount)};
+});
 export const commercialDraftingService = {
+  installmentRegister: (versionId:string, context:CommercialDraftingContext,
+    command?:{installment:number; engagementId:string; reason:string}) =>
+    request(context,command?'POST':'GET',`/fixed-fee-schedules/${encodeURIComponent(versionId)}/register`,command,installmentReceipts),
   purchaseOrderBalance: (order:PurchaseOrder, context:CommercialDraftingContext) =>
     request(context,'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/balance',undefined,value=>{
       const row=object(value);

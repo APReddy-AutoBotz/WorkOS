@@ -1,3 +1,4 @@
+import {fixedFeeRegister,fixedFeeGrant,installmentCommand} from './fixed-fee-eligibility.mjs';
 import {purchaseOrderRelease,purchaseOrderBalance,releaseSchema} from './purchase-order-release.mjs';
 import {amendmentPreviewSchema,amendmentCommandSchema} from './amendment-contracts.mjs';
 import {getAmendmentWorkspace,previewAmendment,appendAmendment} from './amendment-service.mjs';
@@ -38,6 +39,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       else{logError(error);res.status(503).json({error:{code:'COMMERCIAL_UNAVAILABLE',message:'Commercial drafts are unavailable. No successful save is confirmed.'}});}
     }finally{client?.release();}
   };
+  router.get('/fixed-fee-schedules/:id/register',handle(lifecycleQuerySchema,false,(c,r)=>fixedFeeRegister(c,r,null)));
+  router.post('/fixed-fee-schedules/:id/register',handle(installmentCommand,true,(c,r,data)=>fixedFeeRegister(c,r,data,audit),fixedFeeGrant));
   router.get('/amendments/:type/:id',handle(lifecycleQuerySchema,false,(client,req)=>getAmendmentWorkspace(client,req,req.params.type,req.params.id)));
   router.post('/amendments/:type/:id/preview',handle(amendmentPreviewSchema,true,(client,req,data)=>previewAmendment(client,req,req.params.type,req.params.id,data),'commercial.amendments.manage'));
   router.post('/amendments/:type/:id',handle(amendmentCommandSchema,true,(client,req,data)=>appendAmendment(client,req,req.params.type,req.params.id,data,audit),'commercial.amendments.manage'));

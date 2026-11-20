@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.fixed_fee_eligibility.issue',module:'Commercial',label:'Approve due fixed-fee installments',description:'Independently approve a due contract installment for a selected engagement and inspect its register receipt.',protected:false},
  {permission_key:'commercial.purchase_orders.release',module:'Commercial',label:'Release purchase orders',description:'Independently release an in-force purchase order against its active contract terms.',protected:false},
  {permission_key:'commercial.reversal_eligibility.create',module:'Commercial',label:'Issue approved reversal eligibility',description:'Create a signed approved-unbilled item from an independently approved full-line reversal.',protected:false},
  {permission_key:'periods.financial_reopen',module:'Admin',label:'Reopen financial periods',description:'Permit a financial lock to return to Approval Closed with a recorded reason.',protected:false},
