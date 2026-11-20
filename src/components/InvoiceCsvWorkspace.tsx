@@ -1,3 +1,4 @@
+import {canAssignPurchaseOrder,type PoCommitment} from '../services/invoiceCsv';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { useEffect, useRef, useState } from 'react';
 import { InvoiceLineReversal } from './InvoiceLineReversal';
@@ -485,6 +486,8 @@ const InvoiceCsvEngagement = ({
                     Line {x.lineId} · item {x.itemId} · event {x.eventId} ·{' '}
                     {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `credit against original line ${x.originalLineId} · artifact ${x.originalArtifactId}` : 'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
+                    {!('sourceType' in x) && canAssignPurchaseOrder() && <LinePurchaseOrder
+                      batchId={source.id} lineId={x.lineId} approved={source.state==='Approved'} disabled={busy || !!pending} run={run}/>}
                     {!('sourceType' in x) && hasRatePermission('commercial.rate_candidates.view') &&
                       <LinePricing disabled={busy || !!pending} run={run} load={c=>invoiceCsv.linePricing(source.id,x,c)}/>}
                   </li>
@@ -583,4 +586,25 @@ function ExportedCredits({original,run,disabled}:{key?:string;original:InvoiceCs
       {' · credit batch '}{l.batchId} · credit artifact {l.artifactId} · SHA-256 {l.sha256} · {l.applicationAttested ? 'Downstream application attested' : 'Awaiting downstream attestation'}</li>)}</ul> : <p>No exported credits on this page.</p>)}
     {next && <button type="button" disabled={disabled} onClick={()=>load(next)}>Next exported credits</button>}
   </section>;
+}
+
+function LinePurchaseOrder({batchId,lineId,approved,disabled,run}:{batchId:string;lineId:string;approved:boolean;disabled:boolean;
+  run:(f:(c:RateContext)=>Promise<void>)=>Promise<void>}) {
+  const [item,setItem]=useState<PoCommitment|null|undefined>(undefined);
+  const [number,setNumber]=useState('');
+  const [reason,setReason]=useState('');
+  return <fieldset disabled={disabled}><legend>Purchase order</legend>
+    <button type="button" onClick={()=>void run(async c=>{setItem(undefined);setItem(await invoiceCsv.purchaseOrder(batchId,lineId,c));})}>Inspect order allocation</button>
+    {item && <p>{item.number} · {item.currency} {item.amount} assigned · Order committed {item.committed} · Gross consumed {item.consumed} · Available {item.remaining}
+      {item.warning && <> · Warning threshold reached ({item.warningPercent}%)</>}</p>}
+    {item===null && <p>No order assigned</p>}
+    {item===null && approved && <>
+      <label>Released order number <input value={number} onChange={e=>setNumber(e.target.value)} /></label>
+      <label>Allocation reason <input value={reason} maxLength={1000} onChange={e=>setReason(e.target.value)} /></label>
+      <button type="button" disabled={!number.trim() || reason.trim().length<3} onClick={()=>void run(async c=>{
+        setItem(undefined);
+        setItem(await invoiceCsv.purchaseOrder(batchId,lineId,c,{number:number.trim(),reason:reason.trim()}));
+      })}>Commit invoice line</button>
+    </>}
+  </fieldset>;
 }

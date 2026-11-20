@@ -4,4 +4,12 @@ WOS-COM-013 and WOS-COM-014. Before a buyer assigns charges to a purchase order,
 
 Migration 076 stores one append-only scoped release per order. Its foreign key identifies the immutable order and its terms. The protected receipt retains the actor, role, authorization reference, reason, operation and time. The general audit records the status change. A retry with the same order, actor, role and submitted evidence returns the existing receipt. A competing release or conflicting retry fails. Drafts from earlier versions start with no release. Resolved releases are excluded from the draft-order count in closure readiness.
 
-To suspend new releases, withdraw the dedicated release grant and preserve existing receipts. Commitment, consumption, remaining balances and threshold enforcement require explicit links to charge evidence in subsequent work.
+To suspend new releases, withdraw the dedicated release grant and preserve existing receipts.
+
+## Assign an approved invoice line
+
+WOS-COM-013 and WOS-RPT-003. Inspect an approved T&M batch in Invoice CSV export, inspect the line’s order allocation, then enter the released order number and reason. The order must match the contract, the retained contract version, currency and work date. The server obtains the amount from the immutable invoice line. Assignment requires current invoice preparation and export-view authority, access to every worker in the batch, commercial management and purchase-order release authority. Each line can use one order. Unassigned lines remain outside PO balances.
+
+Migration 077 records the assignment and audit atomically. Concurrent allocations serialize on the purchase order. Available value equals the order limit less active commitments and gross consumed charges. The threshold includes commitments and consumption. An over-limit commitment fails in full. Cancellation frees the commitment. Export retains it, and downstream billing confirmation moves it to consumed. An applied credit has its own accounting evidence and does not automatically replenish purchasing authority. The purchase-order release panel shows the aggregate in the order currency to authorized managers.
+
+To roll back the UI or stop new assignments, preserve the append-only table and its reads for existing commitments. Splitting a charge between orders, allocation of milestone lines and PO credit adjustments remain pending.

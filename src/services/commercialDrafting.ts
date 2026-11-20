@@ -195,6 +195,12 @@ const releaseResponse = (value:unknown, order:PurchaseOrder): PurchaseOrderRelea
     reason:text(release.reason), releasedAt};
 };
 export const commercialDraftingService = {
+  purchaseOrderBalance: (order:PurchaseOrder, context:CommercialDraftingContext) =>
+    request(context,'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/balance',undefined,value=>{
+      const row=object(value);
+      if(row.orderId!==order.id || row.contractVersionId!==order.contractVersionId || row.currency!==order.currency) throw invalid();
+      return {committed:decimal(row.committed),consumed:decimal(row.consumed),remaining:decimal(row.remaining),warning:flag(row.warning)};
+    }),
   purchaseOrderRelease: (order:PurchaseOrder, context:CommercialDraftingContext, command?:{approvalReference:string;reason:string}) =>
     request(context, command?'POST':'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/release',
       command?{contractVersionId:order.contractVersionId,...command}:undefined,value=>{

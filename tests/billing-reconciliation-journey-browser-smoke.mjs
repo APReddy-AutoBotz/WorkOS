@@ -70,6 +70,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     'commercial.tm_billing.decide',
     'commercial.invoice_drafts.view',
     'commercial.invoice_drafts.prepare',
+    'commercial.purchase_orders.release',
     'commercial.invoice_drafts.own',
     'commercial.invoice_drafts.cancel',
     'commercial.invoice_approval.manage',
@@ -101,7 +102,14 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           engagement: { startsOn: fx.today, endsOn: end, currency: 'USD' },
           project: { startsOn: fx.today, endsOn: end },
         });
-      await adoptTmHierarchyAmendment(pool, request, ids.manager, roots, fx.today, end);
+      const amendment=await adoptTmHierarchyAmendment(pool, request, ids.manager, roots, fx.today, end);
+      for (const [number,value] of [['SYN-PO-100','100'],['SYN-PO-79','79']]) {
+        const po=ok(await request('/purchase-orders',{method:'POST',body:{number,value,contractId:roots.contract.id,
+          contractVersionId:amendment.version.id,currency:'USD',startsOn:fx.today,endsOn:end,warningThresholdPercent:'80',
+          reason:'Synthetic purchase order'}}),201);
+        ok(await request('/purchase-orders/'+po.id+'/release',{method:'POST',identity:ids.requester,body:{
+          contractVersionId:amendment.version.id,approvalReference:'SYN-authorized',reason:'Approved synthetic allocation limit'}}),201);
+      }
       ok(
         await request('/api/v1/work-categories/catalogs', {
           method: 'POST',
@@ -902,6 +910,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                     'notifications.view',
                     'commercial.contracts.view',
                     'commercial.contracts.manage',
+                    'commercial.purchase_orders.release',
                     'commercial.tm_billing.view',
                     'commercial.invoice_drafts.view',
                     'commercial.invoice_drafts.prepare',
@@ -1134,6 +1143,26 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           assert.equal(inspectedBatch.state,'Approved');
           const line=inspectedBatch.lines[0];
           const pricingPath='/api/v1/invoice-csv/batches/'+draft.batch.id+'/lines/'+line.lineId+'/pricing';
+          const poPath=pricingPath.replace('/pricing','/purchase-order');
+          const assignPo=(number,fields={})=>request(poPath,{method:'POST',identity:ids.requester,
+            body:{expectedOwnerKey:requesterKey,number,reason:'Allocate approved line',...fields}});
+          assert.equal((await assignPo('SYN-PO-79')).status,409);
+          assert.equal((await assignPo('SYN-PO-100',{amount:'1'})).status,400);
+          assert.equal((await assignPo('SYN-ABSENT')).status,404);
+          await pool.query("create function synthetic_po_audit_refusal() returns trigger language plpgsql as $$begin raise exception 'Synthetic refusal';end$$");
+          await pool.query("create trigger synthetic_po_audit_refusal before insert on audit_logs for each row when (new.action='Commit purchase order') execute function synthetic_po_audit_refusal()");
+          assert.equal((await assignPo('SYN-PO-100')).status,503);
+          assert.equal(ok(await request(poPath,{identity:ids.requester})).commitment,null);
+          await pool.query("drop trigger synthetic_po_audit_refusal on audit_logs");
+          await exportUi.getByRole('button',{name:'Inspect order allocation'}).first().click();
+          await exportUi.getByLabel('Released order number').fill('SYN-PO-100');
+          await exportUi.getByLabel('Allocation reason').fill('Allocate approved line');
+          await exportUi.getByRole('button',{name:'Commit invoice line'}).click();
+          await exportUi.getByText(/Order committed 80.*Gross consumed 0.*Available 20.*Warning threshold reached/).waitFor();
+          const initial=ok(await assignPo('SYN-PO-100'));
+          assert.equal(initial.replayed,true);
+          assert.equal((await assignPo('SYN-PO-79')).status,409);
+          assert.equal((await request(poPath,{identity:ids.denied})).status,403);
           const pricingWait=wait(requester.p,pricingPath);
           await exportUi.getByRole('button',{name:'Inspect line pricing'}).first().click();
           const {pricing}=await body(pricingWait);
@@ -1724,6 +1753,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             await exportUi.getByRole('button',{name:'Check exported credits'}).click();
             await creditLink.filter({hasText:'Downstream application attested'}).waitFor();
             assert.deepEqual(ok(await request(pricingPath,{identity:ids.requester})).pricing,pricing);
+            const consumed=ok(await request(poPath,{identity:ids.requester})).commitment;
+            assert.deepEqual([consumed.committed,consumed.consumed,consumed.remaining,consumed.warning],['0','80.0000','20.0000',true]);
             assert.equal((await request('/api/v1/invoice-csv/batches/'+draft.batch.id+'/exported-credits',{identity:ids.denied})).status,404);
             assert.equal(receipt.originalEventId,inspectedCredit.source.originalEventId);
             assert.equal(ok(await issueCredit()).replayed,true);
