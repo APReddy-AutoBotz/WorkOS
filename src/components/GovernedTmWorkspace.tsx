@@ -114,10 +114,12 @@ const TmEngagement = ({
     onLockChange(busy || !!pending);
     return () => onLockChange(false);
   }, [busy, pending, onLockChange]);
+  const [budgets, setBudgets] = useState<Awaited<ReturnType<typeof governedTmValuations.projectBudgets>> | null>(null);
   const [pricing, setPricing] = useState<Awaited<ReturnType<typeof governedTmValuations.periodPricing>> | null>(null);
   const clearSummary = () => {
     setMemberPage(null);
     setSummary(null);
+    setBudgets(null);
     setPricing(null);
   };
   const clear = (message: string) => {
@@ -627,6 +629,27 @@ const TmEngagement = ({
                     <td>{row.excludedValue}</td><td>{row.billable}</td>
                   </tr>)}</tbody>
                 </table>
+              )}
+              <button type="button" onClick={() => {
+                const {id, sequence, start, end} = summary;
+                if (id && sequence) void run(async c => {
+                  setBudgets(null);
+                  setBudgets(await governedTmValuations.projectBudgets(id, engagementId, start, end, sequence, c));
+                });
+              }}>Compare project budgets and actuals</button>
+              {budgets && budgets.periodId === summary.id && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left tabular-nums">
+                    <caption>Project allocations and valued work in retained version {summary.sequence}</caption>
+                    <thead><tr>{['Project','Budget source','Currency','Whole-project allocation','Period hours','Period billable value','Period labor cost']
+                      .map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
+                    <tbody>{budgets.projects.map(row => <tr key={row.budgetSourceId}>
+                      <th scope="row">{row.projectCode} · {row.projectName}</th>
+                      <td>{row.amendmentSequence ? 'Amendment '+row.amendmentSequence : 'Project activation'}</td>
+                      <td>{row.currency}</td><td>{row.allocation}</td><td>{row.hours}</td><td>{row.billable}</td><td>{row.cost}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>
               )}
               {!memberPage && (
                 <button type="button" onClick={() => loadPeriodMembers(0)}>

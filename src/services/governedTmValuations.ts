@@ -273,6 +273,19 @@ const sourcePage = async (engagementId: string, c: RateContext | null, after?: T
   return p.data;
 };
 export const governedTmValuations = {
+  projectBudgets: async (periodId:string, engagementId:string, start:string, end:string, sequence:number, c:RateContext) => {
+    const query = new URLSearchParams({engagementId, start, end, sequence:String(sequence)});
+    const raw = await call('GET', '/period-versions/'+periodId+'/project-budgets?'+query, c);
+    const amount = z.string().regex(/^(0|[1-9]\d*)(\.\d{1,4})?$/);
+    const parsed = z.object({...envelope, periodId:uuid, engagementId:id, start:date, end:date,
+      sequence:z.number().int().positive(), projects:z.array(z.object({projectId:id, projectName:z.string().min(1),
+        projectCode:z.string().min(1), budgetSourceId:id, amendmentSequence:z.number().int().nonnegative(),
+        currency:z.string().regex(/^[A-Z]{3}$/), allocation:amount, hours:amount, cost:amount, billable:amount,
+        entryCount:z.string().regex(/^[1-9]\d*$/)}).strict())}).strict().safeParse(raw);
+    if (!parsed.success || parsed.data.periodId !== periodId || parsed.data.engagementId !== engagementId ||
+        parsed.data.start !== start || parsed.data.end !== end || parsed.data.sequence !== sequence) return bad();
+    return parsed.data;
+  },
   periodPricing: async (periodId:string, engagementId:string, start:string, end:string, sequence:number, c:RateContext) => {
     const query = new URLSearchParams({engagementId, start, end, sequence:String(sequence)});
     const raw = await call('GET', '/period-versions/'+periodId+'/pricing?'+query, c);

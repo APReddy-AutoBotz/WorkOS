@@ -71,3 +71,7 @@ Migration 074 adds this version 3 policy prospectively. It leaves existing polic
 ### Retained period pricing reconciliation
 
 WOS-COM-006 and WOS-RPT-003. Open a retained period version and select **Reconcile period pricing**. The report applies the original per-entry precision and rounding to the retained hours-times-rate product, then sums by currency. Gross value less ceiling reductions and non-chargeable value equals the period's retained billable total. Each reduction is measured after per-entry rounding. Policy reductions are intentional commercial terms. The read requires current authority for every worker in the selected version and uses its fixed membership, including when later work has been valued.
+
+### Project allocations and period actuals
+
+WOS-COM-005 and WOS-RPT-003. Select **Compare project budgets and actuals** on a retained period. Each row links the project budget source referenced by the approved work to the hours, billable value and labor cost for the matching valuations. The allocation covers the entire project. Actuals cover only contributing entries in the selected version. Current worker scope must cover the entire retained period. The report reads immutable project bindings, commercial terms and valuation membership. It does not forecast remaining cost or infer a separate cost budget.
