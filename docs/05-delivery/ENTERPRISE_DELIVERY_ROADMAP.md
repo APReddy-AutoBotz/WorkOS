@@ -165,3 +165,5 @@ The next independent package is [settings persistence outcomes](../tasks/WOS-02-
 The settings recovery journey uses the compiled fixture server with the real PostgreSQL-backed API. CI checks acknowledged saves, failed loads and uncertain outcomes.
 
 Fixed-fee corrections use an explicit reversal policy, an independently approved full-line credit, a separate correction batch and a signed credit CSV. The original installment stays occupied. Purchase-order reporting retains gross consumption. Partial credits and net purchase-order adjustments require separate rules.
+
+Finance operators with fixed-fee source access and notification recovery permission can recover a failed export notification from the commercial workspace. The browser journey verifies recovery against the original artifact and checks that the failed event leaves the recovery queue.

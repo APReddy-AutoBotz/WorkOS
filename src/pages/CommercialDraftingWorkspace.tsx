@@ -281,7 +281,7 @@ export const CommercialDraftingWorkspace = () => {
       <MilestoneBillingWorkspace choices={workspace.engagements.filter(x=>x.model==='milestone').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceActionNotice choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceCsvWorkspace choices={approvalChoices}/>
-      <InvoiceNoticeRecovery choices={invoiceChoices}/>
+      <InvoiceNoticeRecovery choices={approvalChoices}/>
       <ReviewedInvoiceBatch choices={approvalChoices}/>
       <InvoiceBatchApprovalWorkspace choices={approvalChoices}/>
       <InvoiceDraftWorkspace choices={draftEngagements.flatMap(x=>x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency,...(x.model==='fixed_fee'?{sourceType:'FIXED_FEE_INSTALLMENT' as const}:x.model==='milestone'?{sourceType:'MILESTONE_ACCEPTANCE' as const}:{})}]:[])}/>
