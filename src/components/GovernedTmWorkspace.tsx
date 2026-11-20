@@ -114,9 +114,11 @@ const TmEngagement = ({
     onLockChange(busy || !!pending);
     return () => onLockChange(false);
   }, [busy, pending, onLockChange]);
+  const [pricing, setPricing] = useState<Awaited<ReturnType<typeof governedTmValuations.periodPricing>> | null>(null);
   const clearSummary = () => {
     setMemberPage(null);
     setSummary(null);
+    setPricing(null);
   };
   const clear = (message: string) => {
     ++generation.current;
@@ -608,6 +610,24 @@ const TmEngagement = ({
           {summary.id && (
             <fieldset disabled={busy || !!pending}>
               <legend>Contributing valuations</legend>
+              <button type="button" onClick={() => {
+                const {id, sequence, start, end} = summary;
+                if (id && sequence) void run(async c => {
+                  setPricing(null);
+                  setPricing(await governedTmValuations.periodPricing(id, engagementId, start, end, sequence, c));
+                });
+              }}>Reconcile period pricing</button>
+              {pricing && pricing.periodId === summary.id && (
+                <table className="w-full text-left tabular-nums">
+                  <caption>Pricing adjustments for retained version {summary.sequence}</caption>
+                  <thead><tr>{['Currency','Value at adopted rates','Ceiling reductions','Non-chargeable value','Billable value']
+                    .map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
+                  <tbody>{pricing.totals.map(row => <tr key={row.currency}>
+                    <th scope="row">{row.currency}</th><td>{row.gross}</td><td>{row.capReduction}</td>
+                    <td>{row.excludedValue}</td><td>{row.billable}</td>
+                  </tr>)}</tbody>
+                </table>
+              )}
               {!memberPage && (
                 <button type="button" onClick={() => loadPeriodMembers(0)}>
                   Show contributing entries

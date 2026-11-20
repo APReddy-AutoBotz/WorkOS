@@ -31,7 +31,7 @@ const base = '/api/v1/governed-tm-valuations',
     assert.equal(v.status, n, JSON.stringify(v.body));
     return v.body;
   };
-for (const nonChargeable of [false, true]) await withCommercialDatabase(async ({ pool, databaseUrl }) => {
+for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommercialDatabase(async ({ pool, databaseUrl }) => {
   await migrateCommercialDatabase(pool);
   const fx = await seedWorkApproval(pool),
     ids = fx.identities;
@@ -290,8 +290,8 @@ for (const nonChargeable of [false, true]) await withCommercialDatabase(async ({
         await tm.getByLabel('T&M rounding mode', { exact: true }).selectOption('HALF_UP');
         await tm.getByLabel('T&M aggregation', { exact: true }).selectOption('PER_ENTRY');
         await tm.getByLabel('T&M cap treatment', { exact: true }).selectOption('PER_ENTRY_VALUE');
-        await tm.getByLabel('Maximum billable value per entry').fill('99999');
-        await tm.getByLabel('T&M exclusions', { exact: true }).selectOption(nonChargeable ? 'ALL_BILLING' : 'NONE');
+        await tm.getByLabel('Maximum billable value per entry').fill(pricingCase === 'capped' ? '80' : '99999');
+        await tm.getByLabel('T&M exclusions', { exact: true }).selectOption(pricingCase === 'excluded' ? 'ALL_BILLING' : 'NONE');
         await tm.getByLabel('T&M policy approval treatment', { exact: true }).selectOption('NONE');
         await tm.getByLabel('T&M work unit', { exact: true }).selectOption('HOUR');
         await tm.getByLabel('T&M policy reason', { exact: true }).fill('Synthetic explicit T&M policy');
@@ -513,7 +513,7 @@ for (const nonChargeable of [false, true]) await withCommercialDatabase(async ({
         await tm.getByRole('button', { name: 'Read original T&M receipt', exact: true }).click();
         assert.equal((await body(vw)).valuation.id, accepted.valuation.id);
         const result = tm.getByRole('region', { name: 'Retained T&M snapshot', exact: true });
-        if (nonChargeable) {
+        if (pricingCase === 'excluded') {
           await result.getByText(/Non-chargeable phase/).waitFor();
           await result.getByText(/billable 0.00, cost 50.00, margin -50.00/).waitFor();
           assert.equal(accepted.valuation.result.unroundedBillableExact, '125.15425');
@@ -522,6 +522,17 @@ for (const nonChargeable of [false, true]) await withCommercialDatabase(async ({
             [f.organizationId, f.legalEntityId, roots.engagement.id, accepted.valuation.id],
           );
           assert.equal(eligibility.rows[0].eligible, false);
+        }
+        if (pricingCase !== 'standard') {
+          await tm.getByLabel('Work date from').fill(fx.today);
+          await tm.getByLabel('Work date through').fill(fx.today);
+          await tm.getByRole('button', {name:'Load period margin'}).click();
+          await tm.getByRole('button', {name:'Retain this period'}).click();
+          await tm.getByRole('button', {name:'Reconcile period pricing'}).click();
+          const table = tm.getByRole('table', {name:'Pricing adjustments for retained version 1'});
+          await table.waitFor();
+          assert.deepEqual(await table.getByRole('row', {name:/USD/}).getByRole('cell').allTextContents(),
+            pricingCase === 'capped' ? ['125.15','45.15','0','80.00'] : ['125.15','0','125.15','0.00']);
           return;
         }
         await result.getByText(/billable 125.15, cost 50.00, margin 75.15/).waitFor();
@@ -836,6 +847,11 @@ for (const nonChargeable of [false, true]) await withCommercialDatabase(async ({
         });
         assert.equal(limitedWrite.status, 409);
         assert.ok(!JSON.stringify(limitedWrite.body).includes(frozen.id));
+        const pricingPath = base + '/period-versions/' + frozen.id + '/pricing?' +
+          new URLSearchParams({engagementId: roots.engagement.id, start:fx.today, end:fx.today, sequence:'1'});
+        assert.equal((await request(pricingPath, {identity:ids.first})).status,404);
+        assert.deepEqual(ok(await request(pricingPath)).totals,[{currency:'USD',entryCount:'1',
+          gross:'125.15',capReduction:'0.00',excludedValue:'0',billable:'125.15'}]);
         const hiddenMembers = await request(memberPath(frozen), { identity: ids.first });
         assert.equal(hiddenMembers.status, 404);
         assert.ok(!JSON.stringify(hiddenMembers.body).includes(entry.entryId));

@@ -112,6 +112,47 @@ export function registerPeriodRoutes(
     }),
   );
   router.get(
+    '/period-versions/:id/pricing',
+    handle(false, async (c, r) => {
+      const periodId = parse(z.string().uuid(), r.params.id);
+      const q = parse(z.object({...range, sequence: z.coerce.number().int().positive().max(2147483647)})
+        .strict().refine(validRange), r.query);
+      await authorize(c, r);
+      await engagement(c, r, q.engagementId);
+      const period = await visibleVersion(c, r, q);
+      if (period?.id !== periodId)
+        throw fail(404, 'TM_PERIOD_UNAVAILABLE', 'This period version is unavailable.');
+      const {rows} = await c.query(
+        `with entries as (
+          select v.result->>'currency' as currency, v.result->>'version' as version,
+            commercial_tm_fixed((v.result->>'unroundedBillableExact')::numeric,
+              (policy.definition->>'precision')::int, policy.definition->>'rounding')::numeric as gross,
+            (v.result->>'billableValue')::numeric as billable
+          from commercial_tm_period_versions p
+          cross join lateral unnest(p.valuation_ids) member(id)
+          join commercial_tm_valuations v on v.id=member.id and v.organization_id=p.organization_id
+            and v.legal_entity_id=p.legal_entity_id and v.engagement_id=p.engagement_id
+          join commercial_tm_policy_versions policy on policy.id=v.policy_id and policy.organization_id=v.organization_id
+            and policy.legal_entity_id=v.legal_entity_id and policy.engagement_id=v.engagement_id
+          where p.organization_id=$1 and p.legal_entity_id=$2 and p.engagement_id=$3 and p.id=$4
+        )
+        select currency,count(*)::text as "entryCount",sum(gross)::text as gross,
+          sum(case when version='governed-tm/2' then gross-billable else 0 end)::text as "capReduction",
+          sum(case when version='governed-tm/3' then gross-billable else 0 end)::text as "excludedValue",
+          sum(billable)::text as billable
+        from entries group by currency
+        having bool_and(version in ('governed-tm/1','governed-tm/2','governed-tm/3'))
+          and sum(gross-billable)=sum(case when version in ('governed-tm/2','governed-tm/3') then gross-billable else 0 end)
+        order by currency`,
+        [...scope(r), q.engagementId, periodId],
+      );
+      if (rows.length !== period.totals.length || rows.some(row => !period.totals.some(
+        total => total.currency === row.currency && total.entryCount === row.entryCount && total.billable === row.billable)))
+        throw fail(409, 'TM_PERIOD_UNAVAILABLE', 'The pricing evidence does not reconcile to this period.');
+      return {...await envelope(c, r), ...q, periodId, totals:rows};
+    }),
+  );
+  router.get(
     '/period-versions/:id/members',
     handle(false, async (c, r) => {
       const periodId = parse(z.string().uuid(), r.params.id);
