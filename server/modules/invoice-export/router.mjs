@@ -1,3 +1,4 @@
+import {readInvoiceLinePricing} from './line-pricing.mjs';
 import { CREDIT_CSV_SCHEMA } from '../../../shared/correction-invoice-csv.mjs';
 import { correctionArtifact,correctionExportBatch } from './correction-batch.mjs';
 import { registerCorrectionReviewEvidence } from './correction-review-evidence.mjs';
@@ -244,6 +245,16 @@ export const createInvoiceCsvRouter = (o) => {
       and invoice_batch_governed_state(b.id) in ('Approved','Exported','Billed/Confirmed') and (not $7::boolean or invoice_batch_governed_state(b.id)<>'Approved') and correction_original_scope_current(b,$4,$5)
       and ($6::uuid is null or b.id>$6) order by b.id limit 51`,[...scope(r),q.engagementId,r.user.sub,r.user.activeRole,q.after??null,q.purpose==='confirmation'])).rows;
     return {...await envelope(c,r),engagementId:q.engagementId,batches:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};
+  }));
+  router.get('/batches/:id/lines/:lineId/pricing',handle(false,async(c,r)=>{
+    parse(z.object({}).strict(),r.query);
+    const id=parse(uuid,r.params.id),lineId=parse(uuid,r.params.lineId);
+    await authorize(c,r);
+    await assertCommercialAuthority(c,r,'commercial.rate_candidates.view');
+    const {row}=await batch(c,r,id);
+    const pricing=(!row.source_type || row.source_type==='TM_SNAPSHOT') && await readInvoiceLinePricing(c,row,lineId);
+    if(!pricing)throw fail(404,'INVOICE_LINE_PRICING_UNAVAILABLE','Billing evidence unavailable for this invoice line.');
+    return {...await envelope(c,r),pricing};
   }));
   router.get('/batches/:id/exported-credits',handle(false,async(c,r)=>{
     const id=parse(uuid,r.params.id),q=parse(z.object({after:uuid.optional()}).strict(),r.query);

@@ -6,6 +6,7 @@ import {
   captureRateContext,
   invoiceCsv,
   type IssuedCredit,
+  type InvoiceLinePricing,
   type CreditExportLink,
   type CorrectionEvidence,
   type InvoiceCsvSource,
@@ -484,6 +485,8 @@ const InvoiceCsvEngagement = ({
                     Line {x.lineId} · item {x.itemId} · event {x.eventId} ·{' '}
                     {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `credit against original line ${x.originalLineId} · artifact ${x.originalArtifactId}` : 'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
+                    {!('sourceType' in x) && hasRatePermission('commercial.rate_candidates.view') &&
+                      <LinePricing disabled={busy || !!pending} run={run} load={c=>invoiceCsv.linePricing(source.id,x,c)}/>}
                   </li>
                 ))}
               </ul>
@@ -553,6 +556,19 @@ const InvoiceCsvEngagement = ({
   );
 };
 
+
+function LinePricing({disabled,run,load}:{disabled:boolean;run:(f:(c:RateContext)=>Promise<void>)=>Promise<void>;load:(c:RateContext)=>Promise<InvoiceLinePricing>}){
+  const [pricing,setPricing]=useState<InvoiceLinePricing|null>(null);
+  return <div>
+    <button type="button" disabled={disabled} onClick={()=>void run(async c=>{setPricing(null);setPricing(await load(c));})}>Inspect line pricing</button>
+    {pricing && <section aria-label="Retained invoice line pricing">
+      <p>{pricing.hours} hours × {pricing.currency} {pricing.rate} = {pricing.rawAmount}.</p>
+      <p>{pricing.ceiling===null?'Uncapped':`Per-entry ceiling ${pricing.currency} ${pricing.ceiling}`} · rounding basis {pricing.roundingBasis} · {pricing.rounding} at {pricing.precision} decimal places · invoice amount {pricing.currency} {pricing.amount}.</p>
+      <p>Work date {pricing.workDate} · valuation policy {pricing.policyId} effective {pricing.policyEffectiveFrom}.</p>
+      <p>Billing rate {pricing.rateCandidateId} effective {pricing.rateFrom} through {pricing.rateTo} · adoption {pricing.billingAdoptionId}.</p>
+    </section>}
+  </div>;
+}
 
 function ExportedCredits({original,run,disabled}:{key?:string;original:InvoiceCsvSource;disabled:boolean;run:(f:(c:RateContext)=>Promise<void>)=>Promise<void>}){
   const [links,setLinks]=useState<CreditExportLink[]|null>(null),[next,setNext]=useState<string|null>(null);

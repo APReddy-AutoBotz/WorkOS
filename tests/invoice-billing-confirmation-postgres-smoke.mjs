@@ -958,6 +958,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           201,
         );
         const csv = '/api/v1/invoice-csv';
+        const priceLine=ok(await request(csv+'/batches/'+draft.batch.id)).batch.lines[0];
+        const retainedPrice=ok(await request(csv+'/batches/'+draft.batch.id+'/lines/'+priceLine.lineId+'/pricing')).pricing;
+        assert.equal(retainedPrice.version,'governed-tm/1');
+        assert.equal(retainedPrice.ceiling,null);
+        assert.equal(retainedPrice.roundingBasis,retainedPrice.rawAmount);
+        assert.equal(retainedPrice.snapshotId,priceLine.snapshotId);
+
         for (const k of [
           'commercial.invoice_drafts.view',
           'commercial.invoice_export.view',
