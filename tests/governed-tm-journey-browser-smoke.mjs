@@ -31,7 +31,7 @@ const base = '/api/v1/governed-tm-valuations',
     assert.equal(v.status, n, JSON.stringify(v.body));
     return v.body;
   };
-await withCommercialDatabase(async ({ pool, databaseUrl }) => {
+for (const nonChargeable of [false, true]) await withCommercialDatabase(async ({ pool, databaseUrl }) => {
   await migrateCommercialDatabase(pool);
   const fx = await seedWorkApproval(pool),
     ids = fx.identities;
@@ -291,7 +291,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await tm.getByLabel('T&M aggregation', { exact: true }).selectOption('PER_ENTRY');
         await tm.getByLabel('T&M cap treatment', { exact: true }).selectOption('PER_ENTRY_VALUE');
         await tm.getByLabel('Maximum billable value per entry').fill('99999');
-        await tm.getByLabel('T&M exclusions', { exact: true }).selectOption('NONE');
+        await tm.getByLabel('T&M exclusions', { exact: true }).selectOption(nonChargeable ? 'ALL_BILLING' : 'NONE');
         await tm.getByLabel('T&M policy approval treatment', { exact: true }).selectOption('NONE');
         await tm.getByLabel('T&M work unit', { exact: true }).selectOption('HOUR');
         await tm.getByLabel('T&M policy reason', { exact: true }).fill('Synthetic explicit T&M policy');
@@ -513,6 +513,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await tm.getByRole('button', { name: 'Read original T&M receipt', exact: true }).click();
         assert.equal((await body(vw)).valuation.id, accepted.valuation.id);
         const result = tm.getByRole('region', { name: 'Retained T&M snapshot', exact: true });
+        if (nonChargeable) {
+          await result.getByText(/Non-chargeable phase/).waitFor();
+          await result.getByText(/billable 0.00, cost 50.00, margin -50.00/).waitFor();
+          assert.equal(accepted.valuation.result.unroundedBillableExact, '125.15425');
+          const eligibility = await pool.query(
+            'select tm_billing_source_valid($1,$2,$3,$4) as eligible',
+            [f.organizationId, f.legalEntityId, roots.engagement.id, accepted.valuation.id],
+          );
+          assert.equal(eligibility.rows[0].eligible, false);
+          return;
+        }
         await result.getByText(/billable 125.15, cost 50.00, margin 75.15/).waitFor();
         const verifyCalculation = async () => {
           const audit = result.getByRole('region', { name: 'Calculation evidence' });

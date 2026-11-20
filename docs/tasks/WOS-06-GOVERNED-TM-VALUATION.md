@@ -61,3 +61,9 @@ The work-date policy lookup uses organization, legal entity, engagement and the 
 WOS-COM-003/004/006 and WOS-INV-001 support a buyer-selected maximum for each approved entry. Policy version 2 requires a positive ceiling expressed in the engagement currency, with at most the policy's selected number of decimal places. The server applies the lesser of hours times the adopted billing rate and the ceiling, then rounds. Cost uses the full approved hours times the adopted cost rate. The snapshot records the uncapped product, ceiling, amount after the ceiling, final rounded amount and margin. Billing eligibility requires its own approval.
 
 Migration 073 preserves all version 1 policies and snapshots. Existing uncapped policies continue to use version 1 arithmetic. Contract-wide, purchase-order and cumulative period caps require separate controls. To suspend new capped policies, disable their creation and retain the version 2 reader, calculator and database checks for existing policy and snapshot history.
+
+### Non-chargeable engagement phases
+
+For WOS-COM-003/004/006, a scoped policy owner may exclude all billing for an engagement beginning on the policy's effective date. The next effective policy controls subsequent work dates. The approved work and both adopted rate references remain attached to each valuation. The raw hours-times-rate product stays available for reconciliation. Billable value is zero, labor cost is rounded as usual, and gross margin is the negative of that cost. The billing review source filter refuses the snapshot.
+
+Migration 074 adds this version 3 policy prospectively. It leaves existing policies and snapshots intact. To end a non-chargeable phase, publish a successor with the intended charging terms. Preserve version 3 read and calculation support for historical work if new policy creation is disabled.

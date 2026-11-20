@@ -41,6 +41,10 @@ export function validTmEntryCap(value, precision) {
     /[1-9]/.test(value) && (value.split('.')[1]?.length ?? 0) <= precision;
 }
 export const validTmValuationPolicy = (policy) => {
+  if (policy?.version === 'governed-tm/3') {
+    return policy.exclusions === 'ALL_BILLING' &&
+      validUncappedPolicy({...policy, version: 'governed-tm/1', exclusions: 'NONE'});
+  }
   if (policy?.version !== 'governed-tm/2') return validUncappedPolicy(policy);
   const {capAmount, ...base} = policy;
   return base.capTreatment === 'PER_ENTRY_VALUE' && validTmEntryCap(capAmount, base.precision) &&
@@ -87,7 +91,7 @@ export const calculateTmEntry = ({ hours, billingRate, costRate, currency, unit,
     cost = exactProduct(hours, costRate),
     ceiling = policy.version === 'governed-tm/2' ? decimalQuantity(policy.capAmount) : null,
     capped = ceiling && billing.units * 10n ** BigInt(ceiling.scale) > ceiling.units * 10n ** BigInt(billing.scale) ? ceiling : billing,
-    revenueRounded = round(capped, policy.precision, policy.rounding),
+    revenueRounded = policy.exclusions === 'ALL_BILLING' ? 0n : round(capped, policy.precision, policy.rounding),
     costRounded = round(cost, policy.precision, policy.rounding);
   return {
     version: policy.version,

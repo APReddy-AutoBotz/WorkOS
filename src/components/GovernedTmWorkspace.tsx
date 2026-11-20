@@ -251,7 +251,7 @@ const TmEngagement = ({
       expectedLatestId: policies[0]?.id ?? null,
       effectiveFrom: effective,
       definition: {
-        version: cap === 'PER_ENTRY_VALUE' ? 'governed-tm/2' : 'governed-tm/1',
+        version: exclusions === 'ALL_BILLING' ? 'governed-tm/3' : cap === 'PER_ENTRY_VALUE' ? 'governed-tm/2' : 'governed-tm/1',
         ...(cap === 'PER_ENTRY_VALUE' ? {capAmount} : {}),
         currency,
         precision: Number(precision),
@@ -763,7 +763,8 @@ const TmEngagement = ({
               </label>
               <label>
                 Cap treatment
-                <select aria-label="T&M cap treatment" value={cap} onChange={(e) => setCap(e.target.value)}>
+                <select aria-label="T&M cap treatment"
+                  disabled={exclusions === 'ALL_BILLING'} value={cap} onChange={(e) => setCap(e.target.value)}>
                   <option value="">Choose explicitly</option>
                   <option value="NONE">No cap</option>
                   <option value="PER_ENTRY_VALUE">Maximum billable value per work entry</option>
@@ -777,10 +778,14 @@ const TmEngagement = ({
                 <select
                   aria-label="T&M exclusions"
                   value={exclusions}
-                  onChange={(e) => setExclusions(e.target.value)}
+                  onChange={(e) => {
+                    setExclusions(e.target.value);
+                    if (e.target.value === 'ALL_BILLING') setCap('NONE');
+                  }}
                 >
                   <option value="">Choose explicitly</option>
                   <option value="NONE">No additional exclusions</option>
+                  <option value="ALL_BILLING">Exclude all work from billing during this policy period</option>
                 </select>
               </label>
               <label>
@@ -932,6 +937,7 @@ const TmEngagement = ({
         <section aria-label="Retained T&M snapshot">
           <h3>Retained calculation</h3>
           <p>
+            {shown.result.version === 'governed-tm/3' && <>Non-chargeable phase · all billing excluded · </>}
             {shown.result.version==='governed-tm/2' && <>Entry ceiling {shown.result.currency} {shown.result.capAmount} · billable before rounding {shown.result.billableAfterCapExact} · </>}
             {shown.result.currency} billable {shown.result.billableValue}, cost {shown.result.costValue},
             margin {shown.result.marginValue}. Work entry {shown.entryId}; policy {shown.policyId}; billing
