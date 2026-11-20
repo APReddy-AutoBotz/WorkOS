@@ -88,3 +88,14 @@ export const assertAmendmentError=(result,status,code)=>{
   assert.doesNotMatch(JSON.stringify(result.body),/postgres(?:ql)?:\/\/|insert into|select .* from|constraint .* violates/i,'safe errors do not disclose persistence details');
   if(result.response){assert.ok(result.response.headers.get('x-correlation-id'));assert.equal(result.body.error.correlationId,result.response.headers.get('x-correlation-id'));}
 };
+
+export async function adoptTmHierarchyAmendment(pool, request, actor, roots, today, endsOn) {
+  const version = await seedApplicableAmendmentVersion(pool, actor, roots.contract, today, {endsOn});
+  const events = {};
+  for (const [type, id] of [['Contract',roots.contract.id],['Engagement',roots.engagement.id],['Project',roots.project.id]]) {
+    const workspace = await amendmentWorkspace(request, type, id);
+    const terms = amendmentInput(workspace, version, type === 'Project' ? {budget:'4500.0002'} : {});
+    events[type] = await amendmentApply(request, type, id, terms);
+  }
+  return {version, events};
+}

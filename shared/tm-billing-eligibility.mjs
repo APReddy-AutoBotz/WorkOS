@@ -125,7 +125,7 @@ export const tmBillingEvidence = (snapshot) => {
         approvalText(x.entityId) &&
         approvalText(x.lifecycleEventId) &&
         approvalText(x.contractVersionId) &&
-        x.amendmentId === null,
+        (x.amendmentId === null || approvalText(x.amendmentId)),
     ) ||
     source.references.find((x) => x.entityType === 'Project')?.entityId !== source.projectId ||
     source.references.find((x) => x.entityType === 'Engagement')?.entityId !== snapshot.engagementId ||
