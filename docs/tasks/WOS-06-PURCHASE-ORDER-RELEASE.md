@@ -1,0 +1,7 @@
+# Purchase order release
+
+WOS-COM-013 and WOS-COM-014. Before a buyer assigns charges to a purchase order, an authorized commercial reviewer can record release of the exact saved order. In the purchase order list, choose **Inspect release**, verify the currency, limit, dates, warning threshold and contract version, and enter the external approval reference and reason. Release applies to an order with positive value whose dates include today in UTC, under the active contract and applicable terms. The reviewer requires commercial view, manage and the opt-in purchase order release permission. The original creator and accounts linked to the creator's employee record cannot release the order.
+
+Migration 076 stores one append-only scoped release per order. Its foreign key identifies the immutable order and its terms. The protected receipt retains the actor, role, authorization reference, reason, operation and time. The general audit records the status change. A retry with the same order, actor, role and submitted evidence returns the existing receipt. A competing release or conflicting retry fails. Drafts from earlier versions start with no release. Resolved releases are excluded from the draft-order count in closure readiness.
+
+To suspend new releases, withdraw the dedicated release grant and preserve existing receipts. Commitment, consumption, remaining balances and threshold enforcement require explicit links to charge evidence in subsequent work.

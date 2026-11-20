@@ -39,7 +39,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canReleasePurchaseOrder?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -59,6 +59,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   const permissions = getEffectivePermissions(user);
   if (!permissions.includes('commercial.contracts.view')) return null;
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
+    canReleasePurchaseOrder: permissions.includes('commercial.purchase_orders.release'),
     canManage: permissions.includes('commercial.contracts.manage'), isCurrent};
 };
 export const isCommercialDraftingContextCurrent = (context: CommercialDraftingContext) => {
@@ -182,7 +183,26 @@ const request = async <T>(context: CommercialDraftingContext | null, method: 'GE
 const termsBody = (input: ContractTermsInput) => ({name: input.name, model: input.model, startsOn: input.startsOn,
   endsOn: input.endsOn, effectiveFrom: input.effectiveFrom, currency: input.currency, value: input.value,
   billingTerms: input.billingTerms, documents: input.documents.map(document => ({name: document.name, url: document.url}))});
+export type PurchaseOrderRelease = {actorId:string; activeRole:string; approvalReference:string; reason:string; releasedAt:string};
+const releaseResponse = (value:unknown, order:PurchaseOrder): PurchaseOrderRelease | null => {
+  const row=object(value);
+  if (row.orderId !== order.id || row.contractVersionId !== order.contractVersionId) throw invalid();
+  if (row.release === null) return null;
+  const release=object(row.release);
+  const releasedAt=text(release.releasedAt);
+  if (!Number.isFinite(Date.parse(releasedAt))) throw invalid();
+  return {actorId:text(release.actorId), activeRole:text(release.activeRole), approvalReference:text(release.approvalReference),
+    reason:text(release.reason), releasedAt};
+};
 export const commercialDraftingService = {
+  purchaseOrderRelease: (order:PurchaseOrder, context:CommercialDraftingContext, command?:{approvalReference:string;reason:string}) =>
+    request(context, command?'POST':'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/release',
+      command?{contractVersionId:order.contractVersionId,...command}:undefined,value=>{
+        const release=releaseResponse(value,order);
+        if (command && (!release || release.approvalReference!==command.approvalReference || release.reason!==command.reason)) throw invalid();
+        return release;
+      }),
+
   getWorkspace: (context: CommercialDraftingContext | null) => request(context, 'GET', '/workspace', undefined, normalizeCommercialWorkspace),
   getContract: (id: string, context: CommercialDraftingContext | null) => request(context, 'GET', `/contracts/${encodeURIComponent(id)}`, undefined, value => {
     const contract = normalizeCommercialContract(value); if (contract.id !== id) throw invalid(); return contract;

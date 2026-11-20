@@ -411,7 +411,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       assert.equal(sameA.body.valuation.id, sameB.body.valuation.id);
       const created = sameA.body.valuation;
       const beforeCapUpgrade=(await pool.query('select to_jsonb(v) value from commercial_tm_valuations v where id=$1',[created.id])).rows[0].value;
-      assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms']);
+      assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release']);
       assert.deepEqual((await pool.query('select to_jsonb(v) value from commercial_tm_valuations v where id=$1',[created.id])).rows[0].value,beforeCapUpgrade);
       assert.equal(ok(await request(base+'/valuations/'+created.id)).valuation.result.version,'governed-tm/1');
       assert.deepEqual(

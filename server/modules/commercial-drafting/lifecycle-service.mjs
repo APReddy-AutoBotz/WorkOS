@@ -200,7 +200,7 @@ export const getClosureReadiness=async(client,req,type,id)=>{
     (select count(*)::int from timesheet_entries e join timesheets t on t.id=e.timesheet_id where t.organization_id=$1 and t.legal_entity_id=$2 and e.project_id=any($3::text[]) and t.status in('Draft','Submitted')) "draftSubmittedWorkLines",
     (select count(distinct a.id)::int from approval_records a join timesheets t on a.entity_type='Timesheet' and a.entity_id=t.id::text join timesheet_entries e on e.timesheet_id=t.id where t.organization_id=$1 and t.legal_entity_id=$2 and e.project_id=any($3::text[]) and a.status='Pending') "pendingTimesheetApprovals",
     (select count(*)::int from commercial_milestones where organization_id=$1 and legal_entity_id=$2 and engagement_id=any($4::text[])) "unacceptedMilestones",
-    (select count(*)::int from commercial_purchase_orders where organization_id=$1 and legal_entity_id=$2 and contract_id=$5) "draftPurchaseOrders"`,
+    (select count(*)::int from commercial_purchase_orders po where po.organization_id=$1 and po.legal_entity_id=$2 and po.contract_id=$5 and not exists (select 1 from commercial_purchase_order_releases rel where rel.purchase_order_id=po.id)) "draftPurchaseOrders"`,
     [...scope(req),projectIds,engagementIds,type==='Contract'?id:root.contract_id])).rows[0];
   const ownerId=type==='Contract'?null:(type==='Engagement'?root.owner_id:root.manager_id);
   const ownerActive=ownerId?Boolean((await client.query(`select 1 from employees where ${where} and id=$3 and status='Active' and (joining_date is null or joining_date<=$4) and (exit_date is null or exit_date>=$5)`,[...scope(req),ownerId,root.starts_on,root.ends_on])).rowCount):null;
