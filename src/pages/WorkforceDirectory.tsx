@@ -1,3 +1,4 @@
+import {WorkerTypeAssignments} from '../components/WorkerTypeAssignments';
 import {hasRatePermission} from '../services/rateCandidates';
 import {lazy,Suspense,useEffect,useRef,useState} from 'react';
 import {directorySearch} from '../../shared/workforce-directory.mjs';
@@ -29,6 +30,8 @@ export const WorkforceDirectory=()=>{
  {page&&<section aria-label="Current scoped directory" className="space-y-3"><p>Observed {page.observedAt}. Matching visible workers: {page.totalMatching}. This page: {page.workers.length}. This is a current directory observation, not historical reporting or a whole-company count.</p>
  <button type="button" disabled={busy} onClick={()=>void load()}>Reload first directory page</button>
  {page.parent&&<section aria-label="Selected directory worker" className="rounded-xl border p-4 space-y-2"><h2>{page.parent.name} · {page.parent.code}</h2><p>{page.parent.designation} · {page.parent.department} · {page.parent.country} · {page.parent.status}</p><p>Worker type: {page.parent.workerType??'Unclassified'}</p><p>Recorded business unit: {page.parent.businessUnit??'Not recorded'} · Region: {page.parent.region??'Not recorded'} · Visible direct reports: {page.parent.visibleDirectReports}</p>
+ {hasRatePermission('employees.manage') && <div key={page.ownerKey+page.parent.id}><WorkerTypeAssignments workerId={page.parent.id} ownerKey={page.ownerKey}
+   onSaved={()=>void load({search:'',parentId:page.parent!.id})}/></div>}
  {page.parent.manager?<p>Visible recorded manager: {page.parent.manager.name} · <button type="button" disabled={busy} onClick={()=>navigate(page.parent!.manager!.id)}>Open recorded manager {page.parent.manager.code}</button></p>:<p>No recorded manager is shown in this authorized view.</p>}
  <div className="flex gap-3">{hasRatePermission('commercial.contracts.view') && hasRatePermission('commercial.cost_candidates.view') && <button type="button" disabled={busy} onClick={()=>handoff('cost_candidate')}>Inspect selected worker cost candidates</button>}<button type="button" disabled={busy} onClick={()=>handoff('capabilities')}>Inspect selected worker capabilities</button><button type="button" disabled={busy} onClick={()=>handoff('capacity')}>Inspect selected worker capacity</button><button type="button" disabled={busy} onClick={()=>navigate(null)}>Return to scoped directory</button></div><h3>Visible direct reports</h3></section>}
  {page.workers.length===0&&<p role="status">No workers match this current scoped selection. Other relationships and scopes are not inferred.</p>}

@@ -27,6 +27,40 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    pending=reply(path);await selected().getByRole('button',{name:'Return to scoped directory',exact:true}).click();page=await body(pending);await pool.query("update employees set name=name||' changed'where id=$1",[fx.children[2]]);pending=reply(path);await p.getByRole('button',{name:'Next scoped directory page',exact:true}).click();await body(pending,409);await p.getByText('Directory sources or relationships changed. Reload from the first directory page.',{exact:true}).waitFor();assert.equal(await region('Current scoped directory').count(),0);
    await load();let release,accepted;const held=new Promise(r=>release=r),got=new Promise(r=>accepted=r);await p.route('**/api/v1/workforce-directory?*',async route=>{const response=await route.fetch();accepted();await held;await route.fulfill({response});});pending=reply(path);await p.getByRole('button',{name:'Load scoped directory',exact:true}).click();await got;await p.evaluate(()=>window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));await p.getByText('Account, role or scope changed. Directory and unsent handoffs cleared. Reload explicitly.',{exact:true}).waitFor();release();await body(pending);assert.equal(await region('Current scoped directory').count(),0);assert.equal(await region('Selected workforce handoff').count(),0);assert.equal(await p.getByLabel('Directory search',{exact:true}).inputValue(),'');await p.unroute('**/api/v1/workforce-directory?*');
    await load();await p.evaluate(()=>{const u=JSON.parse(sessionStorage.getItem('workos_session'));sessionStorage.setItem('workos_session',JSON.stringify({...u,role:'HR',permissionRole:'HR'}));window.dispatchEvent(new Event('focus'));});await p.getByText('Account, role or scope changed. Directory and unsent handoffs cleared. Reload explicitly.',{exact:true}).waitFor();assert.equal(await region('Current scoped directory').count(),0);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+   await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('TeamLead','employees.manage',true) on conflict(role_name,permission_key)do update set enabled=true");
+   const management=await browser.newContext();
+   await management.addInitScript(({user,scope,token})=>{
+     sessionStorage.setItem('workos_session',JSON.stringify(user));
+     sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));
+     sessionStorage.setItem('workos_api_token',token);
+   },{user:{id:f.ownerId,employeeId:ids.denied.employeeId,userName:ids.denied.username,role:'TeamLead',permissionRole:'TeamLead',
+     permissions:['employees.view','employees.manage']},scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId},token:tokenFor(ids.denied)});
+   const editor=await management.newPage();
+   await editor.goto(origin+'/tests/fixtures/workforce-directory.html');
+   await editor.getByRole('button',{name:'Load scoped directory'}).click();
+   await editor.getByRole('button',{name:'Open reporting context '+ids.reader.employeeId,exact:true}).click();
+   const maintenance=editor.getByRole('region',{name:'Worker type maintenance'});
+   await maintenance.getByLabel('Effective date').fill(fx.today);
+   await maintenance.getByRole('button',{name:'Load types and assignments'}).click();
+   await maintenance.getByLabel('Worker type to assign').selectOption('clear');
+   await maintenance.getByLabel('Classification reason').fill('Synthetic worker classification update');
+   let firstSubmission=true;
+   await editor.route('**/type-assignments',async route=>{
+     if(route.request().method()!=='POST'||!firstSubmission)return route.continue();
+     firstSubmission=false;
+     const response=await route.fetch();
+     assert.equal(response.status(),201);
+     await route.abort('failed');
+   });
+   await maintenance.getByRole('button',{name:'Record dated assignment'}).click();
+   await maintenance.getByText('Outcome uncertain. Retry the same assignment to recover its receipt.').waitFor();
+   const replay=editor.waitForResponse(r=>r.url().endsWith('/type-assignments')&&r.request().method()==='POST');
+   await maintenance.getByRole('button',{name:'Retry original assignment'}).click();
+   assert.equal((await (await replay).json()).replayed,true);
+   await editor.getByRole('region',{name:'Selected directory worker'}).getByText('Worker type: Unclassified',{exact:true}).waitFor();
+   await maintenance.getByRole('button',{name:'Load types and assignments'}).click();
+   await maintenance.getByRole('list',{name:'Recorded worker type assignments'}).getByText(/Synthetic worker classification update/).waitFor();
+   await management.close();
    console.log('Scoped directory connected React/API/PostgreSQL receipt:',JSON.stringify({visibleTeamLead:25,directReportPages:[20,3],explicitNestedAndManagerNavigation:true,noHiddenManager:true,literalUnicodeSearch:true,originalCapabilityRead:true,originalProspectiveCapacityRead:'16h',noNewChangeOrExportAuthority:true,readNeutralBeforeSyntheticStaleEdit:true,staleContinuation409:true,lateAccepted200Suppressed:true,activeRoleChangeClears:true,noBroadCompatibilityLoaders:true,noExternalRequests:true,realClock:true}));await c.close();
   }finally{await browser?.close();await fixture.close();}
  });

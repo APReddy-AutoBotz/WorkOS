@@ -105,4 +105,12 @@ Classify every check as PASS / FAIL / SKIP / NOT RUN and retain exact commands/e
 
 Construction is complete only when the implementation is published on this existing branch, the exact GitHub head is reported, all mandatory checks are honestly classified, and the internal A–I pass has no unresolved current P0/P1/P2. Keep the product PR Draft after construction. Do not mark Ready or merge until the controller separately completes exact-head acceptance and independent confirmation.
 
-Current worker classification (WOS-WKF-001 and WOS-WKF-002) is available in the scoped workforce directory. Search by the buyer-defined worker type label. Workers without a current matching profile and catalog entry appear as unclassified. Entity administrators can retire locally owned catalog entries after dependency checks. Organization-wide entries remain available for shared use.
+Current worker classification (WOS-WKF-001 and WOS-WKF-002) is available in the scoped workforce directory. Search by the buyer-defined worker type label. Workers without a current matching profile and catalog entry appear as unclassified. Entity administrators can retire locally owned catalog entries after dependency checks. Organization-wide entries remain available for shared use. With workforce management access, open a worker, load types for the effective date and record the assignment with a reason. Future assignments take effect on their UTC date. Earlier entries and the original profile are retained.
+
+### Effective-dated worker type maintenance
+
+Migration 072 adds an append-only classification timeline. A workforce manager selects an authorized worker, inspects the available catalog versions for the UTC effective date, and records a reason. The first assignment supersedes the existing profile on its effective date. An explicit unclassified assignment clears the classification from that date. Future changes must follow the latest scheduled date. The timeline retains the selected catalog label even after its applicability ends.
+
+Retries with the same request recover the original receipt. Concurrent editors must reload after another change commits. The worker change and its audit event commit together. For an operational rollback, suspend the assignment write route and keep the current directory reader, timeline and audit evidence. Reverting the reader alone would hide effective assignments. Historic rate and billing records use their retained evidence.
+
+Acceptance covers WOS-WKF-001, WOS-WKF-002 and WOS-ORG-003 through the workforce directory PostgreSQL and browser journeys, plus fresh installation and populated migration from 071.
