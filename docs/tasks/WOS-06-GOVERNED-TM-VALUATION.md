@@ -67,3 +67,7 @@ Migration 073 preserves all version 1 policies and snapshots. Existing uncapped 
 For WOS-COM-003/004/006, a scoped policy owner may exclude all billing for an engagement beginning on the policy's effective date. The next effective policy controls subsequent work dates. The approved work and both adopted rate references remain attached to each valuation. The raw hours-times-rate product stays available for reconciliation. Billable value is zero, labor cost is rounded as usual, and gross margin is the negative of that cost. The billing review source filter refuses the snapshot.
 
 Migration 074 adds this version 3 policy prospectively. It leaves existing policies and snapshots intact. To end a non-chargeable phase, publish a successor with the intended charging terms. Preserve version 3 read and calculation support for historical work if new policy creation is disabled.
+
+### Retained period pricing reconciliation
+
+WOS-COM-006 and WOS-RPT-003. Open a retained period version and select **Reconcile period pricing**. The report applies the original per-entry precision and rounding to the retained hours-times-rate product, then sums by currency. Gross value less ceiling reductions and non-chargeable value equals the period's retained billable total. Each reduction is measured after per-entry rounding. Policy reductions are intentional commercial terms. The read requires current authority for every worker in the selected version and uses its fixed membership, including when later work has been valued.
