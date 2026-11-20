@@ -67,7 +67,8 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await fill(target, {'Contract / SOW number': 'SYN-JOURNEY-CONTRACT', 'Contract name': `Synthetic browser terms ${hostile}`, 'Starts on': '2020-01-01', 'Ends on': '2099-12-31', 'Terms effective from': '2020-01-01', 'Currency (ISO code)': 'GBP', 'Contract value (decimal)': '12345.6789', 'Billing terms': `Synthetic browser billing terms ${hostile}`, 'Reason for creation / revision': 'Synthetic browser contract creation'});
     await target.getByLabel('Client', {exact: true}).selectOption(clientId);await target.getByLabel('Commercial model', {exact: true}).selectOption('fixed_fee');
     await button('Add installment').click();
-    await fill(target, {'Installment 1 due date':new Date().toISOString().slice(0,10), 'Installment 1 amount':'12000'});
+    const installmentDue=new Date(Date.now()-86400000).toISOString().slice(0,10);
+    await fill(target, {'Installment 1 due date':installmentDue, 'Installment 1 amount':'12000'});
     await button('Add installment').click();
     await fill(target, {'Installment 2 due date':'2099-02-01', 'Installment 2 amount':'345.6789'});
     await button('Add document link').click();await fill(target, {'Document 1 name': `Synthetic safe SOW ${hostile}`, 'Document 1 URL': 'https://example.test/synthetic-browser-sow.pdf'});
@@ -206,7 +207,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const reconciles=async schedule=>(await pool.query(
       'select fixed_fee_schedule_preserves_issued($1,$2,$3,$4::jsonb) compatible',
       [scope.organizationId,scope.legalEntityId,contractId,JSON.stringify(schedule)])).rows[0].compatible;
-    const first={dueOn:today,amount:'12000.0000'};
+    const first={dueOn:installmentDue,amount:'12000.0000'};
     assert.equal(await reconciles([first,{dueOn:future,amount:'2000'}]),true);
     assert.equal(await reconciles([{...first,amount:'11999.9999'}]),false);
     assert.equal(await reconciles([{...first,dueOn:future},first]),false);
@@ -323,7 +324,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const decided=await decisionPost;assert.equal(decided.status(),201,await decided.text());
     assert.equal((await readSource(identities.manager)).batch.state,'Approved');
     assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
-    const exportGrants=[...reviewerGrants,'reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
+    const exportGrants=[...reviewerGrants,'commercial.purchase_orders.release','reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
       'commercial.invoice_export.configure','integrations.invoice_alert_routes.manage'];
     for (const key of exportGrants) await pool.query(
       "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
@@ -342,6 +343,26 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await exportUi.getByLabel('Invoice export batch',{exact:true}).selectOption(nextId);
     await exportUi.getByRole('button',{name:'Inspect invoice export source'}).click();
     await exportUi.getByText(/installment 1 · due/).first().waitFor();
+    const poPath=csv+'/batches/'+nextId+'/lines/'+nextLine.line.id+'/purchase-order';
+    const orderCommand={expectedOwnerKey:managerSource.ownerKey,number:po.body.number,reason:'Reserve approved fixed-fee installment'};
+    const overLimit=await apiRequest(poPath,{identity:identities.manager,method:'POST',body:orderCommand});
+    assert.equal(overLimit.status,409,JSON.stringify(overLimit.body));
+    assert.equal(overLimit.body.error.code,'PO_LIMIT_EXCEEDED');
+    assert.equal((await apiRequest(poPath,{identity:identities.manager})).body.commitment,null);
+    const coveringNumber='SYN-FIXED-FEE-COVERAGE';
+    const covering=await apiRequest('/purchase-orders',{identity:identities.manager,method:'POST',body:{
+      ...po.body,contractVersionId:versionId,number:coveringNumber,value:'12300.6789',startsOn:today,endsOn:future}});
+    assert.equal(covering.status,201,JSON.stringify(covering.body));
+    const coverageRelease=await apiRequest('/purchase-orders/'+covering.body.id+'/release',{
+      method:'POST',identity:identities.reader,body:releaseCommand});
+    assert.equal(coverageRelease.status,201,JSON.stringify(coverageRelease.body));
+    await exportUi.getByRole('button',{name:'Inspect order allocation'}).click();
+    await exportUi.getByLabel('Released order number').fill(coveringNumber);
+    await exportUi.getByLabel('Allocation reason').fill(orderCommand.reason);
+    await exportUi.getByRole('button',{name:'Commit invoice line'}).click();
+    await exportUi.getByText(/Order committed 12000.0000.*Gross consumed 0.*Available 300.6789.*Warning threshold reached/).waitFor();
+    const poReplay=await apiRequest(poPath,{identity:identities.manager,method:'POST',body:{...orderCommand,number:coveringNumber}});
+    assert.equal(poReplay.body.replayed,true,JSON.stringify(poReplay.body));
     await exportUi.getByLabel('Invoice CSV schema').selectOption('workos.invoice-fixed-fee-csv/1');
     await exportUi.getByRole('checkbox',{name:/I inspected the final approval/}).check();
     await exportUi.getByLabel('Invoice CSV reason').fill('Retain approved fixed-fee installment');
@@ -406,6 +427,10 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.deepEqual([terminal.body.source.state,confirmedReceipt.sourceType,confirmedReceipt.artifactSha256,confirmedReceipt.reference],
       ['Billed/Confirmed','FIXED_FEE_INSTALLMENT',artifact.sha256,attestation.reference]);
     assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
+    const balance=(await apiRequest(poPath,{identity:identities.manager})).body.commitment;
+    assert.deepEqual([balance.committed,balance.consumed,balance.remaining,balance.warning],['0','12000.0000','300.6789',true]);
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);
+    assert.equal((await apiRequest(poPath,{identity:identities.manager})).status,403);
     await confirmer.context.close();
     await exporting.context.close();
     await deciding.context.close();
