@@ -36,7 +36,7 @@ const fence = (r, k) => {
 const batchFields = `coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT') as "sourceType",b.id,b.client_id as "clientId",b.contract_id as "contractId",b.engagement_id as "engagementId",b.currency,b.period_start::text as "periodStart",b.period_end::text as "periodEnd",b.period_basis as "periodBasis",b.owner_user_id as "ownerUserId",b.owner_role as "ownerRole",b.preparer_user_id as "preparerUserId",b.preparer_role as "preparerRole",b.request_id as "requestId",b.reason,b.created_at as "createdAt"`;
 const lineFields = `l.id,l.batch_id as "batchId",l.sequence,l.item_id as "itemId",l.item_version as "itemVersion",l.event_id as "eventId",l.snapshot_id as "snapshotId",coalesce(to_jsonb(l)->>'source_type','TM_SNAPSHOT') as "sourceType",l.currency,l.amount::text,l.billing_evidence as evidence,l.actor_id as "actorId",l.active_role as "activeRole",l.request_id as "requestId",l.reason,l.created_at as "createdAt"`;
 const batchView = (x) => {
-  if (x.sourceType === 'MILESTONE_ACCEPTANCE') return x;
+  if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT'].includes(x.sourceType)) return x;
   if (x.sourceType === 'TM_SNAPSHOT') {
     const { sourceType: _, ...legacy } = x;
     return legacy;
@@ -44,7 +44,7 @@ const batchView = (x) => {
   throw fail(503, 'INVOICE_DRAFT_UNCONFIRMED', 'Invoice batch source could not be confirmed.');
 };
 const lineView = (x) => {
-  if (x.sourceType === 'MILESTONE_ACCEPTANCE' && x.snapshotId === null) return x;
+  if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT'].includes(x.sourceType) && x.snapshotId === null) return x;
   if (x.sourceType === 'TM_SNAPSHOT' && typeof x.snapshotId === 'string') {
     const { sourceType: _, ...legacy } = x;
     return legacy;
@@ -172,6 +172,10 @@ export const createInvoiceDraftRouter = (o) => {
       )
     ).rows[0];
     if (!row) throw fail(404, 'INVOICE_DRAFT_SOURCE', 'Scoped draft unavailable.');
+    if (row.sourceType === 'FIXED_FEE_INSTALLMENT') {
+      await assertCommercialAuthority(c,r,'commercial.fixed_fee_eligibility.issue');
+      return batchView(row);
+    }
     const isMilestone = await milestoneBatchModel(c, r, batchId);
     if (isMilestone !== (row.sourceType === 'MILESTONE_ACCEPTANCE'))
       throw fail(409, 'INVOICE_DRAFT_SOURCE', 'Invoice batch source does not match its engagement.');
@@ -236,6 +240,17 @@ export const createInvoiceDraftRouter = (o) => {
         [itemId, ...scope(r)],
       )
     ).rows[0];
+    if (kind?.source_type === 'FIXED_FEE_INSTALLMENT') {
+      await assertCommercialAuthority(c,r,'commercial.fixed_fee_eligibility.issue');
+      const {rows:[source]}=await c.query(`select i.version as "itemVersion",ev.id as "eventId",ev.currency,ev.amount::text,
+        ev.billing_evidence as evidence,fixed_fee_invoice_item_current(b,i.id,$4,$5) as current
+        from approved_unbilled_items i join billing_eligibility_events ev on ev.id=i.event_id
+        join invoice_draft_batches b on b.id=$6 and b.organization_id=i.organization_id and b.legal_entity_id=i.legal_entity_id
+        where i.id=$1 and i.organization_id=$2 and i.legal_entity_id=$3 and i.source_type='FIXED_FEE_INSTALLMENT'`,
+        [itemId,...scope(r),r.user.sub,r.user.activeRole,batchId]);
+      if (!source) throw fail(404,'INVOICE_DRAFT_SOURCE','Installment unavailable.');
+      return {...source,sourceType:'FIXED_FEE_INSTALLMENT',snapshotId:null};
+    }
     if (kind?.source_type === 'MILESTONE_ACCEPTANCE')
       return loadMilestoneInvoiceItem(c, r, batchId, itemId, lock);
     if (kind?.source_type !== 'TM_SNAPSHOT')
@@ -293,8 +308,12 @@ export const createInvoiceDraftRouter = (o) => {
             [...scope(r), v.engagementId],
           )
         ).rows[0];
-      if (!engagement || !['time_and_materials', 'milestone'].includes(engagement.model))
+      if (!engagement || !['time_and_materials','milestone','fixed_fee'].includes(engagement.model))
         throw fail(404, 'INVOICE_DRAFT_SOURCE', 'Scoped billing engagement unavailable.');
+      if (engagement.model === 'fixed_fee') {
+        await assertCommercialAuthority(c,r,'commercial.fixed_fee_eligibility.issue');
+        if (v.periodBasis !== 'ELIGIBLE_DATE') throw fail(409,'INVOICE_DRAFT_SOURCE','Installments use the eligibility date.');
+      }
       if (engagement.model === 'milestone') {
         await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
         if (v.periodBasis !== 'ELIGIBLE_DATE')
@@ -320,10 +339,10 @@ export const createInvoiceDraftRouter = (o) => {
         d.reason,
         r.operationId,
       ];
-      if (engagement.model === 'milestone')
+      if (engagement.model !== 'time_and_materials')
         await c.query(
-          "insert into invoice_draft_batches(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,currency,period_start,period_end,period_basis,owner_user_id,owner_role,preparer_user_id,preparer_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'MILESTONE_ACCEPTANCE')",
-          args,
+          "insert into invoice_draft_batches(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,currency,period_start,period_end,period_basis,owner_user_id,owner_role,preparer_user_id,preparer_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)",
+          [...args,engagement.model==='milestone'?'MILESTONE_ACCEPTANCE':'FIXED_FEE_INSTALLMENT'],
         );
       else
         await c.query(
@@ -346,14 +365,17 @@ export const createInvoiceDraftRouter = (o) => {
       } catch (e) {
         if (e.code !== 'COMMERCIAL_PERMISSION_DENIED') throw e;
       }
+      let fixedAccess=false;
+      try { await assertCommercialAuthority(c,r,'commercial.fixed_fee_eligibility.issue'); fixedAccess=true; }
+      catch (e) { if (e.code!=='COMMERCIAL_PERMISSION_DENIED') throw e; }
       const args = [...scope(r)],
         workerWhere = o.buildEmployeeScopeWhere(r, args, 'worker');
       args.push(q.after ?? null);
       const afterParam = args.length;
-      args.push(milestoneAccess);
+      args.push(milestoneAccess,fixedAccess);
       const rows = (
         await c.query(
-          `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",invoice_batch_governed_state(b.id) as state from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2 and ($${afterParam}::uuid is null or b.id>$${afterParam}::uuid) and (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='TM_SNAPSHOT' or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='MILESTONE_ACCEPTANCE' and $${args.length}::boolean)) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by b.id limit 51`,
+          `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",invoice_batch_governed_state(b.id) as state from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2 and ($${afterParam}::uuid is null or b.id>$${afterParam}::uuid) and (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='TM_SNAPSHOT' or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='MILESTONE_ACCEPTANCE' and $${args.length-1}::boolean) or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='FIXED_FEE_INSTALLMENT' and $${args.length}::boolean)) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by b.id limit 51`,
           args,
         )
       ).rows;
@@ -505,6 +527,21 @@ export const createInvoiceDraftRouter = (o) => {
     });
   router.post('/reconciliation/exports', exportReport(false));
   router.post('/reconciliation/portfolio/exports', exportReport(true));
+  router.get('/batches/:id/available-installments',handle(false,async(c,r)=>{
+    await authorize(c,r,'view',['commercial.fixed_fee_eligibility.issue']);
+    const batchId=parse(uuid,r.params.id),q=parse(z.object({after:uuid.optional()}).strict(),r.query);
+    const b=await batch(c,r,batchId);
+    if(b.sourceType!=='FIXED_FEE_INSTALLMENT') throw fail(404,'INVOICE_DRAFT_SOURCE','Installment draft unavailable.');
+    const {rows}=await c.query(`select i.id,ev.amount::text,ev.currency,ev.billing_evidence->>'dueOn' as "dueOn",
+      (ev.billing_evidence->>'installment')::int installment from invoice_draft_batches b
+      join billing_eligibility_events ev on ev.organization_id=b.organization_id and ev.legal_entity_id=b.legal_entity_id
+        and ev.engagement_id=b.engagement_id and ev.source_type=b.source_type and ev.eligible_on between b.period_start and b.period_end
+      join approved_unbilled_items i on i.event_id=ev.id
+      where b.id=$1 and ($2::uuid is null or i.id>$2) and not exists(select 1 from invoice_draft_occupancies o where o.item_id=i.id)
+      and fixed_fee_invoice_item_current(b,i.id,$3,$4) order by i.id limit 51`,
+      [batchId,q.after??null,r.user.sub,r.user.activeRole]);
+    return {...await envelope(c,r),batchId,items:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};
+  }));
   router.get(
     '/batches/:id',
     handle(false, async (c, r) => {
@@ -569,13 +606,15 @@ export const createInvoiceDraftRouter = (o) => {
           amount: source.amount,
           current: source.current,
         };
-      if (
-        b.state !== 'Draft' ||
-        !b.ownerCurrent ||
-        !(source.sourceType === 'MILESTONE_ACCEPTANCE'
-          ? milestoneInvoiceAcquisitionAllowed(draft, source)
-          : invoiceItemMatches(draft, match))
-      )
+      let matches;
+      if (source.sourceType === 'FIXED_FEE_INSTALLMENT') {
+        matches = b.sourceType === 'FIXED_FEE_INSTALLMENT' && source.current;
+      } else if (source.sourceType === 'MILESTONE_ACCEPTANCE') {
+        matches = milestoneInvoiceAcquisitionAllowed(draft,source);
+      } else {
+        matches = invoiceItemMatches(draft,match);
+      }
+      if (b.state !== 'Draft' || !b.ownerCurrent || !matches)
         throw fail(409, 'INVOICE_DRAFT_SOURCE', 'The whole current item is unavailable for this draft.');
       const lineId = randomUUID();
       await context(c, r, batchId, lineId, null, d.expectedLineCount);
@@ -598,10 +637,10 @@ export const createInvoiceDraftRouter = (o) => {
         d.reason,
         r.operationId,
       ];
-      if (source.sourceType === 'MILESTONE_ACCEPTANCE')
+      if (['FIXED_FEE_INSTALLMENT','MILESTONE_ACCEPTANCE'].includes(source.sourceType))
         await c.query(
-          "insert into invoice_draft_lines(id,organization_id,legal_entity_id,batch_id,sequence,item_id,item_version,event_id,snapshot_id,currency,amount,billing_evidence,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,'MILESTONE_ACCEPTANCE')",
-          lineArgs,
+          "insert into invoice_draft_lines(id,organization_id,legal_entity_id,batch_id,sequence,item_id,item_version,event_id,snapshot_id,currency,amount,billing_evidence,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,$19)",
+          [...lineArgs,source.sourceType],
         );
       else
         await c.query(
@@ -713,11 +752,11 @@ export const createInvoiceDraftRouter = (o) => {
         d.reason,
         r.operationId,
       ];
-      if (await milestoneBatchModel(c, r, batchId)) {
-        await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
+      if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT'].includes(b.sourceType)) {
+        await assertCommercialAuthority(c,r,b.sourceType==='FIXED_FEE_INSTALLMENT'?'commercial.fixed_fee_eligibility.issue':'commercial.milestone_billing.view');
         await c.query(
-          "insert into invoice_draft_cancellations(id,organization_id,legal_entity_id,batch_id,expected_line_count,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'MILESTONE_ACCEPTANCE')",
-          cancelArgs,
+          "insert into invoice_draft_cancellations(id,organization_id,legal_entity_id,batch_id,expected_line_count,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+          [...cancelArgs,b.sourceType],
         );
       } else
         await c.query(

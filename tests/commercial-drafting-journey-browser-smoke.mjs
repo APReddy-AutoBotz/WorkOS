@@ -37,7 +37,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const createContext = async (identity, permissions) => {
       const context = await browser.newContext({viewport: {width: 1100, height: 900}});
       await context.addInitScript(({identity, permissions, scope, signedToken, ownerId}) => {
-        sessionStorage.setItem('workos_session', JSON.stringify({id: identity.id, employeeId: ownerId, name: 'Synthetic Commercial Journey Operator', role: identity.role, permissionRole: identity.role, permissions}));
+        sessionStorage.setItem('workos_session', JSON.stringify({id: identity.id, userName:identity.username, employeeId: ownerId, name: 'Synthetic Commercial Journey Operator', role: identity.role, permissionRole: identity.role, permissions}));
         sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
         sessionStorage.setItem('workos_api_token', signedToken);
       }, {identity, permissions, scope, signedToken: tokenFor(identity), ownerId});
@@ -210,6 +210,67 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal(await reconciles([{...first,amount:'11999.9999'}]),false);
     assert.equal(await reconciles([{...first,dueOn:future},first]),false);
     assert.equal(await reconciles([]),false);
+    const draftGrants=['commercial.contracts.view','commercial.tm_billing.view','commercial.invoice_drafts.view',
+      'employees.view','notifications.view','commercial.invoice_drafts.prepare','commercial.invoice_drafts.own','commercial.invoice_drafts.cancel'];
+    for(const key of draftGrants) await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled) values('Employee',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
+    const preparing=await createContext(identities.reader,[...draftGrants,grant]);
+    const draftPage=preparing.page;
+    await draftPage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const desk=draftPage.getByRole('region',{name:'Invoice-ready draft batches'});
+    const loadDrafts=()=>desk.getByRole('button',{name:'Load drafts and available items'}).click();
+    await loadDrafts();
+    await desk.getByLabel('Invoice engagement').selectOption(engagement.result.id);
+    await desk.getByLabel('Invoice period start').fill(today);
+    await desk.getByLabel('Invoice period end').fill(today);
+    await desk.getByLabel('Invoice period basis').selectOption('ELIGIBLE_DATE');
+    await desk.getByLabel('Invoice owner user ID').fill(identities.reader.id);
+    await desk.getByLabel('Invoice owner role').fill('Employee');
+    await desk.getByLabel('Invoice draft reason').fill('Prepare the approved installment');
+    await desk.getByRole('checkbox',{name:'Confirm the displayed client, contract and currency'}).check();
+    const post=(suffix)=>draftPage.waitForResponse(r=>r.url().endsWith('/api/v1/invoice-drafts/'+suffix) && r.request().method()==='POST');
+    const creating=post('batches');
+    await desk.getByRole('button',{name:'Create invoice Draft'}).click();
+    const created=await creating;assert.equal(created.status(),201,await created.text());
+    const fixedBatch=(await created.json()).batch.id;
+    const inspectFixed=async()=>{
+      await loadDrafts();
+      await desk.getByLabel('Invoice draft',{exact:true}).selectOption(fixedBatch);
+      await desk.getByRole('button',{name:'Inspect invoice draft'}).click();
+    };
+    await inspectFixed();
+    await desk.getByLabel('Available invoice item').selectOption('fixed:'+registered.itemId);
+    await desk.getByLabel('Invoice item reason').fill('Reserve the exact approved installment');
+    const reserving=post('batches/'+fixedBatch+'/lines');
+    await desk.getByRole('button',{name:'Reserve selected whole item'}).click();
+    const reserved=await reserving;assert.equal(reserved.status(),201,await reserved.text());
+    const fixedLine=(await reserved.json()).line;
+    assert.deepEqual([fixedLine.eventId,fixedLine.itemId,fixedLine.amount,fixedLine.snapshotId],
+      [registered.eventId,registered.itemId,'12000.0000',null]);
+    const linePath='/api/v1/invoice-drafts/batches/'+fixedBatch+'/lines';
+    const original=reserved.request().postDataJSON();
+    const replay=await apiRequest(linePath,{method:'POST',identity:identities.reader,body:original});
+    assert.equal(replay.body.replayed,true,JSON.stringify(replay.body));
+    const double=await apiRequest(linePath,{method:'POST',identity:identities.reader,
+      body:{...original,expectedLineCount:1,requestId:crypto.randomUUID()}});
+    assert.equal(double.status,409);
+    const actorPermissions=['commercial.tm_billing.view','commercial.invoice_drafts.view','employees.view','notifications.view'];
+    for(const key of actorPermissions) await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);
+    const hidden=await apiRequest('/api/v1/invoice-drafts/batches/'+fixedBatch);
+    assert.equal(hidden.status,403);
+    const listing=await apiRequest('/api/v1/invoice-drafts/batches');
+    assert.equal(listing.status,200);assert.ok(!listing.body.batches.some(b=>b.id===fixedBatch));
+    await inspectFixed();
+    await desk.getByText(/Retained lines 1/).waitFor();
+    await desk.getByLabel('Cancellation reason').fill('Release the installment for rebatching');
+    const cancelling=post('batches/'+fixedBatch+'/cancellations');
+    await desk.getByRole('button',{name:/Cancel .*draft/i}).click();
+    const cancelled=await cancelling;assert.equal(cancelled.status(),201,await cancelled.text());
+    assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rowCount,0);
+    assert.equal((await pool.query('select 1 from invoice_draft_lines where id=$1 and event_id=$2',[fixedLine.id,registered.eventId])).rowCount,1);
+    await preparing.context.close();
     await billing.context.close();
     await reviewer.context.close();
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
