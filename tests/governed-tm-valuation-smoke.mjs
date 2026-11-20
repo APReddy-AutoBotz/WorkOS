@@ -35,6 +35,13 @@ assert.equal(run('1','79.995','0',capped).billableAfterCapExact,'79.995');
 assert.equal(run('1','79.995','0',capped).billableValue,'80.00');
 for(const capAmount of ['0','-1','80.001','1e2','080.00',null])assert.equal(validTmValuationPolicy({...capped,capAmount}),false);
 assert.equal(validTmValuationPolicy({...capped,version:'governed-tm/1'}),false);
+const excluded = {...p, version:'governed-tm/3', exclusions:'ALL_BILLING'};
+assert(validTmValuationPolicy(excluded));
+assert(!validTmValuationPolicy({...excluded, exclusions:'NONE'}));
+assert(!validTmValuationPolicy({...capped, version:'governed-tm/3', exclusions:'ALL_BILLING'}));
+const freePhase = run('1.25','100.1234','40.0020',excluded);
+assert.deepEqual([freePhase.unroundedBillableExact,freePhase.billableValue,freePhase.costValue,freePhase.marginValue],
+  ['125.15425','0.00','50.00','-50.00']);
 assert(validTmValuationPolicy(p));
 assert.deepEqual(run('1.25', '100.1234', '40.0020'), {
   version: 'governed-tm/1',

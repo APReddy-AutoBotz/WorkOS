@@ -6,7 +6,7 @@ import {seedDirectory} from './support/workforce-directory-test.mjs';
 const path='/api/v1/workforce-directory',ok=r=>{assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};
 await withCommercialDatabase(async({pool,databaseUrl})=>{
  await withCommercialMigrationsThrough(71,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));const fx=await seedDirectory(pool),ids=fx.identities;
- assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap']);
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase']);
  assert.equal((await pool.query('select count(*)::int n from worker_type_assignments')).rows[0].n,0);
  await withCommercialApi({databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s)},async({request})=>{
   const read=(q={},identity=ids.denied)=>request(path+'?'+new URLSearchParams({contractVersion:'workforce-directory/2',...q}),{identity}),all=async(identity,q={})=>{let p=ok(await read(q,identity)),rows=[...p.workers];while(p.nextAfter){p=ok(await read({...q,after:p.nextAfter,expectedRosterToken:p.rosterToken},identity));rows.push(...p.workers);}return rows;};
