@@ -6449,7 +6449,7 @@ app.use('/api/v1/tm-billing-eligibility',createTmBillingRouter({pool,requireData
 app.use('/api/v1/approved-rate-sources',createRateAdoptionRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Approved rate source failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/governed-tm-valuations',createGovernedTmRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Governed T&M valuation failed',e?.code||'UNKNOWN')}));
 app.use('/api/v1/rate-candidates',createRateCandidateRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError:e=>console.error('Rate candidate failed',e?.code||'UNKNOWN')}));
-app.use('/api/v1/workforce-directory',createWorkforceDirectoryRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole}));
+app.use('/api/v1/workforce-directory',createWorkforceDirectoryRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,hasActiveAssignedRole,getEffectivePermissionsForUser,audit}));
 app.use('/api/v1/my-work-planning',createOwnWorkPlanningRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,buildProjectScopeWhere}));
 app.use('/api/v1/resource-demand',createResourceDemandRouter({pool,requireDatabase,requireAuth,requirePermission,buildProjectScopeWhere,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/workforce-capabilities',createWorkforceCapabilitiesRouter({pool,requireDatabase,requireAuth,requirePermission,buildEmployeeScopeWhere,audit}));

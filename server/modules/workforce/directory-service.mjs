@@ -11,6 +11,11 @@ export const readWorkforceDirectory=async(c,req,q,buildEmployeeScopeWhere)=>{
  const org=add(req.organizationScope.organizationId),legal=add(req.organizationScope.legalEntityId);
  const today="(statement_timestamp() at time zone 'UTC')::date";
  const includeType=q.contractVersion===WORKFORCE_DIRECTORY_VERSION;
+ const scheduled=includeType && (await c.query("select to_regclass('worker_type_assignments') is not null available")).rows[0].available;
+ const assignmentJoin=scheduled?`left join lateral(select a.id,a.worker_type_id from worker_type_assignments a
+   where a.employee_id=e.id and a.organization_id=${org} and a.legal_entity_id=${legal} and a.effective_from<=${today}
+   order by a.effective_from desc limit 1) assignment on true`:'';
+ const typeId=scheduled?'case when assignment.id is not null then assignment.worker_type_id else profile.worker_type_id end':'profile.worker_type_id';
  const version=includeType?WORKFORCE_DIRECTORY_VERSION:'workforce-directory/1';
  const row=(alias)=>`jsonb_build_object('id',${alias}.id,'code',${alias}.code,'name',${alias}.name,'status',${alias}.status,'designation',${alias}.designation,'department',${alias}.department,${includeType?`'workerType',${alias}.worker_type,`:''}'country',${alias}.country,'region',${alias}.region,'businessUnit',${alias}.business_unit,'manager',case when ${alias}.manager_id is null then null else jsonb_build_object('id',${alias}.manager_id,'code',${alias}.manager_code,'name',${alias}.manager_name)end,'visibleDirectReports',${alias}.visible_direct_reports)`;
  const data=(await c.query(`with visible as materialized(
@@ -18,8 +23,9 @@ export const readWorkforceDirectory=async(c,req,q,buildEmployeeScopeWhere)=>{
    from employees e
    left join worker_profiles profile on profile.employee_id=e.id and profile.organization_id=${org}
      and profile.legal_entity_id=${legal} and ${today} between profile.effective_from and coalesce(profile.effective_to,'infinity'::date)
-   left join organization_catalog_items kind on kind.id=profile.worker_type_id and kind.catalog_type='worker_type'
-     and kind.organization_id=profile.organization_id and (kind.legal_entity_id is null or kind.legal_entity_id=profile.legal_entity_id)
+   ${assignmentJoin}
+   left join organization_catalog_items kind on kind.id=${typeId} and kind.catalog_type='worker_type'
+     and kind.organization_id=${org} and (kind.legal_entity_id is null or kind.legal_entity_id=${legal})
      and kind.active and ${today} between kind.effective_from and coalesce(kind.effective_to,'infinity'::date)
    where ${where}
   ),counts as(select reporting_manager_id,count(*)::integer n from visible group by reporting_manager_id),

@@ -1,9 +1,13 @@
+import {runMigrations} from '../server/migration-runner.mjs';
+import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
-import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,withCommercialApi} from './support/commercial-drafting-test.mjs';
+import {commercialFixture as f,withCommercialDatabase,withCommercialMigrationsThrough,migrateCommercialDatabase,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {seedDirectory} from './support/workforce-directory-test.mjs';
 const path='/api/v1/workforce-directory',ok=r=>{assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};
 await withCommercialDatabase(async({pool,databaseUrl})=>{
- await migrateCommercialDatabase(pool);const fx=await seedDirectory(pool),ids=fx.identities;
+ await withCommercialMigrationsThrough(71,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));const fx=await seedDirectory(pool),ids=fx.identities;
+ assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['072_wos04_worker_type_assignments']);
+ assert.equal((await pool.query('select count(*)::int n from worker_type_assignments')).rows[0].n,0);
  await withCommercialApi({databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s)},async({request})=>{
   const read=(q={},identity=ids.denied)=>request(path+'?'+new URLSearchParams({contractVersion:'workforce-directory/2',...q}),{identity}),all=async(identity,q={})=>{let p=ok(await read(q,identity)),rows=[...p.workers];while(p.nextAfter){p=ok(await read({...q,after:p.nextAfter,expectedRosterToken:p.rosterToken},identity));rows.push(...p.workers);}return rows;};
   // Shared labels are readable in this entity but entity-scoped setup cannot retire them.
@@ -27,6 +31,43 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     retire(parent.body.id),
   ]);
   assert.deepEqual([child.status,retirement.status],child.status===201?[201,409]:[409,200]);
+  await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Admin','employees.manage',true) on conflict(role_name,permission_key)do update set enabled=true");
+  const worker=fx.children[0],types=path+'/workers/'+worker+'/type-assignments';
+  const list=ok(await request(types+'?on='+fx.today));
+  assert.ok(list.options.some(o=>o.id==='shared-worker-kind'));
+  assert.equal((await request(types+'?on='+fx.today,{identity:ids.reader})).status,403);
+  assert.equal((await request(path+'/workers/'+fx.other+'/type-assignments?on='+fx.today)).status,404);
+  const assignment={expectedOwnerKey:list.ownerKey,requestId:randomUUID(),expectedLatestId:null,effectiveFrom:fx.today,
+    workerTypeId:'shared-worker-kind',reason:'Synthetic current classification'};
+  const save=(changes={})=>request(types,{method:'POST',body:{...assignment,...changes}});
+  assert.equal((await save({effectiveFrom:'2000-01-01'})).status,409);
+  assert.equal((await save({workerTypeId:'local-worker-kind'})).status,409);
+  assert.equal((await save({expectedOwnerKey:'0'.repeat(64)})).status,409);
+  await pool.query("create function refuse_type_audit() returns trigger language plpgsql as $$begin raise exception 'Synthetic audit refusal';end$$; create trigger refuse_type_audit before insert on audit_logs for each row when(new.action='Schedule Worker Type') execute function refuse_type_audit()");
+  assert.equal((await save()).status,503);
+  assert.equal(ok(await request(types+'?on='+fx.today)).latestId,null);
+  await pool.query('drop trigger refuse_type_audit on audit_logs');
+  const writes=await Promise.all([save(),save()]);
+  assert.deepEqual(writes.map(r=>r.status).sort(),[200,201],JSON.stringify(writes));
+  assert.equal((await save({reason:'Different request'})).status,409);
+  assert.equal(ok(await read({parentId:worker})).parent.workerType,'Shared visiting fellow');
+  const next={requestId:randomUUID(),expectedLatestId:assignment.requestId,effectiveFrom:fx.monday,workerTypeId:null};
+  assert.equal((await save({...next,expectedLatestId:null})).status,409);
+  assert.equal((await save(next)).status,201);
+  const history=ok(await request(types+'?on='+fx.monday)).history;
+  assert.deepEqual(history.map(v=>v.label),[null,'Shared visiting fellow']);
+  assert.equal(ok(await read({parentId:worker})).parent.workerType,'Shared visiting fellow');
+  await assert.rejects(pool.query('delete from worker_type_assignments where id=$1',[next.requestId]));
+  const futureType=await request(catalog,{method:'POST',body:{code:'SCHEDULED',name:'Synthetic scheduled classification',effectiveFrom:fx.today}});
+  assert.equal(futureType.status,201);
+  const scheduled={expectedLatestId:next.requestId,requestId:randomUUID(),effectiveFrom:fx.dates[1],workerTypeId:futureType.body.id};
+  assert.equal((await save(scheduled)).status,201);
+  assert.equal((await retire(futureType.body.id)).status,409);
+  assert.equal((await save({...scheduled,requestId:randomUUID(),expectedLatestId:scheduled.requestId})).status,409);
+  assert.equal((await pool.query("select count(*)::int n from audit_logs where action='Schedule Worker Type' and entity_id=$1",[worker])).rows[0].n,3);
+  await assert.rejects(pool.query(`insert into worker_type_assignments(organization_id,legal_entity_id,employee_id,previous_id,
+    effective_from,actor_id,active_role,reason) select organization_id,legal_entity_id,employee_id,id,effective_from+1,actor_id,
+    active_role,'Synthetic missing audit' from worker_type_assignments where id=$1`,[scheduled.requestId]),e=>e.code==='WKT03');
   const tables=['employees','users','user_roles','role_permissions','project_allocations','timesheets','leave_requests','workforce_capability_versions','worker_capacity_versions','worker_capacity_evidence','audit_logs'],snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async t=>[t,(await pool.query('select to_jsonb(t)v from '+t+' t order by to_jsonb(t)::text')).rows]))),before=await snapshot();
   const legacy=ok(await request(path,{identity:ids.denied}));
   assert.equal(legacy.contractVersion,'workforce-directory/1');
@@ -65,6 +106,6 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   await pool.query("update users set status='Inactive'where id=$1",[ids.denied.id]);assert.equal((await read()).status,403);await pool.query("update users set status='Active'where id=$1",[ids.denied.id]);
   for(const scope of[{organizationId:f.organizationId,legalEntityId:f.otherLegalEntityId},{organizationId:f.otherOrganizationId,legalEntityId:f.foreignLegalEntityId}])assert.equal((await request(path,{identity:ids.denied,scope})).status,403);
   assert.equal((await request(path,{authenticated:false})).status,401);assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
-  console.log('Scoped directory PostgreSQL/API receipt:',JSON.stringify({visibleTeamLead:25,directReports:23,nestedTraversal:true,employeeSelfOnly:true,projectManagerRelationshipOnly:true,directorAndHrScope:true,hiddenManagerNoIdentifier:true,literalUnicodeWildcardSearch:true,readNeutral:true,changedRoster409:true,heldRoleAndCurrentPermission403:true,noNewMigration:true}));
+  console.log('Scoped directory PostgreSQL/API receipt:',JSON.stringify({visibleTeamLead:25,directReports:23,nestedTraversal:true,employeeSelfOnly:true,projectManagerRelationshipOnly:true,directorAndHrScope:true,hiddenManagerNoIdentifier:true,literalUnicodeWildcardSearch:true,readNeutral:true,changedRoster409:true,heldRoleAndCurrentPermission403:true,populatedUpgrade:true,scheduledClassification:true}));
  });
 });

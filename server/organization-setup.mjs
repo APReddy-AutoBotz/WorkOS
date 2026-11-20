@@ -324,7 +324,7 @@ export const registerOrganizationSetupRoutes = ({
       await client.query('commit'); res.status(201).json(result.rows[0]);
     } catch (error) {
       await client.query('rollback');
-      if (['23P01','23505','23514'].includes(error.code)) return res.status(409).json({ error:'Catalog version conflicts with existing history', code:'CATALOG_VERSION_CONFLICT' });
+      if (['WKT01','23P01','23505','23514'].includes(error.code)) return res.status(409).json({ error:'Catalog version conflicts with existing history', code:'CATALOG_VERSION_CONFLICT' });
       console.error(error); res.status(500).json({ error:'Catalog item creation failed' });
     } finally { client.release(); }
   }));
@@ -338,16 +338,19 @@ export const registerOrganizationSetupRoutes = ({
         and catalog_type=$3 and legal_entity_id=$4 for update`,
       [req.params.id, req.organizationScope.organizationId, req.params.type, req.organizationScope.legalEntityId])).rows[0];
       if (!item) { await client.query('rollback'); return res.status(404).json({ error:'Catalog item not found' }); }
+      const scheduledTypes=item.catalog_type==='worker_type' && (await client.query("select to_regclass('worker_type_assignments') is not null available")).rows[0].available;
+      const currentLegacy=scheduledTypes?`and not exists(select 1 from worker_type_assignments a where a.employee_id=worker_profiles.employee_id
+        and a.organization_id=$2 and a.legal_entity_id=$3 and a.effective_from<=(statement_timestamp() at time zone 'UTC')::date)`:'';
       const dependencies = await client.query(`select 'child' dependency,id from organization_catalog_items
         where parent_id=$1 and active=true and organization_id=$2 and (legal_entity_id is null or legal_entity_id=$3)
         union all select 'worker',employee_id from worker_profiles where worker_type_id=$1 and organization_id=$2
-          and legal_entity_id=$3 and lifecycle_status in ('Active','On Leave') limit $4`,
+          and legal_entity_id=$3 and lifecycle_status in ('Active','On Leave') ${currentLegacy} limit $4`,
       [item.id, req.organizationScope.organizationId, req.organizationScope.legalEntityId, MAX_DEPENDENCIES + 1]);
       if (dependencies.rows.length) { await client.query('rollback'); return res.status(409).json({ error:'Active dependencies prevent retirement', code:'CATALOG_IN_USE', dependencies:dependencies.rows.slice(0,MAX_DEPENDENCIES), truncated:dependencies.rows.length>MAX_DEPENDENCIES }); }
       const result = await client.query('update organization_catalog_items set active=false,effective_to=coalesce(effective_to,current_date),updated_at=now() where id=$1 returning *',[item.id]);
       await audit(client,req,{module:'Organization Setup',action:'Retire Catalog Item',entityType:req.params.type,entityId:item.id,oldValue:item,newValue:result.rows[0],details:'Retired catalog item after dependency analysis'});
       await client.query('commit'); res.json(result.rows[0]);
-    } catch(error) { await client.query('rollback'); console.error(error); res.status(500).json({error:'Catalog retirement failed'}); } finally { client.release(); }
+    } catch(error) { await client.query('rollback'); if(error.code==='WKT01')return res.status(409).json({error:'Current or scheduled worker assignments prevent retirement',code:'CATALOG_IN_USE'}); console.error(error); res.status(500).json({error:'Catalog retirement failed'}); } finally { client.release(); }
   }));
 
   router.get('/calendars', requirePermission('settings.manage'), asyncHandler(async (req,res) => {
