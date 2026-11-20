@@ -163,3 +163,5 @@ Accepted main remains PR169 merge `88262c87a260529c00a680b22d2f021ff7d8cba4`, wi
 The next independent package is [settings persistence outcomes](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md). Baseline browser execution reproduced false success before server acknowledgement and missing failed-load recovery. Scope is truthful save status, retained edits, duplicate prevention, newer-edit distinction, unmount suppression and load retry. Current validation remains required before publication/acceptance. Commercial source authorization, remaining security reconciliation, persistent throttling and buyer/release evidence remain separate.
 
 The settings recovery journey uses the compiled fixture server with the real PostgreSQL-backed API. CI checks acknowledged saves, failed loads and uncertain outcomes.
+
+Finance operators with fixed-fee source access and notification recovery permission can recover a failed export notification from the commercial workspace. The browser journey verifies recovery against the original artifact and checks that the failed event leaves the recovery queue.

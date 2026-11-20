@@ -324,7 +324,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal((await readSource(identities.manager)).batch.state,'Approved');
     assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
     const exportGrants=[...reviewerGrants,'reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
-      'commercial.invoice_export.configure','integrations.invoice_alert_routes.manage'];
+      'commercial.invoice_export.configure','commercial.invoice_export.recover_notices','integrations.invoice_alert_routes.manage'];
     for (const key of exportGrants) await pool.query(
       "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
     const config='/api/v1/invoice-export-notice-config', csv='/api/v1/invoice-csv';
@@ -353,6 +353,8 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
       expectedLineCount:approved.control.lineCount+1,expectedTotal:approved.control.total,reason:'Reject stale control total'}});
     assert.equal(stale.status,409);
     assert.equal((await readSource(identities.manager)).batch.state,'Approved');
+    await pool.query("create function synthetic_fixed_fee_notice_refusal() returns trigger language plpgsql as $$begin raise exception 'Synthetic notification failure' using errcode='INC02';end$$");
+    await pool.query('create trigger synthetic_fixed_fee_notice_refusal before insert on invoice_export_notice_events for each row execute function synthetic_fixed_fee_notice_refusal()');
     const exported=exporting.page.waitForResponse(r=>r.url().endsWith('/exports') && r.request().method()==='POST');
     await exportUi.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
     const generated=await exported;assert.equal(generated.status(),201,await generated.text());
@@ -367,8 +369,30 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const rows=Buffer.from(artifact.payloadBase64,'base64').toString('utf8').split('\r\n');
     assert.deepEqual(rows[1].split(',').slice(4,8),[registered.itemId,'1',registered.eventId,'FIXED_FEE_INSTALLMENT']);
     assert.equal(JSON.parse(Buffer.from(rows[1].split(',')[9].slice(4),'base64')).installment,1);
+    await pool.query('drop trigger synthetic_fixed_fee_notice_refusal on invoice_export_notice_events');
+    const recoveryUi=exporting.page.getByRole('region',{name:'Invoice notification recovery'});
+    await recoveryUi.getByLabel('Invoice recovery engagement').selectOption(engagement.result.id);
+    await recoveryUi.getByRole('button',{name:'Load invoice recovery batches'}).click();
+    await recoveryUi.getByLabel('Invoice recovery batch',{exact:true}).selectOption(nextId);
+    const targetsResponse=exporting.page.waitForResponse(r=>r.url().endsWith('/notice-recovery-sources/'+nextId));
+    await recoveryUi.getByRole('button',{name:'Load invoice recovery targets'}).click();
+    const targets=(await (await targetsResponse).json()).targets;
+    assert.deepEqual(targets.map(t=>t.kind),['producer']);
+    await recoveryUi.getByLabel('Invoice recovery target').selectOption(targets[0].id);
+    await recoveryUi.getByLabel('Invoice recovery reason').fill('Restore the original fixed-fee export notice');
+    const recovered=exporting.page.waitForResponse(r=>r.url().endsWith('/notice-recoveries') && r.request().method()==='POST');
+    await recoveryUi.getByRole('button',{name:'Attempt invoice notice recovery'}).click();
+    const recoveryResult=await recovered;
+    assert.equal(recoveryResult.status(),201,await recoveryResult.text());
+    await recoveryUi.getByText(/Recovery attempt recorded/).waitFor();
+    const reread=await apiRequest(csv+'/notice-recovery-sources/'+nextId,{identity:identities.manager});
+    assert.deepEqual(reread.body.targets,[]);
+    const notice=await pool.query('select id from invoice_export_notice_events where batch_id=$1 and artifact_id=$2',[nextId,artifact.id]);
+    assert.equal(notice.rowCount,1);
+    assert.equal((await apiRequest(csv+'/artifacts/'+artifact.id,{identity:identities.manager})).body.artifact.sha256,artifact.sha256);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);
     assert.equal((await apiRequest(csv+'/artifacts/'+artifact.id,{identity:identities.manager})).status,403);
+    assert.equal((await apiRequest(csv+'/notice-recovery-sources/'+nextId,{identity:identities.manager})).status,403);
     await exporting.context.close();
     await deciding.context.close();
     await preparing.context.close();

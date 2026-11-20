@@ -631,3 +631,5 @@ After final approval, a finance preparer with the explicitly granted `commercial
 Current worker classification (WOS-WKF-001 and WOS-WKF-002) is available in the scoped workforce directory. Search by the buyer-defined worker type label. Workers without a current matching profile and catalog entry appear as unclassified. Entity administrators can retire locally owned catalog entries after dependency checks. Organization-wide entries remain available for shared use. With workforce management access, open a worker, load types for the effective date and record the assignment with a reason. Future assignments take effect on their UTC date. Earlier entries and the original profile are retained.
 
 WOS-INV-001, WOS-APR-001 and WOS-APR-003. Billing review policy history lists each retained version, its effective date, change reason and ordered reviewers. Use Load older billing policies to review earlier versions.
+
+WOS-INV-007. The commercial drafting browser journey exercises fixed-fee export notification recovery from a recorded producer failure, checks the retained artifact checksum and verifies denied recovery access after source permission is revoked.
