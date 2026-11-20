@@ -1,3 +1,4 @@
+import {validTmEntryCap} from '../../shared/governed-tm-valuation.mjs';
 import { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../services/apiClient';
 import { approvedRateSources } from '../services/approvedRateSources';
@@ -99,6 +100,7 @@ const TmEngagement = ({
     [rounding, setRounding] = useState(''),
     [aggregation, setAggregation] = useState(''),
     [cap, setCap] = useState(''),
+    [capAmount,setCapAmount] = useState(''),
     [exclusions, setExclusions] = useState(''),
     [approval, setApproval] = useState(''),
     [unit, setUnit] = useState(''),
@@ -138,6 +140,7 @@ const TmEngagement = ({
     setRounding('');
     setAggregation('');
     setCap('');
+    setCapAmount('');
     setExclusions('');
     setApproval('');
     setUnit('');
@@ -235,7 +238,7 @@ const TmEngagement = ({
       !['0', '1', '2', '3', '4'].includes(precision) ||
       !rounding ||
       !aggregation ||
-      !cap ||
+      !cap || (cap === 'PER_ENTRY_VALUE' && !validTmEntryCap(capAmount,Number(precision))) ||
       !exclusions ||
       !approval ||
       !unit ||
@@ -248,7 +251,8 @@ const TmEngagement = ({
       expectedLatestId: policies[0]?.id ?? null,
       effectiveFrom: effective,
       definition: {
-        version: 'governed-tm/1',
+        version: cap === 'PER_ENTRY_VALUE' ? 'governed-tm/2' : 'governed-tm/1',
+        ...(cap === 'PER_ENTRY_VALUE' ? {capAmount} : {}),
         currency,
         precision: Number(precision),
         rounding,
@@ -698,8 +702,7 @@ const TmEngagement = ({
             <fieldset disabled={busy || !!pending}>
               <legend>Explicit T&M policy</legend>
               <p>
-                Only no-cap, no-exclusion, no-additional-approval policies are supported. If policy approval
-                or a cap is required, this workflow is unavailable.
+                A per-entry ceiling limits the billable amount before rounding. Cost uses all approved hours.
               </p>
               <label>
                 Policy effective date UTC
@@ -763,8 +766,12 @@ const TmEngagement = ({
                 <select aria-label="T&M cap treatment" value={cap} onChange={(e) => setCap(e.target.value)}>
                   <option value="">Choose explicitly</option>
                   <option value="NONE">No cap</option>
+                  <option value="PER_ENTRY_VALUE">Maximum billable value per work entry</option>
                 </select>
               </label>
+              {cap === 'PER_ENTRY_VALUE' && <label>Maximum billable value per entry ({currency})
+                <input aria-label="Maximum billable value per entry" inputMode="decimal" value={capAmount} onChange={e=>setCapAmount(e.target.value)} />
+              </label>}
               <label>
                 Exclusions
                 <select
@@ -802,7 +809,8 @@ const TmEngagement = ({
                   onChange={(e) => setPolicyReason(e.target.value)}
                 />
               </label>
-              <button type="button" onClick={savePolicy}>
+              {cap === 'PER_ENTRY_VALUE' && capAmount && !validTmEntryCap(capAmount,Number(precision)) && <p role="status">Enter a positive ceiling within the selected currency precision.</p>}
+              <button type="button" disabled={cap === 'PER_ENTRY_VALUE' && !validTmEntryCap(capAmount,Number(precision))} onClick={savePolicy}>
                 Record explicit T&M policy
               </button>
             </fieldset>
@@ -855,7 +863,7 @@ const TmEngagement = ({
           {policyDetails && (
             <p>
               Policy: {policyDetails.currency}, {policyDetails.precision} decimals, {policyDetails.rounding},{' '}
-              {policyDetails.aggregation}; cap {policyDetails.capTreatment}, exclusions{' '}
+              {policyDetails.aggregation}; cap {policyDetails.capTreatment} {policyDetails.capAmount}, exclusions{' '}
               {policyDetails.exclusions}, additional approval {policyDetails.approvalTreatment}, unit{' '}
               {policyDetails.unit}.
             </p>
@@ -924,6 +932,7 @@ const TmEngagement = ({
         <section aria-label="Retained T&M snapshot">
           <h3>Retained calculation</h3>
           <p>
+            {shown.result.version==='governed-tm/2' && <>Entry ceiling {shown.result.currency} {shown.result.capAmount} · billable before rounding {shown.result.billableAfterCapExact} · </>}
             {shown.result.currency} billable {shown.result.billableValue}, cost {shown.result.costValue},
             margin {shown.result.marginValue}. Work entry {shown.entryId}; policy {shown.policyId}; billing
             adoption {shown.billingAdoptionId}; cost adoption {shown.costAdoptionId}.
@@ -949,8 +958,8 @@ const TmEngagement = ({
                   <tr>
                     <th scope="col">Amount</th>
                     <th scope="col">Hourly rate</th>
-                    <th scope="col">Before rounding</th>
-                    <th scope="col">After rounding</th>
+                    <th scope="col">Hours × rate</th>
+                    <th scope="col">Final rounded amount</th>
                   </tr>
                 </thead>
                 <tbody>

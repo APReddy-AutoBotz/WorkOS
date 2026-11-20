@@ -65,6 +65,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
     { ...policy, precision: null },
     { ...policy, rounding: 'UNKNOWN' },
     { ...policy, extra: true },
+    ...['80.00', '9999999999999999.99', '80.005', '0', '1e3', null].map(capAmount =>
+      ({...policy,version:'governed-tm/2',capTreatment:'PER_ENTRY_VALUE',capAmount})),
   ])
     assert.equal(
       (await pool.query('select valid_governed_tm_policy($1::jsonb) valid', [JSON.stringify(v)])).rows[0]

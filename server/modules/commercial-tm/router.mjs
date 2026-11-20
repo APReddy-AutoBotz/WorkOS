@@ -72,7 +72,8 @@ export const createGovernedTmRouter = (o) => {
       const out = await fn(c, r);
       await c.query('commit');
       begun = false;
-      res.status(write && !out.replayed ? 201 : 200).json(out);
+      const version = out.valuation?.result.version ?? out.policy?.definition.version;
+      res.status(write && !out.replayed ? 201 : 200).json(version ? {...out, calculationVersion:version} : out);
     } catch (e) {
       if (begun) await c.query('rollback').catch(() => {});
       if (e.statusCode) res.status(e.statusCode).json({ code: e.code, error: e.message });

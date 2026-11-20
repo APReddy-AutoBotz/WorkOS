@@ -131,7 +131,7 @@ export const tmBillingEvidence = (snapshot) => {
     source.references.find((x) => x.entityType === 'Engagement')?.entityId !== snapshot.engagementId ||
     new Set(source.references.map((x) => x.contractVersionId)).size !== 1 ||
     !validCapabilityDate(source.workDate) ||
-    result.version !== 'governed-tm/1' ||
+    !['governed-tm/1','governed-tm/2'].includes(result.version) ||
     !/^[A-Z]{3}$/.test(result.currency) ||
     result.unit !== 'HOUR' ||
     typeof result.billableValue !== 'string' ||

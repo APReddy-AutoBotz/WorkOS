@@ -1,8 +1,10 @@
+import {runMigrations} from '../server/migration-runner.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
   commercialFixture as f,
   withCommercialDatabase,
+  withCommercialMigrationsThrough,
   migrateCommercialDatabase,
   withCommercialApi,
 } from './support/commercial-drafting-test.mjs';
@@ -28,7 +30,7 @@ const base = '/api/v1/governed-tm-valuations',
     return v.body;
   };
 await withCommercialDatabase(async ({ pool, databaseUrl }) => {
-  await migrateCommercialDatabase(pool);
+  await withCommercialMigrationsThrough(72,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const fx = await seedWorkApproval(pool),
     ids = fx.identities;
   await grantAmendmentPermissions(pool);
@@ -408,6 +410,10 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
       assert.deepEqual([sameA.status, sameB.status].sort(), [200, 201]);
       assert.equal(sameA.body.valuation.id, sameB.body.valuation.id);
       const created = sameA.body.valuation;
+      const beforeCapUpgrade=(await pool.query('select to_jsonb(v) value from commercial_tm_valuations v where id=$1',[created.id])).rows[0].value;
+      assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['073_wos06_tm_entry_value_cap']);
+      assert.deepEqual((await pool.query('select to_jsonb(v) value from commercial_tm_valuations v where id=$1',[created.id])).rows[0].value,beforeCapUpgrade);
+      assert.equal(ok(await request(base+'/valuations/'+created.id)).valuation.result.version,'governed-tm/1');
       assert.deepEqual(
         {
           billableValue: created.result.billableValue,

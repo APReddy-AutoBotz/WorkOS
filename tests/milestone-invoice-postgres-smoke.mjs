@@ -926,7 +926,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const acceptedCredit=attempts[0].body.artifact;
         assert.equal(acceptedCredit.total,issued.amount);
         assert.equal(acceptedCredit.schemaVersion,'workos.invoice-credit-csv/1');
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap']);
         const creditSource=ok(await request(csv+'/confirmation-sources/'+finalBatch)).source;
         assert.equal(creditSource.sourceType,'FULL_LINE_REVERSAL');
         const creditAttestation={...confirm,requestId:randomUUID(),batchId:finalBatch,artifactId:acceptedCredit.id,

@@ -17,12 +17,13 @@ const policy = z
     previousId: uuid.nullable(),
     effectiveFrom: date,
     definition: z.custom<{
-      version: 'governed-tm/1';
+      version: 'governed-tm/1'|'governed-tm/2';
       currency: string;
       precision: number;
       rounding: 'HALF_UP' | 'HALF_EVEN' | 'DOWN';
       aggregation: 'PER_ENTRY';
-      capTreatment: 'NONE';
+      capTreatment: 'NONE'|'PER_ENTRY_VALUE';
+      capAmount?: string;
       exclusions: 'NONE';
       unit: 'HOUR';
       approvalTreatment: 'NONE';
@@ -68,7 +69,9 @@ const evidence = z
   .strict();
 const result = z
   .object({
-    version: z.literal('governed-tm/1'),
+    version: z.enum(['governed-tm/1','governed-tm/2']),
+    capAmount: z.string().optional(),
+    billableAfterCapExact: z.string().optional(),
     currency: z.string().regex(/^[A-Z]{3}$/),
     unit: z.literal('HOUR'),
     hoursExact: z.string(),
@@ -107,7 +110,7 @@ const envelope = {
   organizationId: id,
   legalEntityId: id,
   serverDate: date,
-  calculationVersion: z.literal('governed-tm/1'),
+  calculationVersion: z.enum(['governed-tm/1','governed-tm/2']),
 };
 const pc = z
     .object({
