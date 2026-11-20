@@ -290,7 +290,7 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
         await tm.getByLabel('T&M rounding mode', { exact: true }).selectOption('HALF_UP');
         await tm.getByLabel('T&M aggregation', { exact: true }).selectOption('PER_ENTRY');
         await tm.getByLabel('T&M cap treatment', { exact: true }).selectOption('PER_ENTRY_VALUE');
-        await tm.getByLabel('Maximum billable value per entry').fill(pricingCase === 'capped' ? '80.00' : '99999');
+        await tm.getByLabel('Maximum billable value per entry').fill(pricingCase === 'capped' ? '80' : '99999');
         await tm.getByLabel('T&M exclusions', { exact: true }).selectOption(pricingCase === 'excluded' ? 'ALL_BILLING' : 'NONE');
         await tm.getByLabel('T&M policy approval treatment', { exact: true }).selectOption('NONE');
         await tm.getByLabel('T&M work unit', { exact: true }).selectOption('HOUR');
