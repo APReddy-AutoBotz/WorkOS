@@ -6,6 +6,27 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
  await migrateCommercialDatabase(pool);const fx=await seedDirectory(pool),ids=fx.identities;
  await withCommercialApi({databaseUrl,identities:ids,onServerError:s=>process.stderr.write(s)},async({request})=>{
   const read=(q={},identity=ids.denied)=>request(path+'?'+new URLSearchParams({contractVersion:'workforce-directory/2',...q}),{identity}),all=async(identity,q={})=>{let p=ok(await read(q,identity)),rows=[...p.workers];while(p.nextAfter){p=ok(await read({...q,after:p.nextAfter,expectedRosterToken:p.rosterToken},identity));rows.push(...p.workers);}return rows;};
+  // Shared labels are readable in this entity but entity-scoped setup cannot retire them.
+  await pool.query("insert into role_permissions(role_name,permission_key,enabled)values('Admin','settings.manage',true) on conflict(role_name,permission_key)do update set enabled=true");
+  await pool.query(`insert into organization_catalog_items(id,organization_id,legal_entity_id,catalog_type,code,name,effective_from)
+    values('shared-worker-kind',$1,null,'worker_type','SYN-SHARED','Shared visiting fellow',current_date-3),
+          ('local-worker-kind',$1,$2,'worker_type','SYN-LOCAL','Local visiting fellow',current_date-3)`,[f.organizationId,f.legalEntityId]);
+  const catalog='/api/v1/organization-setup/catalogs/worker_type';
+  const retire=id=>request(catalog+'/'+id+'/retire',{method:'POST',body:{}});
+  const catalogRows=ok(await request(catalog));
+  assert.ok(catalogRows.some(x=>x.id==='shared-worker-kind'));
+  assert.equal((await retire('shared-worker-kind')).status,404);
+  assert.equal((await retire('directory-kind')).status,409);
+  assert.equal(ok(await retire('local-worker-kind')).active,false);
+  assert.ok(ok(await request(catalog)).some(x=>x.id==='shared-worker-kind' && x.active));
+  assert.equal((await pool.query("select count(*)::int n from audit_logs where action='Retire Catalog Item' and entity_id='shared-worker-kind'")).rows[0].n,0);
+  const parent=await request(catalog,{method:'POST',body:{code:'PARENT',name:'Synthetic parent type',effectiveFrom:'2020-01-01'}});
+  assert.equal(parent.status,201,JSON.stringify(parent.body));
+  const [child,retirement]=await Promise.all([
+    request(catalog,{method:'POST',body:{code:'CHILD',name:'Synthetic child type',parentId:parent.body.id,effectiveFrom:'2020-01-01'}}),
+    retire(parent.body.id),
+  ]);
+  assert.deepEqual([child.status,retirement.status],child.status===201?[201,409]:[409,200]);
   const tables=['employees','users','user_roles','role_permissions','project_allocations','timesheets','leave_requests','workforce_capability_versions','worker_capacity_versions','worker_capacity_evidence','audit_logs'],snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async t=>[t,(await pool.query('select to_jsonb(t)v from '+t+' t order by to_jsonb(t)::text')).rows]))),before=await snapshot();
   const legacy=ok(await request(path,{identity:ids.denied}));
   assert.equal(legacy.contractVersion,'workforce-directory/1');

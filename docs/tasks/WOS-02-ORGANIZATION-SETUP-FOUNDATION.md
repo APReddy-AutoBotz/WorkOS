@@ -105,4 +105,4 @@ Classify every check as PASS / FAIL / SKIP / NOT RUN and retain exact commands/e
 
 Construction is complete only when the implementation is published on this existing branch, the exact GitHub head is reported, all mandatory checks are honestly classified, and the internal A–I pass has no unresolved current P0/P1/P2. Keep the product PR Draft after construction. Do not mark Ready or merge until the controller separately completes exact-head acceptance and independent confirmation.
 
-Current worker classification (WOS-WKF-001 and WOS-WKF-002) is available in the scoped workforce directory. Search by the buyer-defined worker type label. Workers without a current matching profile and catalog entry appear as unclassified.
+Current worker classification (WOS-WKF-001 and WOS-WKF-002) is available in the scoped workforce directory. Search by the buyer-defined worker type label. Workers without a current matching profile and catalog entry appear as unclassified. Entity administrators can retire locally owned catalog entries after dependency checks. Organization-wide entries remain available for shared use.
