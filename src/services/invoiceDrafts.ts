@@ -63,7 +63,7 @@ const batch = z
     reason,
     createdAt: instant,
     ownerCurrent: z.boolean(),
-    sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT']).optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
   })
   .strict()
@@ -71,7 +71,7 @@ const batch = z
     (x) =>
       x.periodStart <= x.periodEnd &&
       (!x.sourceType ||
-        (x.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission('commercial.milestone_billing.view'))),
+        (x.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission(x.sourceType==='FIXED_FEE_INSTALLMENT'?'commercial.fixed_fee_eligibility.issue':'commercial.milestone_billing.view'))),
   );
 const tmLine = z
   .object({
@@ -118,7 +118,13 @@ const milestoneLine = z
     createdAt: instant,
   })
   .strict();
-const line = z.union([tmLine, milestoneLine]);
+const fixedFeeLine = milestoneLine.extend({
+  sourceType:z.literal('FIXED_FEE_INSTALLMENT'),
+  evidence:z.object({sourceVersion:z.literal(1),contractVersionId:id,installment:z.number().int().min(1).max(120),
+    dueOn:date,currency:z.string().regex(/^[A-Z]{3}$/),amount,engagementId:id,contractLifecycleId:id,
+    engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),approvalReason:reason}).strict(),
+});
+const line = z.union([tmLine, milestoneLine, fixedFeeLine]);
 const cancellation = z
     .object({
       id: uuid,
@@ -155,14 +161,16 @@ const checkDetail = (
   try {
     const computed = invoiceDraftTotal(lines.map((l) => l.amount));
     return (
-      lines.every((l) => (l.snapshotId === null) === (x.sourceType === 'MILESTONE_ACCEPTANCE')) &&
+      lines.every((l) => ('sourceType' in l ? l.sourceType : undefined) === x.sourceType) &&
       lines.every(
         (l, i) =>
           l.batchId === x.id &&
           l.sequence === i + 1 &&
           l.currency === x.currency &&
-          ('sourceType' in l
-            ? hasRatePermission('commercial.milestone_billing.view') &&
+          ('sourceType' in l && l.sourceType==='FIXED_FEE_INSTALLMENT'
+            ? l.evidence.engagementId===x.engagementId && l.evidence.currency===x.currency &&
+              canonicalHours(l.evidence.amount)===canonicalHours(l.amount)
+            : 'sourceType' in l ? hasRatePermission('commercial.milestone_billing.view') &&
               x.periodBasis === 'ELIGIBLE_DATE' &&
               milestoneEvidenceMatches(l.evidence, x.engagementId, x.currency, l.amount)
             : l.evidence.engagementId === x.engagementId &&
@@ -333,6 +341,15 @@ const reconciliationTotals = {
   ),
 };
 export const invoiceDrafts = {
+  availableInstallments: async(batchId:string,c:RateContext|null,after?:string)=>{
+    if (!uuid.safeParse(batchId).success || !hasRatePermission('commercial.fixed_fee_eligibility.issue')) return bad();
+    const data=await call('GET','/batches/'+batchId+'/available-installments'+(after?'?after='+encodeURIComponent(after):''),c,'view');
+    const result=z.object({...envelope,batchId:z.literal(batchId),nextAfter:uuid.nullable(),
+      items:z.array(z.object({id:uuid,installment:z.number().int().positive(),dueOn:date,currency:z.string(),amount}).strict()).max(50)
+    }).strict().safeParse(data);
+    if (!result.success) return bad();
+    return result.data;
+  },
   portfolio: async (
     start: string,
     end: string,

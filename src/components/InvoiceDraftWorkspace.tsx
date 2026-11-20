@@ -18,7 +18,7 @@ type Choice = {
   clientId: string;
   contractId: string;
   currency: string;
-  sourceType?: 'MILESTONE_ACCEPTANCE';
+  sourceType?: 'MILESTONE_ACCEPTANCE' | 'FIXED_FEE_INSTALLMENT';
 };
 type MilestoneItem = Awaited<ReturnType<typeof milestoneBilling.register>>['items'][number];
 type RegisterItem = Awaited<ReturnType<typeof tmBillingEligibility.register>>['items'][number];
@@ -27,6 +27,8 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     [batchNext, setBatchNext] = useState<string | null>(null),
     [register, setRegister] = useState<RegisterItem[]>([]),
     [registerNext, setRegisterNext] = useState<string | null>(null),
+    [fixedItems,setFixedItems]=useState<Awaited<ReturnType<typeof invoiceDrafts.availableInstallments>>['items']>([]),
+    [fixedNext,setFixedNext]=useState<string|null>(null),
     [milestones, setMilestones] = useState<MilestoneItem[]>([]),
     [milestoneNext, setMilestoneNext] = useState<string | null>(null),
     [milestoneEnabled, setMilestoneEnabled] = useState(false),
@@ -59,6 +61,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     setBatchNext(null);
     setRegister([]);
     setRegisterNext(null);
+    setFixedItems([]);setFixedNext(null);
     setMilestones([]);
     setMilestoneNext(null);
     setMilestoneEnabled(false);
@@ -179,6 +182,9 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     if (!selected) return;
     void run(async (c) => {
       const x = await invoiceDrafts.inspect(selected, c, canCancel);
+      const fixed=x.batch.sourceType==='FIXED_FEE_INSTALLMENT' && x.batch.state==='Draft' && canPrepare
+        ? await invoiceDrafts.availableInstallments(selected,c) : null;
+      setFixedItems(fixed?.items??[]);setFixedNext(fixed?.nextAfter??null);
       setDetail(x);
       setItemId('');
     });
@@ -255,6 +261,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     };
     if (
       !validInvoiceDraft(definition) ||
+      (choice.sourceType==='FIXED_FEE_INSTALLMENT' && periodBasis!=='ELIGIBLE_DATE') ||
       (choice.sourceType === 'MILESTONE_ACCEPTANCE' && (!milestoneEnabled || periodBasis !== 'ELIGIBLE_DATE'))
     )
       return;
@@ -280,6 +287,13 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
         ownerUserId: d.ownerUserId,
         ownerRole: d.ownerRole,
       };
+    if (d.sourceType==='FIXED_FEE_INSTALLMENT') {
+      const selected=fixedItems.find(item=>'fixed:'+item.id===itemId);
+      if (!selected) return;
+      perform({type:'line',batchId:d.id,data:{requestId:crypto.randomUUID(),itemId:selected.id,itemVersion:1,
+        expectedLineCount:detail.total.lineCount,reason:itemReason.trim()}});
+      return;
+    }
     if (d.sourceType === 'MILESTONE_ACCEPTANCE') {
       if (
         !chosenMilestone ||
@@ -523,12 +537,14 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                       <li key={x.id}>
                         Item {x.itemId} version {x.itemVersion} · Event {x.eventId} ·{' '}
                         {'sourceType' in x
-                          ? `milestone ${x.evidence.milestoneId}`
+                          ? x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment}` : `milestone ${x.evidence.milestoneId}`
                           : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
                         <details>
                           <summary>Supporting evidence</summary>
-                          {'sourceType' in x ? (
+                          {'sourceType' in x && x.sourceType==='FIXED_FEE_INSTALLMENT' ? (
+                            <p>Due {x.evidence.dueOn} · Contract version {x.evidence.contractVersionId} · Approval reason {x.evidence.approvalReason}</p>
+                          ) : 'sourceType' in x ? (
                             <>
                               <p>Milestone acceptance decision {x.evidence.decisionId}</p>
                               <ul>
@@ -572,7 +588,9 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                           onChange={(e) => setItemId(e.target.value)}
                         >
                           <option value="">Choose an item</option>
-                          {detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
+                          {detail.batch.sourceType==='FIXED_FEE_INSTALLMENT'
+                            ? fixedItems.map(x=><option key={x.id} value={'fixed:'+x.id}>Installment {x.installment} · {x.dueOn} · {x.currency} {x.amount}</option>)
+                            : detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
                             ? milestones.map((x) => (
                                 <option key={x.id} value={'milestone:' + x.id}>
                                   {x.currency} {x.amount} · {x.evidence.milestoneId} · {x.engagementId}
@@ -585,7 +603,12 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                               ))}
                         </select>
                       </label>
-                      {detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
+                      {detail.batch.sourceType==='FIXED_FEE_INSTALLMENT'
+                        ? fixedNext && <button type="button" onClick={()=>void run(async c=>{
+                          const page=await invoiceDrafts.availableInstallments(detail.batch.id,c,fixedNext);
+                          setFixedItems(old=>[...old,...page.items]);setFixedNext(page.nextAfter);
+                        })}>More available installments</button>
+                        : detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
                         ? milestoneNext && (
                             <button type="button" onClick={moreMilestones}>
                               More available milestones
