@@ -26,8 +26,7 @@ const ok = (r, status = 200) => {
 };
 const events = ['approval.action_required', 'approval.rejected_or_correction_required', 'approval.completed'];
 for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(async ({ pool, databaseUrl }) => {
-  if (verifyPurchaseOrder) await migrateCommercialDatabase(pool);
-  else await withCommercialMigrationsThrough(67,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
+  await withCommercialMigrationsThrough(verifyPurchaseOrder ? 81 : 67,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const fx = await seedWorkApproval(pool),
     ids = fx.identities;
   await grantAmendmentPermissions(pool);
@@ -523,6 +522,29 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
           ).replayed,
           true,
         );
+        if (verifyPurchaseOrder) {
+          const upgrade=await migrateCommercialDatabase(pool);
+          assert.deepEqual(upgrade.applied,['082_wos06_invoice_review_identity']);
+          const instancePath=invoiceApproval+'/instances/'+firstReview.id;
+          const actorView=()=>request(instancePath,{identity:ids.manager});
+          assert.equal(ok(await actorView()).approval.current,true);
+          const linkedId='synthetic-invoice-reassigned-worker';
+          await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,
+            primary_country_director_id,status,organization_id,legal_entity_id)
+            values($1,$1,'Synthetic review worker','review-worker@example.test','Consultant','Delivery','US',
+              'director-commercial','Active',$2,$3)`,[linkedId,f.organizationId,f.legalEntityId]);
+          await pool.query('update users set employee_record_id=$1 where id=$2',[linkedId,ids.second.id]);
+          assert.equal(ok(await actorView()).approval.current,false);
+          await pool.query('update users set employee_record_id=null where id=$1',[ids.second.id]);
+          const stale=ok(await actorView());
+          assert.equal(stale.approval.current,false);
+          const blocked=await request(instancePath+'/decisions',{method:'POST',identity:ids.manager,body:{
+            expectedOwnerKey:stale.ownerKey,requestId:randomUUID(),expectedSequence:0,decision:'Approved',
+            reason:'Attempt decision after second reviewer identity was reassigned',
+          }});
+          assert.equal(blocked.status,409,JSON.stringify(blocked.body));
+          assert.equal((await pool.query('select 1 from invoice_batch_approval_transitions where instance_id=$1',[firstReview.id])).rowCount,0);
+        }
         const withdrawn = ok(
           await request(invoiceApproval + '/instances/' + firstReview.id + '/withdrawals', {
             method: 'POST',
@@ -985,7 +1007,7 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         const acceptedCredit=attempts[0].body.artifact;
         assert.equal(acceptedCredit.total,issued.amount);
         assert.equal(acceptedCredit.schemaVersion,'workos.invoice-credit-csv/1');
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release', '077_wos06_po_line_commitments', '078_wos06_milestone_po_commitments', '079_wos06_fixed_fee_schedule', '080_wos06_fixed_fee_eligibility', '081_wos06_fixed_fee_invoice_drafts']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release', '077_wos06_po_line_commitments', '078_wos06_milestone_po_commitments', '079_wos06_fixed_fee_schedule', '080_wos06_fixed_fee_eligibility', '081_wos06_fixed_fee_invoice_drafts', '082_wos06_invoice_review_identity']);
         const creditSource=ok(await request(csv+'/confirmation-sources/'+finalBatch)).source;
         assert.equal(creditSource.sourceType,'FULL_LINE_REVERSAL');
         const creditAttestation={...confirm,requestId:randomUUID(),batchId:finalBatch,artifactId:acceptedCredit.id,
