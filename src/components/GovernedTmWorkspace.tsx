@@ -76,6 +76,7 @@ const TmEngagement = ({
       ReturnType<typeof governedTmValuations.periodMembers>
     > | null>(null),
     [selectedSource, setSelectedSource] = useState(''),
+    [effectivePolicy, setEffectivePolicy] = useState<TmPolicy | null>(null),
     [selectedPolicy, setSelectedPolicy] = useState(''),
     [rates, setRates] = useState<TmRates | null>(null),
     [periodStart, setPeriodStart] = useState(''),
@@ -122,6 +123,7 @@ const TmEngagement = ({
     setPolicies(null);
     setSources([]);
     setSelectedSource('');
+    setEffectivePolicy(null);
     setSelectedPolicy('');
     setRates(null);
     clearSummary();
@@ -201,6 +203,7 @@ const TmEngagement = ({
       setMorePolicies(v.morePolicies);
       setMoreSources(v.moreSources);
       setSelectedSource('');
+      setEffectivePolicy(null);
       setSelectedPolicy('');
       setRates(null);
       setSnapshot(null);
@@ -279,7 +282,20 @@ const TmEngagement = ({
     });
   };
   const chosenSource = sources.find((x) => x.entryId === selectedSource),
-    chosenPolicy = policies?.find((x) => x.id === selectedPolicy);
+    chosenPolicy = effectivePolicy?.id === selectedPolicy ? effectivePolicy : null;
+  const selectWork = (entryId: string) => {
+    setSelectedSource(entryId);
+    setSelectedPolicy('');
+    setEffectivePolicy(null);
+    setRates(null);
+    setSnapshot(null);
+    const entry = sources.find((x) => x.entryId === entryId);
+    if (entry) void run(async (c) => {
+      const applicable = await governedTmValuations.effectivePolicy(engagementId, entry.workDate, c);
+      setEffectivePolicy(applicable);
+      setNotice(applicable ? '' : 'No T&M valuation policy was effective on this work date.');
+    });
+  };
   const policyDetails = chosenPolicy?.definition;
   const inspectRates = () => {
     if (
@@ -791,17 +807,17 @@ const TmEngagement = ({
               </button>
             </fieldset>
           )}
+          {policies.length > 0 && <details>
+            <summary>T&amp;M policy history</summary>
+            <ul>{policies.map(p => <li key={p.id}>{p.effectiveFrom} · version {p.sequence} · {p.definition.currency} · {p.definition.rounding}</li>)}</ul>
+          </details>}
           <label>
             Approved work
             <select
               aria-label="T&M approved work"
               value={selectedSource}
               disabled={busy || !!pending}
-              onChange={(e) => {
-                setSelectedSource(e.target.value);
-                setRates(null);
-                setSnapshot(null);
-              }}
+              onChange={(e) => selectWork(e.target.value)}
             >
               <option value="">Choose approved work</option>
               {sources.map((x) => (
@@ -825,11 +841,9 @@ const TmEngagement = ({
               }}
             >
               <option value="">Choose explicit policy</option>
-              {policies.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.effectiveFrom} · version {p.sequence}
-                </option>
-              ))}
+              {effectivePolicy && <option value={effectivePolicy.id}>
+                {effectivePolicy.effectiveFrom} · version {effectivePolicy.sequence}
+              </option>}
             </select>
           </label>
           {chosenSource && (

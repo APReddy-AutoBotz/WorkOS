@@ -396,6 +396,17 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await body(pw);
         const first = await body(sw);
         assert.equal(first.truncated, true);
+        const lookup = reply(base + '/effective-policy');
+        await tm.getByLabel('T&M approved work', { exact: true }).selectOption(first.sources[0].entryId);
+        assert.equal((await body(lookup)).policy.id, policy.id);
+        const selector = tm.getByLabel('Retained T&M policy', { exact: true });
+        await selector.locator('option[value="'+policy.id+'"]').waitFor({state:'attached'});
+        assert.equal(await selector.inputValue(),'');
+        assert.equal(await selector.locator('option').count(),2);
+        const lookupPath = base+'/effective-policy?engagementId='+encodeURIComponent(roots.engagement.id)+'&workDate=';
+        assert.equal(ok(await request(lookupPath+shift(fx.today,-1))).policy,null);
+        assert.equal(ok(await request(lookupPath+shift(fx.today,20))).policy.id,latest);
+        assert.equal((await request(lookupPath+fx.today,{identity:ids.reader})).status,403);
         const last = await loadHistory();
         assert.deepEqual([first.sources[0].entryId, last.entryId], [entry.entryId, second.entryId].sort());
         const query = '?engagementId=' + encodeURIComponent(roots.engagement.id);
