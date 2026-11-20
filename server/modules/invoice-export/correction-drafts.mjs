@@ -20,7 +20,7 @@ export function registerCorrectionDrafts(router,{handle,authorize,batch,envelope
     if(d.expectedOwnerKey!==workApprovalOwner(r)) throw fail(409,'Account or scope changed.');
     await authorize(c,r,'reversal');
     await assertCommercialAuthority(c,r,'commercial.invoice_drafts.'+(isCancel?'cancel':'own'));
-    const {row:orig}=await batch(c,r,r.params.originalId,true);
+    const {row:orig}=await batch(c,r,r.params.originalId,true,true);
     if(!['Exported','Billed/Confirmed'].includes(orig.state)) throw fail(409,'A retained export is required.');
     const ctx={organizationId:orig.organization_id,legalEntityId:orig.legal_entity_id,actorId:r.user.sub,activeRole:r.user.activeRole,
       operationId:r.operationId,originalId:orig.id};

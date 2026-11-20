@@ -1,3 +1,4 @@
+import {verifyFixedFeeCredit} from './support/fixed-fee-credit-journey.mjs';
 import { INVOICE_EXPORT_EVENT_KEYS } from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
@@ -427,6 +428,10 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.deepEqual([terminal.body.source.state,confirmedReceipt.sourceType,confirmedReceipt.artifactSha256,confirmedReceipt.reference],
       ['Billed/Confirmed','FIXED_FEE_INSTALLMENT',artifact.sha256,attestation.reference]);
     assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
+    await verifyFixedFeeCredit({apiRequest,postAs,pool,identities,createContext,baseUrl,csv,reviewRoot,
+      batchId:nextId,lineId:nextLine.line.id,artifact,confirmedReceipt,engagementId:engagement.result.id,
+      managerKey:managerSource.ownerKey,readerKey:submitterSource.ownerKey,policy:reviewPolicy.policy,
+      definition,today,exportGrants,grant});
     const balance=(await apiRequest(poPath,{identity:identities.manager})).body.commitment;
     assert.deepEqual([balance.committed,balance.consumed,balance.remaining,balance.warning],['0','12000.0000','300.6789',true]);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);

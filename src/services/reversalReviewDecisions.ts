@@ -7,7 +7,7 @@ const record = z.object({
   reason:z.string().min(3).max(1000),confirmationId:uuid.nullable(),createdAt:z.string().datetime(),
 }).strict();
 const schema = z.object({
-  id:uuid,policyId:uuid,requestId:uuid,batchId:uuid,lineId:uuid,itemId:uuid,sourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE']),
+  id:uuid,policyId:uuid,requestId:uuid,batchId:uuid,lineId:uuid,itemId:uuid,sourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT']),
   currency:z.string().regex(/^[A-Z]{3}$/),amount:z.string().regex(/^(0|[1-9]\d*)(\.\d{1,4})?$/),requestReason:z.string().min(3).max(1000),
   artifactId:uuid,sha256:z.string().regex(/^[a-f0-9]{64}$/),confirmationId:uuid.nullable(),externalReference:z.string().nullable(),
   decisions:z.array(record).max(10),status:z.enum(['Pending','Approved','Rejected']),canDecide:z.boolean(),stageCount:z.number().int().min(1).max(10),

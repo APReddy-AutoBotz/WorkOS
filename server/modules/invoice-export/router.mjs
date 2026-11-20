@@ -269,7 +269,7 @@ export const createInvoiceCsvRouter = (o) => {
   router.get('/batches/:id/exported-credits',handle(false,async(c,r)=>{
     const id=parse(uuid,r.params.id),q=parse(z.object({after:uuid.optional()}).strict(),r.query);
     await authorize(c,r);
-    await batch(c,r,id);
+    await batch(c,r,id,false,true);
     const rows=(await c.query(`select original_artifact_id as "originalArtifactId",original_line_id as "originalLineId",
       correction_artifact_id as "artifactId",correction_batch_id as "batchId",correction_line_id as "lineId",correction_sha256 as sha256,
       currency,trim_scale(amount)::text amount,

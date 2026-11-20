@@ -506,12 +506,12 @@ const InvoiceCsvEngagement = ({
                   Retrieve retained invoice CSV
                 </button>
               )}
-              {source.sourceType!=='FULL_LINE_REVERSAL' && source.sourceType!=='FIXED_FEE_INSTALLMENT' && verified && source.artifactId === verified.artifact.id && source.id === verified.artifact.batchId &&
+              {source.sourceType!=='FULL_LINE_REVERSAL' && verified && source.artifactId === verified.artifact.id && source.id === verified.artifact.batchId &&
                 (source.state === 'Exported' || source.state === 'Billed/Confirmed') && hasRatePermission('commercial.invoice_drafts.prepare') && (
                   <InvoiceLineReversal key={source.id + source.state} source={source} state={source.state} artifact={verified.artifact}
                     run={run} disabled={busy || !!pending} />
                 )}
-              {source.sourceType!=='FULL_LINE_REVERSAL' && source.sourceType!=='FIXED_FEE_INSTALLMENT' && source.artifactId && <ExportedCredits key={source.artifactId} original={source} run={run} disabled={busy || !!pending}/>}
+              {source.sourceType!=='FULL_LINE_REVERSAL' && source.artifactId && <ExportedCredits key={source.artifactId} original={source} run={run} disabled={busy || !!pending}/>}
               {canCreate && source.state === 'Approved' && (
                 <fieldset disabled={busy || !!pending}>
                   <legend>Accept approved CSV artifact</legend>

@@ -18,6 +18,7 @@ export function registerIssuedCredits(router, { handle, authorize, envelope }) {
       [organizationId, legalEntityId, engagementId],
     )).rows[0];
     if (!engagement) throw Object.assign(new Error('Engagement unavailable.'), {statusCode:404, code:'CREDIT_REGISTER_SCOPE'});
+    if (engagement.model === 'fixed_fee') await assertCommercialAuthority(client,req,'commercial.fixed_fee_eligibility.issue');
     if (engagement.model === 'milestone') await assertCommercialAuthority(client, req, 'commercial.milestone_billing.view');
     const credits = (await client.query(
       `select item.id as "itemId", credit.id as "eventId", credit.eligible_on::text as "eligibleOn",
