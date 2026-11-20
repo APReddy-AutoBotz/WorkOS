@@ -297,7 +297,7 @@ assert.match(service, /MAX_HISTORY_ROWS = 100/, 'history must be bounded');
 assert.match(service, /idempotencyKey/, 'worker lifecycle retries must be idempotent');
 assert.match(service, /Catalog versions must be added after the latest version/, 'backdated catalog versions must fail before mutation');
 assert.match(service, /Worker transition conflicts with existing history/, 'backdated worker transitions must return a stable conflict');
-assert.match(service, /catalog_type=\$3 and \(legal_entity_id is null or legal_entity_id=\$4\) for update/, 'catalog retirement must match type and legal scope');
+assert.match(service, /catalog_type=\$3 and legal_entity_id=\$4 for update/, 'catalog retirement must match type and legal scope');
 assert.match(service, /e\.legal_entity_id=\$3 and wp\.organization_id=\$2 and wp\.legal_entity_id=\$3/, 'worker mutations must match persisted legal scope');
 assert.match(service, /from worker_history h[\s\S]*h\.legal_entity_id=\$3/, 'worker history rows must be scoped by version ownership');
 assert.doesNotMatch(service, /router\.get\('\/workers\/:id\/history'[\s\S]*join worker_profiles/, 'history authorization must not depend on the worker current legal entity');

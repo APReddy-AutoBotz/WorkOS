@@ -294,7 +294,7 @@ export const registerOrganizationSetupRoutes = ({
         [`${req.organizationScope.organizationId}:${legalEntityId}:${req.params.type}:${parsed.data.code}`]);
       if (parsed.data.parentId) {
         const parent = await client.query(`select 1 from organization_catalog_items where id=$1 and organization_id=$2
-          and catalog_type=$3 and active=true and (legal_entity_id is null or legal_entity_id=$4)`,
+          and catalog_type=$3 and active=true and (legal_entity_id is null or legal_entity_id=$4) for share`,
         [parsed.data.parentId, req.organizationScope.organizationId, req.params.type, req.organizationScope.legalEntityId]);
         if (!parent.rowCount) { await client.query('rollback'); return res.status(409).json({ error:'Parent is unavailable in this scope', code:'INVALID_CATALOG_PARENT' }); }
       }
@@ -335,7 +335,7 @@ export const registerOrganizationSetupRoutes = ({
     try {
       await client.query('begin');
       const item = (await client.query(`select * from organization_catalog_items where id=$1 and organization_id=$2
-        and catalog_type=$3 and (legal_entity_id is null or legal_entity_id=$4) for update`,
+        and catalog_type=$3 and legal_entity_id=$4 for update`,
       [req.params.id, req.organizationScope.organizationId, req.params.type, req.organizationScope.legalEntityId])).rows[0];
       if (!item) { await client.query('rollback'); return res.status(404).json({ error:'Catalog item not found' }); }
       const dependencies = await client.query(`select 'child' dependency,id from organization_catalog_items
