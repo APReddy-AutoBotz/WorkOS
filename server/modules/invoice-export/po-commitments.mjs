@@ -20,7 +20,14 @@ export function registerPoCommitments(router,{handle,parse,batch,authorize,envel
     for(const key of ['commercial.contracts.manage','commercial.purchase_orders.release','commercial.invoice_drafts.prepare'])
       await assertCommercialAuthority(c,r,key);
     const {row,source}=await batch(c,r,id,lock);
-    if(row.source_type!=='TM_SNAPSHOT' || !source.lines.some(l=>l.lineId===lineId))
+    if(row.source_type==='MILESTONE_ACCEPTANCE') {
+      await assertCommercialAuthority(c,r,'commercial.milestone_billing.view');
+      const hidden=await c.query(`select 1 from invoice_draft_lines l where batch_id=$1 and
+        invoice_source_historical_visible($2,$3,l,$4,$5) is not true limit 1`,
+        [id,row.organization_id,row.legal_entity_id,r.user.sub,r.user.activeRole]);
+      if(hidden.rowCount)throw fail(404,'PO_LINE_UNAVAILABLE','This invoice line is unavailable.');
+    }
+    if(!['TM_SNAPSHOT','MILESTONE_ACCEPTANCE'].includes(row.source_type) || !source.lines.some(l=>l.lineId===lineId))
       throw fail(404,'PO_LINE_UNAVAILABLE','This invoice line is unavailable.');
     return {id,lineId,row};
   };

@@ -25,14 +25,16 @@ const ok = (r, status = 200) => {
   return r.body;
 };
 const events = ['approval.action_required', 'approval.rejected_or_correction_required', 'approval.completed'];
-await withCommercialDatabase(async ({ pool, databaseUrl }) => {
-  await withCommercialMigrationsThrough(67,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
+for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(async ({ pool, databaseUrl }) => {
+  if (verifyPurchaseOrder) await migrateCommercialDatabase(pool);
+  else await withCommercialMigrationsThrough(67,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const fx = await seedWorkApproval(pool),
     ids = fx.identities;
   await grantAmendmentPermissions(pool);
   const permissions = [
     'commercial.contracts.view',
     'commercial.contracts.manage',
+    ...(verifyPurchaseOrder ? ['commercial.purchase_orders.release'] : []),
     'commercial.milestone_billing.view',
     'commercial.milestone_billing.manage',
     'commercial.milestone_billing.decide',
@@ -73,6 +75,32 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           engagement: { startsOn: fx.today, endsOn: end, currency: 'USD' },
           project: { startsOn: fx.today, endsOn: end },
         });
+      const poNumber = 'SYN-MILESTONE-PO';
+      if (verifyPurchaseOrder) {
+        const po = ok(await request('/purchase-orders', {
+          method: 'POST',
+          identity: ids.requester,
+          body: {
+            number: poNumber,
+            contractId: roots.contract.id,
+            contractVersionId: roots.pin,
+            currency: 'USD',
+            value: '150',
+            warningThresholdPercent: '80',
+            startsOn: fx.today,
+            endsOn: fx.today,
+            reason: 'Synthetic acceptance-date purchase order',
+          },
+        }), 201);
+        ok(await request('/purchase-orders/' + po.id + '/release', {
+          method: 'POST',
+          body: {
+            contractVersionId: roots.pin,
+            approvalReference: 'SYN-RELEASE',
+            reason: 'Verify the accepted milestone limit',
+          },
+        }), 201);
+      }
       const milestone = ok(
         await request('/milestones', {
           method: 'POST',
@@ -80,7 +108,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             engagementId: roots.engagement.id,
             code: 'SYN-MILESTONE-1',
             name: 'Synthetic delivery',
-            dueOn: fx.today,
+            dueOn: shiftCapacityDate(fx.today,1),
             amount: '125.1500',
             currency: 'USD',
             reason: 'Synthetic milestone',
@@ -670,6 +698,21 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           csvSource = inspection.batch;
         assert.equal(csvSource.sourceType, 'MILESTONE_ACCEPTANCE');
         assert.equal(csvSource.sourceCurrent, true);
+        const poLine = csvSource.lines[0];
+        const orderPath = csv + '/batches/' + draft.batch.id + '/lines/' + poLine.lineId + '/purchase-order';
+        if (verifyPurchaseOrder) {
+          await page.goto(origin+'/tests/fixtures/invoice-csv.html?'+query);
+          const orderUi=page.getByRole('region',{name:'Invoice CSV export'});
+          await orderUi.getByLabel('Invoice export engagement').selectOption(roots.engagement.id);
+          await orderUi.getByRole('button',{name:'Load invoice export batches'}).click();
+          await orderUi.getByLabel('Invoice export batch').selectOption(draft.batch.id);
+          await orderUi.getByRole('button',{name:'Inspect invoice export source'}).click();
+          await orderUi.getByRole('button',{name:'Inspect order allocation'}).click();
+          await orderUi.getByLabel('Released order number').fill(poNumber);
+          await orderUi.getByLabel('Allocation reason').fill('Reserve independently accepted charge');
+          await orderUi.getByRole('button',{name:'Commit invoice line'}).click();
+          await orderUi.getByText(/Order committed 125.1500.*Gross consumed 0.*Available 24.8500.*Warning threshold reached/).waitFor();
+        }
         const exportCommand = {
           expectedOwnerKey: inspection.ownerKey,
           requestId: randomUUID(),
@@ -686,7 +729,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           request(csv + '/exports', { method: 'POST', body: exportCommand }),
           request(csv + '/exports', { method: 'POST', body: exportCommand }),
         ]);
-        assert.deepEqual(exports.map((x) => x.status).sort(), [200, 201]);
+        assert.deepEqual(exports.map((x) => x.status).sort(), [200, 201], JSON.stringify(exports.map(x=>x.body.error)));
         const artifact = ok(
           exports.find((x) => x.status === 201),
           201,
@@ -746,6 +789,22 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           request(csv + '/confirmations', { method: 'POST', body: confirm }),
         ]);
         assert.deepEqual(confirmations.map((x) => x.status).sort(), [200, 201]);
+        if (verifyPurchaseOrder) {
+          const poBalance=ok(await request(orderPath)).commitment;
+          assert.deepEqual([poBalance.committed,poBalance.consumed,poBalance.remaining],['0','125.1500','24.8500']);
+          await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.milestone_billing.view'");
+          assert.equal((await request(orderPath)).status, 403);
+          assert.equal((await request(orderPath, {
+            method: 'POST',
+            body: {
+              expectedOwnerKey: inspection.ownerKey,
+              number: poNumber,
+              reason: 'Reserve independently accepted charge',
+            },
+          })).status, 403);
+          await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.milestone_billing.view'");
+          return;
+        }
         assert.equal(
           ok(
             confirmations.find((x) => x.status === 201),
@@ -926,7 +985,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const acceptedCredit=attempts[0].body.artifact;
         assert.equal(acceptedCredit.total,issued.amount);
         assert.equal(acceptedCredit.schemaVersion,'workos.invoice-credit-csv/1');
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release', '077_wos06_po_line_commitments']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release', '077_wos06_po_line_commitments', '078_wos06_milestone_po_commitments']);
         const creditSource=ok(await request(csv+'/confirmation-sources/'+finalBatch)).source;
         assert.equal(creditSource.sourceType,'FULL_LINE_REVERSAL');
         const creditAttestation={...confirm,requestId:randomUUID(),batchId:finalBatch,artifactId:acceptedCredit.id,
