@@ -320,17 +320,9 @@ export const createInvoiceBatchApprovalRouter = (o) => {
             [i.id],
           )
         ).rows[0] ?? null,
-      model = (
-        await c.query(
-          'select e.model from invoice_batch_approval_instances i join invoice_draft_batches b on b.id=i.batch_id join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where i.id=$1',
-          [i.id],
-        )
-      ).rows[0]?.model,
       current = (
         await c.query(
-          model === 'milestone'
-            ? "select invoice_batch_governed_state(i.batch_id)='Under Review' and not exists(select 1 from invoice_batch_approval_invalidations z where z.instance_id=i.id) and i.sequence=(select max(x.sequence) from invoice_batch_approval_instances x where x.batch_id=i.batch_id) and milestone_invoice_approval_pin_current(i) current from invoice_batch_approval_instances i where id=$1"
-            : 'select invoice_batch_approval_review_current(i) current from invoice_batch_approval_instances i where id=$1',
+          'select invoice_batch_approval_review_current(i) current from invoice_batch_approval_instances i where id=$1',
           [i.id],
         )
       ).rows[0].current;
