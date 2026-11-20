@@ -1,4 +1,4 @@
-import {purchaseOrderRelease,releaseSchema} from './purchase-order-release.mjs';
+import {purchaseOrderRelease,purchaseOrderBalance,releaseSchema} from './purchase-order-release.mjs';
 import {amendmentPreviewSchema,amendmentCommandSchema} from './amendment-contracts.mjs';
 import {getAmendmentWorkspace,previewAmendment,appendAmendment} from './amendment-service.mjs';
 import {lockCommercialLifecycle} from './project-mutation.mjs';
@@ -49,6 +49,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/contracts',handle(createContractSchema,true,(client,req,data)=>createContract(client,req,data,audit)));
   router.post('/contracts/:id/versions',handle(appendContractSchema,true,(client,req,data)=>appendContractVersion(client,req,req.params.id,data,audit)));
   router.post('/engagements',handle(createEngagementSchema,true,(client,req,data)=>createEngagement(client,req,data,audit)));
+  router.get('/purchase-orders/:id/balance',handle(lifecycleQuerySchema,false,(client,req)=>purchaseOrderBalance(client,req)));
   router.get('/purchase-orders/:id/release',handle(lifecycleQuerySchema,false,(client,req)=>purchaseOrderRelease(client,req,null)));
   router.post('/purchase-orders/:id/release',handle(releaseSchema,true,(client,req,data)=>purchaseOrderRelease(client,req,data,audit),'commercial.purchase_orders.release'));
   router.post('/purchase-orders',handle(createPurchaseOrderSchema,true,(client,req,data)=>createPurchaseOrder(client,req,data,audit)));

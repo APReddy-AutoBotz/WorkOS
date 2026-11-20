@@ -1,3 +1,4 @@
+import {registerPoCommitments} from './po-commitments.mjs';
 import {readInvoiceLinePricing} from './line-pricing.mjs';
 import { CREDIT_CSV_SCHEMA } from '../../../shared/correction-invoice-csv.mjs';
 import { correctionArtifact,correctionExportBatch } from './correction-batch.mjs';
@@ -246,6 +247,7 @@ export const createInvoiceCsvRouter = (o) => {
       and ($6::uuid is null or b.id>$6) order by b.id limit 51`,[...scope(r),q.engagementId,r.user.sub,r.user.activeRole,q.after??null,q.purpose==='confirmation'])).rows;
     return {...await envelope(c,r),engagementId:q.engagementId,batches:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};
   }));
+  registerPoCommitments(router,{handle,parse,batch,authorize,envelope,audit,fail});
   router.get('/batches/:id/lines/:lineId/pricing',handle(false,async(c,r)=>{
     parse(z.object({}).strict(),r.query);
     const id=parse(uuid,r.params.id),lineId=parse(uuid,r.params.lineId);

@@ -391,7 +391,7 @@ export const CommercialDraftingWorkspace = () => {
           <section className={panelClass} aria-label="Purchase order drafts"><h2 className="mb-4 text-lg font-bold">Purchase orders ({workspace.purchaseOrders.length})</h2>
             {!workspace.purchaseOrders.length && <p>No purchase orders returned for this scope.</p>}
             <ul className="space-y-3">{workspace.purchaseOrders.map(order => <li key={state.generation+'-'+order.id} className="break-words rounded-xl border border-slate-200 p-3"><h3 className="font-bold">{order.number}</h3>
-              <p className="mt-1 text-sm">{order.currency} {order.value}. {order.startsOn} to {order.endsOn}. Warning threshold {order.warningThresholdPercent}%.</p><p className="mt-1 text-xs">Pinned terms ID: {order.contractVersionId}. No consumption or remaining-value claim.</p>
+              <p className="mt-1 text-sm">{order.currency} {order.value}. {order.startsOn} to {order.endsOn}. Warning threshold {order.warningThresholdPercent}%.</p><p className="mt-1 text-xs">Pinned terms ID: {order.contractVersionId}. Inspect release for the current order status.</p>
               {state.context && <PurchaseOrderReleasePanel order={order} context={state.context}/>}</li>)}</ul>
           </section>
           <section className={panelClass} aria-label="Draft milestones"><h2 className="mb-4 text-lg font-bold">Draft milestones ({workspace.milestones.length})</h2>

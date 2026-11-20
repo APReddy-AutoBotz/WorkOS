@@ -149,6 +149,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const released=await releasing;
     assert.equal(released.status(),201,await released.text());
     await reviewer.page.getByText(/Released .*SYN-PO-AUTH-001/).waitFor();
+    await reviewer.page.getByText(/Committed 0 .*Gross consumed 0 .*Available 7500.4500/).waitFor();
     const receipt=await apiRequest(releasePath);
     assert.equal(receipt.body.release.actorId,identities.reader.id);
     assert.deepEqual((await postRelease(identities.reader)).body,receipt.body);

@@ -45,3 +45,17 @@ export async function purchaseOrderRelease(client, req, command, audit) {
     reason:'Commercial approval reference retained in protected release history.',source:'Web',details:'Independent purchase order release recorded.'});
   return purchaseOrderRelease(client,req,null);
 }
+
+export async function purchaseOrderBalance(client, req) {
+  await assertCommercialAuthority(client,req,'commercial.contracts.manage');
+  await assertCommercialAuthority(client,req,'commercial.purchase_orders.release');
+  const {rows:[balance]}=await client.query(
+    `select p.id as "orderId",p.contract_version_id as "contractVersionId",p.currency,
+      b.committed::text committed,b.consumed::text consumed,b.remaining::text remaining,b.warning
+     from commercial_purchase_orders p join commercial_purchase_order_releases r on r.purchase_order_id=p.id
+     cross join lateral commercial_po_balance(p.id) b
+     where p.id=$1 and p.organization_id=$2 and p.legal_entity_id=$3`,
+    [req.params.id,req.organizationScope.organizationId,req.organizationScope.legalEntityId]);
+  if (!balance) fail(404,'PO_UNAVAILABLE','This released purchase order is unavailable.');
+  return balance;
+}

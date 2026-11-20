@@ -519,7 +519,22 @@ const linePricing = z.object({
   rounding:z.enum(['HALF_UP','HALF_EVEN','DOWN']),precision:z.number().int().min(0).max(4),amount:money,
 }).strict();
 export type InvoiceLinePricing=z.infer<typeof linePricing>;
+const poCommitment=z.object({number:id,currency:z.string().regex(/^[A-Z]{3}$/),orderValue:money,amount:money,
+  committed:money,consumed:money,remaining:money,warning:z.boolean(),warningPercent:money,actorId:uuid,activeRole:id,reason:z.string().min(3)}).strict();
+export type PoCommitment=z.infer<typeof poCommitment>;
+export const canAssignPurchaseOrder=()=>['commercial.contracts.manage','commercial.purchase_orders.release','commercial.invoice_drafts.prepare'].every(hasRatePermission);
 export const invoiceCsv = {
+  purchaseOrder:async(batchId:string,lineId:string,c:RateContext,command?:{number:string;reason:string})=>{
+    if(!canAssignPurchaseOrder())return bad();
+    const raw=await call(command?'POST':'GET','/batches/'+batchId+'/lines/'+lineId+'/purchase-order',c,'view',command);
+    const parsed=z.object({...envelope,batchId:uuid,lineId:uuid,commitment:poCommitment.nullable(),
+      ...(command?{replayed:z.boolean()}:{})}).strict().safeParse(raw);
+    if(!parsed.success || parsed.data.batchId!==batchId || parsed.data.lineId!==lineId ||
+       (command && (parsed.data.commitment?.number!==command.number || parsed.data.commitment?.reason!==command.reason ||
+        parsed.data.commitment?.actorId!==parsed.data.actorUserId || parsed.data.commitment?.activeRole!==parsed.data.activeRole)))return bad();
+    return parsed.data.commitment;
+  },
+
   linePricing:async(batchId:string,line:z.infer<typeof tmLine>,c:RateContext)=>{
     if(!hasRatePermission('commercial.rate_candidates.view'))return bad();
     const raw=await call('GET','/batches/'+batchId+'/lines/'+line.lineId+'/pricing',c,'view');
