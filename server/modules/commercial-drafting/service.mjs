@@ -7,7 +7,7 @@ const scopeValues = req => [req.organizationScope.organizationId,req.organizatio
 const scopeWhere = 'organization_id=$1 and legal_entity_id=$2';
 const termsProjection = `id,contract_id,version,effective_from::text,name,model,starts_on::text,ends_on::text,currency,value::text,billing_terms,documents`;
 export const termsDto = row => row ? ({id:row.id,version:row.version,effectiveFrom:row.effective_from,name:row.name,model:row.model,
-  startsOn:row.starts_on,endsOn:row.ends_on,currency:row.currency,value:row.value,billingTerms:row.billing_terms,documents:row.documents}) : null;
+  startsOn:row.starts_on,endsOn:row.ends_on,currency:row.currency,value:row.value,billingTerms:row.billing_terms,documents:row.documents,...(row.installments?.length ? {installments:row.installments} : {})}) : null;
 const engagementDto = row => ({id:row.id,code:row.code,name:row.name,model:row.model,clientId:row.client_id,contractId:row.contract_id,
   contractVersionId:row.contract_version_id,ownerId:row.owner_id,attributionId:row.attribution_id,startsOn:row.starts_on,endsOn:row.ends_on,
   currency:row.currency,budget:row.budget,billable:row.billable,status:row.status,origin:row.origin});
@@ -36,7 +36,7 @@ const utcToday = async client => (await client.query("select (now() at time zone
 export const getContract = async (client,req,id,{lock=false}={}) => {
   const root=(await client.query(`select id,number,client_id,latest_version,status from commercial_contracts where ${scopeWhere} and id=$3${lock?' for update':''}`,[...scopeValues(req),id])).rows[0];
   if(!root)fail(404,'COMMERCIAL_NOT_FOUND','The scoped commercial record was not found.');
-  const versions=(await client.query(`select ${termsProjection} from commercial_contract_versions where ${scopeWhere} and contract_id=$3 order by version desc limit 200`,[...scopeValues(req),id])).rows.map(termsDto);
+  const versions=(await client.query(`select *,effective_from::text,starts_on::text,ends_on::text,value::text from commercial_contract_versions where ${scopeWhere} and contract_id=$3 order by version desc limit 200`,[...scopeValues(req),id])).rows.map(termsDto);
   return {id:root.id,number:root.number,clientId:root.client_id,latestVersion:root.latest_version,status:root.status,versions};
 };
 const auditCommand = async (audit,client,req,type,id,before,after,reason) => {
@@ -54,10 +54,11 @@ const auditCommand = async (audit,client,req,type,id,before,after,reason) => {
     source:'Web',details:'Draft only; no acceptance or billing eligibility. Material evidence requires commercial access.'});
 };
 const insertTerms = async (client,req,id,version,data) => {
+  const withSchedule = Boolean(data.installments?.length);
   const result=await client.query(`insert into commercial_contract_versions
-    (organization_id,legal_entity_id,contract_id,version,effective_from,name,model,starts_on,ends_on,currency,value,billing_terms,documents,reason,created_by)
-    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15) returning ${termsProjection}`,
-  [...scopeValues(req),id,version,data.effectiveFrom,data.name,data.model,data.startsOn,data.endsOn,data.currency,data.value,data.billingTerms,JSON.stringify(data.documents),data.reason,req.user.sub]);
+    (organization_id,legal_entity_id,contract_id,version,effective_from,name,model,starts_on,ends_on,currency,value,billing_terms,documents,reason,created_by${withSchedule?',installments':''})
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15${withSchedule?',$16::jsonb':''}) returning ${termsProjection}`,
+  [...scopeValues(req),id,version,data.effectiveFrom,data.name,data.model,data.startsOn,data.endsOn,data.currency,data.value,data.billingTerms,JSON.stringify(data.documents),data.reason,req.user.sub,...(withSchedule?[JSON.stringify(data.installments)]:[])]);
   return termsDto(result.rows[0]);
 };
 const scopedClient = async (client,req,id) => {
@@ -81,7 +82,8 @@ export const appendContractVersion = async (client,req,id,data,audit) => {
     fail(409,'COMMERCIAL_EFFECTIVE_DATE_CONFLICT','A revision must start after both the latest version and the current UTC date.');
   if(data.model!==latest.model || data.currency!==latest.currency)
     fail(409,'COMMERCIAL_IDENTITY_CONFLICT','Changing a contract model or currency requires a separate contract, not a draft revision.');
-  await insertTerms(client,req,id,before.latestVersion+1,data);
+  const installments = data.installments ?? before.versions[0].installments;
+  await insertTerms(client,req,id,before.latestVersion+1,{...data,installments});
   await client.query(`update commercial_contracts set latest_version=latest_version+1 where ${scopeWhere} and id=$3`,[...scopeValues(req),id]);
   const result=await getContract(client,req,id);
   await auditCommand(audit,client,req,'Contract',id,before,result,data.reason);

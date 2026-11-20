@@ -23,6 +23,12 @@ WorkOS deterministically resolves commercial terms, values approved evidence acr
 - Retainer: period capacity/value consumption, rollover/expiry and overage.
 - Managed service: configured service units/tickets/shifts with optional time/cost evidence.
 
+### Fixed-fee contract schedules
+
+In Commercial Drafting, add installments to a fixed-fee contract or its next version. Enter due dates within the contract term in chronological order. Amounts use contract currency and support four decimal places. A populated schedule must reconcile to the full contract value. An empty schedule represents terms still to be scheduled. Inspect the contract version history to recover earlier due dates and amounts. Contract read and manage permissions govern inspection and revision. Each saved version retains its own schedule in the protected commercial audit history.
+
+Migration 079 adds the installment list to immutable contract versions. Existing versions have an empty schedule. A revision that omits the schedule inherits the earlier version’s installments and must still reconcile to the revised contract value. An explicit empty list clears the schedule on the new version. During an application rollback, retain the column and constraint and suspend contract revisions until the restored API can preserve installment history. Contractual-due billing events, invoice allocation and earned-management policy adoption are separate delivery gates under WOS-COM-007, WOS-COM-011 and WOS-INV-001.
+
 ## Operational earned-management revenue
 
 Operational earned-management revenue is a project-control metric, not statutory accounting recognition. T&M may use the approved-eligible-value profile. For fixed-fee, milestone, retainer and managed-service models the calculation is disabled until an authorized effective-dated profile is selected. Supported profiles include fixed-fee time-elapsed, fixed-fee progress/effort, milestone acceptance, retainer service-period/base/overage and managed-service accepted-unit/period-charge.
