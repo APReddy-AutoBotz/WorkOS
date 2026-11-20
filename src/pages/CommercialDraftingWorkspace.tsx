@@ -1,3 +1,4 @@
+import {FixedFeeInstallmentRegister} from '../components/FixedFeeInstallmentRegister';
 import {PurchaseOrderReleasePanel} from '../components/PurchaseOrderReleasePanel';
 import {hasRatePermission} from '../services/rateCandidates';
 import {MilestoneBillingWorkspace} from '../components/MilestoneBillingWorkspace';
@@ -395,6 +396,9 @@ export const CommercialDraftingWorkspace = () => {
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
               {version.installments?.length ? <div><h4>Fixed-fee billing schedule</h4>
                 <ol>{version.installments.map((item,i) => <li key={i}>{item.dueOn} · {version.currency} {item.amount}</li>)}</ol></div> : null}
+              {version.installments?.length && state.context?.canIssueInstallment ? <FixedFeeInstallmentRegister
+                key={state.generation+'-'+version.id} context={state.context} version={version}
+                engagements={workspace.engagements.filter(e=>e.contractId===detail.id && e.model==='fixed_fee')} /> : null}
               <p className="mt-2 whitespace-pre-wrap break-words text-sm">Billing terms: {version.billingTerms || 'No billing terms saved.'}</p>
               {!!version.documents.length && <ul className="mt-2 space-y-1">{version.documents.map((document, index) => <li key={index}><a className="break-all text-sm underline" href={document.url} target="_blank" rel="noopener noreferrer">{document.name}</a></li>)}</ul>}
             </li>)}</ol>

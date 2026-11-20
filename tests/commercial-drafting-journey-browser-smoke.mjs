@@ -66,7 +66,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await fill(target, {'Contract / SOW number': 'SYN-JOURNEY-CONTRACT', 'Contract name': `Synthetic browser terms ${hostile}`, 'Starts on': '2020-01-01', 'Ends on': '2099-12-31', 'Terms effective from': '2020-01-01', 'Currency (ISO code)': 'GBP', 'Contract value (decimal)': '12345.6789', 'Billing terms': `Synthetic browser billing terms ${hostile}`, 'Reason for creation / revision': 'Synthetic browser contract creation'});
     await target.getByLabel('Client', {exact: true}).selectOption(clientId);await target.getByLabel('Commercial model', {exact: true}).selectOption('fixed_fee');
     await button('Add installment').click();
-    await fill(target, {'Installment 1 due date':'2099-01-01', 'Installment 1 amount':'12000'});
+    await fill(target, {'Installment 1 due date':new Date().toISOString().slice(0,10), 'Installment 1 amount':'12000'});
     await button('Add installment').click();
     await fill(target, {'Installment 2 due date':'2099-02-01', 'Installment 2 amount':'345.6789'});
     await button('Add document link').click();await fill(target, {'Document 1 name': `Synthetic safe SOW ${hostile}`, 'Document 1 URL': 'https://example.test/synthetic-browser-sow.pdf'});
@@ -162,6 +162,55 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.deepEqual((await postRelease(identities.reader)).body,receipt.body);
     assert.equal((await postRelease(identities.reader,{...releaseCommand,reason:'Changed instructions'})).status,409);
     assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_id=$1 and action='Release'",[po.result.id])).rows[0].n,1);
+    const grant='commercial.fixed_fee_eligibility.issue';
+    const path='/fixed-fee-schedules/'+versionId+'/register';
+    const command={installment:1,engagementId:engagement.result.id,reason:'Reviewed contractually due installment'};
+    const issue=(identity,body=command)=>apiRequest(path,{identity,method:'POST',body});
+    assert.equal((await issue(identities.reader)).status,403);
+    for(const role of ['Employee','Admin']) await pool.query(
+      'insert into role_permissions(role_name,permission_key,enabled) values($1,$2,true) on conflict(role_name,permission_key) do update set enabled=true',[role,grant]);
+    assert.equal((await issue(identities.reader)).status,409);
+    const activation=await apiRequest('/lifecycle/Engagement/'+engagement.result.id+'/transitions',{method:'POST',
+      body:{expectedSequence:0,state:'Active',contractVersionId:versionId,reason:'Synthetic engagement activation',approvalReference:null}});
+    assert.equal(activation.status,201,JSON.stringify(activation.body));
+    assert.equal((await issue(identities.reader,{...command,installment:2})).status,409);
+    const today=new Date().toISOString().slice(0,10);
+    const unavailablePeriod=await issue(identities.reader);
+    assert.equal(unavailablePeriod.body.error.code,'INSTALLMENT_PERIOD_CLOSED');
+    await pool.query(`insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
+      values('syn-fixed-period',$1,$2,'SYN-FIXED','Synthetic approval period',$3,$3,'Open','Weekly')`,[scope.organizationId,scope.legalEntityId,today]);
+    assert.equal((await issue(identities.manager)).status,403);
+    assert.equal((await issue(identities.reader,{...command,amount:'0.01'})).status,400);
+    const billing=await createContext(identities.reader,['commercial.contracts.view','commercial.contracts.manage',grant]);
+    await billing.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    await billing.page.getByRole('button',{name:'Inspect SYN-JOURNEY-CONTRACT',exact:true}).click();
+    const schedule=billing.page.getByRole('listitem').filter({has:billing.page.getByRole('heading',{name:/^Version 1 ·/})})
+      .getByRole('group',{name:'Fixed-fee billing eligibility'});
+    await schedule.getByRole('button',{name:'Inspect installment register'}).click();
+    await schedule.getByLabel('Scheduled installment').selectOption('1');
+    await schedule.getByLabel('Billing engagement').selectOption(command.engagementId);
+    await schedule.getByLabel('Installment approval reason').fill(command.reason);
+    const saving=billing.page.waitForResponse(r=>r.url().endsWith(path) && r.request().method()==='POST');
+    await schedule.getByRole('button',{name:'Approve due installment'}).click();
+    const saved=await saving;assert.equal(saved.status(),201,await saved.text());
+    await schedule.getByText(/Installment 1 · GBP 12000.0000 · Approved/).waitFor();
+    const registered=(await saved.json()).receipts[0];
+    assert.equal((await issue(identities.reader)).body.receipts[0].itemId,registered.itemId);
+    assert.equal((await issue(identities.reader,{...command,reason:'Changed reason'})).status,409);
+    assert.equal((await apiRequest(path,{identity:identities.reader,headers:{'x-legal-entity-id':'other-synthetic-entity'}})).status,403);
+    const totals=(await pool.query(`select (select count(*) from approved_unbilled_items where event_id=$1::uuid)::int items,
+      (select count(*) from audit_logs where entity_id=$1::text and action='Approve Installment')::int audits,
+      (select count(*) from invoice_draft_lines where event_id=$1::uuid)::int invoice_lines`,[registered.eventId])).rows[0];
+    assert.deepEqual(totals,{items:1,audits:1,invoice_lines:0});
+    const reconciles=async schedule=>(await pool.query(
+      'select fixed_fee_schedule_preserves_issued($1,$2,$3,$4::jsonb) compatible',
+      [scope.organizationId,scope.legalEntityId,contractId,JSON.stringify(schedule)])).rows[0].compatible;
+    const first={dueOn:today,amount:'12000.0000'};
+    assert.equal(await reconciles([first,{dueOn:future,amount:'2000'}]),true);
+    assert.equal(await reconciles([{...first,amount:'11999.9999'}]),false);
+    assert.equal(await reconciles([{...first,dueOn:future},first]),false);
+    assert.equal(await reconciles([]),false);
+    await billing.context.close();
     await reviewer.context.close();
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
     console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
