@@ -289,7 +289,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await tm.getByLabel('T&M currency precision', { exact: true }).selectOption('2');
         await tm.getByLabel('T&M rounding mode', { exact: true }).selectOption('HALF_UP');
         await tm.getByLabel('T&M aggregation', { exact: true }).selectOption('PER_ENTRY');
-        await tm.getByLabel('T&M cap treatment', { exact: true }).selectOption('NONE');
+        await tm.getByLabel('T&M cap treatment', { exact: true }).selectOption('PER_ENTRY_VALUE');
+        await tm.getByLabel('Maximum billable value per entry').fill('99999');
         await tm.getByLabel('T&M exclusions', { exact: true }).selectOption('NONE');
         await tm.getByLabel('T&M policy approval treatment', { exact: true }).selectOption('NONE');
         await tm.getByLabel('T&M work unit', { exact: true }).selectOption('HOUR');

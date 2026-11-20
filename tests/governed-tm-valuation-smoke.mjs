@@ -24,6 +24,17 @@ const p = {
   },
   run = (hours, billingRate, costRate, policy = p) =>
     calculateTmEntry({ hours, billingRate, costRate, currency: 'USD', unit: 'HOUR', policy });
+const capped={...p,version:'governed-tm/2',capTreatment:'PER_ENTRY_VALUE',capAmount:'80.00'};
+const cappedResult=run('1.25','100.1234','80.0020',capped);
+assert.equal(cappedResult.unroundedBillableExact,'125.15425');
+assert.equal(cappedResult.billableAfterCapExact,'80');
+assert.equal(cappedResult.billableValue,'80.00');
+assert.equal(cappedResult.costValue,'100.00');
+assert.equal(cappedResult.marginValue,'-20.00');
+assert.equal(run('1','79.995','0',capped).billableAfterCapExact,'79.995');
+assert.equal(run('1','79.995','0',capped).billableValue,'80.00');
+for(const capAmount of ['0','-1','80.001','1e2','080.00',null])assert.equal(validTmValuationPolicy({...capped,capAmount}),false);
+assert.equal(validTmValuationPolicy({...capped,version:'governed-tm/1'}),false);
 assert(validTmValuationPolicy(p));
 assert.deepEqual(run('1.25', '100.1234', '40.0020'), {
   version: 'governed-tm/1',

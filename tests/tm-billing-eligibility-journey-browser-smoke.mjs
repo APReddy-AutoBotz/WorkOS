@@ -218,12 +218,13 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         cost = await makeRate('cost', '40.0020'),
         policies = ok(await request(base + '/policies?engagementId=' + roots.engagement.id)),
         definition = {
-          version: 'governed-tm/1',
+          version: 'governed-tm/2',
           currency: 'USD',
           precision: 2,
           rounding: 'HALF_UP',
           aggregation: 'PER_ENTRY',
-          capTreatment: 'NONE',
+          capTreatment: 'PER_ENTRY_VALUE',
+          capAmount: '80.00',
           exclusions: 'NONE',
           unit: 'HOUR',
           approvalTreatment: 'NONE',
@@ -343,6 +344,10 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         }),
         201,
       ).valuation;
+      assert.equal(calc.result.capAmount,'80.00');
+      assert.equal(calc.result.billableValue,'80.00');
+      assert.equal(calc.result.costValue,'50.00');
+      assert.equal(calc.result.marginValue,'30.00');
       const b = '/api/v1/tm-billing-eligibility';
       const fixture = await startFixtureServer({
         root: fileURLToPath(new URL('../', import.meta.url)),
@@ -580,7 +585,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal(rr.items.length, 1);
         await last.actor.ui
           .getByRole('region', { name: 'Approved-unbilled register', exact: true })
-          .getByText(/USD 125.1500/)
+          .getByText(/USD 80.0000/)
           .waitFor();
         await last.actor.p.evaluate(() =>
           window.dispatchEvent(new Event('workos:organization-scope-switch-requested')),
