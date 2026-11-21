@@ -70,6 +70,10 @@ Each of the four direct-manager phases runs six rounds of 75 simultaneous reques
 
 The staged workload then adopts a two-stage policy through the API for 90 additional workers. It measures submission, first-stage approval and final approval separately. Each wave issues 15 commands alongside 55 personal-history reads and five utilization reports. Decision traffic is concentrated on the named reviewer for each stage. Reviewer source reads happen before the timed decision. The first stage must leave every sheet submitted with no final decision. The final stage must retain the approved state, both independent reviewers’ decisions and all three in-app handoffs. The same latency thresholds apply.
 
+## Retrieving older rate candidates
+
+Open the contract, engagement or worker and select **Load candidates**. Use **Older candidates** to continue from the last version on the page. **Newer candidates** returns toward the latest records. Reloading the first page includes newly recorded candidates. Each page requires the current billing or confidential cost permission for the selected source.
+
 ## Reviewing corrected work
 
 For direct timesheet status integrations, retain the `write_token` from the reviewed timesheet and send it as `expected_write_token` with the approval or rejection. A 409 with `WORK_REVIEW_VERSION_CHANGED` requires reading the revised entries and making a fresh decision. Never fetch a new token solely to retry an old decision. The web desk supplies the token for every connected decision. The legacy API continues to accept calls that omit it.
