@@ -78,6 +78,15 @@ Each of three phases runs six rounds of 75 simultaneous requests. Throughout, 55
 
 Buyer policy defines frequency, retention, encryption and RPO/RTO. Restore rehearsal verifies application version, schema, organization/configuration, users/roles, critical counts, audit continuity, commercial control totals and representative role journeys.
 
+## API traffic monitoring
+
+Collect JSON stdout from each production API replica and select records with `operation=http.traffic`. Each process emits a window about every 60 seconds, including idle windows. Identify replicas using the log collector’s deployment labels. Records contain aggregate counts only. Use existing failure events and their correlation IDs for individual incident investigation.
+
+- **Error rate.** Sum all replicas’ `responses["5xx"]` over the alert period and divide by the sum of all completed response counts. Track 4xx and `interrupted` (connection closed before response completion) separately. A zero denominator means no completed traffic. Probe traffic contributes to the totals.
+- **Latency.** Sum `latencyCounts` by index across windows and replicas. The first seven bins have inclusive upper bounds of 100, 250, 500, 1,000, 2,000, 3,000 and 5,000 ms. The last bin counts slower requests. Use the first bin whose cumulative count reaches 95% to bound p95. Durations run from API middleware admission until the server finishes writing the response. Interrupted requests have no latency sample.
+- **Traffic and saturation.** Divide completed responses by the measured window duration in seconds per replica, then sum those rates. `inFlight` is a gauge at the window boundary. A long request contributes to the window in which it finishes. An abruptly stopped replica can lose its last partial window.
+- **Ownership.** Before cutover the buyer operations lead assigns an on-call responder, alert destination, thresholds and escalation interval. Page the responder for sustained 5xx or latency increases and missing summaries from a serving replica. Check readiness, database and identity-provider health, then examine correlated failure logs. Exercise alert delivery and recovery on the buyer installation.
+
 ## Incident and support evidence
 
 Record release/incident ID, exact version, environment, timestamps, impact, detection, mitigation, data/audit effect, root cause, corrective actions and owner. Never attach raw credentials or unrestricted personal/financial payloads.

@@ -62,6 +62,7 @@ import {fetchBoundedJson, getGovernedAppUrls, loadEntraOpenIdConfiguration} from
 import {validateRuntimeEnvironment} from './environment.mjs';
 import {registerHealthRoutes} from './health.mjs';
 import { listAuthorizedOrganizationScopes, registerOrganizationSetupRoutes, resolveOrganizationScope } from './organization-setup.mjs';
+import {createApiTrafficMetrics} from './api/traffic-metrics.mjs';
 import {createRequestContextMiddleware} from './api/request-context.mjs';
 import {versionedApiErrorHandler, versionedApiResponseContract} from './api/v1/error-contract.mjs';
 import {createIdentityAccessMiddleware, readCookie, sessionEntraGroups} from './modules/identity-access/middleware.mjs';
@@ -104,6 +105,9 @@ const checkSessionLifetime = async (database = pool) => {
 await checkSessionLifetime();
 
 const round1 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
+
+const trafficMetrics = isProduction ? createApiTrafficMetrics() : null;
+if (trafficMetrics) app.use('/api', trafficMetrics.observe);
 
 app.set('trust proxy', runtimeEnvironment.trustedProxies);
 app.use(cors({
@@ -6505,6 +6509,12 @@ if (isProduction || process.env.SERVE_STATIC === 'true') {
   }
 }
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Configured product Workforce Operations Core API listening on http://localhost:${port}`);
 });
+
+if (trafficMetrics) {
+  const timer = setInterval(() => console.log(JSON.stringify(trafficMetrics.takeWindow())), 60_000);
+  timer.unref();
+  server.once('close', () => clearInterval(timer));
+}

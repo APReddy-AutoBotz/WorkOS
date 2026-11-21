@@ -223,6 +223,10 @@ Buyer UAT:
 Owner Gate D approval:
 ```
 
+## WOS-OPS-006 and WOS-NFR-OBS-001/003/006 HTTP monitoring
+
+The health suite checks window rollover, interrupted responses, latency boundaries and exclusion of request content. The production identity suite verifies traffic summaries from the running API during provider outage and recovery. The release runbook assigns alert handling and explains multi-replica aggregation.
+
 ## WOS-NFR-PERF-001/002/003/007/008 Standard-profile API evidence
 
 The `test:standard-profile` CI job step checks populated employee timesheet history, persisted draft saves, submissions and independent direct-manager approvals alongside utilization report results across 75 concurrent sessions. The workflow summary records measurements and thresholds. Staged approval timing, buyer-scale UAT and browser measurements remain open.
