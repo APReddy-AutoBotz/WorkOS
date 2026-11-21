@@ -285,7 +285,15 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const recovered = await body(waitRequest);
         assert.equal(recovered.approval.id, submitted.approval.id);
         await review.getByText('The original request was confirmed by read-only receipt. Reload.').waitFor();
-        await review.getByRole('button', { name: 'Close commercial approval', exact: true }).click();
+        await review.getByRole('button', { name: 'Load approval and owner', exact: true }).click();
+        const managerSelection = review.getByLabel('Approval request', { exact: true });
+        await managerSelection.selectOption(submitted.approval.id);
+        const cancelReason = review.getByLabel('Commercial cancellation reason', { exact: true });
+        await cancelReason.fill('Synthetic abandoned draft');
+        await managerSelection.selectOption('');
+        await managerSelection.selectOption(submitted.approval.id);
+        assert.equal(await cancelReason.inputValue(), '');
+        await cancelReason.fill('Synthetic cancellation inspected at stage zero');
         const rc = await browser.newContext({
           viewport: { width: 1800, height: 1400 },
           timezoneId: 'Pacific/Kiritimati',
@@ -354,6 +362,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           sequence: 1,
           currentStage: 1,
         });
+        const refused = reply('/api/v1/commercial-candidate-approvals/instances/' + submitted.approval.id + '/cancellations', 'POST');
+        await review.getByRole('button', { name: 'Cancel commercial review', exact: true }).click();
+        assert.equal((await refused).status(), 409);
+        await review.getByText(/The review stage changed/).waitFor();
+        await review.getByRole('button', { name: 'Close commercial approval', exact: true }).click();
         await rc.close();
         const fc = await browser.newContext({
           viewport: { width: 1800, height: 1400 },

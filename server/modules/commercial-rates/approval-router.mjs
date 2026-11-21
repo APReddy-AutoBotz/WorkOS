@@ -534,10 +534,10 @@ export const createCommercialCandidateApprovalRouter = (o) => {
     '/instances/:id/cancellations',
     handle(true, async (c, r) => {
       const id = parse(uuid, r.params.id),
-        d = parse(z.object({ ...bodyFence, reason }).strict(), r.body);
+        d = parse(z.object({ ...bodyFence, expectedSequence: z.number().int().min(0).max(9).optional(), reason }).strict(), r.body);
       fence(r, d.expectedOwnerKey);
       const { x } = await instance(c, r, id);
-      await candidate(c, r, x.candidate_id, true);
+      const source = await candidate(c, r, x.candidate_id, true);
       const digest = fp(d);
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [
         `commercial-cancel-request:${scope(r).join(':')}:${r.user.sub}:${d.requestId}`,
@@ -557,6 +557,13 @@ export const createCommercialCandidateApprovalRouter = (o) => {
           throw err(409, 'COMMERCIAL_APPROVAL_KEY', 'Original cancellation differs.');
         return { ...(await rateCandidateContext(c, r)), approval: await instanceView(c, x), replayed: true };
       }
+      // Approval transitions acquire this stream lock in the database before they append.
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [
+        `rate-candidate:${scope(r).join(':')}:${source.stream_id}`,
+      ]);
+      const { state } = await instanceView(c, x);
+      if (state.status !== 'Pending' || state.sequence !== (d.expectedSequence ?? 0))
+        throw err(409, 'COMMERCIAL_APPROVAL_STAGE_CHANGED', 'Reload the current stage before cancelling.');
       await ctx(c, r, id);
       const cid = randomUUID();
       await c.query(

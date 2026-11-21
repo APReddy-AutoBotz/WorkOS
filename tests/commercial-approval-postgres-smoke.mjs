@@ -711,7 +711,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         "update projects set manager_id=null where id='" + f.projectId + "'",
         'lock_commercial_candidate_worker_witness',
       );
-      const createReview = async (suffix) => {
+      const createReview = async (suffix, stages = definition.stages) => {
         const candidate = ok(
             await request('/api/v1/rate-candidates/candidates', {
               method: 'POST',
@@ -753,7 +753,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
               body: {
                 ...polCmd,
                 requestId: randomUUID(),
-                definition: { ...definition, candidateId: candidate.id },
+                definition: { ...definition, stages, candidateId: candidate.id },
               },
             }),
             201,
@@ -879,7 +879,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ).rows[0].n,
         0,
       );
-      const race = await createReview('race');
+      const race = await createReview('race', def2.stages);
       await pool.query(
         "create function synthetic_notice_refusal()returns trigger language plpgsql as $$begin raise exception 'Synthetic notification failure';end$$;create trigger synthetic_notice_refusal before insert on commercial_candidate_approval_recipients for each row execute function synthetic_notice_refusal()",
       );
@@ -942,6 +942,23 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         ).rows[0].n,
         1,
       );
+      const cancelPath = root + '/instances/' + ra.body.approval.id + '/cancellations';
+      const cancelStage = (data) => request(cancelPath, { method: 'POST', body: data });
+      const baseCancel = { requestId: randomUUID(), expectedOwnerKey: ownerResponse.ownerKey,
+        reason: 'Synthetic inspected review cancellation' };
+      for (const pin of [{}, { expectedSequence: 0 }]) {
+        const refused = await cancelStage({ ...baseCancel, ...pin });
+        assert.equal(refused.status, 409);
+        assert.equal(refused.body.error.code, 'COMMERCIAL_APPROVAL_STAGE_CHANGED');
+      }
+      const command = { ...baseCancel, expectedSequence: 1 };
+      const recorded = ok(await cancelStage(command), 201).approval;
+      assert.equal(recorded.state.status, 'Cancelled');
+      assert.equal(recorded.state.sequence, 1);
+      assert.equal(ok(await cancelStage(command)).replayed, true);
+      assert.equal((await cancelStage({ ...command, expectedSequence: 0 })).status, 409);
+      const original = ok(await request(root + '/receipts/cancellation/' + command.requestId));
+      assert.equal(original.approval.cancellation.id, recorded.cancellation.id);
       const stale = await createReview('stale'),
         oldRequest = ok(
           await request(root + '/requests', { method: 'POST', body: stale.command }),

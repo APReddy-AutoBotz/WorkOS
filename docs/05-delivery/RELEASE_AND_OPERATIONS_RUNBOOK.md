@@ -624,3 +624,7 @@ For an adopted rate conflict, inspect the two candidate version IDs shown at the
 ### T&M billing review cancellation
 
 After a billing stage changes, reload the engagement, inspect the current review and enter a new reason if cancellation is still intended. API clients send the inspected expectedSequence. Older callers omitting it can cancel at sequence zero or replay their original accepted command. Deploy the API before the web client and roll both back together if needed.
+
+### Rate approval cancellation
+
+After a stage-change refusal, reload the rate approval, select the request and review its decisions before cancelling. API clients send expectedSequence from the inspected approval. Older clients can initiate cancellations at sequence zero and replay prior accepted commands. Deploy the API first and roll back both API and web together if necessary.
