@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
+import {createApiTrafficMetrics} from '../server/api/traffic-metrics.mjs';
+
+let now = 0;
+const metrics = createApiTrafficMetrics({clock: () => now});
+const start = statusCode => {
+  const response = Object.assign(new EventEmitter(), {statusCode});
+  const privateRequest = new Proxy({}, {get() { throw Error('Metrics must not read request content'); }});
+  let continued = false;
+  metrics.observe(privateRequest, response, () => { continued = true; });
+  assert.equal(continued, true);
+  return response;
+};
+const slow = start(503);
+const ok = start(200);
+const earlyClose = start(200);
+now = 100;
+ok.emit('finish');
+ok.emit('close');
+earlyClose.emit('close');
+earlyClose.emit('finish');
+const first = metrics.takeWindow();
+assert.equal(first.inFlight, 1);
+assert.equal(first.interrupted, 1);
+assert.equal(first.windowMs, 100);
+assert.deepEqual(first.responses, {'1xx':0,'2xx':1,'3xx':0,'4xx':0,'5xx':0,other:0});
+assert.deepEqual(first.latencyCounts, [1,0,0,0,0,0,0,0]);
+const redirect = start(302);
+now = 351;
+redirect.emit('finish');
+const denied = start(403);
+now = 2351;
+denied.emit('finish');
+now = 5001;
+slow.emit('finish');
+const second = metrics.takeWindow();
+assert.equal(second.inFlight, 0);
+assert.equal(second.interrupted, 0);
+assert.equal(second.windowMs, 4901);
+assert.deepEqual(second.responses, {'1xx':0,'2xx':0,'3xx':1,'4xx':1,'5xx':1,other:0});
+assert.deepEqual(second.latencyUpperBoundsMs, [100,250,500,1000,2000,3000,5000]);
+assert.deepEqual(second.latencyCounts, [0,0,1,0,1,0,0,1]);
+assert.deepEqual(Object.keys(second).sort(), ['timestamp','level','service','operation','windowMs','inFlight',
+  'responses','interrupted','latencyCounts','latencyUpperBoundsMs'].sort());
+assert.equal(metrics.takeWindow().latencyCounts.reduce((a,b)=>a+b,0), 0);
+console.log('API metrics window boundaries, status counts, full request duration, disconnects and payload isolation passed.');

@@ -726,6 +726,25 @@ try {
   assert.ok(discoveryRequests > discoveryRequestsBeforeRecovery,
     'a later successful identity-provider probe must run after the outage');
   assert.ok(recoveredReadiness, `readiness should recover after the provider responds again: ${production.output()}`);
+  // Observe the production timer on the same process that served the failure and recovery journeys.
+  const metricsDeadline = Date.now() + 75_000;
+  let sawSuccess = false, sawDenial = false, sawFailure = false;
+  while (Date.now() < metricsDeadline) {
+    assert.equal(productionChild.exitCode, null);
+    for (const line of production.output().split(/\r?\n/).slice(0, -1)) {
+      if (!line.includes('"operation":"http.traffic"')) continue;
+      const metric = JSON.parse(line);
+      assert.equal(metric.service, 'api');
+      assert.equal(Object.values(metric.responses).reduce((a,b)=>a+b,0),
+        metric.latencyCounts.reduce((a,b)=>a+b,0));
+      sawSuccess ||= metric.responses['2xx'] > 0;
+      sawDenial ||= metric.responses['4xx'] > 0;
+      sawFailure ||= metric.responses['5xx'] > 0;
+    }
+    if (sawSuccess && sawDenial && sawFailure) break;
+    await delay(250);
+  }
+  assert.ok(sawSuccess && sawDenial && sawFailure, 'Production logs must include successful, denied and unavailable responses');
   await terminate(productionChild);
   productionChild = null;
 
