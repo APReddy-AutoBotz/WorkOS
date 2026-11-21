@@ -133,7 +133,7 @@ const standardSource=sourceBase.refine((v) => {
 const negativeMoney=z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).refine(v=>/[1-9]/.test(v));
 const correctionEvidence=z.object({
   sourceVersion:z.literal(1),reviewId:uuid,policyId:uuid,requestId:uuid,decisionId:uuid,
-  originalSourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE']),originalEventId:uuid,originalEventVersion:z.literal(1),
+  originalSourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE','RETAINER_PERIOD']),originalEventId:uuid,originalEventVersion:z.literal(1),
   originalItemId:uuid,originalItemVersion:z.literal(1),originalLineId:uuid,originalBatchId:uuid,artifactId:uuid,
   artifactSha256:hash,confirmationId:uuid.nullable(),currency:z.string().regex(/^[A-Z]{3}$/),originalAmount:money,amount:negativeMoney,
 }).strict();
@@ -143,7 +143,8 @@ const correctionSource=sourceBase.extend({sourceType:z.literal('FULL_LINE_REVERS
   const first=v.lines[0]?.evidence;
   return v.periodStart<=v.periodEnd && v.lineCount===v.lines.length && new Set(v.lines.map(l=>l.itemId)).size===v.lines.length
     && v.lines.every((l,n)=>l.sequence===n+1 && l.currency===v.currency && l.evidence.currency===v.currency && l.amount===l.evidence.amount
-      && l.amount==='-'+l.evidence.originalAmount && l.evidence.originalBatchId===first.originalBatchId && l.evidence.artifactSha256===first.artifactSha256)
+      && l.amount==='-'+l.evidence.originalAmount && l.evidence.originalBatchId===first.originalBatchId && l.evidence.artifactSha256===first.artifactSha256
+      && (l.evidence.originalSourceType!=='RETAINER_PERIOD' || hasRatePermission('commercial.retainer_eligibility.issue')))
     && v.total==='-'+invoiceDraftTotal(v.lines.map(l=>l.amount.slice(1))).amount;
 });
 const source=z.union([standardSource,correctionSource]);
