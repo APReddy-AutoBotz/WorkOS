@@ -399,6 +399,75 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal(archived.status,200);assert.equal(archived.body.record.review.decision,'Approved');
     assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Retainer Statement Review'")).rows[0].n,2);
     await assert.rejects(pool.query("update commercial_retainer_reviews set reason='Synthetic rewrite' where statement_id=$1",[third.id]));
+    const registerPath=scopedStatementPath+'/register',issueGrant='commercial.retainer_eligibility.issue';
+    assert.equal((await apiRequest(registerPath,{identity:finance})).status,403);
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values($1,$2,true) on conflict(role_name,permission_key) do update set enabled=true",[reviewRole,issueGrant]);
+    const retainerVersion=savedRetainer.result.versions[0].id;
+    const eng=await apiRequest('/engagements',{method:'POST',body:{...engagement.body,model:'retainer',code:'SYN-RETAINER-BILL',
+      name:'Synthetic retainer billing',contractId:savedRetainer.result.id,contractVersionId:retainerVersion,startsOn:'2020-01-01',endsOn:'2099-12-31'}});
+    assert.equal(eng.status,201,JSON.stringify(eng.body));
+    const retainerCommand={statementId:third.id,reviewId:archived.body.record.review.id,engagementId:eng.body.id,reason:'Register synthetic approved service period'};
+    const issueRetainer=body=>apiRequest(registerPath,{identity:finance,method:'POST',body});
+    assert.equal((await issueRetainer(retainerCommand)).status,409,'draft terms cannot generate charges');
+    // Seed synthetic opening history at the service date. Only this fixture transaction
+    // sees the historical clock. The ledger's sequence, root, date and scope triggers all run.
+    const historyClient=await pool.connect();
+    try {
+      await historyClient.query('begin');
+      await historyClient.query('create schema journey_retainer_clock');
+      await historyClient.query("create function journey_retainer_clock.now() returns timestamptz language sql stable as $$select timestamptz '2020-01-01 12:00:00+00'$$");
+      await historyClient.query('set local search_path=journey_retainer_clock,public,pg_catalog');
+      for (const [type,id] of [['Contract',savedRetainer.result.id],['Engagement',eng.body.id]]) {
+        await historyClient.query(`insert into commercial_lifecycle_events(organization_id,legal_entity_id,entity_type,entity_id,sequence,state,effective_on,
+          contract_id,contract_version_id,after_value,reason,actor_id,active_role,correlation_id,operation_id)
+          values($1,$2,$3,$4,1,'Active','2020-01-01',$5,$6,jsonb_build_object('state','Active'),'Synthetic opening history',$7,'Admin',$4,$4)`,
+          [scope.organizationId,scope.legalEntityId,type,id,savedRetainer.result.id,retainerVersion,actorId]);
+      }
+      await historyClient.query('drop function journey_retainer_clock.now()');
+      await historyClient.query('drop schema journey_retainer_clock');
+      await historyClient.query('commit');
+    } catch(error) {await historyClient.query('rollback');throw error;} finally {historyClient.release();}
+    const inspect=await apiRequest(registerPath,{identity:finance});
+    assert.equal(inspect.status,200,JSON.stringify(inspect.body));assert.deepEqual(inspect.body.engagements,[{id:eng.body.id,name:eng.body.name}]);
+    assert.equal((await issueRetainer({...retainerCommand,engagementId:engagement.result.id})).status,409);
+    assert.equal((await issueRetainer({...retainerCommand,amount:'0.01'})).status,400);
+    const issuer=await createContext(finance,[...reviewGrants,issueGrant]);
+    await issuer.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const issueButton=name=>issuer.page.getByRole('button',{name,exact:true});
+    await issueButton('Inspect SYN-RETAINER-PERIOD').click();await issueButton('Inspect approved retainer hours').click();
+    await issueButton('Inspect retainer billing register').click();
+    await issuer.page.getByLabel('Responsible billing engagement').selectOption(eng.body.id);
+    await issuer.page.getByLabel('Registration reason').fill(retainerCommand.reason);
+    await pool.query("create trigger reject_test_retainer_audit before insert on audit_logs for each row when(new.action='Issue Retainer Charge') execute function reject_test_po_audit()");
+    assert.equal((await issueRetainer(retainerCommand)).status,503);
+    assert.equal((await apiRequest(registerPath,{identity:finance})).body.receipt,null,'register membership rolls back with the audit');
+    await pool.query('drop trigger reject_test_retainer_audit on audit_logs');
+    const registerLock=await pool.connect();let parallelIssue;
+    try {
+      await registerLock.query('begin');
+      await registerLock.query("select pg_advisory_xact_lock(hashtextextended($1,0))",['commercial-lifecycle:'+scope.organizationId+':'+scope.legalEntityId]);
+      await issueButton('Register approved retainer charge').click();await waitForLock(1);
+      parallelIssue=issueRetainer(retainerCommand);await waitForLock(2);
+    } finally {await registerLock.query('rollback');registerLock.release();}
+    assert.equal((await parallelIssue).status,201);
+    await issuer.page.getByText(/Approved-unbilled · GBP 3500.0000/).waitFor();
+    const issued=await issueRetainer(retainerCommand);
+    assert.equal(issued.status,201,JSON.stringify(issued.body));assert.equal(issued.body.receipt.amount,'3500.0000');
+    assert.equal((await issueRetainer({...retainerCommand,reason:'Changed registration'})).status,409);
+    assert.equal((await pool.query("select count(*)::int n from billing_eligibility_events where source_type='RETAINER_PERIOD'")).rows[0].n,1);
+    // Exercise the installed exclusion constraint independently of the source guard.
+    // Different versions and engagements still compete for the same contract days.
+    const ranges=await pool.connect();
+    try {
+      await ranges.query('begin');
+      const rule=(await ranges.query("select pg_get_constraintdef(oid) rule from pg_constraint where conrelid='billing_eligibility_events'::regclass and conname='retainer_period_billed_once'")).rows[0].rule;
+      await ranges.query('create temporary table retainer_range_probe(organization_id text,legal_entity_id text,contract_id text,engagement_id text,version text,source_type text,retainer_period daterange) on commit drop');
+      await ranges.query('alter table retainer_range_probe add constraint probe_once '+rule);
+      const addRange=(eng,version,start,end)=>ranges.query("insert into retainer_range_probe values('org','entity','contract',$1,$2,'RETAINER_PERIOD',daterange($3,$4,'[]'))",[eng,version,start,end]);
+      await addRange('first','v1','2020-01-01','2020-01-31');await addRange('next','v2','2020-02-01','2020-02-28');
+      await assert.rejects(addRange('different','v3','2020-01-31','2020-02-01'),e=>e.code==='23P01');
+    } finally {await ranges.query('rollback');ranges.release();}
+    await issuer.context.close();
     await independent.context.close();
     assert.equal((await apiRequest(consumptionPath.replace(savedRetainer.result.versions[0].id,versionId))).status,404);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");

@@ -1,3 +1,4 @@
+import {RetainerRegister} from './RetainerRegister';
 import {RetainerStatement} from './RetainerStatement';
 import {hasRatePermission} from '../services/rateCandidates';
 import {useState} from 'react';
@@ -35,7 +36,9 @@ export function RetainerConsumption({contractId,version,context}: {
         {p.startsOn<version.effectiveFrom && <p>Capacity requires a full service period on or after this version’s effective date.</p>}
         {p.capacity && <p>Contract capacity in hours · {p.capacity.carriedIn} brought forward · {p.capacity.consumed} consumed · {p.capacity.remaining} remaining · {p.capacity.overage} over capacity · {p.capacity.carriedOut} carried forward · {p.capacity.expired} expired</p>}
         {p.capacity && version.retainerRounding && (context.canManage && hasRatePermission('commercial.retainer_statements.prepare') || hasRatePermission('commercial.retainer_statements.decide')) &&
-          hasRatePermission('commercial.rate_candidates.view') && <RetainerStatement contractId={contractId} version={version} startsOn={p.startsOn} context={context}/>}</li>)}</ul></>}
+          hasRatePermission('commercial.rate_candidates.view') && <RetainerStatement contractId={contractId} version={version} startsOn={p.startsOn} context={context}/>}
+        {p.capacity && version.retainerRounding && hasRatePermission('commercial.retainer_eligibility.issue') && hasRatePermission('commercial.rate_candidates.view') &&
+          <RetainerRegister contractId={contractId} version={version} startsOn={p.startsOn} context={context}/>}</li>)}</ul></>}
     {version.retainerOveragePolicy && periods?.some(p=>p.capacity) && hasRatePermission('commercial.rate_candidates.view') && <>
       <button type="button" className="mt-2 underline" disabled={previewStatus==='loading'} onClick={inspectPricing}>Preview excess-hour pricing</button>
       {previewStatus==='loading' && <p role="status">Loading pricing…</p>}
