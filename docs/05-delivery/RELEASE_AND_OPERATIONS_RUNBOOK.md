@@ -64,6 +64,12 @@ Monitor startup/readiness, authentication failures, authorization denials, datab
 
 ## Backup and restore
 
+1. Record the application commit, database version, migration ledger, backup timestamp and approved reconciliation totals. Configure buyer-controlled encrypted storage, access, retention and an off-site copy. Provision cluster roles, extension binaries, deployment secrets and external document storage through their respective recovery procedures.
+2. Use the matching PostgreSQL client tools. Supply connection details via a protected service file and password file. Run `pg_dump --format=custom --no-password --file=workos.dump --dbname=service=workos_backup` into a restricted directory. Verify the stored archive checksum against the digest recorded at backup time.
+3. Provision a fresh isolated recovery database with the expected owners. Verify the target service points to it, then run `pg_restore --single-transaction --exit-on-error --no-password --dbname=service=workos_recovery workos.dump`. Keep outbound integrations disabled. If restoration fails, investigate before retrying in a new recovery database.
+4. Start the matching release in isolation. Check the ledger, audit continuity, financial totals, authorized and denied role journeys, and an audited write. Record elapsed recovery time and the latest recovered transaction against the buyer’s RTO and RPO before authorizing cutover.
+5. For synthetic release evidence, point `WORKOS_TEST_DATABASE_URL` at a disposable loopback PostgreSQL instance with database creation rights and run `npm run test:restore`. The test creates two temporary databases and compares row counts and fingerprints for every public table before starting the recovered API.
+
 Buyer policy defines frequency, retention, encryption and RPO/RTO. Restore rehearsal verifies application version, schema, organization/configuration, users/roles, critical counts, audit continuity, commercial control totals and representative role journeys.
 
 ## Incident and support evidence
