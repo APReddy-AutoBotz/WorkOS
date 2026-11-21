@@ -173,6 +173,21 @@ export const ApprovedRateSource = ({
               ? `Adopted source ${view.adoption.id} retains approval ${view.adoption.approvalId}.`
               : 'No adoption has been recorded.'}
           </p>
+          {view.adoption && (
+            <details>
+              <summary>Adoption receipt</summary>
+              <dl>
+                <dt>Adopted at</dt><dd>{view.adoption.createdAt}</dd>
+                <dt>Adopted by</dt><dd>{view.adoption.actorId} ({view.adoption.activeRole})</dd>
+                <dt>Reason</dt><dd>{view.adoption.reason}</dd>
+                <dt>Candidate version ID</dt><dd>{view.adoption.candidateId}</dd>
+                <dt>Owner event ID</dt><dd>{view.adoption.ownerEventId}</dd>
+                <dt>Approval policy version ID</dt><dd>{view.adoption.policyId}</dd>
+                <dt>Final approval transition ID</dt><dd>{view.adoption.finalTransitionId}</dd>
+                <dt>Adoption request ID</dt><dd>{view.adoption.requestId}</dd>
+              </dl>
+            </details>
+          )}
           {view.truncated && <p>Only the latest ten completed reviews are shown.</p>}
           {canAdopt && !view.adoption && (
             <>
@@ -355,7 +370,7 @@ export const AdoptedRateResolution = ({
         <p role="status">
           Adopted resolution: {result.result}
           {result.source
-            ? ` · ${result.source.currency} ${result.source.amount}/${result.source.unit} · candidate ${result.source.id} · adoption ${result.source.adoptionId} · approval ${result.source.approvalId} · adopted ${result.source.adoptedAt}`
+            ? ` · ${result.source.currency} ${result.source.amount}/${result.source.unit} · ${result.source.bindingType} ${result.source.bindingId} · version ${result.source.sequence} effective ${result.source.effectiveFrom} through ${result.source.effectiveTo} UTC · priority ${result.source.priority} · candidate ${result.source.id} · adoption ${result.source.adoptionId} · approval ${result.source.approvalId} · adopted ${result.source.adoptedAt}`
             : ''}
           .
         </p>
