@@ -469,6 +469,19 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         aw = reply('/api/v1/approved-rate-sources/receipts/' + adoptionCommand.requestId);
         await adoption.getByRole('button', { name: 'Read original adoption receipt', exact: true }).click();
         assert.equal((await body(aw)).adoption.id, acceptedAdoption.adoption.id);
+        aw = reply('/api/v1/approved-rate-sources/candidates/' + receipt.candidate.id);
+        await adoption.getByRole('button', { name: 'Inspect approved reviews', exact: true }).click();
+        const retained = (await body(aw)).adoption;
+        assert.deepEqual(retained, acceptedAdoption.adoption);
+        await adoption.getByText('Adoption receipt', { exact: true }).click();
+        for (const evidence of [
+          retained.createdAt, retained.actorId + ' (' + retained.activeRole + ')', retained.reason,
+          retained.candidateId, retained.ownerEventId, retained.policyId, retained.finalTransitionId,
+          retained.requestId,
+        ]) {
+          await adoption.locator('details').getByText(evidence, { exact: true }).waitFor();
+        }
+        assert.equal(await adoption.getByRole('button', { name: 'Adopt approved rate source' }).count(), 0);
         await adoption.getByRole('button', { name: 'Close source adoption', exact: true }).click();
         await billing.getByLabel('Engagement for preview', { exact: true }).selectOption(engagement.id);
         const resolvedBilling = billing.getByRole('region', {
@@ -485,6 +498,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         assert.equal(resolved.source.approvalId, submitted.approval.id);
         assert.equal(resolved.source.adoptionId, acceptedAdoption.adoption.id);
         await resolvedBilling.getByText(/Adopted resolution: source.*12345678901234.1234/).waitFor();
+        const source = resolved.source;
+        const versionEvidence = `${source.bindingType} ${source.bindingId} · version ${source.sequence} effective ${source.effectiveFrom} through ${source.effectiveTo} UTC · priority ${source.priority}`;
+        assert.ok((await resolvedBilling.getByRole('status').innerText()).includes(versionEvidence));
 
         await billing.getByLabel('Engagement for preview', { exact: true }).selectOption(engagement.id);
         await billing.getByLabel('Preview as-of UTC', { exact: true }).fill(fx.today);

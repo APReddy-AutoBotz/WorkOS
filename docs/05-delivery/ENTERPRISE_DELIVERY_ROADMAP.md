@@ -177,3 +177,7 @@ Accepted main remains PR169 merge `88262c87a260529c00a680b22d2f021ff7d8cba4`, wi
 The next independent package is [settings persistence outcomes](../tasks/WOS-02-SETTINGS-SAVE-OUTCOMES.md). Baseline browser execution reproduced false success before server acknowledgement and missing failed-load recovery. Scope is truthful save status, retained edits, duplicate prevention, newer-edit distinction, unmount suppression and load retry. Current validation remains required before publication/acceptance. Commercial source authorization, remaining security reconciliation, persistent throttling and buyer/release evidence remain separate.
 
 The settings recovery journey uses the compiled fixture server with the real PostgreSQL-backed API. CI checks acknowledged saves, failed loads and uncertain outcomes.
+
+### Rate adoption evidence
+
+WOS-COM-001–003. Finance can trace a resolved billing or cost rate to its effective version and inspect the retained adoption decision in the candidate history. The browser journey checks the saved receipt after recovery from an interrupted response.

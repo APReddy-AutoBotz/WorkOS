@@ -612,3 +612,7 @@ Open Workforce directory with the employee viewing permission. Search and paging
 ## Commercial rate candidates
 
 Apply migration 065a after 065. It creates an empty, append-only candidate table and defines four opt-in permissions. Grant billing and confidential cost access separately. After an uncertain write, read its original receipt before attempting another save. Retain the ledger on recovery. Authoritative rate adoption and invoice workflows still require separate release gates.
+
+### Verify a rate adoption
+
+Open the candidate version, select **Inspect approved reviews**, then expand **Adoption receipt**. Compare its candidate and approval references with the resolved source. The actor and role identify who adopted the source. Use the retained owner event, policy version and final approval transition to trace the preceding approval.
