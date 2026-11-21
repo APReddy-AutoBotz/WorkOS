@@ -50,7 +50,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
       });
       return {context, page};
     };
-    const {context, page} = await createContext(identities.manager, ['commercial.contracts.view','commercial.contracts.manage','employees.view','reports.view_utilization','commercial.rate_candidates.view']);
+    const {context, page} = await createContext(identities.manager, ['commercial.contracts.view','commercial.contracts.manage','employees.view','reports.view_utilization','commercial.rate_candidates.view','commercial.retainer_statements.prepare']);
     const button = name => page.getByRole('button', {name, exact: true});
     const form = name => page.getByRole('form', {name, exact: true});
     const fill = async (target, fields) => {for (const [label, value] of Object.entries(fields)) await target.getByLabel(label, {exact: true}).fill(value);};
@@ -284,22 +284,50 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await target.getByLabel('Period price rounding').selectOption('HALF_EVEN:2');
     await target.getByLabel('Excess-hour pricing').selectOption('no_charge');
     await button('Add retainer period').click();
-    await fill(target, {'Period 1 start date':'2020-01-01','Period 1 end date':'2099-12-31',
+    await fill(target, {'Period 1 start date':'2020-01-01','Period 1 end date':'2020-12-31',
       'Period 1 included hours':'40.1250','Period 1 base fee':'3500.0001'});
     const savedRetainer = await save('/contracts','retainer');
     assert.deepEqual(savedRetainer.result.versions[0].retainerPeriods,[
-      {startsOn:'2020-01-01',endsOn:'2099-12-31',includedHours:'40.1250',baseFee:'3500.0001'}]);
-    await page.getByText('2020-01-01 through 2099-12-31 · 40.1250 included hours · GBP 3500.0001 base fee',{exact:true}).waitFor();
+      {startsOn:'2020-01-01',endsOn:'2020-12-31',includedHours:'40.1250',baseFee:'3500.0001'}]);
+    await page.getByText('2020-01-01 through 2020-12-31 · 40.1250 included hours · GBP 3500.0001 base fee',{exact:true}).waitFor();
     await page.getByText('All approved hours · carry unused hours to the next service period',{exact:true}).waitFor();
     const consumptionPath=`/contracts/${savedRetainer.result.id}/versions/${savedRetainer.result.versions[0].id}/retainer-consumption`;
-    for (const key of ['employees.view','reports.view_utilization','commercial.rate_candidates.view']) await pool.query(
+    for (const key of ['employees.view','reports.view_utilization','commercial.rate_candidates.view','commercial.retainer_statements.prepare']) await pool.query(
       "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
     await button('Inspect approved retainer hours').click();
-    await page.getByText('2020-01-01 through 2099-12-31 · 0 billable hours · 0 non-billable hours',{exact:true}).waitFor();
-    await page.getByText(/40.125 remaining · 0 over capacity/).waitFor();
+    await page.getByText('2020-01-01 through 2020-12-31 · 0 billable hours · 0 non-billable hours',{exact:true}).waitFor();
+    await page.getByText(/0 remaining · 0 over capacity/).waitFor();
     await button('Preview excess-hour pricing').click();
     await page.getByText(/0 excess hours · No charge under this contract/).waitFor();
     await page.getByText('Period price preview · GBP 3500.00 · base fee 3500.00 · overage 0.00',{exact:true}).waitFor();
+    await button('Review period statement').click();
+    await page.getByRole('heading',{name:'Current period evidence'}).waitFor();
+    const scopedStatementPath=consumptionPath.replace('retainer-consumption','retainer-statements/2020-01-01');
+    const candidate=(await apiRequest(scopedStatementPath)).body;
+    await pool.query(`create function reject_test_statement_audit() returns trigger language plpgsql as $$
+      begin if new.entity_type='Retainer Statement' then raise exception 'Synthetic audit unavailable'; end if; return new; end $$;
+      create trigger reject_test_statement_audit before insert on audit_logs for each row execute function reject_test_statement_audit()`);
+    try {
+      assert.equal((await apiRequest(scopedStatementPath,{method:'POST',body:{sourceHash:candidate.sourceHash,previousId:null,reason:'Synthetic audit rollback'}})).status,503);
+      assert.equal((await pool.query('select 1 from commercial_retainer_statements where version_id=$1',[savedRetainer.result.versions[0].id])).rowCount,0);
+    } finally {await pool.query('drop trigger reject_test_statement_audit on audit_logs');}
+    await page.getByLabel('Statement reason').fill('Synthetic closed period reconciliation');
+    await button('Prepare statement').click();
+    await page.getByText('Statement prepared. Reload to inspect the saved evidence.').waitFor();
+    await button('Review period statement').click();
+    await button('Inspect statement 1').click();
+    await page.getByRole('heading',{name:'Saved statement 1'}).waitFor();
+    const statementPath=scopedStatementPath;
+    const reviewed=(await apiRequest(statementPath)).body;
+    const statementRecord=reviewed.history[0];
+    const cmd={sourceHash:statementRecord.sourceHash,previousId:null,reason:statementRecord.reason};
+    assert.equal((await apiRequest(statementPath,{method:'POST',body:cmd})).body.record.id,statementRecord.id);
+    assert.equal((await apiRequest(statementPath,{method:'POST',body:{...cmd,sourceHash:'0'.repeat(64)}})).status,409);
+    assert.equal((await apiRequest(statementPath,{method:'POST',body:{...cmd,total:'999'}})).status,400);
+    assert.equal((await apiRequest(statementPath+'?statementId='+statementRecord.id,{identity:identities.reader})).status,403);
+    assert.equal((await apiRequest(statementPath.replace('2020-01-01','2099-01-01'))).status,409);
+    await assert.rejects(pool.query('update commercial_retainer_statements set reason=$1 where id=$2',['Synthetic rewrite',statementRecord.id]));
+    assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Retainer Statement' and entity_id=$1",[statementRecord.id])).rows[0].n,1);
     assert.equal((await apiRequest(consumptionPath.replace(savedRetainer.result.versions[0].id,versionId))).status,404);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");
     assert.equal((await apiRequest(consumptionPath)).status,403);

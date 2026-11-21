@@ -1,3 +1,4 @@
+import {evidencePage} from '../server/modules/commercial-drafting/retainer-statement.mjs';
 import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import assert from 'node:assert/strict';
 import {priceRetainerOverage} from '../server/modules/commercial-drafting/retainer-overage.mjs';
@@ -8,6 +9,12 @@ import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner
 import {actualCatalog} from './support/actual-work-test.mjs';
 import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
 
+const historyEntries=Array.from({length:103},(_,entryId)=>({entryId}));
+const paged={periods:[{entries:historyEntries.slice(0,97)},{entries:historyEntries.slice(97)}]};
+assert.deepEqual(evidencePage(paged).periods.flatMap(p=>p.entries),historyEntries.slice(0,100));
+assert.deepEqual(evidencePage(paged,'100').periods.flatMap(p=>p.entries),historyEntries.slice(100));
+assert.equal(evidencePage(paged,'100').nextOffset,null);
+assert.throws(()=>evidencePage(paged,'103'),e=>e.code==='RETAINER_INVALID_PAGE');
 const capacityInputs=['2026-01-01','2026-02-01'].map(day=>({startsOn:day,endsOn:day,includedHours:'2.1501'}));
 const hours=capacityInputs.map((p,i)=>({...p,billableHours:i?'4.10':'1.1',nonBillableHours:'0.025'}));
 for (const [policy,carried,expired,overage] of [
@@ -82,7 +89,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const preview=async()=>{const r=await request(previewPath);assert.equal(r.status,200,JSON.stringify(r.body));return r.body.periods[0];};
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.rate_candidates.view'");
     assert.equal((await request(previewPath)).status,403);
-    for (const [role,grants] of [['Admin',['commercial.rate_candidates.view','commercial.rate_candidates.manage','commercial.rate_approvals.decide']],
+    for (const [role,grants] of [['Admin',['commercial.rate_candidates.view','commercial.rate_candidates.manage','commercial.rate_approvals.decide','commercial.retainer_statements.prepare']],
       ['Employee',['commercial.rate_candidates.view']]]) await pool.query(
       `insert into role_permissions(role_name,permission_key,enabled) select $1,k,true from unnest($2::text[]) k
        on conflict(role_name,permission_key) do update set enabled=true`,[role,grants]);
@@ -96,6 +103,16 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(priced.periodPrice,{baseFee:'100.12',overage:'33.95',total:'134.07'});
     assert.deepEqual([priced.status,priced.hours,priced.amount,priced.source.adoptionId,priced.source.effectiveFrom,priced.source.effectiveTo],
       ['priced','2.7499','33.94916544',adoption.id,today,end]);
+    const statementPath=path.replace('retainer-consumption','retainer-statements/'+today);
+    const inspected=await request(statementPath);
+    assert.equal(inspected.status,200,JSON.stringify(inspected.body));
+    const statement=inspected.body.evidence;
+    assert.equal(statement.closed,false);assert.equal(statement.price.source.adoptionId,adoption.id);
+    assert.deepEqual(statement.price.periodPrice,priced.periodPrice);
+    assert.deepEqual(statement.periods[0].entries.map(e=>e.hours).sort(),['1.25','2.5']);
+    assert(statement.periods[0].entries.every(e=>e.submissionId===instance.submissionId && e.decisionId && e.entryId && e.engagementId && e.projectId===project.id));
+    const attempted=await request(statementPath,{method:'POST',body:{sourceHash:inspected.body.sourceHash,previousId:null,reason:'Synthetic open period'}});
+    assert.equal(attempted.status,409);assert.equal(attempted.body.error.code,'RETAINER_PERIOD_OPEN');
     await adoptHourlyRate(opts,'billing','14.00');
     const conflict=await preview(); assert.equal(conflict.status,'conflict');assert.equal(conflict.amount,null);assert.equal(conflict.source,null);assert.equal(conflict.periodPrice,null);
     const {id,version,...terms}=contract.versions[0];

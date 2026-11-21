@@ -242,7 +242,56 @@ const installmentReceipts = (value: unknown) => rows(object(value).receipts, ent
     contractVersionId:text(r.contractVersionId), engagementId:text(r.engagementId), eligibleOn:date(r.eligibleOn),
     dueOn:date(r.dueOn), currency:currency(r.currency), amount:decimal(r.amount)};
 });
+const statementHash=(v:unknown)=>{const s=text(v);if (!/^[a-f0-9]{64}$/.test(s)) throw invalid();return s;};
+const statementReceipt=(value:unknown)=>{
+  const r=object(value);
+  return {id:text(r.id),sequence:integer(r.sequence,1),previousId:nullableText(r.previousId),sourceHash:statementHash(r.sourceHash),
+    actorId:text(r.actorId),activeRole:text(r.activeRole),createdAt:text(r.createdAt),reason:text(r.reason)};
+};
+const statementEvidence=(value:unknown,contractId:string,version:ContractTerms,startsOn:string)=>{
+  const e=object(value),p=object(e.price),price=object(p.periodPrice),rounding=normalizeRounding(e.rounding);
+  if (e.format!=='retainer-statement/1' || e.contractId!==contractId || e.versionId!==version.id || p.startsOn!==startsOn ||
+      e.currency!==version.currency || rounding.mode!==version.retainerRounding?.mode || rounding.precision!==version.retainerRounding?.precision) throw invalid();
+  const quantity=(v:unknown)=>{const s=text(v);if (!/^\d+(?:\.\d+)?$/.test(s)) throw invalid();return s;};
+  const periods=rows(e.periods,item=>{
+    const r=object(item),entries=rows(r.entries,item=>{const w=object(item);return {entryId:text(w.entryId),decisionId:text(w.decisionId),
+      workerId:text(w.workerId),submissionId:text(w.submissionId),projectId:text(w.projectId),engagementId:text(w.engagementId),workDate:date(w.workDate),hours:quantity(w.hours),billable:flag(w.billable)};});
+    const entryCount=integer(r.entryCount); if (entryCount<entries.length) throw invalid();
+    return {entryCount,startsOn:date(r.startsOn),endsOn:date(r.endsOn),entries};
+  });
+  const source=p.source ? object(p.source) : null;
+  const totalEntries=integer(e.totalEntries),entryOffset=integer(e.entryOffset),nextOffset=e.nextOffset===null?null:integer(e.nextOffset);
+  if (totalEntries!==periods.reduce((n,p)=>n+p.entryCount,0) || entryOffset>totalEntries ||
+    periods.reduce((n,p)=>n+p.entries.length,0)!==Math.min(100,totalEntries-entryOffset) ||
+    nextOffset!==(entryOffset+100<totalEntries?entryOffset+100:null)) throw invalid();
+  return {periods,entryOffset,nextOffset,totalEntries,closed:flag(e.closed),baseFee:quantity(price.baseFee),overage:quantity(price.overage),total:quantity(price.total),
+    adoptionId:source ? text(source.adoptionId) : null,approvalId:source ? text(source.approvalId) : null,
+    rate:source ? quantity(source.hourlyRate) : null};
+};
 export const commercialDraftingService = {
+  retainerStatement: (contractId:string,version:ContractTerms,startsOn:string,context:CommercialDraftingContext,
+    action?: {statementId?:string;entriesOffset?:number}|{sourceHash:string;previousId:string|null;reason:string})=>{
+    const selected=action && 'statementId' in action ? action.statementId : null;
+    const query=new URLSearchParams();
+    if (selected) query.set('statementId',selected);
+    if (action && 'entriesOffset' in action) query.set('entriesOffset',String(action.entriesOffset));
+    const command=action && 'sourceHash' in action ? action : undefined;
+    const path=`/contracts/${encodeURIComponent(contractId)}/versions/${encodeURIComponent(version.id)}/retainer-statements/${encodeURIComponent(startsOn)}`;
+    return request(context,command?'POST':'GET',path+(query.size?'?'+query.toString():''),command,value=>{
+      const row=object(value);
+      if (row.contractId!==contractId || row.versionId!==version.id || row.startsOn!==startsOn) throw invalid();
+      if (selected || command) {
+        const record=statementReceipt(row.record);
+        if (selected && record.id!==selected || command && record.sourceHash!==command.sourceHash) throw invalid();
+        return {record,evidence:selected ? statementEvidence(object(row.record).evidence,contractId,version,startsOn) : null,
+          sourceHash:null,history:[]};
+      }
+      const hash=row.sourceHash===null ? null : statementHash(row.sourceHash);
+      if (Boolean(hash)!==Boolean(row.evidence)) throw invalid();
+      return {record:null,evidence:hash ? statementEvidence(row.evidence,contractId,version,startsOn) : null,
+        sourceHash:hash,history:rows(row.history,statementReceipt)};
+    });
+  },
   installmentRegister: (versionId:string, context:CommercialDraftingContext,
     command?:{installment:number; engagementId:string; reason:string}) =>
     request(context,command?'POST':'GET',`/fixed-fee-schedules/${encodeURIComponent(versionId)}/register`,command,installmentReceipts),
