@@ -120,6 +120,11 @@ const date = (value: unknown) => {
 };
 const currency = (value: unknown) => { const result = text(value); if (!/^[A-Z]{3}$/.test(result)) throw invalid(); return result; };
 const decimal = (value: unknown) => { const result = text(value); if (!/^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/.test(result)) throw invalid(); return result; };
+const registerMoney = (value: unknown) => {
+  const result=text(value);
+  if (!/^(?:0|[1-9]\d{0,15})(?:\.\d{1,4})?$/.test(result)) throw invalid();
+  return result;
+};
 const percent = (value: unknown) => { const result = text(value); if (!/^\d{1,3}(?:\.\d{1,2})?$/.test(result) || Number(result) > 100) throw invalid(); return result; };
 const model = <T extends string>(value: unknown, allowed: readonly T[]): T => { if (!allowed.includes(value as T)) throw invalid(); return value as T; };
 const rows = <T>(value: unknown, normalize: (row: unknown) => T): T[] => {
@@ -299,6 +304,17 @@ export const commercialDraftingService = {
         sourceHash:hash,history:rows(row.history,statementReceipt)};
     },Boolean(command && !reviewing));
   },
+  retainerRegister: (contractId:string, version:ContractTerms, startsOn:string, context:CommercialDraftingContext,
+    command?:{statementId:string;reviewId:string;engagementId:string;reason:string}) =>
+    request(context,command?'POST':'GET',`/contracts/${encodeURIComponent(contractId)}/versions/${encodeURIComponent(version.id)}/retainer-statements/${encodeURIComponent(startsOn)}/register`,command,value=>{
+      const row=object(value),r=row.receipt===null?null:object(row.receipt),s=row.statement===null?null:object(row.statement);
+      const receipt=r && {eventId:text(r.eventId),itemId:text(r.itemId),engagementId:text(r.engagementId),statementId:text(r.statementId),
+        reviewId:text(r.reviewId),amount:registerMoney(r.amount),currency:currency(r.currency),eligibleOn:date(r.eligibleOn)};
+      if (command && (!receipt || receipt.engagementId!==command.engagementId || receipt.statementId!==command.statementId || receipt.reviewId!==command.reviewId)) throw invalid();
+      if ((receipt && receipt.currency!==version.currency) || (s && s.currency!==version.currency)) throw invalid();
+      return {receipt,statement:s && {statementId:text(s.statementId),reviewId:text(s.reviewId),amount:registerMoney(s.amount),currency:currency(s.currency)},
+        engagements:rows(row.engagements,entry=>{const e=object(entry);return {id:text(e.id),name:text(e.name)};})};
+    },false),
   installmentRegister: (versionId:string, context:CommercialDraftingContext,
     command?:{installment:number; engagementId:string; reason:string}) =>
     request(context,command?'POST':'GET',`/fixed-fee-schedules/${encodeURIComponent(versionId)}/register`,command,installmentReceipts),

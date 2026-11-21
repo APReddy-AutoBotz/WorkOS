@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 const expected=[
  {permission_key:'commercial.retainer_statements.decide',module:'Commercial',label:'Review retainer statements',description:'Independently approve or reject a retained period statement.',protected:false},
+ {permission_key:'commercial.retainer_eligibility.issue',module:'Commercial',label:'Register approved retainer charges',description:'Register an independently approved service period against its responsible engagement.',protected:false},
  {permission_key:'commercial.retainer_statements.prepare',module:'Commercial',label:'Prepare retainer statements',description:'Retain closed-period pricing and approved work evidence for review.',protected:false},
  {permission_key:'commercial.fixed_fee_eligibility.issue',module:'Commercial',label:'Approve due fixed-fee installments',description:'Independently approve a due contract installment for a selected engagement and inspect its register receipt.',protected:false},
  {permission_key:'commercial.purchase_orders.release',module:'Commercial',label:'Release purchase orders',description:'Independently release an in-force purchase order against its active contract terms.',protected:false},

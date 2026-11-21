@@ -1,3 +1,4 @@
+import {retainerRegister,retainerIssueGrant,retainerIssueCommand} from './retainer-eligibility.mjs';
 import {retainerStatement,statementGrant,statementCommand,statementQuery,reviewGrant,reviewCommand} from './retainer-statement.mjs';
 import {getRetainerConsumption} from './retainer-consumption.mjs';
 import {fixedFeeRegister,fixedFeeGrant,installmentCommand} from './fixed-fee-eligibility.mjs';
@@ -39,7 +40,10 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if(error?.code==='RSR01')res.status(403).json({error:{code:'RETAINER_IDENTITY_DENIED',message:'Current, distinct worker identities are required to review the statement.'}});
+      }else if(error?.code==='RBE01')res.status(403).json({error:{code:'RETAINER_REGISTER_DENIED',message:'Current retainer billing authority is required.'}});
+      else if(error?.code==='RBE02' || (permission===retainerIssueGrant && error?.code==='CTM04') || error?.constraint==='retainer_period_billed_once')
+        res.status(409).json({error:{code:'COMMERCIAL_REGISTER_CONFLICT',message:'Review source eligibility, financial period and existing charges.'}});
+      else if(error?.code==='RSR01')res.status(403).json({error:{code:'RETAINER_IDENTITY_DENIED',message:'Current, distinct worker identities are required to review the statement.'}});
       else if(error?.code==='RSR02')res.status(409).json({error:{code:'RETAINER_REVIEW_STALE',message:'Reload the latest retained statement.'}});
       else if(error?.code==='RST01')res.status(403).json({error:{code:'RETAINER_STATEMENT_DENIED',message:'Current statement preparation authority is required.'}});
       else if(error?.code==='RST02' || (consistentWrite && error?.code==='40001'))res.status(409).json({error:{code:'RETAINER_STATEMENT_STALE',message:'Reload and review current statement evidence.'}});
@@ -76,6 +80,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/lifecycle/projects',handle(projectBindingSchema,true,(client,req,data)=>createGovernedProject(client,req,data,audit),'commercial.lifecycle.manage'));
   router.get('/workspace',handle(workspaceQuerySchema,false,(client,req,data)=>getWorkspace(client,req,data)));
   const statementPath='/contracts/:id/versions/:versionId/retainer-statements/:startsOn';
+  router.all(statementPath+'/register',(req,res,next)=>{res.set('Cache-Control','no-store');next();});
+  router.get(statementPath+'/register',handle(lifecycleQuerySchema,false,(c,r)=>retainerRegister(c,r,buildEmployeeScopeWhere)));
+  router.post(statementPath+'/register',handle(retainerIssueCommand,true,(c,r,data)=>retainerRegister(c,r,buildEmployeeScopeWhere,data,audit),retainerIssueGrant,true));
   router.all(statementPath+'/review',(req,res,next)=>{res.set('Cache-Control','no-store');next();});
   router.get(statementPath+'/review',handle(statementQuery,false,(c,r,q)=>retainerStatement(c,r,buildEmployeeScopeWhere,{query:q,review:true})));
   router.post(statementPath+'/review',handle(reviewCommand,true,(c,r,command)=>retainerStatement(c,r,buildEmployeeScopeWhere,{command,audit,review:true}),reviewGrant,true));
