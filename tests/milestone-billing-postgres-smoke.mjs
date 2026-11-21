@@ -500,7 +500,32 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         };
         await assertOptions('Milestone billing review', 54);
         await assertOptions('Billing milestone', 54);
-        await page.getByLabel('Milestone review policy', { exact: true }).selectOption(current.id);
+        const sourcePicker = page.getByLabel('Billing milestone', { exact: true });
+        const reviewPolicy = page.getByLabel('Milestone review policy', { exact: true });
+        const submit = page.getByRole('button', { name: 'Request milestone billing review', exact: true });
+        await sourcePicker.selectOption(milestone.id);
+        const terms = page.getByRole('region', { name: 'Selected milestone terms' });
+        await terms.getByText('SYN-MILESTONE-1 · due ' + fx.today + ' · USD 125.1500').waitFor();
+        await reviewPolicy.selectOption(current.id);
+        await page.getByLabel('Milestone change owner user ID').fill(ids.requester.id);
+        await page.getByLabel('Milestone change owner role').fill('Admin');
+        await page.getByLabel('Milestone request reason').fill('Synthetic milestone-specific reason');
+        for (const item of evidence) {
+          await page.getByLabel(item.kind + ' reference', { exact: true }).fill(item.reference);
+          await page.getByLabel(item.kind + ' URL', { exact: true }).fill(item.url);
+        }
+        assert.equal(await submit.isEnabled(), true);
+        await sourcePicker.selectOption(declined.milestoneId);
+        await terms.getByText('SYN-MILESTONE-2 · due ' + fx.today + ' · USD 42.0000').waitFor();
+        assert.equal(await submit.isDisabled(), true);
+        for (const label of ['Milestone review policy','Milestone change owner user ID','Milestone change owner role','Milestone request reason']) {
+          assert.equal(await page.getByLabel(label, { exact: true }).inputValue(), '');
+        }
+        await reviewPolicy.selectOption(current.id);
+        for (const item of evidence) {
+          assert.equal(await page.getByLabel(item.kind + ' reference', { exact: true }).inputValue(), '');
+          assert.equal(await page.getByLabel(item.kind + ' URL', { exact: true }).inputValue(), '');
+        }
         assert.equal(await page.getByLabel('Milestone policy effective from').isEnabled(), true);
         await page.getByRole('button', { name: 'Load milestone register', exact: true }).click();
         await page.getByRole('button', { name: 'More approved milestone items', exact: true }).click();

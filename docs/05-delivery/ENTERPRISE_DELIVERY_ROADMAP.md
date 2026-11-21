@@ -201,3 +201,7 @@ Milestone acceptance cancellations now check the inspected review stage while ho
 ### Inspect a T&M snapshot for billing
 
 Billing preparers and reviewers can trace T&M snapshot amounts to approved work and contract versions using the existing billing-only evidence projection.
+
+### Prepare a milestone billing request
+
+Preparers can check milestone payment terms before requesting acceptance review. Acceptance evidence remains specific to the selected milestone throughout the draft.
