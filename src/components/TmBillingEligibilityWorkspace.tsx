@@ -14,6 +14,29 @@ import { hasRatePermission, isRateContextCurrent, type RateContext } from '../se
 type Choice = { id: string; label: string };
 type Template = { key: string; subject: string; body: string };
 const events = ['approval.action_required', 'approval.rejected_or_correction_required', 'approval.completed'];
+const BillingSnapshotEvidence = ({ source }: { source: TmBillingEvidence }) => (
+  <section key={source.snapshotId} aria-label="Retained billing snapshot">
+    <p>Work date {source.workDate} · Billable amount {source.currency} {source.amount}</p>
+    <details>
+      <summary>Snapshot evidence</summary>
+      <dl>
+        <dt>Snapshot ID</dt><dd>{source.snapshotId}</dd>
+        <dt>Work entry</dt><dd>{source.entryId}</dd>
+        <dt>Work submission</dt><dd>{source.submissionId}</dd>
+        <dt>Work approval decision</dt><dd>{source.decisionId}</dd>
+        <dt>Valuation policy</dt><dd>{source.policyId}</dd>
+        <dt>Billing rate adoption</dt><dd>{source.billingAdoptionId}</dd>
+        <dt>Commercial binding</dt><dd>{source.bindingId}</dd>
+        <dt>Contract version</dt><dd>{source.references[0].contractVersionId}</dd>
+      </dl>
+      <ul>
+        {source.references.map((ref) => (
+          <li key={ref.entityType}>{ref.entityType} {ref.entityId} · lifecycle event {ref.lifecycleEventId}</li>
+        ))}
+      </ul>
+    </details>
+  </section>
+);
 export const TmBillingEligibilityWorkspace = ({ choices }: { choices: Choice[] }) => {
   const [engagement, setEngagement] = useState(''),
     [locked, setLocked] = useState(false);
@@ -195,13 +218,19 @@ const TmBillingEngagement = ({
       }
     }
   };
+  const selectSnapshot = (id: string) => {
+    setSnapshotId(id);
+    setPolicyId('');
+    setOwnerId('');
+    setOwnerRole('');
+    setRequestReason('');
+  };
   const load = () =>
     void run(async (c) => {
       clearStage();
       setLoaded(false);
       setSelected('');
-      setSnapshotId('');
-      setPolicyId('');
+      selectSnapshot('');
       const x = await tmBillingEligibility.load(engagementId, c);
       setPolicies(x.policies);
       setMorePolicies(x.morePolicies);
@@ -322,8 +351,9 @@ const TmBillingEngagement = ({
       },
     });
   };
+  const selectedSnapshot = sources.find((source) => source.snapshotId === snapshotId);
   const requestReady = Boolean(
-    snapshotId &&
+    selectedSnapshot &&
       policyId &&
       effectivePolicy?.id === policyId &&
       ownerId &&
@@ -551,7 +581,7 @@ const TmBillingEngagement = ({
                 <select
                   aria-label="Billing snapshot"
                   value={snapshotId}
-                  onChange={(e) => setSnapshotId(e.target.value)}
+                  onChange={(e) => selectSnapshot(e.target.value)}
                 >
                   <option value="">Choose a retained snapshot</option>
                   {sources.map((x) => (
@@ -561,6 +591,7 @@ const TmBillingEngagement = ({
                   ))}
                 </select>
               </label>
+              {selectedSnapshot && <BillingSnapshotEvidence source={selectedSnapshot} />}
               {sourceNext && (
                 <button type="button" onClick={() => more('sources', sourceNext)}>
                   More billing snapshots
@@ -647,11 +678,7 @@ const TmBillingEngagement = ({
           </button>
           {inspected && (
             <section aria-label="Inspected billing review">
-              <p>
-                Snapshot {inspected.source.snapshotId} · {inspected.source.currency} {inspected.source.amount}{' '}
-                · work {inspected.source.submissionId} · decision {inspected.source.decisionId} · policy{' '}
-                {inspected.source.policyId} · billing source {inspected.source.billingAdoptionId}.
-              </p>
+              <BillingSnapshotEvidence source={inspected.source} />
               <p>
                 Review {chosen?.id} · {chosen?.state.status} · current {String(chosen?.current)} · owner{' '}
                 {chosen?.ownerUserId} ({chosen?.ownerRole}). Completed decisions: {chosen?.state.sequence}.

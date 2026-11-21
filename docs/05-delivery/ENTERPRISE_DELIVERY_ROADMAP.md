@@ -197,3 +197,7 @@ Billing and confidential cost rate review cancellations check the inspected stag
 ### Milestone acceptance cancellation
 
 Milestone acceptance cancellations now check the inspected review stage while holding the review lock used for approvals.
+
+### Inspect a T&M snapshot for billing
+
+Billing preparers and reviewers can trace T&M snapshot amounts to approved work and contract versions using the existing billing-only evidence projection.
