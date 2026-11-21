@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 import {readFile} from 'node:fs/promises';
 import {startFixtureServer} from './support/compiled-fixture-server.mjs';
@@ -106,14 +107,52 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
      button.click();
      setTimeout(() => window.dispatchEvent(new Event('workos:organization-scope-switch-requested')),0);
    });
-   await exportButton.waitFor();
-   await page.evaluate(() => sessionStorage.setItem('workos_organization_scope',JSON.stringify({organizationId:'synthetic-other',legalEntityId:'synthetic-other'})));
-   await exportButton.click();
-   await page.getByText('Reload the approval page to export for your current account and scope.').waitFor();
+   const reloadApprovals = page.getByRole('button',{name:'Reload approvals'});
+   await reloadApprovals.waitFor();
+   assert.equal(await page.locator('tbody tr').count(),0);
+   assert.equal(await exportButton.count(),0);
    assert.equal(cancelledDownloads,0);
    assert.equal((await pool.query("select count(*)::int n from audit_logs where action='Export' and module='Timesheet Governance' and user_id=$1",[identities.manager.id])).rows[0].n,3);
+   await page.unroute('**/api/timesheets');
+   await reloadApprovals.click();
+   const submittedRow = page.locator('tbody tr').filter({hasText:today});
+   await submittedRow.click();
+   await page.getByRole('button',{name:'Flag Review'}).click();
+   await page.locator('textarea').fill('Synthetic correction');
+   let decisions = 0;
+   page.on('request', req => { if (req.method()==='PATCH' && new URL(req.url()).pathname.endsWith('/status')) decisions++; });
+   await page.evaluate(() => sessionStorage.setItem('workos_organization_scope',JSON.stringify({organizationId:'synthetic-other',legalEntityId:'synthetic-other'})));
+   await page.getByRole('button',{name:'Send Back'}).click();
+   await reloadApprovals.waitFor();
+   assert.equal(await page.locator('textarea, tbody tr').count(),0);
+   assert.equal(decisions,0);
+   assert.equal((await pool.query('select status from timesheets where id=$1',[saved.body.id])).rows[0].status,'Submitted');
+   // A decision already accepted by the server keeps its original scope even if the UI closes.
+   await reloadApprovals.click();
+   await submittedRow.click();
+   let releaseDecision;
+   const holdResponse = new Promise(resolve => { releaseDecision = resolve; });
+   let received;
+   const serverDecision = new Promise(resolve => { received = resolve; });
+   await page.route('**/api/timesheets/*/status',async route => {
+     const headers = route.request().headers();
+     const response = await route.fetch();
+     received({status:response.status(),organization:headers['x-organization-id'],entity:headers['x-legal-entity-id']});
+     await holdResponse;
+     await route.fulfill({response});
+   });
+   await page.getByRole('button',{name:'Approve',exact:true}).click();
+   try {
+     const receipt = await Promise.race([serverDecision,delay(15000,null,{ref:false})]);
+     assert.deepEqual(receipt,{status:200,organization:f.organizationId,entity:f.legalEntityId});
+     await page.evaluate(() => window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
+     await reloadApprovals.waitFor();
+   } finally { releaseDecision(); }
+   await page.waitForLoadState('networkidle');
+   assert.equal(await page.locator('tbody tr').count(),0);
+   assert.equal((await pool.query('select status from timesheets where id=$1',[saved.body.id])).rows[0].status,'Approved');
    assert.deepEqual(errors,[]);
   }finally{await browser?.close();await fixtureServer.close();}
  });
 });
-console.log('Timesheet Ops Export real browser/API/SQL: literal formula prefix, normal CSV quoting, filename and audit passed.');
+console.log('Timesheet Ops Export real browser/API/SQL: CSV integrity, responsive export, stale decisions and delayed acknowledgements passed.');

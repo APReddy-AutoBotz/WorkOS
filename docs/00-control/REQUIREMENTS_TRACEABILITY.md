@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-NFR-SEC-004 — timesheet approval binds single and bulk decisions to the loaded account, role and organization scope. The browser/API/PostgreSQL journey verifies that a stale rejection sends no request and that a late acknowledgement cannot repopulate a closed view.
+
 WOS-NFR-PERF-006 — Timesheet Ops Export formats filtered entries in bounded batches. `test:timesheet-export-browser` exercises browser input during a 10,000-entry export, CSV row integrity and cancellation on scope switch. Server-side export isolation remains a separate release criterion.
 
 WOS-OPS-006 and WOS-NFR-OBS-003/006 — delivery monitoring covers pending invoice-alert depth and age, integration and notification failures, and invoice-notice persistence and production failures. `test:delivery-health` checks the PostgreSQL snapshot, minimal grants and unavailable-schema behavior. Invoice export failure and recovery journeys cover nonempty queue and failure readings.

@@ -64,6 +64,8 @@ These are product and acceptance commitments, not claims that every capability i
 
 Buyer operations can run `npm run --silent ops:delivery-health` to check pending invoice alerts, their oldest age and recent delivery failures. [Delivery monitoring and database grants](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#delivery-monitoring)
 
+Timesheet approval closes the previous workspace when an operator switches organization scope. Reloading approvals fetches the current view. A decision already accepted by the server retains its original scope.
+
 Timesheet Ops Export prepares large CSVs in batches, keeps the approval page responsive and cancels an in-progress download when the operator switches scope.
 
 Production API replicas emit one JSON traffic summary per minute for monitoring request volume, failures and latency. See [API traffic monitoring](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#api-traffic-monitoring) for alert ownership and aggregation.

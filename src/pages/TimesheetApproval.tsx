@@ -5,7 +5,7 @@ import {WorkSourceIdentity} from '../components/WorkSourceIdentity';
 import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
 import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
 import { WorkSubmissionAssurance } from '../components/WorkSubmissionAssurance';
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
 import { timesheetService, employeeService, projectService, adminService, allocationService } from '../services/api';
@@ -34,12 +34,24 @@ import {canonicalHours} from '../../shared/work-hours.mjs';
 const formatHours=(value:number)=>`${canonicalHours(value)}h`;
 
 import { productConfig } from '../config/productConfig';
-function exportContext() {
+function approvalContext() {
   const user = authService.getCurrentUser();
   const scope = getOrganizationScope();
   return JSON.stringify([getToken(), user?.id, user?.role, user?.permissionRole, scope?.organizationId, scope?.legalEntityId]);
 }
 export const TimesheetApproval = () => {
+  const [stale, setStale] = useState(false);
+  const invalidate = useCallback(() => setStale(true), []);
+  if (stale) return (
+    <div role="status" className="p-6">
+      <p>The approval view closed because your account, role or organization scope changed.</p>
+      <button className="btn-secondary mt-3" onClick={() => window.location.reload()}>Reload approvals</button>
+    </div>
+  );
+  return <ApprovalWorkspace invalidate={invalidate} />;
+};
+
+function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
   const [timesheets, setTimesheets] = useState<TimesheetSummary[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -52,20 +64,40 @@ export const TimesheetApproval = () => {
   const [actionNotice, setActionNotice] = useState('');
   const user = authService.getCurrentUser();
 
-  const loadedContext = useRef<string | null>(null);
+  const [owner] = useState(approvalContext);
+  const live = useRef(true);
   const activeExport = useRef<AbortController | null>(null);
   const [exporting, setExporting] = useState(false);
+  const cancel = useCallback(() => {
+    live.current = false;
+    activeExport.current?.abort();
+    invalidate();
+  }, [invalidate]);
+
+  const isCurrent = useCallback(() => {
+    if (!live.current) return false;
+    if (owner === approvalContext()) return true;
+    cancel();
+    return false;
+  }, [cancel, owner]);
+
   useEffect(() => {
-    const cancel = () => activeExport.current?.abort();
+    live.current = true;
+    const check = () => { isCurrent(); };
+    window.addEventListener('storage', check);
+    window.addEventListener('focus', check);
     window.addEventListener('workos:organization-scope-switch-requested', cancel);
-    window.addEventListener('workos:organization-scope-changed', cancel);
+    window.addEventListener('workos:organization-scope-changed', check);
     return () => {
-      cancel();
+      live.current = false;
+      activeExport.current?.abort();
       activeExport.current = null;
+      window.removeEventListener('storage', check);
+      window.removeEventListener('focus', check);
       window.removeEventListener('workos:organization-scope-switch-requested', cancel);
-      window.removeEventListener('workos:organization-scope-changed', cancel);
+      window.removeEventListener('workos:organization-scope-changed', check);
     };
-  }, []);
+  }, [cancel, isCurrent]);
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -74,17 +106,16 @@ export const TimesheetApproval = () => {
   const [statusFilter, setStatusFilter] = useState('Submitted');
 
   useEffect(() => {
+    let disposed = false;
     const fetchData = async () => {
       try {
-        const owner = exportContext();
         const [tsData, empData, projData, allocData] = await Promise.all([
           timesheetService.getAll(),
           employeeService.getAll(),
           projectService.getAll(),
           allocationService.getAll(),
         ]);
-        if (owner !== exportContext()) return;
-        loadedContext.current = owner;
+        if (disposed || !isCurrent()) return;
         setTimesheets(tsData);
         setEmployees(empData);
         setProjects(projData);
@@ -92,11 +123,12 @@ export const TimesheetApproval = () => {
       } catch (error) {
         console.error('Failed to fetch data', error);
       } finally {
-        setLoading(false);
+        if (!disposed && isCurrent()) setLoading(false);
       }
     };
     fetchData();
-  }, []);
+    return () => { disposed = true; };
+  }, [isCurrent]);
 
   const filteredTimesheets = useMemo(() => {
     const scopedEmployeeIds = new Set(filterEmployeesByOrgVisibility({
@@ -140,25 +172,38 @@ export const TimesheetApproval = () => {
   const submittedFilteredTimesheets = filteredTimesheets.filter(ts => ts.status === 'Submitted');
 
   const refreshTimesheets = async () => {
+    if (!isCurrent()) return false;
     const tsData = await timesheetService.getAll();
+    if (!isCurrent()) return false;
     setTimesheets(tsData);
+    return true;
+  };
+
+  const runDecision = async (operation: () => Promise<void>) => {
+    try {
+      await operation();
+    } catch {
+      if (isCurrent()) setActionNotice('The decision could not be confirmed. Reload approvals to check the latest status before retrying.');
+    }
   };
 
   const handleApprove = async (ts: TimesheetSummary) => {
+    if (!isCurrent()) return;
     if (ts.status !== 'Submitted') {
       setActionNotice('Only submitted timesheets can be approved.');
       return;
     }
     await timesheetService.approve(
       ts.id || `${ts.employeeId}:${ts.weekEnding}`,
-      undefined
+      undefined, isCurrent
     );
-    await refreshTimesheets();
+    if (!await refreshTimesheets() || !isCurrent()) return;
     setActionNotice(`Approved ${ts.employeeName}'s timesheet for ${ts.weekEnding}.`);
     if (selectedId === `${ts.employeeId}:${ts.weekEnding}`) setSelectedId(null);
   };
 
   const openRejectModal = (ts: TimesheetSummary) => {
+    if (!isCurrent()) return;
     if (ts.status !== 'Submitted') {
       setActionNotice('Only submitted timesheets can be sent back for correction.');
       return;
@@ -175,47 +220,43 @@ export const TimesheetApproval = () => {
   };
 
   const confirmReject = async () => {
-    if (!rejectionTarget) return;
+    if (!isCurrent() || !rejectionTarget) return;
     const remark = rejectionReason.trim();
     if (!remark) {
       setRejectionError('A rejection reason is required before sending this timesheet back.');
       return;
     }
-    await timesheetService.reject(rejectionTarget.id || `${rejectionTarget.employeeId}:${rejectionTarget.weekEnding}`, remark);
-    await refreshTimesheets();
+    await timesheetService.reject(rejectionTarget.id || `${rejectionTarget.employeeId}:${rejectionTarget.weekEnding}`, remark, isCurrent);
+    if (!await refreshTimesheets() || !isCurrent()) return;
     setActionNotice(`Rejected ${rejectionTarget.employeeName}'s timesheet for ${rejectionTarget.weekEnding}.`);
     if (selectedId === `${rejectionTarget.employeeId}:${rejectionTarget.weekEnding}`) setSelectedId(null);
     closeRejectModal();
   };
 
   const handleBulkApprove = async () => {
+    if (!isCurrent()) return;
     if (!submittedFilteredTimesheets.length) {
       setActionNotice('No submitted timesheets are available in the current filter scope.');
       return;
     }
     await Promise.all(
       submittedFilteredTimesheets.map(ts =>
-        timesheetService.approve(ts.id || `${ts.employeeId}:${ts.weekEnding}`)
+        timesheetService.approve(ts.id || `${ts.employeeId}:${ts.weekEnding}`, undefined, isCurrent)
       )
     );
-    await refreshTimesheets();
+    if (!await refreshTimesheets() || !isCurrent()) return;
     setSelectedId(null);
     setActionNotice(`Bulk approved ${submittedFilteredTimesheets.length} timesheets.`);
   };
 
   const handleExport = async () => {
-    if (activeExport.current) return;
-    const owner = exportContext();
-    if (loadedContext.current !== owner) {
-      setActionNotice('Reload the approval page to export for your current account and scope.');
-      return;
-    }
+    if (activeExport.current || !isCurrent()) return;
     const controller = new AbortController();
     activeExport.current = controller;
     setExporting(true);
     try {
       const {blob, rowCount} = await buildTimesheetCsv(filteredTimesheets, controller.signal);
-      if (controller.signal.aborted || owner !== exportContext()) return;
+      if (controller.signal.aborted || !isCurrent()) return;
       const url = URL.createObjectURL(blob);
       try {
         const link = document.createElement('a');
@@ -269,7 +310,7 @@ export const TimesheetApproval = () => {
              </button>
              {user?.role === 'Admin' && (
                <button
-                  onClick={handleBulkApprove}
+                  onClick={() => runDecision(handleBulkApprove)}
                   className="btn-primary py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-primary/20"
                >
                   <CheckCircle2 size={14} /> Bulk Approve
@@ -352,7 +393,7 @@ export const TimesheetApproval = () => {
                     )}
                     onClick={() => {
                       const key = `${ts.employeeId}:${ts.weekEnding}`;
-                      setSelectedId(selectedId === key ? null : key);
+                      if (isCurrent()) setSelectedId(selectedId === key ? null : key);
                     }}
                   >
                     <td className="py-5 px-8">
@@ -484,7 +525,7 @@ export const TimesheetApproval = () => {
                     <XCircle size={16} /> Flag Review
                   </button>
                   <button
-                    onClick={() => handleApprove(selectedTimesheet)}
+                    onClick={() => runDecision(() => handleApprove(selectedTimesheet))}
                     className="btn-primary py-3 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
                   >
                     <CheckCircle2 size={16} /> Approve
@@ -569,7 +610,7 @@ export const TimesheetApproval = () => {
                 <button onClick={closeRejectModal} className="btn-secondary px-5 py-3">
                   Cancel
                 </button>
-                <button onClick={confirmReject} className="btn-primary px-5 py-3 shadow-lg shadow-primary/20">
+                <button onClick={() => runDecision(confirmReject)} className="btn-primary px-5 py-3 shadow-lg shadow-primary/20">
                   Send Back
                 </button>
               </div>
