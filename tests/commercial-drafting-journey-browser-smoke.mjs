@@ -547,7 +547,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal(sourceRead.status,200,JSON.stringify(sourceRead.body));
     const {batch:source,ownerKey}=sourceRead.body;
     assert.equal(source.sourceType,'RETAINER_PERIOD');assert.equal(source.lines[0].evidence.reviewId,retainerCommand.reviewId);
-    const policyInput={entityType:'InvoiceBatch',engagementId:eng.body.id,locale:'en-US',completionInApp:true,
+    const policyInput={entityType:'InvoiceBatch',fullLineReversals:true,engagementId:eng.body.id,locale:'en-US',completionInApp:true,
       templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(key=>({key,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))};
     const configure=(reviewer,prior,additionalStages=[])=>act('/policies',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),engagementId:eng.body.id,
       expectedLatestId:prior,effectiveFrom:today,definition:{...policyInput,stages:[{userId:reviewer.id,role:reviewer.role},...additionalStages]},reason:'Synthetic retainer invoice review'});
@@ -689,6 +689,52 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal((await apiRequest(csv+'/confirmation-receipts/'+attestationRequest.requestId,{identity:finance})).body.confirmation.id,receipt.id);
     assert.equal((await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:finance})).body.source.state,'Billed/Confirmed');
     assert.equal((await pool.query('select id from invoice_export_notice_events where confirmation_id=$1',[receipt.id])).rowCount,1);
+    const reversalPath=csv+'/batches/'+batchId+'/lines/'+rebatched.body.line.id+'/reversal-request';
+    const reverse=(path,body)=>apiRequest(reversalPath+path,{method:'POST',identity:finance,body});
+    const requestBody={expectedOwnerKey:ownerKey,artifactId:a.id,sha256:a.sha256,inspectedState:'Billed/Confirmed',reason:'Reverse duplicate downstream charge'};
+    assert.equal((await reverse('',{...requestBody,inspectedState:'Exported'})).status,409);
+    assert.equal((await apiRequest(reversalPath,{identity:identities.reader})).status,403);
+    await csvDesk.getByLabel('Invoice export engagement').selectOption(eng.body.id);
+    await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
+    await csvDesk.getByLabel('Invoice export batch').selectOption(batchId);
+    await csvDesk.getByRole('button',{name:'Inspect invoice export source'}).click();
+    await csvDesk.getByRole('button',{name:'Retrieve retained invoice CSV'}).click();
+    await csvDesk.getByLabel('Exported line to review').selectOption(rebatched.body.line.id);
+    await csvDesk.getByRole('button',{name:'Check reversal request'}).click();
+    await csvDesk.getByLabel('Full reversal reason').fill(requestBody.reason);
+    await csvDesk.getByRole('button',{name:'Request full line reversal'}).click();
+    await csvDesk.getByRole('button',{name:'Check reversal reviewers'}).click();
+    await csvDesk.getByRole('button',{name:'Submit reversal for independent review'}).click();
+    await csvDesk.getByText(/Submitted reversal review/).waitFor();
+    assert.equal((await reverse('',requestBody)).body.replayed,true);
+    const savedReview=(await apiRequest(reversalPath+'/review',{identity:finance})).body.review;
+    const decisionPath='/api/v1/work-approvals/reversal-reviews/'+savedReview.id;
+    const stageDecision=(who,key,n)=>apiRequest(decisionPath+'/decisions',{method:'POST',identity:who,body:{
+      expectedOwnerKey:key,expectedSequence:n,policyId:stagedPolicy.body.policy.id,confirmationId:receipt.id,decision:'Approved',reason:'Verified retained service period charge'}});
+    const aliasCheck=await pool.connect();
+    try {
+      await aliasCheck.query('begin');
+      await aliasCheck.query('update users set employee_record_id=(select employee_record_id from users where id=$1) where id=$2',[identities.manager.id,alias.id]);
+      const eligibility=await aliasCheck.query('select retainer_review_participants_valid(retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',[finance.id,finance.role,stagedPolicy.body.policy.id,batchId]);
+      assert.equal(eligibility.rows[0].ok,false,'Two accounts for the same worker cannot independently review a reversal');
+    } finally {
+      await aliasCheck.query('rollback');
+      aliasCheck.release();
+    }
+    const firstReversal=await stageDecision(identities.manager,reviewerKey,0);
+    assert.equal(firstReversal.status,201,JSON.stringify(firstReversal.body));
+    assert.equal(firstReversal.body.review.sourceType,'RETAINER_PERIOD');
+    const stageWorker=(await pool.query('select employee_record_id from users where id=$1',[alias.id])).rows[0].employee_record_id;
+    await pool.query('update users set employee_record_id=null where id=$1',[alias.id]);
+    await pool.query('update users set employee_record_id=$2 where id=$1',[alias.id,stageWorker]);
+    assert.equal((await apiRequest(decisionPath,{identity:alias})).body.review.canDecide,false);
+    assert.equal((await stageDecision(alias,secondKey,1)).status,409);
+    await assert.rejects(pool.query(
+      "insert into invoice_reversal_decisions(id,review_id,sequence,actor_id,active_role,reason,confirmation_id,decision,operation_id) values($1,$2,2,$3,$4,'Synthetic stale decision',$5,'Approved',$6)",
+      [crypto.randomUUID(),savedReview.id,alias.id,alias.role,receipt.id,crypto.randomUUID()]),
+      err=>err.code==='IBA02' && err.message.includes('Reversal reviewer identity changed'));
+    assert.equal((await pool.query('select sequence from invoice_reversal_decisions where review_id=$1',[savedReview.id])).rowCount,1);
+    assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[batchId])).rowCount,1);
     await csvBrowser.context.close();
     await reviewBrowser.context.close();
     await preparing.context.close();
@@ -702,6 +748,6 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await billing.context.close();
     await reviewer.context.close();
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
-    console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export and downstream billing attestation, completion notices, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
+    console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export and downstream billing attestation, independent retainer reversal review, completion notices, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
   } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
 }, {upgrade: true});
