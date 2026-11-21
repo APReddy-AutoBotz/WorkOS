@@ -104,6 +104,16 @@ Run `npm run test:timesheet-export-browser` with the locked Chromium version and
 
 Migration 082q sets a fixed function lookup path for the CHECK validators that call other WorkOS functions. This lets PostgreSQL validate populated policies during archive restoration with its empty session search path. Apply 082q before taking the release backup, then rehearse that archive on a fresh database. Archives made before 082q retain their original validator definitions. Where the source is still available, migrate it and take a new verified archive. Retain the validator settings on application rollback.
 
+**Recovering an 082p archive when the source is unavailable.** Use a trusted PostgreSQL custom-format dump from a database whose last migration was `082p_wos06_retainer_credit`. Provision a fresh isolated database from `template0` with the expected owner roles and extensions available. Keep application traffic and external integrations disabled. Configure a libpq service for this destination and an owner-only temporary directory on an encrypted volume with room for the expanded SQL. From the release checkout, run:
+
+```sh
+PGSERVICE=workos_recovery TMPDIR=/secure/recovery-tmp node scripts/restore-082p-archive.mjs /secure/backups/workos.dump
+```
+
+The command uses PostgreSQL client tools on PATH and standard noninteractive libpq authentication. It loads the schema, applies the 082q function settings, loads data with CHECK constraints enforced, verifies the historical migration IDs, and restores indexes and triggers in a single transaction. It refuses a populated destination and removes temporary SQL on normal exit. After an interrupted process, remove any abandoned private SQL directory once the process has stopped. Preserve the source archive.
+
+Run the release migrator against the recovered database through the normal deployment configuration. Verify the ledger, financial control totals, scoped reads and an audited write before cutover. A failed transaction leaves the destination at its prior state. If the deployed application is rolled back, retain accepted migration history and validator settings.
+
 Run `npm run test:commercial-drafting-journey -- --restore-credit` with Chromium, PostgreSQL 16 client tools on PATH, and the disposable database connection used by CI. After the approved-credit journey stops its source API, the rehearsal takes a custom-format archive and restores it transactionally into a separate database. The recovered API must return the exact invoice and credit bytes, enforce the original role boundary, recover both original confirmation receipts on retry, and preserve their occupied register items. The database check traces the credit to the original and reconciles the signed amounts in their native currency.
 
 The CI step summary records the public table count, migration count, archive snapshot age at the simulated incident, and elapsed time from that incident through recovered application verification. The standard-profile targets are 24 hours for RPO and 8 hours for RTO. The synthetic incident occurs immediately after backup. Buyer acceptance also requires evidence of the deployed backup cadence, retention, archive access, data volume, and operator cutover time.

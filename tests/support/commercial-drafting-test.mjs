@@ -72,7 +72,7 @@ export const withCommercialMigrationsThrough = async (lastVersion,test) => {
     await mkdir(join(directory, 'migrations'));
     await copyFile(join(commercialServerDir, 'schema.sql'), join(directory, 'schema.sql'));
     for (const file of (await readdir(join(commercialServerDir, 'migrations'))).sort()) {
-      if (/^\d{3}[a-z]?_[a-z0-9_]+\.sql$/.test(file) && Number(file.slice(0, 3)) <= lastVersion) {
+      if (/^\d{3}[a-z]?_[a-z0-9_]+\.sql$/.test(file) && (typeof lastVersion === 'number' ? Number(file.slice(0, 3)) <= lastVersion : file <= lastVersion + '.sql')) {
         await copyFile(join(commercialServerDir, 'migrations', file), join(directory, 'migrations', file));
       }
     }
