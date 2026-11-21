@@ -191,3 +191,5 @@ An approved batch is never returned to review. Before export, protected cancella
 ### Retainer contract periods
 
 Each immutable retainer contract version may define up to 120 ordered, non-overlapping service periods within the term. Each period records inclusive dates, positive included hours and a nonnegative base fee in contract currency, each with up to four decimal places. Gaps are allowed. An empty list represents unspecified periods. Operational valuation and billing eligibility require their own approved policy and evidence.
+
+The approved-hours view aggregates positive governed project hours against the contract version retained at submission and the inclusive service period containing the work date. The final approval and approved timesheet must agree. Billable and non-billable hours appear separately within the viewer’s worker scope. These figures represent operational work evidence. Capacity deductions, rollover, earned valuation and billing eligibility require separate policy decisions.

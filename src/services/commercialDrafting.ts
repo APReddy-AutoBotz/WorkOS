@@ -218,6 +218,19 @@ export const commercialDraftingService = {
   installmentRegister: (versionId:string, context:CommercialDraftingContext,
     command?:{installment:number; engagementId:string; reason:string}) =>
     request(context,command?'POST':'GET',`/fixed-fee-schedules/${encodeURIComponent(versionId)}/register`,command,installmentReceipts),
+  retainerConsumption: (contractId:string, version:ContractTerms, context:CommercialDraftingContext) =>
+    request(context,'GET',`/contracts/${encodeURIComponent(contractId)}/versions/${encodeURIComponent(version.id)}/retainer-consumption`,undefined,value=>{
+      const row=object(value);
+      if (row.contractId!==contractId || row.versionId!==version.id) throw invalid();
+      const periods=rows(row.periods, item=>{
+        const p=object(item);
+        const quantity=(v:unknown)=>{const s=text(v); if (!/^\d+(?:\.\d+)?$/.test(s)) throw invalid(); return s;};
+        return {startsOn:date(p.startsOn),endsOn:date(p.endsOn),billableHours:quantity(p.billableHours),nonBillableHours:quantity(p.nonBillableHours)};
+      });
+      const expected=version.retainerPeriods ?? [];
+      if (periods.length!==expected.length || periods.some((p,i)=>p.startsOn!==expected[i].startsOn || p.endsOn!==expected[i].endsOn)) throw invalid();
+      return periods;
+    }),
   purchaseOrderBalance: (order:PurchaseOrder, context:CommercialDraftingContext) =>
     request(context,'GET','/purchase-orders/'+encodeURIComponent(order.id)+'/balance',undefined,value=>{
       const row=object(value);

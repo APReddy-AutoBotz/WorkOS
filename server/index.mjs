@@ -6475,7 +6475,7 @@ app.use('/api/v1/work-categories',createWorkCategoryRouter({pool,requireDatabase
 app.use('/api/v1/work-capture-modes',createCaptureModesRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
 app.use('/api/v1/work-submission-deadline',createSubmissionDeadlineRouter({pool,requireDatabase,requireAuth,requirePermission}));
 app.use('/api/v1/work-capture-policy',createCapturePolicyRouter({pool,requireDatabase,requireAuth,requirePermission,audit}));
-app.use('/api/v1/commercial-drafting', createCommercialDraftingRouter({pool,requireDatabase,requireAuth,audit}));
+app.use('/api/v1/commercial-drafting', createCommercialDraftingRouter({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit}));
 app.use('/api/v1/client-profiles', createClientProfilesRouter({pool,requireDatabase,requireAuth,audit}));
 
 app.use('/api/v1', versionedApiErrorHandler);

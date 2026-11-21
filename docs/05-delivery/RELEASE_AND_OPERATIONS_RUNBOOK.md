@@ -644,3 +644,5 @@ Select the milestone and check its code, due date, amount and contract version. 
 ### Retainer contract periods
 
 Apply migration 082d before deploying the retainer editor. Existing contract versions receive an empty period list. In Commercial Drafting, select Retainer, add service periods and inspect the saved version history. Older clients that omit periods on revision inherit the previous list. An explicit empty list clears the new version. For application rollback, retain migration 082d in the manifest and keep the column and constraint. Suspend retainer contract revisions until the serving API can preserve the recorded periods.
+
+To inspect approved retainer hours, open the saved contract version and select **Inspect approved retainer hours**. The active role needs contract view, employee view and utilization-report access. Totals cover visible workers only. A zero can reflect scope, pending approval, a different retained version, or an empty period. This read-only report requires no new migration. Reverting the application change removes the report and preserves all work and contract evidence.
