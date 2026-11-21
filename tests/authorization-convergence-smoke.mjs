@@ -23,5 +23,5 @@ for (const [name, pattern] of contracts) assert.match(source + readFileSync(new 
 assert.match(migration, /state_hash text not null unique/);
 assert.match(migration, /expires_at timestamptz not null/);
 assert.equal(validateRuntimeEnvironment({}).loginRateLimit,8,'production login rate limiting retains a validated default of eight attempts');
-assert.match(identityFixture, /LOGIN_RATE_LIMIT: '13'/, 'the thirteen-callback identity fixture must use an explicit bounded allowance');
+assert.match(identityFixture, /LOGIN_RATE_LIMIT: '14'/, 'the fourteen-callback identity fixture must use an explicit bounded allowance');
 console.log(`Authorization convergence smoke passed (${contracts.length} controls).`);

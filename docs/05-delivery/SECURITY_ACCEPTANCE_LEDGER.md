@@ -23,7 +23,7 @@ This revision adds [independent leave decisions](../tasks/WOS-05-INDEPENDENT-LEA
 
 ## Remaining priority work
 
-1. Complete session lifetime change auditing under WOS-IAM-008. Track administrative revoke-all separately. See the session evidence below.
+1. Rehearse account-wide session revocation with the buyer’s named incident responders before production acceptance.
 2. Verify independent leave decisions, current director/relationship bindings and delegation authority against accepted behavior. Retain negative self-approval and stale-authority cases.
 3. Verify invoice source eligibility and alternate-source protections in the commercial integration sequence. Financial policy and immutable snapshots must remain authoritative.
 4. Integrate remaining timesheet/export safety and notification diagnostic controls with actual scope, CSV and redaction tests.
@@ -38,8 +38,8 @@ The earlier logout finding concerned reuse of a signed credential after logout. 
 | Requirement or operation | Evidence and remaining work |
 |---|---|
 | WOS-IAM-008 and WOS-IAM-010, current-session logout | The API suite checks denial of bearer and cookie reuse, including refresh and role-switch siblings. An independent sign-in remains usable. A second API process enforces revocation. Failed audit writes roll back the logout transaction. |
-| WOS-IAM-008, absolute lifetime | Refresh and role switch preserve the original expiry. The server reads `API_SESSION_TTL_HOURS` and derives the cookie lifetime from the expiry. Evidence of who changed the configured lifetime, when, and its previous and new values remains outstanding. |
-| Administrative revoke-all | Current-session logout targets the presented credential families. Revoking every independent session for a user remains a separate operation requiring its own authority and audit evidence. |
+| WOS-IAM-008, absolute lifetime | Refresh and role switch preserve the original expiry. The server reads `API_SESSION_TTL_HOURS` and derives the cookie lifetime from the expiry. Migration 082a adds the prior and new values, timestamp, authenticated database operator and active database role. CI checks access denial, transaction rollback and production replica mismatch. |
+| Administrative revoke-all | An explicit database function grant authorizes account-wide revocation. Migration 082b and the session PostgreSQL suite cover denied execution, actor attribution, audit rollback, stale retries, independent account isolation, reactivation and fresh sign-in. |
 
 ## Rollback and release boundary
 
