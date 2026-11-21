@@ -1,3 +1,4 @@
+import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import assert from 'node:assert/strict';
 import {retainerBalances} from '../server/modules/commercial-drafting/retainer-balances.mjs';
 import {randomUUID} from 'node:crypto';
@@ -31,9 +32,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       assert.equal(r.status,status,JSON.stringify(r.body)); return r.body;
     };
     const tomorrow=addUtcDays(today,1),end=addUtcDays(today,30);
-    const periods=[today,tomorrow].map(day=>({startsOn:day,endsOn:day,includedHours:'10',baseFee:'100'}));
+    const periods=[today,tomorrow].map(day=>({startsOn:day,endsOn:day,includedHours:'1.0001',baseFee:'100'}));
     const {project,contract,pin}=await createAmendmentHierarchy(request,'SYN-RETAINER-HOURS',{
-      contract:{model:'retainer',startsOn:today,endsOn:end,effectiveFrom:today,retainerPeriods:periods,retainerCapacityPolicy:'all_rollover'},
+      contract:{model:'retainer',startsOn:today,endsOn:end,effectiveFrom:today,retainerPeriods:periods,retainerCapacityPolicy:'all_rollover',retainerOveragePolicy:'contract_hourly_at_period_end'},
       engagement:{startsOn:today,endsOn:end},project:{startsOn:today,endsOn:end}});
     const read=async(identity=identities.manager,version=pin)=>{
       const res=await request(`/contracts/${contract.id}/versions/${version}/retainer-consumption`,{identity});
@@ -63,13 +64,33 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(identities.first),empty);
     const path=`/contracts/${contract.id}/versions/${pin}/retainer-consumption`;
     const full=(await request(path)).body.periods;
-    assert.deepEqual(full[0].capacity,{consumed:'3.75',carriedIn:'0',remaining:'6.25',overage:'0',expired:'0',carriedOut:'0'});
+    assert.deepEqual(full[0].capacity,{consumed:'3.75',carriedIn:'0',remaining:'0',overage:'2.7499',expired:'0',carriedOut:'0'});
     assert.equal(full[1].capacity,undefined);
     for (const identity of [identities.reader,identities.first])
       assert((await request(path,{identity})).body.periods.every(p=>p.capacity===undefined));
+    const previewPath=path.replace('retainer-consumption','retainer-overage-preview');
+    const preview=async()=>{const r=await request(previewPath);assert.equal(r.status,200,JSON.stringify(r.body));return r.body.periods[0];};
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.rate_candidates.view'");
+    assert.equal((await request(previewPath)).status,403);
+    for (const [role,grants] of [['Admin',['commercial.rate_candidates.view','commercial.rate_candidates.manage','commercial.rate_approvals.decide']],
+      ['Employee',['commercial.rate_candidates.view']]]) await pool.query(
+      `insert into role_permissions(role_name,permission_key,enabled) select $1,k,true from unnest($2::text[]) k
+       on conflict(role_name,permission_key) do update set enabled=true`,[role,grants]);
+    assert.equal((await request(previewPath,{identity:identities.reader})).status,403);
+    assert.equal((await preview()).status,'missing');
+    const opts={request,ids:identities,contractId:contract.id,today,end,currency:contract.versions[0].currency};
+    await adoptHourlyRate({...opts,currency:'JPY'},'billing','999.00');
+    assert.equal((await preview()).status,'missing');
+    const adoption=await adoptHourlyRate(opts,'billing','12.3456');
+    const priced=await preview();
+    assert.deepEqual([priced.status,priced.hours,priced.amount,priced.source.adoptionId,priced.source.effectiveFrom,priced.source.effectiveTo],
+      ['priced','2.7499','33.94916544',adoption.id,today,end]);
+    await adoptHourlyRate(opts,'billing','14.00');
+    const conflict=await preview(); assert.equal(conflict.status,'conflict');assert.equal(conflict.amount,null);assert.equal(conflict.source,null);
     const {id,version,...terms}=contract.versions[0];
     const revised=await post('/contracts/'+contract.id+'/versions',{...terms,expectedVersion:version,effectiveFrom:tomorrow,
-      reason:'Synthetic prospective revision'});
+      reason:'Synthetic prospective revision',retainerOveragePolicy:null});
+    assert.equal((await request(previewPath.replace(pin,revised.versions[0].id))).status,409);
     assert.deepEqual(await read(identities.manager,revised.versions[0].id),empty);
     assert.deepEqual(await read(),approved);
   });

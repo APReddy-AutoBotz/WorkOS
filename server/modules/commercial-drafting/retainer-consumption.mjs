@@ -1,22 +1,27 @@
+import {authorizeRateCandidate} from '../commercial-rates/router.mjs';
+import {priceRetainerOverage} from './retainer-overage.mjs';
 import {retainerBalances} from './retainer-balances.mjs';
 import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
-export async function getRetainerConsumption(client, req, buildEmployeeScopeWhere) {
+export async function getRetainerConsumption(client, req, buildEmployeeScopeWhere, priceOverage=false) {
   await assertCommercialAuthority(client, req, 'employees.view');
   await assertCommercialAuthority(client, req, 'reports.view_utilization');
+  if (priceOverage) await authorizeRateCandidate(client,req,'billing');
   const {organizationId, legalEntityId} = req.organizationScope;
   const {id:contractId, versionId} = req.params;
   const params = [organizationId, legalEntityId, contractId, versionId];
   const version = await client.query(
-    `select retainer_periods,retainer_capacity_policy,(now() at time zone 'UTC')::date::text today from commercial_contract_versions where organization_id=$1 and legal_entity_id=$2
+    `select retainer_periods,retainer_capacity_policy,retainer_overage_policy,currency,(now() at time zone 'UTC')::date::text today from commercial_contract_versions where organization_id=$1 and legal_entity_id=$2
      and contract_id=$3 and id=$4 and model='retainer'`, params);
   if (!version.rowCount) fail(404,'COMMERCIAL_NOT_FOUND','The scoped retainer version was not found.');
   const periods = version.rows[0].retainer_periods;
-  if (!periods.length) return {contractId, versionId, periods:[]};
   params.push(JSON.stringify(periods));
   const coverage = {entityWide:false};
   const workerScope = buildEmployeeScopeWhere(req,params,'worker',coverage);
+  if (priceOverage && !coverage.entityWide) fail(403,'COMMERCIAL_PERMISSION_DENIED','Contract-wide worker visibility is required for overage pricing.');
+  if (priceOverage && !version.rows[0].retainer_overage_policy) fail(409,'COMMERCIAL_RETAINER_OVERAGE_UNSPECIFIED','Select overage terms on a contract version before pricing.');
+  if (!periods.length) return {contractId, versionId, periods:[]};
   const result = await client.query(`
     with periods as (
       select * from jsonb_to_recordset($5::jsonb) as p("startsOn" date,"endsOn" date)
@@ -50,5 +55,9 @@ export async function getRetainerConsumption(client, req, buildEmployeeScopeWher
   const {retainer_capacity_policy:policy,today} = version.rows[0];
   const rows = coverage.entityWide && policy
     ? retainerBalances(periods,result.rows,policy,today) : result.rows;
+  if (priceOverage) {
+    const {currency,retainer_overage_policy:overagePolicy}=version.rows[0];
+    return {contractId,versionId,currency,periods:await priceRetainerOverage(client,req.organizationScope,contractId,currency,overagePolicy,rows)};
+  }
   return {contractId, versionId, periods:rows};
 }
