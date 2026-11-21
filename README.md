@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+T&M billing cancellations apply to the inspected review stage. If another reviewer advances it, finance must reopen the current stage before cancelling.
+
 When adopted rates tie, finance can see the shared priority and two candidate version IDs in rate resolution and T&M valuation review.
 
 Finance can reopen an adopted billing or cost rate to inspect its recorded reason, actor, role and approval references. Resolving a rate shows the selected version, binding, effective dates and priority.

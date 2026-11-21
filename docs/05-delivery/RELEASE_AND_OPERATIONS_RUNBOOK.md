@@ -620,3 +620,7 @@ Open the candidate version, select **Inspect approved reviews**, then expand **A
 ### Diagnose competing adopted rates
 
 For an adopted rate conflict, inspect the two candidate version IDs shown at the shared priority. These are examples if more than two versions tie. Review the effective dates and approval evidence before adopting a corrected higher-priority version through the normal approval process.
+
+### T&M billing review cancellation
+
+After a billing stage changes, reload the engagement, inspect the current review and enter a new reason if cancellation is still intended. API clients send the inspected expectedSequence. Older callers omitting it can cancel at sequence zero or replay their original accepted command. Deploy the API before the web client and roll both back together if needed.

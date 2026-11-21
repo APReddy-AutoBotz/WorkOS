@@ -701,7 +701,7 @@ export const createTmBillingRouter = (o) => {
     '/instances/:id/cancellations',
     handle(true, async (c, r) => {
       const instanceId = parse(uuid, r.params.id),
-        d = parse(z.object(baseBody).strict(), r.body);
+        d = parse(z.object({ ...baseBody, expectedSequence: z.number().int().min(0).max(9).optional() }).strict(), r.body);
       fence(r, d.expectedOwnerKey);
       await authorize(c, r, 'manager');
       const i = await instance(c, r, instanceId, true),
@@ -724,6 +724,9 @@ export const createTmBillingRouter = (o) => {
           throw fail(409, 'TM_BILLING_KEY', 'Original cancellation differs.');
         return { ...(await envelope(c, r)), approval: await view(c, i), replayed: true };
       }
+      const { state } = await view(c, i);
+      if (state.status !== 'Pending' || state.sequence !== (d.expectedSequence ?? 0))
+        throw fail(409, 'TM_BILLING_STAGE_CHANGED', 'Inspect the current billing review stage before cancelling.');
       const cid = randomUUID();
       await context(c, r, i.id);
       await c.query(

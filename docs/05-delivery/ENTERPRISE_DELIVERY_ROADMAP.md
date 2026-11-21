@@ -185,3 +185,7 @@ WOS-COM-001–003. Finance can trace a resolved billing or cost rate to its effe
 ### Diagnose competing adopted rates
 
 WOS-COM-003 and WOS-COM-006 — Rate conflict diagnosis is available during source inspection and T&M valuation review. A tied resolution continues to block valuation.
+
+### T&M billing review cancellation
+
+T&M billing managers can cancel the pending stage they inspected. A concurrent reviewer advancing the stage invalidates an earlier cancellation draft.

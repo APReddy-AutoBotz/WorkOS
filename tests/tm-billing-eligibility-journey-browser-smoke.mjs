@@ -569,7 +569,21 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           "insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency) values('synthetic-finance-month',$1,$2,'FIN','Synthetic finance month',$3,$3,'Financially Locked','Monthly')",
           [f.organizationId, f.legalEntityId, fx.today],
         );
+        await loadPolicySelection();
+        await ui.getByLabel('Billing review', { exact: true }).selectOption(review.id);
+        const inspect = ui.getByRole('button', { name: 'Inspect retained billing evidence', exact: true });
+        await inspect.click();
+        const cancellationReason = ui.getByLabel('Billing cancellation reason', { exact: true });
+        await cancellationReason.fill('Synthetic cancelled draft');
+        await inspect.click();
+        await ui.getByText(/Completed decisions: 0/).waitFor();
+        assert.equal(await cancellationReason.inputValue(), '');
+        await cancellationReason.fill('Synthetic stage zero cancellation');
         const first = await decideUI(ids.manager);
+        const cancellation = wait(p, b + '/instances/' + review.id + '/cancellations', 'POST');
+        await ui.getByRole('button', { name: 'Cancel billing review', exact: true }).click();
+        assert.equal((await body(cancellation, 409)).error.code, 'TM_BILLING_STAGE_CHANGED');
+        await ui.getByText(/Reload and inspect the current stage before cancelling/).waitFor();
         assert.equal(first.out.approval.state.status, 'Pending');
         assert.equal((await pool.query('select count(*)::int n from approved_unbilled_items')).rows[0].n, 0);
         await decideUI(ids.second, true);

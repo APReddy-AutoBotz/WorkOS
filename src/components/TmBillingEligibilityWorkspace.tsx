@@ -108,6 +108,12 @@ const TmBillingEngagement = ({
     onLockChange(busy || !!pending);
     return () => onLockChange(false);
   }, [busy, pending, onLockChange]);
+  const clearStage = () => {
+    setInspected(null);
+    setDecision('');
+    setDecisionReason('');
+    setCancelReason('');
+  };
   const clear = (message: string) => {
     ++generation.current;
     context.current = null;
@@ -126,10 +132,7 @@ const TmBillingEngagement = ({
     setOwnerRole('');
     setRequestReason('');
     setSelected('');
-    setInspected(null);
-    setDecision('');
-    setDecisionReason('');
-    setCancelReason('');
+    clearStage();
     setFrom('');
     setLocale('');
     setCompletion('');
@@ -194,6 +197,11 @@ const TmBillingEngagement = ({
   };
   const load = () =>
     void run(async (c) => {
+      clearStage();
+      setLoaded(false);
+      setSelected('');
+      setSnapshotId('');
+      setPolicyId('');
       const x = await tmBillingEligibility.load(engagementId, c);
       setPolicies(x.policies);
       setMorePolicies(x.morePolicies);
@@ -202,10 +210,7 @@ const TmBillingEngagement = ({
       setSourceNext(x.sourcesNext);
       setApprovalNext(x.approvalsNext);
       setEffectivePolicy(x.effectivePolicy);
-      setPolicyId('');
       setLoaded(true);
-      setInspected(null);
-      setSelected('');
     });
   const more = (kind: 'sources' | 'instances', after: string) =>
     void run(async (c) => {
@@ -230,6 +235,7 @@ const TmBillingEngagement = ({
   const inspect = () => {
     if (!selected) return;
     void run(async (c) => {
+      clearStage();
       const x = await tmBillingEligibility.inspect(selected, c);
       if (x.approval.engagementId !== engagementId) throw Error('Scope changed');
       setInspected({ approval: x.approval, source: x.source });
@@ -266,6 +272,8 @@ const TmBillingEngagement = ({
           setInspected(null);
           setNotice(e.code === 'BILLING_ELIGIBILITY_PERIOD_CLOSED'
             ? 'The eligibility date is outside an open financial period. Review the reporting calendar before approving.'
+            : e.code === 'TM_BILLING_STAGE_CHANGED'
+            ? 'The review stage changed. Reload and inspect the current stage before cancelling.'
             : 'The operation was refused. Reload before a deliberate new request.');
           return;
         }
@@ -361,7 +369,7 @@ const TmBillingEngagement = ({
     perform({
       type: 'cancellation',
       id: chosen.id,
-      data: { requestId: crypto.randomUUID(), reason: cancelReason.trim() },
+      data: { requestId: crypto.randomUUID(), expectedSequence: chosen.state.sequence, reason: cancelReason.trim() },
     });
   };
   return (
@@ -614,7 +622,7 @@ const TmBillingEngagement = ({
               value={selected}
               onChange={(e) => {
                 setSelected(e.target.value);
-                setInspected(null);
+                clearStage();
               }}
             >
               <option value="">Choose a review</option>
@@ -646,7 +654,7 @@ const TmBillingEngagement = ({
               </p>
               <p>
                 Review {chosen?.id} · {chosen?.state.status} · current {String(chosen?.current)} · owner{' '}
-                {chosen?.ownerUserId} ({chosen?.ownerRole}).
+                {chosen?.ownerUserId} ({chosen?.ownerRole}). Completed decisions: {chosen?.state.sequence}.
               </p>
               {canDecide && chosen?.current && chosen.state.status === 'Pending' && (
                 <fieldset disabled={busy || !!pending}>
