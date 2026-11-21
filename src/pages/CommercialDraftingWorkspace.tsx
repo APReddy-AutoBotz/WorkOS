@@ -242,7 +242,7 @@ export const CommercialDraftingWorkspace = () => {
   const invoiceEngagements = workspace?.engagements.filter(e =>
     e.model === 'time_and_materials' || (e.model === 'milestone' && canViewMilestones)
   ) ?? [];
-  const draftEngagements=[...invoiceEngagements,...(workspace?.engagements.filter(e=>e.model==='fixed_fee' && state.context?.canIssueInstallment)??[])];
+  const draftEngagements=[...invoiceEngagements,...(workspace?.engagements.filter(e=>(e.model==='fixed_fee' && state.context?.canIssueInstallment) || (e.model==='retainer' && hasRatePermission('commercial.retainer_eligibility.issue')))??[])];
   const invoiceChoices = invoiceEngagements.map(e => ({ id: e.id, label: e.name }));
   const draft = workspace && state.context?.canManage ? state.draft : undefined;
   const detail = workspace ? state.detail : undefined;
@@ -289,7 +289,7 @@ export const CommercialDraftingWorkspace = () => {
       <InvoiceNoticeRecovery choices={invoiceChoices}/>
       <ReviewedInvoiceBatch choices={invoiceChoices}/>
       <InvoiceBatchApprovalWorkspace choices={invoiceChoices}/>
-      <InvoiceDraftWorkspace choices={draftEngagements.flatMap(x=>x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency,...(x.model==='fixed_fee'?{sourceType:'FIXED_FEE_INSTALLMENT' as const}:x.model==='milestone'?{sourceType:'MILESTONE_ACCEPTANCE' as const}:{})}]:[])}/>
+      <InvoiceDraftWorkspace choices={draftEngagements.flatMap(x=>x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency,...(x.model==='retainer'?{sourceType:'RETAINER_PERIOD' as const}:x.model==='fixed_fee'?{sourceType:'FIXED_FEE_INSTALLMENT' as const}:x.model==='milestone'?{sourceType:'MILESTONE_ACCEPTANCE' as const}:{})}]:[])}/>
       <TmBillingEligibilityWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <RateCandidates kind="billing" choices={[...workspace.contracts.map(x=>({type:'contract' as const,id:x.id,label:x.number})),...workspace.engagements.map(x=>({type:'engagement' as const,id:x.id,label:x.name}))]}/>
       <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">

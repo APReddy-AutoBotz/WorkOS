@@ -18,17 +18,26 @@ type Choice = {
   clientId: string;
   contractId: string;
   currency: string;
-  sourceType?: 'MILESTONE_ACCEPTANCE' | 'FIXED_FEE_INSTALLMENT';
+  sourceType?: 'MILESTONE_ACCEPTANCE' | 'FIXED_FEE_INSTALLMENT' | 'RETAINER_PERIOD';
 };
 type MilestoneItem = Awaited<ReturnType<typeof milestoneBilling.register>>['items'][number];
 type RegisterItem = Awaited<ReturnType<typeof tmBillingEligibility.register>>['items'][number];
+const isContractCharge=(source?:string)=>source==='RETAINER_PERIOD' || source==='FIXED_FEE_INSTALLMENT';
+async function availableCharges(batch:InvoiceDraft,context:RateContext|null,after?:string) {
+  if (batch.sourceType==='RETAINER_PERIOD') {
+    const page=await invoiceDrafts.availableRetainerCharges(batch.id,context,after);
+    return {nextAfter:page.nextAfter,items:page.items.map(x=>({id:x.id,value:'retainer:'+x.id,label:`Retainer ${x.startsOn} through ${x.endsOn} · ${x.currency} ${x.amount}`}))};
+  }
+  const page=await invoiceDrafts.availableInstallments(batch.id,context,after);
+  return {nextAfter:page.nextAfter,items:page.items.map(x=>({id:x.id,value:'fixed:'+x.id,label:`Installment ${x.installment} · ${x.dueOn} · ${x.currency} ${x.amount}`}))};
+}
 export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
   const [batches, setBatches] = useState<InvoiceDraft[]>([]),
     [batchNext, setBatchNext] = useState<string | null>(null),
     [register, setRegister] = useState<RegisterItem[]>([]),
     [registerNext, setRegisterNext] = useState<string | null>(null),
-    [fixedItems,setFixedItems]=useState<Awaited<ReturnType<typeof invoiceDrafts.availableInstallments>>['items']>([]),
-    [fixedNext,setFixedNext]=useState<string|null>(null),
+    [chargeItems,setChargeItems]=useState<Awaited<ReturnType<typeof availableCharges>>['items']>([]),
+    [chargeNext,setChargeNext]=useState<string|null>(null),
     [milestones, setMilestones] = useState<MilestoneItem[]>([]),
     [milestoneNext, setMilestoneNext] = useState<string | null>(null),
     [milestoneEnabled, setMilestoneEnabled] = useState(false),
@@ -61,7 +70,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     setBatchNext(null);
     setRegister([]);
     setRegisterNext(null);
-    setFixedItems([]);setFixedNext(null);
+    setChargeItems([]);setChargeNext(null);
     setMilestones([]);
     setMilestoneNext(null);
     setMilestoneEnabled(false);
@@ -182,9 +191,9 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     if (!selected) return;
     void run(async (c) => {
       const x = await invoiceDrafts.inspect(selected, c, canCancel);
-      const fixed=x.batch.sourceType==='FIXED_FEE_INSTALLMENT' && x.batch.state==='Draft' && canPrepare
-        ? await invoiceDrafts.availableInstallments(selected,c) : null;
-      setFixedItems(fixed?.items??[]);setFixedNext(fixed?.nextAfter??null);
+      const charges=isContractCharge(x.batch.sourceType) && x.batch.state==='Draft' && canPrepare
+        ? await availableCharges(x.batch,c) : null;
+      setChargeItems(charges?.items??[]);setChargeNext(charges?.nextAfter??null);
       setDetail(x);
       setItemId('');
     });
@@ -261,7 +270,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     };
     if (
       !validInvoiceDraft(definition) ||
-      (choice.sourceType==='FIXED_FEE_INSTALLMENT' && periodBasis!=='ELIGIBLE_DATE') ||
+      (isContractCharge(choice.sourceType) && periodBasis!=='ELIGIBLE_DATE') ||
       (choice.sourceType === 'MILESTONE_ACCEPTANCE' && (!milestoneEnabled || periodBasis !== 'ELIGIBLE_DATE'))
     )
       return;
@@ -287,8 +296,8 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
         ownerUserId: d.ownerUserId,
         ownerRole: d.ownerRole,
       };
-    if (d.sourceType==='FIXED_FEE_INSTALLMENT') {
-      const selected=fixedItems.find(item=>'fixed:'+item.id===itemId);
+    if (isContractCharge(d.sourceType)) {
+      const selected=chargeItems.find(item=>item.value===itemId);
       if (!selected) return;
       perform({type:'line',batchId:d.id,data:{requestId:crypto.randomUUID(),itemId:selected.id,itemVersion:1,
         expectedLineCount:detail.total.lineCount,reason:itemReason.trim()}});
@@ -537,12 +546,14 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                       <li key={x.id}>
                         Item {x.itemId} version {x.itemVersion} · Event {x.eventId} ·{' '}
                         {'sourceType' in x
-                          ? x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment}` : `milestone ${x.evidence.milestoneId}`
+                          ? x.sourceType==='RETAINER_PERIOD' ? `retainer ${x.evidence.startsOn} through ${x.evidence.endsOn}` : x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment}` : `milestone ${x.evidence.milestoneId}`
                           : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
                         <details>
                           <summary>Supporting evidence</summary>
-                          {'sourceType' in x && x.sourceType==='FIXED_FEE_INSTALLMENT' ? (
+                          {'sourceType' in x && x.sourceType==='RETAINER_PERIOD' ? (
+                            <p>Statement {x.evidence.statementId} · revision {x.evidence.statementVersion} · review {x.evidence.reviewId} · base fee {x.evidence.periodPrice.baseFee} · overage {x.evidence.periodPrice.overage} · contract version {x.evidence.contractVersionId}</p>
+                          ) : 'sourceType' in x && x.sourceType==='FIXED_FEE_INSTALLMENT' ? (
                             <p>Due {x.evidence.dueOn} · Contract version {x.evidence.contractVersionId} · Approval reason {x.evidence.approvalReason}</p>
                           ) : 'sourceType' in x ? (
                             <>
@@ -588,8 +599,8 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                           onChange={(e) => setItemId(e.target.value)}
                         >
                           <option value="">Choose an item</option>
-                          {detail.batch.sourceType==='FIXED_FEE_INSTALLMENT'
-                            ? fixedItems.map(x=><option key={x.id} value={'fixed:'+x.id}>Installment {x.installment} · {x.dueOn} · {x.currency} {x.amount}</option>)
+                          {isContractCharge(detail.batch.sourceType)
+                            ? chargeItems.map(x=><option key={x.id} value={x.value}>{x.label}</option>)
                             : detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
                             ? milestones.map((x) => (
                                 <option key={x.id} value={'milestone:' + x.id}>
@@ -603,11 +614,11 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                               ))}
                         </select>
                       </label>
-                      {detail.batch.sourceType==='FIXED_FEE_INSTALLMENT'
-                        ? fixedNext && <button type="button" onClick={()=>void run(async c=>{
-                          const page=await invoiceDrafts.availableInstallments(detail.batch.id,c,fixedNext);
-                          setFixedItems(old=>[...old,...page.items]);setFixedNext(page.nextAfter);
-                        })}>More available installments</button>
+                      {isContractCharge(detail.batch.sourceType)
+                        ? chargeNext && <button type="button" onClick={()=>void run(async c=>{
+                          const page=await availableCharges(detail.batch,c,chargeNext);
+                          setChargeItems(old=>[...old,...page.items]);setChargeNext(page.nextAfter);
+                        })}>{detail.batch.sourceType==='RETAINER_PERIOD'?'More available retainer charges':'More available installments'}</button>
                         : detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
                         ? milestoneNext && (
                             <button type="button" onClick={moreMilestones}>
