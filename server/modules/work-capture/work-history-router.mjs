@@ -1,5 +1,5 @@
 import {Router} from 'express';
-import {timesheetReadScope} from './timesheet-read-scope.mjs';
+import {timesheetReadScope,authorizeDirectReportReview} from './timesheet-read-scope.mjs';
 import {canonicalHours} from './work-hours.mjs';
 export const WORK_HISTORY_PAGE_SIZE=10;
 export const parseHistoryCursor=value=>{
@@ -17,7 +17,7 @@ export const projectHistorySubmission=row=>({
 export const createWorkHistoryRouter=({pool,requireDatabase,requireAuth,requirePermission,
  logError=error=>console.error('Work history read failed',error?.code||'UNKNOWN')})=>{
  const router=Router();router.use(requireDatabase,requireAuth,requirePermission('timesheets.submit'));
- router.get('/:id/submissions',async(req,res)=>{
+ router.get('/:id/submissions',authorizeDirectReportReview,async(req,res)=>{
   let before;
   try{before=parseHistoryCursor(req.query.beforeSequence);if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(req.params.id))throw Error('Invalid header');}
   catch{res.status(400).json({error:'Work history request is invalid.',code:'WORK_HISTORY_INVALID'});return;}

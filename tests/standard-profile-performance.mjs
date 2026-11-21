@@ -55,7 +55,8 @@ await withCommercialDatabase(async database => {
     const samples = {};
     const thresholds = {};
     const receipts = new Map();
-    const states = {save: 'Draft', submit: 'Submitted', approve: 'Approved'};
+    const reviewed = new Map();
+    const states = {save: 'Draft', submit: 'Submitted', review: 'Submitted', approve: 'Approved'};
     const reviewers = sessions.slice(75);
     for (const [phase, status] of Object.entries(states)) {
       const readKey = 'read during ' + phase;
@@ -63,14 +64,14 @@ await withCommercialDatabase(async database => {
       samples[phase] = [];
       samples[readKey] = [];
       samples[reportKey] = [];
-      thresholds[phase] = 3000;
+      thresholds[phase] = phase === 'review' ? 2000 : 3000;
       thresholds[readKey] = 2000;
       thresholds[reportKey] = 5000;
       for (let round = 0; round < 6; round++) {
         const week = new Date(Date.UTC(2024, 2, 3 + round * 7)).toISOString().slice(0,10);
         await Promise.all(sessions.slice(0,75).map(async (employee, index) => {
           const decision = phase === 'approve' && index >= 5 && index < 20;
-          const actor = decision ? reviewers[index - 5] : employee;
+          const actor = (decision || (phase === 'review' && index >= 5 && index < 20)) ? reviewers[index - 5] : employee;
           const worker = employee.worker;
           const options = {authenticated: false, headers: actor.headers};
           const start = performance.now();
@@ -88,11 +89,21 @@ await withCommercialDatabase(async database => {
             assert.equal(result.status, 200);
             assert.equal(result.body.length, 8);
             assert.ok(result.body.every(sheet => sheet.employee_id === worker && sheet.entries.length === 5));
+          } else if (phase === 'review') {
+            const result = await request('/api/timesheets?view=direct-report-review', options);
+            samples.review.push(performance.now() - start);
+            assert.equal(result.status, 200, JSON.stringify(result.body));
+            assert.equal(result.body.length, 14);
+            assert.ok(result.body.every(row => row.employee_id === worker && row.status !== 'Draft'));
+            const sheet = result.body.find(row => row.week_ending === week);
+            assert.equal(sheet.status, 'Submitted');
+            assert.match(sheet.write_token, /^[a-f0-9]{64}$/);
+            reviewed.set(sheet.id, sheet.write_token);
           } else {
             const key = worker + '/' + week;
             const draft = receipts.get(key);
             const result = decision
-              ? await request('/api/timesheets/' + draft.id + '/status', {...options, method: 'PATCH', body: {status}})
+              ? await request('/api/timesheets/' + draft.id + '/status', {...options, method: 'PATCH', body: {status, expected_write_token: reviewed.get(draft.id)}})
               : await request('/api/timesheets', {...options, method: 'POST', body: {
                 employee_id: worker, week_ending: week, status, expected_write_token: draft?.write_token ?? null,
                 entries: [{work_type: 'Client Misc Task', client_name: 'Synthetic client', work_date: week,
@@ -111,7 +122,20 @@ await withCommercialDatabase(async database => {
       const persisted = await pool.query(`select count(*)::int sheets, sum(total_hours)::int hours
         from timesheets where status=$1 and id=any($2::uuid[])`, [status, [...receipts.values()].map(row => row.id)]);
       assert.deepEqual(persisted.rows[0], {sheets: 90, hours: 90});
+      if (phase === 'save') {
+        const leadView = await request('/api/timesheets?view=direct-report-review', {authenticated:false, headers:reviewers[0].headers});
+        assert.equal(leadView.status, 200);
+        assert.equal(leadView.body.length, 8);
+        assert.ok(leadView.body.every(sheet => sheet.employee_id === sessions[5].worker && sheet.status === 'Approved'));
+      }
+      if (phase === 'review') assert.equal(reviewed.size, 90);
       if (phase === 'submit') {
+        const deniedList = await request('/api/timesheets?view=direct-report-review', {authenticated:false,headers:sessions[5].headers});
+        assert.equal(deniedList.status, 403);
+        const personalList = await request('/api/timesheets', {authenticated:false,headers:reviewers[0].headers});
+        assert.equal(personalList.status, 200);
+        assert.equal(personalList.body.length, 8);
+        assert.ok(personalList.body.every(sheet => sheet.employee_id === reviewers[0].worker));
         const submitted = receipts.get('profile-worker-6/2024-03-03');
         const denied = await request('/api/timesheets/' + submitted.id + '/status', {
           authenticated: false, headers: reviewers[1].headers, method: 'PATCH', body: {status: 'Approved'},
@@ -119,6 +143,9 @@ await withCommercialDatabase(async database => {
         assert.equal(denied.status, 403, 'A different team lead cannot approve this employee’s work');
       }
     }
+    await pool.query("update role_permissions set enabled=false where role_name='TeamLead' and permission_key='timesheets.approve'");
+    const revoked = await request('/api/timesheets?view=direct-report-review', {authenticated:false, headers:reviewers[0].headers});
+    assert.equal(revoked.status, 403);
     const evidence = await pool.query(`select count(distinct t.id)::int sheets, count(*)::int decisions
       from timesheets t join work_submission_evidence w on w.timesheet_id=t.id
       join work_submission_decisions d on d.submission_id=w.id

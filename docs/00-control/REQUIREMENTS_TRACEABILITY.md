@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-NFR-SEC-004, WOS-NFR-PERF-001/002/008 — the direct-report review list and retained history require team-lead approval access and a current reporting relationship in the selected entity. Browser and PostgreSQL tests cover correction history, reassignment, permission revocation and 90 reviewed-version decisions under Standard-profile load.
+
 WOS-NFR-SEC-004 and WOS-NFR-UX-006 — the approval desk pins each decision to its reviewed work version. The browser/PostgreSQL journey rejects a delayed approval and rejection after resubmission and checks the retained source, decision and audit records.
 
 WOS-NFR-UX-006 and WOS-NFR-OBS-005 — bulk timesheet approval previews the filtered selection, validates decisions individually via the approval API and reads back each current status. The approval browser journey covers cancellation, partial completion, lost responses, repeated confirmation and unavailable readback.

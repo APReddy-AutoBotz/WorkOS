@@ -41,9 +41,12 @@ export const decodeWorkHistoryPage=(value:unknown,before:number|null=null):WorkH
  const next=page.nextBeforeSequence;if(next!==null&&(!Number.isInteger(next)||submissions.length!==10||next!==submissions.at(-1)?.sequence))fail();
  return {organizationId:page.organizationId,legalEntityId:page.legalEntityId,timesheetId:page.timesheetId,employeeId:page.employeeId,weekEnding:page.weekEnding,submissions,nextBeforeSequence:next} as WorkHistoryPage;
 };
-export const workSubmissionHistoryService={get:async(timesheetId:string,before:number|null,context:WorkCaptureContext|null,expectedEmployeeId?:string)=>{
+export const workSubmissionHistoryService={get:async(timesheetId:string,before:number|null,context:WorkCaptureContext|null,expectedEmployeeId?:string,directReportReview=false)=>{
  const owner=assertWorkCaptureContext(context);
- const raw=await api.requestWithContext<unknown>('GET',`/api/v1/timesheets/${encodeURIComponent(timesheetId)}/submissions${before===null?'':`?beforeSequence=${before}`}`,undefined,owner);
+ const query=new URLSearchParams();
+ if(before!==null)query.set('beforeSequence',String(before));
+ if(directReportReview)query.set('view','direct-report-review');
+ const raw=await api.requestWithContext<unknown>('GET',`/api/v1/timesheets/${encodeURIComponent(timesheetId)}/submissions${query.size?'?'+query:''}`,undefined,owner);
  assertWorkCaptureContext(owner);const page=decodeWorkHistoryPage(raw,before);
  if(page.organizationId!==owner.scope.organizationId||page.legalEntityId!==owner.scope.legalEntityId||page.timesheetId!==timesheetId||expectedEmployeeId&&page.employeeId!==expectedEmployeeId)throw new ApiClientError('Work history scope changed. Reload.',{status:403});return page;
 }};

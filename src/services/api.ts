@@ -618,10 +618,11 @@ async function decideTimesheet(timesheetId: string, status: 'Approved' | 'Reject
 }
 
 export const timesheetService = {
-  getAll: async (): Promise<TimesheetSummary[]> => {
+  getAll: async (view?: 'approval'): Promise<TimesheetSummary[]> => {
     if (await checkBackend()) {
+      const directReportReview = view === 'approval' && authService.getCurrentUser()?.role === 'TeamLead';
       const [rawTS, rawEmps] = await Promise.all([
-        api.get<Record<string, unknown>[]>('/api/timesheets'),
+        api.get<Record<string, unknown>[]>(directReportReview ? '/api/timesheets?view=direct-report-review' : '/api/timesheets'),
         api.get<Record<string, unknown>[]>('/api/employees'),
       ]);
       const empMap = new Map(rawEmps.map(r => [String(r.id), { ...normalizeEmployee(r), plannedUtilization: 0, actualUtilization: 0, activeProjectCount: 0 }]));

@@ -120,7 +120,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
     const fetchData = async () => {
       try {
         const [tsData, empData, projData, allocData] = await Promise.all([
-          timesheetService.getAll(),
+          timesheetService.getAll('approval'),
           employeeService.getAll(),
           projectService.getAll(),
           allocationService.getAll(),
@@ -183,7 +183,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
 
   const refreshTimesheets = async () => {
     if (!isCurrent()) return false;
-    const tsData = await timesheetService.getAll();
+    const tsData = await timesheetService.getAll('approval');
     if (!isCurrent()) return false;
     setTimesheets(tsData);
     return tsData;
@@ -523,7 +523,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
                    <div>
                      <WorkCaptureWarnings warnings={selectedTimesheet.captureWarnings}/>
               <WorkSubmissionAssurance assurance={selectedTimesheet.workAssurance} status={selectedTimesheet.status} entryCheck={selectedTimesheet.duplicateEntryCheck} />
-              {selectedTimesheet.id&&<div key={`${selectedTimesheet.id}:${selectedTimesheet.writeToken}`}><WorkSubmissionHistory timesheetId={selectedTimesheet.id}/></div>}
+              {selectedTimesheet.id&&<div key={`${selectedTimesheet.id}:${selectedTimesheet.writeToken}`}><WorkSubmissionHistory timesheetId={selectedTimesheet.id} expectedEmployeeId={selectedTimesheet.employeeId} directReportReview={user?.role === 'TeamLead'}/></div>}
                      <h4 className="font-bold text-heading">{selectedTimesheet.employeeName}</h4>
                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Period: {selectedTimesheet.weekEnding}</p>
                    </div>

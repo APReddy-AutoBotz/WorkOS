@@ -16,7 +16,7 @@ where u.username like 'PROFILE-%';
 insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
 select id,'org-default','legal-default',true from users where username like 'PROFILE-%';
 insert into role_permissions(role_name,permission_key,enabled)
-values ('Employee','timesheets.submit',true),('Admin','reports.view_utilization',true),('TeamLead','timesheets.approve',true)
+values ('Employee','timesheets.submit',true),('Admin','reports.view_utilization',true),('TeamLead','timesheets.approve',true),('TeamLead','timesheets.submit',true)
 on conflict(role_name,permission_key) do update set enabled=excluded.enabled;
 
 insert into clients(id,name,account_owner_id,organization_id,legal_entity_id)

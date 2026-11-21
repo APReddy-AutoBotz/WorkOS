@@ -36,7 +36,7 @@ import {createResourceDemandRouter} from './modules/planning/resource-demand-rou
 import {createWorkforceCapabilitiesRouter} from './modules/workforce/capabilities-router.mjs';
 import {workSourceIdentityInput,validateWorkSourceReplacement} from './modules/work-capture/work-source-identity.mjs';
 import {createSubmissionDeadlineRouter} from './modules/work-capture/submission-deadline.mjs';
-import {timesheetReadScope} from './modules/work-capture/timesheet-read-scope.mjs';
+import {timesheetReadScope,authorizeDirectReportReview} from './modules/work-capture/timesheet-read-scope.mjs';
 import {createWorkHistoryRouter} from './modules/work-capture/work-history-router.mjs';
 import {checkDuplicateEntries,projectTimesheetDuplicateCheck,readDuplicateEntryCheck} from './modules/work-capture/duplicate-entry-check.mjs';
 import {workReferenceInput} from './modules/work-capture/work-reference.mjs';
@@ -2860,7 +2860,7 @@ app.delete('/api/allocations/:id', requireDatabase, requireAuth, requirePermissi
     client.release();
   }
 });
-app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('timesheets.submit'), async (req, res) => {
+app.get('/api/timesheets', requireDatabase, requireAuth, requirePermission('timesheets.submit'), authorizeDirectReportReview, async (req, res) => {
   const {params,where}=timesheetReadScope(req);
   await run(res, `
     with visible as (select

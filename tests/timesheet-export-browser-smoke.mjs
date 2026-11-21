@@ -157,6 +157,39 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    assert.deepEqual(await sourceSnapshot(),retainedBefore);
    assert.deepEqual(await decisionCounts(),countsBefore);
    decisions = 0;
+   // Give the fixture team lead one direct report in the selected legal entity.
+   const lead = identities.denied;
+   const leadWorker = 'synthetic-approval-team-lead';
+   await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+     values($1,'SYN-REVIEW-LEAD','Synthetic review lead','review-lead@example.test','Consultant','Delivery','US','director-commercial','Active',$2,$3)`,[leadWorker,f.organizationId,f.legalEntityId]);
+   await pool.query('update users set employee_record_id=$1,employee_id=$2 where id=$3',[leadWorker,'SYN-REVIEW-LEAD',lead.id]);
+   await pool.query('update employees set reporting_manager_id=$1 where id=$2',[leadWorker,f.ownerId]);
+   const leadPermissions = ['employees.view','projects.view','allocations.view','timesheets.submit','timesheets.approve'];
+   await pool.query(`insert into role_permissions(role_name,permission_key,enabled)
+     select 'TeamLead',key,true from unnest($1::text[]) key on conflict(role_name,permission_key) do update set enabled=true`,[leadPermissions]);
+   const leadContext = await browser.newContext();
+   try {
+     await leadContext.addInitScript(({worker,permissions,token,scope})=>{
+       sessionStorage.setItem('workos_session',JSON.stringify({id:worker,employeeId:'SYN-REVIEW-LEAD',name:'Synthetic review lead',role:'TeamLead',permissionRole:'TeamLead',permissions}));
+       sessionStorage.setItem('workos_api_token',token);
+       sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));
+     },{worker:leadWorker,permissions:leadPermissions,token:tokenFor(lead),scope:{organizationId:f.organizationId,legalEntityId:f.legalEntityId}});
+     const teamPage = await leadContext.newPage();
+     await teamPage.goto(fixtureServer.url+'/tests/fixtures/timesheet-export.html');
+     await teamPage.locator('tbody tr').filter({hasText:today}).click();
+     await teamPage.getByRole('button',{name:'Load retained history'}).click();
+     await teamPage.getByRole('article',{name:'Retained submission 2'}).waitFor();
+     await teamPage.getByRole('article',{name:'Retained submission 1'}).waitFor();
+     const historyPath = '/api/v1/timesheets/'+saved.body.id+'/submissions?view=direct-report-review';
+     await pool.query('update employees set reporting_manager_id=null where id=$1',[f.ownerId]);
+     assert.equal((await request(historyPath,{identity:lead})).status,404);
+     const empty = await request('/api/timesheets?view=direct-report-review',{identity:lead});
+     assert.equal(empty.status,200);
+     assert.deepEqual(empty.body,[]);
+     await pool.query('update employees set reporting_manager_id=$1 where id=$2',[leadWorker,f.ownerId]);
+     await pool.query("update role_permissions set enabled=false where role_name='TeamLead' and permission_key='timesheets.approve'");
+     assert.equal((await request(historyPath,{identity:lead})).status,403);
+   } finally { await leadContext.close(); }
    const previousWeek = (await pool.query("select to_char(ends_on,'YYYY-MM-DD') as day from reporting_periods where id='period-work-previous'")).rows[0].day;
    const previous = await request('/api/timesheets',{identity:identities.reader,method:'POST',body:{
      employee_id:f.ownerId,week_ending:previousWeek,status:'Submitted',entries:[{work_type:'Client Misc Task',
