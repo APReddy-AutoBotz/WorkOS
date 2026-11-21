@@ -1,10 +1,11 @@
-import {quoteCsvCell} from '../../shared/csv-cell.mjs';
+import {buildTimesheetCsv} from '../lib/timesheetCsv';
+import {getToken, getOrganizationScope} from '../services/apiClient';
 import {WorkCategory} from '../components/WorkCategory';
 import {WorkSourceIdentity} from '../components/WorkSourceIdentity';
 import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
 import {WorkSubmissionHistory} from '../components/WorkSubmissionHistory';
 import { WorkSubmissionAssurance } from '../components/WorkSubmissionAssurance';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Badge } from '../components/ui/Badge';
 import { timesheetService, employeeService, projectService, adminService, allocationService } from '../services/api';
@@ -33,6 +34,11 @@ import {canonicalHours} from '../../shared/work-hours.mjs';
 const formatHours=(value:number)=>`${canonicalHours(value)}h`;
 
 import { productConfig } from '../config/productConfig';
+function exportContext() {
+  const user = authService.getCurrentUser();
+  const scope = getOrganizationScope();
+  return JSON.stringify([getToken(), user?.id, user?.role, user?.permissionRole, scope?.organizationId, scope?.legalEntityId]);
+}
 export const TimesheetApproval = () => {
   const [timesheets, setTimesheets] = useState<TimesheetSummary[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -46,6 +52,21 @@ export const TimesheetApproval = () => {
   const [actionNotice, setActionNotice] = useState('');
   const user = authService.getCurrentUser();
 
+  const loadedContext = useRef<string | null>(null);
+  const activeExport = useRef<AbortController | null>(null);
+  const [exporting, setExporting] = useState(false);
+  useEffect(() => {
+    const cancel = () => activeExport.current?.abort();
+    window.addEventListener('workos:organization-scope-switch-requested', cancel);
+    window.addEventListener('workos:organization-scope-changed', cancel);
+    return () => {
+      cancel();
+      activeExport.current = null;
+      window.removeEventListener('workos:organization-scope-switch-requested', cancel);
+      window.removeEventListener('workos:organization-scope-changed', cancel);
+    };
+  }, []);
+
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
   const [projectQuery, setProjectQuery] = useState('');
@@ -55,12 +76,15 @@ export const TimesheetApproval = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        const owner = exportContext();
         const [tsData, empData, projData, allocData] = await Promise.all([
           timesheetService.getAll(),
           employeeService.getAll(),
           projectService.getAll(),
           allocationService.getAll(),
         ]);
+        if (owner !== exportContext()) return;
+        loadedContext.current = owner;
         setTimesheets(tsData);
         setEmployees(empData);
         setProjects(projData);
@@ -179,48 +203,38 @@ export const TimesheetApproval = () => {
     setActionNotice(`Bulk approved ${submittedFilteredTimesheets.length} timesheets.`);
   };
 
-  const handleExport = () => {
-    const rows = filteredTimesheets.flatMap(ts => ts.entries.map(entry => ({
-      Employee: ts.employeeName,
-      EmployeeId: ts.employeeId,
-      WeekEnding: ts.weekEnding,
-      Status: ts.status,
-      ProjectOrClient: entry.projectName || entry.clientName || '',
-      WorkType: entry.workType,
-      Category: entry.category || '',
-      Date: entry.date,
-      Hours: entry.hours,
-      Remark: entry.remark || '',
-      ApprovedBy: ts.approvedBy || '',
-      RejectedBy: ts.rejectedBy || '',
-      RejectionReason: ts.rejectionReason || ts.rejectionNote || '',
-    })));
-    const fallback = {
-      Employee: '',
-      EmployeeId: '',
-      WeekEnding: '',
-      Status: '',
-      ProjectOrClient: '',
-      WorkType: '',
-      Category: '',
-      Date: '',
-      Hours: '',
-      Remark: '',
-      ApprovedBy: '',
-      RejectedBy: '',
-      RejectionReason: '',
-    };
-    const headers = Object.keys(rows[0] || fallback);
-    const csv = [headers.map(quoteCsvCell).join(','), ...rows.map(row => headers.map(header => quoteCsvCell(row[header as keyof typeof row])).join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `timesheet-approval-export-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    adminService.logAction('Export', 'Timesheet Governance', `Exported ${rows.length} timesheet approval rows from current filter scope`);
-    setActionNotice(`Exported ${rows.length} timesheet entr${rows.length === 1 ? 'y' : 'ies'} from the current filter scope.`);
+  const handleExport = async () => {
+    if (activeExport.current) return;
+    const owner = exportContext();
+    if (loadedContext.current !== owner) {
+      setActionNotice('Reload the approval page to export for your current account and scope.');
+      return;
+    }
+    const controller = new AbortController();
+    activeExport.current = controller;
+    setExporting(true);
+    try {
+      const {blob, rowCount} = await buildTimesheetCsv(filteredTimesheets, controller.signal);
+      if (controller.signal.aborted || owner !== exportContext()) return;
+      const url = URL.createObjectURL(blob);
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `timesheet-approval-export-${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+      adminService.logAction('Export', 'Timesheet Governance', `Exported ${rowCount} timesheet approval rows from current filter scope`);
+      setActionNotice(`Exported ${rowCount} timesheet entr${rowCount === 1 ? 'y' : 'ies'} from the current filter scope.`);
+    } catch {
+      if (!controller.signal.aborted) setActionNotice('The export could not be prepared. Try exporting again.');
+    } finally {
+      if (activeExport.current === controller) {
+        activeExport.current = null;
+        setExporting(false);
+      }
+    }
   };
 
   if (loading) {
@@ -248,9 +262,10 @@ export const TimesheetApproval = () => {
           <div className="flex items-center gap-3">
              <button
                 onClick={handleExport}
+                disabled={exporting} aria-busy={exporting}
                 className="btn-secondary py-2.5 px-5 flex items-center gap-2"
              >
-                <Download size={14} /> Ops Export
+                <Download size={14} /> {exporting ? 'Preparing export…' : 'Ops Export'}
              </button>
              {user?.role === 'Admin' && (
                <button

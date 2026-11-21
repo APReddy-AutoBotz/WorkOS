@@ -71,6 +71,47 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    const shared=await sharedDownload;
    assert.equal(shared.suggestedFilename(),'synthetic-shared-export.csv');
    assert.deepEqual(parseCsv(await readFile(await shared.path(),'utf8')),[["'\t=1+1",'normal'],["'\ufeff＝1+1",'comma, "quote"\nnext']]);
+   // Expand the authorized API response at the browser boundary to isolate CSV rendering cost.
+   await page.route('**/api/timesheets', async route => {
+     const response = await route.fetch();
+     const sheets = await response.json();
+     const sheet = sheets.find(item => item.id === saved.body.id);
+     assert.ok(sheet);
+     const entries = Array.from({length: 10000}, (_, i) => ({...sheet.entries[i % 2], remark: 'Synthetic entry ' + i}));
+     await route.fulfill({response, json: [{...sheet, entries}]});
+   });
+   await page.reload();
+   await page.locator('tbody tr').filter({hasText:today}).waitFor();
+   const exportButton = page.getByRole('button',{name:'Ops Export',exact:true});
+   const largeDownload = page.waitForEvent('download');
+   const largeAudit = page.waitForResponse(r=>new URL(r.url()).pathname==='/api/audit-events'&&r.request().method()==='POST');
+   const responsive = await exportButton.evaluate(button => new Promise(resolve => {
+     button.click();
+     setTimeout(() => {
+       const input = document.querySelector('input[placeholder="Search by consultant name..."]');
+       input.focus();
+       resolve(button.disabled && document.activeElement === input);
+     }, 0);
+   }));
+   assert.equal(responsive, true, 'The browser must accept focus while the large export is still running');
+   const largeRows = parseCsv(await readFile(await (await largeDownload).path(),'utf8'));
+   assert.deepEqual(largeRows[0],headers);
+   assert.equal(largeRows.length,10001);
+   assert.ok(largeRows.slice(1).every((row,i)=>row.length===13 && row[9]==='Synthetic entry '+i));
+   assert.equal((await largeAudit).status(),201);
+
+   let cancelledDownloads = 0;
+   page.on('download', () => { cancelledDownloads++; });
+   await exportButton.evaluate(button => {
+     button.click();
+     setTimeout(() => window.dispatchEvent(new Event('workos:organization-scope-switch-requested')),0);
+   });
+   await exportButton.waitFor();
+   await page.evaluate(() => sessionStorage.setItem('workos_organization_scope',JSON.stringify({organizationId:'synthetic-other',legalEntityId:'synthetic-other'})));
+   await exportButton.click();
+   await page.getByText('Reload the approval page to export for your current account and scope.').waitFor();
+   assert.equal(cancelledDownloads,0);
+   assert.equal((await pool.query("select count(*)::int n from audit_logs where action='Export' and module='Timesheet Governance' and user_id=$1",[identities.manager.id])).rows[0].n,3);
    assert.deepEqual(errors,[]);
   }finally{await browser?.close();await fixtureServer.close();}
  });
