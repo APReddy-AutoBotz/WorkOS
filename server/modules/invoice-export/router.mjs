@@ -6,7 +6,7 @@ import { registerCorrectionReviewEvidence } from './correction-review-evidence.m
 import { registerCorrectionDrafts } from './correction-drafts.mjs';
 import { registerIssuedCredits } from './issued-credits.mjs';
 import { registerLineReversalRequests } from './line-reversal-requests.mjs';
-import { milestoneBatchModel } from '../invoice-approval/milestone-batch.mjs';
+import { approvalBatchModel } from '../invoice-approval/milestone-batch.mjs';
 import { loadMilestoneExportBatch } from './milestone-batch.mjs';
 import { milestoneInvoiceCsvArtifact, MILESTONE_INVOICE_CSV_SCHEMA } from './milestone-csv.mjs';
 import {
@@ -19,13 +19,15 @@ import {
   recoverInvoiceExportRecipients,
 } from './notice-producer.mjs';
 import { Router } from 'express';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { capacityCanonical, capacityHash } from '../planning/worker-capacity-service.mjs';
 import { assertCommercialAuthority } from '../commercial-drafting/service.mjs';
 import { scopedCapacityWorker } from '../planning/worker-capacity-service.mjs';
 import { workApprovalOwner } from '../approvals/work-approval-service.mjs';
 import { invoiceCsvArtifact, INVOICE_CSV_SCHEMA } from './csv.mjs';
+import {invoiceDraftTotal} from '../../../shared/invoice-batch-draft.mjs';
+const RETAINER_CSV_SCHEMA='workos.invoice-retainer-csv/1';
 const uuid = z.string().uuid(),
   key = z.string().regex(/^[a-f0-9]{64}$/),
   reason = z.string().trim().min(3).max(1000),
@@ -148,7 +150,8 @@ export const createInvoiceCsvRouter = (o) => {
       }),
     ]);
   const batch = async (c, r, batchId, lock = false) => {
-    if (await milestoneBatchModel(c, r, batchId)) return loadMilestoneExportBatch(c, r, batchId, lock);
+    const model=await approvalBatchModel(c,r,batchId,true);
+    if (model==='milestone' || model==='retainer') return loadMilestoneExportBatch(c,r,batchId,lock,model);
     const b = (
       await c.query(
         `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
@@ -186,8 +189,15 @@ export const createInvoiceCsvRouter = (o) => {
     return { row: b, source, review };
   };
   const exportBatch=async(c,r,id,lock=false)=>(await correctionExportBatch(c,r,id,lock)) ?? batch(c,r,id,lock);
-  const renderExport=source=>{
+  const renderExport=async(c,source)=>{
     switch(source.lines[0]?.sourceType){
+      case 'RETAINER_PERIOD': {
+        const {rows:[{bytes}]}=await c.query('select retainer_invoice_csv_bytes(b) bytes from invoice_draft_batches b where b.id=$1',[source.batchId]);
+        if (!Buffer.isBuffer(bytes) || !bytes.length) throw new TypeError('Retained retainer charge bytes unavailable.');
+        const {lineCount,amount}=invoiceDraftTotal(source.lines.map(line=>line.amount));
+        return {schemaVersion:RETAINER_CSV_SCHEMA,bytes,sha256:createHash('sha256').update(bytes).digest('hex'),
+          currency:source.currency,lineCount,total:amount};
+      }
       case 'FULL_LINE_REVERSAL': return correctionArtifact(source);
       case 'MILESTONE_ACCEPTANCE': return milestoneInvoiceCsvArtifact(source);
       default: return invoiceCsvArtifact(source);
@@ -285,7 +295,7 @@ export const createInvoiceCsvRouter = (o) => {
       let total = null;
       try {
         const x =
-          renderExport(source);
+          await renderExport(c,source);
         total = { lineCount: x.lineCount, total: x.total, currency: x.currency };
       } catch {
         /* Historical source can remain inspectable without becoming exportable. */
@@ -294,7 +304,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         batch: {
           id: row.id,
-          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
+          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
           state: row.state,
           clientId: row.client_id,
           contractId: row.contract_id,
@@ -309,7 +319,7 @@ export const createInvoiceCsvRouter = (o) => {
           sourceCurrent: review?.current === true,
           artifactId: stored?.id ?? null,
           lines: source.lines.map((x) =>
-            x.sourceType === 'FULL_LINE_REVERSAL' ? x : x.sourceType === 'MILESTONE_ACCEPTANCE'
+            x.sourceType === 'FULL_LINE_REVERSAL' ? x : ['MILESTONE_ACCEPTANCE','RETAINER_PERIOD'].includes(x.sourceType)
               ? {
                   lineId: x.lineId,
                   sequence: x.sequence,
@@ -317,7 +327,7 @@ export const createInvoiceCsvRouter = (o) => {
                   itemVersion: x.itemVersion,
                   eventId: x.eventId,
                   sourceType: x.sourceType,
-                  milestoneId: JSON.parse(x.evidenceJson).milestoneId,
+                   ...(x.sourceType==='RETAINER_PERIOD'?{statementId:JSON.parse(x.evidenceJson).statementId,reviewId:JSON.parse(x.evidenceJson).reviewId}:{milestoneId:JSON.parse(x.evidenceJson).milestoneId}),
                   eligibleDate: x.eligibleDate,
                   currency: x.currency,
                   amount: x.amount,
@@ -352,7 +362,7 @@ export const createInvoiceCsvRouter = (o) => {
             approvalId: uuid,
             finalTransitionId: uuid,
             lineageHash: key,
-            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA]),
+            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA,RETAINER_CSV_SCHEMA]),
             expectedLineCount: z.number().int().min(1).max(1000000),
             expectedTotal: z.union([money,z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/)]),
             reason,
@@ -404,7 +414,7 @@ export const createInvoiceCsvRouter = (o) => {
       let rendered;
       try {
         rendered =
-          renderExport(source);
+          await renderExport(c,source);
       } catch (e) {
         if (!(e instanceof TypeError)) throw e;
         const failureId = randomUUID();

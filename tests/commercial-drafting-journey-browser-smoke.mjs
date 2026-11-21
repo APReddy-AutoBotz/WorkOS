@@ -1,3 +1,4 @@
+import {INVOICE_EXPORT_EVENT_KEYS} from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {startFixtureServer} from './support/compiled-fixture-server.mjs';
@@ -602,6 +603,60 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
       expectedSequence:1,decision:'Approved',reason:'Verified second-stage control total'});
     assert.equal(second.status,201,JSON.stringify(second.body));
     assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Approved');
+    const exportKeys=['reports.export','commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','integrations.invoice_alert_routes.manage'];
+    for(const role of [reviewRole,'Admin','Employee']) await pool.query(
+      'insert into role_permissions(role_name,permission_key,enabled) select $1,k,true from unnest($2::text[]) k on conflict(role_name,permission_key) do update set enabled=true',[role,exportKeys]);
+    const csv='/api/v1/invoice-csv', notice='/api/v1/invoice-export-notice-config';
+    const configPost=(path,body)=>apiRequest(notice+path,{method:'POST',identity:finance,body:{...body,expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),reason:'Synthetic export notice configuration'}});
+    const route=await configPost('/routes',{routeKey:crypto.randomUUID(),expectedLatestId:null,label:'Synthetic internal export notices',active:true});
+    assert.equal(route.status,201,JSON.stringify(route.body));
+    const notify=await configPost('/policies',{expectedLatestId:null,effectiveFrom:today,definition:{entityType:'InvoiceExport',engagementId:eng.body.id,
+      financeOwner:{userId:finance.id,role:reviewRole},integrationAdmin:{userId:identities.manager.id,role:'Admin'},alertRouteId:route.body.route.id,
+      locale:'en-US',templates:INVOICE_EXPORT_EVENT_KEYS.map(key=>({key,subject:'Invoice {{sourceRef}}',body:'Synthetic status {{sourceRef}}'})),completionInApp:true}});
+    assert.equal(notify.status,201,JSON.stringify(notify.body));
+    assert.equal((await apiRequest(csv+'/batches/'+batchId,{identity:identities.reader})).status,403);
+    const exportSource=await apiRequest(csv+'/batches/'+batchId,{identity:finance});
+    assert.equal(exportSource.status,200,JSON.stringify(exportSource.body));
+    const exportCmd={expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),batchId,approvalId:instance,finalTransitionId:exportSource.body.batch.finalTransitionId,
+      lineageHash:exportSource.body.batch.lineageHash,schemaVersion:'workos.invoice-retainer-csv/1',expectedLineCount:1,expectedTotal:'3500',reason:'Synthetic retainer export'};
+    const sendExport=body=>apiRequest(csv+'/exports',{method:'POST',identity:finance,body});
+    assert.equal((await sendExport({...exportCmd,expectedTotal:'1'})).status,409);
+    assert.equal((await sendExport({...exportCmd,schemaVersion:'workos.invoice-tm-csv/1'})).status,409);
+    await pool.query("create trigger reject_test_retainer_export before insert on audit_logs for each row when (new.module='Invoice CSV') execute function reject_test_po_audit()");
+    const interrupted=await sendExport(exportCmd);
+    assert.equal(interrupted.status,503,JSON.stringify(interrupted.body));
+    assert.equal((await apiRequest(csv+'/batches/'+batchId,{identity:finance})).body.batch.state,'Approved');
+    assert.equal((await pool.query('select 1 from invoice_csv_artifacts where batch_id=$1',[batchId])).rowCount,0);
+    await pool.query('drop trigger reject_test_retainer_export on audit_logs');
+    const csvBrowser=await createContext(finance,[...draftGrants,issueGrant,...exportKeys]);
+    await csvBrowser.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const csvDesk=csvBrowser.page.getByRole('region',{name:'Invoice CSV export'});
+    await csvDesk.getByLabel('Invoice export engagement').selectOption(eng.body.id);
+    await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
+    await csvDesk.getByLabel('Invoice export batch').selectOption(batchId);
+    await csvDesk.getByRole('button',{name:'Inspect invoice export source'}).click();
+    await csvDesk.getByLabel('Invoice CSV schema').selectOption('workos.invoice-retainer-csv/1');
+    await csvDesk.getByRole('checkbox',{name:'I inspected the final approval, retained lineage and control total'}).check();
+    await csvDesk.getByLabel('Invoice CSV reason').fill(exportCmd.reason);
+    const saving=csvBrowser.page.waitForResponse(r=>r.url().endsWith(csv+'/exports') && r.request().method()==='POST');
+    await csvDesk.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
+    const saved=await saving;assert.equal(saved.status(),201,await saved.text());
+    await csvDesk.getByRole('region',{name:'Verified invoice CSV'}).waitFor();
+    const a=(await saved.json()).artifact;
+    const bytes=Buffer.from(a.payloadBase64,'base64'),row=bytes.toString('utf8').split('\r\n')[1].split(',');
+    assert.deepEqual([row[4],row[6],row[8],JSON.parse(Buffer.from(row[9].slice(4),'base64')).reviewId,row[15],row[19]],
+      [issued.body.receipt.itemId,issued.body.receipt.eventId,retainerCommand.statementId,retainerCommand.reviewId,'3500','1']);
+    assert.equal((await apiRequest(csv+'/artifacts/'+a.id,{identity:identities.reader})).status,403);
+    assert.equal((await pool.query('select count(*)::int n from invoice_draft_occupancies where batch_id=$1',[batchId])).rows[0].n,1);
+    const noticeEvents=await pool.query(
+      "select id from invoice_export_notice_events where batch_id=$1 and artifact_id=$2 and event_key='invoice_batch.exported_or_billed_confirmed'",
+      [batchId,a.id]);
+    assert.equal(noticeEvents.rowCount,1,'Accepted retainer export must produce its configured completion notice');
+    const replayExport=await sendExport(saved.request().postDataJSON());assert.equal(replayExport.body.replayed,true);
+    assert.equal(replayExport.body.artifact.sha256,a.sha256);
+    assert.equal((await sendExport({...saved.request().postDataJSON(),reason:'Changed reason'})).status,409);
+    assert.equal((await apiRequest(csv+'/batches/'+batchId,{identity:finance})).body.batch.state,'Exported');
+    await csvBrowser.context.close();
     await reviewBrowser.context.close();
     await preparing.context.close();
     }
@@ -614,6 +669,6 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await billing.context.close();
     await reviewer.context.close();
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
-    console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
+    console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export, completion notice, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
   } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
 }, {upgrade: true});
