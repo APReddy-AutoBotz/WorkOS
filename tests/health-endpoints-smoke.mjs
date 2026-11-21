@@ -61,6 +61,7 @@ registerHealthRoutes({
   pool,
   migrationStatus,
   environment: healthEnvironment,
+  checkSessionLifetime: async () => {},
   identityProviderReady: () => identityProviderAvailable,
 });
 
