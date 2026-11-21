@@ -1,5 +1,5 @@
 -- pg_restore loads data with an empty search_path. These CHECK validators call
--- other WorkOS functions. Resolve built-ins and application helpers consistently.
+-- other application functions. Resolve built-ins and application helpers consistently.
 alter function public.valid_workforce_capabilities(jsonb) set search_path = pg_catalog, public, pg_temp;
 alter function public.valid_resource_demand(jsonb) set search_path = pg_catalog, public, pg_temp;
 alter function public.valid_capacity_profile(jsonb) set search_path = pg_catalog, public, pg_temp;
