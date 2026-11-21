@@ -62,7 +62,11 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
       ) as eligible`,
       [JSON.stringify(stages), existing.actorId, row.preparer_user_id, row.organization_id, row.legal_entity_id, row.id],
     )).rows[0].eligible;
-    if (!eligible) return { ...base, route: { status: 'REVIEWERS_UNAVAILABLE' } };
+    const independent = eligible && (row.source_type !== 'RETAINER_PERIOD' || (await c.query(
+      'select retainer_review_participants_valid(retainer_reversal_participants(b,$2,$3,$4)) ok from invoice_draft_batches b where b.id=$1',
+      [row.id, existing.actorId, existing.activeRole, policy.id],
+    )).rows[0]?.ok);
+    if (!independent) return { ...base, route: { status: 'REVIEWERS_UNAVAILABLE' } };
     return { ...base, route: { status: 'AVAILABLE', policyId: policy.id, effectiveFrom: policy.effectiveFrom, stages } };
   }));
   router.post(path, handle(true, async (c, r) => {

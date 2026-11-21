@@ -32,7 +32,13 @@ async function inspect(c, r, write) {
     [source.id])).rows;
   const status = decisions.some(d => d.decision === 'Rejected') ? 'Rejected' : decisions.length === stages.length ? 'Approved' : 'Pending';
   const next = stages[decisions.length];
-  const canDecide = Boolean(status === 'Pending' && deciderAuthority && next?.userId.toLowerCase() === r.user.sub.toLowerCase() && next.role === r.user.activeRole);
+  const assigned = Boolean(status === 'Pending' && deciderAuthority && next?.userId.toLowerCase() === r.user.sub.toLowerCase() && next.role === r.user.activeRole);
+  const canDecide = assigned && (source.sourceType !== 'RETAINER_PERIOD' || (await c.query(
+    `select retainer_review_participants_valid(i) and s.retainer_link_generations=invoice_review_link_generations(i) as current
+     from invoice_reversal_reviews s join invoice_draft_batches b on b.id=$2
+     cross join lateral retainer_reversal_participants(b,s.actor_id,s.active_role,s.policy_id) i where s.id=$1`,
+    [source.id,source.batchId],
+  )).rows[0]?.current === true);
   return { ...source, decisions, status, canDecide, stageCount: stages.length };
 }
 
