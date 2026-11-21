@@ -3,6 +3,8 @@ import { execFile } from 'node:child_process';
 import { appendFile, mkdtemp, rm, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { getMigrationManifest } from '../../server/migration-runner.mjs';
 import { promisify } from 'node:util';
 import {
   migrateCommercialDatabase, withCommercialDatabase,
@@ -36,7 +38,7 @@ async function contents(pool) {
   return result;
 }
 
-export async function verifyRestoredArchive(source, label, verify) {
+export async function verifyRestoredArchive(source, label, verify, {historical082p=false,checkHistoricalMismatch=false}={}) {
   const expected = await contents(source.pool);
   assert.ok(expected.schema_migrations.count && expected.audit_logs.count && expected.users.count);
   const directory = await mkdtemp(join(tmpdir(),'workos-restore-'));
@@ -46,11 +48,28 @@ export async function verifyRestoredArchive(source, label, verify) {
     await postgresTool('pg_dump',source.databaseUrl,['--format=custom','--file',archive,'--no-password']);
     const incident = performance.now();
     await withCommercialDatabase(async target => {
-      await postgresTool('pg_restore',target.databaseUrl,['--dbname',new URL(target.databaseUrl).pathname.slice(1),
+      const restore=()=>postgresTool('pg_restore',target.databaseUrl,['--dbname',new URL(target.databaseUrl).pathname.slice(1),
         '--single-transaction','--exit-on-error','--no-password',archive]);
+      const recoverHistorical=()=>postgresTool(process.execPath,target.databaseUrl,[
+        fileURLToPath(new URL('../../scripts/restore-082p-archive.mjs',import.meta.url)),archive]);
+      if (historical082p) {
+        await assert.rejects(restore(),error=>error.stderr.includes('valid_capability_label(text) does not exist'));
+        assert.deepEqual(await contents(target.pool),{});
+        await recoverHistorical();
+        // An operator retry against the restored destination must leave its contents intact.
+        await assert.rejects(recoverHistorical(),error=>error.stderr.includes('empty isolated recovery database'));
+      } else {
+        if (checkHistoricalMismatch) {
+          await assert.rejects(recoverHistorical(),error=>error.stderr.includes('Archive migration ledger does not match 082p'));
+          assert.deepEqual(await contents(target.pool),{},'A mismatched archive must roll back all restored tables');
+        }
+        await restore();
+      }
       assert.deepEqual(await contents(target.pool),expected,'Restored public table contents must match the source');
       const migration = await migrateCommercialDatabase(target.pool);
-      assert.deepEqual(migration.applied,[]);
+      const manifest=await getMigrationManifest();
+      const newer=manifest.slice(manifest.findIndex(m=>m.id==='082q_wos08_archive_constraint_resolution'));
+      assert.deepEqual(migration.applied,historical082p ? newer.map(m=>m.id) : []);
       await verify(target, expected);
       const recoveryPointAgeMs = Math.ceil(incident - snapshotStarted);
       const recoveryTimeMs = Math.ceil(performance.now() - incident);
