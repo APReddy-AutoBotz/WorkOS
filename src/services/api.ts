@@ -12,7 +12,7 @@ import type { Employee, Project, Allocation, TimesheetSummary, AuditLog, ImportE
 import { DataStorage, STORAGE_KEYS } from './storage';
 import { authService } from './authService';
 import {
-  api, checkBackend, getOrganizationScope, ApiClientError, isDemoFallbackAllowed,
+  api, checkBackend, getToken, getOrganizationScope, ApiClientError, isDemoFallbackAllowed,
   normalizeEmployee, normalizeProject, normalizeAllocation,
   normalizeClient, normalizeTimesheetSummary, normalizeWorkAssurance, normalizeAuditLog,
   normalizeSettings, normalizeCatalogItem, normalizeRoleDefinition,
@@ -588,6 +588,34 @@ export const allocationService = {
 };
 
 // ── Timesheet Service ────────────────────────────────────────────────────────
+async function decideTimesheet(timesheetId: string, status: 'Approved' | 'Rejected', reason: string | undefined, isCurrent: () => boolean) {
+  if (!isCurrent()) return;
+  const scope = getOrganizationScope();
+  const token = getToken();
+  const connected = await checkBackend();
+  if (!isCurrent()) return;
+  if (connected) {
+    const backendId = timesheetId.includes(':')
+      ? (await timesheetService.getAll()).find(t => `${t.employeeId}:${t.weekEnding}` === timesheetId)?.id
+      : timesheetId;
+    if (!isCurrent()) return;
+    if (!backendId) throw new Error('Timesheet record was not found for the decision.');
+    const path = `/api/timesheets/${backendId}/status`;
+    const body = status === 'Rejected' ? {status, reason} : {status};
+    if (scope) await api.requestWithContext('PATCH', path, body, {scope, token});
+    else await api.patch(path, body);
+    return;
+  }
+  const [empId, weekEnding] = timesheetId.includes(':') ? timesheetId.split(':') : [timesheetId, ''];
+  const list = DataStorage.get<TimesheetSummary[]>(STORAGE_KEYS.TIMESHEETS, []);
+  const fields = status === 'Approved' ? {approvedAt: new Date().toISOString()} :
+    {rejectionReason: reason, rejectionNote: reason, rejectedAt: new Date().toISOString()};
+  DataStorage.set(STORAGE_KEYS.TIMESHEETS, list.map(t =>
+    t.employeeId === empId && t.weekEnding === weekEnding ? {...t, status, ...fields} : t
+  ));
+  decideLocalApprovalRecord('Timesheet', timesheetId, status, reason);
+}
+
 export const timesheetService = {
   getAll: async (): Promise<TimesheetSummary[]> => {
     if (await checkBackend()) {
@@ -654,42 +682,10 @@ export const timesheetService = {
     }
     DataStorage.recalculateUtilization();
   },
-  approve: async (timesheetId: string, _reason?: string): Promise<void> => {
-    if (await checkBackend()) {
-      const backendId = timesheetId.includes(':')
-        ? (await timesheetService.getAll()).find(t => `${t.employeeId}:${t.weekEnding}` === timesheetId)?.id
-        : timesheetId;
-      if (!backendId) throw new Error('Timesheet record was not found for approval.');
-      await api.patch(`/api/timesheets/${backendId}/status`, { status: 'Approved' });
-      return;
-    }
-    const [empId, weekEnding] = timesheetId.includes(':') ? timesheetId.split(':') : [timesheetId, ''];
-    const list = DataStorage.get<TimesheetSummary[]>(STORAGE_KEYS.TIMESHEETS, []);
-    DataStorage.set(STORAGE_KEYS.TIMESHEETS, list.map(t =>
-      (t.employeeId === empId && t.weekEnding === weekEnding)
-        ? { ...t, status: 'Approved' as const, approvedAt: new Date().toISOString() }
-        : t
-    ));
-    decideLocalApprovalRecord('Timesheet', timesheetId, 'Approved');
-  },
-  reject: async (timesheetId: string, reason: string): Promise<void> => {
-    if (await checkBackend()) {
-      const backendId = timesheetId.includes(':')
-        ? (await timesheetService.getAll()).find(t => `${t.employeeId}:${t.weekEnding}` === timesheetId)?.id
-        : timesheetId;
-      if (!backendId) throw new Error('Timesheet record was not found for rejection.');
-      await api.patch(`/api/timesheets/${backendId}/status`, { status: 'Rejected', reason });
-      return;
-    }
-    const [empId, weekEnding] = timesheetId.includes(':') ? timesheetId.split(':') : [timesheetId, ''];
-    const list = DataStorage.get<TimesheetSummary[]>(STORAGE_KEYS.TIMESHEETS, []);
-    DataStorage.set(STORAGE_KEYS.TIMESHEETS, list.map(t =>
-      (t.employeeId === empId && t.weekEnding === weekEnding)
-        ? { ...t, status: 'Rejected' as const, rejectionReason: reason, rejectionNote: reason, rejectedAt: new Date().toISOString() }
-        : t
-    ));
-    decideLocalApprovalRecord('Timesheet', timesheetId, 'Rejected', reason);
-  },
+  approve: (timesheetId: string, _reason?: string, isCurrent = () => true): Promise<void> =>
+    decideTimesheet(timesheetId, 'Approved', undefined, isCurrent),
+  reject: (timesheetId: string, reason: string, isCurrent = () => true): Promise<void> =>
+    decideTimesheet(timesheetId, 'Rejected', reason, isCurrent),
 };
 
 // ── Admin Service ────────────────────────────────────────────────────────────
