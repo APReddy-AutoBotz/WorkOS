@@ -1,3 +1,4 @@
+import {verifyRecoveredCredit} from './support/retainer-credit-recovery.mjs';
 import {INVOICE_EXPORT_EVENT_KEYS} from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
@@ -28,7 +29,9 @@ const legacyState = async pool => {
   }
   return output;
 };
-const verifyCommercialDrafting = reversalScenario => withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identities, actorId, scope, ownerId, clientId, request: apiRequest}) => {
+const verifyCommercialDrafting = async reversalScenario => {
+  let recoveryEvidence;
+  await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identities, actorId, scope, ownerId, clientId, request: apiRequest}) => {
   const beforeLegacy = await legacyState(pool);
   const fixtureServer = await startFixtureServer({root, fixtures: ['commercial-drafting'], apiUrl});
   let browser;
@@ -809,6 +812,8 @@ const verifyCommercialDrafting = reversalScenario => withCommercialDraftingApi(a
       assert.equal(creditArtifact.total,credit.amount);
       const creditConfirmation=ok(await attest({...attestationRequest,requestId:crypto.randomUUID(),batchId:reserved.batchId,artifactId:creditArtifact.id,
         artifactSha256:creditArtifact.sha256,total:credit.amount,reference:'Synthetic credit application',reason:'Matched applied service-period credit'})).confirmation;
+      recoveryEvidence={finance, original:{artifact:a,confirmation:receipt,itemId:issued.body.receipt.itemId},
+        credit:{artifact:creditArtifact,confirmation:creditConfirmation,itemId:credit.itemId}};
       assert.equal(creditConfirmation.sourceType,'FULL_LINE_REVERSAL');
       assert.equal(creditConfirmation.total,credit.amount);
       assert.equal(ok(await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:finance}),200).confirmation.id,receipt.id);
@@ -834,6 +839,8 @@ const verifyCommercialDrafting = reversalScenario => withCommercialDraftingApi(a
     console.log('Retainer reversal scenario passed:',reversalScenario);
     console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export and downstream billing attestation, independent retainer reversal review, completion notices, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
   } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
-}, {upgrade: true});
+}, {upgrade: true, afterApi: reversalScenario === 'approved credit' && process.argv.includes('--restore-credit')
+    ? source => verifyRecoveredCredit(source,recoveryEvidence) : undefined});
+};
 await verifyCommercialDrafting('approved credit');
 await verifyCommercialDrafting('stale reviewer');

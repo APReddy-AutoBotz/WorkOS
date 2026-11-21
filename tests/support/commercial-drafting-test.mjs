@@ -241,7 +241,7 @@ export const withCommercialApi = async ({databaseUrl, identities, timeZone = 'UT
 
 // Shared real-backend fixture for a separate hosted React/browser journey. The
 // caller owns its Vite/browser lifecycle; this wrapper owns PostgreSQL and API.
-export const withCommercialDraftingApi = async (test, {upgrade = false, timeZone = 'UTC'} = {}) =>
+export const withCommercialDraftingApi = async (test, {upgrade = false, timeZone = 'UTC', afterApi = undefined} = {}) =>
   withCommercialDatabase(async ({pool, databaseUrl}) => {
     if (upgrade) {
       await withPreCommercialMigrations(async rootDir => {
@@ -259,4 +259,5 @@ export const withCommercialDraftingApi = async (test, {upgrade = false, timeZone
       actorId: identities.manager.id, scope: {organizationId: commercialFixture.organizationId, legalEntityId: commercialFixture.legalEntityId},
       ownerId: commercialFixture.ownerId, clientId: commercialFixture.clientId, attributionId: commercialFixture.businessUnitId,
       businessUnitId: commercialFixture.businessUnitId, costCentreId: commercialFixture.costCentreId}));
+    if (afterApi) await afterApi({pool,databaseUrl,identities});
   });
