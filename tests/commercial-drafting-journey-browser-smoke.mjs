@@ -12,7 +12,7 @@ const future = new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 10);
 const hostile = '<script>window.syntheticCommercialExecuted=true</script>';
 const prefix = '/api/v1/commercial-drafting';
 const expectedFields = {
-  retainer: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','retainerPeriods','retainerCapacityPolicy','retainerOveragePolicy','number','clientId','reason'],
+  retainer: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','retainerPeriods','retainerCapacityPolicy','retainerOveragePolicy','retainerRounding','number','clientId','reason'],
   contract: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','installments','number','clientId','reason'],
   engagement: ['code','name','model','ownerId','startsOn','endsOn','currency','budget','contractId','contractVersionId','clientId','attributionId','reason'],
   po: ['contractId','contractVersionId','number','value','currency','startsOn','endsOn','warningThresholdPercent','reason'],
@@ -281,6 +281,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await target.getByLabel('Client',{exact:true}).selectOption(clientId);
     await target.getByLabel('Commercial model',{exact:true}).selectOption('retainer');
     await target.getByLabel('Capacity consumption and unused hours').selectOption('all_rollover');
+    await target.getByLabel('Period price rounding').selectOption('HALF_EVEN:2');
     await target.getByLabel('Excess-hour pricing').selectOption('no_charge');
     await button('Add retainer period').click();
     await fill(target, {'Period 1 start date':'2020-01-01','Period 1 end date':'2099-12-31',
@@ -298,6 +299,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await page.getByText(/40.125 remaining · 0 over capacity/).waitFor();
     await button('Preview excess-hour pricing').click();
     await page.getByText(/0 excess hours · No charge under this contract/).waitFor();
+    await page.getByText('Period price preview · GBP 3500.00 · base fee 3500.00 · overage 0.00',{exact:true}).waitFor();
     assert.equal((await apiRequest(consumptionPath.replace(savedRetainer.result.versions[0].id,versionId))).status,404);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");
     assert.equal((await apiRequest(consumptionPath)).status,403);

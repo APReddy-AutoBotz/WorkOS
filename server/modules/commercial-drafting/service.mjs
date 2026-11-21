@@ -7,7 +7,7 @@ const scopeValues = req => [req.organizationScope.organizationId,req.organizatio
 const scopeWhere = 'organization_id=$1 and legal_entity_id=$2';
 const termsProjection = `id,contract_id,version,effective_from::text,name,model,starts_on::text,ends_on::text,currency,value::text,billing_terms,documents`;
 export const termsDto = row => row ? ({id:row.id,version:row.version,effectiveFrom:row.effective_from,name:row.name,model:row.model,
-  startsOn:row.starts_on,endsOn:row.ends_on,currency:row.currency,value:row.value,billingTerms:row.billing_terms,documents:row.documents,...(row.retainer_overage_policy ? {retainerOveragePolicy:row.retainer_overage_policy} : {}),...(row.retainer_capacity_policy ? {retainerCapacityPolicy:row.retainer_capacity_policy} : {}),...(row.retainer_periods?.length ? {retainerPeriods:row.retainer_periods} : {}),...(row.installments?.length ? {installments:row.installments} : {})}) : null;
+  startsOn:row.starts_on,endsOn:row.ends_on,currency:row.currency,value:row.value,billingTerms:row.billing_terms,documents:row.documents,...(row.retainer_rounding ? {retainerRounding:row.retainer_rounding} : {}),...(row.retainer_overage_policy ? {retainerOveragePolicy:row.retainer_overage_policy} : {}),...(row.retainer_capacity_policy ? {retainerCapacityPolicy:row.retainer_capacity_policy} : {}),...(row.retainer_periods?.length ? {retainerPeriods:row.retainer_periods} : {}),...(row.installments?.length ? {installments:row.installments} : {})}) : null;
 const engagementDto = row => ({id:row.id,code:row.code,name:row.name,model:row.model,clientId:row.client_id,contractId:row.contract_id,
   contractVersionId:row.contract_version_id,ownerId:row.owner_id,attributionId:row.attribution_id,startsOn:row.starts_on,endsOn:row.ends_on,
   currency:row.currency,budget:row.budget,billable:row.billable,status:row.status,origin:row.origin});
@@ -61,6 +61,10 @@ const insertTerms = async (client,req,id,version,data) => {
       extraValues.push(JSON.stringify(rows));
     }
   }
+  if (data.retainerRounding) {
+    columns.push('retainer_rounding');
+    extraValues.push(JSON.stringify(data.retainerRounding));
+  }
   if (data.retainerOveragePolicy) {
     columns.push('retainer_overage_policy');
     extraValues.push(data.retainerOveragePolicy);
@@ -100,6 +104,7 @@ export const appendContractVersion = async (client,req,id,data,audit) => {
     fail(409,'COMMERCIAL_IDENTITY_CONFLICT','Changing a contract model or currency requires a separate contract, not a draft revision.');
   const installments = data.installments ?? before.versions[0].installments;
   await insertTerms(client,req,id,before.latestVersion+1,{...data,installments,
+    retainerRounding:data.retainerRounding === undefined ? latest.retainerRounding : data.retainerRounding,
     retainerOveragePolicy:data.retainerOveragePolicy === undefined ? latest.retainerOveragePolicy : data.retainerOveragePolicy,
     retainerCapacityPolicy:data.retainerCapacityPolicy === undefined ? latest.retainerCapacityPolicy : data.retainerCapacityPolicy,
     retainerPeriods:data.retainerPeriods ?? latest.retainerPeriods});

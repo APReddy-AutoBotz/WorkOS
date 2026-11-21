@@ -12,7 +12,7 @@ export async function getRetainerConsumption(client, req, buildEmployeeScopeWher
   const {id:contractId, versionId} = req.params;
   const params = [organizationId, legalEntityId, contractId, versionId];
   const version = await client.query(
-    `select retainer_periods,retainer_capacity_policy,retainer_overage_policy,currency,(now() at time zone 'UTC')::date::text today from commercial_contract_versions where organization_id=$1 and legal_entity_id=$2
+    `select retainer_periods,retainer_capacity_policy,retainer_overage_policy,retainer_rounding,effective_from::text,currency,(now() at time zone 'UTC')::date::text today from commercial_contract_versions where organization_id=$1 and legal_entity_id=$2
      and contract_id=$3 and id=$4 and model='retainer'`, params);
   if (!version.rowCount) fail(404,'COMMERCIAL_NOT_FOUND','The scoped retainer version was not found.');
   const periods = version.rows[0].retainer_periods;
@@ -52,12 +52,12 @@ export async function getRetainerConsumption(client, req, buildEmployeeScopeWher
       trim_scale(coalesce(sum(a.hours) filter(where not a.billable),0))::text as "nonBillableHours"
     from periods p left join approved a on a.work_date between p."startsOn" and p."endsOn"
     group by p."startsOn",p."endsOn" order by p."startsOn"`, params);
-  const {retainer_capacity_policy:policy,today} = version.rows[0];
+  const {retainer_capacity_policy:policy,today,effective_from:effectiveFrom} = version.rows[0];
   const rows = coverage.entityWide && policy
-    ? retainerBalances(periods,result.rows,policy,today) : result.rows;
+    ? retainerBalances(periods,result.rows,policy,today,effectiveFrom) : result.rows;
   if (priceOverage) {
     const {currency,retainer_overage_policy:overagePolicy}=version.rows[0];
-    return {contractId,versionId,currency,periods:await priceRetainerOverage(client,req.organizationScope,contractId,currency,overagePolicy,rows)};
+    return {contractId,versionId,currency,periods:await priceRetainerOverage(client,req.organizationScope,contractId,currency,overagePolicy,rows,periods,version.rows[0].retainer_rounding)};
   }
   return {contractId, versionId, periods:rows};
 }

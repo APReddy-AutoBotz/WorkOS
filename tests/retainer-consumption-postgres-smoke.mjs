@@ -1,5 +1,6 @@
 import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import assert from 'node:assert/strict';
+import {priceRetainerOverage} from '../server/modules/commercial-drafting/retainer-overage.mjs';
 import {retainerBalances} from '../server/modules/commercial-drafting/retainer-balances.mjs';
 import {randomUUID} from 'node:crypto';
 import {commercialFixture, withCommercialDatabase, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
@@ -16,11 +17,20 @@ for (const [policy,carried,expired,overage] of [
   assert.equal(a.capacity.carriedOut,carried);assert.equal(a.capacity.expired,expired);
   assert.equal(b.capacity.carriedIn,carried);assert.equal(b.capacity.overage,overage);
 }
+const revisedBalances=retainerBalances(capacityInputs,hours,'all_rollover','2026-02-01','2026-01-20');
+assert.equal(revisedBalances[0].capacity,undefined);
+assert.equal(revisedBalances[1].capacity.carriedIn,'0');
 assert.equal(retainerBalances(capacityInputs.slice(0,1),hours.slice(0,1),'all_rollover','2026-02-01')[0].capacity.expired,'1.0251');
 
 await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await migrateCommercialDatabase(pool);
   const {today,identities}=await seedWorkApproval(pool);
+  const example={startsOn:today,endsOn:today,baseFee:'100.125'};
+  const roundedFee=async rounding=>(await priceRetainerOverage(pool,commercialFixture,'synthetic-unused','USD','no_charge',
+    [{...example,capacity:{overage:'2'}}],[example],rounding))[0].periodPrice;
+  for (const [mode,wanted] of [['HALF_EVEN','100.12'],['HALF_UP','100.13'],['DOWN','100.12']])
+    assert.deepEqual(await roundedFee({mode,precision:2}),{baseFee:wanted,overage:'0.00',total:wanted});
+  assert.equal(await roundedFee(null),null);
   await grantAmendmentPermissions(pool);
   for (const role of ['Admin','Employee']) await pool.query(
     `insert into role_permissions(role_name,permission_key,enabled) select $1,k,true from unnest($2::text[]) k
@@ -32,9 +42,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       assert.equal(r.status,status,JSON.stringify(r.body)); return r.body;
     };
     const tomorrow=addUtcDays(today,1),end=addUtcDays(today,30);
-    const periods=[today,tomorrow].map(day=>({startsOn:day,endsOn:day,includedHours:'1.0001',baseFee:'100'}));
+    const periods=[today,tomorrow].map(day=>({startsOn:day,endsOn:day,includedHours:'1.0001',baseFee:'100.125'}));
     const {project,contract,pin}=await createAmendmentHierarchy(request,'SYN-RETAINER-HOURS',{
-      contract:{model:'retainer',startsOn:today,endsOn:end,effectiveFrom:today,retainerPeriods:periods,retainerCapacityPolicy:'all_rollover',retainerOveragePolicy:'contract_hourly_at_period_end'},
+      contract:{model:'retainer',startsOn:today,endsOn:end,effectiveFrom:today,retainerPeriods:periods,retainerCapacityPolicy:'all_rollover',retainerOveragePolicy:'contract_hourly_at_period_end',retainerRounding:{mode:'HALF_EVEN',precision:2}},
       engagement:{startsOn:today,endsOn:end},project:{startsOn:today,endsOn:end}});
     const read=async(identity=identities.manager,version=pin)=>{
       const res=await request(`/contracts/${contract.id}/versions/${version}/retainer-consumption`,{identity});
@@ -83,15 +93,17 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal((await preview()).status,'missing');
     const adoption=await adoptHourlyRate(opts,'billing','12.3456');
     const priced=await preview();
+    assert.deepEqual(priced.periodPrice,{baseFee:'100.12',overage:'33.95',total:'134.07'});
     assert.deepEqual([priced.status,priced.hours,priced.amount,priced.source.adoptionId,priced.source.effectiveFrom,priced.source.effectiveTo],
       ['priced','2.7499','33.94916544',adoption.id,today,end]);
     await adoptHourlyRate(opts,'billing','14.00');
-    const conflict=await preview(); assert.equal(conflict.status,'conflict');assert.equal(conflict.amount,null);assert.equal(conflict.source,null);
+    const conflict=await preview(); assert.equal(conflict.status,'conflict');assert.equal(conflict.amount,null);assert.equal(conflict.source,null);assert.equal(conflict.periodPrice,null);
     const {id,version,...terms}=contract.versions[0];
     const revised=await post('/contracts/'+contract.id+'/versions',{...terms,expectedVersion:version,effectiveFrom:tomorrow,
-      reason:'Synthetic prospective revision',retainerOveragePolicy:null});
+      reason:'Synthetic prospective revision',retainerOveragePolicy:null,retainerRounding:null});
     assert.equal((await request(previewPath.replace(pin,revised.versions[0].id))).status,409);
     assert.deepEqual(await read(identities.manager,revised.versions[0].id),empty);
+    assert((await request(path.replace(pin,revised.versions[0].id))).body.periods.every(p=>!p.capacity));
     assert.deepEqual(await read(),approved);
   });
 });
