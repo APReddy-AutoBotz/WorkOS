@@ -66,6 +66,8 @@ Buyer operations can run `npm run --silent ops:delivery-health` to check pending
 
 Single and bulk decisions from the timesheet approval desk use the version displayed to the reviewer. If an employee resubmits before a decision arrives, reload and review the corrected work.
 
+Team leads can open submitted timesheets and retained correction history for their current direct reports in the selected legal entity. Their personal timesheet history stays scoped to their own work.
+
 Bulk timesheet approval previews the selected employees and weeks. After confirmation, the approval desk shows each timesheet’s refreshed status and whether its decision was acknowledged.
 
 Timesheet approval closes the previous workspace when an operator switches organization scope. Reloading approvals fetches the current view. A decision already accepted by the server retains its original scope.
