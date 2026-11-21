@@ -76,7 +76,7 @@ Timesheet Ops Export prepares large CSVs in batches, keeps the approval page res
 
 Production API replicas emit one JSON traffic summary per minute for monitoring request volume, failures and latency. See [API traffic monitoring](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#api-traffic-monitoring) for alert ownership and aggregation.
 
-Run `npm run test:standard-profile` on a disposable loopback PostgreSQL instance to measure timesheet reads, draft saves, submissions, independent approvals and utilization reports with 75 concurrent authenticated sessions. The [performance runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#standard-profile-api-performance) explains the dataset, thresholds and deployment evidence.
+Run `npm run test:standard-profile` on a disposable loopback PostgreSQL instance to measure timesheet reads, draft saves, submissions, independent direct-manager approvals, two-stage approvals and utilization reports. Each measured wave issues 75 concurrent authenticated requests. The [performance runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#standard-profile-api-performance) explains the dataset, thresholds and deployment evidence.
 
 A designated database incident responder can revoke all application sessions for one account. The next sign-in starts a new generation. See the [account revocation procedure](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#revoking-all-sessions-for-an-account).
 

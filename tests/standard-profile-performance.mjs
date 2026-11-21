@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {appendFile, readFile} from 'node:fs/promises';
+import {measureStagedApprovals} from './support/standard-profile-stages.mjs';
 import {performance} from 'node:perf_hooks';
 import {runMigrations} from '../server/migrate.mjs';
 import {
@@ -57,6 +58,26 @@ await withCommercialDatabase(async database => {
     const receipts = new Map();
     const reviewed = new Map();
     const states = {save: 'Draft', submit: 'Submitted', review: 'Submitted', approve: 'Approved'};
+    async function readReport(actor, reportKey) {
+      const options = {authenticated: false, headers: actor.headers};
+      const start = performance.now();
+      const result = await request('/api/reports/planned-utilization?date=2024-02-01', options);
+      samples[reportKey].push(performance.now() - start);
+      assert.equal(result.status, 200);
+      const workers = result.body.rows.filter(row => row.id.startsWith('profile-worker-'));
+      assert.equal(workers.length, 250);
+      assert.ok(workers.every(row => Number(row.planned_utilization) === 100));
+      assert.ok(result.body.rows.every(row => row.id !== commercialFixture.otherOwnerId && row.id !== commercialFixture.foreignOwnerId));
+    }
+    async function readOwnWork(actor, readKey) {
+      const options = {authenticated: false, headers: actor.headers};
+      const start = performance.now();
+      const result = await request('/api/timesheets', options);
+      samples[readKey].push(performance.now() - start);
+      assert.equal(result.status, 200);
+      assert.equal(result.body.length, 8);
+      assert.ok(result.body.every(sheet => sheet.employee_id === actor.worker && sheet.entries.length === 5));
+    }
     const reviewers = sessions.slice(75);
     for (const [phase, status] of Object.entries(states)) {
       const readKey = 'read during ' + phase;
@@ -76,19 +97,9 @@ await withCommercialDatabase(async database => {
           const options = {authenticated: false, headers: actor.headers};
           const start = performance.now();
           if (index < 5) {
-            const result = await request('/api/reports/planned-utilization?date=2024-02-01', options);
-            samples[reportKey].push(performance.now() - start);
-            assert.equal(result.status, 200);
-            const workers = result.body.rows.filter(row => row.id.startsWith('profile-worker-'));
-            assert.equal(workers.length, 250);
-            assert.ok(workers.every(row => Number(row.planned_utilization) === 100));
-            assert.ok(result.body.rows.every(row => row.id !== commercialFixture.otherOwnerId && row.id !== commercialFixture.foreignOwnerId));
+            await readReport(actor,reportKey);
           } else if (index >= 20) {
-            const result = await request('/api/timesheets', options);
-            samples[readKey].push(performance.now() - start);
-            assert.equal(result.status, 200);
-            assert.equal(result.body.length, 8);
-            assert.ok(result.body.every(sheet => sheet.employee_id === worker && sheet.entries.length === 5));
+            await readOwnWork(actor,readKey);
           } else if (phase === 'review') {
             const result = await request('/api/timesheets?view=direct-report-review', options);
             samples.review.push(performance.now() - start);
@@ -155,8 +166,9 @@ await withCommercialDatabase(async database => {
       where t.id=any($1::uuid[]) and d.status='Approved' and d.actor_id<>w.actor_id and d.active_role='TeamLead'`,
     [[...receipts.values()].map(row => row.id)]);
     assert.deepEqual(evidence.rows[0], {sheets: 90, decisions: 90});
+    await measureStagedApprovals({pool, request, accounts, sessions, identities, samples, thresholds, readOwnWork, readReport});
     const report = ['## Standard-profile API performance', '',
-      '250 synthetic accounts, 75 concurrent sessions, 25 clients, 50 projects, 250 assignments, 10,000 work entries, 2,000 submission audit rows and 50 commercial milestones.', '',
+      '250 synthetic workforce accounts, 75 concurrent requests per wave, 25 clients, 50 projects, 250 assignments, 10,000 work entries, 2,000 submission audit rows and 50 commercial milestones.', '',
       '| Operation | Samples | p95 (ms) | Max (ms) | Target (ms) |', '|---|---:|---:|---:|---:|'];
     const violations = [];
     for (const [operation, durations] of Object.entries(samples)) {
