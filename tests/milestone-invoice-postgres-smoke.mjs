@@ -524,7 +524,7 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         );
         if (verifyPurchaseOrder) {
           const upgrade=await migrateCommercialDatabase(pool);
-          assert.deepEqual(upgrade.applied,['082_wos06_invoice_review_identity', '083_wos06_fixed_fee_batch_approval', '084_wos06_fixed_fee_invoice_export', '085_wos06_fixed_fee_invoice_confirmation', '086_wos06_fixed_fee_po_commitments']);
+          assert.deepEqual(upgrade.applied,['082_wos06_invoice_review_identity', '082a_wos01_session_lifetime', '082b_wos01_account_session_revocation', '082c_wos08_timesheet_entry_lookup', '083_wos06_fixed_fee_batch_approval', '084_wos06_fixed_fee_invoice_export', '085_wos06_fixed_fee_invoice_confirmation', '086_wos06_fixed_fee_po_commitments']);
           const instancePath=invoiceApproval+'/instances/'+firstReview.id;
           const actorView=()=>request(instancePath,{identity:ids.manager});
           assert.equal(ok(await actorView()).approval.current,true);
@@ -1007,7 +1007,7 @@ for (const verifyPurchaseOrder of [false, true]) await withCommercialDatabase(as
         const acceptedCredit=attempts[0].body.artifact;
         assert.equal(acceptedCredit.total,issued.amount);
         assert.equal(acceptedCredit.schemaVersion,'workos.invoice-credit-csv/1');
-        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release', '077_wos06_po_line_commitments', '078_wos06_milestone_po_commitments', '079_wos06_fixed_fee_schedule', '080_wos06_fixed_fee_eligibility', '081_wos06_fixed_fee_invoice_drafts', '082_wos06_invoice_review_identity', '083_wos06_fixed_fee_batch_approval', '084_wos06_fixed_fee_invoice_export', '085_wos06_fixed_fee_invoice_confirmation', '086_wos06_fixed_fee_po_commitments']);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release', '077_wos06_po_line_commitments', '078_wos06_milestone_po_commitments', '079_wos06_fixed_fee_schedule', '080_wos06_fixed_fee_eligibility', '081_wos06_fixed_fee_invoice_drafts', '082_wos06_invoice_review_identity', '082a_wos01_session_lifetime', '082b_wos01_account_session_revocation', '082c_wos08_timesheet_entry_lookup', '083_wos06_fixed_fee_batch_approval', '084_wos06_fixed_fee_invoice_export', '085_wos06_fixed_fee_invoice_confirmation', '086_wos06_fixed_fee_po_commitments']);
         const creditSource=ok(await request(csv+'/confirmation-sources/'+finalBatch)).source;
         assert.equal(creditSource.sourceType,'FULL_LINE_REVERSAL');
         const creditAttestation={...confirm,requestId:randomUUID(),batchId:finalBatch,artifactId:acceptedCredit.id,

@@ -29,7 +29,7 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     const beforeUpgrade = await request('/api/auth/me',{headers:{Authorization:`Bearer ${preUpgrade}`}});
     assert.equal(beforeUpgrade.status,503);
     assert.equal(beforeUpgrade.body.code,'SESSION_AUTHORITY_UNAVAILABLE');
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['057a_wos04_session_revocations','057b_wos05_leave_submitter_lookup','057c_wos04_shared_auth_throttle','058_wos04_assignment_overlap_policy','058a_wos04_assignment_overlap_serialization','059_wos04_work_category_context','060_wos04_actual_work_evidence','061_wos04_calendar_leave_intake','062_wos04_native_forecast_evidence','063_wos05_staged_work_approvals','064_wos04_work_period_notices','065_wos05_assignment_material_approvals','065a_wos06_rate_cost_candidates', '065b_wos06_candidate_owners', '065c_wos06_commercial_candidate_approvals', '065d_wos06_approved_rate_adoptions', '065e_wos06_governed_tm_valuation', '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy', '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility', '065n_wos06_milestone_invoice_lineage', '065o_wos06_milestone_invoice_approval', '065p_wos06_milestone_invoice_export', '065q_wos06_milestone_invoice_cancel_notice', '065r_wos06_milestone_invoice_confirmation', '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen', '065v_wos06_billing_eligibility_period', '065w_wos06_exported_line_reversal_requests', '065x_wos06_reversal_review_policy', '065y_wos06_reversal_review_submission', '065z_wos06_reversal_review_decisions', '066_wos06_full_line_reversal_eligibility', '067_wos06_correction_batch_reservations', '068_wos06_correction_review_evidence', '069_wos06_correction_batch_approval', '070_wos06_credit_export_lineage', '071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release', '077_wos06_po_line_commitments', '078_wos06_milestone_po_commitments', '079_wos06_fixed_fee_schedule', '080_wos06_fixed_fee_eligibility', '081_wos06_fixed_fee_invoice_drafts', '082_wos06_invoice_review_identity', '083_wos06_fixed_fee_batch_approval', '084_wos06_fixed_fee_invoice_export', '085_wos06_fixed_fee_invoice_confirmation', '086_wos06_fixed_fee_po_commitments']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['057a_wos04_session_revocations','057b_wos05_leave_submitter_lookup','057c_wos04_shared_auth_throttle','058_wos04_assignment_overlap_policy','058a_wos04_assignment_overlap_serialization','059_wos04_work_category_context','060_wos04_actual_work_evidence','061_wos04_calendar_leave_intake','062_wos04_native_forecast_evidence','063_wos05_staged_work_approvals','064_wos04_work_period_notices','065_wos05_assignment_material_approvals','065a_wos06_rate_cost_candidates', '065b_wos06_candidate_owners', '065c_wos06_commercial_candidate_approvals', '065d_wos06_approved_rate_adoptions', '065e_wos06_governed_tm_valuation', '065f_wos06_tm_billing_eligibility', '065g_wos06_invoice_draft_occupancy', '065h_wos06_invoice_batch_approval', '065i_wos06_approved_invoice_csv', '065j_wos06_invoice_export_notifications', '065k_wos06_invoice_billing_confirmation', '065l_wos06_invoice_action_required', '065m_wos06_milestone_billing_eligibility', '065n_wos06_milestone_invoice_lineage', '065o_wos06_milestone_invoice_approval', '065p_wos06_milestone_invoice_export', '065q_wos06_milestone_invoice_cancel_notice', '065r_wos06_milestone_invoice_confirmation', '065s_wos06_tm_period_versions', '065t_wos06_tm_financial_period_lock', '065u_wos06_financial_period_reopen', '065v_wos06_billing_eligibility_period', '065w_wos06_exported_line_reversal_requests', '065x_wos06_reversal_review_policy', '065y_wos06_reversal_review_submission', '065z_wos06_reversal_review_decisions', '066_wos06_full_line_reversal_eligibility', '067_wos06_correction_batch_reservations', '068_wos06_correction_review_evidence', '069_wos06_correction_batch_approval', '070_wos06_credit_export_lineage', '071_wos06_credit_billing_confirmation', '072_wos04_worker_type_assignments', '073_wos06_tm_entry_value_cap', '074_wos06_tm_nonchargeable_phase', '075_wos06_amended_tm_terms', '076_wos06_purchase_order_release', '077_wos06_po_line_commitments', '078_wos06_milestone_po_commitments', '079_wos06_fixed_fee_schedule', '080_wos06_fixed_fee_eligibility', '081_wos06_fixed_fee_invoice_drafts', '082_wos06_invoice_review_identity', '082a_wos01_session_lifetime', '082b_wos01_account_session_revocation', '082c_wos08_timesheet_entry_lookup', '083_wos06_fixed_fee_batch_approval', '084_wos06_fixed_fee_invoice_export', '085_wos06_fixed_fee_invoice_confirmation', '086_wos06_fixed_fee_po_commitments']);
     assert.equal((await request('/api/auth/me',{headers:{Authorization:`Bearer ${preUpgrade}`}})).status,200);
     assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
     const login = async () => {
@@ -123,7 +123,59 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     assert.equal((await request('/api/auth/logout', {...other, method: 'POST'})).status, 200);
     assert.equal((await request('/api/auth/logout',{method:'POST',headers:{Authorization:`Bearer ${preUpgrade}`}})).status,200);
     assert.equal((await request('/api/auth/me',{headers:{Authorization:`Bearer ${preUpgrade}`}})).status,401);
-    revokedToken = first;
+    const oldSession = await login();
+    const legacyFamily = tokenFor();
+    const otherAccount = tokenFor(identities.reader);
+    const bearer = token => ({headers: {Authorization: `Bearer ${token}`}});
+    const sibling = await request('/api/auth/switch-role', {...bearer(oldSession), method: 'POST', body: {role: 'Employee'}});
+    assert.equal(sibling.status, 200);
+    const target = identities.manager.id;
+    const revoke = 'select public.revoke_account_sessions($1, 0, $2)';
+    const operator = 'test_responder_' + randomBytes(8).toString('hex');
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(`create role ${operator}`);
+      await client.query(`set local role ${operator}`);
+      await client.query('savepoint denied');
+      await assert.rejects(client.query(revoke, [target, 'synthetic-incident']), {code: '42501'});
+      await client.query('rollback to denied');
+      await client.query('reset role');
+      await client.query(`grant execute on function public.revoke_account_sessions(uuid,integer,text) to ${operator}`);
+      await client.query(`alter table audit_logs add constraint test_reject_session_audit check (action <> 'RevokeAccountSessions') not valid`);
+      await client.query('savepoint failed_audit');
+      await assert.rejects(client.query(revoke, [target, 'synthetic-failure']), {code: '23514'});
+      await client.query('rollback to failed_audit');
+      await client.query('alter table audit_logs drop constraint test_reject_session_audit');
+      await client.query(`set local role ${operator}`);
+      await client.query(revoke, [target, 'synthetic-incident']);
+      await client.query('reset role');
+      await client.query(`revoke execute on function public.revoke_account_sessions(uuid,integer,text) from ${operator}`);
+      await client.query(`drop role ${operator}`);
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+    await assert.rejects(pool.query(revoke, [target, 'synthetic-retry']), /generation did not match/);
+    const evidenceRows = (await pool.query(`select user_id=session_user as authenticated,active_role,old_value,new_value,reason
+      from audit_logs where action='RevokeAccountSessions' and entity_id=$1`, [target])).rows;
+    assert.deepEqual(evidenceRows, [{authenticated:true, active_role:operator, old_value:{generation:0},
+      new_value:{generation:1}, reason:'synthetic-incident'}]);
+    await pool.query("update users set status='Inactive' where id=$1", [target]);
+    await pool.query("update users set status='Active' where id=$1", [target]);
+    for (const token of [oldSession, sibling.body.token, legacyFamily]) {
+      assert.equal((await request('/api/auth/me', bearer(token))).status, 401);
+    }
+    assert.equal((await request('/api/auth/me', bearer(otherAccount))).status, 200);
+    const fresh = await login();
+    assert.equal(claims(fresh).sessionGeneration, 1);
+    const refreshed = await request('/api/auth/me', bearer(fresh));
+    assert.equal(refreshed.status, 200);
+    assert.equal(claims(refreshed.body.token).sessionGeneration, 1);
+    await pool.query("select public.revoke_account_sessions($1,1,'synthetic-followup')", [target]);
+    assert.equal((await request('/api/auth/me', bearer(refreshed.body.token))).status, 401);
+    revokedToken = oldSession;
   });
   await withCommercialApi({databaseUrl, identities, sessionSecret: secret}, async ({request}) => {
     assert.equal((await request('/api/auth/me', {headers: {Authorization: `Bearer ${revokedToken}`}})).status, 401,

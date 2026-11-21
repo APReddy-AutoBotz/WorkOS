@@ -32,7 +32,7 @@ Buyers can adopt effective-dated work categories for project, descriptive client
 
 Allocation Control supports buyer-selected warning and blocking thresholds for overlapping active assignments. Thresholds use the declared assignment percentages and become effective on the adopted date. [Assignment overlap policy](docs/tasks/WOS-04-ASSIGNMENT-OVERLAP-POLICY.md)
 
-Production Compose accepts `API_SESSION_TTL_HOURS` in hours, including fractions. The default is eight hours. Invalid durations prevent API startup. [Operations runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#configuring-session-lifetime)
+Production Compose accepts `API_SESSION_TTL_HOURS` in hours, including fractions. The default is eight hours. Production startup, readiness and sign-in require the configured duration to match the audited database value. On upgrade, a named database operator must record the current lifetime before starting the new API. [Operations runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#configuring-session-lifetime)
 
 The merged PostgreSQL session and browser journeys verify current-session logout and absolute expiry. Auditing changes to session lifetime remains open under WOS-IAM-008. [Session acceptance evidence](docs/05-delivery/SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
 
@@ -61,6 +61,12 @@ Start with the [current implementation status](docs/00-control/IMPLEMENTATION_ST
 These are product and acceptance commitments, not claims that every capability is already accepted on `main`. Financial valuation, billing eligibility and invoice readiness remain separate decisions; operational earned-management metrics are not statutory accounting recognition.
 
 ## Development and operations
+
+Run `npm run test:standard-profile` on a disposable loopback PostgreSQL instance to measure timesheet reads, draft saves, submissions, independent approvals and utilization reports with 75 concurrent authenticated sessions. The [performance runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#standard-profile-api-performance) explains the dataset, thresholds and deployment evidence.
+
+A designated database incident responder can revoke all application sessions for one account. The next sign-in starts a new generation. See the [account revocation procedure](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#revoking-all-sessions-for-an-account).
+
+Run `npm run test:restore` with a disposable loopback PostgreSQL database and matching PostgreSQL client tools to exercise archive recovery, commercial data integrity and scoped API access. See the [backup and restore procedure](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#backup-and-restore).
 
 The application uses React/TypeScript, Node.js/Express and PostgreSQL in a modular monolith. Install the checked-out revision's lockfile with `npm ci`; consult [environment examples](.env.example), the [deployment architecture](docs/02-architecture/DEPLOYMENT_ARCHITECTURE.md) and [operations runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md) before configuring or running it. Production requires its documented infrastructure and identity configuration; demo/test settings are not production setup.
 
