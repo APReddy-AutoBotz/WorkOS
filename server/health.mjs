@@ -22,6 +22,7 @@ export const createHealthHandlers = ({
   environment = process.env,
   migrationStatus = getMigrationStatus,
   identityProviderReady = isIdentityProviderAvailable,
+  checkSessionLifetime,
 }) => {
   const build = getBuildMetadata(environment);
   const productionRuntime = environment.NODE_ENV === 'production' || environment.APP_MODE === 'production';
@@ -52,6 +53,14 @@ export const createHealthHandlers = ({
           unsupportedMigrationCount: status.unknownIds.length,
         });
         return;
+      }
+      if (productionRuntime) {
+        try {
+          await checkSessionLifetime();
+        } catch {
+          response.status(503).json({status: 'unready', database: 'connected', migrations: 'current', sessionPolicy: 'unavailable'});
+          return;
+        }
       }
       let providerReady = false;
       try {
@@ -119,8 +128,9 @@ export const registerHealthRoutes = ({
   environment = process.env,
   migrationStatus = getMigrationStatus,
   identityProviderReady = isIdentityProviderAvailable,
+  checkSessionLifetime,
 }) => {
-  const handlers = createHealthHandlers({pool, rootDir, environment, migrationStatus, identityProviderReady});
+  const handlers = createHealthHandlers({pool, rootDir, environment, migrationStatus, identityProviderReady, checkSessionLifetime});
   app.get('/api/health/live', handlers.live);
   app.get('/api/health/ready', handlers.ready);
   app.get('/api/health/build', handlers.buildInfo);
