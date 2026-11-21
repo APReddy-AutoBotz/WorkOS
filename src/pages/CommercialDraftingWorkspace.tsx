@@ -23,7 +23,7 @@ import {
   captureCommercialDraftingContext, commercialDraftingService, isCommercialDraftingContextCurrent,
   COMMERCIAL_CONTRACT_MODELS, ENGAGEMENT_MODELS,
   type CommercialDraftingContext, type CommercialWorkspace, type ContractDetail,
-  retainerRoundingModes, type RetainerRounding, retainerOverageLabels, type RetainerOveragePolicy, retainerPolicyLabels, type RetainerCapacityPolicy, type RetainerPeriod, type ContractModel, type EngagementModel, type CreateContractInput, type AppendContractVersionInput,
+  retainerRoundingModes, type RetainerRounding, retainerOverageLabels, type RetainerOveragePolicy, retainerPolicyLabels, type RetainerCapacityPolicy, type RetainerPeriod, type ServiceDimension, type ContractModel, type EngagementModel, type CreateContractInput, type AppendContractVersionInput,
   type CreateEngagementInput, type CreatePurchaseOrderInput, type CreateMilestoneInput,
 } from '../services/commercialDrafting';
 
@@ -34,6 +34,7 @@ type Draft = {
   retainerRounding?: RetainerRounding | null;
   retainerOveragePolicy?: RetainerOveragePolicy | null;
   retainerCapacityPolicy?: RetainerCapacityPolicy | null;
+  serviceDimensions: ServiceDimension[];
   retainerPeriods: RetainerPeriod[];
   installments: {dueOn: string; amount: string}[];
   currency: string; value: string; budget: string; billingTerms: string; documents: {name: string; url: string}[];
@@ -53,7 +54,7 @@ const moneyPattern = '(0|[1-9]\\d{0,13})(\\.\\d{1,4})?';
 const modelLabel = (model: EngagementModel) => ({time_and_materials: 'Time and materials', fixed_fee: 'Fixed fee', milestone: 'Milestone based',
   retainer: 'Retainer', managed_service: 'Managed service', internal: 'Internal initiative', pre_sales: 'Pre-sales / non-billable'}[model]);
 const blankDraft = (kind: DraftKind, lease: number): Draft => ({kind, lease, contractId: '', expectedVersion: 0, number: '', clientId: '', name: '', code: '',
-  model: 'time_and_materials', startsOn: '', endsOn: '', effectiveFrom: '', currency: '', value: '', budget: '', billingTerms: '', installments: [], retainerPeriods: [], documents: [],
+  model: 'time_and_materials', startsOn: '', endsOn: '', effectiveFrom: '', currency: '', value: '', budget: '', billingTerms: '', installments: [], serviceDimensions: [], retainerPeriods: [], documents: [],
   ownerId: '', contractVersionId: '', attributionId: '', warningThresholdPercent: '', engagementId: '', dueOn: '', amount: '', reason: ''});
 const safeError = (error: unknown, saving = false) => {
   const status = error instanceof ApiClientError ? error.status : 0;
@@ -151,7 +152,7 @@ export const CommercialDraftingWorkspace = () => {
       const detail = owner.detail?.status === 'ready' ? owner.detail.value : undefined;
       const latest = detail?.versions.find(version => version.version === detail.latestVersion);
       if (!detail || !latest) return;
-      draft = {...draft, ...latest, retainerPeriods: latest.retainerPeriods ?? [], installments: latest.installments ?? [], documents: latest.documents.map(document => ({...document})), contractId: detail.id,
+      draft = {...draft, ...latest, serviceDimensions: latest.serviceDimensions ?? [], retainerPeriods: latest.retainerPeriods ?? [], installments: latest.installments ?? [], documents: latest.documents.map(document => ({...document})), contractId: detail.id,
         number: detail.number, clientId: detail.clientId, expectedVersion: detail.latestVersion, effectiveFrom: ''};
     }
     publish({...owner, draft, uncertain: false, message: undefined, saveError: undefined});
@@ -195,6 +196,7 @@ export const CommercialDraftingWorkspace = () => {
     const includeSchedule = draft.model === 'fixed_fee' && (draft.installments.length > 0 || hadSchedule);
     const terms = {name: draft.name, model: draft.model as ContractModel, startsOn: draft.startsOn, endsOn: draft.endsOn,
       effectiveFrom: draft.effectiveFrom, currency: draft.currency, value: draft.value, billingTerms: draft.billingTerms,
+      ...(draft.model === 'managed_service' ? {serviceDimensions:draft.serviceDimensions} : {}),
       ...(draft.model === 'retainer' ? {retainerPeriods: draft.retainerPeriods, retainerCapacityPolicy:draft.retainerCapacityPolicy,retainerOveragePolicy:draft.retainerOveragePolicy,retainerRounding:draft.retainerRounding} : {}),
       ...(includeSchedule ? {installments: draft.installments} : {}),
       documents: draft.documents.map(document => ({...document})), reason: draft.reason};
@@ -322,6 +324,19 @@ export const CommercialDraftingWorkspace = () => {
                 {textInput('startsOn', 'Starts on', {type: 'date'})}{textInput('endsOn', 'Ends on', {type: 'date'})}
                 {textInput('effectiveFrom', 'Terms effective from', {type: 'date'})}{textInput('currency', 'Currency (ISO code)', {pattern: '[A-Z]{3}', maxLength: 3, disabled: draft.kind === 'revision'})}
                 {textInput('value', 'Contract value (decimal)', {pattern: moneyPattern, maxLength: 19})}
+                {draft.model === 'managed_service' && <fieldset className="min-w-0 md:col-span-2">
+                  <legend>Service quantity dimensions</legend>
+                  {draft.serviceDimensions.map((unit,index)=><div key={index} className="grid gap-2 md:grid-cols-3">
+                    {(['code','label'] as const).map(key=><Field key={key} label={`Unit ${index+1} ${key}`}><input className={inputClass} required maxLength={key==='code'?40:80}
+                      value={unit[key]} onChange={e=>edit({serviceDimensions:draft.serviceDimensions.map((row,n)=>n===index?{...row,[key]:e.target.value}:row)})}/></Field>)}
+                    <Field label={`Unit ${index+1} decimal places`}><select className={inputClass} value={unit.precision}
+                      onChange={e=>edit({serviceDimensions:draft.serviceDimensions.map((row,n)=>n===index?{...row,precision:Number(e.target.value)}:row)})}>
+                      {[0,1,2,3,4].map(n=><option key={n} value={n}>{n}</option>)}</select></Field>
+                    <button type="button" className={buttonClass} onClick={()=>edit({serviceDimensions:draft.serviceDimensions.filter((_,n)=>n!==index)})}>Remove unit {index+1}</button>
+                  </div>)}
+                  <button type="button" className={buttonClass} disabled={draft.serviceDimensions.length>=50}
+                    onClick={()=>edit({serviceDimensions:[...draft.serviceDimensions,{code:'',label:'',precision:0}]})}>Add service unit</button>
+                </fieldset>}
                 {draft.model === 'retainer' && <fieldset className="min-w-0 md:col-span-2">
                   <legend>Retainer service periods</legend>
                   <Field label="Period price rounding"><select className={inputClass} value={draft.retainerRounding ? `${draft.retainerRounding.mode}:${draft.retainerRounding.precision}` : ''}
@@ -430,6 +445,8 @@ export const CommercialDraftingWorkspace = () => {
               <h4 className="break-words font-bold">Version {version.version} · {version.name}</h4>
               <p className="mt-2 text-sm">Effective {version.effectiveFrom}. Coverage {version.startsOn} to {version.endsOn}. {modelLabel(version.model)}.</p>
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
+              {version.serviceDimensions?.length ? <div><h4>Service quantity dimensions</h4>
+                <ul>{version.serviceDimensions.map(unit=><li key={unit.code}>{unit.label} · {unit.code} · {unit.precision} decimal places</li>)}</ul></div> : null}
               {version.retainerPeriods?.length ? <div><h4>Retainer service periods</h4>
                 {version.retainerRounding && <p>Base fee and overage round separately · {retainerRoundingModes[version.retainerRounding.mode]} · {version.retainerRounding.precision} decimal places</p>}
                 <p>{version.retainerOveragePolicy ? retainerOverageLabels[version.retainerOveragePolicy] : 'Excess-hour pricing unspecified'}</p>
