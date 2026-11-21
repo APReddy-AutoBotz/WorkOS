@@ -869,6 +869,10 @@ const verifyCommercialDrafting = async reversalScenario => {
         const result=await apiRequest('/lifecycle/'+type+'/'+id+'/transitions',{method:'POST',body:{expectedSequence:0,state:'Active',contractVersionId:serviceVersion,approvalReference:null,reason:'Synthetic service delivery opening'}});
         assert.equal(result.status,201,JSON.stringify(result.body));
       }
+      assert.equal((await capture({...serviceInput,recorderWorkerId:ownerId})).status,400);
+      await pool.query('update users set employee_record_id=null where id=$1',[actorId]);
+      assert.equal((await capture(serviceInput)).status,403,'unlinked recorder cannot create evidence');
+      await pool.query('update users set employee_record_id=$2 where id=$1',[actorId,ownerId]);
       assert.equal((await capture({...serviceInput,quantity:'1.251'})).status,422);
       assert.equal((await capture({...serviceInput,dimensionCode:'UNKNOWN'})).status,422);
       assert.equal((await capture({...serviceInput,serviceDate:future})).status,422);
@@ -884,8 +888,9 @@ const verifyCommercialDrafting = async reversalScenario => {
       await captureForm.getByText(today+' · 1.25 SHIFT · SYN-SHIFT-1').waitFor();
       const replay=await capture(serviceInput);assert.equal(replay.status,201,JSON.stringify(replay.body));
       assert.equal((await capture({...serviceInput,quantity:'2'})).status,409);
-      const evidence=await pool.query('select quantity::text,actor_id from commercial_service_unit_evidence where engagement_id=$1',[serviceEng.body.id]);
-      assert.deepEqual(evidence.rows,[{quantity:'1.25',actor_id:actorId}]);
+      const evidence=await pool.query('select quantity::text,actor_id,recorder_worker_id,recorder_link_generation::text from commercial_service_unit_evidence where engagement_id=$1',[serviceEng.body.id]);
+      const generation=(await pool.query('select coalesce(max(generation),0)::text generation from invoice_reviewer_link_changes where account_id=$1',[actorId])).rows[0].generation;
+      assert.deepEqual(evidence.rows,[{quantity:'1.25',actor_id:actorId,recorder_worker_id:ownerId,recorder_link_generation:generation}]);
       await assert.rejects(pool.query('delete from commercial_service_unit_evidence where id=$1',[replay.body.id]));
       const {number,clientId:client,...revision}=saved.body;
       const path='/contracts/'+saved.result.id+'/versions';

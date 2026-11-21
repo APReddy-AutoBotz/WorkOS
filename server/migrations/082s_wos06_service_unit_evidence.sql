@@ -8,6 +8,7 @@ create table commercial_service_unit_evidence (
  dimension_code text not null, quantity numeric not null check(quantity>0 and quantity<1000000000000 and scale(quantity)<=4),
  source_reference text not null check(length(source_reference) between 1 and 120 and source_reference=btrim(source_reference)),
  actor_id uuid not null references users(id), active_role text not null, operation_id text not null,
+ recorder_worker_id text not null, recorder_link_generation bigint not null check(recorder_link_generation>=0),
  created_at timestamptz not null default clock_timestamp(),
  foreign key(organization_id,legal_entity_id,engagement_id) references commercial_engagements(organization_id,legal_entity_id,id),
  foreign key(organization_id,legal_entity_id,contract_id,version_id) references commercial_contract_versions(organization_id,legal_entity_id,contract_id,id),
@@ -23,6 +24,13 @@ begin
  or nullif(current_setting('workos.service_unit_evidence',true),'')::jsonb is distinct from
  jsonb_build_object('actor',new.actor_id,'operation',new.operation_id,'id',new.id)
  then raise exception 'Scoped capture authority required' using errcode='MSU01'; end if;
+ -- Preserve the account-to-worker link observed at capture for subsequent independent review.
+ perform id from users where id=new.actor_id for share;
+ select e.id,coalesce((select max(generation) from invoice_reviewer_link_changes where account_id=u.id),0)
+ into new.recorder_worker_id,new.recorder_link_generation from users u join employees e on e.id=u.employee_record_id
+ where u.id=new.actor_id and e.organization_id=new.organization_id and e.legal_entity_id=new.legal_entity_id and e.status='Active'
+ for share of e;
+ if not found then raise exception 'Current recorder worker required' using errcode='MSU01'; end if;
  select * into eng from commercial_engagements where organization_id=new.organization_id and legal_entity_id=new.legal_entity_id
  and id=new.engagement_id and contract_id=new.contract_id and model='managed_service';
  select * into ver from commercial_contract_versions where organization_id=new.organization_id and legal_entity_id=new.legal_entity_id
