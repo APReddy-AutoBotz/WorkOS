@@ -588,20 +588,21 @@ export const allocationService = {
 };
 
 // ── Timesheet Service ────────────────────────────────────────────────────────
-async function decideTimesheet(timesheetId: string, status: 'Approved' | 'Rejected', reason: string | undefined, isCurrent: () => boolean) {
+async function decideTimesheet(timesheetId: string, status: 'Approved' | 'Rejected', reason: string | undefined, isCurrent: () => boolean, reviewedToken?: string) {
   if (!isCurrent()) return;
   const scope = getOrganizationScope();
   const token = getToken();
   const connected = await checkBackend();
   if (!isCurrent()) return;
   if (connected) {
+    if (!reviewedToken || !/^[a-f0-9]{64}$/.test(reviewedToken)) throw new Error('Reload the timesheet to review its current version.');
     const backendId = timesheetId.includes(':')
       ? (await timesheetService.getAll()).find(t => `${t.employeeId}:${t.weekEnding}` === timesheetId)?.id
       : timesheetId;
     if (!isCurrent()) return;
     if (!backendId) throw new Error('Timesheet record was not found for the decision.');
     const path = `/api/timesheets/${backendId}/status`;
-    const body = status === 'Rejected' ? {status, reason} : {status};
+    const body = {status, reason, expected_write_token: reviewedToken};
     if (scope) await api.requestWithContext('PATCH', path, body, {scope, token});
     else await api.patch(path, body);
     return;
@@ -682,10 +683,10 @@ export const timesheetService = {
     }
     DataStorage.recalculateUtilization();
   },
-  approve: (timesheetId: string, _reason?: string, isCurrent = () => true): Promise<void> =>
-    decideTimesheet(timesheetId, 'Approved', undefined, isCurrent),
-  reject: (timesheetId: string, reason: string, isCurrent = () => true): Promise<void> =>
-    decideTimesheet(timesheetId, 'Rejected', reason, isCurrent),
+  approve: (timesheetId: string, _reason?: string, isCurrent = () => true, reviewedToken?: string): Promise<void> =>
+    decideTimesheet(timesheetId, 'Approved', undefined, isCurrent, reviewedToken),
+  reject: (timesheetId: string, reason: string, isCurrent = () => true, reviewedToken?: string): Promise<void> =>
+    decideTimesheet(timesheetId, 'Rejected', reason, isCurrent, reviewedToken),
 };
 
 // ── Admin Service ────────────────────────────────────────────────────────────
