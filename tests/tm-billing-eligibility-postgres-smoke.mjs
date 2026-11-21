@@ -928,6 +928,14 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         }),
         201,
       );
+      for (const pin of [{}, { expectedSequence: 0 }]) {
+        const staleCancel = await request(b + '/instances/' + raceReq.id + '/cancellations', {
+          method: 'POST', identity: ids.requester,
+          body: { ...pin, expectedOwnerKey: requesterKey, requestId: randomUUID(), reason: 'Synthetic superseded stage' },
+        });
+        assert.equal(staleCancel.status, 409);
+        assert.equal(staleCancel.body.error.code, 'TM_BILLING_STAGE_CHANGED');
+      }
       const raceLast = ok(await request(b + '/instances/' + raceReq.id, { identity: ids.second })),
         raceBody = {
           expectedOwnerKey: raceLast.ownerKey,
@@ -1035,6 +1043,24 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         201,
       ).approval;
       assert.equal(fresh.state.status, 'Pending');
+      const advanced = ok(await request(b + '/instances/' + fresh.id + '/decisions', {
+        method: 'POST', identity: ids.manager,
+        body: { expectedOwnerKey: staleView.ownerKey, requestId: randomUUID(), expectedSequence: 0,
+          decision: 'Approved', reason: 'Synthetic first billing decision' },
+      }), 201).approval;
+      const cancelBody = { expectedOwnerKey: requesterKey, requestId: randomUUID(),
+        expectedSequence: advanced.state.sequence, reason: 'Synthetic inspected second stage' };
+      const cancelPath = b + '/instances/' + fresh.id + '/cancellations';
+      const writeCancel = (data) => request(cancelPath, { method: 'POST', identity: ids.requester, body: data });
+      const recorded = ok(await writeCancel(cancelBody), 201).approval;
+      assert.equal(recorded.state.sequence, 1);
+      assert.equal(recorded.state.status, 'Cancelled');
+      assert.equal(ok(await writeCancel(cancelBody)).replayed, true);
+      assert.equal((await writeCancel({ ...cancelBody, expectedSequence: 0 })).status, 409);
+      const recovered = ok(await request(b + '/receipts/cancellation/' + cancelBody.requestId, { identity: ids.requester }));
+      assert.equal(recovered.approval.cancellation.id, recorded.cancellation.id);
+      assert.equal(recovered.eventId, null);
+
       console.log('explicit staged review and billing event path passed in disposable PostgreSQL.');
     },
   );

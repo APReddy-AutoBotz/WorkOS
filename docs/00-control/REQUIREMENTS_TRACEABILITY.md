@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-COM-014 and WOS-INV-001 — T&M billing cancellation checks the inspected decision sequence under the review lock. API and browser regressions verify a stale cancellation leaves the next approval stage and register intact.
+
 WOS-COM-003 and WOS-COM-006 — Adopted-rate ties return two scoped candidate IDs at the highest priority. PostgreSQL, service and browser checks cover the evidence and absence of a selected source.
 
 WOS-COM-001–003 — The rate adoption browser journey compares the inspected adoption receipt with the original persisted decision and checks the resolved source binding, version, UTC effective range and priority.
