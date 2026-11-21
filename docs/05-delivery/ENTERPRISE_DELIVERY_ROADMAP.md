@@ -30,9 +30,9 @@ The work category package adds migration 059 after the assignment overlap contro
 
 The next assignment package integrates effective-dated overlap rules and retained decision evidence with current allocation editing and CSV imports. Migration 058 follows the shared login throttle migration. Acceptance covers fresh installation, upgrade, concurrent writes and the Allocation Control browser journey. [Work package](../tasks/WOS-04-ASSIGNMENT-OVERLAP-POLICY.md)
 
-The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. Auditing lifetime changes across deployments remains open.
+The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. Migration 082a records the database operator, time and values for lifetime changes. Production replicas check the effective value at startup, readiness and sign-in.
 
-The November 18 review verified current-session logout and absolute expiry against the merged application. The remaining WOS-IAM-008 work is to record session lifetime changes with actor, timestamp, and old and new values. Administrative revoke-all needs separate authorization tests. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
+The November 18 review verified current-session logout and absolute expiry against the merged application. The production identity and session-policy suites cover audited lifetime changes and stale replica denial. Administrative revoke-all needs separate authorization tests. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
 
 Twenty-one React-to-PostgreSQL browser journeys now compile their fixture pages in memory and forward API traffic to each journey’s disposable database-backed server. Session logout, independent leave decisions, timesheet ownership and export, and the import/audit harness use the same compiler. The fourteen browser interaction suites have a dedicated fixture server.
 

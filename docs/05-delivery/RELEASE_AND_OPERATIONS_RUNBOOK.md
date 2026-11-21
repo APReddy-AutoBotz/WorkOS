@@ -466,6 +466,23 @@ Shared and Timesheet Approval exports quote every field and apply the existing a
 
 Set `API_SESSION_TTL_HOURS` in the production Compose environment before recreating the API replicas. For example, `0.25` configures a 15-minute lifetime. Omission uses eight hours. Startup checks that the duration resolves to at least one millisecond and a representable expiry. A configuration error names the setting. Correct the value and recreate the API services. Existing signed sessions retain their original expiry.
 
+Apply migrations with `npm run api:migrate` before starting the new API. Using a named PostgreSQL login, record the actual deployed duration in milliseconds. For an existing eight-hour deployment the baseline is:
+
+```sql
+insert into deployment_session_policy (lifetime_ms) values (28800000);
+```
+
+For a scheduled change, drain sign-in traffic and use a conditional update. For example, changing eight hours to fifteen minutes requires the following statement to return exactly one row:
+
+```sql
+update deployment_session_policy set lifetime_ms = 900000
+where singleton and lifetime_ms = 28800000 returning lifetime_ms;
+```
+
+Set `API_SESSION_TTL_HOURS=0.25`, recreate all replicas and verify readiness before restoring sign-in traffic. A stale replica refuses new production logins. To roll back the duration, reverse the conditional update and the environment change together. Preserve migration 082a and its audit history. Initial registration has a null previous value because pre-upgrade changes cannot be reconstructed.
+
+Keep policy write grants with named deployment operators. A delegated operator needs SELECT and column INSERT/UPDATE on `lifetime_ms`. The database records the authenticated login, active role, timestamp and previous/new milliseconds in the deployment audit log; the operator does not need direct audit-table write access. Protect database owner credentials under the buyer’s deployment controls.
+
 ### Shared login throttling candidate
 
 Migration `057c_wos04_shared_auth_throttle` stores expiring login counters in the buyer database. API replicas share the per-IP and per-input limits, including the Entra callback limit. Apply migrations before switching traffic, drain old API processes, and configure identical limits and trusted proxy settings on all replicas. Counters start empty on first upgrade. Storage failure returns HTTP 503 before authentication. Reverting to the previous application restores process-local counters and its readiness check rejects the newer migration ledger. Prefer forward correction and retain the migration.
