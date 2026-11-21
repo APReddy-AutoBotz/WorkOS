@@ -57,6 +57,7 @@
     "test:migration-manifest": "node tests/migration-manifest-smoke.mjs",
     "test:migration-error-logging": "node tests/migration-error-logging-smoke.mjs",
     "test:session-policy": "node tests/session-policy-postgres-smoke.mjs",
+    "test:standard-profile": "node tests/standard-profile-performance.mjs",
     "test:restore": "node tests/postgres-restore-rehearsal.mjs",
     "test:migrations": "node tests/migration-runner-smoke.mjs",
     "test:terminology-runtime": "node --import tsx tests/terminology-runtime-smoke.mjs",

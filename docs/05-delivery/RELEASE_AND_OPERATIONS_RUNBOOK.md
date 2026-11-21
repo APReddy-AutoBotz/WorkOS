@@ -62,6 +62,12 @@ Prefer roll-forward for migrations that have accepted production data. Applicati
 
 Monitor startup/readiness, authentication failures, authorization denials, database health, background jobs, integrations, imports/exports, approvals, commercial jobs, batch exports and storage. Define thresholds, owners and response time before production.
 
+## Standard-profile API performance
+
+Set `WORKOS_TEST_DATABASE_URL` to a disposable loopback PostgreSQL service with database creation rights and run `npm run test:standard-profile`. The test creates and removes its own database. It seeds 250 workforce accounts, 25 clients, 50 projects, 250 assignments, eight weeks of approved work (10,000 entries), 2,000 submission audit rows and 50 commercial milestones.
+
+Six rounds each start 75 requests together using distinct signed sessions. Each round includes 55 employees reading their own histories, 15 saving drafts and five administrators reading the planned utilization report. Times include local HTTP transport, authorization, database access and response decoding. The first round counts. The nearest-rank 95th percentile must stay within 2,000 ms for reads and 3,000 ms for saves. Each report must complete within 5,000 ms. The job summary records sample counts, p95 and maximum durations. Migration 082c indexes entry lookups by timesheet and work date. The rehearsal checks the PostgreSQL execution plan after analyzing the populated database. Schedule the index build in the migration window because PostgreSQL can block entry writes while building it. For application rollback, retain the index and migration ledger. Repeat on buyer-equivalent infrastructure and record the machine, PostgreSQL version and release commit for deployment sign-off.
+
 ## Backup and restore
 
 1. Record the application commit, database version, migration ledger, backup timestamp and approved reconciliation totals. Configure buyer-controlled encrypted storage, access, retention and an off-site copy. Provision cluster roles, extension binaries, deployment secrets and external document storage through their respective recovery procedures.
