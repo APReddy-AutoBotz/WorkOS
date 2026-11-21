@@ -1,3 +1,4 @@
+import {retainerInvoiceEvidence} from './invoiceDrafts';
 import { milestoneInvoiceEvidence, milestoneEvidenceMatches } from './milestoneInvoiceContracts';
 import { z } from 'zod';
 import {
@@ -77,11 +78,12 @@ const milestoneLine = z
     evidence: milestoneInvoiceEvidence,
   })
   .strict();
-const line = z.union([tmLine, milestoneLine]);
+const retainerLine=milestoneLine.extend({sourceType:z.literal('RETAINER_PERIOD'),evidence:retainerInvoiceEvidence});
+const line = z.union([tmLine, milestoneLine, retainerLine]);
 const sourceBase = z
   .object({
     id: uuid,
-    sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','RETAINER_PERIOD']).optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
     current: z.boolean(),
     currency: z.string().regex(/^[A-Z]{3}$/),
@@ -101,9 +103,9 @@ const standardSource=sourceBase.refine((v) => {
     try {
       const sum = invoiceDraftTotal(v.lines.map((x) => x.amount));
       return (
-        v.lines.every((x) => (x.snapshotId === null) === (v.sourceType === 'MILESTONE_ACCEPTANCE')) &&
+        v.lines.every((x) => ('sourceType' in x ? x.sourceType : undefined) === v.sourceType) &&
         (!v.sourceType ||
-          (v.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission('commercial.milestone_billing.view'))) &&
+          (v.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission(v.sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':'commercial.milestone_billing.view'))) &&
         v.periodStart <= v.periodEnd &&
         sum.lineCount === v.lineCount &&
         canonicalHours(sum.amount) === canonicalHours(v.total) &&
@@ -111,7 +113,9 @@ const standardSource=sourceBase.refine((v) => {
           (x, n) =>
             x.sequence === n + 1 &&
             x.currency === v.currency &&
-            ('sourceType' in x
+            ('sourceType' in x && x.sourceType==='RETAINER_PERIOD'
+              ? x.evidence.engagementId===v.engagementId && x.evidence.startsOn<=x.evidence.endsOn && canonicalHours(x.evidence.periodPrice.total)===canonicalHours(x.amount)
+              : 'sourceType' in x
               ? hasRatePermission('commercial.milestone_billing.view') &&
                 v.periodBasis === 'ELIGIBLE_DATE' &&
                 milestoneEvidenceMatches(x.evidence, v.engagementId, v.currency, x.amount)

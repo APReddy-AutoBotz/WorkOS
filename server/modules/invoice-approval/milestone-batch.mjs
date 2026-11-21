@@ -1,36 +1,41 @@
 import { assertCommercialAuthority } from '../commercial-drafting/service.mjs';
 
 const fail = (statusCode, code, message) => Object.assign(new Error(message), { statusCode, code });
-export const milestoneBatchModel = async (c, r, batchId) => {
+export const approvalBatchModel = async (c, r, batchId, includeRetainer=false) => {
   const row = (
     await c.query(
-      `select e.model from invoice_draft_batches b join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3 and coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT') in ('TM_SNAPSHOT','MILESTONE_ACCEPTANCE')`,
+      `select e.model from invoice_draft_batches b join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3 and coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT') in ('TM_SNAPSHOT','MILESTONE_ACCEPTANCE'${includeRetainer ? ",'RETAINER_PERIOD'" : ''})`,
       [batchId, r.organizationScope.organizationId, r.organizationScope.legalEntityId],
     )
   ).rows[0];
   if (!row) throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped invoice batch unavailable.');
-  return row.model === 'milestone';
+  return row.model;
 };
-export const loadMilestoneApprovalBatch = async (c, r, batchId, lock = false) => {
-  await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
+export const milestoneBatchModel=async(c,r,id)=>(await approvalBatchModel(c,r,id))==='milestone';
+export const loadMilestoneApprovalBatch = async (c, r, batchId, lock = false, model='milestone') => {
+  const retainer=model==='retainer';
+  const current=retainer?'retainer_invoice_batch_source_current':'milestone_invoice_batch_source_current';
+  const lineage=retainer?'retainer_invoice_lineage_hash':'milestone_invoice_lineage_hash';
+  const source=retainer?'RETAINER_PERIOD':'MILESTONE_ACCEPTANCE';
+  await assertCommercialAuthority(c, r, retainer?'commercial.retainer_eligibility.issue':'commercial.milestone_billing.view');
   const b = (
     await c.query(
-      `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state,milestone_invoice_batch_source_current(b,$4,$5) current,milestone_invoice_lineage_hash(b.id) lineage_hash from invoice_draft_batches b join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3 and e.model='milestone'${lock ? ' for update of b' : ''}`,
+      `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state,${current}(b,$4,$5) current,${lineage}(b.id) lineage_hash from invoice_draft_batches b join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3 and e.model=$6${lock ? ' for update of b' : ''}`,
       [
         batchId,
         r.organizationScope.organizationId,
         r.organizationScope.legalEntityId,
         r.user.sub,
-        r.user.activeRole,
+        r.user.activeRole,model,
       ],
     )
   ).rows[0];
-  if (!b || b.source_type !== 'MILESTONE_ACCEPTANCE')
-    throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped milestone batch unavailable.');
+  if (!b || b.source_type !== source)
+    throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped invoice batch unavailable.');
   const lines = (
     await c.query(
-      "select l.id,l.sequence,l.item_id,l.item_version,l.event_id,l.snapshot_id,l.source_type,l.currency,l.amount::text,l.billing_evidence from invoice_draft_lines l where l.batch_id=$1 and l.source_type='MILESTONE_ACCEPTANCE' order by l.sequence",
-      [b.id],
+      "select l.id,l.sequence,l.item_id,l.item_version,l.event_id,l.snapshot_id,l.source_type,l.currency,l.amount::text,l.billing_evidence from invoice_draft_lines l where l.batch_id=$1 and l.source_type=$2 order by l.sequence",
+      [b.id,source],
     )
   ).rows;
   const sum = (

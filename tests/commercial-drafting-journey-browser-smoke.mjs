@@ -536,6 +536,63 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal(rebatched.status,201,JSON.stringify(rebatched.body));
     assert.equal(rebatched.body.line.eventId,retainerLine.eventId);
     assert.notEqual(rebatched.body.line.id,retainerLine.id);
+    const approvalBase='/api/v1/invoice-batch-approvals',batchId=otherBatch.body.batch.id;
+    const act=(path,identity,body)=>apiRequest(approvalBase+path,body ? {identity,method:'POST',body} : {identity});
+    const invoiceManager=['commercial.contracts.manage','commercial.invoice_approval.manage','approvals.view','commercial.invoice_approval.decide'];
+    const decisionKeys=[...draftGrants,issueGrant,'approvals.view','commercial.invoice_approval.decide'];
+    for(const [role,keys] of [[reviewRole,invoiceManager],['Admin',decisionKeys]]) await pool.query(
+      'insert into role_permissions(role_name,permission_key,enabled) select $1,k,true from unnest($2::text[]) k on conflict(role_name,permission_key) do update set enabled=true',[role,keys]);
+    const sourceRead=await act('/sources/'+batchId,finance);
+    assert.equal(sourceRead.status,200,JSON.stringify(sourceRead.body));
+    const {batch:source,ownerKey}=sourceRead.body;
+    assert.equal(source.sourceType,'RETAINER_PERIOD');assert.equal(source.lines[0].evidence.reviewId,retainerCommand.reviewId);
+    const policyInput={entityType:'InvoiceBatch',engagementId:eng.body.id,locale:'en-US',completionInApp:true,
+      templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(key=>({key,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))};
+    const configure=(reviewer,prior)=>act('/policies',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),engagementId:eng.body.id,
+      expectedLatestId:prior,effectiveFrom:today,definition:{...policyInput,stages:[{userId:reviewer.id,role:reviewer.role}]},reason:'Synthetic retainer invoice review'});
+    const submit=policyId=>act('/requests',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),batchId,expectedPolicyId:policyId,
+      expectedLineCount:source.lineCount,expectedLineageHash:source.lineageHash,reason:'Review the approved service-period charge'});
+    const self=await configure(finance,null);assert.equal(self.status,201,JSON.stringify(self.body));
+    const independentRequester=identities.manager;
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.invoice_approval.manage',true) on conflict(role_name,permission_key) do update set enabled=true");
+    const adminSource=(await act('/sources/'+batchId,independentRequester)).body;
+    const ownerAsReviewer=await act('/requests',independentRequester,{requestId:crypto.randomUUID(),expectedOwnerKey:adminSource.ownerKey,
+      batchId,expectedPolicyId:self.body.policy.id,expectedLineCount:source.lineCount,expectedLineageHash:source.lineageHash,reason:'Test owner independence'});
+    assert.equal(ownerAsReviewer.status,403,JSON.stringify(ownerAsReviewer.body));
+    const selfSubmit=await submit(self.body.policy.id);assert.ok([403,409].includes(selfSubmit.status),JSON.stringify(selfSubmit.body));
+    const policy=await configure(identities.manager,self.body.policy.id);assert.equal(policy.status,201,JSON.stringify(policy.body));
+    const submission=await submit(policy.body.policy.id);assert.equal(submission.status,201,JSON.stringify(submission.body));
+    const reviewerKey=(await act('/sources/'+batchId,identities.manager)).body.ownerKey;
+    const decide=(id,decision)=>act('/instances/'+id+'/decisions',identities.manager,{requestId:crypto.randomUUID(),
+      expectedOwnerKey:reviewerKey,expectedSequence:0,decision,reason:'Synthetic governed decision'});
+    await pool.query('update users set employee_record_id=null where id=$1',[identities.manager.id]);
+    await pool.query('update users set employee_record_id=$2 where id=$1',[identities.manager.id,ownerId]);
+    const staleDecision=await decide(submission.body.approval.id,'Approved');
+    assert.equal(staleDecision.status,409,JSON.stringify(staleDecision.body));
+    const withdrawn=await act('/instances/'+submission.body.approval.id+'/withdrawals',finance,
+      {requestId:crypto.randomUUID(),expectedOwnerKey:ownerKey,reason:'Renew after reviewer identity changed'});
+    assert.equal(withdrawn.status,201,JSON.stringify(withdrawn.body));
+    const renewed=await submit(policy.body.policy.id);assert.equal(renewed.status,201,JSON.stringify(renewed.body));
+    const rejection=await decide(renewed.body.approval.id,'Rejected');assert.equal(rejection.status,201,JSON.stringify(rejection.body));
+    assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Draft');
+    const finalReview=await submit(policy.body.policy.id);assert.equal(finalReview.status,201,JSON.stringify(finalReview.body));
+    const instance=finalReview.body.approval.id;
+    assert.equal((await act('/instances/'+instance,identities.reader)).status,403);
+    const reviewBrowser=await createContext(identities.manager,decisionKeys);
+    await reviewBrowser.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const approvalDesk=reviewBrowser.page.getByRole('region',{name:'Invoice batch approvals'});
+    await approvalDesk.getByLabel('Invoice approval engagement').selectOption(eng.body.id);
+    await approvalDesk.getByRole('button',{name:'Load invoice batches and reviews'}).click();
+    await approvalDesk.getByLabel('Invoice batch review',{exact:true}).selectOption(instance);
+    await approvalDesk.getByRole('button',{name:'Inspect invoice review'}).click();
+    await approvalDesk.getByText(new RegExp(retainerCommand.statementId)).waitFor();
+    await approvalDesk.getByLabel('Invoice approval decision',{exact:true}).selectOption('Approved');
+    await approvalDesk.getByLabel('Invoice approval decision reason').fill('Accepted traced service period and fee components');
+    const accepted=reviewBrowser.page.waitForResponse(r=>r.url().endsWith('/instances/'+instance+'/decisions') && r.request().method()==='POST');
+    await approvalDesk.getByRole('button',{name:'Record invoice approval decision'}).click();
+    const approved=await accepted;assert.equal(approved.status(),201,await approved.text());
+    assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Approved');
+    await reviewBrowser.context.close();
     await preparing.context.close();
     }
     await issuer.context.close();
