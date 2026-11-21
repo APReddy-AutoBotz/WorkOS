@@ -24,6 +24,7 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
     [previewSource, setPreviewSource] = useState(''),
     [rows, setRows] = useState<RateCandidate[] | null>(null),
     [truncated, setTruncated] = useState(false),
+    [pageStarts, setPageStarts] = useState<string[]>([]),
     [prior, setPrior] = useState<RateCandidate | null>(null),
     [from, setFrom] = useState(''),
     [to, setTo] = useState(''),
@@ -50,6 +51,7 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
     setPreviewSource('');
     setRows(null);
     setTruncated(false);
+    setPageStarts([]);
     setOwnerCandidate(null);
     setApprovalCandidate(null);
     setAdoptionCandidate(null);
@@ -122,10 +124,11 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
       ? { type: 'worker' as Binding, id: workerId }
       : choices.find((x) => x.type + ':' + x.id === selection);
   const sourceId = kind === 'cost' ? workerId : previewSource;
-  const load = () => {
+  const load = (starts: string[] = []) => {
     if (!selected) return;
     void run(async (c) => {
-      const r = await rateCandidateService.list(kind, selected.type, selected.id, c);
+      const r = await rateCandidateService.list(kind, selected.type, selected.id, c, starts.at(-1));
+      setPageStarts(starts);
       setRows(r.candidates);
       setOwnerCandidate(null);
       setTruncated(r.truncated);
@@ -255,7 +258,7 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
           )}
           <button
             type="button"
-            onClick={load}
+            onClick={() => load()}
             disabled={
               !selected ||
               busy ||
@@ -269,11 +272,15 @@ export const RateCandidates = ({ kind, workerId, choices = [] }: Props) => {
           </button>
           {rows && (
             <>
-              <p>
-                {truncated
-                  ? 'First 100 candidates shown; results are not exhaustive.'
-                  : 'Candidates for selected source.'}
-              </p>
+              <p>Candidate history · Page {pageStarts.length + 1}</p>
+              {(truncated || pageStarts.length > 0) && (
+                <nav aria-label="Candidate history pages">
+                  <button type="button" disabled={!pageStarts.length || busy || !!pending || !!ownerCandidate || !!approvalCandidate || !!adoptionCandidate}
+                    onClick={() => load(pageStarts.slice(0, -1))}>Newer candidates</button>
+                  <button type="button" disabled={!truncated || busy || !!pending || !!ownerCandidate || !!approvalCandidate || !!adoptionCandidate}
+                    onClick={() => load([...pageStarts, rows[rows.length - 1].id])}>Older candidates</button>
+                </nav>
+              )}
               <ul>
                 {rows.map((x) => (
                   <li key={x.id}>

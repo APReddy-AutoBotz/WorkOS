@@ -185,10 +185,12 @@ const call = async (
 const exactAmount = (x: string) =>
   BigInt(x.split('.')[0]) * 10000n + BigInt((x.split('.')[1] ?? '').padEnd(4, '0'));
 export const rateCandidateService = {
-  list: async (k: RateKind, t: Binding, id: string, c: RateContext | null) => {
+  list: async (k: RateKind, t: Binding, id: string, c: RateContext | null, beforeId?: string) => {
+    const query = new URLSearchParams({ kind: k, bindingType: t, bindingId: id });
+    if (beforeId !== undefined) query.set('beforeId', z.string().uuid().parse(beforeId));
     const raw = await call(
       'GET',
-      '/candidates?' + new URLSearchParams({ kind: k, bindingType: t, bindingId: id }),
+      '/candidates?' + query,
       undefined,
       c,
       k,
@@ -199,7 +201,9 @@ export const rateCandidateService = {
       .safeParse(raw);
     if (
       !parsed.success ||
-      parsed.data.candidates.some((x) => x.kind !== k || x.bindingType !== t || x.bindingId !== id)
+      (parsed.data.truncated && parsed.data.candidates.length !== 100) ||
+      new Set(parsed.data.candidates.map(x => x.id)).size !== parsed.data.candidates.length ||
+      parsed.data.candidates.some((x) => x.id === beforeId || x.kind !== k || x.bindingType !== t || x.bindingId !== id)
     )
       return bad();
     return parsed.data;

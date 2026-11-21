@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-NFR-PERF-005 and WOS-NFR-SEC-004 — billing and cost candidate history uses bounded pages with a source-scoped version cursor. The rate-candidate browser/API journey checks navigation, concurrent insertion, source mismatch and denied access.
+
 WOS-NFR-PERF-001/002/003/008 — the Standard-profile release check measures 90 staged submissions, 90 first-stage decisions and 90 final decisions with concurrent employee reads and scoped reports. PostgreSQL assertions verify intermediate and final source state, independent actors and notification recipients.
 
 WOS-NFR-SEC-004, WOS-NFR-PERF-001/002/008 — the direct-report review list and retained history require team-lead approval access and a current reporting relationship in the selected entity. Browser and PostgreSQL tests cover correction history, reassignment, permission revocation and 90 reviewed-version decisions under Standard-profile load.

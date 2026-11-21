@@ -64,6 +64,8 @@ These are product and acceptance commitments, not claims that every capability i
 
 Buyer operations can run `npm run --silent ops:delivery-health` to check pending invoice alerts, their oldest age and recent delivery failures. [Delivery monitoring and database grants](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#delivery-monitoring)
 
+Finance users can browse older billing and confidential worker-cost candidates in pages of 100 for the selected source. Each page checks current access.
+
 Single and bulk decisions from the timesheet approval desk use the version displayed to the reviewer. If an employee resubmits before a decision arrives, reload and review the corrected work.
 
 Team leads can open submitted timesheets and retained correction history for their current direct reports in the selected legal entity. Their personal timesheet history stays scoped to their own work.

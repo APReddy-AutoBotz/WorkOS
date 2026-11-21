@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { startFixtureServer } from './support/compiled-fixture-server.mjs';
 import { chromium } from 'playwright';
@@ -173,6 +174,35 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await billing.getByRole('button', { name: 'Preview resolution', exact: true }).click();
         assert.equal((await body(w)).result, 'candidate');
         await billing.getByText(/Preview: candidate.*12345678901234.1234/).waitFor();
+        const addCandidate = async (index) => ok(await request(base + '/candidates', {
+          method: 'POST', body: {...writes[0], streamId:randomUUID(), requestId:randomUUID(), reason:'Synthetic page entry ' + index},
+        }));
+        ok(await request(base + '/candidates', {method:'POST',body:{...writes[0], bindingType:'engagement',
+          bindingId:engagement.id, streamId:randomUUID(), requestId:randomUUID(), reason:'Synthetic older engagement candidate'}}));
+        for (let i = 0; i < 100; i++) await addCandidate(i);
+        w = reply(base + '/candidates');
+        await billing.getByRole('button',{name:'Load candidates',exact:true}).click();
+        const newest = await body(w);
+        assert.equal(newest.candidates.length,100);
+        assert.equal(newest.truncated,true);
+        const inserted = await addCandidate(100);
+        w = reply(base + '/candidates');
+        await billing.getByRole('button',{name:'Older candidates'}).click();
+        const older = await body(w);
+        assert.deepEqual(older.candidates.map(row => row.id),[receipt.candidate.id]);
+        assert.equal(older.truncated,false);
+        await billing.getByText('Candidate history · Page 2').waitFor();
+        assert.ok(await billing.getByRole('button',{name:'Older candidates'}).isDisabled());
+        w = reply(base + '/candidates');
+        await billing.getByRole('button',{name:'Newer candidates'}).click();
+        assert.equal((await body(w)).candidates[0].id,inserted.candidate.id);
+        await billing.getByText('Candidate history · Page 1').waitFor();
+        const mismatchedSource = new URLSearchParams({kind:'billing',bindingType:'engagement',bindingId:engagement.id,beforeId:inserted.candidate.id});
+        const missing = await request(base + '/candidates?' + mismatchedSource);
+        assert.equal(missing.status,200);
+        assert.deepEqual(missing.body.candidates,[]);
+        const denied = await request(base + '/candidates?' + mismatchedSource,{identity:ids.denied});
+        assert.equal(denied.status,403);
         await p.getByRole('link', { name: 'Directory', exact: true }).click();
         await p.getByLabel('Directory search', { exact: true }).fill('SYNTHETIC-COMMERCIAL-LOCAL');
         w = reply('/api/v1/workforce-directory');
@@ -193,6 +223,12 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         await cost.getByRole('button', { name: 'Record candidate', exact: true }).click();
         const costReceipt = await body(w, 201);
         assert.equal(costReceipt.candidate.amount, '73.0123');
+        const crossKind = new URLSearchParams({kind:'billing',bindingType:'contract',bindingId:contract.id,beforeId:costReceipt.candidate.id});
+        const isolated = await request(base + '/candidates?' + crossKind);
+        assert.equal(isolated.status,200);
+        assert.deepEqual(isolated.body.candidates,[]);
+        crossKind.set('beforeId','invalid');
+        assert.equal((await request(base + '/candidates?' + crossKind)).status,400);
         await cost.getByLabel('Preview as-of UTC', { exact: true }).fill(fx.today);
         w = reply(base + '/preview');
         await cost.getByRole('button', { name: 'Preview resolution', exact: true }).click();
@@ -252,6 +288,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         console.log(
           'Rate candidate React/API/PostgreSQL receipt:',
           JSON.stringify({
+            scopedHistoryPaging: true,
             commercialBindingChoice: true,
             workerScopeHandoff: true,
             decimalExact: true,

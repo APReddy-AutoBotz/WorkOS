@@ -169,13 +169,19 @@ export const createRateCandidateRouter = (o) => {
   router.get(
     '/candidates',
     handle(false, async (c, r) => {
-      const q = parse(z.object({ kind, bindingType: binding, bindingId: id }).strict(), r.query);
+      const q = parse(z.object({ kind, bindingType: binding, bindingId: id, beforeId: uuid.optional() }).strict(), r.query);
       await authorize(c, r, q.kind);
       await ref(c, r, q.kind, q.bindingType, q.bindingId, o);
       const rows = (
         await c.query(
-          `select ${projection} from commercial_rate_candidates where organization_id=$1 and legal_entity_id=$2 and kind=$3 and binding_type=$4 and binding_id=$5 order by created_at desc,id desc limit 101`,
-          [...scope(r), q.kind, q.bindingType, q.bindingId],
+          `select ${projection} from commercial_rate_candidates
+           where organization_id=$1 and legal_entity_id=$2 and kind=$3 and binding_type=$4 and binding_id=$5
+             and ($6::uuid is null or (created_at,id) < (
+               select marker.created_at,marker.id from commercial_rate_candidates marker
+               where marker.id=$6 and marker.organization_id=$1 and marker.legal_entity_id=$2
+                 and marker.kind=$3 and marker.binding_type=$4 and marker.binding_id=$5))
+           order by created_at desc,id desc limit 101`,
+          [...scope(r), q.kind, q.bindingType, q.bindingId, q.beforeId ?? null],
         )
       ).rows;
       return { ...(await context(c, r)), candidates: rows.slice(0, 100), truncated: rows.length > 100 };
