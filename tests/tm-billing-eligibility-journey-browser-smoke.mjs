@@ -421,7 +421,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           iw = wait(p, b + '/instances');
         await ui.getByRole('button', { name: 'Load billing evidence and reviews', exact: true }).click();
         assert.equal((await body(pw)).effectivePolicy, null);
-        assert.equal((await body(sw)).sources.length, 1);
+        const { sources } = await body(sw);
+        assert.equal(sources.length, 1);
         await body(iw);
         assert.equal(
           await ui.getByRole('button', { name: 'Request billing review', exact: true }).isDisabled(),
@@ -505,7 +506,31 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await available.locator('option').evaluateAll((nodes) => nodes.map((node) => node.value)),
           ['', pOut.policy.id],
         );
+        const inspectEvidence = async (container, source) => {
+          const evidence = container.getByRole('region', { name: 'Retained billing snapshot', exact: true });
+          await evidence.getByText('Work date ' + source.workDate + ' · Billable amount ' + source.currency + ' ' + source.amount).waitFor();
+          await evidence.getByText('Snapshot evidence', { exact: true }).click();
+          for (const value of [source.snapshotId, source.entryId, source.submissionId, source.decisionId,
+            source.policyId, source.billingAdoptionId, source.bindingId, source.references[0].contractVersionId]) {
+            await evidence.getByText(value, { exact: true }).waitFor();
+          }
+          for (const ref of source.references) {
+            await evidence.getByText(ref.entityType + ' ' + ref.entityId + ' · lifecycle event ' + ref.lifecycleEventId).waitFor();
+          }
+        };
         await ui.getByLabel('Billing snapshot', { exact: true }).selectOption(calc.id);
+        await inspectEvidence(ui, sources[0]);
+        await available.selectOption(pOut.policy.id);
+        await ui.getByLabel('Billing change owner user ID').fill(ids.manager.id);
+        await ui.getByLabel('Billing change owner role').fill('Admin');
+        await ui.getByLabel('Billing request reason').fill('Synthetic abandoned selection');
+        await ui.getByLabel('Billing snapshot', { exact: true }).selectOption('');
+        assert.equal(await ui.getByRole('region', { name: 'Retained billing snapshot' }).count(), 0);
+        await ui.getByLabel('Billing snapshot', { exact: true }).selectOption(calc.id);
+        for (const label of ['Billing review policy','Billing change owner user ID','Billing change owner role','Billing request reason']) {
+          assert.equal(await ui.getByLabel(label, { exact: true }).inputValue(), '');
+        }
+        assert.equal(await ui.getByRole('button', { name: 'Request billing review' }).isDisabled(), true);
         await ui.getByLabel('Billing review policy', { exact: true }).selectOption(pOut.policy.id);
         await ui.getByLabel('Billing change owner user ID', { exact: true }).fill(ids.manager.id);
         await ui.getByLabel('Billing change owner role', { exact: true }).fill('Admin');
@@ -550,6 +575,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           await u.getByRole('button', { name: 'Inspect retained billing evidence', exact: true }).click();
           const source = await body(observed);
           assert(!JSON.stringify(source).includes('costValue'));
+          await inspectEvidence(u.getByRole('region', { name: 'Inspected billing review' }), source.source);
           await u.getByLabel('Billing decision', { exact: true }).selectOption('Approved');
           await u.getByLabel('Billing decision reason', { exact: true }).fill('Synthetic stage decision');
           const d = wait(page, b + '/instances/' + review.id + '/decisions', 'POST');

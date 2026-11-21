@@ -632,3 +632,7 @@ After a stage-change refusal, reload the rate approval, select the request and r
 ### Milestone acceptance cancellation
 
 After a stage-change refusal, reload the milestone review and inspect the completed decisions before cancelling. API clients send the inspected expectedSequence. A new command without it applies only at sequence zero. Use the original cancellation receipt after a lost response. Deploy the API before the web client. Roll both back together if required.
+
+### Inspect a T&M snapshot for billing
+
+Select the retained snapshot and expand **Snapshot evidence**. Check the work date and billable amount, the work approval decision, adopted billing rate and contract version. Select the billing review policy and enter the change owner and request reason for this snapshot. Changing the snapshot clears those inputs. The reviewer can open the same evidence when inspecting the request.
