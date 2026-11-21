@@ -40,6 +40,7 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.tm_billing.view', module: 'Commercial', label: 'View T&M Billing Eligibility', description: 'Opt-in scoped billing-only review and register access.', optIn: true },
   { key: 'commercial.tm_billing.manage', module: 'Commercial', label: 'Manage T&M Billing Eligibility', description: 'Opt-in policy and request management in scope.', optIn: true },
   { key: 'commercial.tm_billing.decide', module: 'Commercial', label: 'Decide T&M Billing Eligibility', description: 'Opt-in decisions for assigned eligibility stages in scope.', optIn: true },
+  { key: 'commercial.retainer_statements.prepare', module: 'Commercial', label: 'Prepare Retainer Statements', description: 'Retain closed-period pricing and approved work evidence for review.', optIn: true },
   { key: 'commercial.rate_candidates.view', module: 'Commercial', label: 'View Billing Rate Candidates', description: 'Opt-in scoped access to unapproved billing rate candidate previews.', optIn: true },
   { key: 'commercial.rate_candidates.manage', module: 'Commercial', label: 'Manage Billing Rate Candidates', description: 'Opt-in append of scoped unapproved billing rate candidates.', optIn: true },
   { key: 'commercial.cost_candidates.view', module: 'Commercial', label: 'View Cost Rate Candidates', description: 'Opt-in scoped access to confidential unapproved cost candidates.', optIn: true },
