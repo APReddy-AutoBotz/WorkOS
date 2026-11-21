@@ -72,7 +72,9 @@ export const createIdentityAccessMiddleware = ({
     }
     try {
       const revoked = await database.query(`select 1 from session_revocations where session_hash=$1
-        union all select 1 where not exists (select 1 from users where id=$2 and session_generation=$3)`,
+        union all select 1 where not exists (
+          select 1 from users u left join account_session_generations g on g.user_id=u.id
+          where u.id=$2 and coalesce(g.generation,0)=$3)`,
       [sessionHash(sid), payload.sub, payload.sessionGeneration ?? 0]);
       if (revoked.rowCount) {
         res.status(401).json({error: 'This session has been signed out', code: 'SESSION_REVOKED'});

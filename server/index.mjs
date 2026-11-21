@@ -916,7 +916,7 @@ const verifyEntraIdToken = async (idToken, { nonce, config }) => {
 };
 
 const userAuthSelect = `
-  select u.id, u.session_generation, u.username, e.employee_id, u.email, u.must_change_password, u.status,
+  select u.id, coalesce((select g.generation from account_session_generations g where g.user_id=u.id),0) as session_generation, u.username, e.employee_id, u.email, u.must_change_password, u.status,
     e.id as employee_record_id, e.organization_id as employee_organization_id,
     e.legal_entity_id as employee_legal_entity_id, e.name, cd.id as country_director_id,
     coalesce(json_agg(distinct r.name) filter (where r.name is not null), '[]') as roles
@@ -1425,7 +1425,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, requireDatabase, loginRate
           and lower(u2.employee_id)=lower($1)
           and u2.status='Active' and e2.status<>'Exited'
       )
-      select u.id, u.session_generation, u.username, e.employee_id, u.email, u.password_hash, u.must_change_password, u.status, e.id as employee_record_id, e.name, cd.id as country_director_id,
+      select u.id, coalesce((select g.generation from account_session_generations g where g.user_id=u.id),0) as session_generation, u.username, e.employee_id, u.email, u.password_hash, u.must_change_password, u.status, e.id as employee_record_id, e.name, cd.id as country_director_id,
         coalesce(json_agg(r.name) filter (where r.name is not null), '[]') as roles
       from users u
       left join employees e on e.id = u.employee_record_id

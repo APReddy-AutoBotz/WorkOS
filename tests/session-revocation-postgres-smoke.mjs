@@ -173,6 +173,8 @@ await withCommercialDatabase(async ({pool, databaseUrl}) => {
     const refreshed = await request('/api/auth/me', bearer(fresh));
     assert.equal(refreshed.status, 200);
     assert.equal(claims(refreshed.body.token).sessionGeneration, 1);
+    await pool.query("select public.revoke_account_sessions($1,1,'synthetic-followup')", [target]);
+    assert.equal((await request('/api/auth/me', bearer(refreshed.body.token))).status, 401);
     revokedToken = oldSession;
   });
   await withCommercialApi({databaseUrl, identities, sessionSecret: secret}, async ({request}) => {

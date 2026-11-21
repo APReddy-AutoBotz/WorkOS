@@ -1,5 +1,7 @@
-alter table public.users add column session_generation integer not null default 0
-  check (session_generation >= 0);
+create table public.account_session_generations (
+  user_id uuid primary key references public.users(id) on delete cascade,
+  generation integer not null check (generation > 0)
+);
 
 -- Deployment-wide authority. Grant execution only to designated incident responders.
 create function public.revoke_account_sessions(target uuid, expected_generation integer, incident_reference text)
@@ -11,9 +13,15 @@ begin
   if incident_reference is null or length(trim(incident_reference)) not between 1 and 200 then
     raise exception 'An incident or change reference is required';
   end if;
-  update public.users set session_generation = session_generation + 1
-    where id = target and session_generation = expected_generation
-    returning session_generation into next_generation;
+  perform 1 from public.users where id = target for update;
+  if not found then raise exception 'Account or expected session generation did not match'; end if;
+  if expected_generation = 0 then
+    insert into public.account_session_generations(user_id, generation) values (target, 1)
+      on conflict (user_id) do nothing returning generation into next_generation;
+  else
+    update public.account_session_generations set generation = generation + 1
+      where user_id = target and generation = expected_generation returning generation into next_generation;
+  end if;
   if not found then raise exception 'Account or expected session generation did not match'; end if;
 
   insert into public.audit_logs (user_id, user_name, user_role, active_role, source, module, action,
