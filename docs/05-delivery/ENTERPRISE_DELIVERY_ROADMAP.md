@@ -4,6 +4,8 @@ Updated 2026-11-19. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+Timesheet desk decisions now check the reviewed work version under the database lock. Direct integrations can pass the same precondition on the legacy status endpoint. Retirement of unconditional legacy calls requires a separate compatibility decision.
+
 Bulk timesheet approvals support selection preview and per-record reconciliation after a partial failure or lost acknowledgement. The browser acceptance journey checks duplicate confirmation and failed refresh recovery.
 
 Timesheet approval discards rows, review details and unsent correction reasons on scope switch. The browser journey checks stale decision prevention and a delayed server acknowledgement.

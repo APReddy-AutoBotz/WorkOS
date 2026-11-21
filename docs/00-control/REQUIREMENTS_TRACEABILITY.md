@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-NFR-SEC-004 and WOS-NFR-UX-006 — the approval desk pins each decision to its reviewed work version. The browser/PostgreSQL journey rejects a delayed approval and rejection after resubmission and checks the retained source, decision and audit records.
+
 WOS-NFR-UX-006 and WOS-NFR-OBS-005 — bulk timesheet approval previews the filtered selection, validates decisions individually via the approval API and reads back each current status. The approval browser journey covers cancellation, partial completion, lost responses, repeated confirmation and unavailable readback.
 
 WOS-NFR-SEC-004 — timesheet approval binds single and bulk decisions to the loaded account, role and organization scope. The browser/API/PostgreSQL journey verifies that a stale rejection sends no request and that a late acknowledgement cannot repopulate a closed view.

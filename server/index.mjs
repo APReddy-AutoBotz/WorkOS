@@ -42,7 +42,7 @@ import {checkDuplicateEntries,projectTimesheetDuplicateCheck,readDuplicateEntryC
 import {workReferenceInput} from './modules/work-capture/work-reference.mjs';
 import {evidenceUrlInput,resolveWorkEntryMetadataReplacement,readWorkEvidenceAudit} from './modules/work-capture/work-evidence.mjs';
 import {createCaptureModesRouter} from './modules/work-capture/capture-modes-router.mjs';
-import {captureModeWriteFields,refineCaptureModeWrite,assertCaptureModeWrite} from './modules/work-capture/capture-modes.mjs';
+import {captureModeWriteFields,refineCaptureModeWrite,assertCaptureModeWrite,assertReviewedWorkVersion} from './modules/work-capture/capture-modes.mjs';
 import {createCapturePolicyRouter} from './modules/work-capture/capture-policy-router.mjs';
 import {validateCapturePolicy,captureHoursInput,assertCaptureReplacementPeriods} from './modules/work-capture/capture-policy.mjs';
 import {canonicalHours,sumHours} from './modules/work-capture/work-hours.mjs';
@@ -3074,6 +3074,7 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
   const schema = z.object({
     status: z.enum(['Approved', 'Rejected']),
     reason: z.string().optional(),
+    expected_write_token: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -3154,6 +3155,7 @@ app.patch('/api/timesheets/:id/status', requireDatabase, requireAuth, requirePer
 
     await assertLegacyWorkApproval(client,req,previous.id);
     await assertWorkDecisionAllowed(client,req,previous);
+    await assertReviewedWorkVersion(client,previous.id,parsed.data.expected_write_token);
     const approved = parsed.data.status === 'Approved';
     const result = await client.query(`
       update timesheets

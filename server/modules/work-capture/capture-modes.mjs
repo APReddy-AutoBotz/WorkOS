@@ -25,6 +25,15 @@ export const refineCaptureModeWrite=(input,context)=>{
 export const loadCaptureMode=async(client,req)=>(await client.query(`select * from work_capture_mode_versions
   where organization_id=$1 and legal_entity_id=$2 order by sequence desc limit 1`,
 [req.organizationScope.organizationId,req.organizationScope.legalEntityId])).rows[0]||null;
+// The decision transaction holds the scoped header lock before checking this value.
+export async function assertReviewedWorkVersion(client, timesheetId, expected) {
+  if (expected === undefined) return;
+  const {rows} = await client.query('select work_capture_write_token($1) token', [timesheetId]);
+  if (rows[0].token !== expected) {
+    throw new WorkPolicyError('WORK_REVIEW_VERSION_CHANGED', 'This timesheet changed after review. Reload it before deciding.', 409);
+  }
+}
+
 export const assertCaptureModeWrite=async(client,req,input,previous)=>{
   if(input.capture_mode!==undefined){
     const latest=await loadCaptureMode(client,req);

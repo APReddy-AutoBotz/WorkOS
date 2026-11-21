@@ -1,5 +1,5 @@
 import {buildTimesheetCsv} from '../lib/timesheetCsv';
-import {getToken, getOrganizationScope} from '../services/apiClient';
+import {ApiClientError, getToken, getOrganizationScope} from '../services/apiClient';
 import {WorkCategory} from '../components/WorkCategory';
 import {WorkSourceIdentity} from '../components/WorkSourceIdentity';
 import {WorkCaptureWarnings} from '../components/WorkCaptureWarnings';
@@ -35,7 +35,8 @@ const formatHours=(value:number)=>`${canonicalHours(value)}h`;
 
 import { productConfig } from '../config/productConfig';
 const sheetKey = (sheet: TimesheetSummary) => sheet.id || `${sheet.employeeId}:${sheet.weekEnding}`;
-type DecisionResult = {key: string; label: string; status: string; acknowledged: boolean};
+type DecisionResult = {key: string; label: string; status: string; outcome: string};
+const reviewChanged = (error: unknown) => error instanceof ApiClientError && error.code === 'WORK_REVIEW_VERSION_CHANGED';
 
 function approvalContext() {
   const user = authService.getCurrentUser();
@@ -196,10 +197,11 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
     setActionNotice('');
     try {
       await operation();
-    } catch {
+    } catch (error) {
       if (isCurrent()) {
         setNeedsReload(true);
-        setActionNotice('The latest decision status could not be confirmed. Reload approvals before retrying.');
+        setActionNotice(reviewChanged(error) ? 'This timesheet changed after you reviewed it. Reload approvals and review the revised work.' :
+          'The latest decision status could not be confirmed. Reload approvals before retrying.');
       }
     } finally {
       decisionLock.current = false;
@@ -215,7 +217,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
     }
     await timesheetService.approve(
       ts.id || `${ts.employeeId}:${ts.weekEnding}`,
-      undefined, isCurrent
+      undefined, isCurrent, ts.writeToken
     );
     if (!await refreshTimesheets() || !isCurrent()) return;
     setActionNotice(`Approved ${ts.employeeName}'s timesheet for ${ts.weekEnding}.`);
@@ -246,7 +248,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
       setRejectionError('A rejection reason is required before sending this timesheet back.');
       return;
     }
-    await timesheetService.reject(rejectionTarget.id || `${rejectionTarget.employeeId}:${rejectionTarget.weekEnding}`, remark, isCurrent);
+    await timesheetService.reject(rejectionTarget.id || `${rejectionTarget.employeeId}:${rejectionTarget.weekEnding}`, remark, isCurrent, rejectionTarget.writeToken);
     if (!await refreshTimesheets() || !isCurrent()) return;
     setActionNotice(`Rejected ${rejectionTarget.employeeName}'s timesheet for ${rejectionTarget.weekEnding}.`);
     if (selectedId === `${rejectionTarget.employeeId}:${rejectionTarget.weekEnding}`) setSelectedId(null);
@@ -258,13 +260,15 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
     if (!preview?.length) return;
     const selection = preview;
     setPreview(null);
-    const acknowledged = new Set<string>();
+    const decisionOutcomes = new Map<string, string>();
     for (let offset = 0; offset < selection.length; offset += 4) {
       if (!isCurrent()) return;
       const batch = selection.slice(offset, offset + 4);
-      const outcomes = await Promise.allSettled(batch.map(ts => timesheetService.approve(sheetKey(ts), undefined, isCurrent)));
+      const outcomes = await Promise.allSettled(batch.map(ts => timesheetService.approve(sheetKey(ts), undefined, isCurrent, ts.writeToken)));
       outcomes.forEach((outcome, index) => {
-        if (outcome.status === 'fulfilled') acknowledged.add(sheetKey(batch[index]));
+        const message = outcome.status === 'fulfilled' ? 'Decision acknowledged' :
+          reviewChanged(outcome.reason) ? 'Work changed. Review the revised timesheet.' : 'No acknowledgement';
+        decisionOutcomes.set(sheetKey(batch[index]), message);
       });
     }
     const latest = await refreshTimesheets();
@@ -274,7 +278,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
       const key = sheetKey(ts);
       const current = byKey.get(key);
       return {key, label: current ? `${current.employeeName} · ${current.weekEnding}` : 'Timesheet outside current view',
-        status: current?.status ?? 'Unavailable', acknowledged: acknowledged.has(key)};
+        status: current?.status ?? 'Unavailable', outcome: decisionOutcomes.get(key) ?? 'No acknowledgement'};
     });
     setSelectedId(null);
     setResults(rows);
@@ -375,7 +379,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
         <div className="mt-4 flex items-start justify-between gap-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-800 shadow-sm">
           <div role="status">{actionNotice}
             {results.length > 0 && <details><summary>View individual outcomes</summary><ul>
-              {results.map(row => <li key={row.key}>{row.label} · {row.status} · {row.acknowledged ? 'Decision acknowledged' : 'No acknowledgement'}</li>)}
+              {results.map(row => <li key={row.key}>{row.label} · {row.status} · {row.outcome}</li>)}
             </ul></details>}
           </div>
           {needsReload && <button className="btn-secondary" onClick={() => window.location.reload()}>Reload approvals</button>}

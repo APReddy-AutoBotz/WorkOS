@@ -127,6 +127,36 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    assert.equal(await page.locator('textarea, tbody tr').count(),0);
    assert.equal(decisions,0);
    assert.equal((await pool.query('select status from timesheets where id=$1',[saved.body.id])).rows[0].status,'Submitted');
+   // Another reviewer requests a correction while this browser retains the original submission.
+   await reloadApprovals.click();
+   await submittedRow.click();
+   const decisionPath = '/api/timesheets/'+saved.body.id+'/status';
+   const reject = await request(decisionPath,{method:'PATCH',body:{status:'Rejected',reason:'Synthetic revision',expected_write_token:saved.body.write_token}});
+   assert.equal(reject.status,200,JSON.stringify(reject.body));
+   const revised = await request('/api/timesheets',{method:'POST',identity:identities.reader,body:{
+     employee_id:f.ownerId,week_ending:today,status:'Submitted',entries:entries.map(entry=>({...entry,remark:'Corrected work'}))}});
+   assert.equal(revised.status,200,JSON.stringify(revised.body));
+   assert.notEqual(revised.body.write_token,saved.body.write_token);
+   assert.equal(revised.body.id,saved.body.id);
+   const retainedBefore = await sourceSnapshot();
+   const decisionCounts = async () => (await pool.query(`select
+     (select count(*) from work_submission_decisions) decisions,
+     (select count(*) from audit_logs where module='Timesheets' and entity_id=$1) audits`,[saved.body.id])).rows[0];
+   const countsBefore = await decisionCounts();
+   const staleResponse = page.waitForResponse(r=>new URL(r.url()).pathname===decisionPath && r.request().method()==='PATCH');
+   await page.getByRole('button',{name:'Approve',exact:true}).click();
+   const conflict = await staleResponse;
+   assert.equal(conflict.request().postDataJSON().expected_write_token,saved.body.write_token);
+   assert.equal(conflict.status(),409);
+   await page.getByText('This timesheet changed after you reviewed it. Reload approvals and review the revised work.').waitFor();
+   assert.equal((await conflict.json()).code,'WORK_REVIEW_VERSION_CHANGED');
+   const staleRejection = await request(decisionPath,{method:'PATCH',body:{
+     status:'Rejected',reason:'Synthetic delayed review',expected_write_token:saved.body.write_token}});
+   assert.equal(staleRejection.status,409);
+   assert.equal((await request(decisionPath,{method:'PATCH',body:{status:'Approved',expected_write_token:null}})).status,400);
+   assert.deepEqual(await sourceSnapshot(),retainedBefore);
+   assert.deepEqual(await decisionCounts(),countsBefore);
+   decisions = 0;
    const previousWeek = (await pool.query("select to_char(ends_on,'YYYY-MM-DD') as day from reporting_periods where id='period-work-previous'")).rows[0].day;
    const previous = await request('/api/timesheets',{identity:identities.reader,method:'POST',body:{
      employee_id:f.ownerId,week_ending:previousWeek,status:'Submitted',entries:[{work_type:'Client Misc Task',
@@ -141,6 +171,8 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    assert.equal(decisions,0);
    const decisionRoute = '**/api/timesheets/*/status';
    await page.route(decisionRoute,async route => {
+     const expectedVersion = route.request().url().includes(previous.body.id) ? previous.body.write_token : revised.body.write_token;
+     assert.equal(route.request().postDataJSON().expected_write_token,expectedVersion);
      if (route.request().url().includes(previous.body.id)) {
        const accepted = await route.fetch();
        assert.equal(accepted.status(),200);

@@ -64,6 +64,8 @@ These are product and acceptance commitments, not claims that every capability i
 
 Buyer operations can run `npm run --silent ops:delivery-health` to check pending invoice alerts, their oldest age and recent delivery failures. [Delivery monitoring and database grants](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#delivery-monitoring)
 
+Single and bulk decisions from the timesheet approval desk use the version displayed to the reviewer. If an employee resubmits before a decision arrives, reload and review the corrected work.
+
 Bulk timesheet approval previews the selected employees and weeks. After confirmation, the approval desk shows each timesheet’s refreshed status and whether its decision was acknowledged.
 
 Timesheet approval closes the previous workspace when an operator switches organization scope. Reloading approvals fetches the current view. A decision already accepted by the server retains its original scope.
