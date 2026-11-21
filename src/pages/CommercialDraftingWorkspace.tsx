@@ -282,7 +282,7 @@ export const CommercialDraftingWorkspace = () => {
     {workspace && <>
       <GovernedTmWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceNoticeConfiguration choices={retainerInvoiceChoices}/>
-      <InvoiceBillingConfirmation choices={invoiceChoices}/>
+      <InvoiceBillingConfirmation choices={retainerInvoiceChoices}/>
       <BillingReconciliation choices={invoiceChoices}/>
       <MilestoneBillingWorkspace choices={workspace.engagements.filter(x=>x.model==='milestone').map(x=>({id:x.id,label:x.name}))}/>
       <InvoiceActionNotice choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>

@@ -603,7 +603,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
       expectedSequence:1,decision:'Approved',reason:'Verified second-stage control total'});
     assert.equal(second.status,201,JSON.stringify(second.body));
     assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Approved');
-    const exportKeys=['reports.export','commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','integrations.invoice_alert_routes.manage'];
+    const exportKeys=['commercial.invoice_batch.confirm','reports.export','commercial.invoice_export.view','commercial.invoice_export.create','commercial.invoice_export.configure','integrations.invoice_alert_routes.manage'];
     for(const role of [reviewRole,'Admin','Employee']) await pool.query(
       'insert into role_permissions(role_name,permission_key,enabled) select $1,k,true from unnest($2::text[]) k on conflict(role_name,permission_key) do update set enabled=true',[role,exportKeys]);
     const csv='/api/v1/invoice-csv', notice='/api/v1/invoice-export-notice-config';
@@ -656,6 +656,39 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal(replayExport.body.artifact.sha256,a.sha256);
     assert.equal((await sendExport({...saved.request().postDataJSON(),reason:'Changed reason'})).status,409);
     assert.equal((await apiRequest(csv+'/batches/'+batchId,{identity:finance})).body.batch.state,'Exported');
+    const confirmations=csvBrowser.page.getByRole('region',{name:'Invoice billing confirmation'});
+    await confirmations.getByLabel('Invoice confirmation engagement').selectOption(eng.body.id);
+    await confirmations.getByRole('button',{name:'Load invoice confirmation batches'}).click();
+    await confirmations.getByLabel('Invoice confirmation batch').selectOption(batchId);
+    await confirmations.getByRole('button',{name:'Inspect exported invoice artifact'}).click();
+    const inspected=confirmations.getByRole('region',{name:'Inspected confirmation source'});
+    await inspected.getByText(/retainer source/).waitFor();
+    assert.equal((await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:identities.reader})).status,403);
+    const reference='Synthetic downstream retainer invoice';
+    const cmd={expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),batchId,artifactId:a.id,artifactVersion:1,artifactSha256:a.sha256,currency:a.currency,total:a.total,reference,reason:'Matched downstream receipt'};
+    const attest=body=>apiRequest(csv+'/confirmations',{method:'POST',identity:finance,body});
+    assert.equal((await attest({...cmd,total:'1'})).status,409);
+    await pool.query("create trigger reject_retainer_attestation before insert on audit_logs for each row when(new.module='Invoice Billing Confirmation') execute function reject_test_po_audit()");
+    assert.equal((await attest(cmd)).status,503);
+    assert.equal((await pool.query('select 1 from invoice_batch_confirmations where batch_id=$1',[batchId])).rowCount,0);
+    await pool.query('drop trigger reject_retainer_attestation on audit_logs');
+    await inspected.getByLabel('Invoice confirmation reference').fill(reference);
+    await inspected.getByLabel('Invoice confirmation reason').fill(cmd.reason);
+    await inspected.getByRole('checkbox').check();
+    const confirming=csvBrowser.page.waitForResponse(r=>r.url().endsWith(csv+'/confirmations') && r.request().method()==='POST');
+    await inspected.getByRole('button',{name:'Record manual billing attestation'}).click();
+    const confirmed=await confirming;
+    assert.equal(confirmed.status(),201,await confirmed.text());
+    const receipt=(await confirmed.json()).confirmation;
+    assert.deepEqual([receipt.sourceType,receipt.artifactSha256,receipt.total,receipt.reference],['RETAINER_PERIOD',a.sha256,a.total,reference]);
+    await confirmations.getByText('Retained manual attestation '+receipt.id,{exact:false}).waitFor();
+    assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[batchId])).rowCount,1);
+    const attestationRequest=confirmed.request().postDataJSON();
+    assert.equal((await attest(attestationRequest)).body.replayed,true);
+    assert.equal((await attest({...attestationRequest,reference:'Changed reference'})).status,409);
+    assert.equal((await apiRequest(csv+'/confirmation-receipts/'+attestationRequest.requestId,{identity:finance})).body.confirmation.id,receipt.id);
+    assert.equal((await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:finance})).body.source.state,'Billed/Confirmed');
+    assert.equal((await pool.query('select id from invoice_export_notice_events where confirmation_id=$1',[receipt.id])).rowCount,1);
     await csvBrowser.context.close();
     await reviewBrowser.context.close();
     await preparing.context.close();
@@ -669,6 +702,6 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await billing.context.close();
     await reviewer.context.close();
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
-    console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export, completion notice, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
+    console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export and downstream billing attestation, completion notices, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
   } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
 }, {upgrade: true});
