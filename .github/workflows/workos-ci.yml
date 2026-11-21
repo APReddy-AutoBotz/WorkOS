@@ -457,6 +457,9 @@ jobs:
       - name: Verify audited deployment session lifetime and database permissions
         run: npm run test:session-policy
 
+      - name: Verify delivery monitoring with PostgreSQL
+        run: npm run test:delivery-health
+
       - name: Measure Standard-profile authenticated API performance
         run: npm run test:standard-profile
 
