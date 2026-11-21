@@ -37,11 +37,12 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const errors = [], external = [], writes = [];
     const createContext = async (identity, permissions) => {
       const context = await browser.newContext({viewport: {width: 1100, height: 900}});
-      await context.addInitScript(({identity, permissions, scope, signedToken, ownerId}) => {
-        sessionStorage.setItem('workos_session', JSON.stringify({id: identity.id, userName:identity.username, employeeId: ownerId, name: 'Synthetic Commercial Journey Operator', role: identity.role, permissionRole: identity.role, permissions}));
+      const linkedWorker=(await pool.query('select employee_record_id from users where id=$1',[identity.id])).rows[0].employee_record_id;
+      await context.addInitScript(({identity, permissions, scope, signedToken, ownerId,linkedWorker}) => {
+        sessionStorage.setItem('workos_session', JSON.stringify({id: linkedWorker || identity.id, userName:identity.username, employeeId: ownerId, name: 'Synthetic Commercial Journey Operator', role: identity.role, permissionRole: identity.role, permissions}));
         sessionStorage.setItem('workos_organization_scope', JSON.stringify(scope));
         sessionStorage.setItem('workos_api_token', signedToken);
-      }, {identity, permissions, scope, signedToken: tokenFor(identity), ownerId});
+      }, {identity, permissions, scope, signedToken: tokenFor(identity), ownerId,linkedWorker});
       const page = await context.newPage();page.setDefaultTimeout(15000);
       page.on('pageerror', error => errors.push(error.message));
       page.on('request', request => {
@@ -467,6 +468,76 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
       await addRange('first','v1','2020-01-01','2020-01-31');await addRange('next','v2','2020-02-01','2020-02-28');
       await assert.rejects(addRange('different','v3','2020-01-31','2020-02-01'),e=>e.code==='23P01');
     } finally {await ranges.query('rollback');ranges.release();}
+    {
+    for (const key of draftGrants) await pool.query(
+      'insert into role_permissions(role_name,permission_key,enabled) values($1,$2,true) on conflict(role_name,permission_key) do update set enabled=true',[reviewRole,key]);
+    const preparing=await createContext(finance,[...draftGrants,issueGrant]);
+    const draftPage=preparing.page;
+    await draftPage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const desk=draftPage.getByRole('region',{name:'Invoice-ready draft batches'});
+    const loadDrafts=()=>desk.getByRole('button',{name:'Load drafts and available items'}).click();
+    await loadDrafts();
+    await desk.getByLabel('Invoice engagement').selectOption(eng.body.id);
+    await desk.getByLabel('Invoice period start').fill(today);
+    await desk.getByLabel('Invoice period end').fill(today);
+    await desk.getByLabel('Invoice period basis').selectOption('ELIGIBLE_DATE');
+    await desk.getByLabel('Invoice owner user ID').fill(finance.id);
+    await desk.getByLabel('Invoice owner role').fill(reviewRole);
+    await desk.getByLabel('Invoice draft reason').fill('Prepare the approved retainer charge');
+    await desk.getByRole('checkbox',{name:'Confirm the displayed client, contract and currency'}).check();
+    const post=(suffix)=>draftPage.waitForResponse(r=>r.url().endsWith('/api/v1/invoice-drafts/'+suffix) && r.request().method()==='POST');
+    const creating=post('batches');
+    await desk.getByRole('button',{name:'Create invoice Draft'}).click();
+    const created=await creating;assert.equal(created.status(),201,await created.text());
+    const retainerBatch=(await created.json()).batch.id;
+    const inspectRetainer=async()=>{
+      await loadDrafts();
+      await desk.getByLabel('Invoice draft',{exact:true}).selectOption(retainerBatch);
+      await desk.getByRole('button',{name:'Inspect invoice draft'}).click();
+    };
+    await inspectRetainer();
+    await desk.getByLabel('Available invoice item').selectOption('retainer:'+issued.body.receipt.itemId);
+    await desk.getByLabel('Invoice item reason').fill('Reserve the exact approved retainer charge');
+    const reserving=post('batches/'+retainerBatch+'/lines');
+    await desk.getByRole('button',{name:'Reserve selected whole item'}).click();
+    const reserved=await reserving;assert.equal(reserved.status(),201,await reserved.text());
+    const retainerLine=(await reserved.json()).line;
+    assert.deepEqual([retainerLine.eventId,retainerLine.itemId,retainerLine.amount,retainerLine.snapshotId],
+      [issued.body.receipt.eventId,issued.body.receipt.itemId,'3500.0000',null]);
+    const linePath='/api/v1/invoice-drafts/batches/'+retainerBatch+'/lines';
+    const original=reserved.request().postDataJSON();
+    const replay=await apiRequest(linePath,{method:'POST',identity:finance,body:original});
+    assert.equal(replay.body.replayed,true,JSON.stringify(replay.body));
+    const double=await apiRequest(linePath,{method:'POST',identity:finance,
+      body:{...original,expectedLineCount:1,requestId:crypto.randomUUID()}});
+    assert.equal(double.status,409);
+    const draftsUrl='/api/v1/invoice-drafts/batches';
+    const otherBatch=await apiRequest(draftsUrl,{method:'POST',identity:finance,body:{...created.request().postDataJSON(),requestId:crypto.randomUUID()}});
+    assert.equal(otherBatch.status,201,JSON.stringify(otherBatch.body));
+    const otherPath=draftsUrl+'/'+otherBatch.body.batch.id;
+    const otherCommand={...original,requestId:crypto.randomUUID()};
+    const overlapping=await apiRequest(otherPath+'/lines',{method:'POST',identity:finance,body:otherCommand});
+    assert.equal(overlapping.status,409);
+    assert.deepEqual((await apiRequest(otherPath+'/available-retainer-charges',{identity:finance})).body.items,[]);
+    const withoutAuthority=await apiRequest('/api/v1/invoice-drafts/batches/'+retainerBatch,{identity:identities.reader});
+    assert.equal(withoutAuthority.status,403);
+    assert.equal((await apiRequest('/api/v1/invoice-drafts/batches',{identity:identities.reader})).body.batches.some(row=>row.id===retainerBatch),false);
+    assert.equal(retainerLine.evidence.reviewId,retainerCommand.reviewId);
+    assert.equal(retainerLine.evidence.statementId,retainerCommand.statementId);
+    await inspectRetainer();
+    await desk.getByText(/Retained lines 1/).waitFor();
+    await desk.getByLabel('Cancellation reason').fill('Release the retainer charge for rebatching');
+    const cancelling=post('batches/'+retainerBatch+'/cancellations');
+    await desk.getByRole('button',{name:/Cancel .*draft/i}).click();
+    const cancelled=await cancelling;assert.equal(cancelled.status(),201,await cancelled.text());
+    assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1',[issued.body.receipt.itemId])).rowCount,0);
+    assert.equal((await pool.query('select 1 from invoice_draft_lines where id=$1 and event_id=$2',[retainerLine.id,issued.body.receipt.eventId])).rowCount,1);
+    const rebatched=await apiRequest(otherPath+'/lines',{method:'POST',identity:finance,body:otherCommand});
+    assert.equal(rebatched.status,201,JSON.stringify(rebatched.body));
+    assert.equal(rebatched.body.line.eventId,retainerLine.eventId);
+    assert.notEqual(rebatched.body.line.id,retainerLine.id);
+    await preparing.context.close();
+    }
     await issuer.context.close();
     await independent.context.close();
     assert.equal((await apiRequest(consumptionPath.replace(savedRetainer.result.versions[0].id,versionId))).status,404);
