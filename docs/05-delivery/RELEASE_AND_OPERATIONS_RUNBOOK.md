@@ -628,3 +628,7 @@ After a billing stage changes, reload the engagement, inspect the current review
 ### Rate approval cancellation
 
 After a stage-change refusal, reload the rate approval, select the request and review its decisions before cancelling. API clients send expectedSequence from the inspected approval. Older clients can initiate cancellations at sequence zero and replay prior accepted commands. Deploy the API first and roll back both API and web together if necessary.
+
+### Milestone acceptance cancellation
+
+After a stage-change refusal, reload the milestone review and inspect the completed decisions before cancelling. API clients send the inspected expectedSequence. A new command without it applies only at sequence zero. Use the original cancellation receipt after a lost response. Deploy the API before the web client. Roll both back together if required.

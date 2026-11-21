@@ -193,3 +193,7 @@ T&M billing managers can cancel the pending stage they inspected. A concurrent r
 ### Rate approval cancellation
 
 Billing and confidential cost rate review cancellations check the inspected stage under the same database lock used to append approval decisions.
+
+### Milestone acceptance cancellation
+
+Milestone acceptance cancellations now check the inspected review stage while holding the review lock used for approvals.

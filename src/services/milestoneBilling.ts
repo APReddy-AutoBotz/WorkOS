@@ -199,7 +199,7 @@ export type MilestoneOperation =
         reason: string;
       };
     }
-  | { type: 'cancellation'; id: string; data: { requestId: string; reason: string } };
+  | { type: 'cancellation'; id: string; data: { requestId: string; expectedSequence: number; reason: string } };
 const operation = z.discriminatedUnion('type', [
   z
     .object({
@@ -250,7 +250,7 @@ const operation = z.discriminatedUnion('type', [
     .object({
       type: z.literal('cancellation'),
       id: uuid,
-      data: z.object({ requestId: uuid, reason }).strict(),
+      data: z.object({ requestId: uuid, expectedSequence: z.number().int().min(0).max(9), reason }).strict(),
     })
     .strict(),
 ]);
@@ -533,6 +533,8 @@ export const milestoneBilling = {
     if (
       op.type === 'cancellation' &&
       (a.id !== op.id ||
+        a.state.status !== 'Cancelled' ||
+        a.state.sequence !== op.data.expectedSequence ||
         a.cancellation?.requestId !== op.data.requestId ||
         a.cancellation?.reason !== op.data.reason ||
         a.cancellation?.actorId !== out.data.actorUserId ||

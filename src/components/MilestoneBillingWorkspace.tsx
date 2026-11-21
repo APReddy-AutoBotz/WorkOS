@@ -199,8 +199,17 @@ const MilestoneReview = ({
       }
     }
   };
+  const clearStage = () => {
+    setInspected(null);
+    setDecision('');
+    setDecisionReason('');
+    setCancelReason('');
+  };
   const load = () =>
     void run(async (c) => {
+      clearStage();
+      setLoaded(false);
+      setSelected('');
       const x = await milestoneBilling.load(engagementId, c);
       setPolicies(x.policies);
       setSources(x.sources);
@@ -211,8 +220,6 @@ const MilestoneReview = ({
       setSourceNext(x.sourceNext);
       setReviewNext(x.reviewNext);
       setLoaded(true);
-      setSelected('');
-      setInspected(null);
     });
   const moreSources = () =>
     void run(async (c) => {
@@ -238,6 +245,7 @@ const MilestoneReview = ({
   const inspect = () => {
     if (!selected) return;
     void run(async (c) => {
+      clearStage();
       const x = await milestoneBilling.inspect(selected, c);
       if (x.approval.engagementId !== engagementId) throw Error('Scope changed');
       setInspected({ approval: x.approval, source: x.source });
@@ -260,6 +268,8 @@ const MilestoneReview = ({
           setInspected(null);
           setNotice(e.code === 'BILLING_ELIGIBILITY_PERIOD_CLOSED'
             ? 'The eligibility date is outside an open financial period. Review the reporting calendar before approving.'
+            : e.code === 'MILESTONE_BILLING_STAGE_CHANGED'
+            ? 'The milestone review stage changed. Reload and inspect the current stage before cancelling.'
             : 'Operation refused. Reload before a deliberate new request.');
           return;
         }
@@ -669,7 +679,7 @@ const MilestoneReview = ({
               value={selected}
               onChange={(e) => {
                 setSelected(e.target.value);
-                setInspected(null);
+                clearStage();
               }}
             >
               <option value="">Choose a review</option>
@@ -688,7 +698,7 @@ const MilestoneReview = ({
               <p>
                 Milestone {inspected.source.id} · {inspected.source.currency} {inspected.source.amount} ·
                 review {chosen?.state.status} · current {String(chosen?.current)} · owner{' '}
-                {chosen?.ownerUserId} ({chosen?.ownerRole}).
+                {chosen?.ownerUserId} ({chosen?.ownerRole}). Completed decisions: {chosen?.state.sequence}.
               </p>
               <ul>
                 {chosen?.evidence.map((e) => (
@@ -743,7 +753,7 @@ const MilestoneReview = ({
                         perform({
                           type: 'cancellation',
                           id: chosen.id,
-                          data: { requestId: crypto.randomUUID(), reason: cancelReason.trim() },
+                          data: { requestId: crypto.randomUUID(), expectedSequence: chosen.state.sequence, reason: cancelReason.trim() },
                         });
                     }}
                   >
