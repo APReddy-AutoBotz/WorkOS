@@ -213,3 +213,5 @@ Retainer contract terms support dated capacity and base fees. Approved hours are
 Release CI now rehearses recovery of a populated billed retainer and applied credit. It verifies financial artifacts and receipts through the recovered API, scoped denial, reservations, signed reconciliation and retry behavior. The workflow summary records measured synthetic recovery objectives. Buyer-environment recovery and release UAT remain open.
 
 Historical archive recovery covers 082p custom-format backups without access to the original database. The release rehearsal verifies scoped commercial reads and writes, retained workforce data, ledger upgrade, and rollback when the supplied archive has a different migration history.
+
+WOS-COM-010 now supports versioned managed-service quantity dimensions in Commercial drafting. Configure and inspect ticket, shift or buyer-defined units per contract version. Capturing service quantities, independent unit acceptance, operational valuation and billing eligibility remain open.

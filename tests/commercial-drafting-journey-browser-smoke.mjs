@@ -14,6 +14,7 @@ const future = new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 10);
 const hostile = '<script>window.syntheticCommercialExecuted=true</script>';
 const prefix = '/api/v1/commercial-drafting';
 const expectedFields = {
+  managed: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','serviceDimensions','number','clientId','reason'],
   retainer: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','retainerPeriods','retainerCapacityPolicy','retainerOveragePolicy','retainerRounding','number','clientId','reason'],
   contract: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','installments','number','clientId','reason'],
   engagement: ['code','name','model','ownerId','startsOn','endsOn','currency','budget','contractId','contractVersionId','clientId','attributionId','reason'],
@@ -835,6 +836,46 @@ const verifyCommercialDrafting = async reversalScenario => {
     await preparing.context.close();
     await billing.context.close();
     await reviewer.context.close();
+    if (reversalScenario==='approved credit') {
+      await open();
+      await button('New contract / SOW').click();
+      const managed=form('New contract / SOW');
+      await managed.getByLabel('Client',{exact:true}).selectOption(clientId);
+      await managed.getByLabel('Commercial model',{exact:true}).selectOption('managed_service');
+      await fill(managed,{'Contract / SOW number':'SYN-SERVICE','Contract name':'Synthetic service operation','Starts on':'2020-01-01',
+        'Ends on':'2099-12-31','Terms effective from':'2020-01-01','Currency (ISO code)':'GBP','Contract value (decimal)':'1000',
+        'Billing terms':'Configured service quantities','Reason for creation / revision':'Set service units'});
+      await button('Add service unit').click();
+      await fill(managed,{'Unit 1 code':'TICKET','Unit 1 label':'Accepted ticket'});
+      await button('Add service unit').click();
+      await fill(managed,{'Unit 2 code':'SHIFT','Unit 2 label':'Support shift'});
+      await managed.getByLabel('Unit 2 decimal places').selectOption('2');
+      const saved=await save('/contracts','managed');
+      const units=[{code:'TICKET',label:'Accepted ticket',precision:0},{code:'SHIFT',label:'Support shift',precision:2}];
+      assert.deepEqual(saved.result.versions[0].serviceDimensions,units);
+      await button('Inspect SYN-SERVICE').click();
+      await page.getByText('Support shift · SHIFT · 2 decimal places',{exact:true}).waitFor();
+      const {number,clientId:client,...revision}=saved.body;
+      const path='/contracts/'+saved.result.id+'/versions';
+      const revise=(body,identity=identities.manager)=>apiRequest(path,{method:'POST',identity,body});
+      const next={...revision,expectedVersion:1,effectiveFrom:future};
+      assert.equal((await revise(next,identities.denied)).status,403);
+      assert.equal((await apiRequest(path,{method:'POST',identity:identities.manager,scope:{...scope,legalEntityId:'synthetic-unassigned-entity'},body:next})).status,403);
+      assert.equal((await revise({...next,serviceDimensions:[{...units[0],precision:5}]})).status,400);
+      assert.equal((await revise({...next,serviceDimensions:[units[0],units[0]]})).status,422);
+      assert.equal((await apiRequest('/contracts',{method:'POST',body:{...saved.body,number:'SYN-WRONG-MODEL',model:'retainer'}})).status,422);
+      delete next.serviceDimensions;
+      const inherited=await revise(next);
+      assert.equal(inherited.status,201,JSON.stringify(inherited.body));
+      assert.deepEqual(inherited.body.versions[0].serviceDimensions,units);
+      const cleared=await revise({...next,expectedVersion:2,effectiveFrom:'2099-01-01',serviceDimensions:[]});
+      assert.equal(cleared.status,201,JSON.stringify(cleared.body));
+      assert.equal(cleared.body.versions[0].serviceDimensions,undefined);
+      assert.deepEqual(cleared.body.versions[2].serviceDimensions,units);
+      const auditTerms=await pool.query("select before_value,after_value from commercial_draft_events where entity_id=$1 and after_value->>'latestVersion'='3'",[saved.result.id]);
+      assert.deepEqual(auditTerms.rows[0].before_value.versions[0].serviceDimensions,units);
+      assert.equal(auditTerms.rows[0].after_value.versions[0].serviceDimensions,undefined);
+    }
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
     console.log('Retainer reversal scenario passed:',reversalScenario);
     console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export and downstream billing attestation, independent retainer reversal review, completion notices, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');

@@ -685,3 +685,5 @@ WOS-INV-001, WOS-APR-001 and WOS-APR-003. Billing review policy history lists ea
 WOS-NFR-REL-006/007/008: the production-like archive rehearsal runs after the retainer credit browser journey with `--restore-credit`. Full public table fingerprints, migration replay, artifact bytes, financial lineage, both occupied items, access boundaries and idempotent confirmation receipts are verified after recovery. The CI job summary retains measured archive age and recovery duration for this synthetic workload.
 
 WOS-NFR-REL-006/007/008 and WOS-NFR-DPL-007: `npm run test:restore` exercises the operator command against a populated pre-082q archive, checks every public table before upgrade, rejects reuse of a populated database, and checks transaction rollback on a mismatched archive.
+
+WOS-COM-010 (managed-service contract terms): migration 082r, the commercial drafting API and the browser journey verify scoped versioned quantity dimensions, inheritance, explicit clearing, duplicate rejection, model restrictions, and preservation of historical versions.

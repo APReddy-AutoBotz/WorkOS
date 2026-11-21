@@ -21,12 +21,14 @@ export const retainerPolicyLabels = {
   all_rollover: 'All approved hours · carry unused hours to the next service period',
 } as const;
 export type RetainerCapacityPolicy = keyof typeof retainerPolicyLabels;
+export type ServiceDimension = {code:string;label:string;precision:number};
 export type RetainerPeriod = {startsOn: string; endsOn: string; includedHours: string; baseFee: string};
 export type ContractTermsInput = {
   name: string; model: ContractModel; startsOn: string; endsOn: string; effectiveFrom: string;
   retainerRounding?: RetainerRounding | null;
   retainerOveragePolicy?: RetainerOveragePolicy | null;
   retainerCapacityPolicy?: RetainerCapacityPolicy | null;
+  serviceDimensions?: ServiceDimension[];
   retainerPeriods?: RetainerPeriod[];
   installments?: {dueOn: string; amount: string}[];
   currency: string; value: string; billingTerms: string; documents: CommercialDocument[];
@@ -145,6 +147,17 @@ const normalizeRounding = (value:unknown):RetainerRounding => {
   if (precision>4) throw invalid();
   return {precision,mode:model(r.mode,['HALF_UP','HALF_EVEN','DOWN'] as const)};
 };
+const normalizeServiceDimensions = (value:unknown, contractModel:unknown): ServiceDimension[] => {
+  if (contractModel !== 'managed_service' || !Array.isArray(value) || value.length>50) throw invalid();
+  const seen=new Set<string>();
+  return rows(value,entry=>{
+    const unit=object(entry), code=text(unit.code), label=text(unit.label), precision=integer(unit.precision);
+    if (Object.keys(unit).length!==3 || !/^[A-Z][A-Z0-9_]{0,39}$/.test(code) || seen.has(code) ||
+        !label || label!==label.trim() || [...label].length>80 || /[\u0000-\u001f\u007f-\u009f\u2028\u2029\ufeff]/u.test(label) || precision>4) throw invalid();
+    seen.add(code);
+    return {code,label,precision};
+  });
+};
 const normalizeTerms = (value: unknown): ContractTerms => {
   const item = object(value);
   return {id: text(item.id), version: integer(item.version, 1), name: text(item.name), model: model(item.model, COMMERCIAL_CONTRACT_MODELS),
@@ -153,6 +166,7 @@ const normalizeTerms = (value: unknown): ContractTerms => {
     ...(item.retainerRounding == null ? {} : {retainerRounding:normalizeRounding(item.retainerRounding)}),
     ...(item.retainerOveragePolicy == null ? {} : {retainerOveragePolicy:model(item.retainerOveragePolicy,Object.keys(retainerOverageLabels) as RetainerOveragePolicy[])}),
     ...(item.retainerCapacityPolicy == null ? {} : {retainerCapacityPolicy:model(item.retainerCapacityPolicy,Object.keys(retainerPolicyLabels) as RetainerCapacityPolicy[])}),
+    ...(item.serviceDimensions === undefined ? {} : {serviceDimensions:normalizeServiceDimensions(item.serviceDimensions,item.model)}),
     ...(item.retainerPeriods === undefined ? {} : {retainerPeriods: rows(item.retainerPeriods, value => {
       const period = object(value);
       return {startsOn: date(period.startsOn), endsOn: date(period.endsOn), includedHours: decimal(period.includedHours), baseFee: decimal(period.baseFee)};
@@ -227,6 +241,7 @@ const termsBody = (input: ContractTermsInput) => ({name: input.name, model: inpu
   ...(input.retainerRounding !== undefined && {retainerRounding:input.retainerRounding}),
   ...(input.retainerOveragePolicy !== undefined && {retainerOveragePolicy:input.retainerOveragePolicy}),
   ...(input.retainerCapacityPolicy !== undefined && {retainerCapacityPolicy:input.retainerCapacityPolicy}),
+  ...(input.serviceDimensions && {serviceDimensions:input.serviceDimensions.map(({code,label,precision})=>({code,label,precision}))}),
   ...(input.retainerPeriods && {retainerPeriods: input.retainerPeriods.map(({startsOn, endsOn, includedHours, baseFee}) => ({startsOn, endsOn, includedHours, baseFee}))}),
   ...(input.installments && {installments: input.installments.map(({dueOn, amount}) => ({dueOn, amount}))}),
   billingTerms: input.billingTerms, documents: input.documents.map(document => ({name: document.name, url: document.url}))});
