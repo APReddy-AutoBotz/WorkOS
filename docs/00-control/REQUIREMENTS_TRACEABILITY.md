@@ -223,6 +223,10 @@ Buyer UAT:
 Owner Gate D approval:
 ```
 
+## WOS-IAM-008 production session policy
+
+Migration 082a and the session-policy and production-identity suites cover deployment-wide lifetime audit, denied changes, failed audit rollback and refusal to issue a new session from a stale replica.
+
 ## WOS-00F corrective traceability
 
 WOS-OPS-005 and WOS-NFR-REL-006/008 have a CI rehearsal in `tests/postgres-restore-rehearsal.mjs`. It compares every public table across a real archive restore, replays the migration runner and verifies commercial reads, scoped denials and an audited write. Buyer backup custody and measured recovery objectives require deployment evidence.

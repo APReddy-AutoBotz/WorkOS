@@ -14,6 +14,7 @@ import {legacyApprovalScope} from './modules/approvals/legacy-approval-scope.mjs
 import {registerLegacyDelegationRoutes} from './modules/approvals/legacy-delegation-router.mjs';
 
 import {safeNotificationMetadata, safeNotificationProvider, notificationFailureCode} from './modules/notifications/delivery-diagnostics.mjs';
+import {assertSessionLifetime} from './modules/identity-access/session-policy.mjs';
 import {createSessionLogoutHandler} from './modules/identity-access/session-lifecycle.mjs';
 import {assertIndependentLeaveDecision, sendLeaveDecisionError} from './modules/leave/decision-independence.mjs';
 import {requireLocalLoginEnabled} from './modules/identity-access/login-rate-limit.mjs';
@@ -97,6 +98,11 @@ const app = express();
 const port = runtimeEnvironment.port;
 const pool = new Pool(databaseConnectionOptions({databaseUrl: runtimeEnvironment.databaseUrl,
   sslMode: runtimeEnvironment.pgSslMode, sslRootCert: runtimeEnvironment.pgSslRootCert}));
+const checkSessionLifetime = async (database = pool) => {
+  if (isProduction) await assertSessionLifetime(database, runtimeEnvironment.sessionTtlMs);
+};
+await checkSessionLifetime();
+
 const round1 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
 
 app.set('trust proxy', runtimeEnvironment.trustedProxies);
@@ -958,6 +964,7 @@ const buildLoginResponse = async (clientOrPool, res, user, requestedRole = null,
     select distinct group_id from entra_group_role_mappings
     where active = true and group_id = any($1::text[]) and role_name = any($2::text[])
     order by group_id`, [groups, systemRoles])).rows.map(row => row.group_id) : [];
+  await checkSessionLifetime(clientOrPool);
   const sessionExpiresAt = Date.now() + runtimeEnvironment.sessionTtlMs;
   const token = signToken({
     sid: crypto.randomUUID(),
@@ -1214,7 +1221,7 @@ const sendNotification = async (client, req, {
   return event;
 };
 
-registerHealthRoutes({app, pool, rootDir: serverDir});
+registerHealthRoutes({app, pool, rootDir: serverDir, checkSessionLifetime});
 
 app.get('/api/auth/entra/config', requireDatabase, async (_req, res) => {
   res.json({
@@ -1441,6 +1448,7 @@ app.post('/api/auth/login', requireLocalLoginEnabled, requireDatabase, loginRate
       ? parsed.data.requestedRole
       : user.roles[0];
     const permissions = await getEffectivePermissionsForUser(pool, user.id, activeRole);
+    await checkSessionLifetime();
     const sessionExpiresAt = Date.now() + runtimeEnvironment.sessionTtlMs;
     const token = signToken({
       sid: crypto.randomUUID(),
