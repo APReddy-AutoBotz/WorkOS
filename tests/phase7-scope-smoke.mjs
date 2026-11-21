@@ -5,7 +5,7 @@ const server = readFileSync('server/index.mjs', 'utf8');
 const notificationRouter = readFileSync('server/modules/notifications/notification-router.mjs', 'utf8');
 const leaveRouter = readFileSync('server/modules/leave/leave-router.mjs', 'utf8');
 
-assert.match(server, /const buildEmployeeScopeWhere = \(req, params, employeeAlias = 'e'\)/, 'employee data scope helper must exist');
+assert.match(server, /const buildEmployeeScopeWhere = \(req, params, employeeAlias = 'e', coverage\)/, 'employee data scope helper must exist');
 assert.match(server, /const buildProjectScopeWhere = \(req, params, projectAlias = 'p'\)/, 'project data scope helper must exist');
 assert.match(server, /const buildApprovalScopeWhere = \(req, params\)/, 'approval data scope helper must exist');
 

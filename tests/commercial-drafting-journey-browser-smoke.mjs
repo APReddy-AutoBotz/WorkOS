@@ -12,7 +12,7 @@ const future = new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 10);
 const hostile = '<script>window.syntheticCommercialExecuted=true</script>';
 const prefix = '/api/v1/commercial-drafting';
 const expectedFields = {
-  retainer: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','retainerPeriods','number','clientId','reason'],
+  retainer: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','retainerPeriods','retainerCapacityPolicy','number','clientId','reason'],
   contract: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','installments','number','clientId','reason'],
   engagement: ['code','name','model','ownerId','startsOn','endsOn','currency','budget','contractId','contractVersionId','clientId','attributionId','reason'],
   po: ['contractId','contractVersionId','number','value','currency','startsOn','endsOn','warningThresholdPercent','reason'],
@@ -280,18 +280,21 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
       'Reason for creation / revision':'Synthetic retainer capacity'});
     await target.getByLabel('Client',{exact:true}).selectOption(clientId);
     await target.getByLabel('Commercial model',{exact:true}).selectOption('retainer');
+    await target.getByLabel('Capacity consumption and unused hours').selectOption('all_rollover');
     await button('Add retainer period').click();
-    await fill(target, {'Period 1 start date':'2028-01-01','Period 1 end date':'2028-01-31',
+    await fill(target, {'Period 1 start date':'2020-01-01','Period 1 end date':'2099-12-31',
       'Period 1 included hours':'40.1250','Period 1 base fee':'3500.0001'});
     const savedRetainer = await save('/contracts','retainer');
     assert.deepEqual(savedRetainer.result.versions[0].retainerPeriods,[
-      {startsOn:'2028-01-01',endsOn:'2028-01-31',includedHours:'40.1250',baseFee:'3500.0001'}]);
-    await page.getByText('2028-01-01 through 2028-01-31 · 40.1250 included hours · GBP 3500.0001 base fee',{exact:true}).waitFor();
+      {startsOn:'2020-01-01',endsOn:'2099-12-31',includedHours:'40.1250',baseFee:'3500.0001'}]);
+    await page.getByText('2020-01-01 through 2099-12-31 · 40.1250 included hours · GBP 3500.0001 base fee',{exact:true}).waitFor();
+    await page.getByText('All approved hours · carry unused hours to the next service period',{exact:true}).waitFor();
     const consumptionPath=`/contracts/${savedRetainer.result.id}/versions/${savedRetainer.result.versions[0].id}/retainer-consumption`;
     for (const key of ['employees.view','reports.view_utilization']) await pool.query(
       "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
     await button('Inspect approved retainer hours').click();
-    await page.getByText('2028-01-01 through 2028-01-31 · 0 billable hours · 0 non-billable hours',{exact:true}).waitFor();
+    await page.getByText('2020-01-01 through 2099-12-31 · 0 billable hours · 0 non-billable hours',{exact:true}).waitFor();
+    await page.getByText(/40.125 remaining · 0 over capacity/).waitFor();
     assert.equal((await apiRequest(consumptionPath.replace(savedRetainer.result.versions[0].id,versionId))).status,404);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");
     assert.equal((await apiRequest(consumptionPath)).status,403);

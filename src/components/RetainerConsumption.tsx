@@ -20,6 +20,7 @@ export function RetainerConsumption({contractId,version,context}: {
     {status==='loading' && <p role="status">Loading approved hours…</p>}
     {status==='error' && <p role="alert">Approved hours could not be loaded.</p>}
     {periods && <><h5>Approved hours in your worker scope</h5><ul>{periods.map(p=>
-      <li key={p.startsOn}>{p.startsOn} through {p.endsOn} · {p.billableHours} billable hours · {p.nonBillableHours} non-billable hours</li>)}</ul></>}
+      <li key={p.startsOn}><span>{p.startsOn} through {p.endsOn} · {p.billableHours} billable hours · {p.nonBillableHours} non-billable hours</span>
+        {p.capacity && <p>Contract capacity in hours · {p.capacity.carriedIn} brought forward · {p.capacity.consumed} consumed · {p.capacity.remaining} remaining · {p.capacity.overage} over capacity · {p.capacity.carriedOut} carried forward · {p.capacity.expired} expired</p>}</li>)}</ul></>}
   </div>;
 }

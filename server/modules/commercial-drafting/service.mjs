@@ -7,7 +7,7 @@ const scopeValues = req => [req.organizationScope.organizationId,req.organizatio
 const scopeWhere = 'organization_id=$1 and legal_entity_id=$2';
 const termsProjection = `id,contract_id,version,effective_from::text,name,model,starts_on::text,ends_on::text,currency,value::text,billing_terms,documents`;
 export const termsDto = row => row ? ({id:row.id,version:row.version,effectiveFrom:row.effective_from,name:row.name,model:row.model,
-  startsOn:row.starts_on,endsOn:row.ends_on,currency:row.currency,value:row.value,billingTerms:row.billing_terms,documents:row.documents,...(row.retainer_periods?.length ? {retainerPeriods:row.retainer_periods} : {}),...(row.installments?.length ? {installments:row.installments} : {})}) : null;
+  startsOn:row.starts_on,endsOn:row.ends_on,currency:row.currency,value:row.value,billingTerms:row.billing_terms,documents:row.documents,...(row.retainer_capacity_policy ? {retainerCapacityPolicy:row.retainer_capacity_policy} : {}),...(row.retainer_periods?.length ? {retainerPeriods:row.retainer_periods} : {}),...(row.installments?.length ? {installments:row.installments} : {})}) : null;
 const engagementDto = row => ({id:row.id,code:row.code,name:row.name,model:row.model,clientId:row.client_id,contractId:row.contract_id,
   contractVersionId:row.contract_version_id,ownerId:row.owner_id,attributionId:row.attribution_id,startsOn:row.starts_on,endsOn:row.ends_on,
   currency:row.currency,budget:row.budget,billable:row.billable,status:row.status,origin:row.origin});
@@ -61,8 +61,12 @@ const insertTerms = async (client,req,id,version,data) => {
       extraValues.push(JSON.stringify(rows));
     }
   }
+  if (data.retainerCapacityPolicy) {
+    columns.push('retainer_capacity_policy');
+    extraValues.push(data.retainerCapacityPolicy);
+  }
   const extraColumns = columns.map(column => ',' + column).join('');
-  const extraParameters = columns.map((_, index) => ',$' + (16 + index) + '::jsonb').join('');
+  const extraParameters = columns.map((column, index) => ',$' + (16 + index) + (column === 'retainer_capacity_policy' ? '::text' : '::jsonb')).join('');
   const result=await client.query(`insert into commercial_contract_versions
     (organization_id,legal_entity_id,contract_id,version,effective_from,name,model,starts_on,ends_on,currency,value,billing_terms,documents,reason,created_by${extraColumns})
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15${extraParameters}) returning ${termsProjection}`,
@@ -91,7 +95,9 @@ export const appendContractVersion = async (client,req,id,data,audit) => {
   if(data.model!==latest.model || data.currency!==latest.currency)
     fail(409,'COMMERCIAL_IDENTITY_CONFLICT','Changing a contract model or currency requires a separate contract, not a draft revision.');
   const installments = data.installments ?? before.versions[0].installments;
-  await insertTerms(client,req,id,before.latestVersion+1,{...data,installments,retainerPeriods:data.retainerPeriods ?? latest.retainerPeriods});
+  await insertTerms(client,req,id,before.latestVersion+1,{...data,installments,
+    retainerCapacityPolicy:data.retainerCapacityPolicy === undefined ? latest.retainerCapacityPolicy : data.retainerCapacityPolicy,
+    retainerPeriods:data.retainerPeriods ?? latest.retainerPeriods});
   await client.query(`update commercial_contracts set latest_version=latest_version+1 where ${scopeWhere} and id=$3`,[...scopeValues(req),id]);
   const result=await getContract(client,req,id);
   await auditCommand(audit,client,req,'Contract',id,before,result,data.reason);
