@@ -223,6 +223,10 @@ Buyer UAT:
 Owner Gate D approval:
 ```
 
+## WOS-IAM-008 account-wide revocation
+
+Migration 082b and the session revocation PostgreSQL and production identity suites cover account-specific generation changes, operator authority, transactional evidence, rejection of earlier credentials and issuance after revocation.
+
 ## WOS-IAM-008 production session policy
 
 Migration 082a and the session-policy and production-identity suites cover deployment-wide lifetime audit, denied changes, failed audit rollback and refusal to issue a new session from a stale replica.
