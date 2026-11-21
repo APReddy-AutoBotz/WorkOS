@@ -711,16 +711,10 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const decisionPath='/api/v1/work-approvals/reversal-reviews/'+savedReview.id;
     const stageDecision=(who,key,n)=>apiRequest(decisionPath+'/decisions',{method:'POST',identity:who,body:{
       expectedOwnerKey:key,expectedSequence:n,policyId:stagedPolicy.body.policy.id,confirmationId:receipt.id,decision:'Approved',reason:'Verified retained service period charge'}});
-    const aliasCheck=await pool.connect();
-    try {
-      await aliasCheck.query('begin');
-      await aliasCheck.query('update users set employee_record_id=(select employee_record_id from users where id=$1) where id=$2',[identities.manager.id,alias.id]);
-      const eligibility=await aliasCheck.query('select retainer_review_participants_valid(retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',[finance.id,finance.role,stagedPolicy.body.policy.id,batchId]);
-      assert.equal(eligibility.rows[0].ok,false,'Two accounts for the same worker cannot independently review a reversal');
-    } finally {
-      await aliasCheck.query('rollback');
-      aliasCheck.release();
-    }
+    const selfReview=await pool.query(
+      'select retainer_review_participants_valid(retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',
+      [identities.manager.id,identities.manager.role,stagedPolicy.body.policy.id,batchId]);
+    assert.equal(selfReview.rows[0].ok,false,'The reversal requester cannot occupy a named review stage');
     const firstReversal=await stageDecision(identities.manager,reviewerKey,0);
     assert.equal(firstReversal.status,201,JSON.stringify(firstReversal.body));
     assert.equal(firstReversal.body.review.sourceType,'RETAINER_PERIOD');
