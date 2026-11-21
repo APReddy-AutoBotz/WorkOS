@@ -1,3 +1,4 @@
+import {retainerStatement,statementGrant,statementCommand,statementQuery} from './retainer-statement.mjs';
 import {getRetainerConsumption} from './retainer-consumption.mjs';
 import {fixedFeeRegister,fixedFeeGrant,installmentCommand} from './fixed-fee-eligibility.mjs';
 import {purchaseOrderRelease,purchaseOrderBalance,releaseSchema} from './purchase-order-release.mjs';
@@ -14,13 +15,13 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   if(!pool?.connect || ![requireDatabase,requireAuth,audit,logError].every(value=>typeof value==='function'))throw new TypeError('Commercial drafting requires database, scope guards and transactional audit.');
   const router=Router();
   router.use(requireDatabase,requireAuth);
-  const handle=(schema,write,command,permission='commercial.contracts.manage')=>async(req,res)=>{
+  const handle=(schema,write,command,permission='commercial.contracts.manage',consistentWrite=false)=>async(req,res)=>{
     const parsed=schema.safeParse(write?req.body:req.query);
     if(!parsed.success){res.status(400).json({error:{code:'COMMERCIAL_INVALID_REQUEST',message:'Commercial input is invalid; check fields, decimal strings and dates.'}});return;}
     let client;let begun=false;
     try{
       client=await pool.connect();
-      await client.query(write?'begin':'begin isolation level repeatable read');begun=true;
+      await client.query(write && !consistentWrite?'begin':'begin isolation level repeatable read');begun=true;
       if(write)await lockCommercialLifecycle(client,req.organizationScope);
       // A mutation also requires view permission, preventing write-only clients
       // from receiving confidential result DTOs through a command response.
@@ -33,7 +34,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if(error?.code==='23505')res.status(409).json({error:{code:'COMMERCIAL_DUPLICATE',message:'This commercial identifier or version already exists in the selected scope.'}});
+      }else if(error?.code==='RST01')res.status(403).json({error:{code:'RETAINER_STATEMENT_DENIED',message:'Current statement preparation authority is required.'}});
+      else if(error?.code==='RST02' || (consistentWrite && error?.code==='40001'))res.status(409).json({error:{code:'RETAINER_STATEMENT_STALE',message:'Reload and review current statement evidence.'}});
+      else if(error?.code==='23505')res.status(409).json({error:{code:'COMMERCIAL_DUPLICATE',message:'This commercial identifier or version already exists in the selected scope.'}});
       else if(error?.code==='23514' && error.constraint==='retainer_rounding_valid') res.status(422).json({error:{
         code:'COMMERCIAL_RETAINER_ROUNDING_INVALID',message:'Retainer rounding requires explicit excess-hour pricing terms.'}});
       else if(error?.code==='23514' && error.constraint==='retainer_overage_policy_valid') res.status(422).json({error:{
@@ -59,6 +62,10 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/lifecycle/:type/:id/transitions',handle(lifecycleTransitionSchema,true,(client,req,data)=>transitionLifecycle(client,req,req.params.type,req.params.id,data,audit),'commercial.lifecycle.manage'));
   router.post('/lifecycle/projects',handle(projectBindingSchema,true,(client,req,data)=>createGovernedProject(client,req,data,audit),'commercial.lifecycle.manage'));
   router.get('/workspace',handle(workspaceQuerySchema,false,(client,req,data)=>getWorkspace(client,req,data)));
+  const statementPath='/contracts/:id/versions/:versionId/retainer-statements/:startsOn';
+  router.all(statementPath,(req,res,next)=>{res.set('Cache-Control','no-store');next();});
+  router.get(statementPath,handle(statementQuery,false,(c,r,q)=>retainerStatement(c,r,buildEmployeeScopeWhere,{query:q})));
+  router.post(statementPath,handle(statementCommand,true,(c,r,command)=>retainerStatement(c,r,buildEmployeeScopeWhere,{command,audit}),statementGrant,true));
   router.get('/contracts/:id/versions/:versionId/retainer-overage-preview',(req,res,next)=>{res.set('Cache-Control','no-store');next();},handle(lifecycleQuerySchema,false,
     (client,req)=>getRetainerConsumption(client,req,buildEmployeeScopeWhere,true)));
   router.get('/contracts/:id/versions/:versionId/retainer-consumption',handle(lifecycleQuerySchema,false,
