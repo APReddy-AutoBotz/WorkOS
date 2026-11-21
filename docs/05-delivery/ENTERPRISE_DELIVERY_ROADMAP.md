@@ -208,4 +208,4 @@ Preparers can check milestone payment terms before requesting acceptance review.
 
 ### Retainer contract periods
 
-Retainer contract terms support dated capacity and base fees. Approved hours are visible by service period, worker scope and retained contract version. Contract-wide capacity balances still require consumption policy, rollover and expiry rules, overage decisions, and separate eligibility events before invoice preparation.
+Retainer contract terms support dated capacity and base fees. Approved hours are visible by service period, worker scope and retained contract version. Contract-wide balances now apply the selected consumption, rollover and expiry terms to approved hours and identify over-capacity hours. Overage charging, approved billing events and invoice preparation remain open.

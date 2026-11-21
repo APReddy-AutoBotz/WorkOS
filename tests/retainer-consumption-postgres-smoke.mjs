@@ -1,9 +1,21 @@
 import assert from 'node:assert/strict';
+import {retainerBalances} from '../server/modules/commercial-drafting/retainer-balances.mjs';
 import {randomUUID} from 'node:crypto';
 import {commercialFixture, withCommercialDatabase, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
 import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
+
+const capacityInputs=['2026-01-01','2026-02-01'].map(day=>({startsOn:day,endsOn:day,includedHours:'2.1501'}));
+const hours=capacityInputs.map((p,i)=>({...p,billableHours:i?'4.10':'1.1',nonBillableHours:'0.025'}));
+for (const [policy,carried,expired,overage] of [
+  ['billable_rollover','1.0501','0','0.8998'],['all_rollover','1.0251','0','0.9498'],
+  ['billable_expire','0','1.0501','1.9499'],['all_expire','0','1.0251','1.9749']]) {
+  const [a,b]=retainerBalances(capacityInputs,hours,policy,'2026-02-01');
+  assert.equal(a.capacity.carriedOut,carried);assert.equal(a.capacity.expired,expired);
+  assert.equal(b.capacity.carriedIn,carried);assert.equal(b.capacity.overage,overage);
+}
+assert.equal(retainerBalances(capacityInputs.slice(0,1),hours.slice(0,1),'all_rollover','2026-02-01')[0].capacity.expired,'1.0251');
 
 await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await migrateCommercialDatabase(pool);
@@ -21,7 +33,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const tomorrow=addUtcDays(today,1),end=addUtcDays(today,30);
     const periods=[today,tomorrow].map(day=>({startsOn:day,endsOn:day,includedHours:'10',baseFee:'100'}));
     const {project,contract,pin}=await createAmendmentHierarchy(request,'SYN-RETAINER-HOURS',{
-      contract:{model:'retainer',startsOn:today,endsOn:end,effectiveFrom:today,retainerPeriods:periods},
+      contract:{model:'retainer',startsOn:today,endsOn:end,effectiveFrom:today,retainerPeriods:periods,retainerCapacityPolicy:'all_rollover'},
       engagement:{startsOn:today,endsOn:end},project:{startsOn:today,endsOn:end}});
     const read=async(identity=identities.manager,version=pin)=>{
       const res=await request(`/contracts/${contract.id}/versions/${version}/retainer-consumption`,{identity});
@@ -49,6 +61,12 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(),approved);
     assert.deepEqual(await read(identities.reader),approved);
     assert.deepEqual(await read(identities.first),empty);
+    const path=`/contracts/${contract.id}/versions/${pin}/retainer-consumption`;
+    const full=(await request(path)).body.periods;
+    assert.deepEqual(full[0].capacity,{consumed:'3.75',carriedIn:'0',remaining:'6.25',overage:'0',expired:'0',carriedOut:'0'});
+    assert.equal(full[1].capacity,undefined);
+    for (const identity of [identities.reader,identities.first])
+      assert((await request(path,{identity})).body.periods.every(p=>p.capacity===undefined));
     const {id,version,...terms}=contract.versions[0];
     const revised=await post('/contracts/'+contract.id+'/versions',{...terms,expectedVersion:version,effectiveFrom:tomorrow,
       reason:'Synthetic prospective revision'});

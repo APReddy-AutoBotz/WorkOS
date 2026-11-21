@@ -1,3 +1,4 @@
+import {retainerBalances} from './retainer-balances.mjs';
 import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
@@ -8,13 +9,14 @@ export async function getRetainerConsumption(client, req, buildEmployeeScopeWher
   const {id:contractId, versionId} = req.params;
   const params = [organizationId, legalEntityId, contractId, versionId];
   const version = await client.query(
-    `select retainer_periods from commercial_contract_versions where organization_id=$1 and legal_entity_id=$2
+    `select retainer_periods,retainer_capacity_policy,(now() at time zone 'UTC')::date::text today from commercial_contract_versions where organization_id=$1 and legal_entity_id=$2
      and contract_id=$3 and id=$4 and model='retainer'`, params);
   if (!version.rowCount) fail(404,'COMMERCIAL_NOT_FOUND','The scoped retainer version was not found.');
   const periods = version.rows[0].retainer_periods;
   if (!periods.length) return {contractId, versionId, periods:[]};
   params.push(JSON.stringify(periods));
-  const workerScope = buildEmployeeScopeWhere(req,params,'worker');
+  const coverage = {entityWide:false};
+  const workerScope = buildEmployeeScopeWhere(req,params,'worker',coverage);
   const result = await client.query(`
     with periods as (
       select * from jsonb_to_recordset($5::jsonb) as p("startsOn" date,"endsOn" date)
@@ -45,5 +47,8 @@ export async function getRetainerConsumption(client, req, buildEmployeeScopeWher
       trim_scale(coalesce(sum(a.hours) filter(where not a.billable),0))::text as "nonBillableHours"
     from periods p left join approved a on a.work_date between p."startsOn" and p."endsOn"
     group by p."startsOn",p."endsOn" order by p."startsOn"`, params);
-  return {contractId, versionId, periods:result.rows};
+  const {retainer_capacity_policy:policy,today} = version.rows[0];
+  const rows = coverage.entityWide && policy
+    ? retainerBalances(periods,result.rows,policy,today) : result.rows;
+  return {contractId, versionId, periods:rows};
 }

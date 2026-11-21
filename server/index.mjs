@@ -446,7 +446,7 @@ const collectDuplicateImportRows = (rows, getKeys, getRowNumber = index => index
   return { duplicateRowNumbers, errors };
 };
 
-const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e') => {
+const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e', coverage) => {
   params.push(req.organizationScope.organizationId, req.organizationScope.legalEntityId);
   const ownership = `${employeeAlias}.organization_id = $${params.length - 1} and ${employeeAlias}.legal_entity_id = $${params.length}`;
   if (req.user.activeRole === 'Employee') {
@@ -498,6 +498,7 @@ const buildEmployeeScopeWhere = (req, params, employeeAlias = 'e') => {
       )
     )`;
   }
+  if (coverage) coverage.entityWide = true;
   return ownership;
 };
 

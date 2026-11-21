@@ -6,7 +6,7 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
-Retainer contract versions can record service periods with included hours and a base fee in contract currency. Contract history shows approved billable and non-billable hours by service period for workers the viewer can access. Each entry follows its retained contract version.
+Retainer contract versions can record service periods with included hours and a base fee in contract currency. Contract history shows approved billable and non-billable hours by service period for workers the viewer can access. Each entry follows its retained contract version. Buyers can choose which approved hours consume capacity and whether unused hours expire or carry forward. Viewers with entity-wide worker scope can inspect the resulting contract balances and excess hours.
 
 Milestone billing requests show the selected due date, amount and contract version. Changing milestones clears the previous acceptance references, review policy, owner and reason.
 

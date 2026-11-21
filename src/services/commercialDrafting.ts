@@ -7,9 +7,17 @@ export const ENGAGEMENT_MODELS = [...COMMERCIAL_CONTRACT_MODELS, 'internal', 'pr
 export type ContractModel = typeof COMMERCIAL_CONTRACT_MODELS[number];
 export type EngagementModel = typeof ENGAGEMENT_MODELS[number];
 export type CommercialDocument = {name: string; url: string};
+export const retainerPolicyLabels = {
+  billable_expire: 'Billable hours · unused hours expire',
+  all_expire: 'All approved hours · unused hours expire',
+  billable_rollover: 'Billable hours · carry unused hours to the next service period',
+  all_rollover: 'All approved hours · carry unused hours to the next service period',
+} as const;
+export type RetainerCapacityPolicy = keyof typeof retainerPolicyLabels;
 export type RetainerPeriod = {startsOn: string; endsOn: string; includedHours: string; baseFee: string};
 export type ContractTermsInput = {
   name: string; model: ContractModel; startsOn: string; endsOn: string; effectiveFrom: string;
+  retainerCapacityPolicy?: RetainerCapacityPolicy | null;
   retainerPeriods?: RetainerPeriod[];
   installments?: {dueOn: string; amount: string}[];
   currency: string; value: string; billingTerms: string; documents: CommercialDocument[];
@@ -123,6 +131,7 @@ const normalizeTerms = (value: unknown): ContractTerms => {
   return {id: text(item.id), version: integer(item.version, 1), name: text(item.name), model: model(item.model, COMMERCIAL_CONTRACT_MODELS),
     startsOn: date(item.startsOn), endsOn: date(item.endsOn), effectiveFrom: date(item.effectiveFrom), currency: currency(item.currency),
     value: decimal(item.value), billingTerms: text(item.billingTerms), documents: documents(item.documents),
+    ...(item.retainerCapacityPolicy == null ? {} : {retainerCapacityPolicy:model(item.retainerCapacityPolicy,Object.keys(retainerPolicyLabels) as RetainerCapacityPolicy[])}),
     ...(item.retainerPeriods === undefined ? {} : {retainerPeriods: rows(item.retainerPeriods, value => {
       const period = object(value);
       return {startsOn: date(period.startsOn), endsOn: date(period.endsOn), includedHours: decimal(period.includedHours), baseFee: decimal(period.baseFee)};
@@ -194,6 +203,7 @@ const request = async <T>(context: CommercialDraftingContext | null, method: 'GE
 // Explicit allowlists keep strict commands free of response/actor/scope fields.
 const termsBody = (input: ContractTermsInput) => ({name: input.name, model: input.model, startsOn: input.startsOn,
   endsOn: input.endsOn, effectiveFrom: input.effectiveFrom, currency: input.currency, value: input.value,
+  ...(input.retainerCapacityPolicy !== undefined && {retainerCapacityPolicy:input.retainerCapacityPolicy}),
   ...(input.retainerPeriods && {retainerPeriods: input.retainerPeriods.map(({startsOn, endsOn, includedHours, baseFee}) => ({startsOn, endsOn, includedHours, baseFee}))}),
   ...(input.installments && {installments: input.installments.map(({dueOn, amount}) => ({dueOn, amount}))}),
   billingTerms: input.billingTerms, documents: input.documents.map(document => ({name: document.name, url: document.url}))});
@@ -225,7 +235,11 @@ export const commercialDraftingService = {
       const periods=rows(row.periods, item=>{
         const p=object(item);
         const quantity=(v:unknown)=>{const s=text(v); if (!/^\d+(?:\.\d+)?$/.test(s)) throw invalid(); return s;};
-        return {startsOn:date(p.startsOn),endsOn:date(p.endsOn),billableHours:quantity(p.billableHours),nonBillableHours:quantity(p.nonBillableHours)};
+        const c=p.capacity===undefined ? null : object(p.capacity);
+        if (c && !version.retainerCapacityPolicy) throw invalid();
+        const capacity=c && {carriedIn:quantity(c.carriedIn),consumed:quantity(c.consumed),remaining:quantity(c.remaining),
+          overage:quantity(c.overage),carriedOut:quantity(c.carriedOut),expired:quantity(c.expired)};
+        return {capacity,startsOn:date(p.startsOn),endsOn:date(p.endsOn),billableHours:quantity(p.billableHours),nonBillableHours:quantity(p.nonBillableHours)};
       });
       const expected=version.retainerPeriods ?? [];
       if (periods.length!==expected.length || periods.some((p,i)=>p.startsOn!==expected[i].startsOn || p.endsOn!==expected[i].endsOn)) throw invalid();
