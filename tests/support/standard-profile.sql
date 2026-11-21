@@ -3,16 +3,20 @@ insert into employees (id,employee_id,name,email,designation,department,country,
 select 'profile-worker-'||n,'PROFILE-'||n,'Synthetic worker '||n,'profile-'||n||'@example.test','Consultant','Delivery','US','director-commercial','Active','org-default','legal-default'
 from generate_series(1,250) n;
 
+update employees set reporting_manager_id='profile-worker-'||(n+70)
+from generate_series(6,20) n where id='profile-worker-'||n;
+
 insert into users (username,email,employee_id,employee_record_id)
 select employee_id,email,employee_id,id from employees where id like 'profile-worker-%';
-insert into roles(name) values ('Admin'),('Employee') on conflict(name) do nothing;
+insert into roles(name) values ('Admin'),('Employee'),('TeamLead') on conflict(name) do nothing;
 insert into user_roles (user_id,role_id)
-select u.id,r.id from users u join roles r on r.name=case when u.username ~ '^PROFILE-[1-5]$' then 'Admin' else 'Employee' end
+select u.id,r.id from users u join roles r on r.name=case when u.username ~ '^PROFILE-[1-5]$' then 'Admin'
+  when u.username ~ '^PROFILE-(7[6-9]|8[0-9]|90)$' then 'TeamLead' else 'Employee' end
 where u.username like 'PROFILE-%';
 insert into user_organization_scopes (user_id,organization_id,legal_entity_id,active)
 select id,'org-default','legal-default',true from users where username like 'PROFILE-%';
 insert into role_permissions(role_name,permission_key,enabled)
-values ('Employee','timesheets.submit',true),('Admin','reports.view_utilization',true)
+values ('Employee','timesheets.submit',true),('Admin','reports.view_utilization',true),('TeamLead','timesheets.approve',true)
 on conflict(role_name,permission_key) do update set enabled=excluded.enabled;
 
 insert into clients(id,name,account_owner_id,organization_id,legal_entity_id)
