@@ -53,6 +53,8 @@
     "test:organization-setup": "node tests/organization-setup-smoke.mjs",
     "test:organization-setup-v1": "node tests/organization-setup-v1-router-smoke.mjs",
     "test:environment": "node tests/runtime-environment-smoke.mjs",
+    "ops:delivery-health": "node server/delivery-health.mjs",
+    "test:delivery-health": "node tests/delivery-health-postgres.mjs",
     "test:health": "node tests/health-endpoints-smoke.mjs && node tests/api-traffic-metrics-smoke.mjs",
     "test:migration-manifest": "node tests/migration-manifest-smoke.mjs",
     "test:migration-error-logging": "node tests/migration-error-logging-smoke.mjs",

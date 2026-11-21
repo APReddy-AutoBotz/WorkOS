@@ -4,7 +4,7 @@ Updated 2026-11-19. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
-Production API traffic summaries provide the denominator for HTTP error rates and bounded latency measurements across replicas. Buyer alert routing, job backlog and integration failure signals require separate acceptance.
+Production API traffic summaries provide the denominator for HTTP error rates and bounded latency measurements across replicas. The delivery monitor reports pending invoice alerts and recent integration and notification failures. External dispatch, buyer thresholds and alert routing remain open.
 
 The Standard-profile performance gate measures authenticated timesheet history, draft saves, employee submissions, independent direct-manager approvals and scoped utilization reporting. Buyer infrastructure, browser rendering, staged approval timings, export isolation and the Expanded profile need separate performance evidence.
 

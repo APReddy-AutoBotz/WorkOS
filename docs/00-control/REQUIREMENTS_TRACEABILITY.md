@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-OPS-006 and WOS-NFR-OBS-003/006 — delivery monitoring covers pending invoice-alert depth and age, integration and notification failures, and invoice-notice persistence and production failures. `test:delivery-health` checks the PostgreSQL snapshot, minimal grants and unavailable-schema behavior. Invoice export failure and recovery journeys cover nonempty queue and failure readings.
+
 PR-007D integration correction (WOS-CTR-003, WOS-CORE-003/005, WOS-NFR-SEC-004/005): amendment authority is discoverable and explicitly configurable through the server permission catalog, with no default grants. Real PostgreSQL/API regression evidence covers denied enrollment, role and individual grant/revoke behavior and actor-attributed permission history without term adoption. See the governed-amendments task receipt for executed results and remaining acceptance gates.
 
 ## WOS03 current-main integration candidate

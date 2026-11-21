@@ -1,5 +1,6 @@
 import { INVOICE_EXPORT_EVENT_KEYS } from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
+import {readDeliveryHealth} from '../server/delivery-health.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   commercialFixture as f,
@@ -1088,6 +1089,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             }),
             201,
           );
+        assert.ok((await readDeliveryHealth(pool)).invoiceNoticeProducerFailures15m > 0);
         assert.equal(recovered.recovery.actorId, ids.second.id);
         assert.notEqual(recovered.recovery.actorId, result.artifact.actorId);
         const event = (

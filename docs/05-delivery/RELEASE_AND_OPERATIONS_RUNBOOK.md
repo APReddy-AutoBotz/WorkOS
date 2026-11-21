@@ -78,6 +78,22 @@ Each of three phases runs six rounds of 75 simultaneous requests. Throughout, 55
 
 Buyer policy defines frequency, retention, encryption and RPO/RTO. Restore rehearsal verifies application version, schema, organization/configuration, users/roles, critical counts, audit continuity, commercial control totals and representative role journeys.
 
+## Delivery monitoring
+
+Run `npm run --silent ops:delivery-health` once per buyer database from the application runtime with its normal database TLS settings. Use a dedicated monitoring identity with CONNECT on the buyer database, USAGE on schema public and only these column grants (substitute the buyer's role name).
+
+```sql
+GRANT SELECT (status, created_at) ON public.invoice_export_alert_outbox TO delivery_monitor;
+GRANT SELECT (status, created_at) ON public.integration_event_logs TO delivery_monitor;
+GRANT SELECT (status, attempted_at) ON public.notification_delivery_attempts TO delivery_monitor;
+GRANT SELECT (created_at) ON public.invoice_export_notice_producer_failures TO delivery_monitor;
+GRANT SELECT (created_at) ON public.invoice_export_notice_failures TO delivery_monitor;
+```
+
+Each invocation returns one JSON sample. `sampledAt` uses database time. `pendingInvoiceAlerts` counts persisted pending alerts. `oldestPendingSeconds` measures the oldest one's age and is null for an empty queue. External alert dispatch is pending implementation. The four failure counts cover occurrences in the preceding 15 minutes, including failures subsequently recovered. Some signals can describe the same incident. Compare consecutive samples individually because their windows overlap.
+
+Buyer operations owns the sampling schedule and thresholds. Route growing queue age or invoice-notice failures to the billing integration owner and other integration failures to the relevant provider owner. A nonzero exit with `DELIVERY_HEALTH_UNAVAILABLE` means the reading failed. Alert operations on a missing reading. To roll back monitoring, stop the scheduled command and revoke the reader grants.
+
 ## API traffic monitoring
 
 Collect JSON stdout from each production API replica and select records with `operation=http.traffic`. Each process emits a window about every 60 seconds, including idle windows. Identify replicas using the log collector’s deployment labels. Records contain aggregate counts only. Use existing failure events and their correlation IDs for individual incident investigation.

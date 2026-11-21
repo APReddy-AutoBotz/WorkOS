@@ -2,6 +2,7 @@ import { emitInvoiceExportNotice } from '../server/modules/invoice-export/notice
 import { capacityCanonical, capacityHash } from '../server/modules/planning/worker-capacity-service.mjs';
 import { INVOICE_EXPORT_EVENT_KEYS } from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
+import {readDeliveryHealth} from '../server/delivery-health.mjs';
 import { randomUUID } from 'node:crypto';
 import {
   commercialFixture as f,
@@ -1083,6 +1084,9 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
             failureEvent.id,
           ])
         ).rows;
+        const deliveryHealth = await readDeliveryHealth(pool);
+        assert.ok(deliveryHealth.pendingInvoiceAlerts > 0);
+        assert.ok(Number.isInteger(deliveryHealth.oldestPendingSeconds) && deliveryHealth.oldestPendingSeconds >= 0);
         assert.equal(failedRecipients.length, 2);
         assert(failedRecipients.every((x) => x.in_app && x.channel_decision === 'Required'));
         assert(failedRecipients.some((x) => x.reasons.includes('integration_administrator')));
