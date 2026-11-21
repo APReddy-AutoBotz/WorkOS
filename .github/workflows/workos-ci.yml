@@ -425,7 +425,7 @@ jobs:
         run: npm run test:commercial-drafting-postgres
 
       - name: Verify real commercial drafting PostgreSQL browser journey
-        run: npm run test:commercial-drafting-journey
+        run: PATH="/usr/lib/postgresql/16/bin:$PATH" npm run test:commercial-drafting-journey -- --restore-credit
 
       - name: Verify governed lifecycle PostgreSQL migration and API acceptance
         run: npm run test:commercial-lifecycle-postgres
