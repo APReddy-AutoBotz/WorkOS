@@ -223,6 +223,10 @@ Buyer UAT:
 Owner Gate D approval:
 ```
 
+## WOS-NFR-PERF-001/002/003/007/008 Standard-profile API evidence
+
+The `test:standard-profile` CI job step checks populated employee timesheet history, persisted draft saves and utilization report results across 75 concurrent sessions. The workflow summary records measurements and thresholds. Approval and submission timing, buyer-scale UAT and browser measurements remain open.
+
 ## WOS-IAM-008 account-wide revocation
 
 Migration 082b and the session revocation PostgreSQL and production identity suites cover account-specific generation changes, operator authority, transactional evidence, rejection of earlier credentials and issuance after revocation.
