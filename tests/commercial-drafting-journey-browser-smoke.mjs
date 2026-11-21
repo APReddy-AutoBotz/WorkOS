@@ -548,8 +548,8 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal(source.sourceType,'RETAINER_PERIOD');assert.equal(source.lines[0].evidence.reviewId,retainerCommand.reviewId);
     const policyInput={entityType:'InvoiceBatch',engagementId:eng.body.id,locale:'en-US',completionInApp:true,
       templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(key=>({key,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))};
-    const configure=(reviewer,prior)=>act('/policies',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),engagementId:eng.body.id,
-      expectedLatestId:prior,effectiveFrom:today,definition:{...policyInput,stages:[{userId:reviewer.id,role:reviewer.role}]},reason:'Synthetic retainer invoice review'});
+    const configure=(reviewer,prior,additionalStages=[])=>act('/policies',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),engagementId:eng.body.id,
+      expectedLatestId:prior,effectiveFrom:today,definition:{...policyInput,stages:[{userId:reviewer.id,role:reviewer.role},...additionalStages]},reason:'Synthetic retainer invoice review'});
     const submit=policyId=>act('/requests',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),batchId,expectedPolicyId:policyId,
       expectedLineCount:source.lineCount,expectedLineageHash:source.lineageHash,reason:'Review the approved service-period charge'});
     const self=await configure(finance,null);assert.equal(self.status,201,JSON.stringify(self.body));
@@ -575,7 +575,12 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const renewed=await submit(policy.body.policy.id);assert.equal(renewed.status,201,JSON.stringify(renewed.body));
     const rejection=await decide(renewed.body.approval.id,'Rejected');assert.equal(rejection.status,201,JSON.stringify(rejection.body));
     assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Draft');
-    const finalReview=await submit(policy.body.policy.id);assert.equal(finalReview.status,201,JSON.stringify(finalReview.body));
+    await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+      values('syn-invoice-reviewer','SYN-INVOICE-REVIEWER','Synthetic second reviewer','invoice-review@example.test','Manager','Delivery','US','director-commercial','Active',$1,$2)`,[scope.organizationId,scope.legalEntityId]);
+    await pool.query("update users set employee_record_id='syn-invoice-reviewer' where id=$1",[alias.id]);
+    const stagedPolicy=await configure(identities.manager,policy.body.policy.id,[{userId:alias.id,role:alias.role}]);
+    assert.equal(stagedPolicy.status,201,JSON.stringify(stagedPolicy.body));
+    const finalReview=await submit(stagedPolicy.body.policy.id);assert.equal(finalReview.status,201,JSON.stringify(finalReview.body));
     const instance=finalReview.body.approval.id;
     assert.equal((await act('/instances/'+instance,identities.reader)).status,403);
     const reviewBrowser=await createContext(identities.manager,decisionKeys);
@@ -591,6 +596,11 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const accepted=reviewBrowser.page.waitForResponse(r=>r.url().endsWith('/instances/'+instance+'/decisions') && r.request().method()==='POST');
     await approvalDesk.getByRole('button',{name:'Record invoice approval decision'}).click();
     const approved=await accepted;assert.equal(approved.status(),201,await approved.text());
+    assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Under Review');
+    const secondKey=(await act('/sources/'+batchId,alias)).body.ownerKey;
+    const second=await act('/instances/'+instance+'/decisions',alias,{expectedOwnerKey:secondKey,requestId:crypto.randomUUID(),
+      expectedSequence:1,decision:'Approved',reason:'Verified second-stage control total'});
+    assert.equal(second.status,201,JSON.stringify(second.body));
     assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Approved');
     await reviewBrowser.context.close();
     await preparing.context.close();
