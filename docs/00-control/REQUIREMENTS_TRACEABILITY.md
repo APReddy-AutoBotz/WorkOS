@@ -1,6 +1,6 @@
 # WorkOS Requirements Traceability
 
-WOS-COM-009 — Retainer contract periods retain inclusive dates, included hours and exact base fees. API and browser tests cover creation, version history, overlapping dates, model restrictions and scoped reads. Consumption, rollover, expiry, overage and approved billing events remain open.
+WOS-COM-009 — Retainer contract periods retain inclusive dates, included hours and exact base fees. API and browser tests cover creation, version history, overlapping dates, model restrictions and scoped reads. The retainer consumption PostgreSQL journey covers multi-stage approval, exact hour sums, service periods, historical version attribution and worker scope. Contract-wide balances, rollover, expiry, overage and approved billing events remain open.
 
 WOS-COM-008 and WOS-INV-001 — The milestone browser and PostgreSQL journey verifies that switching between milestones with different amounts clears the acceptance evidence and ownership inputs and disables submission.
 

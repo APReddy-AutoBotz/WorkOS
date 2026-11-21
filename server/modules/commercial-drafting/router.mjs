@@ -1,3 +1,4 @@
+import {getRetainerConsumption} from './retainer-consumption.mjs';
 import {fixedFeeRegister,fixedFeeGrant,installmentCommand} from './fixed-fee-eligibility.mjs';
 import {purchaseOrderRelease,purchaseOrderBalance,releaseSchema} from './purchase-order-release.mjs';
 import {amendmentPreviewSchema,amendmentCommandSchema} from './amendment-contracts.mjs';
@@ -9,7 +10,7 @@ import {Router} from 'express';
 import {CommercialDraftError,createContractSchema,appendContractSchema,createEngagementSchema,createPurchaseOrderSchema,createMilestoneSchema,workspaceQuerySchema} from './contracts.mjs';
 import {assertCommercialAuthority,getWorkspace,getContract,createContract,appendContractVersion,createEngagement,createPurchaseOrder,createMilestone} from './service.mjs';
 
-export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth,audit,logError=error=>console.error('Commercial drafting request failed',error?.code||'UNKNOWN')}) => {
+export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth,buildEmployeeScopeWhere,audit,logError=error=>console.error('Commercial drafting request failed',error?.code||'UNKNOWN')}) => {
   if(!pool?.connect || ![requireDatabase,requireAuth,audit,logError].every(value=>typeof value==='function'))throw new TypeError('Commercial drafting requires database, scope guards and transactional audit.');
   const router=Router();
   router.use(requireDatabase,requireAuth);
@@ -52,6 +53,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/lifecycle/:type/:id/transitions',handle(lifecycleTransitionSchema,true,(client,req,data)=>transitionLifecycle(client,req,req.params.type,req.params.id,data,audit),'commercial.lifecycle.manage'));
   router.post('/lifecycle/projects',handle(projectBindingSchema,true,(client,req,data)=>createGovernedProject(client,req,data,audit),'commercial.lifecycle.manage'));
   router.get('/workspace',handle(workspaceQuerySchema,false,(client,req,data)=>getWorkspace(client,req,data)));
+  router.get('/contracts/:id/versions/:versionId/retainer-consumption',handle(lifecycleQuerySchema,false,
+    (client,req)=>getRetainerConsumption(client,req,buildEmployeeScopeWhere)));
   router.get('/contracts/:id',handle(workspaceQuerySchema,false,(client,req)=>getContract(client,req,req.params.id)));
   router.post('/contracts',handle(createContractSchema,true,(client,req,data)=>createContract(client,req,data,audit)));
   router.post('/contracts/:id/versions',handle(appendContractSchema,true,(client,req,data)=>appendContractVersion(client,req,req.params.id,data,audit)));
