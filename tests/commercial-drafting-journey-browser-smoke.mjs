@@ -669,6 +669,6 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await billing.context.close();
     await reviewer.context.close();
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);
-    console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
+    console.log('Commercial drafting real React -> API -> disposable PostgreSQL journey passed: exact commands, persisted contract/engagement/PO/milestone, immutable future revision and pinned old terms, approved retainer invoice export, completion notice, rollback and replay, protected full audit/general redaction, reload persistence, unchanged legacy work, read-only and no-access behavior.');
   } finally {try {if (browser) await browser.close();} finally {await fixtureServer.close();}}
 }, {upgrade: true});
