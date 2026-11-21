@@ -292,6 +292,12 @@ const InvoiceCsvEngagement = ({
         setNotice('The retained artifact bytes and checksum were verified.');
       });
   };
+  const expectedSchema = {
+    TM_SNAPSHOT: 'workos.invoice-tm-csv/1',
+    MILESTONE_ACCEPTANCE: 'workos.invoice-milestone-csv/1',
+    FIXED_FEE_INSTALLMENT: 'workos.invoice-fixed-fee-csv/1',
+    FULL_LINE_REVERSAL: 'workos.invoice-credit-csv/1',
+  } as const;
   const create = () => {
     if (
       !source ||
@@ -302,9 +308,7 @@ const InvoiceCsvEngagement = ({
       !source.lineageHash ||
       !source.control ||
       version !==
-        (source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
-          ? 'workos.invoice-milestone-csv/1'
-          : 'workos.invoice-tm-csv/1') ||
+        expectedSchema[source?.sourceType ?? 'TM_SNAPSHOT'] ||
       !confirmed ||
       reason.trim().length < 3
     )
@@ -315,10 +319,7 @@ const InvoiceCsvEngagement = ({
       approvalId: source.approvalId,
       finalTransitionId: source.finalTransitionId,
       lineageHash: source.lineageHash,
-      schemaVersion:
-        source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
-          ? 'workos.invoice-milestone-csv/1'
-          : 'workos.invoice-tm-csv/1',
+      schemaVersion: expectedSchema[source.sourceType ?? 'TM_SNAPSHOT'],
       expectedLineCount: source.control.lineCount,
       expectedTotal: source.control.total,
       reason: reason.trim(),
@@ -484,9 +485,10 @@ const InvoiceCsvEngagement = ({
                 {source.lines.map((x) => (
                   <li key={x.lineId}>
                     Line {x.lineId} · item {x.itemId} · event {x.eventId} ·{' '}
-                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `credit against original line ${x.originalLineId} · artifact ${x.originalArtifactId}` : 'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
+                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `credit against original line ${x.originalLineId} · artifact ${x.originalArtifactId}` : 'installment' in x ? `installment ${x.installment} · due ${x.dueOn} · contract version ${x.contractVersionId}` : 'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
-                    {(!('sourceType' in x) || (x.sourceType==='MILESTONE_ACCEPTANCE' && hasRatePermission('commercial.milestone_billing.view'))) && canAssignPurchaseOrder() && <LinePurchaseOrder
+                    {(!('sourceType' in x) || (x.sourceType==='MILESTONE_ACCEPTANCE' && hasRatePermission('commercial.milestone_billing.view')) ||
+                      (x.sourceType==='FIXED_FEE_INSTALLMENT' && hasRatePermission('commercial.fixed_fee_eligibility.issue'))) && canAssignPurchaseOrder() && <LinePurchaseOrder
                       batchId={source.id} lineId={x.lineId} approved={source.state==='Approved'} disabled={busy || !!pending} run={run}/>}
                     {!('sourceType' in x) && hasRatePermission('commercial.rate_candidates.view') &&
                       <LinePricing disabled={busy || !!pending} run={run} load={c=>invoiceCsv.linePricing(source.id,x,c)}/>}
@@ -521,7 +523,7 @@ const InvoiceCsvEngagement = ({
                       onChange={(e) => setVersion(e.target.value)}
                     >
                       <option value="">Choose</option>
-                      {source.sourceType==='FULL_LINE_REVERSAL' ? <option value="workos.invoice-credit-csv/1">Credit CSV v1</option> : source.sourceType === 'MILESTONE_ACCEPTANCE' ? (
+                      {source.sourceType==='FIXED_FEE_INSTALLMENT' ? <option value="workos.invoice-fixed-fee-csv/1">Fixed-fee invoice CSV v1</option> : source.sourceType==='FULL_LINE_REVERSAL' ? <option value="workos.invoice-credit-csv/1">Credit CSV v1</option> : source.sourceType === 'MILESTONE_ACCEPTANCE' ? (
                         <option value="workos.invoice-milestone-csv/1">
                           Milestone invoice CSV v1
                         </option>

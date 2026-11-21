@@ -7,7 +7,7 @@ export function registerCorrectionReviewEvidence(router,{handle,authorize,batch,
   router.get('/batches/:originalId/correction-drafts/:batchId',handle(false,async(c,r)=>{
     if(!ids.safeParse(r.params).success || Object.keys(r.query).length) throw fail(400,'Select an original export and correction batch.');
     await authorize(c,r,'reversal');
-    const {row:original}=await batch(c,r,r.params.originalId);
+    const {row:original}=await batch(c,r,r.params.originalId,false,true);
     const {batchId}=r.params;
     const header=(await c.query(
       `select b.id as "batchId", b.engagement_id as "engagementId", b.currency, b.owner_user_id as "ownerId",

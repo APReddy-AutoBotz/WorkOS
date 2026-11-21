@@ -569,7 +569,7 @@ const InvoiceApprovalEngagement = ({
                     {source.lines.map((x) => (
                       <li key={x.id}>
                         Item {x.itemId} version {x.itemVersion} · event {x.eventId} ·{' '}
-                        {'sourceType' in x && x.sourceType === 'FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x
+                        {'sourceType' in x && x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment} · due ${x.evidence.dueOn} · contract version ${x.evidence.contractVersionId}` : 'sourceType' in x && x.sourceType === 'FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x
                           ? `milestone ${x.evidence.milestoneId}`
                           : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
@@ -655,7 +655,7 @@ const InvoiceApprovalEngagement = ({
                 {inspected.batch.lines.map((x) => (
                   <li key={x.id}>
                     Item {x.itemId} · event {x.eventId} ·{' '}
-                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x ? `milestone ${x.evidence.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
+                    {'sourceType' in x && x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment} · due ${x.evidence.dueOn} · contract version ${x.evidence.contractVersionId}` : 'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x ? `milestone ${x.evidence.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
                   </li>
                 ))}
