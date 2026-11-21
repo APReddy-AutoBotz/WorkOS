@@ -1,3 +1,4 @@
+import { INVOICE_EXPORT_EVENT_KEYS } from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {startFixtureServer} from './support/compiled-fixture-server.mjs';
@@ -66,7 +67,8 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await fill(target, {'Contract / SOW number': 'SYN-JOURNEY-CONTRACT', 'Contract name': `Synthetic browser terms ${hostile}`, 'Starts on': '2020-01-01', 'Ends on': '2099-12-31', 'Terms effective from': '2020-01-01', 'Currency (ISO code)': 'GBP', 'Contract value (decimal)': '12345.6789', 'Billing terms': `Synthetic browser billing terms ${hostile}`, 'Reason for creation / revision': 'Synthetic browser contract creation'});
     await target.getByLabel('Client', {exact: true}).selectOption(clientId);await target.getByLabel('Commercial model', {exact: true}).selectOption('fixed_fee');
     await button('Add installment').click();
-    await fill(target, {'Installment 1 due date':new Date().toISOString().slice(0,10), 'Installment 1 amount':'12000'});
+    const installmentDue=new Date(Date.now()-86400000).toISOString().slice(0,10);
+    await fill(target, {'Installment 1 due date':installmentDue, 'Installment 1 amount':'12000'});
     await button('Add installment').click();
     await fill(target, {'Installment 2 due date':'2099-02-01', 'Installment 2 amount':'345.6789'});
     await button('Add document link').click();await fill(target, {'Document 1 name': `Synthetic safe SOW ${hostile}`, 'Document 1 URL': 'https://example.test/synthetic-browser-sow.pdf'});
@@ -205,7 +207,7 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const reconciles=async schedule=>(await pool.query(
       'select fixed_fee_schedule_preserves_issued($1,$2,$3,$4::jsonb) compatible',
       [scope.organizationId,scope.legalEntityId,contractId,JSON.stringify(schedule)])).rows[0].compatible;
-    const first={dueOn:today,amount:'12000.0000'};
+    const first={dueOn:installmentDue,amount:'12000.0000'};
     assert.equal(await reconciles([first,{dueOn:future,amount:'2000'}]),true);
     assert.equal(await reconciles([{...first,amount:'11999.9999'}]),false);
     assert.equal(await reconciles([{...first,dueOn:future},first]),false);
@@ -270,6 +272,168 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const cancelled=await cancelling;assert.equal(cancelled.status(),201,await cancelled.text());
     assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rowCount,0);
     assert.equal((await pool.query('select 1 from invoice_draft_lines where id=$1 and event_id=$2',[fixedLine.id,registered.eventId])).rowCount,1);
+    const reviewRoot='/api/v1/invoice-batch-approvals';
+    const reviewerGrants=[...draftGrants,grant,'approvals.view','commercial.invoice_approval.decide','commercial.invoice_approval.manage','commercial.contracts.manage'];
+    for (const key of reviewerGrants) await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Employee','commercial.invoice_approval.manage',true) on conflict(role_name,permission_key) do update set enabled=true");
+    const postAs=async(url,identity,body)=>{
+      const response=await apiRequest(url,{method:'POST',identity,body});
+      assert.equal(response.status,201,JSON.stringify(response.body));
+      return response.body;
+    };
+    const nextDraft=await postAs('/api/v1/invoice-drafts/batches',identities.reader,
+      {...created.request().postDataJSON(),requestId:crypto.randomUUID()});
+    const nextId=nextDraft.batch.id;
+    const nextLine=await postAs('/api/v1/invoice-drafts/batches/'+nextId+'/lines',identities.reader,
+      {...original,requestId:crypto.randomUUID(),expectedLineCount:0});
+    const sourcePath=reviewRoot+'/sources/'+nextId;
+    const readSource=async identity=>{
+      const result=await apiRequest(sourcePath,{identity});assert.equal(result.status,200,JSON.stringify(result.body));return result.body;
+    };
+    const managerSource=await readSource(identities.manager);
+    const definition={entityType:'InvoiceBatch',engagementId:engagement.result.id,stages:[{userId:identities.manager.id,role:'Admin'}],
+      completionInApp:true,locale:'en-US',templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed']
+      .map(key=>({key,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))};
+    const reviewPolicy=await postAs(reviewRoot+'/policies',identities.manager,{expectedOwnerKey:managerSource.ownerKey,requestId:crypto.randomUUID(),
+      engagementId:engagement.result.id,expectedLatestId:null,effectiveFrom:today,definition,reason:'Independent fixed-fee batch review'});
+    const submitterSource=await readSource(identities.reader);
+    assert.deepEqual([submitterSource.batch.sourceType,submitterSource.batch.lines[0].eventId,submitterSource.batch.lineCount],
+      ['FIXED_FEE_INSTALLMENT',registered.eventId,1]);
+    const submit={expectedOwnerKey:submitterSource.ownerKey,requestId:crypto.randomUUID(),batchId:nextId,expectedPolicyId:reviewPolicy.policy.id,
+      expectedLineCount:1,expectedLineageHash:submitterSource.batch.lineageHash,reason:'Review the retained fixed-fee charge'};
+    const staleTotal=await apiRequest(reviewRoot+'/requests',{method:'POST',identity:identities.reader,body:{...submit,expectedLineCount:2}});
+    assert.equal(staleTotal.status,409);
+    const activeReview=await postAs(reviewRoot+'/requests',identities.reader,submit);
+    const reviewId=activeReview.approval.id;
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);
+    assert.equal((await apiRequest(reviewRoot+'/instances/'+reviewId,{identity:identities.manager})).status,403);
+    await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key=$1",[grant]);
+    const deciding=await createContext(identities.manager,reviewerGrants);
+    await deciding.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const queue=deciding.page.getByRole('region',{name:'Invoice batch approvals'});
+    await queue.getByLabel('Invoice approval engagement').selectOption(engagement.result.id);
+    await queue.getByRole('button',{name:'Load invoice batches and reviews'}).click();
+    await queue.getByLabel('Invoice batch review',{exact:true}).selectOption(reviewId);
+    await queue.getByRole('button',{name:'Inspect invoice review'}).click();
+    await queue.getByText(/installment 1 · due/).first().waitFor();
+    await queue.getByLabel('Invoice approval decision',{exact:true}).selectOption('Approved');
+    await queue.getByLabel('Invoice approval decision reason').fill('Verified contract schedule and invoice line');
+    const decisionPost=deciding.page.waitForResponse(r=>r.url().endsWith('/instances/'+reviewId+'/decisions') && r.request().method()==='POST');
+    await queue.getByRole('button',{name:'Record invoice approval decision'}).click();
+    const decided=await decisionPost;assert.equal(decided.status(),201,await decided.text());
+    assert.equal((await readSource(identities.manager)).batch.state,'Approved');
+    assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
+    const exportGrants=[...reviewerGrants,'commercial.purchase_orders.release','reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
+      'commercial.invoice_export.configure','integrations.invoice_alert_routes.manage'];
+    for (const key of exportGrants) await pool.query(
+      "insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[key]);
+    const config='/api/v1/invoice-export-notice-config', csv='/api/v1/invoice-csv';
+    const configCommand={expectedOwnerKey:managerSource.ownerKey,requestId:crypto.randomUUID(),expectedLatestId:null,reason:'Deliver fixed-fee invoice notices'};
+    const {route}=await postAs(config+'/routes',identities.manager,{...configCommand,routeKey:crypto.randomUUID(),label:'Synthetic billing alert',active:true});
+    await postAs(config+'/policies',identities.manager,{...configCommand,requestId:crypto.randomUUID(),effectiveFrom:today,
+      definition:{entityType:'InvoiceExport',engagementId:engagement.result.id,financeOwner:{userId:identities.manager.id,role:'Admin'},
+        integrationAdmin:{userId:identities.reader.id,role:'Employee'},alertRouteId:route.id,locale:'en-US',completionInApp:true,
+        templates:INVOICE_EXPORT_EVENT_KEYS.map(key=>({key,subject:'Invoice {{sourceRef}}',body:'Invoice status {{sourceRef}}'}))}});
+    const exporting=await createContext(identities.manager,exportGrants);
+    await exporting.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const exportUi=exporting.page.getByRole('region',{name:'Invoice CSV export'});
+    await exportUi.getByLabel('Invoice export engagement').selectOption(engagement.result.id);
+    await exportUi.getByRole('button',{name:'Load invoice export batches'}).click();
+    await exportUi.getByLabel('Invoice export batch',{exact:true}).selectOption(nextId);
+    await exportUi.getByRole('button',{name:'Inspect invoice export source'}).click();
+    await exportUi.getByText(/installment 1 · due/).first().waitFor();
+    const poPath=csv+'/batches/'+nextId+'/lines/'+nextLine.line.id+'/purchase-order';
+    const orderCommand={expectedOwnerKey:managerSource.ownerKey,number:po.body.number,reason:'Reserve approved fixed-fee installment'};
+    const overLimit=await apiRequest(poPath,{identity:identities.manager,method:'POST',body:orderCommand});
+    assert.equal(overLimit.status,409,JSON.stringify(overLimit.body));
+    assert.equal(overLimit.body.error.code,'PO_LIMIT_EXCEEDED');
+    assert.equal((await apiRequest(poPath,{identity:identities.manager})).body.commitment,null);
+    const coveringNumber='SYN-FIXED-FEE-COVERAGE';
+    const covering=await apiRequest('/purchase-orders',{identity:identities.manager,method:'POST',body:{
+      ...po.body,contractVersionId:versionId,number:coveringNumber,value:'12300.6789',startsOn:today,endsOn:future}});
+    assert.equal(covering.status,201,JSON.stringify(covering.body));
+    const coverageRelease=await apiRequest('/purchase-orders/'+covering.body.id+'/release',{
+      method:'POST',identity:identities.reader,body:releaseCommand});
+    assert.equal(coverageRelease.status,201,JSON.stringify(coverageRelease.body));
+    await exportUi.getByRole('button',{name:'Inspect order allocation'}).click();
+    await exportUi.getByLabel('Released order number').fill(coveringNumber);
+    await exportUi.getByLabel('Allocation reason').fill(orderCommand.reason);
+    await exportUi.getByRole('button',{name:'Commit invoice line'}).click();
+    await exportUi.getByText(/Order committed 12000.0000.*Gross consumed 0.*Available 300.6789.*Warning threshold reached/).waitFor();
+    const poReplay=await apiRequest(poPath,{identity:identities.manager,method:'POST',body:{...orderCommand,number:coveringNumber}});
+    assert.equal(poReplay.body.replayed,true,JSON.stringify(poReplay.body));
+    await exportUi.getByLabel('Invoice CSV schema').selectOption('workos.invoice-fixed-fee-csv/1');
+    await exportUi.getByRole('checkbox',{name:/I inspected the final approval/}).check();
+    await exportUi.getByLabel('Invoice CSV reason').fill('Retain approved fixed-fee installment');
+    const inspection=await apiRequest(csv+'/batches/'+nextId,{identity:identities.manager});
+    const {batch:approved,ownerKey:exportOwner}=inspection.body;
+    const stale=await apiRequest(csv+'/exports',{identity:identities.manager,method:'POST',body:{
+      batchId:nextId,expectedOwnerKey:exportOwner,requestId:crypto.randomUUID(),approvalId:approved.approvalId,
+      finalTransitionId:approved.finalTransitionId,lineageHash:approved.lineageHash,schemaVersion:'workos.invoice-fixed-fee-csv/1',
+      expectedLineCount:approved.control.lineCount+1,expectedTotal:approved.control.total,reason:'Reject stale control total'}});
+    assert.equal(stale.status,409);
+    assert.equal((await readSource(identities.manager)).batch.state,'Approved');
+    const exported=exporting.page.waitForResponse(r=>r.url().endsWith('/exports') && r.request().method()==='POST');
+    await exportUi.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
+    const generated=await exported;assert.equal(generated.status(),201,await generated.text());
+    const {artifact}=await generated.json();
+    const exportReplay=await apiRequest(csv+'/exports',{identity:identities.manager,method:'POST',body:generated.request().postDataJSON()});
+    assert.equal(exportReplay.status,200);
+    assert.equal(exportReplay.body.artifact.id,artifact.id);
+    assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
+    await exportUi.getByText('Download verified invoice CSV').waitFor();
+    const retained=await apiRequest(csv+'/artifacts/'+artifact.id,{identity:identities.manager});
+    assert.equal(retained.body.artifact.payloadBase64,artifact.payloadBase64);
+    const rows=Buffer.from(artifact.payloadBase64,'base64').toString('utf8').split('\r\n');
+    assert.deepEqual(rows[1].split(',').slice(4,8),[registered.itemId,'1',registered.eventId,'FIXED_FEE_INSTALLMENT']);
+    assert.equal(JSON.parse(Buffer.from(rows[1].split(',')[9].slice(4),'base64')).installment,1);
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);
+    assert.equal((await apiRequest(csv+'/artifacts/'+artifact.id,{identity:identities.manager})).status,403);
+    const confirmPath=csv+'/confirmation-sources/'+nextId;
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.invoice_batch.confirm',true) on conflict(role_name,permission_key) do update set enabled=true");
+    assert.equal((await apiRequest(confirmPath,{identity:identities.manager})).status,403);
+    await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key=$1",[grant]);
+    const {body:confirmationInspection}=await apiRequest(confirmPath,{identity:identities.manager});
+    const exact=confirmationInspection.source;
+    assert.deepEqual([exact.sourceType,exact.state,exact.artifactSha256],['FIXED_FEE_INSTALLMENT','Exported',artifact.sha256]);
+    const attestation={expectedOwnerKey:confirmationInspection.ownerKey,requestId:crypto.randomUUID(),batchId:nextId,
+      artifactId:artifact.id,artifactVersion:artifact.version,artifactSha256:'0'.repeat(64),currency:exact.currency,total:exact.total,
+      reference:'SYNTHETIC-FEE',reason:'Match the downstream billing reference to the retained installment'};
+    assert.equal((await apiRequest(csv+'/confirmations',{identity:identities.manager,method:'POST',body:attestation})).status,409);
+    const confirmer=await createContext(identities.manager,[...exportGrants,'commercial.invoice_batch.confirm']);
+    await confirmer.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+    const confirmUi=confirmer.page.getByRole('region',{name:'Invoice billing confirmation'});
+    await confirmUi.getByLabel('Invoice confirmation engagement').selectOption(engagement.result.id);
+    await confirmUi.getByRole('button',{name:'Load invoice confirmation batches'}).click();
+    await confirmUi.getByLabel('Invoice confirmation batch',{exact:true}).selectOption(nextId);
+    await confirmUi.getByRole('button',{name:'Inspect exported invoice artifact'}).click();
+    await confirmUi.getByText(/fixed-fee installment ·/).waitFor();
+    await confirmUi.getByLabel('Invoice confirmation reference').fill(attestation.reference);
+    await confirmUi.getByLabel('Invoice confirmation reason').fill(attestation.reason);
+    await confirmUi.getByRole('checkbox',{name:/I attest the referenced/}).check();
+    const attested=confirmer.page.waitForResponse(r=>r.url().endsWith('/confirmations') && r.request().method()==='POST');
+    await confirmUi.getByRole('button',{name:'Record manual billing attestation'}).click();
+    const receiptResponse=await attested;
+    assert.equal(receiptResponse.status(),201,await receiptResponse.text());
+    const confirmedReceipt=(await receiptResponse.json()).confirmation;
+    await confirmUi.getByText('Retained manual attestation '+confirmedReceipt.id,{exact:false}).waitFor();
+    const originalReceipt=await apiRequest(csv+'/confirmation-receipts/'+confirmedReceipt.requestId,{identity:identities.manager});
+    assert.deepEqual(originalReceipt.body.confirmation,confirmedReceipt);
+    const repeated=await apiRequest(csv+'/confirmations',{identity:identities.manager,method:'POST',body:receiptResponse.request().postDataJSON()});
+    assert.equal(repeated.status,200);
+    assert.equal(repeated.body.confirmation.id,confirmedReceipt.id);
+    const terminal=await apiRequest(confirmPath,{identity:identities.manager});
+    assert.deepEqual([terminal.body.source.state,confirmedReceipt.sourceType,confirmedReceipt.artifactSha256,confirmedReceipt.reference],
+      ['Billed/Confirmed','FIXED_FEE_INSTALLMENT',artifact.sha256,attestation.reference]);
+    assert.equal((await pool.query('select line_id from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rows[0].line_id,nextLine.line.id);
+    const balance=(await apiRequest(poPath,{identity:identities.manager})).body.commitment;
+    assert.deepEqual([balance.committed,balance.consumed,balance.remaining,balance.warning],['0','12000.0000','300.6789',true]);
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[grant]);
+    assert.equal((await apiRequest(poPath,{identity:identities.manager})).status,403);
+    await confirmer.context.close();
+    await exporting.context.close();
+    await deciding.context.close();
     await preparing.context.close();
     await billing.context.close();
     await reviewer.context.close();

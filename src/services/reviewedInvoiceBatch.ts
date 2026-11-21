@@ -55,10 +55,11 @@ export const reviewInvoiceDecision = (
     !Array.isArray(batch.lines) ||
     batch.lines.length !== batch.lineCount ||
     batch.lines.some((line) =>
-      batch.sourceType === 'MILESTONE_ACCEPTANCE'
-        ? !('sourceType' in line) || line.sourceType !== 'MILESTONE_ACCEPTANCE' || line.snapshotId !== null
+      (batch.sourceType === 'MILESTONE_ACCEPTANCE' || batch.sourceType === 'FIXED_FEE_INSTALLMENT')
+        ? !('sourceType' in line) || line.sourceType !== batch.sourceType || line.snapshotId !== null
         : 'sourceType' in line || typeof line.snapshotId !== 'string',
     ) ||
+    (batch.sourceType === 'FIXED_FEE_INSTALLMENT' && !hasRatePermission('commercial.fixed_fee_eligibility.issue')) ||
     (batch.sourceType === 'MILESTONE_ACCEPTANCE' &&
       !hasRatePermission('commercial.milestone_billing.view')) ||
     !approvalUuid(requestId) ||
