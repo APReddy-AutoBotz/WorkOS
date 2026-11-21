@@ -1,5 +1,5 @@
 import { CREDIT_CSV_SCHEMA,verifyCreditCsv,renderCreditCsv } from '../../shared/correction-invoice-csv.mjs';
-import { verifyMilestoneInvoiceCsv } from './milestoneInvoiceCsv';
+import { verifyMilestoneInvoiceCsv,verifyRetainerInvoiceCsv } from './milestoneInvoiceCsv';
 import { validInvoiceConfirmationCommand, validConfirmationTotal } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
@@ -14,7 +14,7 @@ const uuid = z.string().uuid(),
   hash = z.string().regex(/^[a-f0-9]{64}$/),
   money = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
   instant = z.string().refine((x) => Number.isFinite(Date.parse(x))),
-  schema = z.enum(['workos.invoice-tm-csv/1', 'workos.invoice-milestone-csv/1','workos.invoice-credit-csv/1']),
+  schema = z.enum(['workos.invoice-tm-csv/1', 'workos.invoice-milestone-csv/1','workos.invoice-retainer-csv/1','workos.invoice-credit-csv/1']),
   envelope = {
     ownerKey: hash,
     actorUserId: uuid,
@@ -84,11 +84,13 @@ const milestoneLine = z
     amount: money,
   })
   .strict();
-const line = z.union([tmLine, milestoneLine]);
+const retainerLine=milestoneLine.omit({milestoneId:true}).extend({sourceType:z.literal('RETAINER_PERIOD'),statementId:uuid,reviewId:uuid});
+const line = z.union([tmLine, milestoneLine,retainerLine]);
+const sourceGrant=(sourceType:string)=>sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':'commercial.milestone_billing.view';
 const sourceBase = z
   .object({
     id: uuid,
-    sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','RETAINER_PERIOD']).optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
     clientId: id,
     contractId: id,
@@ -110,8 +112,8 @@ const standardSource=sourceBase.refine((v) => {
     if (
       v.periodStart > v.periodEnd ||
       (v.sourceType &&
-        (!hasRatePermission('commercial.milestone_billing.view') || v.periodBasis !== 'ELIGIBLE_DATE')) ||
-      v.lines.some((x) => 'sourceType' in x !== (v.sourceType === 'MILESTONE_ACCEPTANCE'))
+        (!hasRatePermission(sourceGrant(v.sourceType)) || v.periodBasis !== 'ELIGIBLE_DATE')) ||
+      v.lines.some((x) => ('sourceType' in x?x.sourceType:undefined)!==v.sourceType)
     )
       return false;
     if (['Exported', 'Billed/Confirmed'].includes(v.state) !== Boolean(v.artifactId)) return false;
@@ -127,8 +129,8 @@ const standardSource=sourceBase.refine((v) => {
             x.sequence === n + 1 &&
             x.currency === v.currency &&
             ('sourceType' in x
-              ? v.sourceType === 'MILESTONE_ACCEPTANCE' &&
-                hasRatePermission('commercial.milestone_billing.view') &&
+              ? v.sourceType === x.sourceType &&
+                hasRatePermission(sourceGrant(x.sourceType)) &&
                 v.periodBasis === 'ELIGIBLE_DATE' &&
                 x.eligibleDate >= v.periodStart &&
                 x.eligibleDate <= v.periodEnd
@@ -198,7 +200,7 @@ export type InvoiceCsvOperation = {
   approvalId: string;
   finalTransitionId: string;
   lineageHash: string;
-  schemaVersion: 'workos.invoice-tm-csv/1' | 'workos.invoice-milestone-csv/1' | 'workos.invoice-credit-csv/1';
+  schemaVersion: 'workos.invoice-tm-csv/1' | 'workos.invoice-milestone-csv/1' | 'workos.invoice-credit-csv/1' | 'workos.invoice-retainer-csv/1';
   expectedLineCount: number;
   expectedTotal: string;
   reason: string;
@@ -293,6 +295,10 @@ const checkArtifact = async (a: InvoiceCsvArtifact) => {
     if(digest!==a.sha256) return bad();
     try{verifyCreditCsv(new TextDecoder('utf-8',{fatal:true}).decode(bytes),a);}catch{return bad();}
     return bytes;
+  }
+  if (a.schemaVersion === 'workos.invoice-retainer-csv/1') {
+    if (!hasRatePermission('commercial.retainer_eligibility.issue')) return bad();
+    try {return await verifyRetainerInvoiceCsv({...a,total:a.total});} catch {return bad();}
   }
   if (a.schemaVersion === 'workos.invoice-milestone-csv/1') {
     if (!hasRatePermission('commercial.milestone_billing.view')) return bad();

@@ -1,3 +1,4 @@
+import {retainerInvoiceEvidence} from './invoiceDrafts';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { canonicalHours } from '../../shared/work-hours.mjs';
@@ -20,7 +21,7 @@ const field = (value: string) => {
 };
 
 // This verifies retained bytes and their declared controls, not server authority.
-export const verifyMilestoneInvoiceCsv = async (a: {
+type ArtifactMetadata = {
   schemaVersion: string;
   batchId: string;
   payloadBase64: string;
@@ -28,9 +29,12 @@ export const verifyMilestoneInvoiceCsv = async (a: {
   lineCount: number;
   currency: string;
   total: string;
-}) => {
+};
+const verifyContractCsv=async(a:ArtifactMetadata,retainer:boolean)=>{
+  const expectedSchema=retainer?'workos.invoice-retainer-csv/1':'workos.invoice-milestone-csv/1';
+  const expectedHeader=retainer?header.replace('milestone_id_b64','statement_id')+',event_version':header;
   if (
-    a.schemaVersion !== 'workos.invoice-milestone-csv/1' ||
+    a.schemaVersion !== expectedSchema ||
     !uuid.safeParse(a.batchId).success ||
     !Number.isInteger(a.lineCount) ||
     a.lineCount < 1 ||
@@ -44,7 +48,7 @@ export const verifyMilestoneInvoiceCsv = async (a: {
       .join('');
   if (digest !== a.sha256) throw Error('Checksum mismatch');
   const rows = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\r\n');
-  if (rows[0] !== header || rows.at(-1) !== '' || rows.length !== a.lineCount + 2)
+  if (rows[0] !== expectedHeader || rows.at(-1) !== '' || rows.length !== a.lineCount + 2)
     throw Error('Invalid milestone CSV shape');
   const seen = new Set<string>(),
     amounts: string[] = [];
@@ -52,7 +56,7 @@ export const verifyMilestoneInvoiceCsv = async (a: {
   for (const [n, row] of rows.slice(1, -1).entries()) {
     const c = row.split(',');
     if (
-      c.length !== 19 ||
+      c.length !== (retainer?20:19) || (retainer && c[19]!=='1') ||
       c[0] !== a.schemaVersion ||
       c[1] !== a.batchId ||
       !uuid.safeParse(c[2]).success ||
@@ -60,7 +64,7 @@ export const verifyMilestoneInvoiceCsv = async (a: {
       !uuid.safeParse(c[4]).success ||
       c[5] !== '1' ||
       !uuid.safeParse(c[6]).success ||
-      c[7] !== 'MILESTONE_ACCEPTANCE' ||
+      c[7] !== (retainer?'RETAINER_PERIOD':'MILESTONE_ACCEPTANCE') ||
       seen.has(c[4]) ||
       !date.safeParse(c[13]).success ||
       c[14] !== a.currency ||
@@ -74,21 +78,19 @@ export const verifyMilestoneInvoiceCsv = async (a: {
     )
       throw Error('Invalid milestone line');
     seen.add(c[4]);
-    const milestone = field(c[8]),
-      e = milestoneInvoiceEvidence.safeParse(JSON.parse(field(c[9]))),
-      client = field(c[10]),
-      contract = field(c[11]),
-      engagement = field(c[12]);
-    if (
-      !e.success ||
-      !id.safeParse(milestone).success ||
-      !id.safeParse(client).success ||
-      !id.safeParse(contract).success ||
-      !id.safeParse(engagement).success ||
-      e.data.milestoneId !== milestone ||
-      !milestoneEvidenceMatches(e.data, engagement, c[14], c[15])
-    )
-      throw Error('Milestone evidence mismatch');
+    const rawEvidence=JSON.parse(field(c[9])),client=field(c[10]),contract=field(c[11]),engagement=field(c[12]);
+    if (![client,contract,engagement].every(value=>id.safeParse(value).success)) throw Error('Invalid contract scope');
+    if (retainer) {
+      const e=retainerInvoiceEvidence.parse(rawEvidence);
+      const components=[e.periodPrice.baseFee,e.periodPrice.overage].filter(v=>/[1-9]/.test(v));
+      if (e.statementId!==c[8] || e.engagementId!==engagement || e.startsOn>e.endsOn || e.endsOn>=c[13] ||
+        invoiceDraftTotal(components).amount!==canonicalHours(c[15]) || canonicalHours(e.periodPrice.total)!==canonicalHours(c[15]))
+        throw Error('Retainer evidence mismatch');
+    } else {
+      const milestone=field(c[8]),e=milestoneInvoiceEvidence.parse(rawEvidence);
+      if (!id.safeParse(milestone).success || e.milestoneId!==milestone || !milestoneEvidenceMatches(e,engagement,c[14],c[15]))
+        throw Error('Milestone evidence mismatch');
+    }
     const identity = JSON.stringify([client, contract, engagement, ...c.slice(16, 19)]);
     if (sourceIdentity !== null && sourceIdentity !== identity) throw Error('Mixed source scope');
     sourceIdentity = identity;
@@ -99,3 +101,6 @@ export const verifyMilestoneInvoiceCsv = async (a: {
     throw Error('Control total mismatch');
   return bytes;
 };
+
+export const verifyMilestoneInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,false);
+export const verifyRetainerInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,true);
