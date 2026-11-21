@@ -1,3 +1,4 @@
+import { fixedFeeInvoiceEvidence } from './fixedFeeInvoiceContracts';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { canonicalHours } from '../../shared/work-hours.mjs';
@@ -20,7 +21,7 @@ const field = (value: string) => {
 };
 
 // This verifies retained bytes and their declared controls, not server authority.
-export const verifyMilestoneInvoiceCsv = async (a: {
+export const verifyScheduledInvoiceCsv = async (a: {
   schemaVersion: string;
   batchId: string;
   payloadBase64: string;
@@ -29,8 +30,9 @@ export const verifyMilestoneInvoiceCsv = async (a: {
   currency: string;
   total: string;
 }) => {
+  const fixed = a.schemaVersion === 'workos.invoice-fixed-fee-csv/1';
   if (
-    a.schemaVersion !== 'workos.invoice-milestone-csv/1' ||
+    (!fixed && a.schemaVersion !== 'workos.invoice-milestone-csv/1') ||
     !uuid.safeParse(a.batchId).success ||
     !Number.isInteger(a.lineCount) ||
     a.lineCount < 1 ||
@@ -44,7 +46,7 @@ export const verifyMilestoneInvoiceCsv = async (a: {
       .join('');
   if (digest !== a.sha256) throw Error('Checksum mismatch');
   const rows = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\r\n');
-  if (rows[0] !== header || rows.at(-1) !== '' || rows.length !== a.lineCount + 2)
+  if (rows[0] !== (fixed ? header.replace('milestone_id_b64','contract_version_id_b64') : header) || rows.at(-1) !== '' || rows.length !== a.lineCount + 2)
     throw Error('Invalid milestone CSV shape');
   const seen = new Set<string>(),
     amounts: string[] = [];
@@ -60,7 +62,7 @@ export const verifyMilestoneInvoiceCsv = async (a: {
       !uuid.safeParse(c[4]).success ||
       c[5] !== '1' ||
       !uuid.safeParse(c[6]).success ||
-      c[7] !== 'MILESTONE_ACCEPTANCE' ||
+      c[7] !== (fixed ? 'FIXED_FEE_INSTALLMENT' : 'MILESTONE_ACCEPTANCE') ||
       seen.has(c[4]) ||
       !date.safeParse(c[13]).success ||
       c[14] !== a.currency ||
@@ -74,21 +76,26 @@ export const verifyMilestoneInvoiceCsv = async (a: {
     )
       throw Error('Invalid milestone line');
     seen.add(c[4]);
-    const milestone = field(c[8]),
-      e = milestoneInvoiceEvidence.safeParse(JSON.parse(field(c[9]))),
+    const sourceReference = field(c[8]),
+      evidence = JSON.parse(field(c[9])),
       client = field(c[10]),
       contract = field(c[11]),
       engagement = field(c[12]);
     if (
-      !e.success ||
-      !id.safeParse(milestone).success ||
+      !id.safeParse(sourceReference).success ||
       !id.safeParse(client).success ||
       !id.safeParse(contract).success ||
-      !id.safeParse(engagement).success ||
-      e.data.milestoneId !== milestone ||
-      !milestoneEvidenceMatches(e.data, engagement, c[14], c[15])
+      !id.safeParse(engagement).success
     )
       throw Error('Milestone evidence mismatch');
+    if (fixed) {
+      const e = fixedFeeInvoiceEvidence.parse(evidence);
+      if (e.contractVersionId !== sourceReference || e.engagementId !== engagement || e.currency !== c[14] ||
+          e.dueOn > c[13] || invoiceDraftTotal([e.amount]).amount !== c[15]) throw Error('Installment evidence mismatch');
+    } else {
+      const e = milestoneInvoiceEvidence.parse(evidence);
+      if (e.milestoneId !== sourceReference || !milestoneEvidenceMatches(e, engagement, c[14], c[15])) throw Error('Milestone evidence mismatch');
+    }
     const identity = JSON.stringify([client, contract, engagement, ...c.slice(16, 19)]);
     if (sourceIdentity !== null && sourceIdentity !== identity) throw Error('Mixed source scope');
     sourceIdentity = identity;

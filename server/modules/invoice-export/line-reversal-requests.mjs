@@ -21,7 +21,7 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
   const inspect = async (c, r, write, kind = 'reversal') => {
     if (!params.safeParse(r.params).success || Object.keys(r.query).length) throw fail(400, 'Select a valid exported line.');
     await authorize(c, r, kind);
-    const { row, source } = await batch(c, r, r.params.batchId, write);
+    const { row, source } = await batch(c, r, r.params.batchId, write,true);
     if (!['Exported', 'Billed/Confirmed'].includes(row.state) || !source.lines.some(l => l.lineId === r.params.lineId))
       throw fail(404, 'Exported line unavailable.');
     const artifact = (await c.query(

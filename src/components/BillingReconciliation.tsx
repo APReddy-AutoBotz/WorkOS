@@ -3,11 +3,12 @@ import { captureRateContext, invoiceDrafts } from '../services/invoiceDrafts';
 import { hasRatePermission, isRateContextCurrent, type RateContext } from '../services/rateCandidates';
 
 type Report = Awaited<ReturnType<typeof invoiceDrafts.reconciliation>>;
-type Choice = { id: string; label: string };
+type Choice = { id: string; label: string; fixedFee?: boolean };
 
 export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
   const [engagement, setEngagement] = useState('');
   const [report, setReport] = useState<Report | null>(null);
+  const [balances,setBalances]=useState<Awaited<ReturnType<typeof invoiceDrafts.fixedFeeBalances>> | null>(null);
   const [message, setMessage] = useState('');
   const [reason, setReason] = useState('');
   const [portfolioReason, setPortfolioReason] = useState('');
@@ -24,7 +25,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
       generation.current++;
       current.current = null;
       setPortfolio(null);
-      setReport(null);
+      setReport(null); setBalances(null);
       setReason('');
       setPortfolioReason('');
       setBusy(false);
@@ -78,15 +79,20 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
     const run = ++generation.current,
       context = captureRateContext(() => generation.current === run);
     if (!context || !engagement) {
-      setReport(null);
+      setReport(null); setBalances(null);
       setMessage('Choose an engagement and an active scope.');
       return;
     }
     current.current = context;
     setBusy(true);
-    setReport(null);
+    setReport(null); setBalances(null);
     setMessage('');
     try {
+      if (choices.find(choice => choice.id === engagement)?.fixedFee) {
+        const rows=await invoiceDrafts.fixedFeeBalances(engagement,context);
+        if (generation.current===run) setBalances(rows);
+        return;
+      }
       const result = await invoiceDrafts.reconciliation(engagement, context);
       if (generation.current === run) setReport(result);
     } catch {
@@ -133,7 +139,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
       <h2>Billing reconciliation</h2>
       <p>
         Reconcile approved T&amp;M work or accepted milestones across the portfolio or within one engagement,
-        from eligibility through invoice reservation, export and manual confirmation. Totals reflect your
+        from eligibility through invoice reservation, export and manual confirmation. Select a fixed-fee engagement to see its registered installments and credits by billing state. Totals reflect your
         current access and stay in the original currency.
       </p>
       {!allowed ? (
@@ -265,7 +271,7 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
               onChange={(e) => {
                 generation.current++;
                 setEngagement(e.target.value);
-                setReport(null);
+                setReport(null); setBalances(null);
                 setMessage('');
               }}
             >
@@ -281,6 +287,17 @@ export const BillingReconciliation = ({ choices }: { choices: Choice[] }) => {
             Load billing reconciliation
           </button>
           {message && <p role="status">{message}</p>}
+          {balances && <section aria-label="Fixed-fee billing balances">
+            <h3>Registered installments and credits</h3>
+            {balances.length ? <table>
+              <caption>Current register balances by currency and billing state</caption>
+              <thead><tr>{['Currency','State','Installments','Credits','Gross charges','Credit amount','Net amount'].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
+              <tbody>{balances.map(row=><tr key={row.currency+row.status}>
+                <td>{row.currency}</td><td>{row.status}</td><td>{row.installments}</td><td>{row.credits}</td>
+                <td>{row.gross}</td><td>{row.adjustments}</td><td>{row.net}</td>
+              </tr>)}</tbody>
+            </table> : <p>No registered installments or credits for this engagement.</p>}
+          </section>}
           {report && (
             <div>
               <p>

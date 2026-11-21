@@ -1,5 +1,5 @@
 import { CREDIT_CSV_SCHEMA,verifyCreditCsv,renderCreditCsv } from '../../shared/correction-invoice-csv.mjs';
-import { verifyMilestoneInvoiceCsv } from './milestoneInvoiceCsv';
+import { verifyScheduledInvoiceCsv } from './milestoneInvoiceCsv';
 import { validInvoiceConfirmationCommand, validConfirmationTotal } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
@@ -14,7 +14,7 @@ const uuid = z.string().uuid(),
   hash = z.string().regex(/^[a-f0-9]{64}$/),
   money = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
   instant = z.string().refine((x) => Number.isFinite(Date.parse(x))),
-  schema = z.enum(['workos.invoice-tm-csv/1', 'workos.invoice-milestone-csv/1','workos.invoice-credit-csv/1']),
+  schema = z.enum(['workos.invoice-tm-csv/1', 'workos.invoice-milestone-csv/1','workos.invoice-fixed-fee-csv/1','workos.invoice-credit-csv/1']),
   envelope = {
     ownerKey: hash,
     actorUserId: uuid,
@@ -84,11 +84,14 @@ const milestoneLine = z
     amount: money,
   })
   .strict();
-const line = z.union([tmLine, milestoneLine]);
+const fixedFeeLine = milestoneLine.omit({milestoneId:true}).extend({
+  sourceType:z.literal('FIXED_FEE_INSTALLMENT'),contractVersionId:id,installment:z.number().int().min(1).max(120),dueOn:date,
+}).strict();
+const line = z.union([tmLine, milestoneLine, fixedFeeLine]);
 const sourceBase = z
   .object({
     id: uuid,
-    sourceType: z.literal('MILESTONE_ACCEPTANCE').optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT']).optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
     clientId: id,
     contractId: id,
@@ -110,8 +113,8 @@ const standardSource=sourceBase.refine((v) => {
     if (
       v.periodStart > v.periodEnd ||
       (v.sourceType &&
-        (!hasRatePermission('commercial.milestone_billing.view') || v.periodBasis !== 'ELIGIBLE_DATE')) ||
-      v.lines.some((x) => 'sourceType' in x !== (v.sourceType === 'MILESTONE_ACCEPTANCE'))
+        (!hasRatePermission(v.sourceType === 'FIXED_FEE_INSTALLMENT' ? 'commercial.fixed_fee_eligibility.issue' : 'commercial.milestone_billing.view') || v.periodBasis !== 'ELIGIBLE_DATE')) ||
+      v.lines.some((x) => ('sourceType' in x ? x.sourceType : undefined) !== v.sourceType)
     )
       return false;
     if (['Exported', 'Billed/Confirmed'].includes(v.state) !== Boolean(v.artifactId)) return false;
@@ -127,8 +130,8 @@ const standardSource=sourceBase.refine((v) => {
             x.sequence === n + 1 &&
             x.currency === v.currency &&
             ('sourceType' in x
-              ? v.sourceType === 'MILESTONE_ACCEPTANCE' &&
-                hasRatePermission('commercial.milestone_billing.view') &&
+              ? v.sourceType === x.sourceType &&
+                (x.sourceType !== 'FIXED_FEE_INSTALLMENT' || x.dueOn <= x.eligibleDate) &&
                 v.periodBasis === 'ELIGIBLE_DATE' &&
                 x.eligibleDate >= v.periodStart &&
                 x.eligibleDate <= v.periodEnd
@@ -198,7 +201,7 @@ export type InvoiceCsvOperation = {
   approvalId: string;
   finalTransitionId: string;
   lineageHash: string;
-  schemaVersion: 'workos.invoice-tm-csv/1' | 'workos.invoice-milestone-csv/1' | 'workos.invoice-credit-csv/1';
+  schemaVersion: 'workos.invoice-tm-csv/1' | 'workos.invoice-milestone-csv/1' | 'workos.invoice-fixed-fee-csv/1' | 'workos.invoice-credit-csv/1';
   expectedLineCount: number;
   expectedTotal: string;
   reason: string;
@@ -294,10 +297,10 @@ const checkArtifact = async (a: InvoiceCsvArtifact) => {
     try{verifyCreditCsv(new TextDecoder('utf-8',{fatal:true}).decode(bytes),a);}catch{return bad();}
     return bytes;
   }
-  if (a.schemaVersion === 'workos.invoice-milestone-csv/1') {
-    if (!hasRatePermission('commercial.milestone_billing.view')) return bad();
+  if (a.schemaVersion === 'workos.invoice-milestone-csv/1' || a.schemaVersion === 'workos.invoice-fixed-fee-csv/1') {
+    if (!hasRatePermission(a.schemaVersion === 'workos.invoice-fixed-fee-csv/1' ? 'commercial.fixed_fee_eligibility.issue' : 'commercial.milestone_billing.view')) return bad();
     try {
-      return await verifyMilestoneInvoiceCsv({...a,total:a.total});
+      return await verifyScheduledInvoiceCsv({...a,total:a.total});
     } catch {
       return bad();
     }
@@ -405,7 +408,7 @@ export type InvoiceNoticeRecoveryOperation = {
 const confirmation = z
   .object({
     id: uuid,
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','FULL_LINE_REVERSAL']).optional(),
     batchId: uuid,
     artifactId: uuid,
     artifactVersion: z.literal(1),
@@ -425,6 +428,7 @@ const confirmation = z
   .refine((v) => {
     try {
       return (
+        (v.sourceType !== 'FIXED_FEE_INSTALLMENT' || hasRatePermission('commercial.fixed_fee_eligibility.issue')) &&
         (v.sourceType !== 'MILESTONE_ACCEPTANCE' || hasRatePermission('commercial.milestone_billing.view')) &&
         !/[\u0000-\u001f\u007f-\u009f]/u.test(v.reference) &&
         validConfirmationTotal(v.total,v.sourceType)
@@ -435,7 +439,7 @@ const confirmation = z
   });
 const confirmationSource = z
   .object({
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','FULL_LINE_REVERSAL']).optional(),
     batchId: uuid,
     state: z.enum(['Exported', 'Billed/Confirmed']),
     artifactId: uuid,
@@ -448,6 +452,7 @@ const confirmationSource = z
   .refine((v) => {
     try {
       return (
+        (v.sourceType !== 'FIXED_FEE_INSTALLMENT' || hasRatePermission('commercial.fixed_fee_eligibility.issue')) &&
         (v.sourceType !== 'MILESTONE_ACCEPTANCE' || hasRatePermission('commercial.milestone_billing.view')) &&
         validConfirmationTotal(v.total,v.sourceType)
       );
@@ -458,7 +463,7 @@ const confirmationSource = z
 export type InvoiceConfirmationSource = z.infer<typeof confirmationSource>;
 export type InvoiceConfirmation = z.infer<typeof confirmation>;
 export type InvoiceConfirmationOperation = {
-  sourceType?: 'MILESTONE_ACCEPTANCE'|'FULL_LINE_REVERSAL';
+  sourceType?: 'MILESTONE_ACCEPTANCE'|'FIXED_FEE_INSTALLMENT'|'FULL_LINE_REVERSAL';
   requestId: string;
   batchId: string;
   artifactId: string;
@@ -744,7 +749,8 @@ export const invoiceCsv = {
   confirm: async (op: InvoiceConfirmationOperation, c: RateContext | null, receipt = false) => {
     const { sourceType, ...command } = op;
     if (
-      (sourceType !== undefined && !['FULL_LINE_REVERSAL','MILESTONE_ACCEPTANCE'].includes(sourceType)) ||
+      (sourceType !== undefined && !['FULL_LINE_REVERSAL','MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT'].includes(sourceType)) ||
+      (sourceType === 'FIXED_FEE_INSTALLMENT' && !hasRatePermission('commercial.fixed_fee_eligibility.issue')) ||
       (sourceType === 'MILESTONE_ACCEPTANCE' && !hasRatePermission('commercial.milestone_billing.view')) ||
       !validInvoiceConfirmationCommand(command,sourceType)
     )
