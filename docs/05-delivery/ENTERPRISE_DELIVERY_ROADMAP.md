@@ -12,7 +12,7 @@ Timesheet approval discards rows, review details and unsent correction reasons o
 
 Production API traffic summaries provide the denominator for HTTP error rates and bounded latency measurements across replicas. The delivery monitor reports pending invoice alerts and recent integration and notification failures. External dispatch, buyer thresholds and alert routing remain open.
 
-The Standard-profile performance gate measures authenticated timesheet history, draft saves, employee submissions, direct-manager review reads, version-checked approvals and scoped utilization reporting. The timesheet approval CSV journey verifies browser responsiveness during 10,000-entry exports. Buyer infrastructure, browser startup, staged approval timings, server-side export isolation and the Expanded profile need separate performance evidence.
+The Standard-profile performance gate measures authenticated timesheet history, draft saves, employee submissions, direct-manager review reads, version-checked approvals, named two-stage decisions and scoped utilization reporting. The timesheet approval CSV journey verifies browser responsiveness during 10,000-entry exports. Buyer infrastructure, browser startup, server-side export isolation and the Expanded profile need separate performance evidence.
 
 The PostgreSQL recovery gate exercises a full synthetic database restore, financial record retrieval, role and entity boundaries, and an audited write after recovery. Buyer-scale recovery timings, backup custody and release sign-off remain open.
 

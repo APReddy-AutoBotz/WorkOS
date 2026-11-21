@@ -19,6 +19,14 @@ insert into role_permissions(role_name,permission_key,enabled)
 values ('Employee','timesheets.submit',true),('Admin','reports.view_utilization',true),('TeamLead','timesheets.approve',true),('TeamLead','timesheets.submit',true)
 on conflict(role_name,permission_key) do update set enabled=excluded.enabled;
 
+insert into role_permissions(role_name,permission_key,enabled)
+select 'Admin',key,true from unnest(array['settings.manage','permissions.manage','notifications.manage','approvals.view',
+  'employees.view','timesheets.submit','timesheets.approve','projects.view','notifications.view']) key
+on conflict(role_name,permission_key) do update set enabled=true;
+insert into role_permissions(role_name,permission_key,enabled)
+values ('Employee','employees.view',true),('Employee','notifications.view',true)
+on conflict(role_name,permission_key) do update set enabled=true;
+
 insert into clients(id,name,account_owner_id,organization_id,legal_entity_id)
 select 'profile-client-'||n,'Synthetic client '||n,'profile-worker-1','org-default','legal-default' from generate_series(1,25) n;
 insert into projects(id,project_code,name,client_id,client,manager_id,manager_name,start_date,end_date,status,organization_id,legal_entity_id)
