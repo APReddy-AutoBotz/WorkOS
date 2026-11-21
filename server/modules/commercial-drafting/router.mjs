@@ -34,6 +34,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
       }else if(error?.code==='23505')res.status(409).json({error:{code:'COMMERCIAL_DUPLICATE',message:'This commercial identifier or version already exists in the selected scope.'}});
+      else if(error?.code==='23514' && error.constraint==='retainer_rounding_valid') res.status(422).json({error:{
+        code:'COMMERCIAL_RETAINER_ROUNDING_INVALID',message:'Retainer rounding requires explicit excess-hour pricing terms.'}});
       else if(error?.code==='23514' && error.constraint==='retainer_overage_policy_valid') res.status(422).json({error:{
         code:'COMMERCIAL_RETAINER_OVERAGE_INVALID',message:'Overage terms require a retainer capacity policy.'}});
       else if(error?.code==='23514' && error.constraint==='retainer_capacity_policy_valid') res.status(422).json({error:{

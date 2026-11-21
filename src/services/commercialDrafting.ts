@@ -7,6 +7,8 @@ export const ENGAGEMENT_MODELS = [...COMMERCIAL_CONTRACT_MODELS, 'internal', 'pr
 export type ContractModel = typeof COMMERCIAL_CONTRACT_MODELS[number];
 export type EngagementModel = typeof ENGAGEMENT_MODELS[number];
 export type CommercialDocument = {name: string; url: string};
+export const retainerRoundingModes={HALF_UP:'Half up',HALF_EVEN:'Half even',DOWN:'Round down'} as const;
+export type RetainerRounding={precision:number;mode:keyof typeof retainerRoundingModes};
 export const retainerOverageLabels = {
   no_charge:'No charge for excess hours',
   contract_hourly_at_period_end:'Adopted contract hourly rate effective on the period end date',
@@ -22,6 +24,7 @@ export type RetainerCapacityPolicy = keyof typeof retainerPolicyLabels;
 export type RetainerPeriod = {startsOn: string; endsOn: string; includedHours: string; baseFee: string};
 export type ContractTermsInput = {
   name: string; model: ContractModel; startsOn: string; endsOn: string; effectiveFrom: string;
+  retainerRounding?: RetainerRounding | null;
   retainerOveragePolicy?: RetainerOveragePolicy | null;
   retainerCapacityPolicy?: RetainerCapacityPolicy | null;
   retainerPeriods?: RetainerPeriod[];
@@ -132,11 +135,17 @@ const documents = (value: unknown) => {
   return {name: text(item.name), url};
   });
 };
+const normalizeRounding = (value:unknown):RetainerRounding => {
+  const r=object(value),precision=integer(r.precision);
+  if (precision>4) throw invalid();
+  return {precision,mode:model(r.mode,['HALF_UP','HALF_EVEN','DOWN'] as const)};
+};
 const normalizeTerms = (value: unknown): ContractTerms => {
   const item = object(value);
   return {id: text(item.id), version: integer(item.version, 1), name: text(item.name), model: model(item.model, COMMERCIAL_CONTRACT_MODELS),
     startsOn: date(item.startsOn), endsOn: date(item.endsOn), effectiveFrom: date(item.effectiveFrom), currency: currency(item.currency),
     value: decimal(item.value), billingTerms: text(item.billingTerms), documents: documents(item.documents),
+    ...(item.retainerRounding == null ? {} : {retainerRounding:normalizeRounding(item.retainerRounding)}),
     ...(item.retainerOveragePolicy == null ? {} : {retainerOveragePolicy:model(item.retainerOveragePolicy,Object.keys(retainerOverageLabels) as RetainerOveragePolicy[])}),
     ...(item.retainerCapacityPolicy == null ? {} : {retainerCapacityPolicy:model(item.retainerCapacityPolicy,Object.keys(retainerPolicyLabels) as RetainerCapacityPolicy[])}),
     ...(item.retainerPeriods === undefined ? {} : {retainerPeriods: rows(item.retainerPeriods, value => {
@@ -210,6 +219,7 @@ const request = async <T>(context: CommercialDraftingContext | null, method: 'GE
 // Explicit allowlists keep strict commands free of response/actor/scope fields.
 const termsBody = (input: ContractTermsInput) => ({name: input.name, model: input.model, startsOn: input.startsOn,
   endsOn: input.endsOn, effectiveFrom: input.effectiveFrom, currency: input.currency, value: input.value,
+  ...(input.retainerRounding !== undefined && {retainerRounding:input.retainerRounding}),
   ...(input.retainerOveragePolicy !== undefined && {retainerOveragePolicy:input.retainerOveragePolicy}),
   ...(input.retainerCapacityPolicy !== undefined && {retainerCapacityPolicy:input.retainerCapacityPolicy}),
   ...(input.retainerPeriods && {retainerPeriods: input.retainerPeriods.map(({startsOn, endsOn, includedHours, baseFee}) => ({startsOn, endsOn, includedHours, baseFee}))}),
@@ -254,7 +264,15 @@ export const commercialDraftingService = {
         const source=src && {adoptionId:text(src.adoptionId),candidateId:text(src.candidateId),approvalId:text(src.approvalId),
           effectiveFrom:date(src.effectiveFrom),effectiveTo:date(src.effectiveTo),hourlyRate:exact(src.hourlyRate)};
         if (source && (endsOn<source.effectiveFrom || endsOn>source.effectiveTo)) throw invalid();
-        return {startsOn,endsOn,hours,status,amount,source};
+        const price=p.periodPrice==null ? null : object(p.periodPrice);
+        if (Boolean(price)!==Boolean(version.retainerRounding && amount!==null)) throw invalid();
+        const money=(v:unknown)=>{
+          const s=exact(v);
+          if ((s.split('.')[1]?.length ?? 0)!==version.retainerRounding?.precision) throw invalid();
+          return s;
+        };
+        const periodPrice=price && {baseFee:money(price.baseFee),overage:money(price.overage),total:money(price.total)};
+        return {startsOn,endsOn,hours,status,amount,source,periodPrice};
       });
     }),
   retainerConsumption: (contractId:string, version:ContractTerms, context:CommercialDraftingContext) =>

@@ -15,6 +15,7 @@ const document = z.object({name:z.string().trim().min(1).max(200),url:z.string()
 const terms = {
   name:z.string().trim().min(1).max(200),model:z.enum(COMMERCIAL_MODELS),
   startsOn:date,endsOn:date,effectiveFrom:date,currency,value:decimalAmount,
+  retainerRounding:z.object({precision:z.number().int().min(0).max(4),mode:z.enum(['HALF_UP','HALF_EVEN','DOWN'])}).strict().nullable().optional(),
   retainerOveragePolicy:z.enum(['no_charge','contract_hourly_at_period_end']).nullable().optional(),
   retainerCapacityPolicy:z.enum(['billable_expire','all_expire','billable_rollover','all_rollover']).nullable().optional(),
   retainerPeriods:z.array(z.object({startsOn:date,endsOn:date,includedHours:decimalAmount,baseFee:decimalAmount}).strict()).max(120).optional(),

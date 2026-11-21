@@ -31,6 +31,7 @@ export function RetainerConsumption({contractId,version,context}: {
     {status==='error' && <p role="alert">Approved hours could not be loaded.</p>}
     {periods && <><h5>Approved hours in your worker scope</h5><ul>{periods.map(p=>
       <li key={p.startsOn}><span>{p.startsOn} through {p.endsOn} · {p.billableHours} billable hours · {p.nonBillableHours} non-billable hours</span>
+        {p.startsOn<version.effectiveFrom && <p>Capacity requires a full service period on or after this version’s effective date.</p>}
         {p.capacity && <p>Contract capacity in hours · {p.capacity.carriedIn} brought forward · {p.capacity.consumed} consumed · {p.capacity.remaining} remaining · {p.capacity.overage} over capacity · {p.capacity.carriedOut} carried forward · {p.capacity.expired} expired</p>}</li>)}</ul></>}
     {version.retainerOveragePolicy && periods?.some(p=>p.capacity) && hasRatePermission('commercial.rate_candidates.view') && <>
       <button type="button" className="mt-2 underline" disabled={previewStatus==='loading'} onClick={inspectPricing}>Preview excess-hour pricing</button>
@@ -40,6 +41,7 @@ export function RetainerConsumption({contractId,version,context}: {
         {p.startsOn} through {p.endsOn} · {p.hours} excess hours · {p.status==='missing' ? 'No adopted hourly rate covers the period end' :
           p.status==='conflict' ? 'Highest-priority adopted rates conflict' : p.status==='no_charge' ? 'No charge under this contract' :
           p.status==='no_excess' ? 'No excess hours to price' : `Unrounded amount ${version.currency} ${p.amount}`}
+        {p.periodPrice && <p>Period price preview · {version.currency} {p.periodPrice.total} · base fee {p.periodPrice.baseFee} · overage {p.periodPrice.overage}</p>}
         {p.source && <p>Hourly rate {version.currency} {p.source.hourlyRate} · effective {p.source.effectiveFrom} through {p.source.effectiveTo} · candidate {p.source.candidateId} · adoption {p.source.adoptionId} · approval {p.source.approvalId}</p>}
       </li>)}</ul></>}
     </>}

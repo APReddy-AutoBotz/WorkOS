@@ -1,11 +1,12 @@
-// Preview exact extensions only. An approved billing event must separately select monetary rounding.
-export async function priceRetainerOverage(client,scope,contractId,currency,policy,rows) {
+// Each fee component rounds once under the selected contract-version policy.
+export async function priceRetainerOverage(client,scope,contractId,currency,policy,rows,terms,rounding) {
   const started=rows.filter(p=>p.capacity).map(p=>({startsOn:p.startsOn,endsOn:p.endsOn,hours:p.capacity.overage}));
-  if (policy==='no_charge') return started.map(p=>({...p,status:'no_charge',amount:'0'}));
+  const waived=policy==='no_charge';
   const result=await client.query(`
-    select p.*,case when p.hours::numeric=0 then 'no_excess' when rate.id is null then 'missing'
+    with pricing as (
+    select p.*,case when $6 then 'no_charge' when p.hours::numeric=0 then 'no_excess' when rate.id is null then 'missing'
       when rate.ties>1 then 'conflict' else 'priced' end status,
-      case when p.hours::numeric=0 then '0' when rate.ties=1 then trim_scale(p.hours::numeric*rate.amount)::text end amount,
+      case when $6 or p.hours::numeric=0 then '0' when rate.ties=1 then trim_scale(p.hours::numeric*rate.amount)::text end amount,
       case when rate.ties=1 then jsonb_build_object('adoptionId',rate.id,'candidateId',rate.candidate_id,'approvalId',rate.approval_id,
         'effectiveFrom',rate.effective_from,'effectiveTo',rate.effective_to,'hourlyRate',rate.amount::text) end source
     from jsonb_to_recordset($4::jsonb) p("startsOn" text,"endsOn" text,hours text)
@@ -15,7 +16,17 @@ export async function priceRetainerOverage(client,scope,contractId,currency,poli
         and a.organization_id=c.organization_id and a.legal_entity_id=c.legal_entity_id
       where c.organization_id=$1 and c.legal_entity_id=$2 and c.kind='billing' and c.binding_type='contract'
         and c.binding_id=$3 and c.currency=$5 and c.unit='HOUR' and p."endsOn"::date between c.effective_from and c.effective_to
-        and p.hours::numeric>0 order by c.priority desc,c.id limit 1
-    ) rate on true order by p."startsOn"`,[scope.organizationId,scope.legalEntityId,contractId,JSON.stringify(started),currency]);
+        and not $6 and p.hours::numeric>0 order by c.priority desc,c.id limit 1
+    ) rate on true
+    ), rounded as (
+      select pricing.*, commercial_tm_fixed(t."baseFee"::numeric,$7::int,$8) base,
+        commercial_tm_fixed(pricing.amount::numeric,$7::int,$8) overage
+      from pricing join jsonb_to_recordset($9::jsonb) t("startsOn" text,"baseFee" text) using ("startsOn")
+    )
+    select "startsOn","endsOn",hours,status,amount,source,
+      case when overage is not null then jsonb_build_object('baseFee',base,'overage',overage,
+        'total',commercial_tm_fixed(base::numeric+overage::numeric,$7::int,$8)) end as "periodPrice"
+    from rounded order by "startsOn"`,[scope.organizationId,scope.legalEntityId,contractId,JSON.stringify(started),currency,
+      waived,rounding?.precision ?? null,rounding?.mode ?? null,JSON.stringify(terms)]);
   return result.rows;
 }

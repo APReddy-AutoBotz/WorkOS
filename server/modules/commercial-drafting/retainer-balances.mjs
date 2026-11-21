@@ -8,12 +8,12 @@ function difference(left, right) {
 }
 
 // Input periods are ordered and non-overlapping by the contract version constraint.
-export function retainerBalances(periods, approved, policy, today) {
+export function retainerBalances(periods, approved, policy, today, effectiveFrom) {
   const includeNonBillable=policy==='all_expire' || policy==='all_rollover';
   const rollover=policy==='all_rollover' || policy==='billable_rollover';
   let carriedIn='0';
   return approved.map((row,i)=>{
-    if (row.startsOn>today) return row;
+    if (row.startsOn>today || row.startsOn<effectiveFrom) return row;
     const consumed=includeNonBillable ? sumHours([row.billableHours,row.nonBillableHours]) : row.billableHours;
     const available=sumHours([periods[i].includedHours,carriedIn]);
     const unused=difference(available,consumed);
