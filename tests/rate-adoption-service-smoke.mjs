@@ -150,6 +150,13 @@ raw = { ...raw, source: { ...candidate, bindingId: 'foreign' } };
 await assert.rejects(s.resolve(q, capture()), { status: 503 });
 raw = { ...base, selection: q, result: 'conflict', source: null };
 assert.equal((await s.resolve(q, capture())).result, 'conflict');
+const pair = [candidate.id, randomUUID()];
+raw = { ...raw, conflict: { priority: 10, candidateIds: pair } };
+assert.deepEqual((await s.resolve(q, capture())).conflict.candidateIds, pair);
+raw = { ...raw, conflict: { priority: 10, candidateIds: [pair[0], pair[0]] } };
+await assert.rejects(s.resolve(q, capture()), { status: 503 });
+raw = { ...raw, result: 'source', source: candidate, conflict: { priority: 10, candidateIds: pair } };
+await assert.rejects(s.resolve(q, capture()), { status: 503 });
 raw = { ...base, kind: 'billing', adoption: a, replayed: false };
 status = 201;
 for (const mutate of [

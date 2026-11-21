@@ -122,6 +122,10 @@ const call = async (
     return bad();
   return v.data;
 };
+type RateConflict = { priority: number; candidateIds: string[] };
+export const describeRateConflict = (conflict: RateConflict) =>
+  `At least two candidates share priority ${conflict.priority}: ${conflict.candidateIds.join(' and ')}.`;
+
 export const approvedRateSources = {
   inspect: async (candidateId: string, k: RateKind, c: RateContext | null) => {
     if (!uuid.safeParse(candidateId).success) return bad();
@@ -183,7 +187,7 @@ export const approvedRateSources = {
   },
   resolve: async (q: AdoptedSelection, c: RateContext | null) => {
     if (!selection.safeParse(q).success) return bad();
-    const raw = await call('GET', '/resolve?' + new URLSearchParams(q), c, q.kind),
+    const raw = await call('GET', '/resolve?' + new URLSearchParams({ ...q, includeConflictEvidence: '1' }), c, q.kind),
       source = rateCandidateSchema.extend({
         adoptionId: uuid,
         ownerEventId: uuid,
@@ -198,10 +202,15 @@ export const approvedRateSources = {
           selection,
           result: z.enum(['missing', 'conflict', 'source']),
           source: source.nullable(),
+          conflict: z.object({
+            priority: z.number().int().nonnegative(),
+            candidateIds: z.array(uuid).length(2).refine(([a, b]) => a !== b),
+          }).strict().optional(),
         })
         .strict()
         .safeParse(raw);
     if (!p.success || JSON.stringify(p.data.selection) !== JSON.stringify(q)) return bad();
+    if (p.data.conflict && p.data.result !== 'conflict') return bad();
     const x = p.data.source;
     if (p.data.result === 'source') {
       if (

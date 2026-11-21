@@ -181,3 +181,7 @@ The settings recovery journey uses the compiled fixture server with the real Pos
 ### Rate adoption evidence
 
 WOS-COM-001–003. Finance can trace a resolved billing or cost rate to its effective version and inspect the retained adoption decision in the candidate history. The browser journey checks the saved receipt after recovery from an interrupted response.
+
+### Diagnose competing adopted rates
+
+WOS-COM-003 and WOS-COM-006 — Rate conflict diagnosis is available during source inspection and T&M valuation review. A tied resolution continues to block valuation.

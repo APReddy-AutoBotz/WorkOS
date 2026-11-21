@@ -92,11 +92,11 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           }),
           201,
         );
-      const resolve = (kind, sourceId) =>
+      const resolve = (kind, sourceId, options = {}) =>
         request(
           adoptions +
             '/resolve?' +
-            new URLSearchParams({ kind, sourceId, asOf: fx.today, currency: 'USD', unit: 'HOUR' }),
+            new URLSearchParams({ kind, sourceId, asOf: fx.today, currency: 'USD', unit: 'HOUR', ...options }),
         );
       assert.equal(ok(await resolve('billing', engagement.id)).result, 'missing');
       assert.equal(ok(await resolve('cost', f.ownerId)).result, 'missing');
@@ -315,7 +315,16 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           reason: 'Synthetic equal priority',
         };
       ok(await request(adoptions + '/adoptions', { method: 'POST', body: duplicateCmd }), 201);
-      assert.equal(ok(await resolve('billing', engagement.id)).result, 'conflict');
+      const legacyTie = ok(await resolve('billing', engagement.id));
+      assert.equal(legacyTie.result, 'conflict');
+      assert.equal(legacyTie.conflict, undefined);
+      const tied = ok(await resolve('billing', engagement.id, { includeConflictEvidence: '1' }));
+      assert.equal(tied.result, 'conflict');
+      assert.equal(tied.source, null);
+      assert.deepEqual(tied.conflict, {
+        priority: 10,
+        candidateIds: [billing.candidate.id, duplicate.candidate.id].sort(),
+      });
       const cost = await make('cost', 4),
         ci = ok(await request(adoptions + '/candidates/' + cost.candidate.id)),
         cr = ci.reviews[0],

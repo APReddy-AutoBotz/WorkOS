@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../services/apiClient';
-import { approvedRateSources, type AdoptionCommand } from '../services/approvedRateSources';
+import { describeRateConflict, approvedRateSources, type AdoptionCommand } from '../services/approvedRateSources';
 import { captureRateContext, type RateKind } from '../services/rateCandidates';
 import { hasRatePermission, isRateContextCurrent, type RateContext } from '../services/rateCandidates';
 type Inspection = Awaited<ReturnType<typeof approvedRateSources.inspect>>;
@@ -372,7 +372,7 @@ export const AdoptedRateResolution = ({
           {result.source
             ? ` · ${result.source.currency} ${result.source.amount}/${result.source.unit} · ${result.source.bindingType} ${result.source.bindingId} · version ${result.source.sequence} effective ${result.source.effectiveFrom} through ${result.source.effectiveTo} UTC · priority ${result.source.priority} · candidate ${result.source.id} · adoption ${result.source.adoptionId} · approval ${result.source.approvalId} · adopted ${result.source.adoptedAt}`
             : ''}
-          .
+          . {result.conflict && describeRateConflict(result.conflict)}
         </p>
       )}
       {notice && <p role="status">{notice}</p>}

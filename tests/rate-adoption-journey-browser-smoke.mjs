@@ -857,7 +857,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
                 currency: 'USD',
                 unit: 'HOUR',
                 amount: '81.0123',
-                priority: 12,
+                priority: 11,
                 reason: 'Synthetic late adoption',
               },
             }),
@@ -971,6 +971,15 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         );
         await lateEditor.getByRole('button', { name: 'Adopt approved rate source', exact: true }).click();
         await received;
+        cv = reply('/api/v1/approved-rate-sources/resolve');
+        await resolvedCost.getByRole('button', { name: 'Resolve adopted source', exact: true }).click();
+        const tie = await body(cv);
+        assert.equal(tie.source, null);
+        const tiedIds = [late.id, cost2.id].sort();
+        assert.deepEqual(tie.conflict, { priority: 11, candidateIds: tiedIds });
+        await resolvedCost.getByText(`At least two candidates share priority 11: ${tiedIds.join(' and ')}.`, {
+          exact: false,
+        }).waitFor();
         await p.evaluate(() => window.dispatchEvent(new Event('workos:organization-scope-switch-requested')));
         release();
         await p
