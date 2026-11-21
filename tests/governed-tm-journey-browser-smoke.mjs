@@ -1,3 +1,4 @@
+import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import { fileURLToPath } from 'node:url';
 import { startFixtureServer } from './support/compiled-fixture-server.mjs';
 import { chromium } from 'playwright';
@@ -25,9 +26,6 @@ import {
 } from './support/commercial-amendments-test.mjs';
 import { shiftCapacityDate as shift } from '../shared/worker-capacity.mjs';
 const base = '/api/v1/governed-tm-valuations',
-  candidates = '/api/v1/rate-candidates',
-  approvals = '/api/v1/commercial-candidate-approvals',
-  adoptions = '/api/v1/approved-rate-sources',
   ok = (v, n = 200) => {
     assert.equal(v.status, n, JSON.stringify(v.body));
     return v.body;
@@ -97,127 +95,8 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
           },
         }),
       );
-      const keys = [
-          'approval.action_required',
-          'approval.rejected_or_correction_required',
-          'approval.completed',
-        ],
-        makeRate = async (kind, amount, priority = 1) => {
-          const bindingType = kind === 'billing' ? 'contract' : 'worker',
-            bindingId = kind === 'billing' ? roots.contract.id : f.ownerId,
-            candidate = ok(
-              await request(candidates + '/candidates', {
-                method: 'POST',
-                body: {
-                  requestId: randomUUID(),
-                  streamId: randomUUID(),
-                  expectedLatestId: null,
-                  kind,
-                  bindingType,
-                  bindingId,
-                  effectiveFrom: fx.today,
-                  effectiveTo: end,
-                  currency: 'USD',
-                  unit: 'HOUR',
-                  amount,
-                  priority,
-                  reason: 'Synthetic governed source',
-                },
-              }),
-              201,
-            ).candidate,
-            owner = ok(
-              await request(candidates + '/owners', {
-                method: 'POST',
-                body: {
-                  requestId: randomUUID(),
-                  candidateId: candidate.id,
-                  expectedOwnerEventId: null,
-                  ownerUserId: ids.manager.id,
-                  ownerRole: 'Admin',
-                  reason: 'Synthetic rate owner',
-                },
-              }),
-              201,
-            ),
-            definition = {
-              entityType: 'CommercialCandidate',
-              kind,
-              candidateId: candidate.id,
-              stages: [{ userId: ids.second.id, role: 'Admin' }],
-              locale: 'en-US',
-              templates: keys.map((key) => ({
-                key,
-                subject: 'Review {{stageNumber}}',
-                body: 'Source {{sourceRef}}',
-              })),
-              completionInApp: false,
-            },
-            policy = ok(
-              await request(approvals + '/policies', {
-                method: 'POST',
-                body: {
-                  expectedOwnerKey: owner.ownerKey,
-                  requestId: randomUUID(),
-                  expectedLatestId: null,
-                  effectiveFrom: fx.today,
-                  definition,
-                  reason: 'Synthetic rate policy',
-                },
-              }),
-              201,
-            ).policy,
-            approval = ok(
-              await request(approvals + '/requests', {
-                method: 'POST',
-                body: {
-                  expectedOwnerKey: owner.ownerKey,
-                  requestId: randomUUID(),
-                  candidateId: candidate.id,
-                  expectedOwnerEventId: owner.owner.id,
-                  expectedPolicyId: policy.id,
-                  reason: 'Synthetic review',
-                },
-              }),
-              201,
-            ).approval,
-            actor = ok(await request(approvals + '/instances/' + approval.id, { identity: ids.second }));
-          ok(
-            await request(approvals + '/instances/' + approval.id + '/decisions', {
-              method: 'POST',
-              identity: ids.second,
-              body: {
-                expectedOwnerKey: actor.ownerKey,
-                requestId: randomUUID(),
-                expectedCandidateId: candidate.id,
-                expectedOwnerEventId: owner.owner.id,
-                expectedPolicyId: policy.id,
-                expectedSequence: 0,
-                decision: 'Approved',
-                reason: 'Synthetic source review',
-              },
-            }),
-            201,
-          );
-          const inspected = ok(await request(adoptions + '/candidates/' + candidate.id)),
-            r = inspected.reviews[0];
-          return ok(
-            await request(adoptions + '/adoptions', {
-              method: 'POST',
-              body: {
-                expectedOwnerKey: inspected.ownerKey,
-                requestId: randomUUID(),
-                candidateId: candidate.id,
-                expectedOwnerEventId: r.ownerEventId,
-                approvalId: r.approvalId,
-                expectedPolicyId: r.policyId,
-                expectedFinalTransitionId: r.finalTransitionId,
-                reason: 'Synthetic source adoption',
-              },
-            }),
-            201,
-          ).adoption;
-        };
+      const makeRate=(kind,amount,priority)=>adoptHourlyRate({request,ids,contractId:roots.contract.id,workerId:f.ownerId,
+        today:fx.today,end,currency:'USD'},kind,amount,priority);
       const billing = await makeRate('billing', '100.1234'),
         cost = await makeRate('cost', '40.0020');
       const fixture = await startFixtureServer({

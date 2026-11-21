@@ -23,7 +23,7 @@ import {
   captureCommercialDraftingContext, commercialDraftingService, isCommercialDraftingContextCurrent,
   COMMERCIAL_CONTRACT_MODELS, ENGAGEMENT_MODELS,
   type CommercialDraftingContext, type CommercialWorkspace, type ContractDetail,
-  retainerPolicyLabels, type RetainerCapacityPolicy, type RetainerPeriod, type ContractModel, type EngagementModel, type CreateContractInput, type AppendContractVersionInput,
+  retainerOverageLabels, type RetainerOveragePolicy, retainerPolicyLabels, type RetainerCapacityPolicy, type RetainerPeriod, type ContractModel, type EngagementModel, type CreateContractInput, type AppendContractVersionInput,
   type CreateEngagementInput, type CreatePurchaseOrderInput, type CreateMilestoneInput,
 } from '../services/commercialDrafting';
 
@@ -31,6 +31,7 @@ type DraftKind = 'contract' | 'revision' | 'engagement' | 'purchaseOrder' | 'mil
 type Draft = {
   kind: DraftKind; lease: number; contractId: string; expectedVersion: number; number: string; clientId: string;
   name: string; code: string; model: EngagementModel; startsOn: string; endsOn: string; effectiveFrom: string;
+  retainerOveragePolicy?: RetainerOveragePolicy | null;
   retainerCapacityPolicy?: RetainerCapacityPolicy | null;
   retainerPeriods: RetainerPeriod[];
   installments: {dueOn: string; amount: string}[];
@@ -193,7 +194,7 @@ export const CommercialDraftingWorkspace = () => {
     const includeSchedule = draft.model === 'fixed_fee' && (draft.installments.length > 0 || hadSchedule);
     const terms = {name: draft.name, model: draft.model as ContractModel, startsOn: draft.startsOn, endsOn: draft.endsOn,
       effectiveFrom: draft.effectiveFrom, currency: draft.currency, value: draft.value, billingTerms: draft.billingTerms,
-      ...(draft.model === 'retainer' ? {retainerPeriods: draft.retainerPeriods, retainerCapacityPolicy:draft.retainerCapacityPolicy} : {}),
+      ...(draft.model === 'retainer' ? {retainerPeriods: draft.retainerPeriods, retainerCapacityPolicy:draft.retainerCapacityPolicy,retainerOveragePolicy:draft.retainerOveragePolicy} : {}),
       ...(includeSchedule ? {installments: draft.installments} : {}),
       documents: draft.documents.map(document => ({...document})), reason: draft.reason};
     try {
@@ -321,6 +322,11 @@ export const CommercialDraftingWorkspace = () => {
                 {textInput('value', 'Contract value (decimal)', {pattern: moneyPattern, maxLength: 19})}
                 {draft.model === 'retainer' && <fieldset className="min-w-0 md:col-span-2">
                   <legend>Retainer service periods</legend>
+                  <Field label="Excess-hour pricing"><select className={inputClass} value={draft.retainerOveragePolicy ?? ''}
+                    onChange={e=>edit({retainerOveragePolicy:(e.target.value || null) as RetainerOveragePolicy | null})}>
+                    <option value="">Pricing unspecified</option>
+                    {Object.entries(retainerOverageLabels).map(([key,label])=><option key={key} value={key}>{label}</option>)}
+                  </select></Field>
                   <Field label="Capacity consumption and unused hours"><select className={inputClass} value={draft.retainerCapacityPolicy ?? ''}
                     onChange={e=>edit({retainerCapacityPolicy:(e.target.value || null) as RetainerCapacityPolicy | null})}>
                     <option value="">Policy unspecified</option>
@@ -417,6 +423,7 @@ export const CommercialDraftingWorkspace = () => {
               <p className="mt-2 text-sm">Effective {version.effectiveFrom}. Coverage {version.startsOn} to {version.endsOn}. {modelLabel(version.model)}.</p>
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
               {version.retainerPeriods?.length ? <div><h4>Retainer service periods</h4>
+                <p>{version.retainerOveragePolicy ? retainerOverageLabels[version.retainerOveragePolicy] : 'Excess-hour pricing unspecified'}</p>
                 <p>{version.retainerCapacityPolicy ? retainerPolicyLabels[version.retainerCapacityPolicy] : 'Capacity policy unspecified'}</p>
                 <ul>{version.retainerPeriods.map(p => <li key={p.startsOn}>{p.startsOn} through {p.endsOn} · {p.includedHours} included hours · {version.currency} {p.baseFee} base fee</li>)}</ul></div> : null}
               {version.retainerPeriods?.length && state.context && hasRatePermission('employees.view') && hasRatePermission('reports.view_utilization')

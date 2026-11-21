@@ -31,9 +31,11 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       await client.query('commit');begun=false;res.status(write?201:200).json(result);
     }catch(error){
       if(begun)await client.query('rollback').catch(()=>{});
-      if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE'].includes(error?.code)){
+      if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
       }else if(error?.code==='23505')res.status(409).json({error:{code:'COMMERCIAL_DUPLICATE',message:'This commercial identifier or version already exists in the selected scope.'}});
+      else if(error?.code==='23514' && error.constraint==='retainer_overage_policy_valid') res.status(422).json({error:{
+        code:'COMMERCIAL_RETAINER_OVERAGE_INVALID',message:'Overage terms require a retainer capacity policy.'}});
       else if(error?.code==='23514' && error.constraint==='retainer_capacity_policy_valid') res.status(422).json({error:{
         code:'COMMERCIAL_RETAINER_POLICY_INVALID',message:'A capacity policy requires a retainer contract with dated service periods.'}});
       else if(error?.code==='23514' && error.constraint==='retainer_periods_valid') res.status(422).json({error:{
@@ -55,6 +57,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/lifecycle/:type/:id/transitions',handle(lifecycleTransitionSchema,true,(client,req,data)=>transitionLifecycle(client,req,req.params.type,req.params.id,data,audit),'commercial.lifecycle.manage'));
   router.post('/lifecycle/projects',handle(projectBindingSchema,true,(client,req,data)=>createGovernedProject(client,req,data,audit),'commercial.lifecycle.manage'));
   router.get('/workspace',handle(workspaceQuerySchema,false,(client,req,data)=>getWorkspace(client,req,data)));
+  router.get('/contracts/:id/versions/:versionId/retainer-overage-preview',(req,res,next)=>{res.set('Cache-Control','no-store');next();},handle(lifecycleQuerySchema,false,
+    (client,req)=>getRetainerConsumption(client,req,buildEmployeeScopeWhere,true)));
   router.get('/contracts/:id/versions/:versionId/retainer-consumption',handle(lifecycleQuerySchema,false,
     (client,req)=>getRetainerConsumption(client,req,buildEmployeeScopeWhere)));
   router.get('/contracts/:id',handle(workspaceQuerySchema,false,(client,req)=>getContract(client,req,req.params.id)));
