@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Milestone acceptance reviews can be cancelled at the stage a manager inspected. Finance can recover the cancellation receipt after a lost response.
+
 Rate approval managers must reload a billing or cost rate review if a reviewer advances the stage before cancellation. Switching reviews clears the previous decision and reason.
 
 T&M billing cancellations apply to the inspected review stage. If another reviewer advances it, finance must reopen the current stage before cancelling.

@@ -372,6 +372,46 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         const managerKey = await readApprovalOwner(request, ids.manager);
         const declined = await another('SYN-MILESTONE-2');
         assert.equal(ok(await firstDecision(declined.id, 'Rejected'), 201).approval.state.status, 'Rejected');
+        const cancellable = await another('SYN-CANCEL-STAGE');
+        const inspectCancellation = async () => {
+          await page.getByRole('button', { name: 'Load milestone billing reviews' }).click();
+          await page.getByLabel('Milestone billing review', { exact: true }).selectOption(cancellable.id);
+          await page.getByRole('button', { name: 'Inspect milestone review' }).click();
+        };
+        await inspectCancellation();
+        const reason = page.getByLabel('Milestone cancellation reason');
+        await reason.fill('Synthetic initial-stage draft');
+        ok(await firstDecision(cancellable.id, 'Approved'), 201);
+        const cancelPath = route + '/instances/' + cancellable.id + '/cancellations';
+        const unpinned = await request(cancelPath, { method: 'POST', identity: ids.manager,
+          body: { expectedOwnerKey: managerKey, requestId: randomUUID(), reason: 'Synthetic earlier client' } });
+        assert.equal(unpinned.status, 409);
+        assert.equal(unpinned.body.error.code, 'MILESTONE_BILLING_STAGE_CHANGED');
+        const refused = page.waitForResponse(r => r.url().endsWith(cancelPath));
+        await page.getByRole('button', { name: 'Cancel milestone review' }).click();
+        assert.equal((await refused).status(), 409);
+        await page.getByText(/The milestone review stage changed/).waitFor();
+        await inspectCancellation();
+        await page.getByText(/Completed decisions: 1/).waitFor();
+        assert.equal(await reason.inputValue(), '');
+        await reason.fill('Synthetic current-stage cancellation');
+        let command;
+        await page.route('**' + cancelPath, async interceptor => {
+          command = interceptor.request().postDataJSON();
+          const response = await interceptor.fetch();
+          assert.equal(response.status(), 201);
+          await interceptor.abort('failed');
+        }, { times: 1 });
+        await page.getByRole('button', { name: 'Cancel milestone review' }).click();
+        await page.getByText(/The operation could not be confirmed/).waitFor();
+        assert.equal(command.expectedSequence, 1);
+        await page.getByRole('button', { name: 'Read original milestone receipt' }).click();
+        await page.getByText(/confirmed by a read-only receipt/).waitFor();
+        const replay = ok(await request(cancelPath, { method: 'POST', identity: ids.second, body: command }));
+        assert.equal(replay.replayed, true);
+        assert.equal(replay.approval.state.status, 'Cancelled');
+        assert.equal((await request(cancelPath, { method: 'POST', identity: ids.second,
+          body: { ...command, expectedSequence: 0 } })).status, 409);
         const stale = await another('SYN-MILESTONE-3');
         ok(
           await request(route + '/policies', {
@@ -458,8 +498,8 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
           assert.equal(ids.length, count);
           assert.equal(new Set(ids).size, count);
         };
-        await assertOptions('Milestone billing review', 53);
-        await assertOptions('Billing milestone', 53);
+        await assertOptions('Milestone billing review', 54);
+        await assertOptions('Billing milestone', 54);
         await page.getByLabel('Milestone review policy', { exact: true }).selectOption(current.id);
         assert.equal(await page.getByLabel('Milestone policy effective from').isEnabled(), true);
         await page.getByRole('button', { name: 'Load milestone register', exact: true }).click();
