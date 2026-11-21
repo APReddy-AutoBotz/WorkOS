@@ -1,7 +1,8 @@
 // Shared lock order closes legacy CRUD/import versus explicit promotion races.
 // A database trigger is the final guard, including writers added in future.
+export const commercialLifecycleLockKey=scope=>`commercial-lifecycle:${scope.organizationId}:${scope.legalEntityId}`;
 export const lockCommercialLifecycle = (client,scope) => client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',
-  [`commercial-lifecycle:${scope.organizationId}:${scope.legalEntityId}`]);
+  [commercialLifecycleLockKey(scope)]);
 export const assertLegacyProjectMutationAllowed = async (client,scope,projectIds) => {
   await lockCommercialLifecycle(client,scope);
   const result=await client.query(`select 1 from commercial_project_bindings where organization_id=$1 and legal_entity_id=$2 and project_id=any($3::text[]) limit 1`,

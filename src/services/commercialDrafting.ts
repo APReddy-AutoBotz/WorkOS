@@ -210,10 +210,10 @@ export const normalizeCommercialWorkspace = (value: unknown): CommercialWorkspac
 };
 
 const PREFIX = '/api/v1/commercial-drafting';
-const request = async <T>(context: CommercialDraftingContext | null, method: 'GET' | 'POST', path: string, body: unknown, normalize: (value: unknown) => T) => {
-  const owner = assertCommercialDraftingContext(context, method === 'POST');
+const request = async <T>(context: CommercialDraftingContext | null, method: 'GET' | 'POST', path: string, body: unknown, normalize: (value: unknown) => T, manage=method==='POST') => {
+  const owner = assertCommercialDraftingContext(context, manage);
   const result = await api.requestWithContext<unknown>(method, `${PREFIX}${path}`, body, owner.request);
-  assertCommercialDraftingContext(owner, method === 'POST');
+  assertCommercialDraftingContext(owner, manage);
   return normalize(result);
 };
 // Explicit allowlists keep strict commands free of response/actor/scope fields.
@@ -245,7 +245,11 @@ const installmentReceipts = (value: unknown) => rows(object(value).receipts, ent
 const statementHash=(v:unknown)=>{const s=text(v);if (!/^[a-f0-9]{64}$/.test(s)) throw invalid();return s;};
 const statementReceipt=(value:unknown)=>{
   const r=object(value);
-  return {id:text(r.id),sequence:integer(r.sequence,1),previousId:nullableText(r.previousId),sourceHash:statementHash(r.sourceHash),
+  const d=r.review==null ? null : object(r.review);
+  if (d && d.statementId!==r.id) throw invalid();
+  const review=d && {id:text(d.id),decision:model(d.decision,['Approved','Rejected'] as const),reason:text(d.reason),
+    actorId:text(d.actorId),activeRole:text(d.activeRole),createdAt:text(d.createdAt)};
+  return {review,currentPreparer:r.currentPreparer===true,id:text(r.id),sequence:integer(r.sequence,1),previousId:nullableText(r.previousId),sourceHash:statementHash(r.sourceHash),
     actorId:text(r.actorId),activeRole:text(r.activeRole),createdAt:text(r.createdAt),reason:text(r.reason)};
 };
 const statementEvidence=(value:unknown,contractId:string,version:ContractTerms,startsOn:string)=>{
@@ -270,19 +274,22 @@ const statementEvidence=(value:unknown,contractId:string,version:ContractTerms,s
 };
 export const commercialDraftingService = {
   retainerStatement: (contractId:string,version:ContractTerms,startsOn:string,context:CommercialDraftingContext,
-    action?: {statementId?:string;entriesOffset?:number}|{sourceHash:string;previousId:string|null;reason:string})=>{
-    const selected=action && 'statementId' in action ? action.statementId : null;
+    action?: {statementId?:string;entriesOffset?:number}|{sourceHash:string;previousId:string|null;reason:string;renewReviewIdentity?:true}|
+      {sourceHash:string;statementId:string;decision:'Approved'|'Rejected';reason:string},reviewOnly=false)=>{
+    const reviewing=!!(action && 'decision' in action);
+    const selected=!reviewing && action && 'statementId' in action ? action.statementId : null;
     const query=new URLSearchParams();
     if (selected) query.set('statementId',selected);
     if (action && 'entriesOffset' in action) query.set('entriesOffset',String(action.entriesOffset));
     const command=action && 'sourceHash' in action ? action : undefined;
     const path=`/contracts/${encodeURIComponent(contractId)}/versions/${encodeURIComponent(version.id)}/retainer-statements/${encodeURIComponent(startsOn)}`;
-    return request(context,command?'POST':'GET',path+(query.size?'?'+query.toString():''),command,value=>{
+    return request(context,command?'POST':'GET',path+(reviewOnly||reviewing?'/review':'')+(query.size?'?'+query.toString():''),command,value=>{
       const row=object(value);
       if (row.contractId!==contractId || row.versionId!==version.id || row.startsOn!==startsOn) throw invalid();
       if (selected || command) {
         const record=statementReceipt(row.record);
         if (selected && record.id!==selected || command && record.sourceHash!==command.sourceHash) throw invalid();
+        if (action && 'decision' in action && (record.id!==action.statementId || record.review?.decision!==action.decision || record.review?.reason!==action.reason)) throw invalid();
         return {record,evidence:selected ? statementEvidence(object(row.record).evidence,contractId,version,startsOn) : null,
           sourceHash:null,history:[]};
       }
@@ -290,7 +297,7 @@ export const commercialDraftingService = {
       if (Boolean(hash)!==Boolean(row.evidence)) throw invalid();
       return {record:null,evidence:hash ? statementEvidence(row.evidence,contractId,version,startsOn) : null,
         sourceHash:hash,history:rows(row.history,statementReceipt)};
-    });
+    },Boolean(command && !reviewing));
   },
   installmentRegister: (versionId:string, context:CommercialDraftingContext,
     command?:{installment:number; engagementId:string; reason:string}) =>

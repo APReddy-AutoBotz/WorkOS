@@ -302,6 +302,16 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     await page.getByText('Period price preview · GBP 3500.00 · base fee 3500.00 · overage 0.00',{exact:true}).waitFor();
     await button('Review period statement').click();
     await page.getByRole('heading',{name:'Current period evidence'}).waitFor();
+    const reviewRole='HR', finance={...identities.reader,role:reviewRole},alias={...identities.denied,role:reviewRole};
+    const reviewGrants=['commercial.contracts.view','employees.view','reports.view_utilization','commercial.rate_candidates.view','commercial.retainer_statements.decide'];
+    await pool.query("insert into roles(name) values($1) on conflict do nothing",[reviewRole]);
+    for (const identity of [finance,alias]) await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name=$2 on conflict do nothing",[identity.id,reviewRole]);
+    await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+      values('syn-retainer-reviewer','SYN-RETAINER-REVIEWER','Synthetic reviewer','reviewer-retainer@example.test','Manager','Delivery','US','director-commercial','Active',$1,$2)`,[scope.organizationId,scope.legalEntityId]);
+    await pool.query("update users set employee_record_id=$1 where id=$2",[ownerId,identities.manager.id]);
+    await pool.query("update users set employee_record_id='syn-retainer-reviewer' where id=$1",[finance.id]);
+    for (const role of [reviewRole,'Admin']) await pool.query(`insert into role_permissions(role_name,permission_key,enabled)
+      select $1,k,true from unnest($2::text[]) k on conflict(role_name,permission_key) do update set enabled=true`,[role,reviewGrants]);
     const scopedStatementPath=consumptionPath.replace('retainer-consumption','retainer-statements/2020-01-01');
     const candidate=(await apiRequest(scopedStatementPath)).body;
     await pool.query(`create function reject_test_statement_audit() returns trigger language plpgsql as $$
@@ -328,6 +338,68 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     assert.equal((await apiRequest(statementPath.replace('2020-01-01','2099-01-01'))).status,409);
     await assert.rejects(pool.query('update commercial_retainer_statements set reason=$1 where id=$2',['Synthetic rewrite',statementRecord.id]));
     assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Retainer Statement' and entity_id=$1",[statementRecord.id])).rows[0].n,1);
+    const reviewPath=statementPath+'/review', review=(record,decision,identity=finance)=>apiRequest(reviewPath,{method:'POST',identity,
+      body:{statementId:record.id,sourceHash:record.sourceHash,decision,reason:'Synthetic independent review'}});
+    assert.equal((await review(statementRecord,'Approved',identities.manager)).status,403);
+    assert.equal((await review(statementRecord,'Approved',alias)).status,403);
+    await pool.query("update users set employee_record_id=null where id=$1",[actorId]);
+    await pool.query("update users set employee_record_id=$1 where id=$2",[ownerId,alias.id]);
+    assert.equal((await review(statementRecord,'Approved',alias)).status,403,'a reassigned preparer identity cannot review the original statement');
+    await pool.query("update users set employee_record_id=null where id=$1",[alias.id]);
+    await pool.query("update users set employee_record_id=$1 where id=$2",[ownerId,actorId]);
+    assert.equal((await review(statementRecord,'Approved')).status,403,'a restored worker link must invalidate the old preparer identity');
+    const reprepare=async prior=>{
+      const res=await apiRequest(statementPath,{method:'POST',body:{sourceHash:prior.sourceHash,previousId:prior.id,reason:'Synthetic renewed preparation'}});
+      assert.equal(res.status,201,JSON.stringify(res.body));return res.body.record;
+    };
+    const second=await reprepare(statementRecord);
+    assert.equal((await review(statementRecord,'Approved')).status,409,'superseded statements cannot be approved');
+    await pool.query("update users set employee_record_id=null where id=$1",[finance.id]);
+    await pool.query("update users set employee_record_id='syn-retainer-reviewer' where id=$1",[finance.id]);
+    assert.equal((await review(second,'Approved')).status,403,'a changed reviewer link requires a fresh preparation');
+    const renewal=await apiRequest(statementPath,{method:'POST',body:{sourceHash:second.sourceHash,previousId:second.id,
+      renewReviewIdentity:true,reason:'Renew after reviewer identity was confirmed'}});
+    assert.equal(renewal.status,201,JSON.stringify(renewal.body));const renewed=renewal.body.record;
+    const rejected=await review(renewed,'Rejected');
+    assert.equal(rejected.status,201,JSON.stringify(rejected.body));assert.equal(rejected.body.record.review.decision,'Rejected');
+    assert.equal((await review(renewed,'Rejected')).body.record.review.id,rejected.body.record.review.id);
+    assert.equal((await review(renewed,'Approved')).status,409);
+    const pending=await reprepare(renewed);
+    const hold=await pool.connect();
+    let superseding,concurrentReview;
+    const waitForLock=async count=>{
+      for (let i=0;i<150;i++) {
+        const q=await pool.query("select count(*)::int n from pg_stat_activity where datname=current_database() and wait_event='advisory'");
+        if (q.rows[0].n>=count) return;
+        await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      assert.fail('Expected statement writer to wait for the commercial lock');
+    };
+    try {
+      await hold.query('begin');
+      await hold.query("select pg_advisory_xact_lock(hashtextextended($1,0))",['commercial-lifecycle:'+scope.organizationId+':'+scope.legalEntityId]);
+      superseding=apiRequest(statementPath,{method:'POST',body:{sourceHash:pending.sourceHash,previousId:pending.id,
+        renewReviewIdentity:true,reason:'Synthetic concurrency review renewal'}});
+      await waitForLock(1);
+      concurrentReview=review(pending,'Approved');await waitForLock(2);
+    } finally {await hold.query('rollback');hold.release();}
+    const replacement=await superseding;
+    assert.equal(replacement.status,201,JSON.stringify(replacement.body));const third=replacement.body.record;
+    assert.equal((await concurrentReview).status,409,'queued reviewer must observe the committed superseding statement');
+    const independent=await createContext(finance,reviewGrants);
+    await independent.page.goto(`${baseUrl}/tests/fixtures/commercial-drafting.html?live=1`);
+    const reviewButton=name=>independent.page.getByRole('button',{name,exact:true});
+    await reviewButton('Inspect SYN-RETAINER-PERIOD').click();
+    await reviewButton('Inspect approved retainer hours').click();await reviewButton('Review period statement').click();
+    await reviewButton('Inspect statement 5').click();
+    await independent.page.getByLabel('Review reason').fill('Synthetic browser decision');
+    await reviewButton('Approve statement').click();
+    await independent.page.getByText('Statement approved. Reload to inspect the decision.').waitFor();
+    const archived=await apiRequest(reviewPath+'?statementId='+third.id,{identity:finance});
+    assert.equal(archived.status,200);assert.equal(archived.body.record.review.decision,'Approved');
+    assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Retainer Statement Review'")).rows[0].n,2);
+    await assert.rejects(pool.query("update commercial_retainer_reviews set reason='Synthetic rewrite' where statement_id=$1",[third.id]));
+    await independent.context.close();
     assert.equal((await apiRequest(consumptionPath.replace(savedRetainer.result.versions[0].id,versionId))).status,404);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");
     assert.equal((await apiRequest(consumptionPath)).status,403);
