@@ -1,7 +1,13 @@
-create table public.account_session_generations (
-  user_id uuid primary key references public.users(id) on delete cascade,
-  generation integer not null check (generation > 0)
-);
+-- Each account-wide event advances the generation exactly once. The existing
+-- append-only guard retains the event independently of account lifecycle changes.
+alter table public.session_revocations drop constraint session_revocations_source_check,
+  drop constraint session_revocations_reason_check,
+  add constraint session_revocation_kind check (
+    (source = 'Web' and reason = 'Logout') or
+    (source = 'Database' and reason = 'AccountRevocation' and expires_at = 'infinity')
+  );
+create index session_account_generation_idx on public.session_revocations(user_id)
+  where reason = 'AccountRevocation';
 
 -- Deployment-wide authority. Grant execution only to designated incident responders.
 create function public.revoke_account_sessions(target uuid, expected_generation integer, incident_reference text)
@@ -15,14 +21,14 @@ begin
   end if;
   perform 1 from public.users where id = target for update;
   if not found then raise exception 'Account or expected session generation did not match'; end if;
-  if expected_generation = 0 then
-    insert into public.account_session_generations(user_id, generation) values (target, 1)
-      on conflict (user_id) do nothing returning generation into next_generation;
-  else
-    update public.account_session_generations set generation = generation + 1
-      where user_id = target and generation = expected_generation returning generation into next_generation;
+  select count(*)::integer + 1 into next_generation from public.session_revocations
+    where user_id = target and reason = 'AccountRevocation';
+  if expected_generation is distinct from next_generation - 1 then
+    raise exception 'Account or expected session generation did not match';
   end if;
-  if not found then raise exception 'Account or expected session generation did not match'; end if;
+  insert into public.session_revocations(session_hash, user_id, active_role, source, reason, expires_at)
+    values (encode(sha256(convert_to('account-generation:' || target || ':' || next_generation, 'UTF8')), 'hex'),
+      target, operator_role, 'Database', 'AccountRevocation', 'infinity');
 
   insert into public.audit_logs (user_id, user_name, user_role, active_role, source, module, action,
     entity_type, entity_id, old_value, new_value, reason, details, created_at)
