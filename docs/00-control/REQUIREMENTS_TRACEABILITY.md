@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-NFR-UX-006 and WOS-NFR-OBS-005 — bulk timesheet approval previews the filtered selection, validates decisions individually via the approval API and reads back each current status. The approval browser journey covers cancellation, partial completion, lost responses, repeated confirmation and unavailable readback.
+
 WOS-NFR-SEC-004 — timesheet approval binds single and bulk decisions to the loaded account, role and organization scope. The browser/API/PostgreSQL journey verifies that a stale rejection sends no request and that a late acknowledgement cannot repopulate a closed view.
 
 WOS-NFR-PERF-006 — Timesheet Ops Export formats filtered entries in bounded batches. `test:timesheet-export-browser` exercises browser input during a 10,000-entry export, CSV row integrity and cancellation on scope switch. Server-side export isolation remains a separate release criterion.

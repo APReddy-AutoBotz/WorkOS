@@ -34,6 +34,9 @@ import {canonicalHours} from '../../shared/work-hours.mjs';
 const formatHours=(value:number)=>`${canonicalHours(value)}h`;
 
 import { productConfig } from '../config/productConfig';
+const sheetKey = (sheet: TimesheetSummary) => sheet.id || `${sheet.employeeId}:${sheet.weekEnding}`;
+type DecisionResult = {key: string; label: string; status: string; acknowledged: boolean};
+
 function approvalContext() {
   const user = authService.getCurrentUser();
   const scope = getOrganizationScope();
@@ -57,11 +60,17 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rejectionTarget, setRejectionTarget] = useState<TimesheetSummary | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectionError, setRejectionError] = useState('');
   const [actionNotice, setActionNotice] = useState('');
+  const [preview, setPreview] = useState<TimesheetSummary[] | null>(null);
+  const [results, setResults] = useState<DecisionResult[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [needsReload, setNeedsReload] = useState(false);
+  const decisionLock = useRef(false);
   const user = authService.getCurrentUser();
 
   const [owner] = useState(approvalContext);
@@ -120,8 +129,8 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
         setEmployees(empData);
         setProjects(projData);
         setAllocations(allocData);
-      } catch (error) {
-        console.error('Failed to fetch data', error);
+      } catch {
+        if (!disposed && isCurrent()) setLoadFailed(true);
       } finally {
         if (!disposed && isCurrent()) setLoading(false);
       }
@@ -176,14 +185,25 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
     const tsData = await timesheetService.getAll();
     if (!isCurrent()) return false;
     setTimesheets(tsData);
-    return true;
+    return tsData;
   };
 
   const runDecision = async (operation: () => Promise<void>) => {
+    if (decisionLock.current || needsReload || !isCurrent()) return;
+    decisionLock.current = true;
+    setBusy(true);
+    setResults([]);
+    setActionNotice('');
     try {
       await operation();
     } catch {
-      if (isCurrent()) setActionNotice('The decision could not be confirmed. Reload approvals to check the latest status before retrying.');
+      if (isCurrent()) {
+        setNeedsReload(true);
+        setActionNotice('The latest decision status could not be confirmed. Reload approvals before retrying.');
+      }
+    } finally {
+      decisionLock.current = false;
+      if (isCurrent()) setBusy(false);
     }
   };
 
@@ -235,18 +255,31 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
 
   const handleBulkApprove = async () => {
     if (!isCurrent()) return;
-    if (!submittedFilteredTimesheets.length) {
-      setActionNotice('No submitted timesheets are available in the current filter scope.');
-      return;
+    if (!preview?.length) return;
+    const selection = preview;
+    setPreview(null);
+    const acknowledged = new Set<string>();
+    for (let offset = 0; offset < selection.length; offset += 4) {
+      if (!isCurrent()) return;
+      const batch = selection.slice(offset, offset + 4);
+      const outcomes = await Promise.allSettled(batch.map(ts => timesheetService.approve(sheetKey(ts), undefined, isCurrent)));
+      outcomes.forEach((outcome, index) => {
+        if (outcome.status === 'fulfilled') acknowledged.add(sheetKey(batch[index]));
+      });
     }
-    await Promise.all(
-      submittedFilteredTimesheets.map(ts =>
-        timesheetService.approve(ts.id || `${ts.employeeId}:${ts.weekEnding}`, undefined, isCurrent)
-      )
-    );
-    if (!await refreshTimesheets() || !isCurrent()) return;
+    const latest = await refreshTimesheets();
+    if (!latest || !isCurrent()) return;
+    const byKey = new Map(latest.map(ts => [sheetKey(ts), ts]));
+    const rows = selection.map(ts => {
+      const key = sheetKey(ts);
+      const current = byKey.get(key);
+      return {key, label: current ? `${current.employeeName} · ${current.weekEnding}` : 'Timesheet outside current view',
+        status: current?.status ?? 'Unavailable', acknowledged: acknowledged.has(key)};
+    });
     setSelectedId(null);
-    setActionNotice(`Bulk approved ${submittedFilteredTimesheets.length} timesheets.`);
+    setResults(rows);
+    const approved = rows.filter(row => row.status === 'Approved').length;
+    setActionNotice(`Bulk review complete. ${approved} of ${rows.length} timesheets currently approved.`);
   };
 
   const handleExport = async () => {
@@ -286,6 +319,13 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
     );
   }
 
+  if (loadFailed) return (
+    <div role="alert" className="p-6">
+      <p>Approval records could not be loaded.</p>
+      <button className="btn-secondary mt-3" onClick={() => window.location.reload()}>Reload approvals</button>
+    </div>
+  );
+
   const roleTitle = user?.role === 'Admin' ? 'Timesheet Governance' : 'Timesheet Approval Desk';
   const roleSubtitle = user?.role === 'CountryDirector'
     ? 'Reviewing timesheets for resources mapped to your region/projects.'
@@ -310,7 +350,8 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
              </button>
              {user?.role === 'Admin' && (
                <button
-                  onClick={() => runDecision(handleBulkApprove)}
+                  disabled={busy || needsReload || !!preview || !!rejectionTarget || !submittedFilteredTimesheets.length}
+                  onClick={() => { if (isCurrent()) { setResults([]); setActionNotice(''); setPreview(submittedFilteredTimesheets); } }}
                   className="btn-primary py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-primary/20"
                >
                   <CheckCircle2 size={14} /> Bulk Approve
@@ -320,10 +361,25 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
         }
       />
 
+      {preview && (
+        <section aria-label="Bulk approval preview" className="mt-4 rounded-lg border p-4">
+          <p>Approve {preview.length} submitted timesheet{preview.length === 1 ? '' : 's'} from the selected filters?</p>
+          <details><summary>Review selected timesheets</summary><ul>
+            {preview.map(ts => <li key={sheetKey(ts)}>{ts.employeeName} · {ts.weekEnding}</li>)}
+          </ul></details>
+          <button className="btn-primary" onClick={() => runDecision(handleBulkApprove)}>Confirm bulk approval</button>
+          <button className="btn-secondary" onClick={() => setPreview(null)}>Cancel</button>
+        </section>
+      )}
       {actionNotice && (
         <div className="mt-4 flex items-start justify-between gap-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-800 shadow-sm">
-          <span>{actionNotice}</span>
-          <button onClick={() => setActionNotice('')} className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 hover:text-emerald-950">
+          <div role="status">{actionNotice}
+            {results.length > 0 && <details><summary>View individual outcomes</summary><ul>
+              {results.map(row => <li key={row.key}>{row.label} · {row.status} · {row.acknowledged ? 'Decision acknowledged' : 'No acknowledgement'}</li>)}
+            </ul></details>}
+          </div>
+          {needsReload && <button className="btn-secondary" onClick={() => window.location.reload()}>Reload approvals</button>}
+          <button disabled={needsReload} onClick={() => setActionNotice('')} className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 hover:text-emerald-950">
             Dismiss
           </button>
         </div>
@@ -519,13 +575,13 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
               {selectedTimesheet.status === 'Submitted' ? (
                 <div className="pt-8 border-t border-gray-100 mt-auto grid grid-cols-2 gap-4">
                   <button
-                    onClick={() => openRejectModal(selectedTimesheet)}
+                    disabled={busy || needsReload || !!preview} onClick={() => openRejectModal(selectedTimesheet)}
                     className="btn-secondary py-3 flex items-center justify-center gap-2 text-danger hover:bg-red-50 hover:border-red-100"
                   >
                     <XCircle size={16} /> Flag Review
                   </button>
                   <button
-                    onClick={() => runDecision(() => handleApprove(selectedTimesheet))}
+                    disabled={busy || needsReload || !!preview} onClick={() => runDecision(() => handleApprove(selectedTimesheet))}
                     className="btn-primary py-3 flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
                   >
                     <CheckCircle2 size={16} /> Approve
@@ -610,7 +666,7 @@ function ApprovalWorkspace({invalidate}: {invalidate: () => void}) {
                 <button onClick={closeRejectModal} className="btn-secondary px-5 py-3">
                   Cancel
                 </button>
-                <button onClick={() => runDecision(confirmReject)} className="btn-primary px-5 py-3 shadow-lg shadow-primary/20">
+                <button disabled={busy || needsReload || !!preview} onClick={() => runDecision(confirmReject)} className="btn-primary px-5 py-3 shadow-lg shadow-primary/20">
                   Send Back
                 </button>
               </div>

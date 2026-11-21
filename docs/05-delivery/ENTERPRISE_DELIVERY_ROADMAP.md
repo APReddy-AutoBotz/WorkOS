@@ -4,6 +4,8 @@ Updated 2026-11-19. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
+Bulk timesheet approvals support selection preview and per-record reconciliation after a partial failure or lost acknowledgement. The browser acceptance journey checks duplicate confirmation and failed refresh recovery.
+
 Timesheet approval discards rows, review details and unsent correction reasons on scope switch. The browser journey checks stale decision prevention and a delayed server acknowledgement.
 
 Production API traffic summaries provide the denominator for HTTP error rates and bounded latency measurements across replicas. The delivery monitor reports pending invoice alerts and recent integration and notification failures. External dispatch, buyer thresholds and alert routing remain open.
