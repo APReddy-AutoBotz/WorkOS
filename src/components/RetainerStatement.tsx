@@ -1,3 +1,4 @@
+import {hasRatePermission} from '../services/rateCandidates';
 import {useState} from 'react';
 import {commercialDraftingService, isCommercialDraftingContextCurrent, type CommercialDraftingContext, type ContractTerms} from '../services/commercialDrafting';
 
@@ -8,13 +9,16 @@ export function RetainerStatement({contractId,version,startsOn,context}:{
 }) {
   const [current,setCurrent]=useState<Result>(),[archived,setArchived]=useState<Result>();
   const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[reason,setReason]=useState('');
+  const canPrepare=context.canManage && hasRatePermission('commercial.retainer_statements.prepare');
+  const canDecide=hasRatePermission('commercial.retainer_statements.decide');
   async function load(action?:Parameters<typeof read>[4]) {
     if (busy || !isCommercialDraftingContextCurrent(context)) return;
     setBusy(true);setMessage('');setArchived(undefined);
     try {
-      const result=await read(contractId,version,startsOn,context,action);
+      const result=await read(contractId,version,startsOn,context,action,!canPrepare);
       if (!isCommercialDraftingContextCurrent(context)) return;
-      if (action && 'statementId' in action && action.statementId) setArchived(result);
+      if (action && 'decision' in action) {setCurrent(undefined);setReason('');setMessage('Statement '+action.decision.toLowerCase()+'. Reload to inspect the decision.');}
+      else if (action && 'statementId' in action && action.statementId) setArchived(result);
       else if (action && 'sourceHash' in action) {setCurrent(undefined);setReason('');setMessage('Statement prepared. Reload to inspect the saved evidence.');}
       else setCurrent(result);
     } catch {setCurrent(undefined);setMessage('Statement unavailable. Reload to check current evidence and saved history.');}
@@ -22,6 +26,8 @@ export function RetainerStatement({contractId,version,startsOn,context}:{
   }
   if (!isCommercialDraftingContextCurrent(context)) return null;
   const evidence=(archived ?? current)?.evidence;
+  const latest=current?.history[0];
+  const renewal=Boolean(current?.sourceHash && current.sourceHash===latest?.sourceHash && latest.currentPreparer && !latest.review);
   return <section aria-label={'Retainer statement '+startsOn}>
     <button type="button" disabled={busy} className="underline" onClick={()=>load()}>Review period statement</button>
     {message && <p role="status">{message}</p>}
@@ -37,12 +43,17 @@ export function RetainerStatement({contractId,version,startsOn,context}:{
       onClick={()=>load({statementId:archived.record!.previousId!})}>Inspect previous statement</button>}
     {current && !archived && !current.evidence && <p>Resolve excess-hour pricing to prepare this period.</p>}
     {current?.evidence && !current.evidence.closed && !archived && <p>This service period is open. Its statement can be prepared after the UTC end date.</p>}
-    {current?.sourceHash && current.evidence?.closed && !archived && current.sourceHash!==current.history[0]?.sourceHash && <div>
+    {archived?.record?.review && <p>{archived.record.review.decision} · {archived.record.review.activeRole} · {archived.record.review.createdAt} · {archived.record.review.reason}</p>}
+    {canDecide && archived?.record?.currentPreparer && !archived.record.review && current?.history[0]?.id===archived.record.id &&
+      current.sourceHash===archived.record.sourceHash && <div><label>Review reason<input value={reason} maxLength={1000} onChange={e=>setReason(e.target.value)}/></label>
+      {(['Approved','Rejected'] as const).map(decision=><button key={decision} type="button" disabled={busy || reason.trim().length<3}
+        onClick={()=>load({statementId:archived.record!.id,sourceHash:archived.record!.sourceHash,decision,reason:reason.trim()})}>{decision==='Approved'?'Approve statement':'Reject statement'}</button>)}</div>}
+    {canPrepare && current?.sourceHash && current.evidence?.closed && !archived && (renewal || current.sourceHash!==latest?.sourceHash || !latest?.currentPreparer || latest?.review?.decision==='Rejected') && <div>
       <label>Statement reason<input value={reason} maxLength={1000} onChange={e=>setReason(e.target.value)}/></label>
-      <button type="button" disabled={busy || reason.trim().length<3} onClick={()=>load({sourceHash:current.sourceHash!,
-        previousId:current.history[0]?.id ?? null,reason:reason.trim()})}>Prepare statement</button></div>}
+      <button type="button" disabled={busy || reason.trim().length<3 || (renewal && latest?.reason===reason.trim())} onClick={()=>load({sourceHash:current.sourceHash!,
+        previousId:latest?.id ?? null,reason:reason.trim(),...(renewal ? {renewReviewIdentity:true as const} : {})})}>{renewal?'Renew statement for review':'Prepare statement'}</button></div>}
     {current && current.history.length>0 && <ol>{current.history.map(r=><li key={r.id}>
       <button type="button" disabled={busy} className="underline" onClick={()=>load({statementId:r.id})}>Inspect statement {r.sequence}</button>
-      {' · '}{r.createdAt} · {r.activeRole} · {r.reason}</li>)}</ol>}
+      {' · '}{r.createdAt} · {r.activeRole} · {r.reason} · {r.review?.decision ?? 'Awaiting review'}</li>)}</ol>}
   </section>;
 }
