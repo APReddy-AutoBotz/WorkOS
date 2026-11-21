@@ -731,8 +731,10 @@ export const createInvoiceCsvRouter = (o) => {
         ],
         x = (
           await c.query(
-            "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16,$17)returning *,trim_scale(total)::text total",
-            [...confirmationArgs,row.source_type],
+            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(row.source_type)
+              ? "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16,$17)returning *,trim_scale(total)::text total"
+              : "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16)returning *,trim_scale(total)::text total",
+            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(row.source_type) ? [...confirmationArgs,row.source_type] : confirmationArgs,
           )
         ).rows[0];
       await o.audit(c, r, {
