@@ -107,8 +107,9 @@ const cleanEnvironment = (overrides = {}) => {
     WOS_ENTRA_FIXTURE_ORIGIN: `https://localhost:${discoveryPort}`,
     IDENTITY_DISCOVERY_TIMEOUT_MS: '750',
     IDENTITY_DISCOVERY_RECHECK_MS: '5000',
-    // This fixture makes exactly nine callback requests in one loopback-IP bucket.
-    LOGIN_RATE_LIMIT: '13',
+    // Allow the bounded set of positive and negative callbacks from the test provider.
+    LOGIN_RATE_LIMIT: '14',
+    API_SESSION_TTL_HOURS: '8',
     EMAIL_PROVIDER: 'mock',
     TEAMS_PROVIDER: 'mock',
     ...overrides,
@@ -380,6 +381,12 @@ try {
     expected: /ENTRA_CLIENT_SECRET must be a configured non-placeholder secret/,
   }));
 
+  await pool.query('insert into deployment_session_policy(lifetime_ms) values (28800000) on conflict (singleton) do update set lifetime_ms=excluded.lifetime_ms');
+  results.push(await assertStartupFailure({
+    name: 'session-lifetime-mismatch', port: positivePort + 16,
+    overrides: {API_SESSION_TTL_HOURS: '4'}, expected: /must match the audited database policy/,
+  }));
+
   const beforeUsers = Number((await pool.query('select count(*)::int as count from users')).rows[0].count);
   const beforeEmployees = Number((await pool.query('select count(*)::int as count from employees')).rows[0].count);
   assert.equal(beforeUsers, 0, 'production identity fixture must start with zero users');
@@ -527,6 +534,14 @@ try {
     on conflict(group_id) do update set role_name='Admin',active=true`);
   await pool.query(`insert into entra_group_role_mappings(id,group_id,group_name,role_name,active)
     values ('synthetic-production-role-alternative','mock-entra-group-secondary','Synthetic alternative administrator','Admin',true)`);
+  await pool.query('update deployment_session_policy set lifetime_ms=14400000');
+  const staleReadiness = await fetchWithTimeout(`${serviceOrigin}/api/health/ready`, {}, 1000);
+  assert.equal(staleReadiness.status, 503);
+  assert.equal((await staleReadiness.json()).sessionPolicy, 'unavailable');
+  await assertCallbackRejected({name: 'stale-session-policy', claimOverrides: {groups: ['mock-entra-group-employee']}});
+  await pool.query('update deployment_session_policy set lifetime_ms=28800000');
+
+  await pool.query("select public.revoke_account_sessions($1,0,'synthetic-provider-test')", [syntheticUser.rows[0].id]);
   const {state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = {groups:['mock-entra-group-employee','mock-entra-group-secondary']};
   const callbackUrl = `${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`;
@@ -545,6 +560,7 @@ try {
   const issuedToken = issuedSession.slice('workos_session='.length);
   const issuedClaims = JSON.parse(Buffer.from(issuedToken.split('.')[0], 'base64url').toString());
   assert.equal(issuedClaims.identityProvider, 'entra');
+  assert.equal(issuedClaims.sessionGeneration, 1);
   assert.deepEqual(issuedClaims.entraGroups, ['mock-entra-group-employee','mock-entra-group-secondary']);
   const mappedIdentity = await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers:{cookie:issuedSession}}, 2000);
   assert.equal(mappedIdentity.status, 200, 'A callback-issued mapped-only account remains authorized');

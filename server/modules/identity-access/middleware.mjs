@@ -71,7 +71,10 @@ export const createIdentityAccessMiddleware = ({
       return false;
     }
     try {
-      const revoked = await database.query('select 1 from session_revocations where session_hash=$1', [sessionHash(sid)]);
+      const revoked = await database.query(`select 1 from session_revocations where session_hash=$1
+        union all select 1 where (select count(*) from session_revocations
+          where user_id=$2 and reason='AccountRevocation') <> $3`,
+      [sessionHash(sid), payload.sub, payload.sessionGeneration ?? 0]);
       if (revoked.rowCount) {
         res.status(401).json({error: 'This session has been signed out', code: 'SESSION_REVOKED'});
         return false;

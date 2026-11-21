@@ -62,7 +62,19 @@ Prefer roll-forward for migrations that have accepted production data. Applicati
 
 Monitor startup/readiness, authentication failures, authorization denials, database health, background jobs, integrations, imports/exports, approvals, commercial jobs, batch exports and storage. Define thresholds, owners and response time before production.
 
+## Standard-profile API performance
+
+Set `WORKOS_TEST_DATABASE_URL` to a disposable loopback PostgreSQL service with database creation rights and run `npm run test:standard-profile`. The test creates and removes its own database. It seeds 250 workforce accounts, 25 clients, 50 projects, 250 assignments, eight weeks of approved work (10,000 entries), 2,000 submission audit rows and 50 commercial milestones.
+
+Each of three phases runs six rounds of 75 simultaneous requests. Throughout, 55 employees read their own histories and five administrators read the planned utilization report. In the first phase 15 employees save drafts. The same employees submit those drafts with their retained write tokens in the second phase. In the third, 15 distinct team leads approve their direct reports’ submissions. The test verifies the 90 hours and 90 timesheets at each transition, then checks retained submitter and reviewer identities. Times include local HTTP transport, authorization, database access and response decoding. The first round counts. The nearest-rank 95th percentile must stay within 2,000 ms for reads and 3,000 ms for each mutation type. Each report must complete within 5,000 ms. The job summary records sample counts, p95 and maximum durations. Migration 082c indexes entry lookups by timesheet and work date. The rehearsal checks the PostgreSQL execution plan after analyzing the populated database. Schedule the index build in the migration window because PostgreSQL can block entry writes while building it. For application rollback, retain the index and migration ledger. Repeat on buyer-equivalent infrastructure and record the machine, PostgreSQL version and release commit for deployment sign-off.
+
 ## Backup and restore
+
+1. Record the application commit, database version, migration ledger, backup timestamp and approved reconciliation totals. Configure buyer-controlled encrypted storage, access, retention and an off-site copy. Provision cluster roles, extension binaries, deployment secrets and external document storage through their respective recovery procedures.
+2. Use the matching PostgreSQL client tools. Supply connection details via a protected service file and password file. Run `pg_dump --format=custom --no-password --file=workos.dump --dbname=service=workos_backup` into a restricted directory. Verify the stored archive checksum against the digest recorded at backup time.
+3. Provision a fresh isolated recovery database with the expected owners. Verify the target service points to it, then run `pg_restore --single-transaction --exit-on-error --no-password --dbname=service=workos_recovery workos.dump`. Keep outbound integrations disabled. If restoration fails, investigate before retrying in a new recovery database.
+4. Start the matching release in isolation. Check the ledger, audit continuity, financial totals, authorized and denied role journeys, and an audited write. Record elapsed recovery time and the latest recovered transaction against the buyer’s RTO and RPO before authorizing cutover.
+5. For synthetic release evidence, point `WORKOS_TEST_DATABASE_URL` at a disposable loopback PostgreSQL instance with database creation rights and run `npm run test:restore`. The test creates two temporary databases and compares row counts and fingerprints for every public table before starting the recovered API.
 
 Buyer policy defines frequency, retention, encryption and RPO/RTO. Restore rehearsal verifies application version, schema, organization/configuration, users/roles, critical counts, audit continuity, commercial control totals and representative role journeys.
 
@@ -456,9 +468,38 @@ PR168 also refreshes canonical workforce bindings on each authenticated request.
 ## Operational CSV format compatibility
 
 Shared and Timesheet Approval exports quote every field and apply the existing apostrophe literal-text marker to dangerous control/whitespace/formula prefixes. Headers receive the same encoding. Source records, field order, filters, empty header-only Ops exports and audit behavior remain unchanged. Machine consumers must account for literal markers; spreadsheet saving/reopening and external transformations can alter interpretation. No universal spreadsheet execution guarantee is claimed. No migration is required; reverting the serializer reopens unsafe-prefix paths, so prefer forward correction.
+## Revoking all sessions for an account
+
+Apply migration 082b and drain API versions predating it before relying on account-wide revocation. All current replicas verify the account generation on authenticated requests. Active sessions created before this upgrade start at generation zero. Existing logout revocations continue to apply.
+
+The action covers the target account across every organization and legal entity. Use a named buyer incident-response database login. A database owner grants that role EXECUTE on `public.revoke_account_sessions(uuid,integer,text)`; responders who look up targets also need SELECT on the ID and username columns of public.users and access to the account’s generation. Count committed rows for its UUID in public.session_revocations where reason = 'AccountRevocation'. An account without events is at zero. Keep those grants restricted to deployment-wide incident responders.
+
+1. Confirm the target account’s immutable UUID and current generation using the buyer’s identity directory and database. Record an incident or change reference.
+2. Bind that UUID, the observed generation and the reference as parameters to `select public.revoke_account_sessions($1,$2,$3)`. Commit the transaction. A stale generation fails. Inspect the deployment audit event before retrying so a retry cannot revoke a later sign-in unintentionally.
+3. Verify the deployment audit event `RevokeAccountSessions` identifies the expected account, actor, previous and new generations and reference. Existing bearer and cookie sessions are refused on their next authenticated request, including after account reactivation. Requests already admitted may finish. Fresh sign-in remains possible for an active account; disable the account and address identity-provider access separately if the incident requires blocking new sign-ins.
+
+Retain the migration, generation and audit history during recovery. Reverting to a server that ignores account generations can make revoked credentials usable again. Restore access by fresh authentication on a generation-aware release.
+
 ## Configuring session lifetime
 
 Set `API_SESSION_TTL_HOURS` in the production Compose environment before recreating the API replicas. For example, `0.25` configures a 15-minute lifetime. Omission uses eight hours. Startup checks that the duration resolves to at least one millisecond and a representable expiry. A configuration error names the setting. Correct the value and recreate the API services. Existing signed sessions retain their original expiry.
+
+Apply migrations with `npm run api:migrate` before starting the new API. Using a named PostgreSQL login, record the actual deployed duration in milliseconds. For an existing eight-hour deployment the baseline is:
+
+```sql
+insert into deployment_session_policy (lifetime_ms) values (28800000);
+```
+
+For a scheduled change, drain sign-in traffic and use a conditional update. For example, changing eight hours to fifteen minutes requires the following statement to return exactly one row:
+
+```sql
+update deployment_session_policy set lifetime_ms = 900000
+where singleton and lifetime_ms = 28800000 returning lifetime_ms;
+```
+
+Set `API_SESSION_TTL_HOURS=0.25`, recreate all replicas and verify readiness before restoring sign-in traffic. A stale replica refuses new production logins. To roll back the duration, reverse the conditional update and the environment change together. Preserve migration 082a and its audit history. Initial registration has a null previous value because pre-upgrade changes cannot be reconstructed.
+
+Keep policy write grants with named deployment operators. A delegated operator needs SELECT and column INSERT/UPDATE on `lifetime_ms`. The database records the authenticated login, active role, timestamp and previous/new milliseconds in the deployment audit log; the operator does not need direct audit-table write access. Protect database owner credentials under the buyer’s deployment controls.
 
 ### Shared login throttling candidate
 
