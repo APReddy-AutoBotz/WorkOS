@@ -462,6 +462,18 @@ PR168 also refreshes canonical workforce bindings on each authenticated request.
 ## Operational CSV format compatibility
 
 Shared and Timesheet Approval exports quote every field and apply the existing apostrophe literal-text marker to dangerous control/whitespace/formula prefixes. Headers receive the same encoding. Source records, field order, filters, empty header-only Ops exports and audit behavior remain unchanged. Machine consumers must account for literal markers; spreadsheet saving/reopening and external transformations can alter interpretation. No universal spreadsheet execution guarantee is claimed. No migration is required; reverting the serializer reopens unsafe-prefix paths, so prefer forward correction.
+## Revoking all sessions for an account
+
+Apply migration 082b and drain API versions predating it before relying on account-wide revocation. All current replicas verify the account generation on authenticated requests. Active sessions created before this upgrade start at generation zero. Existing logout revocations continue to apply.
+
+The action covers the target account across every organization and legal entity. Use a named buyer incident-response database login. A database owner grants that role EXECUTE on `public.revoke_account_sessions(uuid,integer,text)`; responders who look up targets also need SELECT on the relevant ID, username and session_generation columns of public.users. Keep those grants restricted to deployment-wide incident responders.
+
+1. Confirm the target account’s immutable UUID and current generation using the buyer’s identity directory and database. Record an incident or change reference.
+2. Bind that UUID, the observed generation and the reference as parameters to `select public.revoke_account_sessions($1,$2,$3)`. Commit the transaction. A stale generation fails. Inspect the deployment audit event before retrying so a retry cannot revoke a later sign-in unintentionally.
+3. Verify the deployment audit event `RevokeAccountSessions` identifies the expected account, actor, previous and new generations and reference. Existing bearer and cookie sessions are refused on their next authenticated request, including after account reactivation. Requests already admitted may finish. Fresh sign-in remains possible for an active account; disable the account and address identity-provider access separately if the incident requires blocking new sign-ins.
+
+Retain the migration, generation and audit history during recovery. Reverting to a server that ignores account generations can make revoked credentials usable again. Restore access by fresh authentication on a generation-aware release.
+
 ## Configuring session lifetime
 
 Set `API_SESSION_TTL_HOURS` in the production Compose environment before recreating the API replicas. For example, `0.25` configures a 15-minute lifetime. Omission uses eight hours. Startup checks that the duration resolves to at least one millisecond and a representable expiry. A configuration error names the setting. Correct the value and recreate the API services. Existing signed sessions retain their original expiry.

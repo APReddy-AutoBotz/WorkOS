@@ -62,6 +62,8 @@ These are product and acceptance commitments, not claims that every capability i
 
 ## Development and operations
 
+A designated database incident responder can revoke all application sessions for one account. The next sign-in starts a new generation. See the [account revocation procedure](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#revoking-all-sessions-for-an-account).
+
 Run `npm run test:restore` with a disposable loopback PostgreSQL database and matching PostgreSQL client tools to exercise archive recovery, commercial data integrity and scoped API access. See the [backup and restore procedure](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md#backup-and-restore).
 
 The application uses React/TypeScript, Node.js/Express and PostgreSQL in a modular monolith. Install the checked-out revision's lockfile with `npm ci`; consult [environment examples](.env.example), the [deployment architecture](docs/02-architecture/DEPLOYMENT_ARCHITECTURE.md) and [operations runbook](docs/05-delivery/RELEASE_AND_OPERATIONS_RUNBOOK.md) before configuring or running it. Production requires its documented infrastructure and identity configuration; demo/test settings are not production setup.

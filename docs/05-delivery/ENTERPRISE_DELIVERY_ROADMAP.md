@@ -32,7 +32,7 @@ The next assignment package integrates effective-dated overlap rules and retaine
 
 The WOS-IAM-008 session configuration package passes buyer-selected lifetimes through production Compose and validates them at startup. Acceptance includes checking a rendered Compose override and measuring the expiry of a signed token. Migration 082a records the database operator, time and values for lifetime changes. Production replicas check the effective value at startup, readiness and sign-in.
 
-The November 18 review verified current-session logout and absolute expiry against the merged application. The production identity and session-policy suites cover audited lifetime changes and stale replica denial. Administrative revoke-all needs separate authorization tests. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
+The November 18 review verified current-session logout and absolute expiry against the merged application. The production identity and session-policy suites cover audited lifetime changes and stale replica denial. Migration 082b adds audited, deployment-operator revocation of every application session for a specified account. PostgreSQL and production identity tests exercise operator permissions, stale credentials and fresh sign-in. [Session evidence on main](SECURITY_ACCEPTANCE_LEDGER.md#session-evidence-on-main-november-18-2026)
 
 Twenty-one React-to-PostgreSQL browser journeys now compile their fixture pages in memory and forward API traffic to each journey’s disposable database-backed server. Session logout, independent leave decisions, timesheet ownership and export, and the import/audit harness use the same compiler. The fourteen browser interaction suites have a dedicated fixture server.
 

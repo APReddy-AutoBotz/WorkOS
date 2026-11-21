@@ -541,6 +541,7 @@ try {
   await assertCallbackRejected({name: 'stale-session-policy', claimOverrides: {groups: ['mock-entra-group-employee']}});
   await pool.query('update deployment_session_policy set lifetime_ms=28800000');
 
+  await pool.query("select public.revoke_account_sessions($1,0,'synthetic-provider-test')", [syntheticUser.rows[0].id]);
   const {state, stateCookie} = await beginAuthorization();
   nextTokenClaimOverrides = {groups:['mock-entra-group-employee','mock-entra-group-secondary']};
   const callbackUrl = `${serviceOrigin}/api/auth/entra/callback?code=synthetic-code&state=${encodeURIComponent(state)}`;
@@ -559,6 +560,7 @@ try {
   const issuedToken = issuedSession.slice('workos_session='.length);
   const issuedClaims = JSON.parse(Buffer.from(issuedToken.split('.')[0], 'base64url').toString());
   assert.equal(issuedClaims.identityProvider, 'entra');
+  assert.equal(issuedClaims.sessionGeneration, 1);
   assert.deepEqual(issuedClaims.entraGroups, ['mock-entra-group-employee','mock-entra-group-secondary']);
   const mappedIdentity = await fetchWithTimeout(`${serviceOrigin}/api/auth/me`, {headers:{cookie:issuedSession}}, 2000);
   assert.equal(mappedIdentity.status, 200, 'A callback-issued mapped-only account remains authorized');
