@@ -67,13 +67,14 @@ export const createInvoiceNoticeConfigRouter = (o) => {
   const authorize = async (c, r, key) => {
     await assertCommercialAuthority(c, r, key);
   };
-  const requireMilestoneScope = async (c, r, engagementId) => {
+  const requireScheduledSourceScope = async (c, r, engagementId) => {
     const e = (
       await c.query(
         'select model from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3',
         [...scope(r), engagementId],
       )
     ).rows[0];
+    if (e?.model === 'fixed_fee') await assertCommercialAuthority(c,r,'commercial.fixed_fee_eligibility.issue');
     if (e?.model === 'milestone') await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
   };
   const context = (c, r, id) =>
@@ -142,7 +143,7 @@ export const createInvoiceNoticeConfigRouter = (o) => {
         )
       ).rows[0];
       if (!row) throw fail(404, 'INVOICE_NOTICE_UNCONFIRMED', 'Original policy receipt is unavailable.');
-      await requireMilestoneScope(c, r, row.engagement_id);
+      await requireScheduledSourceScope(c, r, row.engagement_id);
       return { ...envelope(r), policy: policyView(row) };
     }),
   );
@@ -238,7 +239,7 @@ export const createInvoiceNoticeConfigRouter = (o) => {
     handle(false, async (c, r) => {
       const d = parse(z.object({ engagementId: z.string().trim().min(1).max(200) }).strict(), r.query);
       await authorize(c, r, 'commercial.invoice_export.configure');
-      await requireMilestoneScope(c, r, d.engagementId);
+      await requireScheduledSourceScope(c, r, d.engagementId);
       const v = await c.query(
         'select *,effective_from::text effective_from from invoice_export_notice_policies where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3 order by sequence',
         [...scope(r), d.engagementId],
@@ -265,7 +266,7 @@ export const createInvoiceNoticeConfigRouter = (o) => {
         throw fail(400, 'INVOICE_NOTICE_INPUT', 'Explicit valid policy is required.');
       await authorize(c, r, 'commercial.invoice_export.configure');
       const p = d.definition;
-      await requireMilestoneScope(c, r, p.engagementId);
+      await requireScheduledSourceScope(c, r, p.engagementId);
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [
         `invoice-notice-policy:${scope(r).join(':')}:${p.engagementId}`,
       ]);

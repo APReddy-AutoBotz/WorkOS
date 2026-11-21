@@ -1,3 +1,4 @@
+import {fixedFeeInvoiceEvidence} from './fixedFeeInvoiceContracts';
 import { milestoneInvoiceEvidence, milestoneEvidenceMatches } from './milestoneInvoiceContracts';
 import { z } from 'zod';
 import { validInvoiceDraft, invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
@@ -120,9 +121,7 @@ const milestoneLine = z
   .strict();
 const fixedFeeLine = milestoneLine.extend({
   sourceType:z.literal('FIXED_FEE_INSTALLMENT'),
-  evidence:z.object({sourceVersion:z.literal(1),contractVersionId:id,installment:z.number().int().min(1).max(120),
-    dueOn:date,currency:z.string().regex(/^[A-Z]{3}$/),amount,engagementId:id,contractLifecycleId:id,
-    engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),approvalReason:reason}).strict(),
+  evidence:fixedFeeInvoiceEvidence,
 });
 const line = z.union([tmLine, milestoneLine, fixedFeeLine]);
 const cancellation = z
