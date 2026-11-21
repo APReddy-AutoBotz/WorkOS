@@ -7,8 +7,10 @@ export const ENGAGEMENT_MODELS = [...COMMERCIAL_CONTRACT_MODELS, 'internal', 'pr
 export type ContractModel = typeof COMMERCIAL_CONTRACT_MODELS[number];
 export type EngagementModel = typeof ENGAGEMENT_MODELS[number];
 export type CommercialDocument = {name: string; url: string};
+export type RetainerPeriod = {startsOn: string; endsOn: string; includedHours: string; baseFee: string};
 export type ContractTermsInput = {
   name: string; model: ContractModel; startsOn: string; endsOn: string; effectiveFrom: string;
+  retainerPeriods?: RetainerPeriod[];
   installments?: {dueOn: string; amount: string}[];
   currency: string; value: string; billingTerms: string; documents: CommercialDocument[];
 };
@@ -121,6 +123,10 @@ const normalizeTerms = (value: unknown): ContractTerms => {
   return {id: text(item.id), version: integer(item.version, 1), name: text(item.name), model: model(item.model, COMMERCIAL_CONTRACT_MODELS),
     startsOn: date(item.startsOn), endsOn: date(item.endsOn), effectiveFrom: date(item.effectiveFrom), currency: currency(item.currency),
     value: decimal(item.value), billingTerms: text(item.billingTerms), documents: documents(item.documents),
+    ...(item.retainerPeriods === undefined ? {} : {retainerPeriods: rows(item.retainerPeriods, value => {
+      const period = object(value);
+      return {startsOn: date(period.startsOn), endsOn: date(period.endsOn), includedHours: decimal(period.includedHours), baseFee: decimal(period.baseFee)};
+    })}),
     ...(item.installments === undefined ? {} : {installments: rows(item.installments, value => {
       const installment = object(value);
       return {dueOn: date(installment.dueOn), amount: decimal(installment.amount)};
@@ -188,6 +194,7 @@ const request = async <T>(context: CommercialDraftingContext | null, method: 'GE
 // Explicit allowlists keep strict commands free of response/actor/scope fields.
 const termsBody = (input: ContractTermsInput) => ({name: input.name, model: input.model, startsOn: input.startsOn,
   endsOn: input.endsOn, effectiveFrom: input.effectiveFrom, currency: input.currency, value: input.value,
+  ...(input.retainerPeriods && {retainerPeriods: input.retainerPeriods.map(({startsOn, endsOn, includedHours, baseFee}) => ({startsOn, endsOn, includedHours, baseFee}))}),
   ...(input.installments && {installments: input.installments.map(({dueOn, amount}) => ({dueOn, amount}))}),
   billingTerms: input.billingTerms, documents: input.documents.map(document => ({name: document.name, url: document.url}))});
 export type PurchaseOrderRelease = {actorId:string; activeRole:string; approvalReference:string; reason:string; releasedAt:string};

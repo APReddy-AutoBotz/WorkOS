@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Retainer contract versions can record service periods with included hours and a base fee in contract currency. The contract history preserves the terms agreed for each version.
+
 Milestone billing requests show the selected due date, amount and contract version. Changing milestones clears the previous acceptance references, review policy, owner and reason.
 
 Finance can inspect a T&M snapshot’s billable amount, approved work entry, adopted billing rate and contract version before requesting billing review. Reviewers see the same retained evidence.

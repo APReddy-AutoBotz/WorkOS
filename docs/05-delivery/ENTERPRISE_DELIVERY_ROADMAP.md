@@ -205,3 +205,7 @@ Billing preparers and reviewers can trace T&M snapshot amounts to approved work 
 ### Prepare a milestone billing request
 
 Preparers can check milestone payment terms before requesting acceptance review. Acceptance evidence remains specific to the selected milestone throughout the draft.
+
+### Retainer contract periods
+
+Retainer contract terms support dated capacity and base fees. Delivery still requires approved consumption, rollover and expiry rules, overage decisions, and separate eligibility events before invoice preparation.
