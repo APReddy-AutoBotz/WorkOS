@@ -1,7 +1,7 @@
 import {validTmEntryCap} from '../../shared/governed-tm-valuation.mjs';
 import { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../services/apiClient';
-import { approvedRateSources } from '../services/approvedRateSources';
+import { describeRateConflict, approvedRateSources } from '../services/approvedRateSources';
 import {
   captureRateContext,
   governedTmValuations,
@@ -315,6 +315,8 @@ const TmEngagement = ({
       return;
     const p = chosenPolicy.definition;
     void run(async (c) => {
+      setRates(null);
+      setSnapshot(null);
       const [billing, cost] = await Promise.all([
         approvedRateSources.resolve(
           {
@@ -337,10 +339,12 @@ const TmEngagement = ({
           c,
         ),
       ]);
-      setSnapshot(null);
       if (billing.result !== 'source' || cost.result !== 'source' || !billing.source || !cost.source) {
-        setRates(null);
-        setNotice(`Adopted sources unavailable: billing ${billing.result}, cost ${cost.result}.`);
+        setNotice([
+          `Adopted sources unavailable: billing ${billing.result}, cost ${cost.result}.`,
+          billing.conflict && 'Billing rate: ' + describeRateConflict(billing.conflict),
+          cost.conflict && 'Cost rate: ' + describeRateConflict(cost.conflict),
+        ].filter(Boolean).join(' '));
         return;
       }
       setRates({

@@ -214,11 +214,12 @@ export const createRateAdoptionRouter = (o) => {
   router.get(
     '/resolve',
     handle(false, async (c, r) => {
-      const q = parse(
+      const { includeConflictEvidence, ...q } = parse(
         z
           .object({
             kind,
             sourceId: id,
+            includeConflictEvidence: z.literal('1').optional(),
             asOf: date,
             currency: z.string().regex(/^[A-Z]{3}$/),
             unit: z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/),
@@ -266,6 +267,9 @@ export const createRateAdoptionRouter = (o) => {
         selection: q,
         result,
         source: result === 'source' ? rows[0] : null,
+        ...(includeConflictEvidence && result === 'conflict' && {
+          conflict: { priority: rows[0].priority, candidateIds: rows.map((row) => row.id) },
+        }),
       };
     }),
   );

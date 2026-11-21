@@ -616,3 +616,7 @@ Apply migration 065a after 065. It creates an empty, append-only candidate table
 ### Verify a rate adoption
 
 Open the candidate version, select **Inspect approved reviews**, then expand **Adoption receipt**. Compare its candidate and approval references with the resolved source. The actor and role identify who adopted the source. Use the retained owner event, policy version and final approval transition to trace the preceding approval.
+
+### Diagnose competing adopted rates
+
+For an adopted rate conflict, inspect the two candidate version IDs shown at the shared priority. These are examples if more than two versions tie. Review the effective dates and approval evidence before adopting a corrected higher-priority version through the normal approval process.

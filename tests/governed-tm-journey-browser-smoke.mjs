@@ -446,6 +446,14 @@ for (const pricingCase of ['standard', 'capped', 'excluded']) await withCommerci
         assert.equal((await body(cw)).source.adoptionId, cost.id);
         await tm.getByText(/100.1234\/HOUR; cost adoption .*40.0020\/HOUR/).waitFor();
         await tm.getByLabel('T&M calculation reason', { exact: true }).fill('Synthetic explicit calculation');
+        const inspectRates = tm.getByRole('button', { name: 'Inspect adopted billing and cost sources', exact: true });
+        await p.route('**/api/v1/approved-rate-sources/resolve?**kind=cost**', (route) =>
+          route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }), { times: 1 });
+        await inspectRates.click();
+        await tm.getByText(/The operation could not be confirmed/).waitFor();
+        assert.equal(await tm.getByRole('button', { name: 'Retain T&M snapshot', exact: true }).count(), 0);
+        await inspectRates.click();
+        await tm.getByText(/Both exact adopted source versions are ready/).waitFor();
         const admin = await ctx.newPage();
         await admin.goto(origin + '/tests/fixtures/settings-outcomes.html');
         const controls = admin.getByRole('region', { name: 'Financial period controls' });

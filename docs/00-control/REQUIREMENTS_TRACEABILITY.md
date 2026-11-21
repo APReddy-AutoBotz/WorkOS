@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-COM-003 and WOS-COM-006 — Adopted-rate ties return two scoped candidate IDs at the highest priority. PostgreSQL, service and browser checks cover the evidence and absence of a selected source.
+
 WOS-COM-001–003 — The rate adoption browser journey compares the inspected adoption receipt with the original persisted decision and checks the resolved source binding, version, UTC effective range and priority.
 
 WOS-NFR-PERF-005 and WOS-NFR-SEC-004 — billing and cost candidate history uses bounded pages with a source-scoped version cursor. The rate-candidate browser/API journey checks navigation, concurrent insertion, source mismatch and denied access.
