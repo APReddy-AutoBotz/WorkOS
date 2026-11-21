@@ -570,7 +570,7 @@ const InvoiceApprovalEngagement = ({
                       <li key={x.id}>
                         Item {x.itemId} version {x.itemVersion} · event {x.eventId} ·{' '}
                         {'sourceType' in x && x.sourceType === 'FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x
-                          ? `milestone ${x.evidence.milestoneId}`
+                          ? x.sourceType==='RETAINER_PERIOD' ? `retainer ${x.evidence.startsOn} through ${x.evidence.endsOn} · statement ${x.evidence.statementId} · review ${x.evidence.reviewId}` : `milestone ${x.evidence.milestoneId}`
                           : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
                       </li>
@@ -655,7 +655,7 @@ const InvoiceApprovalEngagement = ({
                 {inspected.batch.lines.map((x) => (
                   <li key={x.id}>
                     Item {x.itemId} · event {x.eventId} ·{' '}
-                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x ? `milestone ${x.evidence.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
+                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `correction for line ${x.evidence.originalLineId} · reversal decision ${x.evidence.decisionId}` : 'sourceType' in x ? x.sourceType==='RETAINER_PERIOD' ? `retainer ${x.evidence.startsOn} through ${x.evidence.endsOn} · statement ${x.evidence.statementId} · review ${x.evidence.reviewId}` : `milestone ${x.evidence.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
                   </li>
                 ))}

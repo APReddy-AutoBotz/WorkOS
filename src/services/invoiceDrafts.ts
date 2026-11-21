@@ -124,11 +124,12 @@ const fixedFeeLine = milestoneLine.extend({
     dueOn:date,currency:z.string().regex(/^[A-Z]{3}$/),amount,engagementId:id,contractLifecycleId:id,
     engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),approvalReason:reason}).strict(),
 });
+export const retainerInvoiceEvidence=z.object({statementId:uuid,statementVersion:z.number().int().positive(),sourceHash:z.string().regex(/^[a-f0-9]{64}$/),
+    reviewId:uuid,contractVersionId:id,engagementId:id,startsOn:date,endsOn:date,periodPrice:z.object({baseFee:amount,overage:amount,total:amount}).strict(),
+    contractLifecycleId:id,engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),reason}).strict();
 const retainerLine=milestoneLine.extend({
   sourceType:z.literal('RETAINER_PERIOD'),
-  evidence:z.object({statementId:uuid,statementVersion:z.number().int().positive(),sourceHash:z.string().regex(/^[a-f0-9]{64}$/),
-    reviewId:uuid,contractVersionId:id,engagementId:id,startsOn:date,endsOn:date,periodPrice:z.object({baseFee:amount,overage:amount,total:amount}).strict(),
-    contractLifecycleId:id,engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),reason}).strict(),
+  evidence:retainerInvoiceEvidence,
 });
 const line = z.union([tmLine, milestoneLine, fixedFeeLine, retainerLine]);
 const cancellation = z
