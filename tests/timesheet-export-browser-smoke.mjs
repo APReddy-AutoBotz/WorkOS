@@ -127,6 +127,47 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
    assert.equal(await page.locator('textarea, tbody tr').count(),0);
    assert.equal(decisions,0);
    assert.equal((await pool.query('select status from timesheets where id=$1',[saved.body.id])).rows[0].status,'Submitted');
+   const previousWeek = (await pool.query("select to_char(ends_on,'YYYY-MM-DD') as day from reporting_periods where id='period-work-previous'")).rows[0].day;
+   const previous = await request('/api/timesheets',{identity:identities.reader,method:'POST',body:{
+     employee_id:f.ownerId,week_ending:previousWeek,status:'Submitted',entries:[{work_type:'Client Misc Task',
+       client_name:'Synthetic client',work_date:previousWeek,hours:1,remark:'Synthetic work',billable:false}]}});
+   assert.equal(previous.status,200,JSON.stringify(previous.body));
+   await reloadApprovals.click();
+   const bulk = page.getByRole('button',{name:'Bulk Approve',exact:true});
+   await bulk.click();
+   const preview = page.getByRole('region',{name:'Bulk approval preview'});
+   await preview.getByText('Approve 2 submitted timesheets from the selected filters?').waitFor();
+   await preview.getByRole('button',{name:'Cancel'}).click();
+   assert.equal(decisions,0);
+   const decisionRoute = '**/api/timesheets/*/status';
+   await page.route(decisionRoute,async route => {
+     if (route.request().url().includes(previous.body.id)) {
+       const accepted = await route.fetch();
+       assert.equal(accepted.status(),200);
+       await route.abort('failed'); // The server committed before its acknowledgement was lost.
+     } else {
+       await route.fulfill({status:503,json:{error:'Synthetic interruption'}});
+     }
+   });
+   await bulk.click();
+   await preview.getByRole('button',{name:'Confirm bulk approval'}).evaluate(button => { button.click(); button.click(); });
+   await page.getByText('Bulk review complete. 1 of 2 timesheets currently approved.').waitFor();
+   await page.getByText('View individual outcomes').click();
+   await page.getByText(new RegExp(previousWeek+' · Approved · No acknowledgement')).waitFor();
+   await page.getByText(new RegExp(today+' · Submitted · No acknowledgement')).waitFor();
+   assert.equal(decisions,2);
+
+   await page.route('**/api/timesheets',route=>route.fulfill({status:503,json:{error:'Synthetic refresh failure'}}));
+   await bulk.click();
+   await preview.getByRole('button',{name:'Confirm bulk approval'}).click();
+   await reloadApprovals.waitFor();
+   assert.ok(await bulk.isDisabled());
+   assert.equal(decisions,3);
+   await reloadApprovals.click();
+   await page.getByText('Approval records could not be loaded.').waitFor();
+   assert.equal(await bulk.count(),0);
+   await page.unroute('**/api/timesheets');
+   await page.unroute(decisionRoute);
    // A decision already accepted by the server keeps its original scope even if the UI closes.
    await reloadApprovals.click();
    await submittedRow.click();
@@ -155,4 +196,4 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
   }finally{await browser?.close();await fixtureServer.close();}
  });
 });
-console.log('Timesheet Ops Export real browser/API/SQL: CSV integrity, responsive export, stale decisions and delayed acknowledgements passed.');
+console.log('Timesheet Ops Export real browser/API/SQL: CSV integrity, responsive export, stale decisions, partial bulk approval and recovery passed.');
