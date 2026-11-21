@@ -22,7 +22,7 @@ import {
   captureCommercialDraftingContext, commercialDraftingService, isCommercialDraftingContextCurrent,
   COMMERCIAL_CONTRACT_MODELS, ENGAGEMENT_MODELS,
   type CommercialDraftingContext, type CommercialWorkspace, type ContractDetail,
-  type ContractModel, type EngagementModel, type CreateContractInput, type AppendContractVersionInput,
+  type RetainerPeriod, type ContractModel, type EngagementModel, type CreateContractInput, type AppendContractVersionInput,
   type CreateEngagementInput, type CreatePurchaseOrderInput, type CreateMilestoneInput,
 } from '../services/commercialDrafting';
 
@@ -30,6 +30,7 @@ type DraftKind = 'contract' | 'revision' | 'engagement' | 'purchaseOrder' | 'mil
 type Draft = {
   kind: DraftKind; lease: number; contractId: string; expectedVersion: number; number: string; clientId: string;
   name: string; code: string; model: EngagementModel; startsOn: string; endsOn: string; effectiveFrom: string;
+  retainerPeriods: RetainerPeriod[];
   installments: {dueOn: string; amount: string}[];
   currency: string; value: string; budget: string; billingTerms: string; documents: {name: string; url: string}[];
   ownerId: string; contractVersionId: string; attributionId: string; warningThresholdPercent: string;
@@ -48,7 +49,7 @@ const moneyPattern = '(0|[1-9]\\d{0,13})(\\.\\d{1,4})?';
 const modelLabel = (model: EngagementModel) => ({time_and_materials: 'Time and materials', fixed_fee: 'Fixed fee', milestone: 'Milestone based',
   retainer: 'Retainer', managed_service: 'Managed service', internal: 'Internal initiative', pre_sales: 'Pre-sales / non-billable'}[model]);
 const blankDraft = (kind: DraftKind, lease: number): Draft => ({kind, lease, contractId: '', expectedVersion: 0, number: '', clientId: '', name: '', code: '',
-  model: 'time_and_materials', startsOn: '', endsOn: '', effectiveFrom: '', currency: '', value: '', budget: '', billingTerms: '', installments: [], documents: [],
+  model: 'time_and_materials', startsOn: '', endsOn: '', effectiveFrom: '', currency: '', value: '', budget: '', billingTerms: '', installments: [], retainerPeriods: [], documents: [],
   ownerId: '', contractVersionId: '', attributionId: '', warningThresholdPercent: '', engagementId: '', dueOn: '', amount: '', reason: ''});
 const safeError = (error: unknown, saving = false) => {
   const status = error instanceof ApiClientError ? error.status : 0;
@@ -60,7 +61,7 @@ const safeError = (error: unknown, saving = false) => {
   return saving ? 'Save outcome could not be confirmed. Keep this draft for reference and reload before trying again to avoid duplicates.'
     : 'Commercial drafting could not be loaded. Check your connection and try again.';
 };
-const Field = ({label, children}: {label: string; children: ReactNode}) => {
+const Field = ({label, children}: {label: string; children: ReactNode; key?: string}) => {
   const id = useId();
   // Keep option text out of the label's accessible name. Every Field owns one
   // input, select or textarea and links it explicitly, including repeated links.
@@ -146,7 +147,7 @@ export const CommercialDraftingWorkspace = () => {
       const detail = owner.detail?.status === 'ready' ? owner.detail.value : undefined;
       const latest = detail?.versions.find(version => version.version === detail.latestVersion);
       if (!detail || !latest) return;
-      draft = {...draft, ...latest, installments: latest.installments ?? [], documents: latest.documents.map(document => ({...document})), contractId: detail.id,
+      draft = {...draft, ...latest, retainerPeriods: latest.retainerPeriods ?? [], installments: latest.installments ?? [], documents: latest.documents.map(document => ({...document})), contractId: detail.id,
         number: detail.number, clientId: detail.clientId, expectedVersion: detail.latestVersion, effectiveFrom: ''};
     }
     publish({...owner, draft, uncertain: false, message: undefined, saveError: undefined});
@@ -190,6 +191,7 @@ export const CommercialDraftingWorkspace = () => {
     const includeSchedule = draft.model === 'fixed_fee' && (draft.installments.length > 0 || hadSchedule);
     const terms = {name: draft.name, model: draft.model as ContractModel, startsOn: draft.startsOn, endsOn: draft.endsOn,
       effectiveFrom: draft.effectiveFrom, currency: draft.currency, value: draft.value, billingTerms: draft.billingTerms,
+      ...(draft.model === 'retainer' ? {retainerPeriods: draft.retainerPeriods} : {}),
       ...(includeSchedule ? {installments: draft.installments} : {}),
       documents: draft.documents.map(document => ({...document})), reason: draft.reason};
     try {
@@ -315,6 +317,18 @@ export const CommercialDraftingWorkspace = () => {
                 {textInput('startsOn', 'Starts on', {type: 'date'})}{textInput('endsOn', 'Ends on', {type: 'date'})}
                 {textInput('effectiveFrom', 'Terms effective from', {type: 'date'})}{textInput('currency', 'Currency (ISO code)', {pattern: '[A-Z]{3}', maxLength: 3, disabled: draft.kind === 'revision'})}
                 {textInput('value', 'Contract value (decimal)', {pattern: moneyPattern, maxLength: 19})}
+                {draft.model === 'retainer' && <fieldset className="min-w-0 md:col-span-2">
+                  <legend>Retainer service periods</legend>
+                  {draft.retainerPeriods.map((period, i) => <div key={i} className="grid gap-2 md:grid-cols-2">
+                    {([['startsOn', 'start date'], ['endsOn', 'end date'], ['includedHours', 'included hours'], ['baseFee', 'base fee']] as const).map(([key,label]) =>
+                      <Field key={key} label={`Period ${i+1} ${label}`}><input className={inputClass} required
+                        type={key === 'startsOn' || key === 'endsOn' ? 'date' : 'text'} value={period[key]}
+                        onChange={e => edit({retainerPeriods: draft.retainerPeriods.map((p,n) => n === i ? {...p,[key]:e.target.value} : p)})} /></Field>)}
+                    <button type="button" className={buttonClass} onClick={() => edit({retainerPeriods: draft.retainerPeriods.filter((_,n) => n !== i)})}>Remove period {i+1}</button>
+                  </div>)}
+                  <button type="button" className={buttonClass} disabled={draft.retainerPeriods.length >= 120}
+                    onClick={() => edit({retainerPeriods: [...draft.retainerPeriods,{startsOn:'',endsOn:'',includedHours:'',baseFee:''}]})}>Add retainer period</button>
+                </fieldset>}
                 {draft.model === 'fixed_fee' && <fieldset className="min-w-0 md:col-span-2">
                   <legend className="text-sm font-semibold">Fixed-fee billing schedule</legend>
                   <p className="text-sm">Enter installments in date order. Their total must equal the contract value in {draft.currency || 'contract currency'}.</p>
@@ -395,6 +409,8 @@ export const CommercialDraftingWorkspace = () => {
               <h4 className="break-words font-bold">Version {version.version} · {version.name}</h4>
               <p className="mt-2 text-sm">Effective {version.effectiveFrom}. Coverage {version.startsOn} to {version.endsOn}. {modelLabel(version.model)}.</p>
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
+              {version.retainerPeriods?.length ? <div><h4>Retainer service periods</h4>
+                <ul>{version.retainerPeriods.map(p => <li key={p.startsOn}>{p.startsOn} through {p.endsOn} · {p.includedHours} included hours · {version.currency} {p.baseFee} base fee</li>)}</ul></div> : null}
               {version.installments?.length ? <div><h4>Fixed-fee billing schedule</h4>
                 <ol>{version.installments.map((item,i) => <li key={i}>{item.dueOn} · {version.currency} {item.amount}</li>)}</ol></div> : null}
               {version.installments?.length && state.context?.canIssueInstallment ? <FixedFeeInstallmentRegister

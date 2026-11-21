@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-COM-009 — Retainer contract periods retain inclusive dates, included hours and exact base fees. API and browser tests cover creation, version history, overlapping dates, model restrictions and scoped reads. Consumption, rollover, expiry, overage and approved billing events remain open.
+
 WOS-COM-008 and WOS-INV-001 — The milestone browser and PostgreSQL journey verifies that switching between milestones with different amounts clears the acceptance evidence and ownership inputs and disables submission.
 
 WOS-COM-003 and WOS-INV-001 — T&M billing preparers and reviewers can inspect a retained valuation’s work, rate and commercial references. The PostgreSQL browser journey checks both views against the scoped source response and verifies that switching snapshots clears the review draft.

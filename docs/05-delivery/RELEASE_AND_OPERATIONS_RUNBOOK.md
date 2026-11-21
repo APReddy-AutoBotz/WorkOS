@@ -640,3 +640,7 @@ Select the retained snapshot and expand **Snapshot evidence**. Check the work da
 ### Prepare a milestone billing request
 
 Select the milestone and check its code, due date, amount and contract version. Choose the review policy, enter the owner and reason, and supply the evidence required by that policy. Selecting a different milestone or reloading requires a fresh draft.
+
+### Retainer contract periods
+
+Apply migration 082d before deploying the retainer editor. Existing contract versions receive an empty period list. In Commercial Drafting, select Retainer, add service periods and inspect the saved version history. Older clients that omit periods on revision inherit the previous list. An explicit empty list clears the new version. For application rollback, retain migration 082d in the manifest and keep the column and constraint. Suspend retainer contract revisions until the serving API can preserve the recorded periods.

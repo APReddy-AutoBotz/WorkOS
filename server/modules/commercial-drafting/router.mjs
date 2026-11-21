@@ -33,6 +33,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
       }else if(error?.code==='23505')res.status(409).json({error:{code:'COMMERCIAL_DUPLICATE',message:'This commercial identifier or version already exists in the selected scope.'}});
+      else if(error?.code==='23514' && error.constraint==='retainer_periods_valid') res.status(422).json({error:{
+        code:'COMMERCIAL_RETAINER_PERIODS_INVALID',message:'Retainer periods need positive included hours and ordered, non-overlapping dates within the contract term.'}});
       else if(error?.code==='23514' && error.constraint==='fixed_fee_installments_valid') res.status(422).json({error:{
         code:'COMMERCIAL_INSTALLMENTS_INVALID',message:'Fixed-fee installments require positive amounts, dates in contract order and an exact match to the contract value.'}});
       else if(['23503','23514','22003','22007'].includes(error?.code))res.status(422).json({error:{code:'COMMERCIAL_CONSTRAINT',message:'The scoped references, dates or decimal values are not valid.'}});

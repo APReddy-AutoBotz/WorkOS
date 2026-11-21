@@ -187,3 +187,7 @@ Commercial tables are additive and feature gated. Seeded vectors and neutral def
 ## Invoice-batch correction boundary
 
 An approved batch is never returned to review. Before export, protected cancellation releases current occupancy atomically and a replacement/new approval is built only from currently eligible items. Failed export retains approved occupancy and final approval. Exported or billed/confirmed history is immutable; correction is forward-only through reversal/supersession eligibility and a new correction batch and approval. This specialization extends the canonical invoice lifecycle and does not create a competing state machine.
+
+### Retainer contract periods
+
+Each immutable retainer contract version may define up to 120 ordered, non-overlapping service periods within the term. Each period records inclusive dates, positive included hours and a nonnegative base fee in contract currency, each with up to four decimal places. Gaps are allowed. An empty list represents unspecified periods. Operational valuation and billing eligibility require their own approved policy and evidence.

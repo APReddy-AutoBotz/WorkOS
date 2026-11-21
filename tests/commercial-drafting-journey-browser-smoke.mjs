@@ -12,6 +12,7 @@ const future = new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 10);
 const hostile = '<script>window.syntheticCommercialExecuted=true</script>';
 const prefix = '/api/v1/commercial-drafting';
 const expectedFields = {
+  retainer: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','retainerPeriods','number','clientId','reason'],
   contract: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','installments','number','clientId','reason'],
   engagement: ['code','name','model','ownerId','startsOn','endsOn','currency','budget','contractId','contractVersionId','clientId','attributionId','reason'],
   po: ['contractId','contractVersionId','number','value','currency','startsOn','endsOn','warningThresholdPercent','reason'],
@@ -270,6 +271,22 @@ await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identit
     const cancelled=await cancelling;assert.equal(cancelled.status(),201,await cancelled.text());
     assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rowCount,0);
     assert.equal((await pool.query('select 1 from invoice_draft_lines where id=$1 and event_id=$2',[fixedLine.id,registered.eventId])).rowCount,1);
+    await open();
+    await button('New contract / SOW').click();
+    target = form('New contract / SOW');
+    await fill(target, {'Contract / SOW number':'SYN-RETAINER-PERIOD','Contract name':'Synthetic retainer',
+      'Starts on':'2020-01-01','Ends on':'2099-12-31','Terms effective from':'2020-01-01',
+      'Currency (ISO code)':'GBP','Contract value (decimal)':'7000','Billing terms':'Synthetic service period',
+      'Reason for creation / revision':'Synthetic retainer capacity'});
+    await target.getByLabel('Client',{exact:true}).selectOption(clientId);
+    await target.getByLabel('Commercial model',{exact:true}).selectOption('retainer');
+    await button('Add retainer period').click();
+    await fill(target, {'Period 1 start date':'2028-01-01','Period 1 end date':'2028-01-31',
+      'Period 1 included hours':'40.1250','Period 1 base fee':'3500.0001'});
+    const savedRetainer = await save('/contracts','retainer');
+    assert.deepEqual(savedRetainer.result.versions[0].retainerPeriods,[
+      {startsOn:'2028-01-01',endsOn:'2028-01-31',includedHours:'40.1250',baseFee:'3500.0001'}]);
+    await page.getByText('2028-01-01 through 2028-01-31 · 40.1250 included hours · GBP 3500.0001 base fee',{exact:true}).waitFor();
     await preparing.context.close();
     await billing.context.close();
     await reviewer.context.close();
