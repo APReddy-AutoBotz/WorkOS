@@ -61,7 +61,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -81,6 +81,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   const permissions = getEffectivePermissions(user);
   if (!permissions.includes('commercial.contracts.view')) return null;
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
+    canCaptureUnits: permissions.includes('commercial.service_units.capture'),
     canIssueInstallment: permissions.includes('commercial.fixed_fee_eligibility.issue'),
     canReleasePurchaseOrder: permissions.includes('commercial.purchase_orders.release'),
     canManage: permissions.includes('commercial.contracts.manage'), isCurrent};
@@ -292,7 +293,28 @@ const statementEvidence=(value:unknown,contractId:string,version:ContractTerms,s
     adoptionId:source ? text(source.adoptionId) : null,approvalId:source ? text(source.approvalId) : null,
     rate:source ? quantity(source.hourlyRate) : null};
 };
+export type ServiceUnitInput = {versionId:string;serviceDate:string;dimensionCode:string;quantity:string;sourceReference:string};
 export const commercialDraftingService = {
+  serviceUnitHistory(engagementId:string,versionId:string,before:string|null,context:CommercialDraftingContext) {
+    const query=new URLSearchParams({versionId});if (before) query.set('before',before);
+    return request(context,'GET','/engagements/'+encodeURIComponent(engagementId)+'/service-unit-evidence?'+query,undefined,value=>{
+      const r=object(value);
+      return {before:nullableText(r.before),records:rows(r.records,item=>{
+        const e=object(item);
+        if(e.engagementId!==engagementId || e.versionId!==versionId) throw invalid();
+        return {id:text(e.id),serviceDate:date(e.serviceDate),dimensionCode:text(e.dimensionCode),quantity:text(e.quantity),sourceReference:text(e.sourceReference)};
+      })};
+    });
+  },
+  captureUnits(engagementId:string,input:ServiceUnitInput,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canCaptureUnits) throw new ApiClientError('Service capture access changed.',{status:403});
+    return request(context,'POST','/engagements/'+encodeURIComponent(engagementId)+'/service-unit-evidence',input,value=>{
+      const r=object(value);
+      if (r.engagementId!==engagementId || r.versionId!==input.versionId || r.serviceDate!==input.serviceDate ||
+          r.dimensionCode!==input.dimensionCode || r.quantity!==input.quantity || r.sourceReference!==input.sourceReference) throw invalid();
+      return text(r.id);
+    },false);
+  },
   retainerStatement: (contractId:string,version:ContractTerms,startsOn:string,context:CommercialDraftingContext,
     action?: {statementId?:string;entriesOffset?:number}|{sourceHash:string;previousId:string|null;reason:string;renewReviewIdentity?:true}|
       {sourceHash:string;statementId:string;decision:'Approved'|'Rejected';reason:string},reviewOnly=false)=>{

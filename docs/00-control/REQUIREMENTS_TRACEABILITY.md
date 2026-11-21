@@ -687,3 +687,5 @@ WOS-NFR-REL-006/007/008: the production-like archive rehearsal runs after the re
 WOS-NFR-REL-006/007/008 and WOS-NFR-DPL-007: `npm run test:restore` exercises the operator command against a populated pre-082q archive, checks every public table before upgrade, rejects reuse of a populated database, and checks transaction rollback on a mismatched archive.
 
 WOS-COM-010 (managed-service contract terms): migration 082r, the commercial drafting API and the browser journey verify scoped versioned quantity dimensions, inheritance, explicit clearing, duplicate rejection, model restrictions, and preservation of historical versions.
+
+WOS-COM-010 delivery evidence: migration 082s, the commercial drafting capture API and the commercial drafting browser journey cover scoped quantity capture, effective adopted terms, precision, duplicate references and immutable evidence. Independent acceptance, time/cost links, valuation and eligibility remain open.

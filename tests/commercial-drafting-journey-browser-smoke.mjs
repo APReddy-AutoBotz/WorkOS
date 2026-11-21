@@ -56,7 +56,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       });
       return {context, page};
     };
-    const {context, page} = await createContext(identities.manager, ['commercial.contracts.view','commercial.contracts.manage','employees.view','reports.view_utilization','commercial.rate_candidates.view','commercial.retainer_statements.prepare']);
+    const {context, page} = await createContext(identities.manager, ['commercial.contracts.view','commercial.contracts.manage','employees.view','reports.view_utilization','commercial.rate_candidates.view','commercial.retainer_statements.prepare','commercial.service_units.capture']);
     const button = name => page.getByRole('button', {name, exact: true});
     const form = name => page.getByRole('form', {name, exact: true});
     const fill = async (target, fields) => {for (const [label, value] of Object.entries(fields)) await target.getByLabel(label, {exact: true}).fill(value);};
@@ -855,6 +855,38 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.deepEqual(saved.result.versions[0].serviceDimensions,units);
       await button('Inspect SYN-SERVICE').click();
       await page.getByText('Support shift · SHIFT · 2 decimal places',{exact:true}).waitFor();
+      const serviceVersion=saved.result.versions[0].id;
+      const serviceEng=await apiRequest('/engagements',{method:'POST',body:{...engagement.body,model:'managed_service',code:'SYN-SERVICE-CAPTURE',
+        name:'Synthetic unit capture',budget:'100',contractId:saved.result.id,contractVersionId:serviceVersion,startsOn:'2020-01-01',endsOn:'2099-12-31'}});
+      assert.equal(serviceEng.status,201,JSON.stringify(serviceEng.body));
+      const capturePath='/engagements/'+serviceEng.body.id+'/service-unit-evidence';
+      const serviceInput={versionId:serviceVersion,serviceDate:today,dimensionCode:'SHIFT',quantity:'1.25',sourceReference:'SYN-SHIFT-1'};
+      const capture=(body,opts={})=>apiRequest(capturePath,{method:'POST',body,...opts});
+      assert.equal((await capture(serviceInput)).status,403);
+      await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.service_units.capture',true),('Admin','commercial.lifecycle.manage',true) on conflict(role_name,permission_key) do update set enabled=true");
+      assert.equal((await capture(serviceInput)).status,422,'draft engagement cannot record delivery');
+      for(const [type,id] of [['Contract',saved.result.id],['Engagement',serviceEng.body.id]]) {
+        const result=await apiRequest('/lifecycle/'+type+'/'+id+'/transitions',{method:'POST',body:{expectedSequence:0,state:'Active',contractVersionId:serviceVersion,approvalReference:null,reason:'Synthetic service delivery opening'}});
+        assert.equal(result.status,201,JSON.stringify(result.body));
+      }
+      assert.equal((await capture({...serviceInput,quantity:'1.251'})).status,422);
+      assert.equal((await capture({...serviceInput,dimensionCode:'UNKNOWN'})).status,422);
+      assert.equal((await capture({...serviceInput,serviceDate:future})).status,422);
+      assert.equal((await capture({...serviceInput,versionId})).status,422);
+      assert.equal((await capture(serviceInput,{scope:{...scope,legalEntityId:'synthetic-unassigned-entity'}})).status,403);
+      await open();await button('Inspect SYN-SERVICE').click();
+      const captureForm=form('Record delivered units');
+      await captureForm.getByLabel('Service engagement').selectOption(serviceEng.body.id);
+      await captureForm.getByLabel('Delivered unit').selectOption('SHIFT');
+      await fill(captureForm,{'Service date':today,'Delivered quantity':'1.25','Service evidence reference':'SYN-SHIFT-1'});
+      await button('Record service evidence').click();
+      await captureForm.getByText(/Service evidence recorded/).waitFor();
+      await captureForm.getByText(today+' · 1.25 SHIFT · SYN-SHIFT-1').waitFor();
+      const replay=await capture(serviceInput);assert.equal(replay.status,201,JSON.stringify(replay.body));
+      assert.equal((await capture({...serviceInput,quantity:'2'})).status,409);
+      const evidence=await pool.query('select quantity::text,actor_id from commercial_service_unit_evidence where engagement_id=$1',[serviceEng.body.id]);
+      assert.deepEqual(evidence.rows,[{quantity:'1.25',actor_id:actorId}]);
+      await assert.rejects(pool.query('delete from commercial_service_unit_evidence where id=$1',[replay.body.id]));
       const {number,clientId:client,...revision}=saved.body;
       const path='/contracts/'+saved.result.id+'/versions';
       const revise=(body,identity=identities.manager)=>apiRequest(path,{method:'POST',identity,body});
