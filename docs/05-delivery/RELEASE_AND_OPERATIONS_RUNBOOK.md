@@ -636,3 +636,7 @@ After a stage-change refusal, reload the milestone review and inspect the comple
 ### Inspect a T&M snapshot for billing
 
 Select the retained snapshot and expand **Snapshot evidence**. Check the work date and billable amount, the work approval decision, adopted billing rate and contract version. Select the billing review policy and enter the change owner and request reason for this snapshot. Changing the snapshot clears those inputs. The reviewer can open the same evidence when inspecting the request.
+
+### Prepare a milestone billing request
+
+Select the milestone and check its code, due date, amount and contract version. Choose the review policy, enter the owner and reason, and supply the evidence required by that policy. Selecting a different milestone or reloading requires a fresh draft.

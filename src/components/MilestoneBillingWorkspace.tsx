@@ -114,6 +114,14 @@ const MilestoneReview = ({
     onLockChange(busy || !!pending);
     return () => onLockChange(false);
   }, [busy, pending, onLockChange]);
+  const selectSource = (id: string) => {
+    setSourceId(id);
+    setPolicyId('');
+    setOwnerId('');
+    setOwnerRole('');
+    setReferences({});
+    setRequestReason('');
+  };
   const clear = (message: string) => {
     generation.current++;
     context.current = null;
@@ -134,12 +142,7 @@ const MilestoneReview = ({
     setStages([{ userId: '', role: '' }]);
     setTemplates(events.map((key) => ({ key, subject: '', body: '' })));
     setPolicyReason('');
-    setSourceId('');
-    setPolicyId('');
-    setOwnerId('');
-    setOwnerRole('');
-    setReferences({});
-    setRequestReason('');
+    selectSource('');
     setDecision('');
     setDecisionReason('');
     setCancelReason('');
@@ -210,13 +213,12 @@ const MilestoneReview = ({
       clearStage();
       setLoaded(false);
       setSelected('');
+      selectSource('');
       const x = await milestoneBilling.load(engagementId, c);
       setPolicies(x.policies);
       setSources(x.sources);
       setApprovals(x.approvals);
       setEffectivePolicy(x.effectivePolicy);
-      setPolicyId('');
-      setReferences({});
       setSourceNext(x.sourceNext);
       setReviewNext(x.reviewNext);
       setLoaded(true);
@@ -294,6 +296,7 @@ const MilestoneReview = ({
       hasRatePermission,
     ),
     chosen = inspected?.approval,
+    selectedSource = sources.find((source) => source.id === sourceId && source.current),
     selectedPolicy = effectivePolicy?.id === policyId ? effectivePolicy : null;
   const reviewer = authService.getCurrentUser(),
     stage =
@@ -338,16 +341,19 @@ const MilestoneReview = ({
       },
     });
   };
+  const evidenceKinds = selectedPolicy
+    ? (selectedPolicy.definition as { evidenceKinds: string[] }).evidenceKinds
+    : [];
+  const evidence = evidenceKinds.map((kind) => ({ kind, ...references[kind] }));
+  const requestReady = Boolean(selectedSource && selectedPolicy && ownerId.trim() && ownerRole.trim() &&
+    requestReason.trim().length >= 3 && validMilestoneEvidence(evidence, evidenceKinds));
   const request = () => {
-    if (!selectedPolicy || !sourceId || !ownerId || !ownerRole || requestReason.trim().length < 3) return;
-    const k = (selectedPolicy.definition as { evidenceKinds: string[] }).evidenceKinds,
-      evidence = k.map((kind) => ({ kind, ...references[kind] }));
-    if (!validMilestoneEvidence(evidence, k)) return;
+    if (!requestReady || !selectedPolicy || !selectedSource) return;
     perform({
       type: 'request',
       data: {
         requestId: crypto.randomUUID(),
-        milestoneId: sourceId,
+        milestoneId: selectedSource.id,
         expectedPolicyId: selectedPolicy.id,
         ownerUserId: ownerId,
         ownerRole,
@@ -579,7 +585,7 @@ const MilestoneReview = ({
                 <select
                   aria-label="Billing milestone"
                   value={sourceId}
-                  onChange={(e) => setSourceId(e.target.value)}
+                  onChange={(e) => selectSource(e.target.value)}
                 >
                   <option value="">Choose a milestone</option>
                   {sources.map((s) => (
@@ -589,6 +595,12 @@ const MilestoneReview = ({
                   ))}
                 </select>
               </label>
+              {selectedSource && (
+                <section aria-label="Selected milestone terms">
+                  <p>{selectedSource.code} · due {selectedSource.dueOn} · {selectedSource.currency} {selectedSource.amount}</p>
+                  <p>Contract {selectedSource.contractId} · version {selectedSource.contractVersionId}</p>
+                </section>
+              )}
               <label>
                 Review policy{' '}
                 <select
@@ -628,7 +640,7 @@ const MilestoneReview = ({
                 />
               </label>
               {selectedPolicy &&
-                (selectedPolicy.definition as { evidenceKinds: string[] }).evidenceKinds.map((kind) => (
+                evidenceKinds.map((kind) => (
                   <div key={kind}>
                     <label>
                       {kind} reference{' '}
@@ -666,7 +678,7 @@ const MilestoneReview = ({
                   onChange={(e) => setRequestReason(e.target.value)}
                 />
               </label>
-              <button type="button" onClick={request}>
+              <button type="button" disabled={!requestReady} onClick={request}>
                 Request milestone billing review
               </button>
             </fieldset>

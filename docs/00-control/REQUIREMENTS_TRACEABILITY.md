@@ -1,5 +1,7 @@
 # WorkOS Requirements Traceability
 
+WOS-COM-008 and WOS-INV-001 — The milestone browser and PostgreSQL journey verifies that switching between milestones with different amounts clears the acceptance evidence and ownership inputs and disables submission.
+
 WOS-COM-003 and WOS-INV-001 — T&M billing preparers and reviewers can inspect a retained valuation’s work, rate and commercial references. The PostgreSQL browser journey checks both views against the scoped source response and verifies that switching snapshots clears the review draft.
 
 WOS-COM-008 and WOS-INV-001 — Milestone review cancellation checks the inspected decision sequence. The real browser and PostgreSQL journey verifies stale-stage refusal, current-stage cancellation, read-only recovery and approved-unbilled register totals.
