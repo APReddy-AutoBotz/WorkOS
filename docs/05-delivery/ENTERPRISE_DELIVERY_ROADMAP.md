@@ -4,7 +4,7 @@ Updated 2026-11-19. Owner direction: review the complete code, improve WorkOS in
 
 ## Delivery priorities
 
-The Standard-profile performance gate measures authenticated timesheet history, draft saves and scoped utilization reporting. Buyer infrastructure, browser rendering, approval timings, export isolation and the Expanded profile need separate performance evidence.
+The Standard-profile performance gate measures authenticated timesheet history, draft saves, employee submissions, independent direct-manager approvals and scoped utilization reporting. Buyer infrastructure, browser rendering, staged approval timings, export isolation and the Expanded profile need separate performance evidence.
 
 The PostgreSQL recovery gate exercises a full synthetic database restore, financial record retrieval, role and entity boundaries, and an audited write after recovery. Buyer-scale recovery timings, backup custody and release sign-off remain open.
 

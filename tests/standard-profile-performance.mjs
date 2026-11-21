@@ -49,45 +49,85 @@ await withCommercialDatabase(async database => {
     const header = await pool.query("select id from timesheets where employee_id='profile-worker-1' limit 1");
     const plan = await pool.query('explain (analyze, buffers, format json) select work_date,hours from timesheet_entries where timesheet_id=$1 order by work_date', [header.rows[0].id]);
     assert.ok(JSON.stringify(plan.rows[0]).includes('timesheet_entries_header_date_idx'), 'Header lookup must use the indexed path on Standard-profile data');
-    const sessions = accounts.slice(0,75).map(account => ({
+    const sessions = accounts.slice(0,90).map(account => ({
       ...account, headers: {Authorization: 'Bearer ' + tokenFor(account)},
     }));
-    const samples = {read: [], save: [], report: []};
-    for (let round = 0; round < 6; round++) {
-      const week = new Date(Date.UTC(2024, 2, 3 + round * 7)).toISOString().slice(0,10);
-      await Promise.all(sessions.map(async ({worker, headers}, index) => {
-        const options = {authenticated: false, headers};
-        const start = performance.now();
-        if (index < 5) {
-          const result = await request('/api/reports/planned-utilization?date=2024-02-01', options);
-          samples.report.push(performance.now() - start);
-          assert.equal(result.status, 200);
-          const workers = result.body.rows.filter(row => row.id.startsWith('profile-worker-'));
-          assert.equal(workers.length, 250);
-          assert.ok(workers.every(row => Number(row.planned_utilization) === 100));
-          assert.ok(result.body.rows.every(row => row.id !== commercialFixture.otherOwnerId && row.id !== commercialFixture.foreignOwnerId));
-        } else if (index < 20) {
-          const result = await request('/api/timesheets', {...options, method: 'POST', body: {
-            employee_id: worker, week_ending: week, status: 'Draft', entries: [{work_type: 'Client Misc Task',
-              client_name: 'Synthetic client', work_date: week, hours: '1', remark: 'Synthetic draft', billable: false}],
-          }});
-          samples.save.push(performance.now() - start);
-          assert.equal(result.status, 200, JSON.stringify(result.body));
-          assert.equal(result.body.status, 'Draft');
-          assert.equal(result.body.employee_id, worker);
-        } else {
-          const result = await request('/api/timesheets', options);
-          samples.read.push(performance.now() - start);
-          assert.equal(result.status, 200);
-          assert.equal(result.body.length, 8);
-          assert.ok(result.body.every(sheet => sheet.employee_id === worker && sheet.entries.length === 5));
-        }
-      }));
+    const samples = {};
+    const thresholds = {};
+    const receipts = new Map();
+    const states = {save: 'Draft', submit: 'Submitted', approve: 'Approved'};
+    const reviewers = sessions.slice(75);
+    for (const [phase, status] of Object.entries(states)) {
+      const readKey = 'read during ' + phase;
+      const reportKey = 'report during ' + phase;
+      samples[phase] = [];
+      samples[readKey] = [];
+      samples[reportKey] = [];
+      thresholds[phase] = 3000;
+      thresholds[readKey] = 2000;
+      thresholds[reportKey] = 5000;
+      for (let round = 0; round < 6; round++) {
+        const week = new Date(Date.UTC(2024, 2, 3 + round * 7)).toISOString().slice(0,10);
+        await Promise.all(sessions.slice(0,75).map(async (employee, index) => {
+          const decision = phase === 'approve' && index >= 5 && index < 20;
+          const actor = decision ? reviewers[index - 5] : employee;
+          const worker = employee.worker;
+          const options = {authenticated: false, headers: actor.headers};
+          const start = performance.now();
+          if (index < 5) {
+            const result = await request('/api/reports/planned-utilization?date=2024-02-01', options);
+            samples[reportKey].push(performance.now() - start);
+            assert.equal(result.status, 200);
+            const workers = result.body.rows.filter(row => row.id.startsWith('profile-worker-'));
+            assert.equal(workers.length, 250);
+            assert.ok(workers.every(row => Number(row.planned_utilization) === 100));
+            assert.ok(result.body.rows.every(row => row.id !== commercialFixture.otherOwnerId && row.id !== commercialFixture.foreignOwnerId));
+          } else if (index >= 20) {
+            const result = await request('/api/timesheets', options);
+            samples[readKey].push(performance.now() - start);
+            assert.equal(result.status, 200);
+            assert.equal(result.body.length, 8);
+            assert.ok(result.body.every(sheet => sheet.employee_id === worker && sheet.entries.length === 5));
+          } else {
+            const key = worker + '/' + week;
+            const draft = receipts.get(key);
+            const result = decision
+              ? await request('/api/timesheets/' + draft.id + '/status', {...options, method: 'PATCH', body: {status}})
+              : await request('/api/timesheets', {...options, method: 'POST', body: {
+                employee_id: worker, week_ending: week, status, expected_write_token: draft?.write_token ?? null,
+                entries: [{work_type: 'Client Misc Task', client_name: 'Synthetic client', work_date: week,
+                  hours: '1', remark: 'Synthetic work', billable: false}],
+              }});
+            samples[phase].push(performance.now() - start);
+            assert.equal(result.status, 200, JSON.stringify(result.body));
+            assert.equal(result.body.status, status);
+            assert.equal(result.body.employee_id, worker);
+            if (phase === 'save') receipts.set(key, result.body);
+            else assert.equal(result.body.id, draft.id);
+            if (decision) assert.equal(result.body.approved_by, actor.username);
+          }
+        }));
+      }
+      const persisted = await pool.query(`select count(*)::int sheets, sum(total_hours)::int hours
+        from timesheets where status=$1 and id=any($2::uuid[])`, [status, [...receipts.values()].map(row => row.id)]);
+      assert.deepEqual(persisted.rows[0], {sheets: 90, hours: 90});
+      if (phase === 'submit') {
+        const submitted = receipts.get('profile-worker-6/2024-03-03');
+        const denied = await request('/api/timesheets/' + submitted.id + '/status', {
+          authenticated: false, headers: reviewers[1].headers, method: 'PATCH', body: {status: 'Approved'},
+        });
+        assert.equal(denied.status, 403, 'A different team lead cannot approve this employee’s work');
+      }
     }
-    const persisted = await pool.query(`select count(*)::int drafts, sum(total_hours)::int hours
-      from timesheets where status='Draft' and employee_id like 'profile-worker-%'`);
-    assert.deepEqual(persisted.rows[0], {drafts: 90, hours: 90});
-    const thresholds = {read: 2000, save: 3000, report: 5000};
+    const evidence = await pool.query(`select count(distinct t.id)::int sheets, count(*)::int decisions
+      from timesheets t join work_submission_evidence w on w.timesheet_id=t.id
+      join work_submission_decisions d on d.submission_id=w.id
+      join users author on author.id=w.actor_id and author.employee_record_id=t.employee_id
+      join employees e on e.id=t.employee_id
+      join users reviewer on reviewer.id=d.actor_id and reviewer.employee_record_id=e.reporting_manager_id
+      where t.id=any($1::uuid[]) and d.status='Approved' and d.actor_id<>w.actor_id and d.active_role='TeamLead'`,
+    [[...receipts.values()].map(row => row.id)]);
+    assert.deepEqual(evidence.rows[0], {sheets: 90, decisions: 90});
     const report = ['## Standard-profile API performance', '',
       '250 synthetic accounts, 75 concurrent sessions, 25 clients, 50 projects, 250 assignments, 10,000 work entries, 2,000 submission audit rows and 50 commercial milestones.', '',
       '| Operation | Samples | p95 (ms) | Max (ms) | Target (ms) |', '|---|---:|---:|---:|---:|'];
@@ -97,7 +137,7 @@ await withCommercialDatabase(async database => {
       const p95 = durations[Math.ceil(durations.length * 0.95)-1];
       const maximum = durations.at(-1);
       report.push(`| ${operation} | ${durations.length} | ${Math.ceil(p95)} | ${Math.ceil(maximum)} | ${thresholds[operation]} |`);
-      if ((operation === 'report' ? maximum : p95) > thresholds[operation]) violations.push(operation);
+      if ((operation.startsWith('report during ') ? maximum : p95) > thresholds[operation]) violations.push(operation);
     }
     const markdown = report.join('\n') + '\n';
     console.log(markdown);
