@@ -223,7 +223,21 @@ Buyer UAT:
 Owner Gate D approval:
 ```
 
+## WOS-NFR-PERF-001/002/003/007/008 Standard-profile API evidence
+
+The `test:standard-profile` CI job step checks populated employee timesheet history, persisted draft saves, submissions and independent direct-manager approvals alongside utilization report results across 75 concurrent sessions. The workflow summary records measurements and thresholds. Staged approval timing, buyer-scale UAT and browser measurements remain open.
+
+## WOS-IAM-008 account-wide revocation
+
+Migration 082b and the session revocation PostgreSQL and production identity suites cover account-specific generation changes, operator authority, transactional evidence, rejection of earlier credentials and issuance after revocation.
+
+## WOS-IAM-008 production session policy
+
+Migration 082a and the session-policy and production-identity suites cover deployment-wide lifetime audit, denied changes, failed audit rollback and refusal to issue a new session from a stale replica.
+
 ## WOS-00F corrective traceability
+
+WOS-OPS-005 and WOS-NFR-REL-006/008 have a CI rehearsal in `tests/postgres-restore-rehearsal.mjs`. It compares every public table across a real archive restore, replays the migration runner and verifies commercial reads, scoped denials and an audited write. Buyer backup custody and measured recovery objectives require deployment evidence.
 
 ## WOS-02 organization and setup foundation traceability
 

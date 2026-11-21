@@ -454,6 +454,15 @@ jobs:
       - name: Run fresh-install, upgrade, and concurrent migration tests
         run: npm run test:migrations
 
+      - name: Verify audited deployment session lifetime and database permissions
+        run: npm run test:session-policy
+
+      - name: Measure Standard-profile authenticated API performance
+        run: npm run test:standard-profile
+
+      - name: Rehearse PostgreSQL archive recovery and verify restored application access
+        run: PATH="/usr/lib/postgresql/16/bin:$PATH" npm run test:restore
+
       - name: Audit locked dependencies
         run: npm audit --audit-level=high
 
