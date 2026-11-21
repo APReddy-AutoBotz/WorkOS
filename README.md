@@ -6,6 +6,8 @@ WorkOS is a buyer-owned professional-services operations platform that connects 
 
 ## Current programme state
 
+Rate approval managers must reload a billing or cost rate review if a reviewer advances the stage before cancellation. Switching reviews clears the previous decision and reason.
+
 T&M billing cancellations apply to the inspected review stage. If another reviewer advances it, finance must reopen the current stage before cancelling.
 
 When adopted rates tie, finance can see the shared priority and two candidate version IDs in rate resolution and T&M valuation review.

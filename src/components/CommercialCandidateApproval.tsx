@@ -121,8 +121,16 @@ export const CommercialCandidateApproval = ({
       }
     }
   };
+  const selectReview = (id: string) => {
+    setSelected(id);
+    setDecision('');
+    setDecisionReason('');
+    setCancelReason('');
+  };
   const load = () =>
     void run(async (c) => {
+      selectReview('');
+      setOwner(undefined);
       const [o, v] = await Promise.all([
         candidateOwnerService.inspect(candidateId, kind, c),
         commercialCandidateApprovals.load(candidateId, kind, c),
@@ -132,7 +140,6 @@ export const CommercialCandidateApproval = ({
       setEffectivePolicy(v.effectivePolicy);
       setApprovals(v.approvals);
       setTruncated(v.truncated);
-      setSelected('');
       setPolicyId('');
     });
   const perform = (op: ApprovalOperation) => {
@@ -157,7 +164,9 @@ export const CommercialCandidateApproval = ({
           setEffectivePolicy(null);
           setApprovals([]);
           setSelected('');
-          setNotice('The operation was refused. Reload before a deliberate new request.');
+          setNotice(e.code === 'COMMERCIAL_APPROVAL_STAGE_CHANGED'
+            ? 'The review stage changed. Reload and select the current review before cancelling.'
+            : 'The operation was refused. Reload before a deliberate new request.');
           return;
         }
         throw e;
@@ -259,7 +268,7 @@ export const CommercialCandidateApproval = ({
     perform({
       type: 'cancellation',
       id: chosen.id,
-      data: { requestId: crypto.randomUUID(), reason: cancelReason.trim() },
+      data: { requestId: crypto.randomUUID(), expectedSequence: chosen.state.sequence, reason: cancelReason.trim() },
     });
   };
   return (
@@ -474,7 +483,7 @@ export const CommercialCandidateApproval = ({
               aria-label="Approval request"
               value={selected}
               disabled={busy || !!pending}
-              onChange={(e) => setSelected(e.target.value)}
+              onChange={(e) => selectReview(e.target.value)}
             >
               <option value="">Choose a retained request</option>
               {approvals.map((a) => (

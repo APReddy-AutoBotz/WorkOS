@@ -189,3 +189,7 @@ WOS-COM-003 and WOS-COM-006 — Rate conflict diagnosis is available during sour
 ### T&M billing review cancellation
 
 T&M billing managers can cancel the pending stage they inspected. A concurrent reviewer advancing the stage invalidates an earlier cancellation draft.
+
+### Rate approval cancellation
+
+Billing and confidential cost rate review cancellations check the inspected stage under the same database lock used to append approval decisions.

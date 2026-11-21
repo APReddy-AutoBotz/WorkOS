@@ -124,7 +124,7 @@ export type DecisionCommand = {
   decision: 'Approved' | 'Rejected';
   reason: string;
 };
-export type CancellationCommand = { requestId: string; reason: string };
+export type CancellationCommand = { requestId: string; expectedSequence: number; reason: string };
 export type ApprovalOperation =
   | { type: 'policy'; data: PolicyCommand }
   | { type: 'request'; data: RequestCommand }
@@ -180,7 +180,7 @@ const operation = z.discriminatedUnion('type', [
     .object({
       type: z.literal('cancellation'),
       id: uuid,
-      data: z.object({ requestId: uuid, reason }).strict(),
+      data: z.object({ requestId: uuid, expectedSequence: z.number().int().min(0).max(9), reason }).strict(),
     })
     .strict(),
 ]);
@@ -408,6 +408,8 @@ export const commercialCandidateApprovals = {
     if (
       op.type === 'cancellation' &&
       (a.id !== op.id ||
+        a.state.status !== 'Cancelled' ||
+        a.state.sequence !== op.data.expectedSequence ||
         !a.cancellation ||
         a.cancellation.requestId !== op.data.requestId ||
         a.cancellation.actorId !== v.data.actorUserId ||
