@@ -22,6 +22,7 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
     if (!params.safeParse(r.params).success || Object.keys(r.query).length) throw fail(400, 'Select a valid exported line.');
     await authorize(c, r, kind);
     const { row, source } = await batch(c, r, r.params.batchId, write);
+    if (row.source_type==='MANAGED_SERVICE_UNIT') throw fail(409,'Corrections are unavailable for this source.');
     if (!['Exported', 'Billed/Confirmed'].includes(row.state) || !source.lines.some(l => l.lineId === r.params.lineId))
       throw fail(404, 'Exported line unavailable.');
     const artifact = (await c.query(

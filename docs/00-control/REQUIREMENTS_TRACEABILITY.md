@@ -699,3 +699,7 @@ WOS-COM-010, WOS-INV-001. Migration 082w and the commercial drafting journey ver
 WOS-INV-001 and WOS-INV-002 managed-service drafting. Migration 082x and the commercial drafting journey cover source-scoped draft creation, whole-item reservation and replay, exclusive occupancy across competing batches, cancellation and rebatching. Managed-service batch review, export and downstream confirmation remain open.
 
 WOS-INV-002 managed-service approval. Migration 082y and the commercial drafting browser journey cover staged policy configuration, protected source inspection, independent reviewer authority, stale lineage rejection and a retained invoice decision on the reserved charge. Export and downstream confirmation remain open.
+
+## Managed-service CSV delivery
+
+WOS-INV-002, WOS-INV-003, WOS-INV-005, WOS-INV-006 and WOS-INV-007 are covered for service-unit export and confirmation by migration `082z_wos06_service_unit_invoice_export.sql` and the finance journey in `tests/commercial-drafting-journey-browser-smoke.mjs`. Service-unit adjustments under WOS-INV-004 remain pending.

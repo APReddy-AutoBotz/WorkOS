@@ -1,4 +1,4 @@
-import {retainerInvoiceEvidence} from './invoiceDrafts';
+import {retainerInvoiceEvidence,serviceUnitInvoiceEvidence} from './invoiceDrafts';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { canonicalHours } from '../../shared/work-hours.mjs';
@@ -30,33 +30,44 @@ type ArtifactMetadata = {
   currency: string;
   total: string;
 };
-const verifyContractCsv=async(a:ArtifactMetadata,retainer:boolean)=>{
-  const expectedSchema=retainer?'workos.invoice-retainer-csv/1':'workos.invoice-milestone-csv/1';
-  const expectedHeader=retainer?header.replace('milestone_id_b64','statement_id')+',event_version':header;
+const contractFormats = {
+  milestone: { schema: 'workos.invoice-milestone-csv/1', header, source: 'MILESTONE_ACCEPTANCE' },
+  retainer: { schema: 'workos.invoice-retainer-csv/1', header: header.replace('milestone_id_b64', 'statement_id') + ',event_version', source: 'RETAINER_PERIOD' },
+  service_unit: { schema: 'workos.invoice-service-unit-csv/1', header: header.replace('milestone_id_b64', 'evidence_id') + ',event_version', source: 'MANAGED_SERVICE_UNIT' },
+} as const;
+
+const scaledToFourPlaces = (value: string) => {
+  const [whole, fraction = ''] = value.split('.');
+  return BigInt(whole + fraction.padEnd(4, '0'));
+};
+
+const verifyContractCsv = async (a: ArtifactMetadata, kind: keyof typeof contractFormats) => {
+  const format = contractFormats[kind];
+  const hasEventVersion = kind !== 'milestone';
   if (
-    a.schemaVersion !== expectedSchema ||
+    a.schemaVersion !== format.schema ||
     !uuid.safeParse(a.batchId).success ||
     !Number.isInteger(a.lineCount) ||
     a.lineCount < 1 ||
     !/^[A-Z]{3}$/.test(a.currency) ||
     !money.safeParse(a.total).success
   )
-    throw Error('Invalid milestone artifact metadata');
+    throw Error('Invalid invoice artifact metadata');
   const bytes = decode(a.payloadBase64),
     digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
       .map((x) => x.toString(16).padStart(2, '0'))
       .join('');
   if (digest !== a.sha256) throw Error('Checksum mismatch');
   const rows = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\r\n');
-  if (rows[0] !== expectedHeader || rows.at(-1) !== '' || rows.length !== a.lineCount + 2)
-    throw Error('Invalid milestone CSV shape');
+  if (rows[0] !== format.header || rows.at(-1) !== '' || rows.length !== a.lineCount + 2)
+    throw Error('Invalid invoice CSV shape');
   const seen = new Set<string>(),
     amounts: string[] = [];
   let sourceIdentity: string | null = null;
   for (const [n, row] of rows.slice(1, -1).entries()) {
     const c = row.split(',');
     if (
-      c.length !== (retainer?20:19) || (retainer && c[19]!=='1') ||
+      c.length !== (hasEventVersion ? 20 : 19) || (hasEventVersion && c[19] !== '1') ||
       c[0] !== a.schemaVersion ||
       c[1] !== a.batchId ||
       !uuid.safeParse(c[2]).success ||
@@ -64,7 +75,7 @@ const verifyContractCsv=async(a:ArtifactMetadata,retainer:boolean)=>{
       !uuid.safeParse(c[4]).success ||
       c[5] !== '1' ||
       !uuid.safeParse(c[6]).success ||
-      c[7] !== (retainer?'RETAINER_PERIOD':'MILESTONE_ACCEPTANCE') ||
+      c[7] !== format.source ||
       seen.has(c[4]) ||
       !date.safeParse(c[13]).success ||
       c[14] !== a.currency ||
@@ -76,11 +87,17 @@ const verifyContractCsv=async(a:ArtifactMetadata,retainer:boolean)=>{
       c[13] < c[16] ||
       c[13] > c[17]
     )
-      throw Error('Invalid milestone line');
+      throw Error('Invalid invoice line');
     seen.add(c[4]);
     const rawEvidence=JSON.parse(field(c[9])),client=field(c[10]),contract=field(c[11]),engagement=field(c[12]);
     if (![client,contract,engagement].every(value=>id.safeParse(value).success)) throw Error('Invalid contract scope');
-    if (retainer) {
+    if (kind === 'service_unit') {
+      const e=serviceUnitInvoiceEvidence.parse(rawEvidence);
+      const divisor=10n**BigInt(8-e.billingPrecision);
+      const rounded=(scaledToFourPlaces(e.unitPrice)*scaledToFourPlaces(e.quantity)+divisor/2n)/divisor;
+      if(e.evidenceId!==c[8] || e.engagementId!==engagement || e.priceEffectiveFrom>e.serviceDate || e.serviceDate>c[13] ||
+        rounded*10n**BigInt(4-e.billingPrecision)!==scaledToFourPlaces(c[15])) throw Error('Service charge evidence mismatch');
+    } else if (kind === 'retainer') {
       const e=retainerInvoiceEvidence.parse(rawEvidence);
       const components=[e.periodPrice.baseFee,e.periodPrice.overage].filter(v=>/[1-9]/.test(v));
       if (e.statementId!==c[8] || e.engagementId!==engagement || e.startsOn>e.endsOn || e.endsOn>=c[13] ||
@@ -102,5 +119,7 @@ const verifyContractCsv=async(a:ArtifactMetadata,retainer:boolean)=>{
   return bytes;
 };
 
-export const verifyMilestoneInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,false);
-export const verifyRetainerInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,true);
+export const verifyMilestoneInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,'milestone');
+export const verifyRetainerInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,'retainer');
+
+export const verifyServiceInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,'service_unit');

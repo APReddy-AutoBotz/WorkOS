@@ -27,6 +27,7 @@ import { scopedCapacityWorker } from '../planning/worker-capacity-service.mjs';
 import { workApprovalOwner } from '../approvals/work-approval-service.mjs';
 import { invoiceCsvArtifact, INVOICE_CSV_SCHEMA } from './csv.mjs';
 import {invoiceDraftTotal} from '../../../shared/invoice-batch-draft.mjs';
+const SERVICE_CSV_SCHEMA='workos.invoice-service-unit-csv/1';
 const RETAINER_CSV_SCHEMA='workos.invoice-retainer-csv/1';
 const uuid = z.string().uuid(),
   key = z.string().regex(/^[a-f0-9]{64}$/),
@@ -150,8 +151,8 @@ export const createInvoiceCsvRouter = (o) => {
       }),
     ]);
   const batch = async (c, r, batchId, lock = false) => {
-    const model=await approvalBatchModel(c,r,batchId,true);
-    if (model==='milestone' || model==='retainer') return loadMilestoneExportBatch(c,r,batchId,lock,model);
+    const model=await approvalBatchModel(c,r,batchId,true,true);
+    if (['milestone','retainer','managed_service'].includes(model)) return loadMilestoneExportBatch(c,r,batchId,lock,model);
     const b = (
       await c.query(
         `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
@@ -191,11 +192,13 @@ export const createInvoiceCsvRouter = (o) => {
   const exportBatch=async(c,r,id,lock=false)=>(await correctionExportBatch(c,r,id,lock)) ?? batch(c,r,id,lock);
   const renderExport=async(c,source)=>{
     switch(source.lines[0]?.sourceType){
+      case 'MANAGED_SERVICE_UNIT':
       case 'RETAINER_PERIOD': {
-        const {rows:[{bytes}]}=await c.query('select retainer_invoice_csv_bytes(b) bytes from invoice_draft_batches b where b.id=$1',[source.batchId]);
-        if (!Buffer.isBuffer(bytes) || !bytes.length) throw new TypeError('Retained retainer charge bytes unavailable.');
+        const service=source.lines[0]?.sourceType==='MANAGED_SERVICE_UNIT';
+        const {rows:[{bytes}]}=await c.query(`select ${service?'service_unit_invoice_csv_bytes':'retainer_invoice_csv_bytes'}(b) bytes from invoice_draft_batches b where b.id=$1`,[source.batchId]);
+        if (!Buffer.isBuffer(bytes) || !bytes.length) throw new TypeError('Retained invoice bytes unavailable.');
         const {lineCount,amount}=invoiceDraftTotal(source.lines.map(line=>line.amount));
-        return {schemaVersion:RETAINER_CSV_SCHEMA,bytes,sha256:createHash('sha256').update(bytes).digest('hex'),
+        return {schemaVersion:service?SERVICE_CSV_SCHEMA:RETAINER_CSV_SCHEMA,bytes,sha256:createHash('sha256').update(bytes).digest('hex'),
           currency:source.currency,lineCount,total:amount};
       }
       case 'FULL_LINE_REVERSAL': return correctionArtifact(source);
@@ -304,7 +307,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         batch: {
           id: row.id,
-          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
+          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
           state: row.state,
           clientId: row.client_id,
           contractId: row.contract_id,
@@ -319,7 +322,7 @@ export const createInvoiceCsvRouter = (o) => {
           sourceCurrent: review?.current === true,
           artifactId: stored?.id ?? null,
           lines: source.lines.map((x) =>
-            x.sourceType === 'FULL_LINE_REVERSAL' ? x : ['MILESTONE_ACCEPTANCE','RETAINER_PERIOD'].includes(x.sourceType)
+            x.sourceType === 'FULL_LINE_REVERSAL' ? x : ['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(x.sourceType)
               ? {
                   lineId: x.lineId,
                   sequence: x.sequence,
@@ -327,7 +330,7 @@ export const createInvoiceCsvRouter = (o) => {
                   itemVersion: x.itemVersion,
                   eventId: x.eventId,
                   sourceType: x.sourceType,
-                   ...(x.sourceType==='RETAINER_PERIOD'?{statementId:JSON.parse(x.evidenceJson).statementId,reviewId:JSON.parse(x.evidenceJson).reviewId}:{milestoneId:JSON.parse(x.evidenceJson).milestoneId}),
+                   ...(x.sourceType==='MANAGED_SERVICE_UNIT'?{evidenceId:JSON.parse(x.evidenceJson).evidenceId,reviewId:JSON.parse(x.evidenceJson).reviewId}:x.sourceType==='RETAINER_PERIOD'?{statementId:JSON.parse(x.evidenceJson).statementId,reviewId:JSON.parse(x.evidenceJson).reviewId}:{milestoneId:JSON.parse(x.evidenceJson).milestoneId}),
                   eligibleDate: x.eligibleDate,
                   currency: x.currency,
                   amount: x.amount,
@@ -362,7 +365,7 @@ export const createInvoiceCsvRouter = (o) => {
             approvalId: uuid,
             finalTransitionId: uuid,
             lineageHash: key,
-            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA,RETAINER_CSV_SCHEMA]),
+            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA,RETAINER_CSV_SCHEMA,SERVICE_CSV_SCHEMA]),
             expectedLineCount: z.number().int().min(1).max(1000000),
             expectedTotal: z.union([money,z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/)]),
             reason,
@@ -495,11 +498,12 @@ export const createInvoiceCsvRouter = (o) => {
     TM_SNAPSHOT: INVOICE_CSV_SCHEMA,
     MILESTONE_ACCEPTANCE: MILESTONE_INVOICE_CSV_SCHEMA,
     RETAINER_PERIOD: RETAINER_CSV_SCHEMA,
+    MANAGED_SERVICE_UNIT: SERVICE_CSV_SCHEMA,
     FULL_LINE_REVERSAL: CREDIT_CSV_SCHEMA,
   })[sourceType];
   const confirmationView = (x) => ({
     id: x.id,
-    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
+    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
     batchId: x.batch_id,
     artifactId: x.artifact_id,
     artifactVersion: x.artifact_version,
@@ -550,7 +554,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         source: {
           batchId: row.id,
-          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
+          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
           state: row.state,
           artifactId: a.id,
           artifactVersion: a.version,
@@ -731,10 +735,10 @@ export const createInvoiceCsvRouter = (o) => {
         ],
         x = (
           await c.query(
-            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(row.source_type)
+            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(row.source_type)
               ? "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16,$17)returning *,trim_scale(total)::text total"
               : "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16)returning *,trim_scale(total)::text total",
-            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(row.source_type) ? [...confirmationArgs,row.source_type] : confirmationArgs,
+            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(row.source_type) ? [...confirmationArgs,row.source_type] : confirmationArgs,
           )
         ).rows[0];
       await o.audit(c, r, {

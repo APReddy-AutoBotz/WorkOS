@@ -5,7 +5,10 @@ import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {BrowserRouter} from 'react-router-dom';
 import {CommercialDraftingWorkspace} from '../../src/pages/CommercialDraftingWorkspace';
+import {verifyServiceInvoiceCsv} from '../../src/services/milestoneInvoiceCsv';
 import '../../src/index.css';
+
+Object.assign(window,{verifyServiceInvoiceCsv});
 
 const root = createRoot(document.getElementById('root')!);
 const params = new URLSearchParams(location.search);
