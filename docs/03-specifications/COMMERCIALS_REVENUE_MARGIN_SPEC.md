@@ -233,3 +233,7 @@ A managed-service dimension opts into accepted-unit billing by specifying a pinn
 Managed-service drafts select approved-unbilled items by eligibility date. The preparer and owner need their invoice permissions and managed-service billing access. Reservation verifies the accepted unit, retained terms, current source identities and unique occupancy, then records a whole line with source evidence. An authorized cancellation releases occupancy and preserves line history.
 
 Managed-service batch approval pins the exact reserved lines, eligibility events, source evidence and total. Named reviewers require current billing access, active worker identities and independence from the requester, preparer and owner. An approval decision revalidates the retained identities, source evidence and item reservations under the configured policy.
+
+## Exporting approved service units
+
+Use schema `workos.invoice-service-unit-csv/1` for approved managed-service unit batches. Each line identifies its register item, eligibility event and retained service evidence. The verifier reconciles quantity and unit price to the rounded line amount. The downstream confirmation pins the retained artifact digest, currency and total.

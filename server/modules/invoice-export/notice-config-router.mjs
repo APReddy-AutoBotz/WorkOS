@@ -74,6 +74,7 @@ export const createInvoiceNoticeConfigRouter = (o) => {
         [...scope(r), engagementId],
       )
     ).rows[0];
+    if (e?.model==='managed_service') await assertCommercialAuthority(c,r,'commercial.service_units.issue');
     if (e?.model==='retainer') await assertCommercialAuthority(c,r,'commercial.retainer_eligibility.issue');
     if (e?.model === 'milestone') await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
   };

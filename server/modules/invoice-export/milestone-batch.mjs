@@ -31,7 +31,7 @@ export const loadMilestoneExportBatch = async (c, r, batchId, lock = false,model
   const review =
     (
       await c.query(
-        `select i.*,${model==='retainer'?'(invoice_batch_approval_pin_current(i) and invoice_review_identities_current(i))':'milestone_invoice_approval_pin_current(i)'} current,t.id as final_transition_id from invoice_batch_approval_instances i join invoice_batch_approval_policies p on p.id=i.policy_id join invoice_batch_approval_transitions t on t.instance_id=i.id and t.sequence=jsonb_array_length(p.definition->'stages') and t.decision='Approved' where i.batch_id=$1 order by i.sequence desc limit 1`,
+        `select i.*,${model!=='milestone'?'(invoice_batch_approval_pin_current(i) and invoice_review_identities_current(i))':'milestone_invoice_approval_pin_current(i)'} current,t.id as final_transition_id from invoice_batch_approval_instances i join invoice_batch_approval_policies p on p.id=i.policy_id join invoice_batch_approval_transitions t on t.instance_id=i.id and t.sequence=jsonb_array_length(p.definition->'stages') and t.decision='Approved' where i.batch_id=$1 order by i.sequence desc limit 1`,
         [b.id],
       )
     ).rows[0] ?? null;

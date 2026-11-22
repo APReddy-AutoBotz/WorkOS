@@ -302,7 +302,7 @@ const InvoiceCsvEngagement = ({
       !source.lineageHash ||
       !source.control ||
       version !==
-        (source.sourceType==='RETAINER_PERIOD' ? 'workos.invoice-retainer-csv/1' : source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
+        (source.sourceType==='MANAGED_SERVICE_UNIT' ? 'workos.invoice-service-unit-csv/1' : source.sourceType==='RETAINER_PERIOD' ? 'workos.invoice-retainer-csv/1' : source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
           ? 'workos.invoice-milestone-csv/1'
           : 'workos.invoice-tm-csv/1') ||
       !confirmed ||
@@ -316,7 +316,7 @@ const InvoiceCsvEngagement = ({
       finalTransitionId: source.finalTransitionId,
       lineageHash: source.lineageHash,
       schemaVersion:
-        source.sourceType==='RETAINER_PERIOD' ? 'workos.invoice-retainer-csv/1' : source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
+        source.sourceType==='MANAGED_SERVICE_UNIT' ? 'workos.invoice-service-unit-csv/1' : source.sourceType==='RETAINER_PERIOD' ? 'workos.invoice-retainer-csv/1' : source.sourceType==='FULL_LINE_REVERSAL' ? 'workos.invoice-credit-csv/1' : source.sourceType === 'MILESTONE_ACCEPTANCE'
           ? 'workos.invoice-milestone-csv/1'
           : 'workos.invoice-tm-csv/1',
       expectedLineCount: source.control.lineCount,
@@ -484,7 +484,7 @@ const InvoiceCsvEngagement = ({
                 {source.lines.map((x) => (
                   <li key={x.lineId}>
                     Line {x.lineId} · item {x.itemId} · event {x.eventId} ·{' '}
-                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `credit against original line ${x.originalLineId} · artifact ${x.originalArtifactId}` : 'sourceType' in x && x.sourceType==='RETAINER_PERIOD' ? `retainer statement ${x.statementId} · review ${x.reviewId}` : 'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
+                    {'sourceType' in x && x.sourceType==='FULL_LINE_REVERSAL' ? `credit against original line ${x.originalLineId} · artifact ${x.originalArtifactId}` : 'sourceType' in x && x.sourceType==='MANAGED_SERVICE_UNIT' ? `service receipt ${x.evidenceId} · review ${x.reviewId}` : 'sourceType' in x && x.sourceType==='RETAINER_PERIOD' ? `retainer statement ${x.statementId} · review ${x.reviewId}` : 'sourceType' in x ? `milestone ${x.milestoneId}` : `snapshot ${x.snapshotId}`} ·{' '}
                     {x.currency} {x.amount}
                     {(!('sourceType' in x) || (x.sourceType==='MILESTONE_ACCEPTANCE' && hasRatePermission('commercial.milestone_billing.view'))) && canAssignPurchaseOrder() && <LinePurchaseOrder
                       batchId={source.id} lineId={x.lineId} approved={source.state==='Approved'} disabled={busy || !!pending} run={run}/>}
@@ -504,12 +504,12 @@ const InvoiceCsvEngagement = ({
                   Retrieve retained invoice CSV
                 </button>
               )}
-              {source.sourceType!=='FULL_LINE_REVERSAL' && verified && source.artifactId === verified.artifact.id && source.id === verified.artifact.batchId &&
+              {source.sourceType!=='FULL_LINE_REVERSAL' && source.sourceType!=='MANAGED_SERVICE_UNIT' && verified && source.artifactId === verified.artifact.id && source.id === verified.artifact.batchId &&
                 (source.state === 'Exported' || source.state === 'Billed/Confirmed') && hasRatePermission('commercial.invoice_drafts.prepare') && (
                   <InvoiceLineReversal key={source.id + source.state} source={source} state={source.state} artifact={verified.artifact}
                     run={run} disabled={busy || !!pending} />
                 )}
-              {source.sourceType!=='FULL_LINE_REVERSAL' && source.artifactId && <ExportedCredits key={source.artifactId} original={source} run={run} disabled={busy || !!pending}/>}
+              {source.sourceType!=='FULL_LINE_REVERSAL' && source.sourceType!=='MANAGED_SERVICE_UNIT' && source.artifactId && <ExportedCredits key={source.artifactId} original={source} run={run} disabled={busy || !!pending}/>}
               {canCreate && source.state === 'Approved' && (
                 <fieldset disabled={busy || !!pending}>
                   <legend>Accept approved CSV artifact</legend>
@@ -521,7 +521,7 @@ const InvoiceCsvEngagement = ({
                       onChange={(e) => setVersion(e.target.value)}
                     >
                       <option value="">Choose</option>
-                      {source.sourceType==='RETAINER_PERIOD' ? <option value="workos.invoice-retainer-csv/1">Retainer CSV v1</option> : source.sourceType==='FULL_LINE_REVERSAL' ? <option value="workos.invoice-credit-csv/1">Credit CSV v1</option> : source.sourceType === 'MILESTONE_ACCEPTANCE' ? (
+                      {source.sourceType==='MANAGED_SERVICE_UNIT' ? <option value="workos.invoice-service-unit-csv/1">Managed-service CSV v1</option> : source.sourceType==='RETAINER_PERIOD' ? <option value="workos.invoice-retainer-csv/1">Retainer CSV v1</option> : source.sourceType==='FULL_LINE_REVERSAL' ? <option value="workos.invoice-credit-csv/1">Credit CSV v1</option> : source.sourceType === 'MILESTONE_ACCEPTANCE' ? (
                         <option value="workos.invoice-milestone-csv/1">
                           Milestone invoice CSV v1
                         </option>

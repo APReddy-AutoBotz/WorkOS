@@ -702,3 +702,7 @@ Configure accepted-unit billing and charge precision on a priced service dimensi
 For managed-service drafts, grant the preparer and owner commercial.service_units.issue as well as their invoice permissions. Select the billable engagement, eligibility-date range and owner, inspect available service charges, then reserve a whole approved item. After an uncertain save inspect the draft. Use authorized cancellation to release reservations. During application rollback preserve migration 082x, draft history and occupancy rows.
 
 For managed-service batch approval, give the policy manager and each participant commercial.service_units.issue alongside the appropriate invoice permissions. Select independent named reviewers. Inspect the retained source and total before submitting or deciding. Withdraw and resubmit when the reviewed identity or source changes. Revoke approval permissions to suspend decisions. Preserve migration 082y and historical decisions during rollback.
+
+## Suspend managed-service invoice delivery
+
+To suspend new exports or confirmations, revoke the applicable invoice export or confirmation grants from affected roles. These grants cover multiple invoice sources. Preserve the migration, signed CSV bytes, register lineage and confirmation receipts for retrieval and reconciliation. A downstream reference records a manual attestation by the confirmer.

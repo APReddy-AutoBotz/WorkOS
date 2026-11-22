@@ -170,3 +170,7 @@ Managed-service contract versions can authorize billing by accepted unit and spe
 Invoice preparers can reserve a whole approved managed-service charge in a draft for its engagement, currency and eligibility period. The line shows the accepted quantity and unit price and retains its review, event and register item. Cancelling the draft releases the item for another batch.
 
 Managed-service invoice batches can follow an engagement-specific approval policy. Reviewers inspect each reserved charge, its accepted quantity and unit price. The decision retains the reviewed line set and total.
+
+## Managed-service invoice export
+
+In **Invoice CSV export**, select an approved service-unit batch, inspect its approval and control total, then accept and download the verified CSV. In **Invoice billing confirmation**, inspect the retained export and record the downstream invoice reference after matching the amount.
