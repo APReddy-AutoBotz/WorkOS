@@ -938,9 +938,6 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await valuePost(valuationPath,valuateBody,{scope:{...scope,legalEntityId:'synthetic-unassigned-entity'}})).status,403);
       const futurePolicy=await valuePost(policyPath,{previousId:policy.id,effectiveFrom:future,profile:'disabled',precision:null,reason:'End management valuation'});
       assert.equal(futurePolicy.status,201,JSON.stringify(futurePolicy.body));
-      await pool.query("update reporting_periods set status='Financially Locked' where id='syn-fixed-period'");
-      assert.equal((await valuePost(valuationPath,valuateBody)).status,409);
-      await pool.query("update reporting_periods set status='Approval Closed' where id='syn-fixed-period'");
       await op.getByRole('button',{name:'Inspect operational valuation',exact:true}).click();
       await op.getByRole('button',{name:'Record operational value',exact:true}).click();
       await op.getByText('Operational management value · GBP 150.02 · 1.25 units at 120.0123',{exact:true}).waitFor();
@@ -957,6 +954,12 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert(concurrent.every(r=>r.status===201));assert.equal(concurrent[0].body.id,concurrent[1].body.id);
       assert.equal((await reviewUnits(second.body.id,'Accepted')).status,409);
       assert.equal((await valuePost(capturePath+'/'+second.body.id+'/valuation',{...valuateBody,reviewId:concurrent[0].body.id})).status,409);
+      const lockReceipt=await capture({...serviceInput,sourceReference:'SYN-LOCKED-VALUE'});
+      const lockReview=await reviewUnits(lockReceipt.body.id,'Accepted');
+      assert.equal(lockReview.status,201);
+      await pool.query("update reporting_periods set status='Financially Locked' where id='syn-fixed-period'");
+      assert.equal((await valuePost(capturePath+'/'+lockReceipt.body.id+'/valuation',{...valuateBody,reviewId:lockReview.body.id})).status,409);
+      assert.equal((await valuePost(valuationPath,valuateBody)).body.id,snapshot.body.id,'locked period preserves idempotent historical receipt');
       assert.equal((await pool.query('select count(*)::int n from commercial_service_unit_valuations')).rows[0].n,1);
       await assert.rejects(pool.query('delete from commercial_service_unit_reviews where id=$1',[accepted.body.id]));
       const third=await capture({...serviceInput,sourceReference:'SYN-SHIFT-3'});
@@ -971,7 +974,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       await pool.query('update users set employee_record_id=$2 where id=$1',[alias.id,priorAliasWorker]);
       await pool.query('update users set employee_record_id=$2 where id=$1',[actorId,ownerId]);
       assert.equal((await reviewUnits(fourth.body.id,'Accepted')).status,403,'restored recorder link cannot validate earlier evidence');
-      assert.equal((await pool.query('select count(*)::int n from commercial_service_unit_reviews')).rows[0].n,3);
+      assert.equal((await pool.query('select count(*)::int n from commercial_service_unit_reviews')).rows[0].n,4);
       const {number,clientId:client,...revision}=saved.body;
       const path='/contracts/'+saved.result.id+'/versions';
       const revise=(body,identity=identities.manager)=>apiRequest(path,{method:'POST',identity,body});
