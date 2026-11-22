@@ -990,12 +990,30 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await periodValue({policyId:historicPolicy})).status,503);
       assert.equal((await periodValue()).body.valuation,null);
       await pool.query('drop trigger reject_period_value_audit on audit_logs');
+      const wrongScope=await apiRequest(pvPath,{identity:finance,method:'POST',scope:{...scope,legalEntityId:'synthetic-unassigned-entity'},body:{policyId:historicPolicy}});
+      assert.equal(wrongScope.status,403);
+      const registerCount=async()=>Number((await pool.query('select count(*) n from approved_unbilled_items')).rows[0].n);
+      const registerBeforePeriodValue=await registerCount();
+      const stalePeriodValue=await pool.connect();
+      try {
+        await stalePeriodValue.query('begin');
+        const original=(await stalePeriodValue.query('select employee_record_id from users where id=$1',[finance.id])).rows[0].employee_record_id;
+        await stalePeriodValue.query('update users set employee_record_id=null where id=$1',[finance.id]);
+        await stalePeriodValue.query('update users set employee_record_id=$2 where id=$1',[finance.id,original]);
+        const id=crypto.randomUUID(),operation=crypto.randomUUID();
+        await stalePeriodValue.query("select set_config('workos.service_valuation',$1,true)",[JSON.stringify({id,actor:finance.id,operation})]);
+        await assert.rejects(stalePeriodValue.query(`insert into commercial_service_period_valuations
+          (organization_id,legal_entity_id,engagement_id,review_id,policy_id,id,actor_id,active_role,operation_id)
+          values($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[scope.organizationId,scope.legalEntityId,serviceEng.body.id,periodReview.id,historicPolicy,id,finance.id,finance.role,operation]),
+          err=>err.code==='MSV02' && err.message.includes('identity changed'));
+      } finally {await stalePeriodValue.query('rollback');stalePeriodValue.release();}
       const valuationDesk=periodBrowser.page.getByRole('region',{name:'Fixed-period operational valuation'});
       await valuationDesk.getByLabel('Period valuation engagement').selectOption(serviceEng.body.id);
       await valuationDesk.getByRole('button',{name:'Inspect period valuation'}).click();
       await valuationDesk.getByRole('button',{name:'Record period value'}).click();
       await valuationDesk.getByText('Operational management value · GBP 100.03',{exact:true}).waitFor();
       const retained=(await periodValue()).body.valuation;
+      assert.equal(await registerCount(),registerBeforePeriodValue,'Operational valuation must not issue a billing item');
       assert.deepEqual([retained.sourceAmount,retained.amount,retained.policyId,retained.reviewId],['100.025','100.03',historicPolicy,periodReview.id]);
       await pool.query("update reporting_periods set status='Financially Locked' where id='syn-period-valuation'");
       assert.equal((await periodValue({policyId:historicPolicy})).body.id,retained.id);
@@ -1018,6 +1036,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       const declined=await decideOther(periods[1],finance,'Rejected');
       assert.equal(declined.status,201,JSON.stringify(declined.body));
       assert.equal(declined.body.review.decision,'Rejected');
+      assert.equal((await apiRequest(pvPath.replace(periodReview.id,declined.body.review.id),{identity:finance})).status,404);
       assert.equal((await decideOther(periods[1],finance,'Approved')).status,409);
       await periodBrowser.context.close();
       assert.equal((await capture({...serviceInput,recorderWorkerId:ownerId})).status,400);
@@ -1160,12 +1179,14 @@ const verifyCommercialDrafting = async reversalScenario => {
       await op.getByRole('button',{name:'Inspect SYN-SERVICE',exact:true}).click();
       await op.getByLabel('Service engagement').selectOption(serviceEng.body.id);
       await op.getByRole('button',{name:'Inspect valuation policy',exact:true}).click();
+      await op.getByText('Current policy: Approved fixed periods',{exact:true}).waitFor();
       await op.getByLabel('Operational valuation profile').selectOption('accepted_unit');
       await op.getByLabel('Policy effective date').fill(today);
       await op.getByLabel('Policy decision reason').fill('Value accepted support shifts');
       await op.getByRole('button',{name:'Schedule policy',exact:true}).click();
       await op.getByText('Current policy: Accepted units',{exact:true}).waitFor();
       const policy=(await valueRead(policyPath)).body.effective;
+      assert.equal((await periodValue()).body.valuation.id,retained.id,'Later policy versions preserve historical period valuation');
       const valuateBody={policyId:policy.id,reviewId:accepted.body.id};
       assert.equal((await valuePost(valuationPath,{...valuateBody,amount:'9000'})).status,400);
       assert.equal((await valuePost(valuationPath,valuateBody,{scope:{...scope,legalEntityId:'synthetic-unassigned-entity'}})).status,403);
