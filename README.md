@@ -174,3 +174,5 @@ Managed-service invoice batches can follow an engagement-specific approval polic
 ## Managed-service invoice export
 
 In **Invoice CSV export**, select an approved service-unit batch, inspect its approval and control total, then accept and download the verified CSV. In **Invoice billing confirmation**, inspect the retained export and record the downstream invoice reference after matching the amount.
+
+To correct an exported managed-service line, retrieve the original CSV, select the line and submit a full reversal under its engagement review policy. After independent approval, finance can issue a credit and track its separate draft, export and downstream confirmation.

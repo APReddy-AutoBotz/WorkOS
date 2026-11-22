@@ -220,4 +220,4 @@ Managed-service quantity capture (WOS-COM-010) records dated, referenced deliver
 
 ## Managed-service invoice delivery
 
-Approved service-unit batches support CSV export and manual downstream confirmation. The next commercial work covers governed service-unit corrections and credits, period-based service charges, and associated time and cost evidence.
+Approved service-unit batches support CSV export and manual downstream confirmation. A full-line service-unit correction now passes through named independent reviewers before finance can issue, reserve, approve, export and confirm a credit. Period-based service charges and associated time and cost evidence remain open.

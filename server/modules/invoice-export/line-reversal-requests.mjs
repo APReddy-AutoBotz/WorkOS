@@ -22,7 +22,7 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
     if (!params.safeParse(r.params).success || Object.keys(r.query).length) throw fail(400, 'Select a valid exported line.');
     await authorize(c, r, kind);
     const { row, source } = await batch(c, r, r.params.batchId, write);
-    if (row.source_type==='MANAGED_SERVICE_UNIT') throw fail(409,'Corrections are unavailable for this source.');
+
     if (!['Exported', 'Billed/Confirmed'].includes(row.state) || !source.lines.some(l => l.lineId === r.params.lineId))
       throw fail(404, 'Exported line unavailable.');
     const artifact = (await c.query(
@@ -63,7 +63,7 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
       ) as eligible`,
       [JSON.stringify(stages), existing.actorId, row.preparer_user_id, row.organization_id, row.legal_entity_id, row.id],
     )).rows[0].eligible;
-    const independent = eligible && (row.source_type !== 'RETAINER_PERIOD' || (await c.query(
+    const independent = eligible && (!['RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(row.source_type) || (await c.query(
       'select retainer_review_participants_valid(retainer_reversal_participants(b,$2,$3,$4)) ok from invoice_draft_batches b where b.id=$1',
       [row.id, existing.actorId, existing.activeRole, policy.id],
     )).rows[0]?.ok);

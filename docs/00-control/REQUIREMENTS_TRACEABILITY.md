@@ -702,4 +702,4 @@ WOS-INV-002 managed-service approval. Migration 082y and the commercial drafting
 
 ## Managed-service CSV delivery
 
-WOS-INV-002, WOS-INV-003, WOS-INV-005, WOS-INV-006 and WOS-INV-007 are covered for service-unit export and confirmation by migration `082z_wos06_service_unit_invoice_export.sql` and the finance journey in `tests/commercial-drafting-journey-browser-smoke.mjs`. Service-unit adjustments under WOS-INV-004 remain pending.
+WOS-INV-002, WOS-INV-003, WOS-INV-005, WOS-INV-006 and WOS-INV-007 are covered for service-unit export and confirmation by migration `082z_wos06_service_unit_invoice_export.sql` and the finance journey in `tests/commercial-drafting-journey-browser-smoke.mjs`. WOS-INV-004 full-line service-unit credits use migration `083_wos06_service_unit_corrections.sql` and the same finance journey to verify reviewer independence, signed amounts, replay and original artifact lineage.
