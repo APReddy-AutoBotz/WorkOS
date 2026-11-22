@@ -228,3 +228,5 @@ The fixed-fee installment register shows whether the original schedule author an
 For fixed-fee batches, select the engagement under **Invoice batch approvals** and configure its named review stages. After reserving a due installment, submit the inspected batch for review. The reviewer sees each installment’s number, due date, contract version and amount. Final approval moves the batch to Approved. Rejection returns it to Draft and preserves its reservations.
 
 After final approval of a fixed-fee batch, open **Invoice CSV export**, inspect its installments and total, and accept the fixed-fee CSV. Finance can download the verified artifact. Once the downstream system accepts it, use **Invoice billing confirmation** to record the reference against that exact file.
+
+To correct an exported fixed-fee installment, inspect the original CSV line and request a full reversal. Independent reviewers approve the request before finance can issue the credit. Reserve the credit in a correction draft, obtain batch approval and confirm its export against the downstream credit reference.

@@ -772,3 +772,7 @@ Inspect the named reviewer, engagement, reserved installments, expected total an
 Inspect the approved batch, verify its installment dates and amounts, and confirm the export notice policy for the engagement. Download the retained artifact after a lost acknowledgement. For downstream billing confirmation, use the reference from the billing system and check the retained file’s checksum, version, currency and total. An unavailable historical file requires verification of current fixed-fee and artifact-read permissions. Preserve financial history and reservations during recovery.
 
 Migration 097 adds fixed-fee export and confirmation support. On application rollback, suspend new fixed-fee exports and confirmations until a compatible version is restored. Preserve the migration, artifact bytes, checksums and confirmation receipts.
+
+### Fixed-fee installment credits
+
+Apply migration 098 after 097. Reconcile the credit against the original installment line, file checksum, currency, amount and any downstream confirmation. Verify that the original reservation remains occupied and the negative line is reserved once. If a mismatch occurs, suspend correction writes and retain both artifacts, approval history and migration 098 for investigation and forward repair.

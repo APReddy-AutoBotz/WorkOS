@@ -79,4 +79,5 @@ export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,ba
   assert.equal(ok(await call(csv+'/confirmations',confirmed.request().postDataJSON()),200).confirmation.id,retained.id);
   assert.equal(ok(await call(csv+'/batches/'+batchId),200).batch.state,'Billed/Confirmed');
   assert.equal((await pool.query('select count(*)::int n from invoice_csv_artifacts where batch_id=$1',[batchId])).rows[0].n,1);
+  return {a,receipt:retained,attestationRequest:confirmed.request().postDataJSON(),exportCmd:saved.request().postDataJSON()};
 }
