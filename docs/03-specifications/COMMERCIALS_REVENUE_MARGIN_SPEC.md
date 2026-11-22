@@ -239,3 +239,7 @@ Managed-service batch approval pins the exact reserved lines, eligibility events
 Use schema `workos.invoice-service-unit-csv/1` for approved managed-service unit batches. Each line identifies its register item, eligibility event and retained service evidence. The verifier reconciles quantity and unit price to the rounded line amount. The downstream confirmation pins the retained artifact digest, currency and total.
 
 A managed-service full-line reversal retains the original eligibility event, register item, export checksum and any downstream confirmation. The approved credit equals the negative of the original line in its currency. Review and issuance require current participant identities and source scope. The correction batch follows its own approval and delivery workflow.
+
+## Fixed-period managed-service terms
+
+A managed-service contract version may retain up to 120 fixed-period charges in date order. Dates must be inclusive, non-overlapping and within the contract term. Each positive amount uses contract currency with up to four decimal places. Gaps are allowed. Omitting the schedule on revision carries it forward. An explicit empty list clears it for that version. Approval, management valuation and billing eligibility require their own decisions.

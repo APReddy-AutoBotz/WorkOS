@@ -22,12 +22,14 @@ export const retainerPolicyLabels = {
 } as const;
 export type RetainerCapacityPolicy = keyof typeof retainerPolicyLabels;
 export type ServiceDimension = {code:string;label:string;precision:number;unitPrice?:string;billingPrecision?:number};
+export type ServicePeriodCharge = {startsOn:string; endsOn:string; amount:string};
 export type RetainerPeriod = {startsOn: string; endsOn: string; includedHours: string; baseFee: string};
 export type ContractTermsInput = {
   name: string; model: ContractModel; startsOn: string; endsOn: string; effectiveFrom: string;
   retainerRounding?: RetainerRounding | null;
   retainerOveragePolicy?: RetainerOveragePolicy | null;
   retainerCapacityPolicy?: RetainerCapacityPolicy | null;
+  servicePeriodCharges?: ServicePeriodCharge[];
   serviceDimensions?: ServiceDimension[];
   retainerPeriods?: RetainerPeriod[];
   installments?: {dueOn: string; amount: string}[];
@@ -166,6 +168,18 @@ const normalizeServiceDimensions = (value:unknown, contractModel:unknown): Servi
     return {code,label,precision,...(billingPrecision!==undefined?{billingPrecision}:{}),...(typeof unit.unitPrice==='string'?{unitPrice:unit.unitPrice}:{})};
   });
 };
+const normalizeServicePeriodCharges = (contract: Record<string, unknown>): ServicePeriodCharge[] => {
+  const terms = contract.servicePeriodCharges;
+  if (contract.model !== 'managed_service' || !Array.isArray(terms) || terms.length > 120) throw invalid();
+  let previousEnd = '';
+  return rows(terms, value => {
+    const term = object(value), startsOn = date(term.startsOn), endsOn = date(term.endsOn), amount = decimal(term.amount);
+    if (Object.keys(term).length !== 3 || startsOn < date(contract.startsOn) || endsOn > date(contract.endsOn) ||
+        startsOn > endsOn || startsOn <= previousEnd || !/[1-9]/.test(amount)) throw invalid();
+    previousEnd = endsOn;
+    return {startsOn, endsOn, amount};
+  });
+};
 const normalizeTerms = (value: unknown): ContractTerms => {
   const item = object(value);
   return {id: text(item.id), version: integer(item.version, 1), name: text(item.name), model: model(item.model, COMMERCIAL_CONTRACT_MODELS),
@@ -174,6 +188,7 @@ const normalizeTerms = (value: unknown): ContractTerms => {
     ...(item.retainerRounding == null ? {} : {retainerRounding:normalizeRounding(item.retainerRounding)}),
     ...(item.retainerOveragePolicy == null ? {} : {retainerOveragePolicy:model(item.retainerOveragePolicy,Object.keys(retainerOverageLabels) as RetainerOveragePolicy[])}),
     ...(item.retainerCapacityPolicy == null ? {} : {retainerCapacityPolicy:model(item.retainerCapacityPolicy,Object.keys(retainerPolicyLabels) as RetainerCapacityPolicy[])}),
+    ...(item.servicePeriodCharges === undefined ? {} : {servicePeriodCharges:normalizeServicePeriodCharges(item)}),
     ...(item.serviceDimensions === undefined ? {} : {serviceDimensions:normalizeServiceDimensions(item.serviceDimensions,item.model)}),
     ...(item.retainerPeriods === undefined ? {} : {retainerPeriods: rows(item.retainerPeriods, value => {
       const period = object(value);
@@ -249,6 +264,7 @@ const termsBody = (input: ContractTermsInput) => ({name: input.name, model: inpu
   ...(input.retainerRounding !== undefined && {retainerRounding:input.retainerRounding}),
   ...(input.retainerOveragePolicy !== undefined && {retainerOveragePolicy:input.retainerOveragePolicy}),
   ...(input.retainerCapacityPolicy !== undefined && {retainerCapacityPolicy:input.retainerCapacityPolicy}),
+  ...(input.servicePeriodCharges && {servicePeriodCharges:input.servicePeriodCharges.map(({startsOn,endsOn,amount})=>({startsOn,endsOn,amount}))}),
   ...(input.serviceDimensions && {serviceDimensions:input.serviceDimensions.map(({code,label,precision,unitPrice,billingPrecision})=>({code,label,precision,...(billingPrecision!==undefined?{billingPrecision}:{}),...(unitPrice!==undefined?{unitPrice}:{})}))}),
   ...(input.retainerPeriods && {retainerPeriods: input.retainerPeriods.map(({startsOn, endsOn, includedHours, baseFee}) => ({startsOn, endsOn, includedHours, baseFee}))}),
   ...(input.installments && {installments: input.installments.map(({dueOn, amount}) => ({dueOn, amount}))}),

@@ -14,7 +14,7 @@ const future = new Date(Date.now() + 86400000 * 30).toISOString().slice(0, 10);
 const hostile = '<script>window.syntheticCommercialExecuted=true</script>';
 const prefix = '/api/v1/commercial-drafting';
 const expectedFields = {
-  managed: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','serviceDimensions','number','clientId','reason'],
+  managed: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','serviceDimensions','servicePeriodCharges','number','clientId','reason'],
   retainer: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','retainerPeriods','retainerCapacityPolicy','retainerOveragePolicy','retainerRounding','number','clientId','reason'],
   contract: ['name','model','startsOn','endsOn','effectiveFrom','currency','value','billingTerms','documents','installments','number','clientId','reason'],
   engagement: ['code','name','model','ownerId','startsOn','endsOn','currency','budget','contractId','contractVersionId','clientId','attributionId','reason'],
@@ -890,6 +890,9 @@ const verifyCommercialDrafting = async reversalScenario => {
         'Ends on':'2099-12-31','Terms effective from':'2020-01-01','Currency (ISO code)':'GBP','Contract value (decimal)':'1000',
         'Billing terms':'Configured service quantities','Reason for creation / revision':'Set service units'});
       await button('Add service unit').click();
+      await button('Add fixed-period charge').click();
+      const periods=[{startsOn:'2024-01-01',endsOn:'2024-01-31',amount:'100.0250'}];
+      await fill(managed,{'Charge 1 start date':periods[0].startsOn,'Charge 1 end date':periods[0].endsOn,'Charge 1 amount':periods[0].amount});
       await fill(managed,{'Unit 1 code':'TICKET','Unit 1 label':'Accepted ticket'});
       await button('Add service unit').click();
       await fill(managed,{'Unit 2 code':'SHIFT','Unit 2 label':'Support shift','Unit 2 price (contract currency, optional)':'120.0123'});
@@ -900,8 +903,10 @@ const verifyCommercialDrafting = async reversalScenario => {
       const saved=await save('/contracts','managed');
       const units=[{code:'TICKET',label:'Accepted ticket',precision:0},{code:'SHIFT',label:'Support shift',precision:2,unitPrice:'120.0123',billingPrecision:1},{code:'CALL',label:'Support call',precision:0,unitPrice:'80'}];
       assert.deepEqual(saved.result.versions[0].serviceDimensions,units);
+      assert.deepEqual(saved.result.versions[0].servicePeriodCharges,periods);
       await button('Inspect SYN-SERVICE').click();
       await page.getByText('Support shift · SHIFT · 2 decimal places · GBP 120.0123 per unit · billing rounds to 1 decimals',{exact:true}).waitFor();
+      await page.getByText('2024-01-01 to 2024-01-31 · GBP 100.0250',{exact:true}).waitFor();
       const serviceVersion=saved.result.versions[0].id;
       const serviceEng=await apiRequest('/engagements',{method:'POST',body:{...engagement.body,model:'managed_service',code:'SYN-SERVICE-CAPTURE',
         name:'Synthetic unit capture',budget:'100',contractId:saved.result.id,contractVersionId:serviceVersion,startsOn:'2020-01-01',endsOn:'2099-12-31'}});
@@ -1121,18 +1126,27 @@ const verifyCommercialDrafting = async reversalScenario => {
         assert.equal((await pool.query("select valid_priced_service_dimensions($1::jsonb,'managed_service') ok",[JSON.stringify(dimensions)])).rows[0].ok,false);
       }
       assert.equal((await pool.query("select valid_priced_service_dimensions($1::jsonb,'managed_service') ok",[JSON.stringify([{...units[0],unitPrice:'0.0000'}])])).rows[0].ok,true);
+      for (const invalid of [[...periods,...periods],[{...periods[0],endsOn:'2023-12-31'}],[{...periods[0],amount:'0'}],[{...periods[0],startsOn:'2019-12-31'}]]) {
+        assert.equal((await revise({...next,servicePeriodCharges:invalid})).status,422);
+      }
+      assert.equal((await revise({...next,servicePeriodCharges:[{...periods[0],amount:'1e3'}]})).status,400);
+      assert.equal((await apiRequest('/contracts',{method:'POST',body:{...saved.body,number:'SYN-WRONG-PERIOD',model:'fixed_fee',serviceDimensions:[]}})).status,422);
+      delete next.servicePeriodCharges;
       delete next.serviceDimensions;
       const inherited=await revise(next);
       assert.equal(inherited.status,201,JSON.stringify(inherited.body));
       assert.deepEqual(inherited.body.versions[0].serviceDimensions,units);
+      assert.deepEqual(inherited.body.versions[0].servicePeriodCharges,periods);
       const repricedUnits=[{...units[0],unitPrice:'0.0000'},{code:'SHIFT',label:'Support shift',precision:2}];
       const repriced=await revise({...next,expectedVersion:2,effectiveFrom:'2099-01-01',serviceDimensions:repricedUnits});
       assert.equal(repriced.status,201,JSON.stringify(repriced.body));
       assert.deepEqual(repriced.body.versions[0].serviceDimensions,repricedUnits);
       assert.deepEqual(repriced.body.versions[1].serviceDimensions,units);
-      const cleared=await revise({...next,expectedVersion:3,effectiveFrom:'2099-01-02',serviceDimensions:[]});
+      const cleared=await revise({...next,expectedVersion:3,effectiveFrom:'2099-01-02',servicePeriodCharges:[],serviceDimensions:[]});
       assert.equal(cleared.status,201,JSON.stringify(cleared.body));
       assert.equal(cleared.body.versions[0].serviceDimensions,undefined);
+      assert.equal(cleared.body.versions[0].servicePeriodCharges,undefined);
+      assert.deepEqual(cleared.body.versions[1].servicePeriodCharges,periods);
       assert.deepEqual(cleared.body.versions[2].serviceDimensions,units);
       const auditTerms=await pool.query("select before_value,after_value from commercial_draft_events where entity_id=$1 and after_value->>'latestVersion'='4'",[saved.result.id]);
       assert.deepEqual(auditTerms.rows[0].before_value.versions[0].serviceDimensions,repricedUnits);

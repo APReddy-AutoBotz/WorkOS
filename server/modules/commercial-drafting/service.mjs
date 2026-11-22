@@ -7,7 +7,7 @@ const scopeValues = req => [req.organizationScope.organizationId,req.organizatio
 const scopeWhere = 'organization_id=$1 and legal_entity_id=$2';
 const termsProjection = `id,contract_id,version,effective_from::text,name,model,starts_on::text,ends_on::text,currency,value::text,billing_terms,documents`;
 export const termsDto = row => row ? ({id:row.id,version:row.version,effectiveFrom:row.effective_from,name:row.name,model:row.model,
-  startsOn:row.starts_on,endsOn:row.ends_on,currency:row.currency,value:row.value,billingTerms:row.billing_terms,documents:row.documents,...(row.service_dimensions?.length ? {serviceDimensions:row.service_dimensions} : {}),...(row.retainer_rounding ? {retainerRounding:row.retainer_rounding} : {}),...(row.retainer_overage_policy ? {retainerOveragePolicy:row.retainer_overage_policy} : {}),...(row.retainer_capacity_policy ? {retainerCapacityPolicy:row.retainer_capacity_policy} : {}),...(row.retainer_periods?.length ? {retainerPeriods:row.retainer_periods} : {}),...(row.installments?.length ? {installments:row.installments} : {})}) : null;
+  startsOn:row.starts_on,endsOn:row.ends_on,currency:row.currency,value:row.value,billingTerms:row.billing_terms,documents:row.documents,...(row.service_period_charges?.length ? {servicePeriodCharges:row.service_period_charges} : {}),...(row.service_dimensions?.length ? {serviceDimensions:row.service_dimensions} : {}),...(row.retainer_rounding ? {retainerRounding:row.retainer_rounding} : {}),...(row.retainer_overage_policy ? {retainerOveragePolicy:row.retainer_overage_policy} : {}),...(row.retainer_capacity_policy ? {retainerCapacityPolicy:row.retainer_capacity_policy} : {}),...(row.retainer_periods?.length ? {retainerPeriods:row.retainer_periods} : {}),...(row.installments?.length ? {installments:row.installments} : {})}) : null;
 const engagementDto = row => ({id:row.id,code:row.code,name:row.name,model:row.model,clientId:row.client_id,contractId:row.contract_id,
   contractVersionId:row.contract_version_id,ownerId:row.owner_id,attributionId:row.attribution_id,startsOn:row.starts_on,endsOn:row.ends_on,
   currency:row.currency,budget:row.budget,billable:row.billable,status:row.status,origin:row.origin});
@@ -55,7 +55,7 @@ const auditCommand = async (audit,client,req,type,id,before,after,reason) => {
 };
 const insertTerms = async (client,req,id,version,data) => {
   const columns = [], extraValues = [];
-  for (const [column, rows] of [['service_dimensions', data.serviceDimensions], ['installments', data.installments], ['retainer_periods', data.retainerPeriods]]) {
+  for (const [column, rows] of [['service_period_charges', data.servicePeriodCharges], ['service_dimensions', data.serviceDimensions], ['installments', data.installments], ['retainer_periods', data.retainerPeriods]]) {
     if (rows?.length) {
       columns.push(column);
       extraValues.push(JSON.stringify(rows));
@@ -107,6 +107,7 @@ export const appendContractVersion = async (client,req,id,data,audit) => {
     retainerRounding:data.retainerRounding === undefined ? latest.retainerRounding : data.retainerRounding,
     retainerOveragePolicy:data.retainerOveragePolicy === undefined ? latest.retainerOveragePolicy : data.retainerOveragePolicy,
     retainerCapacityPolicy:data.retainerCapacityPolicy === undefined ? latest.retainerCapacityPolicy : data.retainerCapacityPolicy,
+    servicePeriodCharges:data.servicePeriodCharges ?? latest.servicePeriodCharges,
     serviceDimensions:data.serviceDimensions ?? latest.serviceDimensions,
     retainerPeriods:data.retainerPeriods ?? latest.retainerPeriods});
   await client.query(`update commercial_contracts set latest_version=latest_version+1 where ${scopeWhere} and id=$3`,[...scopeValues(req),id]);
