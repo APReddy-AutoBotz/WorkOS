@@ -762,3 +762,7 @@ Migration 094 adds permissions, the calculation function and an append-only peri
 Use **Inspect installment register** to check the original item’s identity status. For an unavailable item, inspect the contract-version author, reviewer, current worker scope and recorded account-link generations. Link changes invalidate the previous proof even after restoring the same worker. Preserve the register event, identity receipt, invoice line and audit history. Route unresolved historical approvals to finance for documented disposition. Editing account links or retrying an issuance does not create replacement approval evidence.
 
 Migration 095 preserves the original charges and records verifiable historical identity continuity. If an application rollback is necessary, retain the database guards and receipt table and suspend fixed-fee issuance and new reservations until the compatible application is restored.
+
+## Recover a fixed-fee batch review
+
+Inspect the named reviewer, engagement, reserved installments, expected total and current review state under **Invoice batch approvals**. If a review is stale, check each original installment’s identity status and the current worker links and grants for all participants. Inspect the existing decision after a lost acknowledgement before retrying. Rejection leaves the lines reserved for revision. During application rollback, suspend new fixed-fee review requests and decisions and preserve migration 096, the policy, review history and occupancy records.

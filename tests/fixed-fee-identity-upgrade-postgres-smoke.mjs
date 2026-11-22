@@ -43,7 +43,7 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
     const unapplied=await createAmendmentHierarchy(request,'SYN-OLD-UNISSUED',{
       contract:{value:'100',installments:[{dueOn:today,amount:'100'}]}});
     const before=(await pool.query('select to_jsonb(ev) ev from billing_eligibility_events ev order by id')).rows;
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['095_wos06_fixed_fee_installment_identities']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['095_wos06_fixed_fee_installment_identities','096_wos06_fixed_fee_invoice_approval']);
     assert.deepEqual((await pool.query('select to_jsonb(ev) ev from billing_eligibility_events ev order by id')).rows,before);
     const proof=await pool.query('select event_id,origin,author_worker_id,reviewer_worker_id from fixed_fee_installment_identities');
     assert.deepEqual(proof.rows,[{event_id:verified,origin:'upgrade_continuity',author_worker_id:f.ownerId,reviewer_worker_id:'syn-fixed-review'}]);
