@@ -46,9 +46,9 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
     busy.current=true;setPending(true);setMessage('');
     try {
       const id=await commercialDraftingService.captureUnits(field('engagement'),{versionId:version.id,serviceDate:field('date'),
-        dimensionCode:field('code'),quantity:field('quantity'),sourceReference:field('reference')},context);
+        dimensionCode:field('code'),quantity:field('quantity'),sourceReference:field('reference'),...(field('effort')?{effortHours:field('effort')}:{})},context);
       if (isCommercialDraftingContextCurrent(context)) {
-        for (const name of ['quantity','reference']) {
+        for (const name of ['quantity','reference','effort']) {
           const control=form.elements.namedItem(name);
           if (control instanceof HTMLInputElement) control.value='';
         }
@@ -65,6 +65,7 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
       <label>Service date<input name="date" type="date" required min={version.effectiveFrom} max={today<version.endsOn?today:version.endsOn}/></label>
       <label>Delivered unit<select name="code" required>{version.serviceDimensions?.map(u=><option key={u.code} value={u.code}>{u.label}</option>)}</select></label>
       <label>Delivered quantity<input name="quantity" required inputMode="decimal"/></label>
+      <label>Your effort in hours (optional)<input name="effort" type="number" inputMode="decimal" min="0.0001" max="24" step="0.0001"/></label>
       <label>Service evidence reference<input name="reference" required maxLength={120}/></label>
       <button type="submit">Record service evidence</button></>}
     </fieldset>
@@ -72,6 +73,7 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
       <h5>Recorded service evidence</h5>
       {history.records.length ? <ul>{history.records.map(row=><li key={row.id}>
         <span>{row.serviceDate} · {row.quantity} {row.dimensionCode} · {row.sourceReference}</span>
+        {row.effortHours!==null && <p>Recorded effort · {row.effortHours} hours</p>}
         {context.canIssueServiceUnits && row.review?.decision==='Accepted' && <ServiceUnitBilling context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {context.canValueUnits && row.review?.decision==='Accepted' && <ServiceValueReceipt context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {row.review ? <p>{row.review.decision} · {row.review.reason}</p> : <>

@@ -740,3 +740,7 @@ After an interrupted export, inspect the batch and retrieve its accepted CSV by 
 ## Recover a fixed-period credit
 
 Locate the original line, artifact checksum and reversal review before retrying issuance. Retrieve an existing credit or correction batch by its recorded identifiers. A compatible rollback must preserve migration 091, identity generations, the original and correction occupancies, and both sets of export and confirmation receipts.
+
+## Recover service-unit effort evidence
+
+Inspect the recorded service reference before retrying. Reuse its date, unit, quantity and original effort. Receipts created before migration 092 have no recorded effort. On rollback preserve the column, the scoped audit record and the recorder identity. Existing quantities and financial receipts keep their historical values.
