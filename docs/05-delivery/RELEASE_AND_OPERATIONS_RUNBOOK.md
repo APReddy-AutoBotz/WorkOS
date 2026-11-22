@@ -776,3 +776,5 @@ Migration 097 adds fixed-fee export and confirmation support. On application rol
 ### Fixed-fee installment credits
 
 Apply migration 098 after 097. Reconcile the credit against the original installment line, file checksum, currency, amount and any downstream confirmation. Verify that the original reservation remains occupied and the negative line is reserved once. If a mismatch occurs, suspend correction writes and retain both artifacts, approval history and migration 098 for investigation and forward repair.
+
+For a fixed-fee reconciliation variance, select the engagement and currency and compare the installment and credit counts by billing state. An issued credit stays available until reserved. Export and downstream confirmation move it into the corresponding totals. Reconcile each charge and credit to its own artifact and confirmation. The report is read-only and requires no data conversion on rollback.

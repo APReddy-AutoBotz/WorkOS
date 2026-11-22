@@ -230,3 +230,5 @@ For fixed-fee batches, select the engagement under **Invoice batch approvals** a
 After final approval of a fixed-fee batch, open **Invoice CSV export**, inspect its installments and total, and accept the fixed-fee CSV. Finance can download the verified artifact. Once the downstream system accepts it, use **Invoice billing confirmation** to record the reference against that exact file.
 
 To correct an exported fixed-fee installment, inspect the original CSV line and request a full reversal. Independent reviewers approve the request before finance can issue the credit. Reserve the credit in a correction draft, obtain batch approval and confirm its export against the downstream credit reference.
+
+In **Billing reconciliation**, select a fixed-fee engagement and choose **Load billing reconciliation**. For each currency, the report shows registered installments, credits and net amount in each billing state. A confirmed 12,000 charge and confirmed −12,000 credit therefore have a net confirmed balance of zero. Earned management value and costs are calculated separately.
