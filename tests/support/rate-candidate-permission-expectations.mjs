@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.service_units.value',module:'Commercial',label:'Value accepted service units',description:'Retain an operational management value for independently accepted service units.',protected:false},
+ {permission_key:'commercial.service_units.policy',module:'Commercial',label:'Configure service valuation',description:'Select an effective operational valuation policy for managed-service engagements.',protected:false},
  {permission_key:'commercial.service_units.decide',module:'Commercial',label:'Review delivered service units',description:'Independently accept or reject recorded managed-service quantities.',protected:false},
  {permission_key:'commercial.service_units.capture',module:'Commercial',label:'Record managed-service units',description:'Record delivered quantities against effective engagement terms.',protected:false},
  {permission_key:'commercial.retainer_statements.decide',module:'Commercial',label:'Review retainer statements',description:'Independently approve or reject a retained period statement.',protected:false},
