@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 const expected=[
  {permission_key:'commercial.service_cost.view',module:'Commercial',label:'View managed-service effort cost',description:'Inspect scoped worker costs for accepted service effort.',protected:false},
+ {permission_key:'commercial.service_margin.view',module:'Commercial',label:'View managed-service margins',description:'Read financial period versions for managed-service engagements.',protected:false},
+ {permission_key:'commercial.service_margin.record',module:'Commercial',label:'Retain managed-service margins',description:'Retain a new managed-service period version from current evidence.',protected:false},
  {permission_key:'commercial.service_cost.record',module:'Commercial',label:'Record managed-service effort cost',description:'Retain the adopted hourly worker cost for accepted service effort.',protected:false},
  {permission_key:'commercial.service_periods.issue',module:'Commercial',label:'Register approved service periods',description:'Issue a contractual charge for an independently approved managed-service period.',protected:false},
  {permission_key:'commercial.service_periods.value',module:'Commercial',label:'Value approved service periods',description:'Retain operational management value for an approved fixed-period charge.',protected:false},

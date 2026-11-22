@@ -4,7 +4,8 @@ import {commercialFixture, withCommercialDatabase, migrateCommercialDatabase, wi
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
 import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
-await withCommercialDatabase(async ({pool,databaseUrl})=>{
+import {verifyServiceMargin} from './support/service-margin-test.mjs';
+for (const marginScenario of [false,true]) await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await migrateCommercialDatabase(pool);
   const {today,identities}=await seedWorkApproval(pool);
   await grantAmendmentPermissions(pool);
@@ -20,7 +21,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const end=addUtcDays(today,30);
     const {project,engagement,pin}=await createAmendmentHierarchy(request,'SYN-RECON',{
       contract:{model:'managed_service',startsOn:today,endsOn:end,effectiveFrom:today,
-        serviceDimensions:['CALL','TICKET'].map(code=>({code,label:code,precision:0}))},
+        serviceDimensions:['CALL','TICKET'].map(code=>({code,label:code,precision:0,unitPrice:'50',billingPrecision:2}))},
       engagement:{startsOn:today,endsOn:end},project:{startsOn:today,endsOn:end}});
     const base='/engagements/'+engagement.id+'/service-unit-evidence';
     const capture=(dimensionCode,sourceReference,effortHours)=>post(base,{dimensionCode,sourceReference,effortHours,
@@ -30,7 +31,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const read=async()=>{const r=await request(path);assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};
     assert.equal((await read()).status,'pending_review');
     const review=(id,decision)=>post(base+'/'+id+'/review',{decision,reason:'Synthetic delivery verification'},201,identities.first);
-    await review(receipt.id,'Accepted');
+    const accepted=await review(receipt.id,'Accepted');
     assert.equal((await read()).status,'no_approved_work');
     await post('/api/v1/work-categories/catalogs',{expectedLatestId:null,effectiveFrom:today,definition:actualCatalog,reason:'Synthetic categories'});
     await adoptStagedPolicy(request,identities,today);
@@ -50,6 +51,10 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal((await read()).status,'no_approved_work');
     await decide(identities.second);
     assert.deepEqual(await read(),{evidenceId:receipt.id,status:'matched',approvedHours:'3.75',recordedHours:'3.75',entryCount:2});
+    if (marginScenario) {
+      await verifyServiceMargin({pool,request,post,capture,review,receipt,accepted,base,identities,today,end,engagement,workerId:commercialFixture.ownerId});
+      return;
+    }
     const mismatch=await capture('CALL','OPS-43','1');
     await review(mismatch.id,'Accepted');
     assert.deepEqual((await request(base+'/'+mismatch.id+'/reconciliation')).body,

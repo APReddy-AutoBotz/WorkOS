@@ -218,3 +218,7 @@ In **Record delivered units**, enter **Your effort in hours (optional)** when th
 Open an accepted unit receipt and choose **Inspect effort cost**. Finance can retain a cost when one adopted hourly rate has the highest priority for that worker, service date and engagement currency. The snapshot shows the hours, rate, effective dates, priority and exact cost. Viewing and recording require separate permissions and access to that worker.
 
 Choose **Compare approved effort** on a service receipt to compare recorded hours with approved timesheet entries. Use the same work reference on both records. Reviewers need worker visibility and utilization reporting access.
+
+## Inspect a managed-service month
+
+In Commercial drafting, select the managed-service engagement and a reporting month, then choose **Inspect month**. The report uses all contract versions for that engagement. Registered billable value includes unit and fixed-period charges and their issued credits. The cost figure shows retained worker cost. Gross margin appears once accepted effort, approved timesheets and cost snapshots reconcile. **Retain month** saves the inspected evidence and amounts. **Previous retained version** opens the earlier record.

@@ -750,3 +750,9 @@ Inspect the recorded service reference before retrying. Reuse its date, unit, qu
 Use **Inspect effort cost** on the accepted receipt. Verify the adoption ID, effective dates, currency, hours and original cost before retrying a write. Finance needs current worker scope, cost-rate visibility and effort-cost viewing permission. Recording requires the additional recording grant. The audit log references the protected snapshot without disclosing its monetary values. Retain migration 093, the snapshot, its rate adoption and its audit entry on rollback.
 
 For a discrepancy in **Compare approved effort**, verify the service review, worker, service date and work reference against the approved timesheet and its pinned contract version. Check other service receipts for the same reference. Restrict the report using worker scope and service review and utilization grants. Reverting the application change removes the report. No data migration is required.
+
+## Inspect and recover a managed-service period
+
+Grant authorized finance readers commercial contract visibility, employee visibility, utilization reporting, worker cost-candidate visibility, service effort cost visibility and managed-service margin visibility. The report requires entity-wide worker access. Retention adds the managed-service margin recording permission. Inspect the month after new approvals, retained costs or issued credits. Compare the coverage counts and retain a new version when evidence changes. Recover a lost acknowledgement by inspecting the same month. Use **Previous retained version** to inspect earlier totals. Audit receipts record the version and engagement. Financial values stay in the protected snapshot.
+
+Migration 094 adds permissions, the calculation function and an append-only period table. Application rollback can hide the view and disable the new grants. Preserve the migration and historical versions.
