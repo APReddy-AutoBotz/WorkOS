@@ -708,3 +708,7 @@ For managed-service batch approval, give the policy manager and each participant
 To suspend new exports or confirmations, revoke the applicable invoice export or confirmation grants from affected roles. These grants cover multiple invoice sources. Preserve the migration, signed CSV bytes, register lineage and confirmation receipts for retrieval and reconciliation. A downstream reference records a manual attestation by the confirmer.
 
 To suspend new credits, revoke `commercial.reversal_eligibility.create` from issuing roles. To suspend new reversal reviews, revise the applicable engagement policy. Preserve all issued credits, original exports and downstream confirmations for reconciliation. Existing reviews retain their pinned policy.
+
+## Managed-service fixed-period terms
+
+Existing versions start with an empty fixed-charge schedule when migration 084 is installed. Correct terms prospectively through a contract revision. Preserve the column and earlier versions during application rollback. Before reverting to an application version that cannot carry these terms forward, suspend contract revisions for affected contracts.

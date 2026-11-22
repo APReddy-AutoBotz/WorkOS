@@ -65,6 +65,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
         code:'COMMERCIAL_RETAINER_OVERAGE_INVALID',message:'Overage terms require a retainer capacity policy.'}});
       else if(error?.code==='23514' && error.constraint==='retainer_capacity_policy_valid') res.status(422).json({error:{
         code:'COMMERCIAL_RETAINER_POLICY_INVALID',message:'A capacity policy requires a retainer contract with dated service periods.'}});
+      else if(error?.code==='23514' && error.constraint==='service_period_charges_valid') res.status(422).json({error:{
+        code:'COMMERCIAL_SERVICE_PERIOD_CHARGES_INVALID',message:'Enter positive fixed charges in date order, with non-overlapping periods inside the managed-service contract.'}});
       else if(error?.code==='23514' && error.constraint==='managed_service_dimensions_valid') res.status(422).json({error:{
         code:'COMMERCIAL_SERVICE_DIMENSIONS_INVALID',message:'Managed service units require unique codes, valid labels and supported precision.'}});
       else if(error?.code==='23514' && error.constraint==='retainer_periods_valid') res.status(422).json({error:{
