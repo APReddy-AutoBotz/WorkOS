@@ -267,3 +267,7 @@ The invoice approval policy applies to the engagement. Its manager and every con
 ### Fixed-period CSV and manual confirmation
 
 Schema `workos.invoice-service-period-csv/1` links each exported line to its register item, eligibility event and period review. Encoded evidence includes the original contractual amount and currency, period dates, contract version and engagement. The download verifier reconciles these values with the line and batch totals. Manual downstream confirmation records the external reference and checksum of the accepted artifact.
+
+### Managed-service credit authority
+
+Correction review and credit issuance require current permission for the original charge type. Each named reviewer must remain independent of the requester, preparer and owner through their linked worker identities. A fixed-period full-line credit retains the original event, register item, review, export digest, native amount and downstream confirmation where present. The correction batch goes through independent approval before export.
