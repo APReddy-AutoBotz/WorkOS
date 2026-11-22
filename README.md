@@ -192,3 +192,7 @@ Select the engagement in **Fixed-period operational valuation**. A policy owner 
 ## Register an approved fixed-period charge
 
 Inspect the decision on the contract version, select a billing engagement, and choose **Inspect billing eligibility**. Finance can register the whole contractual charge with a reason. The receipt identifies the approved-unbilled item, amount and UTC eligibility date.
+
+## Prepare a fixed-period invoice draft
+
+In **Invoice-ready draft batches**, choose the engagement option labelled **fixed-period charges**, enter an eligibility-date range and select the draft owner. Reserve a whole approved-unbilled charge and inspect its original period decision, dates and contract version. Cancelling the draft releases the item for another draft.

@@ -724,3 +724,7 @@ Revoke `commercial.service_periods.value` to suspend recording and access throug
 ## Suspend fixed-period charge issuance
 
 Revoke `commercial.service_periods.issue` to suspend period-charge registration. The permission also governs access to protected receipts. Preserve the migration, eligibility events, register items and audit records on rollback. Reconcile the receipt against its contract version and approved period before downstream billing.
+
+## Recover a fixed-period invoice draft
+
+Inspect its reservation and use authorized cancellation to release the register item for rebatching. If rolling back the application, reconcile occupied period items before removing access to cancellation. Preserve migration 088, draft lines, cancellation and audit receipts.

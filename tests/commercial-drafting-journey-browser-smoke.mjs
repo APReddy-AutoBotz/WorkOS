@@ -725,14 +725,14 @@ const verifyCommercialDrafting = async reversalScenario => {
       }
       assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[batchId])).rowCount,1);
     };
-    const verifyContractChargeDraft=async({engagementId,receipt,reviewId,permissions,prefix,availablePath})=>{
+    const verifyContractChargeDraft=async({engagementId,receipt,reviewId,permissions,prefix,availablePath,expectedLineAmount=receipt.amount})=>{
       const preparing=await createContext(finance,[...draftGrants,...permissions]);
       const draftPage=preparing.page;
       await draftPage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
       const desk=draftPage.getByRole('region',{name:'Invoice-ready draft batches'});
       const loadDrafts=()=>desk.getByRole('button',{name:'Load drafts and available items'}).click();
       await loadDrafts();
-      await desk.getByLabel('Invoice engagement').selectOption(engagementId);
+      await desk.getByLabel('Invoice engagement').selectOption(prefix==='period'?'period:'+engagementId:engagementId);
       await desk.getByLabel('Invoice period start').fill(today);
       await desk.getByLabel('Invoice period end').fill(today);
       await desk.getByLabel('Invoice period basis').selectOption('ELIGIBLE_DATE');
@@ -758,7 +758,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       const reserved=await reserving;assert.equal(reserved.status(),201,await reserved.text());
       const line=(await reserved.json()).line;
       assert.deepEqual([line.eventId,line.itemId,line.amount,line.snapshotId],
-        [receipt.eventId,receipt.itemId,receipt.amount,null]);
+        [receipt.eventId,receipt.itemId,expectedLineAmount,null]);
       const linePath='/api/v1/invoice-drafts/batches/'+batchId+'/lines';
       const original=reserved.request().postDataJSON();
       const replay=await apiRequest(linePath,{method:'POST',identity:finance,body:original});
@@ -767,6 +767,16 @@ const verifyCommercialDrafting = async reversalScenario => {
         body:{...original,expectedLineCount:1,requestId:crypto.randomUUID()}});
       assert.equal(double.status,409);
       const draftsUrl='/api/v1/invoice-drafts/batches';
+      if (prefix==='period') {
+        const command=created.request().postDataJSON();
+        assert.equal(command.definition.sourceType,'MANAGED_SERVICE_PERIOD');
+        const invalidSource=await apiRequest(draftsUrl,{method:'POST',identity:finance,
+          body:{...command,definition:{...command.definition,sourceType:'UNKNOWN'},requestId:crypto.randomUUID()}});
+        assert.equal(invalidSource.status,400,JSON.stringify(invalidSource.body));
+        const wrongModel=await apiRequest(draftsUrl,{method:'POST',identity:finance,body:{...command,
+          definition:{...command.definition,engagementId:eng.body.id},requestId:crypto.randomUUID()}});
+        assert.equal(wrongModel.status,409,JSON.stringify(wrongModel.body));
+      }
       const otherBatch=await apiRequest(draftsUrl,{method:'POST',identity:finance,body:{...created.request().postDataJSON(),requestId:crypto.randomUUID()}});
       assert.equal(otherBatch.status,201,JSON.stringify(otherBatch.body));
       const otherPath=draftsUrl+'/'+otherBatch.body.batch.id;
@@ -1012,6 +1022,13 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.deepEqual((await apiRequest(siblingPath,{identity:finance})).body,{charge:null,receipt:null});
       assert.equal((await apiRequest(siblingPath,{identity:finance,method:'POST',body:issueBody})).status,409);
       assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events where service_period_review_id=$1',[periodReview.id])).rows[0].n,1);
+      const reservedPeriod=await verifyContractChargeDraft({engagementId:serviceEng.body.id,receipt:issuedPeriod,reviewId:periodReview.id,
+        permissions:[issueGrant,periodIssueGrant],prefix:'period',availablePath:'period-charges',expectedLineAmount:periods[0].amount});
+      assert.equal(reservedPeriod.line.sourceType,'MANAGED_SERVICE_PERIOD');
+      assert.deepEqual([reservedPeriod.line.evidence.contractVersionId,reservedPeriod.line.evidence.startsOn,reservedPeriod.line.evidence.endsOn],
+        [serviceVersion,periods[0].startsOn,periods[0].endsOn]);
+      await pool.query("update role_permissions set enabled=false where role_name='HR' and permission_key=$1",[periodIssueGrant]);
+      assert.equal((await apiRequest('/api/v1/invoice-drafts/batches/'+reservedPeriod.otherBatch.body.batch.id,{identity:finance})).status,403);
       await billBrowser.context.close();
       const pvPath='/engagements/'+serviceEng.body.id+'/service-period-reviews/'+periodReview.id+'/valuation';
       const periodValue=(body,who=finance)=>apiRequest(pvPath,body?{method:'POST',identity:who,body}:{identity:who});
@@ -1091,7 +1108,9 @@ const verifyCommercialDrafting = async reversalScenario => {
       const declined=await decideOther(periods[1],finance,'Rejected');
       assert.equal(declined.status,201,JSON.stringify(declined.body));
       assert.equal(declined.body.review.decision,'Rejected');
+      await pool.query("update role_permissions set enabled=true where role_name='HR' and permission_key=$1",[periodIssueGrant]);
       assert.equal((await apiRequest(periodBillPath.replace(periodReview.id,declined.body.review.id),{identity:finance})).status,404);
+      await pool.query("update role_permissions set enabled=false where role_name='HR' and permission_key=$1",[periodIssueGrant]);
       assert.equal((await apiRequest(pvPath.replace(periodReview.id,declined.body.review.id),{identity:finance})).status,404);
       assert.equal((await decideOther(periods[1],finance,'Approved')).status,409);
       await periodBrowser.context.close();
@@ -1211,6 +1230,17 @@ const verifyCommercialDrafting = async reversalScenario => {
         await verifyCorrection({exported,engagementId:serviceEng.body.id,ownerKey:key,batchId:serviceBatchId,lineId:rebatched.body.line.id,
           policyId:correctionPolicy.body.policy.id,original:billReceipt.body.receipt,sourceType:'MANAGED_SERVICE_UNIT',amount:'150',act:call,
           reviewerKey:(await call('/sources/'+serviceBatchId,reviewer)).body.ownerKey,secondKey:(await call('/sources/'+serviceBatchId,alias)).body.ownerKey});
+        const unitOwnerCheck=await pool.connect();
+        try {
+          await unitOwnerCheck.query('begin');
+          await unitOwnerCheck.query('set constraints all immediate');
+          await unitOwnerCheck.query('update role_permissions set enabled=false where role_name=$1 and permission_key=$2',[reviewRole,issueKey]);
+          await unitOwnerCheck.query('update role_permissions set enabled=true where role_name=$1 and permission_key=$2',[reviewRole,issueKey]);
+          assert.equal((await unitOwnerCheck.query('select 1 from invoice_draft_owner_losses where batch_id=$1',[serviceBatchId])).rowCount,1);
+        } finally {
+          await unitOwnerCheck.query('rollback');
+          unitOwnerCheck.release();
+        }
         await exported.csvBrowser.context.close();
         await reviewBrowser.context.close();
       }

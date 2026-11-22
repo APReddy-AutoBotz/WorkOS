@@ -18,19 +18,21 @@ type Choice = {
   clientId: string;
   contractId: string;
   currency: string;
-  sourceType?: 'MILESTONE_ACCEPTANCE' | 'FIXED_FEE_INSTALLMENT' | 'RETAINER_PERIOD' | 'MANAGED_SERVICE_UNIT';
+  sourceType?: 'MILESTONE_ACCEPTANCE' | 'FIXED_FEE_INSTALLMENT' | 'RETAINER_PERIOD' | 'MANAGED_SERVICE_UNIT' | 'MANAGED_SERVICE_PERIOD';
 };
 type MilestoneItem = Awaited<ReturnType<typeof milestoneBilling.register>>['items'][number];
 type RegisterItem = Awaited<ReturnType<typeof tmBillingEligibility.register>>['items'][number];
-const isContractCharge=(source?:string)=>source==='MANAGED_SERVICE_UNIT' || source==='RETAINER_PERIOD' || source==='FIXED_FEE_INSTALLMENT';
+const choiceKey=(choice:Choice)=>choice.sourceType==='MANAGED_SERVICE_PERIOD'?'period:'+choice.id:choice.id;
+const isContractCharge=(source?:string)=>source==='MANAGED_SERVICE_PERIOD' || source==='MANAGED_SERVICE_UNIT' || source==='RETAINER_PERIOD' || source==='FIXED_FEE_INSTALLMENT';
 async function availableCharges(batch:InvoiceDraft,context:RateContext|null,after?:string) {
   if (batch.sourceType==='MANAGED_SERVICE_UNIT') {
     const page=await invoiceDrafts.availableServiceCharges(batch.id,context,after);
     return {nextAfter:page.nextAfter,items:page.items.map(x=>({id:x.id,value:'unit:'+x.id,label:`Service ${x.dimensionCode} · ${x.serviceDate} · ${x.currency} ${x.amount}`}))};
   }
-  if (batch.sourceType==='RETAINER_PERIOD') {
-    const page=await invoiceDrafts.availableRetainerCharges(batch.id,context,after);
-    return {nextAfter:page.nextAfter,items:page.items.map(x=>({id:x.id,value:'retainer:'+x.id,label:`Retainer ${x.startsOn} through ${x.endsOn} · ${x.currency} ${x.amount}`}))};
+  if (batch.sourceType==='RETAINER_PERIOD' || batch.sourceType==='MANAGED_SERVICE_PERIOD') {
+    const fixedPeriod=batch.sourceType==='MANAGED_SERVICE_PERIOD';
+    const page=await invoiceDrafts.availablePeriodCharges(batch.id,context,after,fixedPeriod?'period':'retainer');
+    return {nextAfter:page.nextAfter,items:page.items.map(x=>({id:x.id,value:(fixedPeriod?'period:':'retainer:')+x.id,label:`${fixedPeriod?'Service period':'Retainer'} ${x.startsOn} through ${x.endsOn} · ${x.currency} ${x.amount}`}))};
   }
   const page=await invoiceDrafts.availableInstallments(batch.id,context,after);
   return {nextAfter:page.nextAfter,items:page.items.map(x=>({id:x.id,value:'fixed:'+x.id,label:`Installment ${x.installment} · ${x.dueOn} · ${x.currency} ${x.amount}`}))};
@@ -254,7 +256,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
     ].every(hasRatePermission),
     canPrepare = hasRatePermission('commercial.invoice_drafts.prepare'),
     canCancel = hasRatePermission('commercial.invoice_drafts.cancel'),
-    choice = choices.find((x) => x.id === engagementId),
+    choice = choices.find((x) => choiceKey(x) === engagementId),
     chosen = register.find((x) => x.id === itemId),
     chosenMilestone = itemId.startsWith('milestone:')
       ? milestones.find((x) => x.id === itemId.slice(10))
@@ -265,6 +267,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
       clientId: choice.clientId,
       contractId: choice.contractId,
       engagementId: choice.id,
+      ...(choice.sourceType==='MANAGED_SERVICE_PERIOD'?{sourceType:choice.sourceType}:{}),
       currency: choice.currency,
       periodStart,
       periodEnd,
@@ -428,7 +431,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                     >
                       <option value="">Choose an engagement</option>
                       {choices.map((x) => (
-                        <option key={x.id} value={x.id}>
+                        <option key={choiceKey(x)} value={choiceKey(x)}>
                           {x.label}
                         </option>
                       ))}
@@ -550,12 +553,14 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                       <li key={x.id}>
                         Item {x.itemId} version {x.itemVersion} · Event {x.eventId} ·{' '}
                         {'sourceType' in x
-                          ? x.sourceType==='MANAGED_SERVICE_UNIT' ? `service ${x.evidence.dimensionCode} · ${x.evidence.serviceDate}` : x.sourceType==='RETAINER_PERIOD' ? `retainer ${x.evidence.startsOn} through ${x.evidence.endsOn}` : x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment}` : `milestone ${x.evidence.milestoneId}`
+                          ? x.sourceType==='MANAGED_SERVICE_PERIOD' ? `service period ${x.evidence.startsOn} through ${x.evidence.endsOn}` : x.sourceType==='MANAGED_SERVICE_UNIT' ? `service ${x.evidence.dimensionCode} · ${x.evidence.serviceDate}` : x.sourceType==='RETAINER_PERIOD' ? `retainer ${x.evidence.startsOn} through ${x.evidence.endsOn}` : x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment}` : `milestone ${x.evidence.milestoneId}`
                           : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
                         <details>
                           <summary>Supporting evidence</summary>
-                          {'sourceType' in x && x.sourceType==='MANAGED_SERVICE_UNIT' ? (
+                          {'sourceType' in x && x.sourceType==='MANAGED_SERVICE_PERIOD' ? (
+                            <p>Period review {x.evidence.reviewId} · contract version {x.evidence.contractVersionId} · {x.evidence.reason}</p>
+                          ) : 'sourceType' in x && x.sourceType==='MANAGED_SERVICE_UNIT' ? (
                             <p>Acceptance {x.evidence.reviewId} · {x.evidence.quantity} units at {x.evidence.unitPrice} · contract version {x.evidence.contractVersionId}</p>
                           ) : 'sourceType' in x && x.sourceType==='RETAINER_PERIOD' ? (
                             <p>Statement {x.evidence.statementId} · revision {x.evidence.statementVersion} · review {x.evidence.reviewId} · base fee {x.evidence.periodPrice.baseFee} · overage {x.evidence.periodPrice.overage} · contract version {x.evidence.contractVersionId}</p>
@@ -624,7 +629,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                         ? chargeNext && <button type="button" onClick={()=>void run(async c=>{
                           const page=await availableCharges(detail.batch,c,chargeNext);
                           setChargeItems(old=>[...old,...page.items]);setChargeNext(page.nextAfter);
-                        })}>{detail.batch.sourceType==='MANAGED_SERVICE_UNIT'?'More available service charges':detail.batch.sourceType==='RETAINER_PERIOD'?'More available retainer charges':'More available installments'}</button>
+                        })}>{detail.batch.sourceType==='MANAGED_SERVICE_PERIOD'?'More available fixed-period charges':detail.batch.sourceType==='MANAGED_SERVICE_UNIT'?'More available service charges':detail.batch.sourceType==='RETAINER_PERIOD'?'More available retainer charges':'More available installments'}</button>
                         : detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
                         ? milestoneNext && (
                             <button type="button" onClick={moreMilestones}>

@@ -718,4 +718,8 @@ WOS-COM-010 and WOS-COM-011 use migration `086_wos06_service_period_valuation.sq
 
 ## Approved fixed-period billing registration
 
-WOS-INV-001 and WOS-COM-010 use migration `087_wos06_service_period_eligibility.sql`. The commercial drafting journey verifies contractual amount, issue-date locks, authorization, duplicate protection, audit rollback and issuance independent of management valuation. Invoice-batch reservation for this source remains pending.
+WOS-INV-001 and WOS-COM-010 use migration `087_wos06_service_period_eligibility.sql`. The commercial drafting journey verifies contractual amount, issue-date locks, authorization, duplicate protection, audit rollback and issuance independent of management valuation. The fixed-period draft reservation entry below covers the next step.
+
+## Managed fixed-period draft reservation
+
+WOS-INV-002, WOS-INV-003 and WOS-INV-008 use migration `088_wos06_service_period_invoice_drafts.sql`. The commercial drafting journey verifies period-charge selection, protected line evidence, exclusive reservation, cancellation and rebatching. Approval, export and confirmation of period batches remain pending.

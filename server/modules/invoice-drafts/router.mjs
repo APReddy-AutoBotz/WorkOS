@@ -17,10 +17,11 @@ import { scopedCapacityWorker } from '../planning/worker-capacity-service.mjs';
 import { workApprovalOwner } from '../approvals/work-approval-service.mjs';
 import { validInvoiceDraft, invoiceItemMatches } from '../../../shared/invoice-batch-draft.mjs';
 const serviceGrant='commercial.service_units.issue';
-const chargeCurrentFunction=source=>source==='MANAGED_SERVICE_UNIT'?'service_unit_invoice_item_current':source==='RETAINER_PERIOD'?'retainer_invoice_item_current':'fixed_fee_invoice_item_current';
+const periodIssueGrant='commercial.service_periods.issue';
+const chargeCurrentFunction=source=>source==='MANAGED_SERVICE_PERIOD'?'service_period_invoice_item_current':source==='MANAGED_SERVICE_UNIT'?'service_unit_invoice_item_current':source==='RETAINER_PERIOD'?'retainer_invoice_item_current':'fixed_fee_invoice_item_current';
 const retainerGrant='commercial.retainer_eligibility.issue';
-const contractChargeGrant=source=>source==='MANAGED_SERVICE_UNIT'?serviceGrant:source==='RETAINER_PERIOD' ? retainerGrant : 'commercial.fixed_fee_eligibility.issue';
-const isContractCharge=source=>source==='MANAGED_SERVICE_UNIT' || source==='RETAINER_PERIOD' || source==='FIXED_FEE_INSTALLMENT';
+const contractChargeGrant=source=>source==='MANAGED_SERVICE_PERIOD'?periodIssueGrant:source==='MANAGED_SERVICE_UNIT'?serviceGrant:source==='RETAINER_PERIOD' ? retainerGrant : 'commercial.fixed_fee_eligibility.issue';
+const isContractCharge=source=>source==='MANAGED_SERVICE_PERIOD' || source==='MANAGED_SERVICE_UNIT' || source==='RETAINER_PERIOD' || source==='FIXED_FEE_INSTALLMENT';
 const uuid = z.string().uuid(),
   id = z.string().trim().min(1).max(200),
   reason = z.string().trim().min(3).max(1000),
@@ -41,7 +42,7 @@ const fence = (r, k) => {
 const batchFields = `coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT') as "sourceType",b.id,b.client_id as "clientId",b.contract_id as "contractId",b.engagement_id as "engagementId",b.currency,b.period_start::text as "periodStart",b.period_end::text as "periodEnd",b.period_basis as "periodBasis",b.owner_user_id as "ownerUserId",b.owner_role as "ownerRole",b.preparer_user_id as "preparerUserId",b.preparer_role as "preparerRole",b.request_id as "requestId",b.reason,b.created_at as "createdAt"`;
 const lineFields = `l.id,l.batch_id as "batchId",l.sequence,l.item_id as "itemId",l.item_version as "itemVersion",l.event_id as "eventId",l.snapshot_id as "snapshotId",coalesce(to_jsonb(l)->>'source_type','TM_SNAPSHOT') as "sourceType",l.currency,l.amount::text,l.billing_evidence as evidence,l.actor_id as "actorId",l.active_role as "activeRole",l.request_id as "requestId",l.reason,l.created_at as "createdAt"`;
 const batchView = (x) => {
-  if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(x.sourceType)) return x;
+  if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(x.sourceType)) return x;
   if (x.sourceType === 'TM_SNAPSHOT') {
     const { sourceType: _, ...legacy } = x;
     return legacy;
@@ -49,7 +50,7 @@ const batchView = (x) => {
   throw fail(503, 'INVOICE_DRAFT_UNCONFIRMED', 'Invoice batch source could not be confirmed.');
 };
 const lineView = (x) => {
-  if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(x.sourceType) && x.snapshotId === null) return x;
+  if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(x.sourceType) && x.snapshotId === null) return x;
   if (x.sourceType === 'TM_SNAPSHOT' && typeof x.snapshotId === 'string') {
     const { sourceType: _, ...legacy } = x;
     return legacy;
@@ -316,8 +317,9 @@ export const createInvoiceDraftRouter = (o) => {
         ).rows[0];
       if (!engagement || !['time_and_materials','milestone','fixed_fee','retainer','managed_service'].includes(engagement.model))
         throw fail(404, 'INVOICE_DRAFT_SOURCE', 'Scoped billing engagement unavailable.');
+      if (v.sourceType && engagement.model!=='managed_service') throw fail(409,'INVOICE_DRAFT_SOURCE','Fixed-period charges require a managed-service engagement.');
       if (['retainer','fixed_fee','managed_service'].includes(engagement.model)) {
-        await assertCommercialAuthority(c,r,engagement.model==='managed_service'?serviceGrant:engagement.model==='retainer'?retainerGrant:'commercial.fixed_fee_eligibility.issue');
+        await assertCommercialAuthority(c,r,v.sourceType==='MANAGED_SERVICE_PERIOD'?periodIssueGrant:engagement.model==='managed_service'?serviceGrant:engagement.model==='retainer'?retainerGrant:'commercial.fixed_fee_eligibility.issue');
         if (v.periodBasis !== 'ELIGIBLE_DATE') throw fail(409,'INVOICE_DRAFT_SOURCE','Contract charges use the eligibility date.');
       }
       if (engagement.model === 'milestone') {
@@ -348,7 +350,7 @@ export const createInvoiceDraftRouter = (o) => {
       if (engagement.model !== 'time_and_materials')
         await c.query(
           "insert into invoice_draft_batches(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,currency,period_start,period_end,period_basis,owner_user_id,owner_role,preparer_user_id,preparer_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)",
-          [...args,engagement.model==='managed_service'?'MANAGED_SERVICE_UNIT':engagement.model==='milestone'?'MILESTONE_ACCEPTANCE':engagement.model==='retainer'?'RETAINER_PERIOD':'FIXED_FEE_INSTALLMENT'],
+          [...args,v.sourceType==='MANAGED_SERVICE_PERIOD'?v.sourceType:engagement.model==='managed_service'?'MANAGED_SERVICE_UNIT':engagement.model==='milestone'?'MILESTONE_ACCEPTANCE':engagement.model==='retainer'?'RETAINER_PERIOD':'FIXED_FEE_INSTALLMENT'],
         );
       else
         await c.query(
@@ -371,6 +373,8 @@ export const createInvoiceDraftRouter = (o) => {
       } catch (e) {
         if (e.code !== 'COMMERCIAL_PERMISSION_DENIED') throw e;
       }
+      let periodAccess=false;
+      try {await assertCommercialAuthority(c,r,periodIssueGrant);periodAccess=true;} catch(e){if(e.code!=='COMMERCIAL_PERMISSION_DENIED') throw e;}
       let serviceAccess=false;
       try { await assertCommercialAuthority(c,r,serviceGrant); serviceAccess=true; }
       catch(e) { if(e.code!=='COMMERCIAL_PERMISSION_DENIED') throw e; }
@@ -384,10 +388,10 @@ export const createInvoiceDraftRouter = (o) => {
         workerWhere = o.buildEmployeeScopeWhere(r, args, 'worker');
       args.push(q.after ?? null);
       const afterParam = args.length;
-      args.push(serviceAccess,retainerAccess,milestoneAccess,fixedAccess);
+      args.push(periodAccess,serviceAccess,retainerAccess,milestoneAccess,fixedAccess);
       const rows = (
         await c.query(
-          `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",invoice_batch_governed_state(b.id) as state from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2 and ($${afterParam}::uuid is null or b.id>$${afterParam}::uuid) and (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='TM_SNAPSHOT' or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='MANAGED_SERVICE_UNIT' and $${args.length-3}::boolean) or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='RETAINER_PERIOD' and $${args.length-2}::boolean) or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='MILESTONE_ACCEPTANCE' and $${args.length-1}::boolean) or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='FIXED_FEE_INSTALLMENT' and $${args.length}::boolean)) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by b.id limit 51`,
+          `select ${batchFields},invoice_draft_owner_current(b) as "ownerCurrent",invoice_batch_governed_state(b.id) as state from invoice_draft_batches b where b.organization_id=$1 and b.legal_entity_id=$2 and ($${afterParam}::uuid is null or b.id>$${afterParam}::uuid) and (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='TM_SNAPSHOT' or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='MANAGED_SERVICE_PERIOD' and $${args.length-4}::boolean) or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='MANAGED_SERVICE_UNIT' and $${args.length-3}::boolean) or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='RETAINER_PERIOD' and $${args.length-2}::boolean) or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='MILESTONE_ACCEPTANCE' and $${args.length-1}::boolean) or (coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')='FIXED_FEE_INSTALLMENT' and $${args.length}::boolean)) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence s on s.id=v.submission_id join timesheets h on h.id=s.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by b.id limit 51`,
           args,
         )
       ).rows;
@@ -540,12 +544,12 @@ export const createInvoiceDraftRouter = (o) => {
   router.post('/reconciliation/exports', exportReport(false));
   router.post('/reconciliation/portfolio/exports', exportReport(true));
   const availableCharges=(sourceType)=>handle(false,async(c,r)=>{
-    const retainer=sourceType==='RETAINER_PERIOD';
+    const periodCharge=['MANAGED_SERVICE_PERIOD','RETAINER_PERIOD'].includes(sourceType);
     await authorize(c,r,'view',[contractChargeGrant(sourceType)]);
     const batchId=parse(uuid,r.params.id),q=parse(z.object({after:uuid.optional()}).strict(),r.query);
     const b=await batch(c,r,batchId);
     if(b.sourceType!==sourceType) throw fail(404,'INVOICE_DRAFT_SOURCE','Charge draft unavailable.');
-    const {rows}=await c.query(`select i.id,ev.amount::text,ev.currency,${sourceType==='MANAGED_SERVICE_UNIT' ? "ev.billing_evidence->>'dimensionCode' as \"dimensionCode\",ev.billing_evidence->>'serviceDate' as \"serviceDate\"" : retainer ? "ev.billing_evidence->>'startsOn' as \"startsOn\",ev.billing_evidence->>'endsOn' as \"endsOn\"" :
+    const {rows}=await c.query(`select i.id,ev.amount::text,ev.currency,${sourceType==='MANAGED_SERVICE_UNIT' ? "ev.billing_evidence->>'dimensionCode' as \"dimensionCode\",ev.billing_evidence->>'serviceDate' as \"serviceDate\"" : periodCharge ? "ev.billing_evidence->>'startsOn' as \"startsOn\",ev.billing_evidence->>'endsOn' as \"endsOn\"" :
         "ev.billing_evidence->>'dueOn' as \"dueOn\",(ev.billing_evidence->>'installment')::int installment"} from invoice_draft_batches b
       join billing_eligibility_events ev on ev.organization_id=b.organization_id and ev.legal_entity_id=b.legal_entity_id
         and ev.engagement_id=b.engagement_id and ev.source_type=b.source_type and ev.eligible_on between b.period_start and b.period_end
@@ -555,6 +559,7 @@ export const createInvoiceDraftRouter = (o) => {
       [batchId,q.after??null,r.user.sub,r.user.activeRole]);
     return {...await envelope(c,r),batchId,items:rows.slice(0,50),nextAfter:rows.length>50?rows[49].id:null};
   });
+  router.get('/batches/:id/available-period-charges',availableCharges('MANAGED_SERVICE_PERIOD'));
   router.get('/batches/:id/available-service-charges',availableCharges('MANAGED_SERVICE_UNIT'));
   router.get('/batches/:id/available-installments',availableCharges('FIXED_FEE_INSTALLMENT'));
   router.get('/batches/:id/available-retainer-charges',availableCharges('RETAINER_PERIOD'));
@@ -653,7 +658,7 @@ export const createInvoiceDraftRouter = (o) => {
         d.reason,
         r.operationId,
       ];
-      if (['FIXED_FEE_INSTALLMENT','MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(source.sourceType))
+      if (['FIXED_FEE_INSTALLMENT','MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(source.sourceType))
         await c.query(
           "insert into invoice_draft_lines(id,organization_id,legal_entity_id,batch_id,sequence,item_id,item_version,event_id,snapshot_id,currency,amount,billing_evidence,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,$19)",
           [...lineArgs,source.sourceType],
@@ -768,7 +773,7 @@ export const createInvoiceDraftRouter = (o) => {
         d.reason,
         r.operationId,
       ];
-      if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(b.sourceType)) {
+      if (['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(b.sourceType)) {
         await assertCommercialAuthority(c,r,isContractCharge(b.sourceType)?contractChargeGrant(b.sourceType):'commercial.milestone_billing.view');
         await c.query(
           "insert into invoice_draft_cancellations(id,organization_id,legal_entity_id,batch_id,expected_line_count,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
