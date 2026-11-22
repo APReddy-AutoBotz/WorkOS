@@ -135,7 +135,13 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       !row.contract_id
     )
       throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped billing engagement unavailable.');
-    if (row.model === 'managed_service') await assertCommercialAuthority(c,r,'commercial.service_units.issue');
+    if (row.model === 'managed_service') {
+      try { await assertCommercialAuthority(c,r,'commercial.service_units.issue'); }
+      catch (e) {
+        if (e.code!=='COMMERCIAL_PERMISSION_DENIED') throw e;
+        await assertCommercialAuthority(c,r,'commercial.service_periods.issue');
+      }
+    }
     if (row.model === 'retainer') await assertCommercialAuthority(c,r,'commercial.retainer_eligibility.issue');
     if (row.model === 'milestone') await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
     return row;
@@ -266,8 +272,8 @@ export const createInvoiceBatchApprovalRouter = (o) => {
   const batch = async (c, r, batchId, lock = false) => {
     const correction=await correctionApprovalBatch(c,r,batchId,lock);
     if(correction) return correction;
-    const model=await approvalBatchModel(c,r,batchId,true,true);
-    if (['milestone','retainer','managed_service'].includes(model)) return loadMilestoneApprovalBatch(c,r,batchId,lock,model);
+    const model=await approvalBatchModel(c,r,batchId,true,true,true);
+    if (['milestone','retainer','managed_service','managed_service_period'].includes(model)) return loadMilestoneApprovalBatch(c,r,batchId,lock,model);
     const b = (
       await c.query(
         `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state,invoice_batch_source_current(b) current,invoice_batch_lineage_hash(b.id) lineage_hash from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
@@ -358,7 +364,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
   };
   const sourceView = (source) => ({
     id: source.row.id,
-    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(source.row.source_type) ? { sourceType: source.row.source_type } : {}),
+    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(source.row.source_type) ? { sourceType: source.row.source_type } : {}),
     state: source.row.state,
     current: source.row.current,
     currency: source.row.currency,
@@ -376,7 +382,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       itemVersion: x.item_version,
       eventId: x.event_id,
       snapshotId: x.snapshot_id,
-      ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
+      ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
       currency: x.currency,
       amount: x.amount,
       evidence: x.billing_evidence,
@@ -462,7 +468,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
     handle(false, async (c, r) => {
       const q = parse(z.object({ engagementId: id, after: uuid.optional() }).strict(), r.query);
       await authorize(c, r);
-      await engagement(c, r, q.engagementId);
+      const target = await engagement(c, r, q.engagementId);
       const args = [...scope(r), q.engagementId],
         workerWhere = o.buildEmployeeScopeWhere(r, args, 'worker');
       const allowedCorrections=await correctionScopeAvailable(c);
@@ -470,10 +476,15 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       const correctionScope=allowedCorrections
         ? `(coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')<>'FULL_LINE_REVERSAL' or correction_original_scope_current(b,$${args.length-1},$${args.length}))`
         : "coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT')<>'FULL_LINE_REVERSAL'";
+      let managedScope='true';
+      if (target.model==='managed_service') {
+        args.push(r.user.sub,r.user.activeRole);
+        managedScope=`(b.source_type='FULL_LINE_REVERSAL' or (b.source_type in ('MANAGED_SERVICE_PERIOD','MANAGED_SERVICE_UNIT') and invoice_notice_source_authorized(b,$${args.length-1},$${args.length})))`;
+      }
       args.push(q.after ?? null);
       const rows = (
         await c.query(
-          `select i.* from invoice_batch_approval_instances i join invoice_draft_batches b on b.id=i.batch_id where i.organization_id=$1 and i.legal_entity_id=$2 and b.engagement_id=$3 and ${correctionScope} and ($${args.length}::uuid is null or i.id>$${args.length}::uuid) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence e on e.id=v.submission_id join timesheets h on h.id=e.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by i.id limit 51`,
+          `select i.* from invoice_batch_approval_instances i join invoice_draft_batches b on b.id=i.batch_id where i.organization_id=$1 and i.legal_entity_id=$2 and b.engagement_id=$3 and ${correctionScope} and ${managedScope} and ($${args.length}::uuid is null or i.id>$${args.length}::uuid) and not exists(select 1 from invoice_draft_lines l join commercial_tm_valuations v on v.id=l.snapshot_id join work_submission_evidence e on e.id=v.submission_id join timesheets h on h.id=e.timesheet_id left join employees worker on worker.id=h.employee_id where l.batch_id=b.id and not coalesce((${workerWhere}),false)) order by i.id limit 51`,
           args,
         )
       ).rows;

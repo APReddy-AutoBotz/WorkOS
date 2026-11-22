@@ -196,3 +196,7 @@ Inspect the decision on the contract version, select a billing engagement, and c
 ## Prepare a fixed-period invoice draft
 
 In **Invoice-ready draft batches**, choose the engagement option labelled **fixed-period charges**, enter an eligibility-date range and select the draft owner. Reserve a whole approved-unbilled charge and inspect its original period decision, dates and contract version. Cancelling the draft releases the item for another draft.
+
+## Approve a fixed-period invoice batch
+
+In **Invoice batch approvals**, select the engagement and inspect the draft. Submit its exact total and retained lines under the effective approval policy. Each named reviewer can inspect the contract version, period dates and original period decision before recording a decision.

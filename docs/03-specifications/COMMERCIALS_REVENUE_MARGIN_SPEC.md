@@ -259,3 +259,7 @@ An authorized finance operator can issue an independently approved period for a 
 ## Reserve registered service-period charges
 
 Fixed-period drafts use a dedicated source and eligibility-date range. The preparer and owner require invoice and scoped period billing permissions. Each line must reference a whole, unoccupied approved-unbilled item with current approved-period evidence, matching engagement, contract, currency and eligibility date. Cancellation preserves the line and releases its occupancy.
+
+### Fixed-period invoice batch approval
+
+The invoice approval policy applies to the engagement. Its manager and every configured reviewer must share authority over at least one managed-service charge type. Each review request and decision then checks the specific batch source, active participants, independence, item reservations, retained evidence and total. An approval for a fixed-period charge preserves the dates and contract version from the original period decision.

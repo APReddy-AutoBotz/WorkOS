@@ -722,4 +722,6 @@ WOS-INV-001 and WOS-COM-010 use migration `087_wos06_service_period_eligibility.
 
 ## Managed fixed-period draft reservation
 
-WOS-INV-002, WOS-INV-003 and WOS-INV-008 use migration `088_wos06_service_period_invoice_drafts.sql`. The commercial drafting journey verifies period-charge selection, protected line evidence, exclusive reservation, cancellation and rebatching. Approval, export and confirmation of period batches remain pending.
+WOS-INV-002, WOS-INV-003 and WOS-INV-008 use migration `088_wos06_service_period_invoice_drafts.sql`. The commercial drafting journey verifies period-charge selection, protected line evidence, exclusive reservation, cancellation and rebatching. Export and confirmation of period batches remain pending.
+
+WOS-INV-003, WOS-INV-006 and WOS-INV-008 use migration 089 and the commercial drafting browser journey for fixed-period invoice review. Coverage includes independent reviewers, the retained charge total and lineage, the effective engagement policy and source-scoped access.

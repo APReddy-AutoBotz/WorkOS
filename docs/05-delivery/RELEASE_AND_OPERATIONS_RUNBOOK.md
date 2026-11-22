@@ -728,3 +728,7 @@ Revoke `commercial.service_periods.issue` to suspend period-charge registration.
 ## Recover a fixed-period invoice draft
 
 Inspect its reservation and use authorized cancellation to release the register item for rebatching. If rolling back the application, reconcile occupied period items before removing access to cancellation. Preserve migration 088, draft lines, cancellation and audit receipts.
+
+## Recover a fixed-period invoice review
+
+Inspect the latest batch state and review receipt before retrying a decision. If an identity or source permission changes, inspect the policy and use the authorized withdrawal or cancellation workflow. A rollback requires a compatible application that preserves migration 089, approval history, occupancy and audit evidence.
