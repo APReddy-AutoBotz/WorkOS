@@ -1305,9 +1305,16 @@ const verifyCommercialDrafting = async reversalScenario => {
         assert.equal((await costReader()).body.preview.amount,'7.7160625');
         assert.equal((await captureCost({...command,adoptionId:adopted.id})).status,403);
         await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key=$1",[costPermission]);
-        await pool.query("update reporting_periods set status='Financially Locked' where id='syn-fixed-period'");
-        assert.equal((await captureCost({...command,adoptionId:adopted.id})).status,409);
-        await pool.query("update reporting_periods set status='Open' where id='syn-fixed-period'");
+        const locked=await pool.connect();
+        try {
+          await locked.query('begin');
+          await locked.query("update reporting_periods set status='Financially Locked' where id='syn-fixed-period'");
+          const id=crypto.randomUUID(),operation=crypto.randomUUID();
+          await locked.query("select set_config('workos.service_effort_cost',$1,true)",[JSON.stringify({id,actor:actorId,operation})]);
+          await assert.rejects(locked.query(`insert into commercial_service_effort_costs(id,organization_id,legal_entity_id,engagement_id,
+            evidence_id,review_id,adoption_id,actor_id,active_role,operation_id) values($1,$2,$3,$4,$5,$6,$7,$8,'Admin',$9)`,
+            [id,scope.organizationId,scope.legalEntityId,serviceEng.body.id,replay.body.id,accepted.body.id,adopted.id,actorId,operation]),err=>err.code==='CTM04');
+        } finally {await locked.query('rollback');locked.release();}
         await pool.query("create trigger reject_effort_cost_audit before insert on audit_logs for each row when (new.entity_type='Managed Service Effort Cost') execute function reject_test_po_audit()");
         const failed=await captureCost({...command,adoptionId:adopted.id});
         assert(failed.status>=500,JSON.stringify(failed.body));
