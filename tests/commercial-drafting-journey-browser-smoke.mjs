@@ -725,6 +725,22 @@ const verifyCommercialDrafting = async reversalScenario => {
       }
       assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[batchId])).rowCount,1);
     };
+    const approveServiceBatchInBrowser=async({reviewer,sourceGrant,engagementId,instance,reviewId})=>{
+      const reviewBrowser=await createContext(reviewer,[...draftGrants,sourceGrant,issueGrant,'approvals.view','commercial.invoice_approval.decide']);
+      const reviewPage=reviewBrowser.page;await reviewPage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+      const desk=reviewPage.getByRole('region',{name:'Invoice batch approvals'});
+      await desk.getByLabel('Invoice approval engagement').selectOption(engagementId);
+      await desk.getByRole('button',{name:'Load invoice batches and reviews'}).click();
+      await desk.getByLabel('Invoice batch review',{exact:true}).selectOption(instance);
+      await desk.getByRole('button',{name:'Inspect invoice review'}).click();
+      await desk.getByText(new RegExp(reviewId)).waitFor();
+      await desk.getByLabel('Invoice approval decision',{exact:true}).selectOption('Approved');
+      await desk.getByLabel('Invoice approval decision reason').fill('Verified the retained service charge and its approval evidence');
+      const outcome=reviewPage.waitForResponse(r=>r.url().endsWith('/instances/'+instance+'/decisions') && r.request().method()==='POST');
+      await desk.getByRole('button',{name:'Record invoice approval decision'}).click();
+      const decided=await outcome;assert.equal(decided.status(),201,await decided.text());
+      await reviewBrowser.context.close();
+    };
     const verifyContractChargeDraft=async({engagementId,receipt,reviewId,permissions,prefix,availablePath,expectedLineAmount=receipt.amount})=>{
       const preparing=await createContext(finance,[...draftGrants,...permissions]);
       const draftPage=preparing.page;
@@ -1027,6 +1043,33 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal(reservedPeriod.line.sourceType,'MANAGED_SERVICE_PERIOD');
       assert.deepEqual([reservedPeriod.line.evidence.contractVersionId,reservedPeriod.line.evidence.startsOn,reservedPeriod.line.evidence.endsOn],
         [serviceVersion,periods[0].startsOn,periods[0].endsOn]);
+      let periodPolicyId,periodApprovalId;
+      {
+        const serviceBatchId=reservedPeriod.otherBatch.body.batch.id;
+        const call=(path,who,body)=>apiRequest('/api/v1/invoice-batch-approvals'+path,body?{identity:who,method:'POST',body}:{identity:who});
+        const view=await call('/sources/'+serviceBatchId,finance);
+        assert.equal(view.status,200,JSON.stringify(view.body));assert.equal(view.body.batch.total,'100.025');
+        const key=view.body.ownerKey,reviewer=identities.manager;
+        const configure=(who,prior,more=[])=>call('/policies',finance,{expectedOwnerKey:key,requestId:crypto.randomUUID(),engagementId:serviceEng.body.id,
+          expectedLatestId:prior,effectiveFrom:today,definition:{entityType:'InvoiceBatch',fullLineReversals:true,engagementId:serviceEng.body.id,locale:'en-US',completionInApp:true,
+            stages:[{userId:who.id,role:who.role},...more],templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(k=>({key:k,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))},
+          reason:'Review accepted service charges'});
+        const submit=(id,hash=view.body.batch.lineageHash)=>call('/requests',finance,{requestId:crypto.randomUUID(),expectedOwnerKey:key,
+          batchId:serviceBatchId,expectedPolicyId:id,expectedLineCount:1,expectedLineageHash:hash,reason:'Inspect the service invoice'});
+        assert.equal((await call('/sources/'+serviceBatchId,reviewer)).status,403);
+        await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[periodIssueGrant]);
+        const self=await configure(finance,null);assert.equal(self.status,201,JSON.stringify(self.body));
+        assert([403,409].includes((await submit(self.body.policy.id)).status));
+        const policy=await configure(reviewer,self.body.policy.id);assert.equal(policy.status,201,JSON.stringify(policy.body));
+        periodPolicyId=policy.body.policy.id;
+        assert.equal((await submit(periodPolicyId,'0'.repeat(64))).status,409);
+        const submitted=await submit(periodPolicyId);assert.equal(submitted.status,201,JSON.stringify(submitted.body));
+        const instance=submitted.body.approval.id;
+        periodApprovalId=instance;
+        await approveServiceBatchInBrowser({reviewer,sourceGrant:periodIssueGrant,engagementId:serviceEng.body.id,instance,reviewId:periodReview.id});
+        assert.equal((await call('/sources/'+serviceBatchId,finance)).body.batch.state,'Approved');
+        await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[periodIssueGrant]);
+      }
       await pool.query("update role_permissions set enabled=false where role_name='HR' and permission_key=$1",[periodIssueGrant]);
       assert.equal((await apiRequest('/api/v1/invoice-drafts/batches/'+reservedPeriod.otherBatch.body.batch.id,{identity:finance})).status,403);
       await billBrowser.context.close();
@@ -1198,9 +1241,13 @@ const verifyCommercialDrafting = async reversalScenario => {
             stages:[{userId:who.id,role:who.role},...more],templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(k=>({key:k,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))},
           reason:'Review accepted service charges'});
         assert.equal((await call('/sources/'+serviceBatchId,reviewer)).status,403);
-        assert.equal((await configure(reviewer,null)).status,403);
+        assert.equal((await configure(reviewer,periodPolicyId)).status,403);
         await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[issueKey]);
-        const self=await configure(finance,null);assert.equal(self.status,201,JSON.stringify(self.body));
+        const unitHistory=await call('/instances?engagementId='+serviceEng.body.id,reviewer);
+        assert.equal(unitHistory.status,200,JSON.stringify(unitHistory.body));
+        assert(!unitHistory.body.approvals.some(x=>x.id===periodApprovalId));
+        assert.equal((await call('/instances/'+periodApprovalId,reviewer)).status,403);
+        const self=await configure(finance,periodPolicyId);assert.equal(self.status,201,JSON.stringify(self.body));
         const submit=(id,hash=view.body.batch.lineageHash)=>call('/requests',finance,{requestId:crypto.randomUUID(),expectedOwnerKey:key,
           batchId:serviceBatchId,expectedPolicyId:id,expectedLineCount:1,expectedLineageHash:hash,reason:'Inspect the service invoice'});
         assert([403,409].includes((await submit(self.body.policy.id)).status));
@@ -1208,19 +1255,7 @@ const verifyCommercialDrafting = async reversalScenario => {
         assert.equal((await submit(policy.body.policy.id,'0'.repeat(64))).status,409);
         const submitted=await submit(policy.body.policy.id);assert.equal(submitted.status,201,JSON.stringify(submitted.body));
         const instance=submitted.body.approval.id;
-        const reviewBrowser=await createContext(reviewer,[...draftGrants,issueKey,issueGrant,'approvals.view','commercial.invoice_approval.decide']);
-        const reviewPage=reviewBrowser.page;await reviewPage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
-        const desk=reviewPage.getByRole('region',{name:'Invoice batch approvals'});
-        await desk.getByLabel('Invoice approval engagement').selectOption(serviceEng.body.id);
-        await desk.getByRole('button',{name:'Load invoice batches and reviews'}).click();
-        await desk.getByLabel('Invoice batch review',{exact:true}).selectOption(instance);
-        await desk.getByRole('button',{name:'Inspect invoice review'}).click();
-        await desk.getByText(new RegExp(accepted.body.id)).waitFor();
-        await desk.getByLabel('Invoice approval decision',{exact:true}).selectOption('Approved');
-        await desk.getByLabel('Invoice approval decision reason').fill('Verified accepted units and retained price');
-        const outcome=reviewPage.waitForResponse(r=>r.url().endsWith('/instances/'+instance+'/decisions') && r.request().method()==='POST');
-        await desk.getByRole('button',{name:'Record invoice approval decision'}).click();
-        const decided=await outcome;assert.equal(decided.status(),201,await decided.text());
+        await approveServiceBatchInBrowser({reviewer,sourceGrant:issueKey,engagementId:serviceEng.body.id,instance,reviewId:accepted.body.id});
         assert.equal((await call('/sources/'+serviceBatchId,finance)).body.batch.state,'Approved');
         const exported=await verifyInvoiceExport({engagementId:serviceEng.body.id,batchId:serviceBatchId,ownerKey:key,instance,permissions:[issueGrant,issueKey],
           schema:'workos.invoice-service-unit-csv/1',amount:'150',itemId:billReceipt.body.receipt.itemId,eventId:billReceipt.body.receipt.eventId,
@@ -1242,7 +1277,6 @@ const verifyCommercialDrafting = async reversalScenario => {
           unitOwnerCheck.release();
         }
         await exported.csvBrowser.context.close();
-        await reviewBrowser.context.close();
       }
       const noncharge=await capture({...serviceInput,sourceReference:'SYN-NONCHARGE',quantity:'1',dimensionCode:'CALL'});
       const nonchargeReview=await reviewUnits(noncharge.body.id,'Accepted');

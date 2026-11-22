@@ -1,21 +1,22 @@
 import { assertCommercialAuthority } from '../commercial-drafting/service.mjs';
 
 const fail = (statusCode, code, message) => Object.assign(new Error(message), { statusCode, code });
-export const approvalBatchModel = async (c, r, batchId, includeRetainer=false, includeService=false) => {
+export const approvalBatchModel = async (c, r, batchId, includeRetainer=false, includeService=false, includePeriod=false) => {
   const row = (
     await c.query(
-      `select e.model from invoice_draft_batches b join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3 and coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT') in ('TM_SNAPSHOT','MILESTONE_ACCEPTANCE'${includeRetainer ? ",'RETAINER_PERIOD'" : ''}${includeService ? ",'MANAGED_SERVICE_UNIT'" : ''})`,
+      `select e.model,to_jsonb(b)->>'source_type' source_type from invoice_draft_batches b join commercial_engagements e on e.id=b.engagement_id and e.organization_id=b.organization_id and e.legal_entity_id=b.legal_entity_id where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3 and coalesce(to_jsonb(b)->>'source_type','TM_SNAPSHOT') in ('TM_SNAPSHOT','MILESTONE_ACCEPTANCE'${includeRetainer ? ",'RETAINER_PERIOD'" : ''}${includeService ? ",'MANAGED_SERVICE_UNIT'" : ''}${includePeriod ? ",'MANAGED_SERVICE_PERIOD'" : ''})`,
       [batchId, r.organizationScope.organizationId, r.organizationScope.legalEntityId],
     )
   ).rows[0];
   if (!row) throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped invoice batch unavailable.');
-  return row.model;
+  return row.source_type==='MANAGED_SERVICE_PERIOD'?'managed_service_period':row.model;
 };
 export const milestoneBatchModel=async(c,r,id)=>(await approvalBatchModel(c,r,id))==='milestone';
 export const loadMilestoneApprovalBatch = async (c, r, batchId, lock = false, model='milestone') => {
   const config={
     milestone:['milestone_invoice_batch_source_current','milestone_invoice_lineage_hash','MILESTONE_ACCEPTANCE','commercial.milestone_billing.view'],
     retainer:['retainer_invoice_batch_source_current','retainer_invoice_lineage_hash','RETAINER_PERIOD','commercial.retainer_eligibility.issue'],
+    managed_service_period:['service_period_invoice_batch_source_current','service_period_invoice_lineage_hash','MANAGED_SERVICE_PERIOD','commercial.service_periods.issue'],
     managed_service:['service_unit_invoice_batch_source_current','service_unit_invoice_lineage_hash','MANAGED_SERVICE_UNIT','commercial.service_units.issue'],
   }[model];
   if (!config) throw fail(404,'INVOICE_APPROVAL_SOURCE','Unsupported engagement.');
@@ -29,7 +30,7 @@ export const loadMilestoneApprovalBatch = async (c, r, batchId, lock = false, mo
         r.organizationScope.organizationId,
         r.organizationScope.legalEntityId,
         r.user.sub,
-        r.user.activeRole,model,
+        r.user.activeRole,model==='managed_service_period'?'managed_service':model,
       ],
     )
   ).rows[0];
