@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 // null milestone references; never remove fields or derive expected values
 // from the post-upgrade database.
 const additions = Object.freeze({
-  billing_eligibility_events: { milestone_instance_id: null, milestone_decision_id: null, reversal_decision_id: null, reverses_event_id: null, retainer_review_id: null, retainer_period: null },
+  billing_eligibility_events: { milestone_instance_id: null, milestone_decision_id: null, reversal_decision_id: null, reverses_event_id: null, retainer_review_id: null, retainer_period: null, service_review_id: null },
   approved_unbilled_items: { source_type: 'TM_SNAPSHOT' },
   invoice_draft_batches: { source_type: 'TM_SNAPSHOT' },
   invoice_draft_lines: { source_type: 'TM_SNAPSHOT' },

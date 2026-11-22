@@ -1,4 +1,5 @@
 import {reviewCommand as serviceReviewCommand,reviewGrant as serviceReviewGrant,reviewServiceUnits} from './service-unit-review.mjs';
+import {serviceIssueGrant,serviceIssueCommand,serviceUnitRegister} from './service-unit-eligibility.mjs';
 import {policyGrant,valueGrant,policyCommand,valueCommand,servicePolicy,serviceValue} from './service-unit-valuation.mjs';
 import {captureCommand,captureGrant,captureServiceUnits,evidenceQuery,serviceUnitHistory} from './service-unit-evidence.mjs';
 import {retainerRegister,retainerIssueGrant,retainerIssueCommand} from './retainer-eligibility.mjs';
@@ -47,6 +48,8 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       else if(error?.code==='RBE02' || (permission===retainerIssueGrant && error?.code==='CTM04') || error?.constraint==='retainer_period_billed_once')
         res.status(409).json({error:{code:'COMMERCIAL_REGISTER_CONFLICT',message:'Review source eligibility, financial period and existing charges.'}});
       else if(error?.code==='MSU05')res.status(403).json({error:{code:'SERVICE_REVIEW_DENIED',message:'Independent current worker identities are required.'}});
+      else if(error?.code==='SBE01')res.status(403).json({error:{code:'SERVICE_BILLING_DENIED',message:'Service billing authority is required.'}});
+      else if(error?.code==='SBE02' || (permission===serviceIssueGrant && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_BILLING_UNAVAILABLE',message:'Check accepted evidence, billing terms and the issue period.'}});
       else if(error?.code==='MSV01')res.status(403).json({error:{code:'SERVICE_VALUE_DENIED',message:'Current service valuation authority is required.'}});
       else if(error?.code==='MSV02' || (permission===valueGrant && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_VALUE_UNAVAILABLE',message:'Check effective policy, accepted priced evidence, current identities and financial period.'}});
       else if(error?.code==='MSU01')res.status(403).json({error:{code:'SERVICE_UNIT_DENIED',message:'Current service capture permission is required.'}});
@@ -90,6 +93,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/lifecycle/projects',handle(projectBindingSchema,true,(client,req,data)=>createGovernedProject(client,req,data,audit),'commercial.lifecycle.manage'));
   router.get('/workspace',handle(workspaceQuerySchema,false,(client,req,data)=>getWorkspace(client,req,data)));
   router.post('/engagements/:id/service-unit-evidence/:evidenceId/review',handle(serviceReviewCommand,true,(c,r,input)=>reviewServiceUnits(c,r,input,audit),serviceReviewGrant));
+  const serviceRegisterPath='/engagements/:id/service-unit-evidence/:evidenceId/billing';
+  router.get(serviceRegisterPath,handle(workspaceQuerySchema,false,(c,r)=>serviceUnitRegister(c,r)));
+  router.post(serviceRegisterPath,handle(serviceIssueCommand,true,(c,r,input)=>serviceUnitRegister(c,r,input,audit),serviceIssueGrant));
   const servicePolicyPath='/engagements/:id/service-valuation-policy';
   const serviceValuePath='/engagements/:id/service-unit-evidence/:evidenceId/valuation';
   router.get(servicePolicyPath,handle(workspaceQuerySchema,false,(c,r)=>servicePolicy(c,r)));

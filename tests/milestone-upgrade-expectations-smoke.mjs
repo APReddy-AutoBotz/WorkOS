@@ -10,7 +10,7 @@ const expected = expectedMilestoneUpgradeSnapshot(before);
 assert.deepEqual(expected, {
   invoice_draft_batches: [{ v: { id: 'synthetic-batch', currency: 'USD', source_type: 'TM_SNAPSHOT' } }],
   billing_eligibility_events: [
-    { v: { id: 'synthetic-event', amount: '7.5', milestone_instance_id: null, milestone_decision_id: null, reversal_decision_id: null, reverses_event_id: null, retainer_review_id: null, retainer_period: null } },
+    { v: { id: 'synthetic-event', amount: '7.5', milestone_instance_id: null, milestone_decision_id: null, reversal_decision_id: null, reverses_event_id: null, retainer_review_id: null, retainer_period: null, service_review_id: null } },
   ],
   approved_unbilled_items: [{ v: { id: 'synthetic-item', source_type: 'TM_SNAPSHOT' } }],
   audit_logs: [{ v: { id: 'synthetic-audit' } }],

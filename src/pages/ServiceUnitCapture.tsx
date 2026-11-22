@@ -1,3 +1,4 @@
+import {ServiceUnitBilling} from './ServiceUnitBilling';
 import {ServicePolicyEditor,ServiceValueReceipt} from './ServiceValuation';
 import {useRef,useState} from 'react';
 import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext,type ContractTerms,type Engagement} from '../services/commercialDrafting';
@@ -71,6 +72,7 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
       <h5>Recorded service evidence</h5>
       {history.records.length ? <ul>{history.records.map(row=><li key={row.id}>
         <span>{row.serviceDate} · {row.quantity} {row.dimensionCode} · {row.sourceReference}</span>
+        {context.canIssueServiceUnits && row.review?.decision==='Accepted' && <ServiceUnitBilling context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {context.canValueUnits && row.review?.decision==='Accepted' && <ServiceValueReceipt context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {row.review ? <p>{row.review.decision} · {row.review.reason}</p> : <>
           <p>Pending acceptance</p>

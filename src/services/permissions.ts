@@ -44,6 +44,7 @@ export const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: 'commercial.retainer_eligibility.issue', module: 'Commercial', label: 'Register Approved Retainer Charges', description: 'Register an independently approved service period against its responsible engagement.', optIn: true },
   { key: 'commercial.service_units.policy', module: 'Commercial', label: 'Configure service valuation', description: 'Select an effective operational valuation policy for managed-service engagements.', optIn: true },
   { key: 'commercial.service_units.value', module: 'Commercial', label: 'Value accepted service units', description: 'Retain an operational management value for independently accepted service units.', optIn: true },
+  { key: 'commercial.service_units.issue', module: 'Commercial', label: 'Register accepted service units', description: 'Record a contractual charge for independently accepted managed-service units.', optIn: true },
   { key: 'commercial.service_units.decide', module: 'Commercial', label: 'Review delivered service units', description: 'Independently accept or reject recorded managed-service quantities.', optIn: true },
   { key: 'commercial.service_units.capture', module: 'Commercial', label: 'Record managed-service units', description: 'Record delivered quantities against effective engagement terms.', optIn: true },
   { key: 'commercial.retainer_statements.prepare', module: 'Commercial', label: 'Prepare Retainer Statements', description: 'Retain closed-period pricing and approved work evidence for review.', optIn: true },
