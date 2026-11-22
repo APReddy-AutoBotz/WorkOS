@@ -248,6 +248,9 @@ export const createInvoiceDraftRouter = (o) => {
     ).rows[0];
     if (isContractCharge(kind?.source_type)) {
       await assertCommercialAuthority(c,r,contractChargeGrant(kind.source_type));
+      if (lock && kind.source_type==='FIXED_FEE_INSTALLMENT') await c.query(
+        `select lock_fixed_fee_source_workers(ev) from approved_unbilled_items i join billing_eligibility_events ev on ev.id=i.event_id
+          where i.id=$1 and i.organization_id=$2 and i.legal_entity_id=$3`,[itemId,...scope(r)]);
       const currentFunction=chargeCurrentFunction(kind.source_type);
       const {rows:[source]}=await c.query(`select i.version as "itemVersion",ev.id as "eventId",ev.currency,ev.amount::text,
         ev.billing_evidence as evidence,${currentFunction}(b,i.id,$4,$5) as current
@@ -599,6 +602,8 @@ export const createInvoiceDraftRouter = (o) => {
         )
       ).rows[0];
       if (old) {
+        if (source.sourceType==='FIXED_FEE_INSTALLMENT' && !source.current)
+          throw fail(409,'INVOICE_DRAFT_SOURCE','The original installment approval identities or terms changed.');
         if (old.fingerprint !== digest || old.batchId !== batchId || old.activeRole !== r.user.activeRole)
           throw fail(409, 'INVOICE_DRAFT_KEY', 'Original line request differs.');
         delete old.fingerprint;

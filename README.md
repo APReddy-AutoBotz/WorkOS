@@ -222,3 +222,5 @@ Choose **Compare approved effort** on a service receipt to compare recorded hour
 ## Inspect a managed-service month
 
 In Commercial drafting, select the managed-service engagement and a reporting month, then choose **Inspect month**. The report uses all contract versions for that engagement. Registered billable value includes unit and fixed-period charges and their issued credits. The cost figure shows retained worker cost. Gross margin appears once accepted effort, approved timesheets and cost snapshots reconcile. **Retain month** saves the inspected evidence and amounts. **Previous retained version** opens the earlier record.
+
+The fixed-fee installment register shows whether the original schedule author and independent approver still resolve to the verified workers. An invoice preparer can reserve the charge while both identities are current. A historical charge stays visible if an identity can no longer be verified.
