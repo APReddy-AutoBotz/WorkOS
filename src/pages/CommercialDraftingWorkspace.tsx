@@ -1,3 +1,4 @@
+import {ServicePeriodReview} from './ServicePeriodReview';
 import {ServiceUnitCapture} from './ServiceUnitCapture';
 import {RetainerConsumption} from '../components/RetainerConsumption';
 import {FixedFeeInstallmentRegister} from '../components/FixedFeeInstallmentRegister';
@@ -466,6 +467,7 @@ export const CommercialDraftingWorkspace = () => {
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
               {version.servicePeriodCharges?.length ? <div><h4>Fixed-period service charges</h4>
                 <ul>{version.servicePeriodCharges.map(term=><li key={term.startsOn}>{term.startsOn} to {term.endsOn} · {version.currency} {term.amount}</li>)}</ul></div> : null}
+              {version.servicePeriodCharges?.length && state.context ? <div key={state.context.identityKey+version.id}><ServicePeriodReview contractId={detail.id} version={version} context={state.context} today={workspace.asOf}/></div> : null}
               {version.serviceDimensions?.length ? <div><h4>Service quantity dimensions</h4>
                 <ul>{version.serviceDimensions.map(unit=><li key={unit.code}>{unit.label} · {unit.code} · {unit.precision} decimal places{unit.unitPrice!==undefined && ` · ${version.currency} ${unit.unitPrice} per unit`}{unit.billingPrecision!==undefined && ` · billing rounds to ${unit.billingPrecision} decimals`}</li>)}</ul></div> : null}
               {version.serviceDimensions?.length && state.context ? <ServiceUnitCapture

@@ -243,3 +243,7 @@ A managed-service full-line reversal retains the original eligibility event, reg
 ## Fixed-period managed-service terms
 
 A managed-service contract version may retain up to 120 fixed-period charges in date order. Dates must be inclusive, non-overlapping and within the contract term. Each positive amount uses contract currency with up to four decimal places. Gaps are allowed. Omitting the schedule on revision carries it forward. An explicit empty list clears it for that version. Approval, management valuation and billing eligibility require their own decisions.
+
+## Independent fixed-period charge review
+
+A scoped reviewer may approve or reject one closed period on its contract version when the version was adopted and the contract stayed active throughout the period. A lifecycle transition or amendment inside the period requires reconciliation. Reviewer and version author must be distinct accounts and workers with current entity membership and stable links since version creation. The decision retains the effective lifecycle and amendment references, exact amount, currency and reason. Operational valuation and issuance each require separate controls.

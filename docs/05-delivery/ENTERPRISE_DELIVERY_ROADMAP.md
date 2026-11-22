@@ -220,4 +220,4 @@ Managed-service quantity capture (WOS-COM-010) records dated, referenced deliver
 
 ## Managed-service invoice delivery
 
-Approved service-unit batches support CSV export and manual downstream confirmation. A full-line service-unit correction now passes through named independent reviewers before finance can issue, reserve, approve, export and confirm a credit. Managed-service contract versions retain dated fixed charges in contract currency. Independent period-charge approval, operational valuation, billing eligibility and associated time and cost evidence remain open.
+Approved service-unit batches support CSV export and manual downstream confirmation. A full-line service-unit correction now passes through named independent reviewers before finance can issue, reserve, approve, export and confirm a credit. Managed-service contract versions retain dated fixed charges in contract currency. An independent reviewer can approve or reject a closed period on the adopted contract version. Period-charge operational valuation, billing eligibility and associated time and cost evidence remain open.

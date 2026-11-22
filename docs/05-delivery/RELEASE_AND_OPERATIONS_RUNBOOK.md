@@ -712,3 +712,7 @@ To suspend new credits, revoke `commercial.reversal_eligibility.create` from iss
 ## Managed-service fixed-period terms
 
 Existing versions start with an empty fixed-charge schedule when migration 084 is installed. Correct terms prospectively through a contract revision. Preserve the column and earlier versions during application rollback. Before reverting to an application version that cannot carry these terms forward, suspend contract revisions for affected contracts.
+
+## Suspend fixed-period decisions
+
+Revoke `commercial.service_periods.decide` to suspend new decisions. Retain migration 085, decisions and audit records. Commercial viewers can still inspect receipts. A rejected charge remains recorded against its immutable version and period.
