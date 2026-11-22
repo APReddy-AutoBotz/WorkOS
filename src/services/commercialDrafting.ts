@@ -61,7 +61,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -81,6 +81,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   const permissions = getEffectivePermissions(user);
   if (!permissions.includes('commercial.contracts.view')) return null;
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
+    canReviewUnits: permissions.includes('commercial.service_units.decide'),
     canCaptureUnits: permissions.includes('commercial.service_units.capture'),
     canIssueInstallment: permissions.includes('commercial.fixed_fee_eligibility.issue'),
     canReleasePurchaseOrder: permissions.includes('commercial.purchase_orders.release'),
@@ -294,7 +295,22 @@ const statementEvidence=(value:unknown,contractId:string,version:ContractTerms,s
     rate:source ? quantity(source.hourlyRate) : null};
 };
 export type ServiceUnitInput = {versionId:string;serviceDate:string;dimensionCode:string;quantity:string;sourceReference:string};
+type UnitDecision='Accepted'|'Rejected';
+const normalizeUnitReview=(value:unknown,evidenceId:string)=>{
+  const r=object(value);
+  if(r.evidenceId!==evidenceId) throw invalid();
+  return {id:text(r.id),decision:model(r.decision,['Accepted','Rejected'] as const),reason:text(r.reason),createdAt:text(r.createdAt)};
+};
 export const commercialDraftingService = {
+  reviewUnits(engagementId:string,evidenceId:string,decision:UnitDecision,reason:string,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canReviewUnits) throw new ApiClientError('Service review access changed.',{status:403});
+    return request(context,'POST','/engagements/'+encodeURIComponent(engagementId)+'/service-unit-evidence/'+encodeURIComponent(evidenceId)+'/review',
+      {decision,reason},value=>{
+        const review=normalizeUnitReview(value,evidenceId);
+        if (review.decision!==decision || review.reason!==reason) throw invalid();
+        return review;
+      },false);
+  },
   serviceUnitHistory(engagementId:string,versionId:string,before:string|null,context:CommercialDraftingContext) {
     const query=new URLSearchParams({versionId});if (before) query.set('before',before);
     return request(context,'GET','/engagements/'+encodeURIComponent(engagementId)+'/service-unit-evidence?'+query,undefined,value=>{
@@ -302,7 +318,7 @@ export const commercialDraftingService = {
       return {before:nullableText(r.before),records:rows(r.records,item=>{
         const e=object(item);
         if(e.engagementId!==engagementId || e.versionId!==versionId) throw invalid();
-        return {id:text(e.id),serviceDate:date(e.serviceDate),dimensionCode:text(e.dimensionCode),quantity:text(e.quantity),sourceReference:text(e.sourceReference)};
+        return {review:e.review==null?null:normalizeUnitReview(e.review,text(e.id)),id:text(e.id),serviceDate:date(e.serviceDate),dimensionCode:text(e.dimensionCode),quantity:text(e.quantity),sourceReference:text(e.sourceReference)};
       })};
     });
   },

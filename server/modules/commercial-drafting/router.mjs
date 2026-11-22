@@ -1,3 +1,4 @@
+import {reviewCommand as serviceReviewCommand,reviewGrant as serviceReviewGrant,reviewServiceUnits} from './service-unit-review.mjs';
 import {captureCommand,captureGrant,captureServiceUnits,evidenceQuery,serviceUnitHistory} from './service-unit-evidence.mjs';
 import {retainerRegister,retainerIssueGrant,retainerIssueCommand} from './retainer-eligibility.mjs';
 import {retainerStatement,statementGrant,statementCommand,statementQuery,reviewGrant,reviewCommand} from './retainer-statement.mjs';
@@ -44,6 +45,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       }else if(error?.code==='RBE01')res.status(403).json({error:{code:'RETAINER_REGISTER_DENIED',message:'Current retainer billing authority is required.'}});
       else if(error?.code==='RBE02' || (permission===retainerIssueGrant && error?.code==='CTM04') || error?.constraint==='retainer_period_billed_once')
         res.status(409).json({error:{code:'COMMERCIAL_REGISTER_CONFLICT',message:'Review source eligibility, financial period and existing charges.'}});
+      else if(error?.code==='MSU05')res.status(403).json({error:{code:'SERVICE_REVIEW_DENIED',message:'Independent current worker identities are required.'}});
       else if(error?.code==='MSU01')res.status(403).json({error:{code:'SERVICE_UNIT_DENIED',message:'Current service capture permission is required.'}});
       else if(error?.code==='MSU02')res.status(422).json({error:{code:'SERVICE_UNIT_TERMS_INVALID',message:'Check service date, active adopted terms, unit and quantity precision.'}});
       else if(error?.code==='RSR01')res.status(403).json({error:{code:'RETAINER_IDENTITY_DENIED',message:'Current, distinct worker identities are required to review the statement.'}});
@@ -84,6 +86,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post('/lifecycle/:type/:id/transitions',handle(lifecycleTransitionSchema,true,(client,req,data)=>transitionLifecycle(client,req,req.params.type,req.params.id,data,audit),'commercial.lifecycle.manage'));
   router.post('/lifecycle/projects',handle(projectBindingSchema,true,(client,req,data)=>createGovernedProject(client,req,data,audit),'commercial.lifecycle.manage'));
   router.get('/workspace',handle(workspaceQuerySchema,false,(client,req,data)=>getWorkspace(client,req,data)));
+  router.post('/engagements/:id/service-unit-evidence/:evidenceId/review',handle(serviceReviewCommand,true,(c,r,input)=>reviewServiceUnits(c,r,input,audit),serviceReviewGrant));
   router.get('/engagements/:id/service-unit-evidence',handle(evidenceQuery,false,(c,r,q)=>serviceUnitHistory(c,r,q)));
   router.post('/engagements/:id/service-unit-evidence',handle(captureCommand,true,(c,r,input)=>captureServiceUnits(c,r,input,audit),captureGrant));
   const statementPath='/contracts/:id/versions/:versionId/retainer-statements/:startsOn';

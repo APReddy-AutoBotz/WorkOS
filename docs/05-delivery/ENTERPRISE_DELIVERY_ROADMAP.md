@@ -216,4 +216,4 @@ Historical archive recovery covers 082p custom-format backups without access to 
 
 WOS-COM-010 now supports versioned managed-service quantity dimensions in Commercial drafting. Configure and inspect ticket, shift or buyer-defined units per contract version.
 
-Managed-service quantity capture (WOS-COM-010) records dated, referenced delivery against active, independently adopted contract and engagement terms. Next priorities are independent acceptance, optional time/cost evidence links, operational valuation and billing eligibility.
+Managed-service quantity capture (WOS-COM-010) records dated, referenced delivery against active, independently adopted contract and engagement terms. Independent reviewers can now accept or reject an immutable delivery receipt with a reason. Optional time/cost evidence links, operational valuation and billing eligibility remain open.
