@@ -37,7 +37,7 @@ export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,ba
   assert.equal(createHash('sha256').update(bytes).digest('hex'),a.sha256);
   const parts=bytes.toString('utf8').split('\r\n');
   const row=parts[1].split(',');
-  assert.equal(ok(await call(csv+'/exports',saved.request().postDataJSON())).artifact.id,a.id);
+  assert.equal(ok(await call(csv+'/exports',saved.request().postDataJSON()),200).artifact.id,a.id);
   const mutate=async(index,value)=>{
     const line=[...row];line[index]=value;
     const payload=Buffer.from([parts[0],line.join(','),''].join('\r\n'));
@@ -76,7 +76,7 @@ export async function verifyFixedFeeExport({apiRequest,pool,page,engagementId,ba
   const confirmed=await result;assert.equal(confirmed.status(),201,await confirmed.text());
   const retained=(await confirmed.json()).confirmation;
   assert.deepEqual([retained.sourceType,retained.artifactSha256,retained.total],['FIXED_FEE_INSTALLMENT',a.sha256,a.total]);
-  assert.equal(ok(await call(csv+'/confirmations',confirmed.request().postDataJSON())).confirmation.id,retained.id);
+  assert.equal(ok(await call(csv+'/confirmations',confirmed.request().postDataJSON()),200).confirmation.id,retained.id);
   assert.equal(ok(await call(csv+'/batches/'+batchId),200).batch.state,'Billed/Confirmed');
   assert.equal((await pool.query('select count(*)::int n from invoice_csv_artifacts where batch_id=$1',[batchId])).rows[0].n,1);
 }
