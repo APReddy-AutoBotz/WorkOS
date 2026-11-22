@@ -1,3 +1,5 @@
+import {validServiceEffort} from '../../shared/service-unit-effort.mjs';
+import {canonicalHours} from '../../shared/work-hours.mjs';
 import {authService} from './authService';
 import {api, ApiClientError, getOrganizationScope, getToken, type ApiRequestContext} from './apiClient';
 import {getEffectivePermissions} from './permissions';
@@ -319,7 +321,7 @@ const statementEvidence=(value:unknown,contractId:string,version:ContractTerms,s
     adoptionId:source ? text(source.adoptionId) : null,approvalId:source ? text(source.approvalId) : null,
     rate:source ? quantity(source.hourlyRate) : null};
 };
-export type ServiceUnitInput = {versionId:string;serviceDate:string;dimensionCode:string;quantity:string;sourceReference:string};
+export type ServiceUnitInput = {versionId:string;serviceDate:string;dimensionCode:string;quantity:string;sourceReference:string;effortHours?:string};
 type UnitDecision='Accepted'|'Rejected';
 const normalizeUnitReview=(value:unknown,evidenceId:string)=>{
   const r=object(value);
@@ -417,7 +419,8 @@ export const commercialDraftingService = {
       return {before:nullableText(r.before),records:rows(r.records,item=>{
         const e=object(item);
         if(e.engagementId!==engagementId || e.versionId!==versionId) throw invalid();
-        return {review:e.review==null?null:normalizeUnitReview(e.review,text(e.id)),id:text(e.id),serviceDate:date(e.serviceDate),dimensionCode:text(e.dimensionCode),quantity:text(e.quantity),sourceReference:text(e.sourceReference)};
+        if (e.effortHours!=null && !validServiceEffort(e.effortHours)) throw invalid();
+        return {effortHours:e.effortHours==null?null:text(e.effortHours),review:e.review==null?null:normalizeUnitReview(e.review,text(e.id)),id:text(e.id),serviceDate:date(e.serviceDate),dimensionCode:text(e.dimensionCode),quantity:text(e.quantity),sourceReference:text(e.sourceReference)};
       })};
     });
   },
@@ -426,7 +429,8 @@ export const commercialDraftingService = {
     return request(context,'POST','/engagements/'+encodeURIComponent(engagementId)+'/service-unit-evidence',input,value=>{
       const r=object(value);
       if (r.engagementId!==engagementId || r.versionId!==input.versionId || r.serviceDate!==input.serviceDate ||
-          r.dimensionCode!==input.dimensionCode || r.quantity!==input.quantity || r.sourceReference!==input.sourceReference) throw invalid();
+          r.dimensionCode!==input.dimensionCode || r.quantity!==input.quantity || r.sourceReference!==input.sourceReference ||
+          (r.effortHours??null)!==(input.effortHours===undefined?null:canonicalHours(input.effortHours))) throw invalid();
       return text(r.id);
     },false);
   },

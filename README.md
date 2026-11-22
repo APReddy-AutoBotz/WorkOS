@@ -208,3 +208,7 @@ Select the approved batch in **Invoice CSV export** and choose **Fixed-period CS
 ## Correct a billed fixed-period charge
 
 Inspect the retained export and select the original line. Request a full reversal with a reason. After the named reviewers approve it, finance can issue the negative amount, reserve it in a correction batch and submit that batch for approval. The credit export and downstream confirmation keep their own receipts and link back to the original charge.
+
+## Record effort for delivered service units
+
+In **Record delivered units**, enter **Your effort in hours (optional)** when the delivery has supporting time evidence. Enter actual hours for your own work on the service date, to four decimal places. The receipt and its review history retain the reported hours alongside the delivered quantity.

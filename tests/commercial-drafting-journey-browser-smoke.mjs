@@ -987,7 +987,7 @@ const verifyCommercialDrafting = async reversalScenario => {
         name:'Synthetic unit capture',budget:'100',contractId:saved.result.id,contractVersionId:serviceVersion,startsOn:'2020-01-01',endsOn:'2099-12-31'}});
       assert.equal(serviceEng.status,201,JSON.stringify(serviceEng.body));
       const capturePath='/engagements/'+serviceEng.body.id+'/service-unit-evidence';
-      const serviceInput={versionId:serviceVersion,serviceDate:today,dimensionCode:'SHIFT',quantity:'1.25',sourceReference:'SYN-SHIFT-1'};
+      const serviceInput={versionId:serviceVersion,serviceDate:today,dimensionCode:'SHIFT',quantity:'1.25',sourceReference:'SYN-SHIFT-1',effortHours:'0.6250'};
       const capture=(body,opts={})=>apiRequest(capturePath,{method:'POST',body,...opts});
       assert.equal((await capture(serviceInput)).status,403);
       await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.service_units.capture',true),('Admin','commercial.lifecycle.manage',true) on conflict(role_name,permission_key) do update set enabled=true");
@@ -1219,11 +1219,36 @@ const verifyCommercialDrafting = async reversalScenario => {
       const captureForm=form('Record delivered units');
       await captureForm.getByLabel('Service engagement').selectOption(serviceEng.body.id);
       await captureForm.getByLabel('Delivered unit').selectOption('SHIFT');
-      await fill(captureForm,{'Service date':today,'Delivered quantity':'1.25','Service evidence reference':'SYN-SHIFT-1'});
+      await fill(captureForm,{'Service date':today,'Delivered quantity':'1.25','Your effort in hours (optional)':'0.6250','Service evidence reference':'SYN-SHIFT-1'});
       await button('Record service evidence').click();
       await captureForm.getByText(/Service evidence recorded/).waitFor();
       await captureForm.getByText(today+' · 1.25 SHIFT · SYN-SHIFT-1').waitFor();
+      await captureForm.getByText('Recorded effort · 0.625 hours').waitFor();
       const replay=await capture(serviceInput);assert.equal(replay.status,201,JSON.stringify(replay.body));
+      assert.equal(replay.body.effortHours,'0.625');
+      const equivalent=await capture({...serviceInput,effortHours:'0.625'});
+      assert.equal(equivalent.body.id,replay.body.id);
+      assert.equal((await capture({...serviceInput,effortHours:undefined})).status,409);
+      assert.equal((await capture({...serviceInput,effortHours:'1'})).status,409);
+      for(const effortHours of ['0','-1','24.0001','0.00001','1e1',1,null]) {
+        assert.equal((await capture({...serviceInput,effortHours})).status,400);
+      }
+      assert.equal((await capture({...serviceInput,costAmount:'25'})).status,400);
+      const asContractReader=await apiRequest(capturePath+'?versionId='+serviceVersion,{identity:identities.reader});
+      assert.equal(asContractReader.status,200,JSON.stringify(asContractReader.body));
+      const visibleUnit=asContractReader.body.records.find(row=>row.id===replay.body.id);
+      assert.equal(visibleUnit.quantity,'1.25');
+      assert.equal(Object.hasOwn(visibleUnit,'effortHours'),false);
+      const linkCheck=await pool.connect();
+      try {
+        await linkCheck.query('begin');
+        await linkCheck.query('update users set employee_record_id=null where id=$1',[actorId]);
+        await linkCheck.query('update users set employee_record_id=$2 where id=$1',[actorId,ownerId]);
+        const {rows}=await linkCheck.query('select service_unit_effort_recorder_current(e) as current from commercial_service_unit_evidence e where e.id=$1',[replay.body.id]);
+        assert.deepEqual(rows,[{current:false}]);
+      } finally {await linkCheck.query('rollback');linkCheck.release();}
+      const effortAudit=await pool.query("select new_value->>'effortHours' as hours from audit_logs where entity_id=$1 and action='Recorded' and entity_type='Managed Service Evidence'",[replay.body.id]);
+      assert.deepEqual(effortAudit.rows,[{hours:'0.625'}]);
       assert.equal((await capture({...serviceInput,quantity:'2'})).status,409);
       const evidence=await pool.query('select quantity::text,actor_id,recorder_worker_id,recorder_link_generation::text from commercial_service_unit_evidence where engagement_id=$1',[serviceEng.body.id]);
       const generation=(await pool.query('select coalesce(max(generation),0)::text generation from invoice_reviewer_link_changes where account_id=$1',[actorId])).rows[0].generation;
@@ -1327,7 +1352,10 @@ const verifyCommercialDrafting = async reversalScenario => {
         }
         await exported.csvBrowser.context.close();
       }
-      const noncharge=await capture({...serviceInput,sourceReference:'SYN-NONCHARGE',quantity:'1',dimensionCode:'CALL'});
+      const withoutEffort={...serviceInput,effortHours:undefined,sourceReference:'SYN-NONCHARGE',quantity:'1',dimensionCode:'CALL'};
+      const [noncharge,concurrentCapture]=await Promise.all([capture(withoutEffort),capture(withoutEffort)]);
+      assert.equal(noncharge.status,201,JSON.stringify(noncharge.body));assert.equal(concurrentCapture.body.id,noncharge.body.id);
+      assert.equal(Object.hasOwn(noncharge.body,'effortHours'),false);
       const nonchargeReview=await reviewUnits(noncharge.body.id,'Accepted');
       assert.equal(nonchargeReview.status,201);
       assert.equal((await serviceBill(noncharge.body.id,nonchargeReview.body.id)).status,409,'a price alone cannot authorize billing');

@@ -729,3 +729,5 @@ WOS-INV-003, WOS-INV-006 and WOS-INV-008 use migration 089 and the commercial dr
 WOS-INV-003, WOS-INV-006, WOS-INV-007 and WOS-INV-008 use migration 090 and the commercial drafting browser journey for fixed-period CSV delivery. Coverage includes exact contract amount, integrity verification, approval and occupancy, atomic audit failure, replay, historical scope and downstream receipt confirmation.
 
 WOS-INV-003, WOS-INV-004 and WOS-INV-006 through WOS-INV-008 use migration 091 for fixed-period corrections. The commercial drafting journey covers independent staged review, stale workforce identity, source-specific permissions, exact negative credit, unique reservation, correction approval, export and downstream confirmation.
+
+WOS-COM-010 uses migration 092 for optional supporting time on managed-service unit receipts. The commercial drafting browser journey checks capture and review history, absent effort, exact decimals, out-of-range values, conflicting retries, concurrent replay and protected audit evidence. Governed cost evidence is a subsequent work package.

@@ -271,3 +271,7 @@ Schema `workos.invoice-service-period-csv/1` links each exported line to its reg
 ### Managed-service credit authority
 
 Correction review and credit issuance require current permission for the original charge type. Each named reviewer must remain independent of the requester, preparer and owner through their linked worker identities. A fixed-period full-line credit retains the original event, register item, review, export digest, native amount and downstream confirmation where present. The correction batch goes through independent approval before export.
+
+### Supporting effort on a service receipt
+
+A recorder may report their own effort on the service date, up to 24 hours with four decimal places. Omitted effort stays unknown. The receipt retains the hours with the verified recorder and worker identity. In receipt history, the active recorder with capture permission and scoped service reviewers can read the effort. A retry must match the original effort, including whether it was supplied. Approved timesheet hours, service valuation and billing keep their existing independent evidence sources.
