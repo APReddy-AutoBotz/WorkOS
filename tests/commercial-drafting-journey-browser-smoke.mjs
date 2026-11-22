@@ -981,15 +981,25 @@ const verifyCommercialDrafting = async reversalScenario => {
       original:issued.body.receipt,sourceType:'RETAINER_PERIOD',amount:'3500',act,reviewerKey,secondKey});
     if (fixedDelivery) {
       const fixedEngagement=engagement.result.id;
-      for (const role of [finance.role,identities.manager.role]) await pool.query(
-        'insert into role_permissions(role_name,permission_key,enabled) values($1,$2,true) on conflict(role_name,permission_key) do update set enabled=true',[role,grant]);
-      const correctionPolicy=await act('/policies',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),engagementId:fixedEngagement,
-        expectedLatestId:fixedDelivery.policyId,effectiveFrom:today,definition:{...policyInput,engagementId:fixedEngagement,
-          stages:[{userId:identities.manager.id,role:identities.manager.role},{userId:alias.id,role:alias.role}]},reason:'Review the installment credit'});
-      assert.equal(correctionPolicy.status,201,JSON.stringify(correctionPolicy.body));
-      await verifyCorrection({exported:{...exported,...fixedDelivery,attestationRequest:{...fixedDelivery.attestationRequest,expectedOwnerKey:ownerKey},
-        exportCmd:{...fixedDelivery.exportCmd,expectedOwnerKey:ownerKey}},engagementId:fixedEngagement,ownerKey,batchId:fixedDelivery.batchId,lineId:fixedDelivery.lineId,
-        policyId:correctionPolicy.body.policy.id,original:registered,sourceType:'FIXED_FEE_INSTALLMENT',amount:'12000',act,reviewerKey,secondKey});
+      const roles=[finance.role,identities.manager.role];
+      const prior=(await pool.query('select role_name,enabled from role_permissions where role_name=any($1) and permission_key=$2',[roles,grant])).rows;
+      try {
+        for (const role of roles) await pool.query(
+          'insert into role_permissions(role_name,permission_key,enabled) values($1,$2,true) on conflict(role_name,permission_key) do update set enabled=true',[role,grant]);
+        const correctionPolicy=await act('/policies',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),engagementId:fixedEngagement,
+          expectedLatestId:fixedDelivery.policyId,effectiveFrom:today,definition:{...policyInput,engagementId:fixedEngagement,
+            stages:[{userId:identities.manager.id,role:identities.manager.role},{userId:alias.id,role:alias.role}]},reason:'Review the installment credit'});
+        assert.equal(correctionPolicy.status,201,JSON.stringify(correctionPolicy.body));
+        await verifyCorrection({exported:{...exported,...fixedDelivery,attestationRequest:{...fixedDelivery.attestationRequest,expectedOwnerKey:ownerKey},
+          exportCmd:{...fixedDelivery.exportCmd,expectedOwnerKey:ownerKey}},engagementId:fixedEngagement,ownerKey,batchId:fixedDelivery.batchId,lineId:fixedDelivery.lineId,
+          policyId:correctionPolicy.body.policy.id,original:registered,sourceType:'FIXED_FEE_INSTALLMENT',amount:'12000',act,reviewerKey,secondKey});
+      } finally {
+        for (const role of roles) {
+          const row=prior.find(p=>p.role_name===role);
+          if (row) await pool.query('update role_permissions set enabled=$3 where role_name=$1 and permission_key=$2',[role,grant,row.enabled]);
+          else await pool.query('delete from role_permissions where role_name=$1 and permission_key=$2',[role,grant]);
+        }
+      }
     }
     await exported.csvBrowser.context.close();
     await reviewBrowser.context.close();
