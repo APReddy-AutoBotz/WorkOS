@@ -526,7 +526,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await pool.query('select count(*)::int n from invoice_draft_occupancies where batch_id=$1',[batchId])).rows[0].n,1);
       if (sourceType==='MANAGED_SERVICE_UNIT') {
         const rejected=await csvBrowser.page.evaluate(async artifact=>{
-          const {verifyServiceInvoiceCsv}=await import('/src/services/milestoneInvoiceCsv.ts');
+          const {verifyServiceInvoiceCsv}=window;
           const records=atob(artifact.payloadBase64).split('\r\n');
           const columns=records[1].split(',');
           const evidence=JSON.parse(atob(columns[9].slice(4)));
