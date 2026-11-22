@@ -587,6 +587,140 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await pool.query('select id from invoice_export_notice_events where confirmation_id=$1',[receipt.id])).rowCount,1);
       return {a,receipt,attest,attestationRequest,csv,sendExport,csvDesk,csvBrowser,exportCmd};
     };
+    const verifyCorrection=async({exported,engagementId,ownerKey,batchId,lineId,policyId,original,sourceType,amount,act,reviewerKey,secondKey})=>{
+      const {a,receipt,attest,attestationRequest,csv,sendExport,csvDesk,csvBrowser,exportCmd}=exported;
+      const reversalPath=csv+'/batches/'+batchId+'/lines/'+lineId+'/reversal-request';
+      const reverse=(path,body)=>apiRequest(reversalPath+path,{method:'POST',identity:finance,body});
+      const requestBody={expectedOwnerKey:ownerKey,artifactId:a.id,sha256:a.sha256,inspectedState:'Billed/Confirmed',reason:'Reverse duplicate downstream charge'};
+      assert.equal((await reverse('',{...requestBody,inspectedState:'Exported'})).status,409);
+      assert.equal((await apiRequest(reversalPath,{identity:identities.reader})).status,403);
+      await csvDesk.getByLabel('Invoice export engagement').selectOption(engagementId);
+      await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
+      await csvDesk.getByLabel('Invoice export batch').selectOption(batchId);
+      await csvDesk.getByRole('button',{name:'Inspect invoice export source'}).click();
+      await csvDesk.getByRole('button',{name:'Retrieve retained invoice CSV'}).click();
+      await csvDesk.getByLabel('Exported line to review').selectOption(lineId);
+      await csvDesk.getByRole('button',{name:'Check reversal request'}).click();
+      await csvDesk.getByLabel('Full reversal reason').fill(requestBody.reason);
+      await csvDesk.getByRole('button',{name:'Request full line reversal'}).click();
+      await csvDesk.getByRole('button',{name:'Check reversal reviewers'}).click();
+      await csvDesk.getByRole('button',{name:'Submit reversal for independent review'}).click();
+      await csvDesk.getByText(/Submitted reversal review/).waitFor();
+      assert.equal((await reverse('',requestBody)).body.replayed,true);
+      const savedReview=(await apiRequest(reversalPath+'/review',{identity:finance})).body.review;
+      const decisionPath='/api/v1/work-approvals/reversal-reviews/'+savedReview.id;
+      const stageDecision=(who,key,n)=>apiRequest(decisionPath+'/decisions',{method:'POST',identity:who,body:{
+        expectedOwnerKey:key,expectedSequence:n,policyId:policyId,confirmationId:receipt.id,decision:'Approved',reason:'Verified retained service period charge'}});
+      const selfReview=await pool.query(
+        'select retainer_review_participants_valid(retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',
+        [identities.manager.id,identities.manager.role,policyId,batchId]);
+      assert.equal(selfReview.rows[0].ok,false,'The reversal requester cannot occupy a named review stage');
+      const firstReversal=await stageDecision(identities.manager,reviewerKey,0);
+      assert.equal(firstReversal.status,201,JSON.stringify(firstReversal.body));
+      assert.equal(firstReversal.body.review.sourceType,sourceType);
+      if (reversalScenario === 'stale reviewer') {
+        const stageWorker=(await pool.query('select employee_record_id from users where id=$1',[alias.id])).rows[0].employee_record_id;
+        await pool.query('update users set employee_record_id=null where id=$1',[alias.id]);
+        await pool.query('update users set employee_record_id=$2 where id=$1',[alias.id,stageWorker]);
+        assert.equal((await apiRequest(decisionPath,{identity:alias})).body.review.canDecide,false);
+        assert.equal((await stageDecision(alias,secondKey,1)).status,409);
+        await assert.rejects(pool.query(
+          "insert into invoice_reversal_decisions(id,review_id,sequence,actor_id,active_role,reason,confirmation_id,decision,operation_id) values($1,$2,2,$3,$4,'Synthetic stale decision',$5,'Approved',$6)",
+          [crypto.randomUUID(),savedReview.id,alias.id,alias.role,receipt.id,crypto.randomUUID()]),
+          err=>err.code==='IBA02' && err.message.includes('Reversal reviewer identity changed'));
+        assert.equal((await pool.query('select sequence from invoice_reversal_decisions where review_id=$1',[savedReview.id])).rowCount,1);
+      } else {
+        const ok=(response,code=201)=>{assert.equal(response.status,code,JSON.stringify(response.body));return response.body;};
+        assert.equal((await apiRequest(reversalPath+'/eligibility',{identity:finance})).body.source,null);
+        ok(await stageDecision(alias,secondKey,1));
+        const eligibility=ok(await apiRequest(reversalPath+'/eligibility',{identity:finance}),200);
+        assert.equal(eligibility.source.amount,'-'+amount);
+        assert.equal(eligibility.source.originalEventId,original.eventId);
+        const issueBody={expectedOwnerKey:ownerKey,reviewId:savedReview.id,decisionId:eligibility.source.decisionId,
+          confirmationId:receipt.id,eligibleOn:eligibility.serverDate,reason:'Correct the original service-period charge'};
+        assert.equal((await reverse('/eligibility',{...issueBody,confirmationId:null})).status,409);
+        const staleCredit=await pool.connect();
+        try {
+          await staleCredit.query('begin');
+          const worker=(await staleCredit.query('select employee_record_id from users where id=$1',[alias.id])).rows[0].employee_record_id;
+          await staleCredit.query('update users set employee_record_id=null where id=$1',[alias.id]);
+          await staleCredit.query('update users set employee_record_id=$2 where id=$1',[alias.id,worker]);
+          const op=crypto.randomUUID();
+          await staleCredit.query("select set_config('workos.reversal_issue_context',$1,true)",[JSON.stringify({
+            actorId:finance.id,role:finance.role,org:scope.organizationId,legal:scope.legalEntityId,operationId:op})]);
+          await assert.rejects(staleCredit.query(
+            `insert into billing_eligibility_events(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,source_type,version,eligible_on,
+            currency,amount,billing_evidence,actor_id,active_role,operation_id,reverses_event_id,reversal_decision_id)
+            select $1,organization_id,legal_entity_id,client_id,contract_id,engagement_id,'FULL_LINE_REVERSAL',1,$2,currency,amount,evidence,
+            $3,$4,$5,original_event,final_decision from full_line_reversal_source($6)`,
+            [crypto.randomUUID(),issueBody.eligibleOn,finance.id,finance.role,op,savedReview.id]),
+            err=>err.code==='IBA02' && err.message.includes('before credit issuance'));
+        } finally {
+          await staleCredit.query('rollback');
+          staleCredit.release();
+        }
+        assert.equal((await apiRequest(reversalPath+'/eligibility',{identity:identities.reader})).status,403);
+        await pool.query("create trigger fail_retainer_credit before insert on audit_logs for each row when(new.action='Issue Full Line Reversal') execute function reject_test_po_audit()");
+        assert.equal((await reverse('/eligibility',issueBody)).status,503);
+        assert.equal((await pool.query('select 1 from billing_eligibility_events where reverses_event_id=$1',[eligibility.source.originalEventId])).rowCount,0);
+        await pool.query('drop trigger fail_retainer_credit on audit_logs');
+        await csvDesk.getByRole('button',{name:'Check reversal reviewers'}).click();
+        await csvDesk.getByRole('button',{name:'Inspect corrective billing eligibility'}).click();
+        await csvDesk.getByLabel('Credit issuance reason').fill(issueBody.reason);
+        await csvDesk.getByRole('button',{name:'Issue approved-unbilled credit'}).click();
+        await csvDesk.getByText(/Approved-unbilled credit .*eligibility date/).waitFor();
+        const replayedCredit=ok(await reverse('/eligibility',issueBody),200);
+        assert.equal(replayedCredit.replayed,true);
+        const credit=replayedCredit.receipt;
+        assert.equal(credit.amount,'-'+amount);
+        const reservePath=csv+'/batches/'+batchId+'/correction-drafts';
+        const reserveBody={expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),reason:'Reserve the service-period credit',itemIds:[credit.itemId]};
+        const reserve=()=>apiRequest(reservePath,{method:'POST',identity:finance,body:reserveBody});
+        const reserved=ok(await reserve()).receipt;
+        assert.equal(reserved.total,credit.amount);
+        assert.equal(ok(await reserve(),200).receipt.batchId,reserved.batchId);
+        const proof=ok(await apiRequest(reservePath+'/'+reserved.batchId,{identity:finance}),200);
+        assert.equal(proof.lines[0].artifactSha256,a.sha256);
+        const creditSource=ok(await act('/sources/'+reserved.batchId,finance),200).batch;
+        assert.equal(creditSource.lines[0].evidence.originalSourceType,sourceType);
+        const creditApproval=ok(await act('/requests',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),batchId:reserved.batchId,
+          expectedPolicyId:policyId,expectedLineCount:1,expectedLineageHash:creditSource.lineageHash,reason:'Review service-period credit'})).approval;
+        for(const [n,who,key] of [[0,identities.manager,reviewerKey],[1,alias,secondKey]]){
+          ok(await act('/instances/'+creditApproval.id+'/decisions',who,{expectedOwnerKey:key,requestId:crypto.randomUUID(),expectedSequence:n,
+            decision:'Approved',reason:'Approved reviewed service-period credit'}));
+        }
+        const exportCredit=ok(await apiRequest(csv+'/batches/'+reserved.batchId,{identity:finance}),200).batch;
+        const creditCmd={...exportCmd,requestId:crypto.randomUUID(),batchId:reserved.batchId,approvalId:creditApproval.id,
+          finalTransitionId:exportCredit.finalTransitionId,lineageHash:exportCredit.lineageHash,schemaVersion:'workos.invoice-credit-csv/1',expectedTotal:credit.amount};
+        assert.equal((await sendExport({...creditCmd,expectedTotal:amount})).status,409);
+        await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
+        await csvDesk.getByRole('button',{name:'Find credit exports'}).click();
+        await csvDesk.getByLabel('Invoice export batch').selectOption(reserved.batchId);
+        await csvDesk.getByRole('button',{name:'Inspect invoice export source'}).click();
+        await csvDesk.getByLabel('Invoice CSV schema').selectOption('workos.invoice-credit-csv/1');
+        await csvDesk.getByLabel('I inspected the final approval, retained lineage and control total').check();
+        await csvDesk.getByLabel('Invoice CSV reason').fill('Export approved retainer credit');
+        const exportingCredit=csvBrowser.page.waitForResponse(r=>r.url().endsWith(csv+'/exports') && r.request().method()==='POST');
+        await csvDesk.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
+        const acceptedCredit=await exportingCredit;
+        assert.equal(acceptedCredit.status(),201,await acceptedCredit.text());
+        const creditArtifact=(await acceptedCredit.json()).artifact;
+        await csvDesk.getByRole('region',{name:'Verified invoice CSV'}).waitFor();
+        assert.equal(creditArtifact.total,credit.amount);
+        const creditConfirmation=ok(await attest({...attestationRequest,requestId:crypto.randomUUID(),batchId:reserved.batchId,artifactId:creditArtifact.id,
+          artifactSha256:creditArtifact.sha256,total:credit.amount,reference:'Synthetic credit application',reason:'Matched applied service-period credit'})).confirmation;
+        if (sourceType==='RETAINER_PERIOD') recoveryEvidence={finance, original:{artifact:a,confirmation:receipt,itemId:original.itemId},
+          credit:{artifact:creditArtifact,confirmation:creditConfirmation,itemId:credit.itemId}};
+        assert.equal(creditConfirmation.sourceType,'FULL_LINE_REVERSAL');
+        assert.equal(creditConfirmation.total,credit.amount);
+        assert.equal(ok(await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:finance}),200).confirmation.id,receipt.id);
+        const csvText=Buffer.from(creditArtifact.payloadBase64,'base64').toString('utf8');
+        for(const pinned of [a.id,a.sha256,lineId]) assert.ok(csvText.includes(pinned));
+        assert.equal(ok(await sendExport(acceptedCredit.request().postDataJSON()),200).artifact.sha256,creditArtifact.sha256);
+        assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[reserved.batchId])).rowCount,1);
+      }
+      assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[batchId])).rowCount,1);
+    };
     const verifyContractChargeDraft=async({engagementId,receipt,reviewId,permissions,prefix,availablePath})=>{
       const preparing=await createContext(finance,[...draftGrants,...permissions]);
       const draftPage=preparing.page;
@@ -728,142 +862,13 @@ const verifyCommercialDrafting = async reversalScenario => {
       expectedSequence:1,decision:'Approved',reason:'Verified second-stage control total'});
     assert.equal(second.status,201,JSON.stringify(second.body));
     assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Approved');
-    const {a,receipt,attest,attestationRequest,csv,sendExport,csvDesk,csvBrowser,exportCmd}=await verifyInvoiceExport({
+    const exported=await verifyInvoiceExport({
       engagementId:eng.body.id,batchId,ownerKey,instance,permissions:[issueGrant],schema:'workos.invoice-retainer-csv/1',amount:'3500',
       itemId:issued.body.receipt.itemId,eventId:issued.body.receipt.eventId,sourceId:retainerCommand.statementId,reviewId:retainerCommand.reviewId,
       sourceLabel:/retainer source/,sourceType:'RETAINER_PERIOD'});
-    const reversalPath=csv+'/batches/'+batchId+'/lines/'+rebatched.body.line.id+'/reversal-request';
-    const reverse=(path,body)=>apiRequest(reversalPath+path,{method:'POST',identity:finance,body});
-    const requestBody={expectedOwnerKey:ownerKey,artifactId:a.id,sha256:a.sha256,inspectedState:'Billed/Confirmed',reason:'Reverse duplicate downstream charge'};
-    assert.equal((await reverse('',{...requestBody,inspectedState:'Exported'})).status,409);
-    assert.equal((await apiRequest(reversalPath,{identity:identities.reader})).status,403);
-    await csvDesk.getByLabel('Invoice export engagement').selectOption(eng.body.id);
-    await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
-    await csvDesk.getByLabel('Invoice export batch').selectOption(batchId);
-    await csvDesk.getByRole('button',{name:'Inspect invoice export source'}).click();
-    await csvDesk.getByRole('button',{name:'Retrieve retained invoice CSV'}).click();
-    await csvDesk.getByLabel('Exported line to review').selectOption(rebatched.body.line.id);
-    await csvDesk.getByRole('button',{name:'Check reversal request'}).click();
-    await csvDesk.getByLabel('Full reversal reason').fill(requestBody.reason);
-    await csvDesk.getByRole('button',{name:'Request full line reversal'}).click();
-    await csvDesk.getByRole('button',{name:'Check reversal reviewers'}).click();
-    await csvDesk.getByRole('button',{name:'Submit reversal for independent review'}).click();
-    await csvDesk.getByText(/Submitted reversal review/).waitFor();
-    assert.equal((await reverse('',requestBody)).body.replayed,true);
-    const savedReview=(await apiRequest(reversalPath+'/review',{identity:finance})).body.review;
-    const decisionPath='/api/v1/work-approvals/reversal-reviews/'+savedReview.id;
-    const stageDecision=(who,key,n)=>apiRequest(decisionPath+'/decisions',{method:'POST',identity:who,body:{
-      expectedOwnerKey:key,expectedSequence:n,policyId:stagedPolicy.body.policy.id,confirmationId:receipt.id,decision:'Approved',reason:'Verified retained service period charge'}});
-    const selfReview=await pool.query(
-      'select retainer_review_participants_valid(retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',
-      [identities.manager.id,identities.manager.role,stagedPolicy.body.policy.id,batchId]);
-    assert.equal(selfReview.rows[0].ok,false,'The reversal requester cannot occupy a named review stage');
-    const firstReversal=await stageDecision(identities.manager,reviewerKey,0);
-    assert.equal(firstReversal.status,201,JSON.stringify(firstReversal.body));
-    assert.equal(firstReversal.body.review.sourceType,'RETAINER_PERIOD');
-    if (reversalScenario === 'stale reviewer') {
-      const stageWorker=(await pool.query('select employee_record_id from users where id=$1',[alias.id])).rows[0].employee_record_id;
-      await pool.query('update users set employee_record_id=null where id=$1',[alias.id]);
-      await pool.query('update users set employee_record_id=$2 where id=$1',[alias.id,stageWorker]);
-      assert.equal((await apiRequest(decisionPath,{identity:alias})).body.review.canDecide,false);
-      assert.equal((await stageDecision(alias,secondKey,1)).status,409);
-      await assert.rejects(pool.query(
-        "insert into invoice_reversal_decisions(id,review_id,sequence,actor_id,active_role,reason,confirmation_id,decision,operation_id) values($1,$2,2,$3,$4,'Synthetic stale decision',$5,'Approved',$6)",
-        [crypto.randomUUID(),savedReview.id,alias.id,alias.role,receipt.id,crypto.randomUUID()]),
-        err=>err.code==='IBA02' && err.message.includes('Reversal reviewer identity changed'));
-      assert.equal((await pool.query('select sequence from invoice_reversal_decisions where review_id=$1',[savedReview.id])).rowCount,1);
-    } else {
-      const ok=(response,code=201)=>{assert.equal(response.status,code,JSON.stringify(response.body));return response.body;};
-      assert.equal((await apiRequest(reversalPath+'/eligibility',{identity:finance})).body.source,null);
-      ok(await stageDecision(alias,secondKey,1));
-      const eligibility=ok(await apiRequest(reversalPath+'/eligibility',{identity:finance}),200);
-      assert.equal(eligibility.source.amount,'-3500');
-      assert.equal(eligibility.source.originalEventId,issued.body.receipt.eventId);
-      const issueBody={expectedOwnerKey:ownerKey,reviewId:savedReview.id,decisionId:eligibility.source.decisionId,
-        confirmationId:receipt.id,eligibleOn:eligibility.serverDate,reason:'Correct the original service-period charge'};
-      assert.equal((await reverse('/eligibility',{...issueBody,confirmationId:null})).status,409);
-      const staleCredit=await pool.connect();
-      try {
-        await staleCredit.query('begin');
-        const worker=(await staleCredit.query('select employee_record_id from users where id=$1',[alias.id])).rows[0].employee_record_id;
-        await staleCredit.query('update users set employee_record_id=null where id=$1',[alias.id]);
-        await staleCredit.query('update users set employee_record_id=$2 where id=$1',[alias.id,worker]);
-        const op=crypto.randomUUID();
-        await staleCredit.query("select set_config('workos.reversal_issue_context',$1,true)",[JSON.stringify({
-          actorId:finance.id,role:finance.role,org:scope.organizationId,legal:scope.legalEntityId,operationId:op})]);
-        await assert.rejects(staleCredit.query(
-          `insert into billing_eligibility_events(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,source_type,version,eligible_on,
-          currency,amount,billing_evidence,actor_id,active_role,operation_id,reverses_event_id,reversal_decision_id)
-          select $1,organization_id,legal_entity_id,client_id,contract_id,engagement_id,'FULL_LINE_REVERSAL',1,$2,currency,amount,evidence,
-          $3,$4,$5,original_event,final_decision from full_line_reversal_source($6)`,
-          [crypto.randomUUID(),issueBody.eligibleOn,finance.id,finance.role,op,savedReview.id]),
-          err=>err.code==='IBA02' && err.message.includes('before credit issuance'));
-      } finally {
-        await staleCredit.query('rollback');
-        staleCredit.release();
-      }
-      assert.equal((await apiRequest(reversalPath+'/eligibility',{identity:identities.reader})).status,403);
-      await pool.query("create trigger fail_retainer_credit before insert on audit_logs for each row when(new.action='Issue Full Line Reversal') execute function reject_test_po_audit()");
-      assert.equal((await reverse('/eligibility',issueBody)).status,503);
-      assert.equal((await pool.query('select 1 from billing_eligibility_events where reverses_event_id=$1',[eligibility.source.originalEventId])).rowCount,0);
-      await pool.query('drop trigger fail_retainer_credit on audit_logs');
-      await csvDesk.getByRole('button',{name:'Check reversal reviewers'}).click();
-      await csvDesk.getByRole('button',{name:'Inspect corrective billing eligibility'}).click();
-      await csvDesk.getByLabel('Credit issuance reason').fill(issueBody.reason);
-      await csvDesk.getByRole('button',{name:'Issue approved-unbilled credit'}).click();
-      await csvDesk.getByText(/Approved-unbilled credit .*eligibility date/).waitFor();
-      const replayedCredit=ok(await reverse('/eligibility',issueBody),200);
-      assert.equal(replayedCredit.replayed,true);
-      const credit=replayedCredit.receipt;
-      assert.equal(credit.amount,'-3500');
-      const reservePath=csv+'/batches/'+batchId+'/correction-drafts';
-      const reserveBody={expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),reason:'Reserve the service-period credit',itemIds:[credit.itemId]};
-      const reserve=()=>apiRequest(reservePath,{method:'POST',identity:finance,body:reserveBody});
-      const reserved=ok(await reserve()).receipt;
-      assert.equal(reserved.total,credit.amount);
-      assert.equal(ok(await reserve(),200).receipt.batchId,reserved.batchId);
-      const proof=ok(await apiRequest(reservePath+'/'+reserved.batchId,{identity:finance}),200);
-      assert.equal(proof.lines[0].artifactSha256,a.sha256);
-      const creditSource=ok(await act('/sources/'+reserved.batchId,finance),200).batch;
-      assert.equal(creditSource.lines[0].evidence.originalSourceType,'RETAINER_PERIOD');
-      const creditApproval=ok(await act('/requests',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),batchId:reserved.batchId,
-        expectedPolicyId:stagedPolicy.body.policy.id,expectedLineCount:1,expectedLineageHash:creditSource.lineageHash,reason:'Review service-period credit'})).approval;
-      for(const [n,who,key] of [[0,identities.manager,reviewerKey],[1,alias,secondKey]]){
-        ok(await act('/instances/'+creditApproval.id+'/decisions',who,{expectedOwnerKey:key,requestId:crypto.randomUUID(),expectedSequence:n,
-          decision:'Approved',reason:'Approved reviewed service-period credit'}));
-      }
-      const exportCredit=ok(await apiRequest(csv+'/batches/'+reserved.batchId,{identity:finance}),200).batch;
-      const creditCmd={...exportCmd,requestId:crypto.randomUUID(),batchId:reserved.batchId,approvalId:creditApproval.id,
-        finalTransitionId:exportCredit.finalTransitionId,lineageHash:exportCredit.lineageHash,schemaVersion:'workos.invoice-credit-csv/1',expectedTotal:credit.amount};
-      assert.equal((await sendExport({...creditCmd,expectedTotal:'3500'})).status,409);
-      await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
-      await csvDesk.getByRole('button',{name:'Find credit exports'}).click();
-      await csvDesk.getByLabel('Invoice export batch').selectOption(reserved.batchId);
-      await csvDesk.getByRole('button',{name:'Inspect invoice export source'}).click();
-      await csvDesk.getByLabel('Invoice CSV schema').selectOption('workos.invoice-credit-csv/1');
-      await csvDesk.getByLabel('I inspected the final approval, retained lineage and control total').check();
-      await csvDesk.getByLabel('Invoice CSV reason').fill('Export approved retainer credit');
-      const exportingCredit=csvBrowser.page.waitForResponse(r=>r.url().endsWith(csv+'/exports') && r.request().method()==='POST');
-      await csvDesk.getByRole('button',{name:'Accept invoice CSV artifact'}).click();
-      const acceptedCredit=await exportingCredit;
-      assert.equal(acceptedCredit.status(),201,await acceptedCredit.text());
-      const creditArtifact=(await acceptedCredit.json()).artifact;
-      await csvDesk.getByRole('region',{name:'Verified invoice CSV'}).waitFor();
-      assert.equal(creditArtifact.total,credit.amount);
-      const creditConfirmation=ok(await attest({...attestationRequest,requestId:crypto.randomUUID(),batchId:reserved.batchId,artifactId:creditArtifact.id,
-        artifactSha256:creditArtifact.sha256,total:credit.amount,reference:'Synthetic credit application',reason:'Matched applied service-period credit'})).confirmation;
-      recoveryEvidence={finance, original:{artifact:a,confirmation:receipt,itemId:issued.body.receipt.itemId},
-        credit:{artifact:creditArtifact,confirmation:creditConfirmation,itemId:credit.itemId}};
-      assert.equal(creditConfirmation.sourceType,'FULL_LINE_REVERSAL');
-      assert.equal(creditConfirmation.total,credit.amount);
-      assert.equal(ok(await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:finance}),200).confirmation.id,receipt.id);
-      const csvText=Buffer.from(creditArtifact.payloadBase64,'base64').toString('utf8');
-      for(const pinned of [a.id,a.sha256,rebatched.body.line.id]) assert.ok(csvText.includes(pinned));
-      assert.equal(ok(await sendExport(acceptedCredit.request().postDataJSON()),200).artifact.sha256,creditArtifact.sha256);
-      assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[reserved.batchId])).rowCount,1);
-    }
-    assert.equal((await pool.query('select 1 from invoice_draft_occupancies where batch_id=$1',[batchId])).rowCount,1);
-    await csvBrowser.context.close();
+    await verifyCorrection({exported,engagementId:eng.body.id,ownerKey,batchId,lineId:rebatched.body.line.id,policyId:stagedPolicy.body.policy.id,
+      original:issued.body.receipt,sourceType:'RETAINER_PERIOD',amount:'3500',act,reviewerKey,secondKey});
+    await exported.csvBrowser.context.close();
     await reviewBrowser.context.close();
 
     }
@@ -981,7 +986,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal(link.rows[0].source_type,'MANAGED_SERVICE_UNIT');assert.equal(link.rows[0].billing_evidence.contractVersionId,serviceVersion);
       assert.equal(link.rows[0].billing_evidence.quantity,'1.25');assert.equal(link.rows[0].billing_evidence.billingPrecision,1);
       {
-        const {line,otherBatch}=await verifyContractChargeDraft({engagementId:serviceEng.body.id,receipt:billReceipt.body.receipt,reviewId:accepted.body.id,
+        const {line,otherBatch,rebatched}=await verifyContractChargeDraft({engagementId:serviceEng.body.id,receipt:billReceipt.body.receipt,reviewId:accepted.body.id,
           permissions:[issueGrant,issueKey],prefix:'unit',availablePath:'service-charges'});
         assert.equal(line.evidence.dimensionCode,'SHIFT');assert.equal(line.evidence.quantity,'1.25');
         const serviceBatchId=otherBatch.body.batch.id,base='/api/v1/invoice-batch-approvals';
@@ -990,9 +995,9 @@ const verifyCommercialDrafting = async reversalScenario => {
         assert.equal(view.status,200,JSON.stringify(view.body));
         assert.equal(view.body.batch.sourceType,'MANAGED_SERVICE_UNIT');assert.equal(view.body.batch.lines[0].evidence.reviewId,accepted.body.id);
         const key=view.body.ownerKey,reviewer=identities.manager;
-        const configure=(who,prior)=>call('/policies',finance,{expectedOwnerKey:key,requestId:crypto.randomUUID(),engagementId:serviceEng.body.id,
-          expectedLatestId:prior,effectiveFrom:today,definition:{entityType:'InvoiceBatch',engagementId:serviceEng.body.id,locale:'en-US',completionInApp:true,
-            stages:[{userId:who.id,role:who.role}],templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(k=>({key:k,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))},
+        const configure=(who,prior,more=[])=>call('/policies',finance,{expectedOwnerKey:key,requestId:crypto.randomUUID(),engagementId:serviceEng.body.id,
+          expectedLatestId:prior,effectiveFrom:today,definition:{entityType:'InvoiceBatch',fullLineReversals:true,engagementId:serviceEng.body.id,locale:'en-US',completionInApp:true,
+            stages:[{userId:who.id,role:who.role},...more],templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(k=>({key:k,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))},
           reason:'Review accepted service charges'});
         assert.equal((await call('/sources/'+serviceBatchId,reviewer)).status,403);
         assert.equal((await configure(reviewer,null)).status,403);
@@ -1022,6 +1027,11 @@ const verifyCommercialDrafting = async reversalScenario => {
         const exported=await verifyInvoiceExport({engagementId:serviceEng.body.id,batchId:serviceBatchId,ownerKey:key,instance,permissions:[issueGrant,issueKey],
           schema:'workos.invoice-service-unit-csv/1',amount:'150',itemId:billReceipt.body.receipt.itemId,eventId:billReceipt.body.receipt.eventId,
           sourceId:replay.body.id,reviewId:accepted.body.id,sourceLabel:/managed-service source/,sourceType:'MANAGED_SERVICE_UNIT'});
+        const correctionPolicy=await configure(reviewer,policy.body.policy.id,[{userId:alias.id,role:alias.role}]);
+        assert.equal(correctionPolicy.status,201,JSON.stringify(correctionPolicy.body));
+        await verifyCorrection({exported,engagementId:serviceEng.body.id,ownerKey:key,batchId:serviceBatchId,lineId:rebatched.body.line.id,
+          policyId:correctionPolicy.body.policy.id,original:billReceipt.body.receipt,sourceType:'MANAGED_SERVICE_UNIT',amount:'150',act:call,
+          reviewerKey:(await call('/sources/'+serviceBatchId,reviewer)).body.ownerKey,secondKey:(await call('/sources/'+serviceBatchId,alias)).body.ownerKey});
         await exported.csvBrowser.context.close();
         await reviewBrowser.context.close();
       }

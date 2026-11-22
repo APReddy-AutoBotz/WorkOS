@@ -237,3 +237,5 @@ Managed-service batch approval pins the exact reserved lines, eligibility events
 ## Exporting approved service units
 
 Use schema `workos.invoice-service-unit-csv/1` for approved managed-service unit batches. Each line identifies its register item, eligibility event and retained service evidence. The verifier reconciles quantity and unit price to the rounded line amount. The downstream confirmation pins the retained artifact digest, currency and total.
+
+A managed-service full-line reversal retains the original eligibility event, register item, export checksum and any downstream confirmation. The approved credit equals the negative of the original line in its currency. Review and issuance require current participant identities and source scope. The correction batch follows its own approval and delivery workflow.

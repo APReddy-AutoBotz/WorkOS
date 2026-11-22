@@ -706,3 +706,5 @@ For managed-service batch approval, give the policy manager and each participant
 ## Suspend managed-service invoice delivery
 
 To suspend new exports or confirmations, revoke the applicable invoice export or confirmation grants from affected roles. These grants cover multiple invoice sources. Preserve the migration, signed CSV bytes, register lineage and confirmation receipts for retrieval and reconciliation. A downstream reference records a manual attestation by the confirmer.
+
+To suspend new credits, revoke `commercial.reversal_eligibility.create` from issuing roles. To suspend new reversal reviews, revise the applicable engagement policy. Preserve all issued credits, original exports and downstream confirmations for reconciliation. Existing reviews retain their pinned policy.
