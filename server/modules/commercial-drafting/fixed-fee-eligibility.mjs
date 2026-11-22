@@ -18,7 +18,7 @@ export async function fixedFeeRegister(c,req,command,audit) {
     where organization_id=$1 and legal_entity_id=$2 and id=$3`,args)).rows[0];
   if (!version || version.model!=='fixed_fee') fail(404,'SCHEDULE_NOT_FOUND','This fixed-fee schedule is unavailable.');
   const receipts=async()=> (await c.query(`select ev.id as "eventId", i.id as "itemId",ev.engagement_id as "engagementId",
-    ev.eligible_on::text as "eligibleOn",ev.currency,ev.amount::text amount,
+    fixed_fee_identity_current(ev.id) as "identityCurrent",ev.eligible_on::text as "eligibleOn",ev.currency,ev.amount::text amount,
     (ev.billing_evidence->>'installment')::int installment,ev.billing_evidence->>'contractVersionId' as "contractVersionId",
     ev.billing_evidence->>'dueOn' as "dueOn" from billing_eligibility_events ev join approved_unbilled_items i on i.event_id=ev.id
     where ev.organization_id=$1 and ev.legal_entity_id=$2 and ev.contract_id=$3 and ev.source_type='FIXED_FEE_INSTALLMENT'
@@ -26,13 +26,17 @@ export async function fixedFeeRegister(c,req,command,audit) {
   if (!command) return {receipts:await receipts()};
   await assertCommercialAuthority(c,req,'commercial.contracts.manage');
   const {installment,engagementId,reason}=command;
-  const prior=(await c.query(`select actor_id,active_role,engagement_id,billing_evidence from billing_eligibility_events
+  const prior=(await c.query(`select id,actor_id,active_role,engagement_id,billing_evidence from billing_eligibility_events
     where organization_id=$1 and legal_entity_id=$2 and contract_id=$3 and source_type='FIXED_FEE_INSTALLMENT'
     and (billing_evidence->>'installment')::int=$4`,[organizationId,legalEntityId,version.contract_id,installment])).rows[0];
   if (prior) {
     if (prior.actor_id===req.user.sub && prior.active_role===req.user.activeRole && prior.engagement_id===engagementId &&
-        prior.billing_evidence.contractVersionId===versionId && prior.billing_evidence.approvalReason===reason)
+        prior.billing_evidence.contractVersionId===versionId && prior.billing_evidence.approvalReason===reason) {
+      await c.query('select lock_fixed_fee_source_workers(ev) from billing_eligibility_events ev where id=$1',[prior.id]);
+      if (!(await c.query('select fixed_fee_identity_current($1) ok',[prior.id])).rows[0].ok)
+        fail(409,'INSTALLMENT_IDENTITY_CHANGED','The original approval identity can no longer be verified.');
       return {receipts:await receipts()};
+    }
     fail(409,'INSTALLMENT_ALREADY_REGISTERED','This installment already has a billing eligibility receipt.');
   }
   await c.query("select set_config('workos.fixed_fee_issue_operation',$1,true)",[req.operationId]);

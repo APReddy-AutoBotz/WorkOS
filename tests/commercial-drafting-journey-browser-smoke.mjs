@@ -35,6 +35,9 @@ const legacyState = async pool => {
 const verifyCommercialDrafting = async reversalScenario => {
   let recoveryEvidence;
   await withCommercialDraftingApi(async ({pool, baseUrl: apiUrl, tokenFor, identities, actorId, scope, ownerId, clientId, request: apiRequest}) => {
+  await pool.query('update users set employee_record_id=$1 where id=$2',[ownerId,identities.manager.id]);
+  await pool.query(`insert into employees(id,employee_id,name,email,designation,department,country,primary_country_director_id,status,organization_id,legal_entity_id)
+    values('syn-installment-reviewer','SYN-INSTALLMENT','Synthetic installment reviewer','installment@example.test','Manager','Delivery','US','director-commercial','Active',$1,$2)`,[scope.organizationId,scope.legalEntityId]);
   const beforeLegacy = await legacyState(pool);
   const fixtureServer = await startFixtureServer({root, fixtures: ['commercial-drafting'], apiUrl});
   let browser;
@@ -189,6 +192,13 @@ const verifyCommercialDrafting = async reversalScenario => {
     await pool.query(`insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
       values('syn-fixed-period',$1,$2,'SYN-FIXED','Synthetic approval period',$3,$3,'Open','Weekly')`,[scope.organizationId,scope.legalEntityId,today]);
     assert.equal((await issue(identities.manager)).status,403);
+    const linkReviewer=worker=>pool.query('update users set employee_record_id=$1 where id=$2',[worker,identities.reader.id]);
+    await linkReviewer(null);
+    assert.equal((await issue(identities.reader)).status,403);
+    await assert.rejects(linkReviewer(ownerId),e=>e.code==='23505');
+    await linkReviewer('employee-commercial-other-owner');
+    assert.equal((await issue(identities.reader)).status,403);
+    await linkReviewer('syn-installment-reviewer');
     assert.equal((await issue(identities.reader,{...command,amount:'0.01'})).status,400);
     const billing=await createContext(identities.reader,['commercial.contracts.view','commercial.contracts.manage',grant]);
     await billing.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
@@ -203,6 +213,7 @@ const verifyCommercialDrafting = async reversalScenario => {
     await schedule.getByRole('button',{name:'Approve due installment'}).click();
     const saved=await saving;assert.equal(saved.status(),201,await saved.text());
     await schedule.getByText(/Installment 1 · GBP 12000.0000 · Approved/).waitFor();
+    await schedule.getByText(/Approval identities verified/).waitFor();
     const registered=(await saved.json()).receipts[0];
     assert.equal((await issue(identities.reader)).body.receipts[0].itemId,registered.itemId);
     assert.equal((await issue(identities.reader,{...command,reason:'Changed reason'})).status,409);
@@ -242,6 +253,14 @@ const verifyCommercialDrafting = async reversalScenario => {
     await desk.getByRole('button',{name:'Create invoice Draft'}).click();
     const created=await creating;assert.equal(created.status(),201,await created.text());
     const fixedBatch=(await created.json()).batch.id;
+    const workerStatus=status=>pool.query('update employees set status=$1 where id=$2',[status,ownerId]);
+    await workerStatus('On Leave');
+    const unavailable=await apiRequest('/api/v1/invoice-drafts/batches/'+fixedBatch+'/lines',{method:'POST',identity:identities.reader,
+      body:{expectedOwnerKey:created.request().postDataJSON().expectedOwnerKey,requestId:crypto.randomUUID(),itemId:registered.itemId,
+        itemVersion:1,expectedLineCount:0,reason:'Check independent approval evidence'}});
+    assert.equal(unavailable.status,409,JSON.stringify(unavailable.body));
+    assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rowCount,0);
+    await workerStatus('Active');
     const inspectFixed=async()=>{
       await loadDrafts();
       await desk.getByLabel('Invoice draft',{exact:true}).selectOption(fixedBatch);
@@ -260,6 +279,9 @@ const verifyCommercialDrafting = async reversalScenario => {
     const original=reserved.request().postDataJSON();
     const replay=await apiRequest(linePath,{method:'POST',identity:identities.reader,body:original});
     assert.equal(replay.body.replayed,true,JSON.stringify(replay.body));
+    await workerStatus('On Leave');
+    assert.equal((await apiRequest(linePath,{method:'POST',identity:identities.reader,body:original})).status,409);
+    await workerStatus('Active');
     const double=await apiRequest(linePath,{method:'POST',identity:identities.reader,
       body:{...original,expectedLineCount:1,requestId:crypto.randomUUID()}});
     assert.equal(double.status,409);
@@ -279,6 +301,15 @@ const verifyCommercialDrafting = async reversalScenario => {
     const cancelled=await cancelling;assert.equal(cancelled.status(),201,await cancelled.text());
     assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rowCount,0);
     assert.equal((await pool.query('select 1 from invoice_draft_lines where id=$1 and event_id=$2',[fixedLine.id,registered.eventId])).rowCount,1);
+    const identityReceipt=await pool.query('select author_worker_id,reviewer_worker_id,origin from fixed_fee_installment_identities where event_id=$1',[registered.eventId]);
+    assert.deepEqual(identityReceipt.rows,[{author_worker_id:ownerId,reviewer_worker_id:'syn-installment-reviewer',origin:'issue'}]);
+    await linkReviewer(null);
+    await linkReviewer('syn-installment-reviewer');
+    assert.equal((await issue(identities.reader)).status,409);
+    assert.equal((await pool.query('select fixed_fee_identity_current($1) ok',[registered.eventId])).rows[0].ok,false);
+    const historical=(await apiRequest(path,{identity:identities.reader})).body.receipts;
+    assert.equal(historical.length,1);assert.equal(historical[0].identityCurrent,false);
+    await linkReviewer(null);
     await open();
     await button('New contract / SOW').click();
     target = form('New contract / SOW');

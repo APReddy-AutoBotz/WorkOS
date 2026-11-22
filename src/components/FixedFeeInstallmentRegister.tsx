@@ -38,7 +38,7 @@ export function FixedFeeInstallmentRegister({context,version,engagements}:{conte
     {message && <p role="alert">{message}</p>}
     {receipts && <>
       {receipts.length===0 ? <p>No registered installments for this contract.</p> :
-        <ul>{receipts.map(r=><li key={r.itemId}>Installment {r.installment} · {r.currency} {r.amount} · Approved {r.eligibleOn} · Due {r.dueOn} · Engagement {r.engagementId} · Contract version {r.contractVersionId} · Register item {r.itemId}</li>)}</ul>}
+        <ul>{receipts.map(r=><li key={r.itemId}>Installment {r.installment} · {r.currency} {r.amount} · Approved {r.eligibleOn} · Due {r.dueOn} · Engagement {r.engagementId} · Contract version {r.contractVersionId} · Register item {r.itemId} · {r.identityCurrent?'Approval identities verified':'Historical approval · worker identity requires review'}</li>)}</ul>}
       {context.canManage && <><label>Scheduled installment <select value={installment} onChange={e=>setInstallment(e.target.value)}>
         <option value="">Select an installment</option>{version.installments?.map((row,i)=>
           <option key={i} value={i+1} disabled={receipts.some(r=>r.installment===i+1)}>{i+1} · {row.dueOn} · {version.currency} {row.amount}</option>)}</select></label>

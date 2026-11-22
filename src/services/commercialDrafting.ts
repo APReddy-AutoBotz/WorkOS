@@ -305,7 +305,7 @@ const installmentReceipts = (value: unknown) => rows(object(value).receipts, ent
   const r = object(entry);
   return {eventId:text(r.eventId), itemId:text(r.itemId), installment:integer(r.installment,1),
     contractVersionId:text(r.contractVersionId), engagementId:text(r.engagementId), eligibleOn:date(r.eligibleOn),
-    dueOn:date(r.dueOn), currency:currency(r.currency), amount:decimal(r.amount)};
+    dueOn:date(r.dueOn), currency:currency(r.currency), amount:decimal(r.amount),identityCurrent:flag(r.identityCurrent)};
 });
 const statementHash=(v:unknown)=>{const s=text(v);if (!/^[a-f0-9]{64}$/.test(s)) throw invalid();return s;};
 const statementReceipt=(value:unknown)=>{

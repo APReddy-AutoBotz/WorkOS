@@ -756,3 +756,9 @@ For a discrepancy in **Compare approved effort**, verify the service review, wor
 Grant authorized finance readers commercial contract visibility, employee visibility, utilization reporting, worker cost-candidate visibility, service effort cost visibility and managed-service margin visibility. The report requires entity-wide worker access. Retention adds the managed-service margin recording permission. Inspect the month after new approvals, retained costs or issued credits. Compare the coverage counts and retain a new version when evidence changes. Recover a lost acknowledgement by inspecting the same month. Use **Previous retained version** to inspect earlier totals. Audit receipts record the version and engagement. Financial values stay in the protected snapshot.
 
 Migration 094 adds permissions, the calculation function and an append-only period table. Application rollback can hide the view and disable the new grants. Preserve the migration and historical versions.
+
+## Verify fixed-fee installment approval identities
+
+Use **Inspect installment register** to check the original item’s identity status. For an unavailable item, inspect the contract-version author, reviewer, current worker scope and recorded account-link generations. Link changes invalidate the previous proof even after restoring the same worker. Preserve the register event, identity receipt, invoice line and audit history. Route unresolved historical approvals to finance for documented disposition. Editing account links or retrying an issuance does not create replacement approval evidence.
+
+Migration 095 preserves the original charges and records verifiable historical identity continuity. If an application rollback is necessary, retain the database guards and receipt table and suspend fixed-fee issuance and new reservations until the compatible application is restored.
