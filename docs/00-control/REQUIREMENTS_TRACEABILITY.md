@@ -737,3 +737,5 @@ WOS-COM-002, WOS-COM-003 and WOS-COM-010 use migration 093 for confidential work
 WOS-COM-007, WOS-INV-008, WOS-RPT-003 and WOS-RPT-007 — Fixed-fee billing reconciliation aggregates each registered installment and linked full-line credit once, by engagement, currency and current billing state. The commercial drafting React/API/PostgreSQL journey verifies signed totals at issuance, reservation, export and confirmation, permission withdrawal and the final browser table.
 
 WOS-COM-007 / WOS-RPT-003 — Monthly fixed-fee effort in Commercial drafting. The fixed-fee effort PostgreSQL and browser journey covers staged approval, exact hours, worker scope, report permission withdrawal and the rendered result.
+
+WOS-COM-007 / WOS-RPT-003 — Migration 099 and the fixed-fee effort PostgreSQL/API/browser journey cover scoped worker-cost previews, explicit retention, source priority, currency, dates, exact arithmetic, period locking, audit rollback, replay and reconciliation of retained monthly costs.

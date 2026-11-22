@@ -6,7 +6,7 @@ import {fail} from './contracts.mjs';
 
 export const effortMonth=z.object({monthStart:z.string().date().regex(/-01$/)}).strict();
 
-export async function fixedFeeEffort(client,req,{monthStart},buildEmployeeScopeWhere) {
+export async function fixedFeeWorkRows(client,req,{monthStart},buildEmployeeScopeWhere) {
   for (const key of ['employees.view','reports.view_utilization']) await assertCommercialAuthority(client,req,key);
   const {organizationId,legalEntityId}=req.organizationScope;
   const args=[organizationId,legalEntityId,req.params.id];
@@ -14,7 +14,7 @@ export async function fixedFeeEffort(client,req,{monthStart},buildEmployeeScopeW
   if (!engagement.rowCount) fail(404,'COMMERCIAL_NOT_FOUND','Fixed-fee engagement unavailable.');
   args.push(monthStart);
   const visible=buildEmployeeScopeWhere(req,args,'worker');
-  const {rows}=await client.query(`select entry.*,entry.work_date::text,sheet.status,retained.entries,decision.status as decision,retained.pinned
+  const {rows}=await client.query(`select entry.*,entry.work_date::text,sheet.employee_id,sheet.status,retained.entries,decision.status as decision,retained.pinned
     from commercial_engagements eng join commercial_project_bindings b on b.organization_id=eng.organization_id
       and b.legal_entity_id=eng.legal_entity_id and b.engagement_id=eng.id and b.model=eng.model
     join timesheet_entries entry on entry.project_id=b.project_id
@@ -31,7 +31,12 @@ export async function fixedFeeEffort(client,req,{monthStart},buildEmployeeScopeW
     where eng.organization_id=$1 and eng.legal_entity_id=$2 and eng.id=$3 and entry.work_date >= $4::date
       and entry.work_date < $4::date + interval '1 month' and (${visible})`,args);
   const verified=rows.filter(row=>row.pinned && approvedWorkDisposition(row,{entries:row.entries},{status:row.decision}).disposition!=='unresolved');
-  return {engagementId:req.params.id,monthStart,verifiedEntries:verified.length,unresolvedEntries:rows.length-verified.length,
+  return {verified,unresolvedEntries:rows.length-verified.length};
+}
+
+export async function fixedFeeEffort(client,req,{monthStart},buildEmployeeScopeWhere) {
+  const {verified,unresolvedEntries}=await fixedFeeWorkRows(client,req,{monthStart},buildEmployeeScopeWhere);
+  return {engagementId:req.params.id,monthStart,verifiedEntries:verified.length,unresolvedEntries,
     billableHours:sumHours(verified.filter(row=>row.billable).map(row=>row.hours)),
     nonBillableHours:sumHours(verified.filter(row=>!row.billable).map(row=>row.hours))};
 }

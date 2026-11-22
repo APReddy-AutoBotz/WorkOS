@@ -235,3 +235,5 @@ WOS-INV-006/007/008 now covers fixed-fee CSV export and manual downstream billin
 Fixed-fee engagements now expose registered installment and credit balances by original currency and billing state. Billing reconciliation uses retained events, current reservations, exported artifacts and downstream confirmations. Remaining fixed-fee reporting work includes consumed effort and cost, margin risk, and effective-dated earned-management valuation.
 
 Fixed-fee engagement reporting now includes monthly approved effort within the viewer’s worker scope. It separates billable and non-billable hours and flags approved entries with unresolved evidence. Retained worker costs, margin risk, and effective-dated earned-management policies remain open.
+
+Fixed-fee worker costs now support adopted hourly source inspection and immutable cost retention per approved entry, with monthly retained totals by currency and visible coverage. Fixed-fee margin risk, forecasts and policy-governed earned-management valuation remain open.
