@@ -104,7 +104,7 @@
     "test:working-calendar-browser": "node tests/working-calendar-inspector-browser-smoke.mjs",
     "test:commercial-drafting-contract": "node tests/commercial-drafting-contract-smoke.mjs",
     "test:commercial-drafting-service": "node --import tsx tests/commercial-drafting-service-smoke.mjs",
-    "test:commercial-drafting-postgres": "node tests/commercial-drafting-postgres-smoke.mjs && node tests/retainer-consumption-postgres-smoke.mjs",
+    "test:commercial-drafting-postgres": "node tests/commercial-drafting-postgres-smoke.mjs && node tests/retainer-consumption-postgres-smoke.mjs && node tests/service-effort-reconciliation-postgres-smoke.mjs",
     "test:commercial-drafting-browser": "node tests/commercial-drafting-browser-smoke.mjs",
     "test:commercial-drafting-journey": "node tests/commercial-drafting-journey-browser-smoke.mjs",
     "test:commercial-lifecycle-contract": "node tests/commercial-lifecycle-contract-smoke.mjs",

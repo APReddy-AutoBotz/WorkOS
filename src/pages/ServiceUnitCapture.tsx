@@ -4,6 +4,21 @@ import {ServicePolicyEditor,ServiceValueReceipt} from './ServiceValuation';
 import {useRef,useState} from 'react';
 import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext,type ContractTerms,type Engagement} from '../services/commercialDrafting';
 
+function EffortReconciliation({context,engagement,id}:{context:CommercialDraftingContext;engagement:string;id:string}) {
+  const [message,setMessage]=useState('');
+  const [pending,setPending]=useState(false);
+  const inspect=async()=>{
+    setPending(true);
+    try {
+      const result=await commercialDraftingService.reconcileEffort(engagement,id,context);
+      if (isCommercialDraftingContextCurrent(context)) setMessage(result.label+(result.approvedHours===null?'':` Approved hours: ${result.approvedHours} across ${result.entryCount} entries.`));
+    } catch {
+      if (isCommercialDraftingContextCurrent(context)) setMessage('Reconciliation is unavailable for this receipt.');
+    } finally {setPending(false);}
+  };
+  return <div><button type="button" disabled={pending} onClick={()=>void inspect()}>Compare approved effort</button>{message && <p role="status">{message}</p>}</div>;
+}
+
 export function ServiceUnitCapture({engagements,context,version,today}:{engagements:Engagement[];context:CommercialDraftingContext;version:ContractTerms & {id:string};today:string}) {
   const busy=useRef(false);
   const [pending,setPending]=useState(false);
@@ -75,6 +90,7 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
       {history.records.length ? <ul>{history.records.map(row=><li key={row.id}>
         <span>{row.serviceDate} · {row.quantity} {row.dimensionCode} · {row.sourceReference}</span>
         {row.effortHours!==null && <p>Recorded effort · {row.effortHours} hours</p>}
+        {context.canReconcileEffort && <EffortReconciliation context={context} engagement={engagementId} id={row.id}/>}
         {context.canViewEffortCost && row.review?.decision==='Accepted' && <ServiceEffortCost context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {context.canIssueServiceUnits && row.review?.decision==='Accepted' && <ServiceUnitBilling context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {context.canValueUnits && row.review?.decision==='Accepted' && <ServiceValueReceipt context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}

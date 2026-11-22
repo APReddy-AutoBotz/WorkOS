@@ -1,3 +1,4 @@
+import {reconcileServiceEffort} from './service-effort-reconciliation.mjs';
 import {effortCostCommand,effortCostGrant,serviceEffortCost} from './service-effort-cost.mjs';
 import {reviewCommand as serviceReviewCommand,reviewGrant as serviceReviewGrant,reviewServiceUnits} from './service-unit-review.mjs';
 import {periodIssueGrant,servicePeriodRegister} from './service-period-eligibility.mjs';
@@ -116,6 +117,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.get(serviceRegisterPath,handle(workspaceQuerySchema,false,(c,r)=>serviceUnitRegister(c,r)));
   router.post(serviceRegisterPath,handle(serviceIssueCommand,true,(c,r,input)=>serviceUnitRegister(c,r,input,audit),serviceIssueGrant));
   const servicePolicyPath='/engagements/:id/service-valuation-policy';
+  router.get('/engagements/:id/service-unit-evidence/:evidenceId/reconciliation',handle(workspaceQuerySchema,false,(c,r)=>reconcileServiceEffort(c,r,buildEmployeeScopeWhere)));
   const effortCostPath='/engagements/:id/service-unit-evidence/:evidenceId/effort-cost';
   router.get(effortCostPath,handle(workspaceQuerySchema,false,(c,r)=>serviceEffortCost(c,r)));
   router.post(effortCostPath,handle(effortCostCommand,true,(c,r,input)=>serviceEffortCost(c,r,input,audit),effortCostGrant));
