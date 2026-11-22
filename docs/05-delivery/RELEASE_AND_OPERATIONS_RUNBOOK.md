@@ -744,3 +744,7 @@ Locate the original line, artifact checksum and reversal review before retrying 
 ## Recover service-unit effort evidence
 
 Inspect the recorded service reference before retrying. Reuse its date, unit, quantity and original effort. Receipts created before migration 092 have no recorded effort. On rollback preserve the column, the scoped audit record and the recorder identity. Existing quantities and financial receipts keep their historical values.
+
+## Recover managed-service effort cost
+
+Use **Inspect effort cost** on the accepted receipt. Verify the adoption ID, effective dates, currency, hours and original cost before retrying a write. Finance needs current worker scope, cost-rate visibility and effort-cost viewing permission. Recording requires the additional recording grant. The audit log references the protected snapshot without disclosing its monetary values. Retain migration 093, the snapshot, its rate adoption and its audit entry on rollback.

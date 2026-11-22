@@ -1,3 +1,4 @@
+import {ServiceEffortCost} from './ServiceEffortCost';
 import {ServiceUnitBilling} from './ServiceUnitBilling';
 import {ServicePolicyEditor,ServiceValueReceipt} from './ServiceValuation';
 import {useRef,useState} from 'react';
@@ -74,6 +75,7 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
       {history.records.length ? <ul>{history.records.map(row=><li key={row.id}>
         <span>{row.serviceDate} · {row.quantity} {row.dimensionCode} · {row.sourceReference}</span>
         {row.effortHours!==null && <p>Recorded effort · {row.effortHours} hours</p>}
+        {context.canViewEffortCost && row.review?.decision==='Accepted' && <ServiceEffortCost context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {context.canIssueServiceUnits && row.review?.decision==='Accepted' && <ServiceUnitBilling context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {context.canValueUnits && row.review?.decision==='Accepted' && <ServiceValueReceipt context={context} engagement={engagementId} evidenceId={row.id} reviewId={row.review.id}/>}
         {row.review ? <p>{row.review.decision} · {row.review.reason}</p> : <>

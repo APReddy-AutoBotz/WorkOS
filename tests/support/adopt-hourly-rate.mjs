@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 const candidates='/api/v1/rate-candidates', approvals='/api/v1/commercial-candidate-approvals', adoptions='/api/v1/approved-rate-sources';
 const keys=['approval.action_required','approval.rejected_or_correction_required','approval.completed'];
 const ok=(response,status=200)=>{assert.equal(response.status,status,JSON.stringify(response.body));return response.body;};
-export async function adoptHourlyRate({request,ids,contractId,workerId,today,end,currency},kind,amount,priority=1) {
+export async function adoptHourlyRate({request,ids,contractId,workerId,today,end,currency,effectiveFrom=today},kind,amount,priority=1) {
   const bindingType = kind === 'billing' ? 'contract' : 'worker',
     bindingId = kind === 'billing' ? contractId : workerId,
     candidate = ok(
@@ -16,7 +16,7 @@ export async function adoptHourlyRate({request,ids,contractId,workerId,today,end
           kind,
           bindingType,
           bindingId,
-          effectiveFrom: today,
+          effectiveFrom,
           effectiveTo: end,
           currency,
           unit: 'HOUR',
