@@ -263,3 +263,7 @@ Fixed-period drafts use a dedicated source and eligibility-date range. The prepa
 ### Fixed-period invoice batch approval
 
 The invoice approval policy applies to the engagement. Its manager and every configured reviewer must share authority over at least one managed-service charge type. Each review request and decision then checks the specific batch source, active participants, independence, item reservations, retained evidence and total. An approval for a fixed-period charge preserves the dates and contract version from the original period decision.
+
+### Fixed-period CSV and manual confirmation
+
+Schema `workos.invoice-service-period-csv/1` links each exported line to its register item, eligibility event and period review. Encoded evidence includes the original contractual amount and currency, period dates, contract version and engagement. The download verifier reconciles these values with the line and batch totals. Manual downstream confirmation records the external reference and checksum of the accepted artifact.

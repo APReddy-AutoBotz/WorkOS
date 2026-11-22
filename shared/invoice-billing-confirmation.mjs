@@ -5,7 +5,7 @@ import { canonicalHours, compareHours } from './work-hours.mjs';
 export function validConfirmationTotal(total, sourceType = 'TM_SNAPSHOT') {
   if (typeof total !== 'string') return false;
   const credit = sourceType === 'FULL_LINE_REVERSAL';
-  if (!credit && !['TM_SNAPSHOT', 'MILESTONE_ACCEPTANCE', 'RETAINER_PERIOD', 'MANAGED_SERVICE_UNIT'].includes(sourceType)) return false;
+  if (!credit && !['TM_SNAPSHOT', 'MILESTONE_ACCEPTANCE', 'RETAINER_PERIOD', 'MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(sourceType)) return false;
   if (credit && !total.startsWith('-')) return false;
   const magnitude = credit ? total.slice(1) : total;
   try {

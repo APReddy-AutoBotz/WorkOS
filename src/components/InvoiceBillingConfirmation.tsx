@@ -264,7 +264,7 @@ export const InvoiceBillingConfirmation = ({ choices }: { choices: Choice[] }) =
           {source && (
             <section aria-label="Inspected confirmation source">
               <p>
-                {source.state} · {source.sourceType === 'MILESTONE_ACCEPTANCE' ? 'milestone source · ' : source.sourceType === 'MANAGED_SERVICE_UNIT' ? 'managed-service source · ' : source.sourceType === 'RETAINER_PERIOD' ? 'retainer source · ' : source.sourceType === 'FULL_LINE_REVERSAL' ? 'credit · ' : ''}
+                {source.state} · {source.sourceType === 'MILESTONE_ACCEPTANCE' ? 'milestone source · ' : source.sourceType === 'MANAGED_SERVICE_PERIOD' ? 'fixed-period source · ' : source.sourceType === 'MANAGED_SERVICE_UNIT' ? 'managed-service source · ' : source.sourceType === 'RETAINER_PERIOD' ? 'retainer source · ' : source.sourceType === 'FULL_LINE_REVERSAL' ? 'credit · ' : ''}
                 artifact {source.artifactId} v{source.artifactVersion} · SHA-256 {source.artifactSha256} ·{' '}
                 {source.currency} {source.total}.
               </p>

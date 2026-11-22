@@ -732,3 +732,7 @@ Inspect its reservation and use authorized cancellation to release the register 
 ## Recover a fixed-period invoice review
 
 Inspect the latest batch state and review receipt before retrying a decision. If an identity or source permission changes, inspect the policy and use the authorized withdrawal or cancellation workflow. A rollback requires a compatible application that preserves migration 089, approval history, occupancy and audit evidence.
+
+## Recover a fixed-period export
+
+After an interrupted export, inspect the batch and retrieve its accepted CSV by artifact ID. Verify its SHA-256 and exact native total before recording the downstream reference. An authorized finance user can recover accepted evidence after a source author changes identity. A rollback requires a compatible reader for migration 090, retained bytes, receipt, audit and item occupancy.
