@@ -109,7 +109,7 @@ const sqlRejects = (pool, text, values, code, label) => assert.rejects(pool.quer
 const cloneRow = async (pool, table, row, overrides = {}) => {
   const copy = {...row, ...overrides};
   const keys = Object.keys(copy);
-  const values = keys.map(key => ['documents', 'installments', 'retainer_periods', 'service_dimensions', 'source_snapshot'].includes(key) ? JSON.stringify(copy[key]) : copy[key]);
+  const values = keys.map(key => ['documents', 'installments', 'retainer_periods', 'service_dimensions', 'service_period_charges', 'source_snapshot'].includes(key) ? JSON.stringify(copy[key]) : copy[key]);
   return pool.query(`insert into ${table} (${keys.map(key => `"${key}"`).join(',')}) values (${keys.map((_, index) => `$${index + 1}`).join(',')})`, values);
 };
 const assertCloneRejected = async (pool, table, row, overrides, code, label) => {
