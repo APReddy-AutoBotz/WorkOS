@@ -558,12 +558,13 @@ const verifyCommercialDrafting = async reversalScenario => {
           await connection.query('begin');
           const changed=await connection.query('update users set employee_record_id=null where id=(select author_id from commercial_service_period_reviews where id=$1) and id<>$2',[reviewId,finance.id]);
           assert.equal(changed.rowCount,1);
-          const check=()=>connection.query(`select invoice_source_line_visible(l.organization_id,l.legal_entity_id,l.batch_id,l.item_id,$2,$3) as current,
-            invoice_source_historical_visible(l.organization_id,l.legal_entity_id,l,$2,$3) as historical from invoice_draft_lines l where l.batch_id=$1`,
+          const check=()=>connection.query(`select service_period_invoice_item_current(b,l.item_id,$2,$3) as current,
+            invoice_source_line_visible(l.organization_id,l.legal_entity_id,l.batch_id,l.item_id,$2,$3) as correction_scope,
+            invoice_source_historical_visible(l.organization_id,l.legal_entity_id,l,$2,$3) as historical from invoice_draft_lines l join invoice_draft_batches b on b.id=l.batch_id where l.batch_id=$1`,
             [batchId,finance.id,reviewRole]);
-          assert.deepEqual((await check()).rows,[{current:false,historical:true}]);
+          assert.deepEqual((await check()).rows,[{current:false,correction_scope:true,historical:true}]);
           await connection.query("update role_permissions set enabled=false where role_name=$1 and permission_key='commercial.service_periods.issue'",[reviewRole]);
-          assert.deepEqual((await check()).rows,[{current:false,historical:false}]);
+          assert.deepEqual((await check()).rows,[{current:false,correction_scope:false,historical:false}]);
         } finally {
           await connection.query('rollback');
           connection.release();
@@ -637,9 +638,26 @@ const verifyCommercialDrafting = async reversalScenario => {
       const stageDecision=(who,key,n)=>apiRequest(decisionPath+'/decisions',{method:'POST',identity:who,body:{
         expectedOwnerKey:key,expectedSequence:n,policyId:policyId,confirmationId:receipt.id,decision:'Approved',reason:'Verified retained service period charge'}});
       const selfReview=await pool.query(
-        'select retainer_review_participants_valid(retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',
+        'select invoice_reversal_participants_valid(b.source_type,retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',
         [identities.manager.id,identities.manager.role,policyId,batchId]);
       assert.equal(selfReview.rows[0].ok,false,'The reversal requester cannot occupy a named review stage');
+      if (sourceType.startsWith('MANAGED_SERVICE_')) {
+        const sourceGrant=sourceType==='MANAGED_SERVICE_PERIOD'?'commercial.service_periods.issue':'commercial.service_units.issue';
+        const client=await pool.connect();
+        try {
+          await client.query('begin');
+          const changeGrant=(permission,enabled)=>client.query("update role_permissions set enabled=$2 where role_name='Admin' and permission_key=$1",[permission,enabled]);
+          const canReview=async()=>(await client.query('select invoice_reversal_participants_valid(b.source_type,retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',[finance.id,reviewRole,policyId,batchId])).rows[0].ok;
+          await changeGrant(sourceGrant,false);
+          assert.equal(await canReview(),false,'Retainer access cannot authorize a managed-service correction');
+          await changeGrant(sourceGrant,true);
+          await changeGrant(issueGrant,false);
+          assert.equal(await canReview(),true,'The original charge permission is sufficient');
+        } finally {
+          await client.query('rollback');
+          client.release();
+        }
+      }
       const firstReversal=await stageDecision(identities.manager,reviewerKey,0);
       assert.equal(firstReversal.status,201,JSON.stringify(firstReversal.body));
       assert.equal(firstReversal.body.review.sourceType,sourceType);
@@ -1092,6 +1110,12 @@ const verifyCommercialDrafting = async reversalScenario => {
         const delivery=await verifyInvoiceExport({engagementId:serviceEng.body.id,batchId:serviceBatchId,ownerKey:key,instance,
           permissions:[issueGrant,periodIssueGrant],schema:'workos.invoice-service-period-csv/1',amount:'100.025',itemId:issuedPeriod.itemId,eventId:issuedPeriod.eventId,
           sourceId:periodReview.id,reviewId:periodReview.id,sourceLabel:/fixed-period source/,sourceType:'MANAGED_SERVICE_PERIOD'});
+        const correctionPolicy=await configure(reviewer,periodPolicyId,[{userId:alias.id,role:alias.role}]);
+        assert.equal(correctionPolicy.status,201,JSON.stringify(correctionPolicy.body));
+        periodPolicyId=correctionPolicy.body.policy.id;
+        await verifyCorrection({exported:delivery,engagementId:serviceEng.body.id,ownerKey:key,batchId:serviceBatchId,
+          lineId:reservedPeriod.rebatched.body.line.id,policyId:periodPolicyId,original:issuedPeriod,sourceType:'MANAGED_SERVICE_PERIOD',amount:'100.025',act:call,
+          reviewerKey:(await call('/sources/'+serviceBatchId,reviewer)).body.ownerKey,secondKey:(await call('/sources/'+serviceBatchId,alias)).body.ownerKey});
         await delivery.csvBrowser.context.close();
         await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[periodIssueGrant]);
       }

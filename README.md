@@ -204,3 +204,7 @@ In **Invoice batch approvals**, select the engagement and inspect the draft. Sub
 ## Export and confirm an approved fixed-period batch
 
 Select the approved batch in **Invoice CSV export** and choose **Fixed-period CSV v1**. The downloaded CSV includes the period decision, original contract version, eligibility date and exact native-currency amount. After the downstream system accepts it, use **Invoice billing confirmation** to record its reference against the retained artifact.
+
+## Correct a billed fixed-period charge
+
+Inspect the retained export and select the original line. Request a full reversal with a reason. After the named reviewers approve it, finance can issue the negative amount, reserve it in a correction batch and submit that batch for approval. The credit export and downstream confirmation keep their own receipts and link back to the original charge.

@@ -63,8 +63,8 @@ export function registerLineReversalRequests(router, { handle, authorize, batch,
       ) as eligible`,
       [JSON.stringify(stages), existing.actorId, row.preparer_user_id, row.organization_id, row.legal_entity_id, row.id],
     )).rows[0].eligible;
-    const independent = eligible && (!['RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(row.source_type) || (await c.query(
-      'select retainer_review_participants_valid(retainer_reversal_participants(b,$2,$3,$4)) ok from invoice_draft_batches b where b.id=$1',
+    const independent = eligible && (!['RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(row.source_type) || (await c.query(
+      'select invoice_reversal_participants_valid(b.source_type,retainer_reversal_participants(b,$2,$3,$4)) ok from invoice_draft_batches b where b.id=$1',
       [row.id, existing.actorId, existing.activeRole, policy.id],
     )).rows[0]?.ok);
     if (!independent) return { ...base, route: { status: 'REVIEWERS_UNAVAILABLE' } };
