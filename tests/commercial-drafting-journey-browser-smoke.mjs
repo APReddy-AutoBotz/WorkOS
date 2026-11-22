@@ -417,22 +417,25 @@ const verifyCommercialDrafting = async reversalScenario => {
     assert.equal((await issueRetainer(retainerCommand)).status,409,'draft terms cannot generate charges');
     // Seed synthetic opening history at the service date. Only this fixture transaction
     // sees the historical clock. The ledger's sequence, root, date and scope triggers all run.
-    const historyClient=await pool.connect();
-    try {
-      await historyClient.query('begin');
-      await historyClient.query('create schema journey_retainer_clock');
-      await historyClient.query("create function journey_retainer_clock.now() returns timestamptz language sql stable as $$select timestamptz '2020-01-01 12:00:00+00'$$");
-      await historyClient.query('set local search_path=journey_retainer_clock,public,pg_catalog');
-      for (const [type,id] of [['Contract',savedRetainer.result.id],['Engagement',eng.body.id]]) {
-        await historyClient.query(`insert into commercial_lifecycle_events(organization_id,legal_entity_id,entity_type,entity_id,sequence,state,effective_on,
-          contract_id,contract_version_id,after_value,reason,actor_id,active_role,correlation_id,operation_id)
-          values($1,$2,$3,$4,1,'Active','2020-01-01',$5,$6,jsonb_build_object('state','Active'),'Synthetic opening history',$7,'Admin',$4,$4)`,
-          [scope.organizationId,scope.legalEntityId,type,id,savedRetainer.result.id,retainerVersion,actorId]);
-      }
-      await historyClient.query('drop function journey_retainer_clock.now()');
-      await historyClient.query('drop schema journey_retainer_clock');
-      await historyClient.query('commit');
-    } catch(error) {await historyClient.query('rollback');throw error;} finally {historyClient.release();}
+    const openHistoricalTerms=async(contractId,versionId,entities)=>{
+      const historyClient=await pool.connect();
+      try {
+        await historyClient.query('begin');
+        await historyClient.query('create schema journey_retainer_clock');
+        await historyClient.query("create function journey_retainer_clock.now() returns timestamptz language sql stable as $$select timestamptz '2020-01-01 12:00:00+00'$$");
+        await historyClient.query('set local search_path=journey_retainer_clock,public,pg_catalog');
+        for (const [type,id] of entities) {
+          await historyClient.query(`insert into commercial_lifecycle_events(organization_id,legal_entity_id,entity_type,entity_id,sequence,state,effective_on,
+            contract_id,contract_version_id,after_value,reason,actor_id,active_role,correlation_id,operation_id)
+            values($1,$2,$3,$4,1,'Active','2020-01-01',$5,$6,jsonb_build_object('state','Active'),'Synthetic opening history',$7,'Admin',$4,$4)`,
+            [scope.organizationId,scope.legalEntityId,type,id,contractId,versionId,actorId]);
+        }
+        await historyClient.query('drop function journey_retainer_clock.now()');
+        await historyClient.query('drop schema journey_retainer_clock');
+        await historyClient.query('commit');
+      } catch(error) {await historyClient.query('rollback');throw error;} finally {historyClient.release();}
+    };
+    await openHistoricalTerms(savedRetainer.result.id,retainerVersion,[['Contract',savedRetainer.result.id],['Engagement',eng.body.id]]);
     const inspect=await apiRequest(registerPath,{identity:finance});
     assert.equal(inspect.status,200,JSON.stringify(inspect.body));assert.deepEqual(inspect.body.engagements,[{id:eng.body.id,name:eng.body.name}]);
     assert.equal((await issueRetainer({...retainerCommand,engagementId:engagement.result.id})).status,409);
@@ -893,6 +896,12 @@ const verifyCommercialDrafting = async reversalScenario => {
       await button('Add fixed-period charge').click();
       const periods=[{startsOn:'2024-01-01',endsOn:'2024-01-31',amount:'100.0250'}];
       await fill(managed,{'Charge 1 start date':periods[0].startsOn,'Charge 1 end date':periods[0].endsOn,'Charge 1 amount':periods[0].amount});
+      for (const term of [{startsOn:'2024-02-01',endsOn:'2024-02-29',amount:'90'},{startsOn:'2099-01-01',endsOn:'2099-01-31',amount:'80'}]) {
+        periods.push(term);
+        await button('Add fixed-period charge').click();
+        const n=periods.length;
+        await fill(managed,{['Charge '+n+' start date']:term.startsOn,['Charge '+n+' end date']:term.endsOn,['Charge '+n+' amount']:term.amount});
+      }
       await fill(managed,{'Unit 1 code':'TICKET','Unit 1 label':'Accepted ticket'});
       await button('Add service unit').click();
       await fill(managed,{'Unit 2 code':'SHIFT','Unit 2 label':'Support shift','Unit 2 price (contract currency, optional)':'120.0123'});
@@ -906,7 +915,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.deepEqual(saved.result.versions[0].servicePeriodCharges,periods);
       await button('Inspect SYN-SERVICE').click();
       await page.getByText('Support shift · SHIFT · 2 decimal places · GBP 120.0123 per unit · billing rounds to 1 decimals',{exact:true}).waitFor();
-      await page.getByText('2024-01-01 to 2024-01-31 · GBP 100.0250',{exact:true}).waitFor();
+      await page.getByRole('listitem').filter({hasText:'2024-01-01 to 2024-01-31 · GBP 100.0250'}).first().waitFor();
       const serviceVersion=saved.result.versions[0].id;
       const serviceEng=await apiRequest('/engagements',{method:'POST',body:{...engagement.body,model:'managed_service',code:'SYN-SERVICE-CAPTURE',
         name:'Synthetic unit capture',budget:'100',contractId:saved.result.id,contractVersionId:serviceVersion,startsOn:'2020-01-01',endsOn:'2099-12-31'}});
@@ -917,10 +926,56 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await capture(serviceInput)).status,403);
       await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.service_units.capture',true),('Admin','commercial.lifecycle.manage',true) on conflict(role_name,permission_key) do update set enabled=true");
       assert.equal((await capture(serviceInput)).status,422,'draft engagement cannot record delivery');
-      for(const [type,id] of [['Contract',saved.result.id],['Engagement',serviceEng.body.id]]) {
-        const result=await apiRequest('/lifecycle/'+type+'/'+id+'/transitions',{method:'POST',body:{expectedSequence:0,state:'Active',contractVersionId:serviceVersion,approvalReference:null,reason:'Synthetic service delivery opening'}});
-        assert.equal(result.status,201,JSON.stringify(result.body));
-      }
+      const periodPath='/contracts/'+saved.result.id+'/versions/'+serviceVersion+'/service-periods/'+periods[0].startsOn+'/review';
+      const periodGrant='commercial.service_periods.decide';
+      const periodCommand={decision:'Approved',reason:'Confirmed delivery against the closed January terms'};
+      const decidePeriod=(who,body)=>apiRequest(periodPath,{method:'POST',identity:who,body});
+      assert.equal((await decidePeriod(finance,periodCommand)).status,403);
+      await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true),('HR',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[periodGrant]);
+      assert.equal((await decidePeriod(finance,periodCommand)).status,409);
+      await openHistoricalTerms(saved.result.id,serviceVersion,[['Contract',saved.result.id],['Engagement',serviceEng.body.id]]);
+      assert.equal((await decidePeriod(identities.manager,periodCommand)).status,403);
+      assert.equal((await decidePeriod(finance,{...periodCommand,amount:'1'})).status,400);
+      await pool.query("create trigger reject_period_review_audit before insert on audit_logs for each row when(new.entity_type='Managed Service Period Review') execute function reject_test_po_audit()");
+      assert.equal((await decidePeriod(finance,periodCommand)).status,503);
+      assert.equal((await apiRequest(periodPath,{identity:finance})).body.review,null);
+      await pool.query('drop trigger reject_period_review_audit on audit_logs');
+      const periodBrowser=await createContext(finance,['commercial.contracts.view',periodGrant]);
+      await periodBrowser.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+      await periodBrowser.page.getByRole('button',{name:'Inspect SYN-SERVICE',exact:true}).click();
+      const periodDesk=periodBrowser.page.getByRole('group',{name:'Fixed-period charge review'});
+      await periodDesk.getByLabel('Service period').selectOption(periods[0].startsOn);
+      await periodDesk.getByRole('button',{name:'Inspect period decision'}).click();
+      await periodDesk.getByLabel('Period decision reason').fill(periodCommand.reason);
+      const periodResult=periodBrowser.page.waitForResponse(r=>r.url().endsWith(periodPath) && r.request().method()==='POST');
+      await periodDesk.getByRole('button',{name:'Approve period charge'}).click();
+      const periodResponse=await periodResult; assert.equal(periodResponse.status(),201,await periodResponse.text());
+      const {review:periodReview}=await periodResponse.json();
+      assert.deepEqual([periodReview.currency,periodReview.amount,periodReview.versionId],['GBP','100.025',serviceVersion]);
+      await periodDesk.getByText(new RegExp(periodReview.id)).waitFor();
+      assert.equal((await decidePeriod(finance,periodCommand)).body.review.id,periodReview.id);
+      assert.equal((await decidePeriod(finance,{...periodCommand,decision:'Rejected'})).status,409);
+      assert.equal((await apiRequest(periodPath,{identity:finance})).body.review.id,periodReview.id);
+      const decideOther=(term,who,decision)=>apiRequest(periodPath.replace(periods[0].startsOn,term.startsOn),{method:'POST',identity:who,body:{decision,reason:'Reconcile service delivery exception'}});
+      assert.equal((await decideOther(periods[2],finance,'Approved')).status,409);
+      const stale=await pool.connect();
+      try {
+        await stale.query('begin');
+        const worker=(await stale.query('select employee_record_id from users where id=$1',[finance.id])).rows[0].employee_record_id;
+        await stale.query('update users set employee_record_id=null where id=$1',[finance.id]);
+        await stale.query('update users set employee_record_id=$2 where id=$1',[finance.id,worker]);
+        const id=crypto.randomUUID(),operation=crypto.randomUUID();
+        await stale.query("select set_config('workos.period_review',$1,true)",[JSON.stringify({id,actor:finance.id,operation})]);
+        await assert.rejects(stale.query(`insert into commercial_service_period_reviews
+          (organization_id,legal_entity_id,contract_id,version_id,starts_on,id,actor_id,active_role,operation_id,decision,reason)
+          values($1,$2,$3,$4,$5,$6,$7,$8,$9,'Approved','Synthetic stale worker check')`,
+          [scope.organizationId,scope.legalEntityId,saved.result.id,serviceVersion,periods[1].startsOn,id,finance.id,finance.role,operation]),err=>err.code==='MSP02');
+      } finally {await stale.query('rollback');stale.release();}
+      const declined=await decideOther(periods[1],finance,'Rejected');
+      assert.equal(declined.status,201,JSON.stringify(declined.body));
+      assert.equal(declined.body.review.decision,'Rejected');
+      assert.equal((await decideOther(periods[1],finance,'Approved')).status,409);
+      await periodBrowser.context.close();
       assert.equal((await capture({...serviceInput,recorderWorkerId:ownerId})).status,400);
       await pool.query('update users set employee_record_id=null where id=$1',[actorId]);
       assert.equal((await capture(serviceInput)).status,403,'unlinked recorder cannot create evidence');

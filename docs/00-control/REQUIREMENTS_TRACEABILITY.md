@@ -707,3 +707,7 @@ WOS-INV-002, WOS-INV-003, WOS-INV-005, WOS-INV-006 and WOS-INV-007 are covered f
 ## Managed-service fixed-period contract terms
 
 WOS-COM-010 and the fixed-period source prerequisite of WOS-INV-001 use migration `084_wos06_service_period_charge_terms.sql`. The commercial drafting browser journey exercises capture, version history, inheritance, explicit removal, scope denial and invalid schedules. Period approval and eligibility are pending.
+
+## Closed managed-service charge decisions
+
+WOS-COM-010 and the approved fixed-period source for WOS-INV-001 use migration `085_wos06_service_period_reviews.sql`. The commercial drafting browser and PostgreSQL journey covers approval, independent worker identity, closed-period terms, replay and historical receipt inspection. Billing eligibility remains pending.

@@ -180,3 +180,7 @@ To correct an exported managed-service line, retrieve the original CSV, select t
 ## Managed-service fixed charges
 
 In a managed-service contract or revision, choose **Add fixed-period charge** and enter the inclusive dates and exact amount in contract currency. Inspect the contract version to see its retained schedule. Each version keeps its original terms.
+
+## Review a fixed-period service charge
+
+Inspect a managed-service contract version and select a period under **Fixed-period charge review**. Reviewers with period decision access can approve or reject the closed charge with a reason. The receipt records the contract currency and amount.

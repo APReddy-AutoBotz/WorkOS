@@ -63,7 +63,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canIssueServiceUnits?:boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canIssueServiceUnits?:boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -86,6 +86,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
     canValueUnits: permissions.includes('commercial.service_units.value'),
+    canReviewPeriods: permissions.includes('commercial.service_periods.decide'),
     canReviewUnits: permissions.includes('commercial.service_units.decide'),
     canCaptureUnits: permissions.includes('commercial.service_units.capture'),
     canIssueInstallment: permissions.includes('commercial.fixed_fee_eligibility.issue'),
@@ -346,6 +347,20 @@ export const commercialDraftingService = {
       if ((charge && charge.reviewId!==reviewId) || (receipt && receipt.reviewId!==reviewId) || (charge && receipt)) throw invalid();
       const money=(row:Record<string,unknown>)=>{const amount=text(row.amount);if (!/^\d{1,16}(?:\.\d{1,4})?$/.test(amount)) throw invalid();return {amount,currency:currency(row.currency)};};
       return {charge:charge && money(charge),receipt:receipt && {...money(receipt),itemId:text(receipt.itemId),eventId:text(receipt.eventId),eligibleOn:date(receipt.eligibleOn)}};
+    },false);
+  },
+  servicePeriodReview(contractId:string,version:ContractTerms,term:ServicePeriodCharge,context:CommercialDraftingContext,command?:{decision:'Approved'|'Rejected';reason:string}) {
+    if (command && !assertCommercialDraftingContext(context).canReviewPeriods) throw invalid();
+    const path='/contracts/'+encodeURIComponent(contractId)+'/versions/'+encodeURIComponent(version.id)+'/service-periods/'+term.startsOn+'/review';
+    return request(context,command?'POST':'GET',path,command,value=>{
+      const result=object(value);
+      if (result.review===null && !command) return null;
+      const r=object(result.review), decision=model(r.decision,['Approved','Rejected'] as const);
+      const amount=decimal(r.amount), reason=text(r.reason);
+      const canonical=(n:string)=>n.replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'');
+      if (r.contractId!==contractId || r.versionId!==version.id || r.startsOn!==term.startsOn || r.endsOn!==term.endsOn ||
+          r.currency!==version.currency || canonical(amount)!==canonical(term.amount) || (command && (decision!==command.decision || reason!==command.reason.trim()))) throw invalid();
+      return {id:text(r.id),decision,reason};
     },false);
   },
   servicePolicy(eng:string,c:CommercialDraftingContext) {
