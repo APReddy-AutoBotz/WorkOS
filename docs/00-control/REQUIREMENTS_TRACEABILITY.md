@@ -693,3 +693,5 @@ WOS-COM-010 delivery evidence: migration 082s, the commercial drafting capture A
 WOS-COM-010, WOS-COM-011 pricing prerequisite. Migration 082u and the commercial drafting browser journey cover optional prices on immutable unit definitions, exact price retention, unpriced and zero-price terms, invalid decimals and revision history.
 
 WOS-COM-004, WOS-COM-010 and WOS-COM-011. Migration 082v, the commercial drafting API and real browser journey verify engagement policy selection, independent acceptance, service-date contract price, deterministic rounding, open-period enforcement and immutable managed-service valuation. Period-charge profiles, optional time/cost links, governed corrections and separate billing eligibility remain open.
+
+WOS-COM-010, WOS-INV-001. Migration 082w and the commercial drafting journey verify accepted-unit contractual eligibility, distinct billing and valuation precisions, explicit issuer grant, immutable register lineage, locked-period rejection and replay. Invoice batch handling of managed-service items remains open.

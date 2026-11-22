@@ -164,3 +164,5 @@ Independent reviewers can accept or reject a delivered quantity from its engagem
 Commercial managers can set a price per managed-service unit in contract currency. The version history shows the exact price, including explicit zero. A blank price leaves the unit unpriced.
 
 Managed-service operators can retain an operational value for independently accepted units. A policy owner selects the effective date and rounding precision. Each valuation preserves the service-date policy, accepted quantity, versioned contract price and contract currency.
+
+Managed-service contract versions can authorize billing by accepted unit and specify the charge precision. Billing operators inspect an independently accepted receipt and record its contractual charge in the approved-unbilled register. The receipt retains the eligibility event and register item.
