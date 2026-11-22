@@ -689,3 +689,5 @@ WOS-NFR-REL-006/007/008 and WOS-NFR-DPL-007: `npm run test:restore` exercises th
 WOS-COM-010 (managed-service contract terms): migration 082r, the commercial drafting API and the browser journey verify scoped versioned quantity dimensions, inheritance, explicit clearing, duplicate rejection, model restrictions, and preservation of historical versions.
 
 WOS-COM-010 delivery evidence: migration 082s, the commercial drafting capture API and the commercial drafting browser journey cover scoped quantity capture, effective adopted terms, precision, duplicate references and immutable evidence. Migration 082t and the commercial drafting browser journey cover independent acceptance and rejection, recorder and reviewer identity changes, immutable decisions and concurrent replay. Time/cost links, valuation and eligibility remain open.
+
+WOS-COM-010, WOS-COM-011 pricing prerequisite. Migration 082u and the commercial drafting browser journey cover optional prices on immutable unit definitions, exact price retention, unpriced and zero-price terms, invalid decimals and revision history.

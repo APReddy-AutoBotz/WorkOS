@@ -848,13 +848,13 @@ const verifyCommercialDrafting = async reversalScenario => {
       await button('Add service unit').click();
       await fill(managed,{'Unit 1 code':'TICKET','Unit 1 label':'Accepted ticket'});
       await button('Add service unit').click();
-      await fill(managed,{'Unit 2 code':'SHIFT','Unit 2 label':'Support shift'});
+      await fill(managed,{'Unit 2 code':'SHIFT','Unit 2 label':'Support shift','Unit 2 price (contract currency, optional)':'120.0123'});
       await managed.getByLabel('Unit 2 decimal places').selectOption('2');
       const saved=await save('/contracts','managed');
-      const units=[{code:'TICKET',label:'Accepted ticket',precision:0},{code:'SHIFT',label:'Support shift',precision:2}];
+      const units=[{code:'TICKET',label:'Accepted ticket',precision:0},{code:'SHIFT',label:'Support shift',precision:2,unitPrice:'120.0123'}];
       assert.deepEqual(saved.result.versions[0].serviceDimensions,units);
       await button('Inspect SYN-SERVICE').click();
-      await page.getByText('Support shift · SHIFT · 2 decimal places',{exact:true}).waitFor();
+      await page.getByText('Support shift · SHIFT · 2 decimal places · GBP 120.0123 per unit',{exact:true}).waitFor();
       const serviceVersion=saved.result.versions[0].id;
       const serviceEng=await apiRequest('/engagements',{method:'POST',body:{...engagement.body,model:'managed_service',code:'SYN-SERVICE-CAPTURE',
         name:'Synthetic unit capture',budget:'100',contractId:saved.result.id,contractVersionId:serviceVersion,startsOn:'2020-01-01',endsOn:'2099-12-31'}});
@@ -940,16 +940,27 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await revise({...next,serviceDimensions:[{...units[0],precision:5}]})).status,400);
       assert.equal((await revise({...next,serviceDimensions:[units[0],units[0]]})).status,422);
       assert.equal((await apiRequest('/contracts',{method:'POST',body:{...saved.body,number:'SYN-WRONG-MODEL',model:'retainer'}})).status,422);
+      for(const unitPrice of ['-1','1.00001','01','1e2',120,null]) {
+        const dimensions=[{...units[0],unitPrice}];
+        assert.equal((await revise({...next,serviceDimensions:dimensions})).status,400);
+        assert.equal((await pool.query("select valid_priced_service_dimensions($1::jsonb,'managed_service') ok",[JSON.stringify(dimensions)])).rows[0].ok,false);
+      }
+      assert.equal((await pool.query("select valid_priced_service_dimensions($1::jsonb,'managed_service') ok",[JSON.stringify([{...units[0],unitPrice:'0.0000'}])])).rows[0].ok,true);
       delete next.serviceDimensions;
       const inherited=await revise(next);
       assert.equal(inherited.status,201,JSON.stringify(inherited.body));
       assert.deepEqual(inherited.body.versions[0].serviceDimensions,units);
-      const cleared=await revise({...next,expectedVersion:2,effectiveFrom:'2099-01-01',serviceDimensions:[]});
+      const repricedUnits=[{...units[0],unitPrice:'0.0000'},{code:'SHIFT',label:'Support shift',precision:2}];
+      const repriced=await revise({...next,expectedVersion:2,effectiveFrom:'2099-01-01',serviceDimensions:repricedUnits});
+      assert.equal(repriced.status,201,JSON.stringify(repriced.body));
+      assert.deepEqual(repriced.body.versions[0].serviceDimensions,repricedUnits);
+      assert.deepEqual(repriced.body.versions[1].serviceDimensions,units);
+      const cleared=await revise({...next,expectedVersion:3,effectiveFrom:'2099-01-02',serviceDimensions:[]});
       assert.equal(cleared.status,201,JSON.stringify(cleared.body));
       assert.equal(cleared.body.versions[0].serviceDimensions,undefined);
       assert.deepEqual(cleared.body.versions[2].serviceDimensions,units);
-      const auditTerms=await pool.query("select before_value,after_value from commercial_draft_events where entity_id=$1 and after_value->>'latestVersion'='3'",[saved.result.id]);
-      assert.deepEqual(auditTerms.rows[0].before_value.versions[0].serviceDimensions,units);
+      const auditTerms=await pool.query("select before_value,after_value from commercial_draft_events where entity_id=$1 and after_value->>'latestVersion'='4'",[saved.result.id]);
+      assert.deepEqual(auditTerms.rows[0].before_value.versions[0].serviceDimensions,repricedUnits);
       assert.equal(auditTerms.rows[0].after_value.versions[0].serviceDimensions,undefined);
     }
     await reader.context.close();await denied.context.close();await context.close();assert.deepEqual(errors, []);assert.deepEqual(external, []);

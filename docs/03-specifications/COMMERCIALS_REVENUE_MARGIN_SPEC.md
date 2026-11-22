@@ -223,3 +223,5 @@ Managed-service contract versions retain up to 50 quantity dimensions. Each has 
 A delivered quantity identifies its engagement, service date, adopted version, configured dimension and source reference. References are unique per engagement and dimension. Retrying an identical capture by the same actor and role returns its receipt. Capture has no approval or invoice effect.
 
 Each managed-service receipt may have one immutable acceptance or rejection with a reason. Both parties require distinct active worker identities in the entity. The recorder link must still match its retained generation, and the reviewer link must predate capture. Historical decisions remain visible.
+
+Managed-service unit terms may include an exact non-negative decimal price in contract currency, with up to 14 integer and four fractional digits. The price is optional for each dimension. Omitting the dimension list on revision carries prices forward. Replacing a dimension without its price clears that price on the new version. Configuring a price alone creates no financial snapshot or billing event.
