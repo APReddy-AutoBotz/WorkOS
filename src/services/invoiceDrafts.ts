@@ -131,13 +131,11 @@ const retainerLine=milestoneLine.extend({
   sourceType:z.literal('RETAINER_PERIOD'),
   evidence:retainerInvoiceEvidence,
 });
-const serviceLine=milestoneLine.extend({
-  sourceType:z.literal('MANAGED_SERVICE_UNIT'),
-  evidence:z.object({evidenceId:uuid,reviewId:uuid,contractVersionId:id,engagementId:id,priceEffectiveFrom:date,serviceDate:date,
+export const serviceUnitInvoiceEvidence=z.object({evidenceId:uuid,reviewId:uuid,contractVersionId:id,engagementId:id,priceEffectiveFrom:date,serviceDate:date,
     dimensionCode:z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/),quantity:z.string().regex(/^(?:0|[1-9]\d{0,11})(?:\.\d{1,4})?$/),
     unitPrice:z.string().regex(/^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/),billingPrecision:z.number().int().min(0).max(4),rounding:z.literal('HALF_UP'),
-    contractLifecycleId:id,engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),reason}).strict(),
-});
+    contractLifecycleId:id,engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),reason}).strict();
+const serviceLine=milestoneLine.extend({sourceType:z.literal('MANAGED_SERVICE_UNIT'),evidence:serviceUnitInvoiceEvidence});
 const line = z.union([tmLine, milestoneLine, fixedFeeLine, retainerLine,serviceLine]);
 const cancellation = z
     .object({

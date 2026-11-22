@@ -168,3 +168,5 @@ Managed-service operators can retain an operational value for independently acce
 Managed-service contract versions can authorize billing by accepted unit and specify the charge precision. Billing operators inspect an independently accepted receipt and record its contractual charge in the approved-unbilled register. The receipt retains the eligibility event and register item.
 
 Invoice preparers can reserve a whole approved managed-service charge in a draft for its engagement, currency and eligibility period. The line shows the accepted quantity and unit price and retains its review, event and register item. Cancelling the draft releases the item for another batch.
+
+Managed-service invoice batches can follow an engagement-specific approval policy. Reviewers inspect each reserved charge, its accepted quantity and unit price. The decision retains the reviewed line set and total.
