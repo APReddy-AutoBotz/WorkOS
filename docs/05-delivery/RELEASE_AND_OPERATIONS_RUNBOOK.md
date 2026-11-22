@@ -716,3 +716,7 @@ Existing versions start with an empty fixed-charge schedule when migration 084 i
 ## Suspend fixed-period decisions
 
 Revoke `commercial.service_periods.decide` to suspend new decisions. Retain migration 085, decisions and audit records. Commercial viewers can still inspect receipts. A rejected charge remains recorded against its immutable version and period.
+
+## Suspend approved-period valuation
+
+Revoke `commercial.service_periods.value` to suspend recording and access through the valuation endpoint. Schedule the disabled profile to stop valuing periods with an end date on or after its effective date. Preserve migration 086, policy versions and past snapshots during rollback.

@@ -184,3 +184,7 @@ In a managed-service contract or revision, choose **Add fixed-period charge** an
 ## Review a fixed-period service charge
 
 Inspect a managed-service contract version and select a period under **Fixed-period charge review**. Reviewers with period decision access can approve or reject the closed charge with a reason. The receipt records the contract currency and amount.
+
+## Value a managed-service period
+
+Select the engagement in **Fixed-period operational valuation**. A policy owner can schedule the approved fixed-period profile and rounding precision. After independent period approval, finance can inspect the period-end policy and record the operational management value.

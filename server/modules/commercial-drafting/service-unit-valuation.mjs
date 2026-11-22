@@ -4,10 +4,10 @@ import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
 export const policyGrant='commercial.service_units.policy',valueGrant='commercial.service_units.value';
-export const policyCommand=z.object({effectiveFrom:z.string().date(),profile:z.enum(['accepted_unit','disabled']),precision:z.number().int().min(0).max(4).nullable(),
-  previousId:z.string().uuid().nullable(),reason:z.string().trim().min(3).max(1000)}).strict().refine(p=>(p.profile==='accepted_unit')===(p.precision!==null));
+export const policyCommand=z.object({effectiveFrom:z.string().date(),profile:z.enum(['accepted_unit','approved_period','disabled']),precision:z.number().int().min(0).max(4).nullable(),
+  previousId:z.string().uuid().nullable(),reason:z.string().trim().min(3).max(1000)}).strict().refine(p=>(p.profile!=='disabled')===(p.precision!==null));
 export const valueCommand=z.object({reviewId:z.string().uuid(),policyId:z.string().uuid()}).strict();
-const policyFields='id,effective_from::text as "effectiveFrom",profile,precision_digits as precision,reason,actor_id as "ownerId"';
+export const policyFields='id,effective_from::text as "effectiveFrom",profile,precision_digits as precision,reason,actor_id as "ownerId"';
 const valueFields='id,evidence_id as "evidenceId",review_id as "reviewId",policy_id as "policyId",version_id as "versionId",currency,quantity::text,unit_price::text as "unitPrice",amount::text';
 const keys=req=>[req.organizationScope.organizationId,req.organizationScope.legalEntityId,req.params.id];
 const where='organization_id=$1 and legal_entity_id=$2 and engagement_id=$3';
