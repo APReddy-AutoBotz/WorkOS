@@ -697,3 +697,5 @@ WOS-COM-004, WOS-COM-010 and WOS-COM-011. Migration 082v, the commercial draftin
 WOS-COM-010, WOS-INV-001. Migration 082w and the commercial drafting journey verify accepted-unit contractual eligibility, distinct billing and valuation precisions, explicit issuer grant, immutable register lineage, locked-period rejection and replay. Invoice batch handling of managed-service items remains open.
 
 WOS-INV-001 and WOS-INV-002 managed-service drafting. Migration 082x and the commercial drafting journey cover source-scoped draft creation, whole-item reservation and replay, exclusive occupancy across competing batches, cancellation and rebatching. Managed-service batch review, export and downstream confirmation remain open.
+
+WOS-INV-002 managed-service approval. Migration 082y and the commercial drafting browser journey cover staged policy configuration, protected source inspection, independent reviewer authority, stale lineage rejection and a retained invoice decision on the reserved charge. Export and downstream confirmation remain open.

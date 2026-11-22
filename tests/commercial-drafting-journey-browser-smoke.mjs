@@ -949,9 +949,45 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal(link.rows[0].source_type,'MANAGED_SERVICE_UNIT');assert.equal(link.rows[0].billing_evidence.contractVersionId,serviceVersion);
       assert.equal(link.rows[0].billing_evidence.quantity,'1.25');assert.equal(link.rows[0].billing_evidence.billingPrecision,1);
       {
-        const {line}=await verifyContractChargeDraft({engagementId:serviceEng.body.id,receipt:billReceipt.body.receipt,reviewId:accepted.body.id,
+        const {line,otherBatch}=await verifyContractChargeDraft({engagementId:serviceEng.body.id,receipt:billReceipt.body.receipt,reviewId:accepted.body.id,
           permissions:[issueGrant,issueKey],prefix:'unit',availablePath:'service-charges'});
         assert.equal(line.evidence.dimensionCode,'SHIFT');assert.equal(line.evidence.quantity,'1.25');
+        const serviceBatchId=otherBatch.body.batch.id,base='/api/v1/invoice-batch-approvals';
+        const call=(path,who,body)=>apiRequest(base+path,body?{identity:who,method:'POST',body}:{identity:who});
+        const view=await call('/sources/'+serviceBatchId,finance);
+        assert.equal(view.status,200,JSON.stringify(view.body));
+        assert.equal(view.body.batch.sourceType,'MANAGED_SERVICE_UNIT');assert.equal(view.body.batch.lines[0].evidence.reviewId,accepted.body.id);
+        const key=view.body.ownerKey,reviewer=identities.manager;
+        const configure=(who,prior)=>call('/policies',finance,{expectedOwnerKey:key,requestId:crypto.randomUUID(),engagementId:serviceEng.body.id,
+          expectedLatestId:prior,effectiveFrom:today,definition:{entityType:'InvoiceBatch',engagementId:serviceEng.body.id,locale:'en-US',completionInApp:true,
+            stages:[{userId:who.id,role:who.role}],templates:['approval.action_required','approval.rejected_or_correction_required','approval.completed'].map(k=>({key:k,subject:'Review {{sourceRef}}',body:'Stage {{stageNumber}}'}))},
+          reason:'Review accepted service charges'});
+        assert.equal((await call('/sources/'+serviceBatchId,reviewer)).status,403);
+        assert.equal((await configure(reviewer,null)).status,403);
+        await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[issueKey]);
+        const self=await configure(finance,null);assert.equal(self.status,201,JSON.stringify(self.body));
+        const submit=(id,hash=view.body.batch.lineageHash)=>call('/requests',finance,{requestId:crypto.randomUUID(),expectedOwnerKey:key,
+          batchId:serviceBatchId,expectedPolicyId:id,expectedLineCount:1,expectedLineageHash:hash,reason:'Inspect the service invoice'});
+        assert([403,409].includes((await submit(self.body.policy.id)).status));
+        const policy=await configure(reviewer,self.body.policy.id);assert.equal(policy.status,201,JSON.stringify(policy.body));
+        assert.equal((await submit(policy.body.policy.id,'0'.repeat(64))).status,409);
+        const submitted=await submit(policy.body.policy.id);assert.equal(submitted.status,201,JSON.stringify(submitted.body));
+        const instance=submitted.body.approval.id;
+        const reviewBrowser=await createContext(reviewer,[...draftGrants,issueKey,issueGrant,'approvals.view','commercial.invoice_approval.decide']);
+        const reviewPage=reviewBrowser.page;await reviewPage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+        const desk=reviewPage.getByRole('region',{name:'Invoice batch approvals'});
+        await desk.getByLabel('Invoice approval engagement').selectOption(serviceEng.body.id);
+        await desk.getByRole('button',{name:'Load invoice batches and reviews'}).click();
+        await desk.getByLabel('Invoice batch review',{exact:true}).selectOption(instance);
+        await desk.getByRole('button',{name:'Inspect invoice review'}).click();
+        await desk.getByText(new RegExp(accepted.body.id)).waitFor();
+        await desk.getByLabel('Invoice approval decision',{exact:true}).selectOption('Approved');
+        await desk.getByLabel('Invoice approval decision reason').fill('Verified accepted units and retained price');
+        const outcome=reviewPage.waitForResponse(r=>r.url().endsWith('/instances/'+instance+'/decisions') && r.request().method()==='POST');
+        await desk.getByRole('button',{name:'Record invoice approval decision'}).click();
+        const decided=await outcome;assert.equal(decided.status(),201,await decided.text());
+        assert.equal((await call('/sources/'+serviceBatchId,finance)).body.batch.state,'Approved');
+        await reviewBrowser.context.close();
       }
       const noncharge=await capture({...serviceInput,sourceReference:'SYN-NONCHARGE',quantity:'1',dimensionCode:'CALL'});
       const nonchargeReview=await reviewUnits(noncharge.body.id,'Accepted');

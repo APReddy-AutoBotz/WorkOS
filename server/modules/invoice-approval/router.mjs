@@ -128,13 +128,14 @@ export const createInvoiceBatchApprovalRouter = (o) => {
     ).rows[0];
     if (
       !row ||
-      !['time_and_materials', 'milestone','retainer'].includes(row.model) ||
+      !['time_and_materials', 'milestone','retainer','managed_service'].includes(row.model) ||
       row.origin !== 'manual' ||
       !row.billable ||
       !row.client_id ||
       !row.contract_id
     )
       throw fail(404, 'INVOICE_APPROVAL_SOURCE', 'Scoped billing engagement unavailable.');
+    if (row.model === 'managed_service') await assertCommercialAuthority(c,r,'commercial.service_units.issue');
     if (row.model === 'retainer') await assertCommercialAuthority(c,r,'commercial.retainer_eligibility.issue');
     if (row.model === 'milestone') await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
     return row;
@@ -265,8 +266,8 @@ export const createInvoiceBatchApprovalRouter = (o) => {
   const batch = async (c, r, batchId, lock = false) => {
     const correction=await correctionApprovalBatch(c,r,batchId,lock);
     if(correction) return correction;
-    const model=await approvalBatchModel(c,r,batchId,true);
-    if (model==='milestone' || model==='retainer') return loadMilestoneApprovalBatch(c,r,batchId,lock,model);
+    const model=await approvalBatchModel(c,r,batchId,true,true);
+    if (['milestone','retainer','managed_service'].includes(model)) return loadMilestoneApprovalBatch(c,r,batchId,lock,model);
     const b = (
       await c.query(
         `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state,invoice_batch_source_current(b) current,invoice_batch_lineage_hash(b.id) lineage_hash from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
@@ -357,7 +358,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
   };
   const sourceView = (source) => ({
     id: source.row.id,
-    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(source.row.source_type) ? { sourceType: source.row.source_type } : {}),
+    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(source.row.source_type) ? { sourceType: source.row.source_type } : {}),
     state: source.row.state,
     current: source.row.current,
     currency: source.row.currency,
@@ -375,7 +376,7 @@ export const createInvoiceBatchApprovalRouter = (o) => {
       itemVersion: x.item_version,
       eventId: x.event_id,
       snapshotId: x.snapshot_id,
-      ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
+      ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
       currency: x.currency,
       amount: x.amount,
       evidence: x.billing_evidence,
