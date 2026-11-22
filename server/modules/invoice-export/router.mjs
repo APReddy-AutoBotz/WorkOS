@@ -27,6 +27,7 @@ import { scopedCapacityWorker } from '../planning/worker-capacity-service.mjs';
 import { workApprovalOwner } from '../approvals/work-approval-service.mjs';
 import { invoiceCsvArtifact, INVOICE_CSV_SCHEMA } from './csv.mjs';
 import {invoiceDraftTotal} from '../../../shared/invoice-batch-draft.mjs';
+const FIXED_CSV_SCHEMA='workos.invoice-fixed-fee-csv/2';
 const PERIOD_CSV_SCHEMA='workos.invoice-service-period-csv/1';
 const SERVICE_CSV_SCHEMA='workos.invoice-service-unit-csv/1';
 const RETAINER_CSV_SCHEMA='workos.invoice-retainer-csv/1';
@@ -152,8 +153,8 @@ export const createInvoiceCsvRouter = (o) => {
       }),
     ]);
   const batch = async (c, r, batchId, lock = false) => {
-    const model=await approvalBatchModel(c,r,batchId,true,true,true);
-    if (['milestone','retainer','managed_service','managed_service_period'].includes(model)) return loadMilestoneExportBatch(c,r,batchId,lock,model);
+    const model=await approvalBatchModel(c,r,batchId,true,true,true,true);
+    if (['milestone','retainer','managed_service','managed_service_period','fixed_fee'].includes(model)) return loadMilestoneExportBatch(c,r,batchId,lock,model);
     const b = (
       await c.query(
         `select b.*,b.period_start::text period_start,b.period_end::text period_end,invoice_batch_governed_state(b.id) state from invoice_draft_batches b where b.id=$1 and b.organization_id=$2 and b.legal_entity_id=$3${lock ? ' for update of b' : ''}`,
@@ -193,10 +194,12 @@ export const createInvoiceCsvRouter = (o) => {
   const exportBatch=async(c,r,id,lock=false)=>(await correctionExportBatch(c,r,id,lock)) ?? batch(c,r,id,lock);
   const renderExport=async(c,source)=>{
     switch(source.lines[0]?.sourceType){
+      case 'FIXED_FEE_INSTALLMENT':
       case 'MANAGED_SERVICE_PERIOD':
       case 'MANAGED_SERVICE_UNIT':
       case 'RETAINER_PERIOD': {
         const formats={
+          FIXED_FEE_INSTALLMENT:['fixed_fee_invoice_csv_bytes',FIXED_CSV_SCHEMA],
           MANAGED_SERVICE_PERIOD:['service_period_invoice_csv_bytes',PERIOD_CSV_SCHEMA],
           MANAGED_SERVICE_UNIT:['service_unit_invoice_csv_bytes',SERVICE_CSV_SCHEMA],
           RETAINER_PERIOD:['retainer_invoice_csv_bytes',RETAINER_CSV_SCHEMA],
@@ -314,7 +317,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         batch: {
           id: row.id,
-          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
+          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
           state: row.state,
           clientId: row.client_id,
           contractId: row.contract_id,
@@ -329,7 +332,7 @@ export const createInvoiceCsvRouter = (o) => {
           sourceCurrent: review?.current === true,
           artifactId: stored?.id ?? null,
           lines: source.lines.map((x) =>
-            x.sourceType === 'FULL_LINE_REVERSAL' ? x : ['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(x.sourceType)
+            x.sourceType === 'FULL_LINE_REVERSAL' ? x : ['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(x.sourceType)
               ? {
                   lineId: x.lineId,
                   sequence: x.sequence,
@@ -337,7 +340,7 @@ export const createInvoiceCsvRouter = (o) => {
                   itemVersion: x.itemVersion,
                   eventId: x.eventId,
                   sourceType: x.sourceType,
-                   ...(x.sourceType==='MANAGED_SERVICE_PERIOD'?{reviewId:JSON.parse(x.evidenceJson).reviewId}:x.sourceType==='MANAGED_SERVICE_UNIT'?{evidenceId:JSON.parse(x.evidenceJson).evidenceId,reviewId:JSON.parse(x.evidenceJson).reviewId}:x.sourceType==='RETAINER_PERIOD'?{statementId:JSON.parse(x.evidenceJson).statementId,reviewId:JSON.parse(x.evidenceJson).reviewId}:{milestoneId:JSON.parse(x.evidenceJson).milestoneId}),
+                   ...(x.sourceType==='FIXED_FEE_INSTALLMENT'?{installment:JSON.parse(x.evidenceJson).installment,dueOn:JSON.parse(x.evidenceJson).dueOn}:x.sourceType==='MANAGED_SERVICE_PERIOD'?{reviewId:JSON.parse(x.evidenceJson).reviewId}:x.sourceType==='MANAGED_SERVICE_UNIT'?{evidenceId:JSON.parse(x.evidenceJson).evidenceId,reviewId:JSON.parse(x.evidenceJson).reviewId}:x.sourceType==='RETAINER_PERIOD'?{statementId:JSON.parse(x.evidenceJson).statementId,reviewId:JSON.parse(x.evidenceJson).reviewId}:{milestoneId:JSON.parse(x.evidenceJson).milestoneId}),
                   eligibleDate: x.eligibleDate,
                   currency: x.currency,
                   amount: x.amount,
@@ -372,7 +375,7 @@ export const createInvoiceCsvRouter = (o) => {
             approvalId: uuid,
             finalTransitionId: uuid,
             lineageHash: key,
-            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA,RETAINER_CSV_SCHEMA,SERVICE_CSV_SCHEMA,PERIOD_CSV_SCHEMA]),
+            schemaVersion: z.enum([INVOICE_CSV_SCHEMA, MILESTONE_INVOICE_CSV_SCHEMA,CREDIT_CSV_SCHEMA,RETAINER_CSV_SCHEMA,SERVICE_CSV_SCHEMA,PERIOD_CSV_SCHEMA,FIXED_CSV_SCHEMA]),
             expectedLineCount: z.number().int().min(1).max(1000000),
             expectedTotal: z.union([money,z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/)]),
             reason,
@@ -506,12 +509,13 @@ export const createInvoiceCsvRouter = (o) => {
     MILESTONE_ACCEPTANCE: MILESTONE_INVOICE_CSV_SCHEMA,
     RETAINER_PERIOD: RETAINER_CSV_SCHEMA,
     MANAGED_SERVICE_UNIT: SERVICE_CSV_SCHEMA,
+    FIXED_FEE_INSTALLMENT: FIXED_CSV_SCHEMA,
     MANAGED_SERVICE_PERIOD: PERIOD_CSV_SCHEMA,
     FULL_LINE_REVERSAL: CREDIT_CSV_SCHEMA,
   })[sourceType];
   const confirmationView = (x) => ({
     id: x.id,
-    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
+    ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(x.source_type) ? { sourceType: x.source_type } : {}),
     batchId: x.batch_id,
     artifactId: x.artifact_id,
     artifactVersion: x.artifact_version,
@@ -562,7 +566,7 @@ export const createInvoiceCsvRouter = (o) => {
         ...(await envelope(c, r)),
         source: {
           batchId: row.id,
-          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
+          ...(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(row.source_type) ? { sourceType: row.source_type } : {}),
           state: row.state,
           artifactId: a.id,
           artifactVersion: a.version,
@@ -743,10 +747,10 @@ export const createInvoiceCsvRouter = (o) => {
         ],
         x = (
           await c.query(
-            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(row.source_type)
+            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(row.source_type)
               ? "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id,source_type)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16,$17)returning *,trim_scale(total)::text total"
               : "insert into invoice_batch_confirmations(id,organization_id,legal_entity_id,batch_id,artifact_id,artifact_version,artifact_sha256,currency,total,confirmation_kind,external_reference,actor_id,active_role,request_id,request_fingerprint,reason,operation_id)values($1,$2,$3,$4,$5,$6,$7,$8,$9,'MANUAL_ATTESTATION',$10,$11,$12,$13,$14,$15,$16)returning *,trim_scale(total)::text total",
-            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(row.source_type) ? [...confirmationArgs,row.source_type] : confirmationArgs,
+            ['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(row.source_type) ? [...confirmationArgs,row.source_type] : confirmationArgs,
           )
         ).rows[0];
       await o.audit(c, r, {

@@ -1,5 +1,5 @@
 import { CREDIT_CSV_SCHEMA,verifyCreditCsv,renderCreditCsv } from '../../shared/correction-invoice-csv.mjs';
-import { verifyMilestoneInvoiceCsv,verifyRetainerInvoiceCsv,verifyServiceInvoiceCsv,verifyPeriodInvoiceCsv } from './milestoneInvoiceCsv';
+import { verifyMilestoneInvoiceCsv,verifyRetainerInvoiceCsv,verifyServiceInvoiceCsv,verifyPeriodInvoiceCsv,verifyFixedFeeInvoiceCsv } from './milestoneInvoiceCsv';
 import { validInvoiceConfirmationCommand, validConfirmationTotal } from '../../shared/invoice-billing-confirmation.mjs';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
@@ -14,7 +14,7 @@ const uuid = z.string().uuid(),
   hash = z.string().regex(/^[a-f0-9]{64}$/),
   money = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,4})?$/),
   instant = z.string().refine((x) => Number.isFinite(Date.parse(x))),
-  schema = z.enum(['workos.invoice-tm-csv/1', 'workos.invoice-milestone-csv/1','workos.invoice-retainer-csv/1','workos.invoice-service-unit-csv/1','workos.invoice-service-period-csv/1','workos.invoice-credit-csv/1']),
+  schema = z.enum(['workos.invoice-tm-csv/1', 'workos.invoice-milestone-csv/1','workos.invoice-retainer-csv/1','workos.invoice-service-unit-csv/1','workos.invoice-service-period-csv/1','workos.invoice-fixed-fee-csv/2','workos.invoice-credit-csv/1']),
   envelope = {
     ownerKey: hash,
     actorUserId: uuid,
@@ -87,12 +87,13 @@ const milestoneLine = z
 const retainerLine=milestoneLine.omit({milestoneId:true}).extend({sourceType:z.literal('RETAINER_PERIOD'),statementId:uuid,reviewId:uuid});
 const serviceLine=milestoneLine.omit({milestoneId:true}).extend({sourceType:z.literal('MANAGED_SERVICE_UNIT'),evidenceId:uuid,reviewId:uuid});
 const periodLine=milestoneLine.omit({milestoneId:true}).extend({sourceType:z.literal('MANAGED_SERVICE_PERIOD'),reviewId:uuid});
-const line = z.union([tmLine, milestoneLine,retainerLine,serviceLine,periodLine]);
-const sourceGrant=(sourceType:string)=>sourceType==='MANAGED_SERVICE_PERIOD'?'commercial.service_periods.issue':sourceType==='MANAGED_SERVICE_UNIT'?'commercial.service_units.issue':sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':'commercial.milestone_billing.view';
+const installmentLine=milestoneLine.omit({milestoneId:true}).extend({sourceType:z.literal('FIXED_FEE_INSTALLMENT'),installment:z.number().int().min(1).max(120),dueOn:date});
+const line = z.union([tmLine, milestoneLine,retainerLine,serviceLine,periodLine,installmentLine]);
+const sourceGrant=(sourceType:string)=>sourceType==='FIXED_FEE_INSTALLMENT'?'commercial.fixed_fee_eligibility.issue':sourceType==='MANAGED_SERVICE_PERIOD'?'commercial.service_periods.issue':sourceType==='MANAGED_SERVICE_UNIT'?'commercial.service_units.issue':sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':'commercial.milestone_billing.view';
 const sourceBase = z
   .object({
     id: uuid,
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT']).optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
     clientId: id,
     contractId: id,
@@ -134,6 +135,7 @@ const standardSource=sourceBase.refine((v) => {
               ? v.sourceType === x.sourceType &&
                 hasRatePermission(sourceGrant(x.sourceType)) &&
                 v.periodBasis === 'ELIGIBLE_DATE' &&
+                (x.sourceType!=='FIXED_FEE_INSTALLMENT' || x.dueOn<=x.eligibleDate) &&
                 x.eligibleDate >= v.periodStart &&
                 x.eligibleDate <= v.periodEnd
               : !v.sourceType &&
@@ -202,7 +204,7 @@ export type InvoiceCsvOperation = {
   approvalId: string;
   finalTransitionId: string;
   lineageHash: string;
-  schemaVersion: 'workos.invoice-tm-csv/1' | 'workos.invoice-milestone-csv/1' | 'workos.invoice-credit-csv/1' | 'workos.invoice-retainer-csv/1' | 'workos.invoice-service-unit-csv/1' | 'workos.invoice-service-period-csv/1';
+  schemaVersion: 'workos.invoice-tm-csv/1' | 'workos.invoice-milestone-csv/1' | 'workos.invoice-credit-csv/1' | 'workos.invoice-retainer-csv/1' | 'workos.invoice-service-unit-csv/1' | 'workos.invoice-service-period-csv/1' | 'workos.invoice-fixed-fee-csv/2';
   expectedLineCount: number;
   expectedTotal: string;
   reason: string;
@@ -297,6 +299,10 @@ const checkArtifact = async (a: InvoiceCsvArtifact) => {
     if(digest!==a.sha256) return bad();
     try{verifyCreditCsv(new TextDecoder('utf-8',{fatal:true}).decode(bytes),a);}catch{return bad();}
     return bytes;
+  }
+  if(a.schemaVersion==='workos.invoice-fixed-fee-csv/2') {
+    if(!hasRatePermission('commercial.fixed_fee_eligibility.issue')) return bad();
+    try {return await verifyFixedFeeInvoiceCsv({...a,total:a.total});} catch {return bad();}
   }
   if(a.schemaVersion==='workos.invoice-service-period-csv/1') {
     if(!hasRatePermission('commercial.service_periods.issue')) return bad();
@@ -421,7 +427,7 @@ export type InvoiceNoticeRecoveryOperation = {
 const confirmation = z
   .object({
     id: uuid,
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT']).optional(),
     batchId: uuid,
     artifactId: uuid,
     artifactVersion: z.literal(1),
@@ -451,7 +457,7 @@ const confirmation = z
   });
 const confirmationSource = z
   .object({
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FULL_LINE_REVERSAL','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT']).optional(),
     batchId: uuid,
     state: z.enum(['Exported', 'Billed/Confirmed']),
     artifactId: uuid,
@@ -474,7 +480,7 @@ const confirmationSource = z
 export type InvoiceConfirmationSource = z.infer<typeof confirmationSource>;
 export type InvoiceConfirmation = z.infer<typeof confirmation>;
 export type InvoiceConfirmationOperation = {
-  sourceType?: 'MILESTONE_ACCEPTANCE'|'FULL_LINE_REVERSAL'|'RETAINER_PERIOD'|'MANAGED_SERVICE_UNIT'|'MANAGED_SERVICE_PERIOD';
+  sourceType?: 'MILESTONE_ACCEPTANCE'|'FULL_LINE_REVERSAL'|'RETAINER_PERIOD'|'MANAGED_SERVICE_UNIT'|'MANAGED_SERVICE_PERIOD'|'FIXED_FEE_INSTALLMENT';
   requestId: string;
   batchId: string;
   artifactId: string;
@@ -760,7 +766,7 @@ export const invoiceCsv = {
   confirm: async (op: InvoiceConfirmationOperation, c: RateContext | null, receipt = false) => {
     const { sourceType, ...command } = op;
     if (
-      (sourceType !== undefined && !['FULL_LINE_REVERSAL','MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(sourceType)) ||
+      (sourceType !== undefined && !['FULL_LINE_REVERSAL','MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT'].includes(sourceType)) ||
       (sourceType && sourceType !== 'FULL_LINE_REVERSAL' && !hasRatePermission(sourceGrant(sourceType))) ||
       !validInvoiceConfirmationCommand(command,sourceType)
     )

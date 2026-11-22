@@ -249,7 +249,7 @@ export const CommercialDraftingWorkspace = () => {
   ) ?? [];
   const draftEngagements=[...invoiceEngagements,...(workspace?.engagements.filter(e=>(e.model==='managed_service' && state.context?.canIssueServiceUnits) || (e.model==='fixed_fee' && state.context?.canIssueInstallment) || (e.model==='retainer' && hasRatePermission('commercial.retainer_eligibility.issue')))??[])];
   const periodOnlyEngagements=(workspace?.engagements??[]).filter(e=>e.model==='managed_service' && state.context?.canIssuePeriods && !state.context?.canIssueServiceUnits);
-  const deliveryChoices=[...draftEngagements.filter(e=>e.model!=='fixed_fee'),...periodOnlyEngagements].map(e=>({id:e.id,label:e.name}));
+  const deliveryChoices=[...draftEngagements,...periodOnlyEngagements].map(e=>({id:e.id,label:e.name}));
   const invoiceChoices = invoiceEngagements.map(e => ({ id: e.id, label: e.name }));
   const draft = workspace && state.context?.canManage ? state.draft : undefined;
   const detail = workspace ? state.detail : undefined;
@@ -295,7 +295,7 @@ export const CommercialDraftingWorkspace = () => {
       <InvoiceCsvWorkspace choices={deliveryChoices}/>
       <InvoiceNoticeRecovery choices={deliveryChoices}/>
       <ReviewedInvoiceBatch choices={invoiceChoices}/>
-      <InvoiceBatchApprovalWorkspace choices={[...deliveryChoices,...draftEngagements.filter(e=>e.model==='fixed_fee').map(e=>({id:e.id,label:e.name}))]}/>
+      <InvoiceBatchApprovalWorkspace choices={deliveryChoices}/>
       <InvoiceDraftWorkspace choices={[...draftEngagements.flatMap(x=>x.clientId&&x.contractId&&x.currency?[{id:x.id,label:x.name,clientId:x.clientId,contractId:x.contractId,currency:x.currency,...(x.model==='managed_service'?{sourceType:'MANAGED_SERVICE_UNIT' as const}:x.model==='retainer'?{sourceType:'RETAINER_PERIOD' as const}:x.model==='fixed_fee'?{sourceType:'FIXED_FEE_INSTALLMENT' as const}:x.model==='milestone'?{sourceType:'MILESTONE_ACCEPTANCE' as const}:{})}]:[]),...workspace.engagements.flatMap(x=>x.model==='managed_service' && state.context?.canIssuePeriods && x.clientId && x.contractId && x.currency ? [{id:x.id,label:x.name+' · fixed-period charges',clientId:x.clientId,contractId:x.contractId,currency:x.currency,sourceType:'MANAGED_SERVICE_PERIOD' as const}]:[])]}/>
       <TmBillingEligibilityWorkspace choices={workspace.engagements.filter(x=>x.model==='time_and_materials').map(x=>({id:x.id,label:x.name}))}/>
       <RateCandidates kind="billing" choices={[...workspace.contracts.map(x=>({type:'contract' as const,id:x.id,label:x.number})),...workspace.engagements.map(x=>({type:'engagement' as const,id:x.id,label:x.name}))]}/>

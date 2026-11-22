@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
-import {migrateCommercialDatabase} from './commercial-drafting-test.mjs';
+import {verifyFixedFeeExport} from './fixed-fee-export-journey.mjs';
+import {runMigrations} from '../../server/migrate.mjs';
+import {withCommercialMigrationsThrough,migrateCommercialDatabase} from './commercial-drafting-test.mjs';
 import {randomUUID} from 'node:crypto';
 
 export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext,baseUrl,identities,engagementId,today,draftGrants,grant,createCommand,lineCommand,registered,reversalScenario}) {
   const preparer=identities.reader,reviewer=identities.manager;
   const access=[...draftGrants,grant,'commercial.contracts.manage','commercial.invoice_approval.manage','commercial.invoice_approval.decide','approvals.view'];
+  access.push('commercial.invoice_batch.confirm','reports.export','commercial.invoice_export.view','commercial.invoice_export.create',
+    'commercial.invoice_export.configure','integrations.invoice_alert_routes.manage');
   const roles=[preparer.role,reviewer.role];
   const saved=(await pool.query('select role_name,permission_key,enabled from role_permissions where role_name=any($1) and permission_key=any($2)',[roles,access])).rows;
   const change=async(role,keys,enabled)=>pool.query(`insert into role_permissions(role_name,permission_key,enabled) select $1,k,$3 from unnest($2::text[]) k
@@ -21,9 +25,9 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
         from invoice_draft_batches b join invoice_draft_lines l on l.batch_id=b.id join invoice_draft_occupancies o on o.line_id=l.id
         where b.id=$1`,[batch.id])).rows;
       const prior=await retained();assert.equal(prior.length,1);
-      assert.equal((await migrateCommercialDatabase(pool)).applied[0],'096_wos06_fixed_fee_invoice_approval');
+      await withCommercialMigrationsThrough(96,async rootDir=>assert.deepEqual((await runMigrations({pool,rootDir,logger:{log(){}}})).applied,['096_wos06_fixed_fee_invoice_approval']));
       assert.deepEqual(await retained(),prior);
-      assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
+
     }
     const source=ok(await act('/sources/'+batch.id,preparer),200);
     assert.equal(source.batch.total,'12000');
@@ -71,6 +75,12 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
       await desk.getByRole('button',{name:'Record invoice approval decision'}).click();
       const r=await response;assert.equal(r.status(),201,await r.text());
       assert.equal(ok(await act('/sources/'+batch.id,preparer),200).batch.state,decision==='Approved'?'Approved':'Draft');
+      if (decision==='Approved') {
+        const prior=ok(await act('/sources/'+batch.id,preparer),200).batch;
+        assert.equal((await migrateCommercialDatabase(pool)).applied[0],'097_wos06_fixed_fee_invoice_export');
+        assert.deepEqual(ok(await act('/sources/'+batch.id,preparer),200).batch,prior);
+        await verifyFixedFeeExport({apiRequest,pool,page,engagementId,batchId:batch.id,reviewer,preparer,today,reviewerKey,registered,instance,change,grant});
+      }
       assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1 and batch_id=$2',[registered.itemId,batch.id])).rowCount,1);
     } finally {await browser.context.close();}
   } finally {
