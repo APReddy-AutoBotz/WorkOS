@@ -6,6 +6,7 @@ import { decimalQuantity, formatQuantity } from './work-hours.mjs';
 // currency, conversion, item selection or invoice/export authority.
 export const validInvoiceDraft = (x) =>
   approvalKeys(x, [
+    ...(x?.sourceType==='MANAGED_SERVICE_PERIOD'?['sourceType']:[]),
     'clientId',
     'contractId',
     'engagementId',

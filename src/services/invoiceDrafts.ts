@@ -63,7 +63,7 @@ const batch = z
     reason,
     createdAt: instant,
     ownerCurrent: z.boolean(),
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD']).optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
   })
   .strict()
@@ -71,7 +71,7 @@ const batch = z
     (x) =>
       x.periodStart <= x.periodEnd &&
       (!x.sourceType ||
-        (x.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission(x.sourceType==='MANAGED_SERVICE_UNIT'?'commercial.service_units.issue':x.sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':x.sourceType==='FIXED_FEE_INSTALLMENT'?'commercial.fixed_fee_eligibility.issue':'commercial.milestone_billing.view'))),
+        (x.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission(x.sourceType==='MANAGED_SERVICE_PERIOD'?'commercial.service_periods.issue':x.sourceType==='MANAGED_SERVICE_UNIT'?'commercial.service_units.issue':x.sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':x.sourceType==='FIXED_FEE_INSTALLMENT'?'commercial.fixed_fee_eligibility.issue':'commercial.milestone_billing.view'))),
   );
 const tmLine = z
   .object({
@@ -136,7 +136,10 @@ export const serviceUnitInvoiceEvidence=z.object({evidenceId:uuid,reviewId:uuid,
     unitPrice:z.string().regex(/^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/),billingPrecision:z.number().int().min(0).max(4),rounding:z.literal('HALF_UP'),
     contractLifecycleId:id,engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),reason}).strict();
 const serviceLine=milestoneLine.extend({sourceType:z.literal('MANAGED_SERVICE_UNIT'),evidence:serviceUnitInvoiceEvidence});
-const line = z.union([tmLine, milestoneLine, fixedFeeLine, retainerLine,serviceLine]);
+const periodLine=milestoneLine.extend({sourceType:z.literal('MANAGED_SERVICE_PERIOD'),evidence:z.object({
+  reviewId:uuid,contractVersionId:id,engagementId:id,startsOn:date,endsOn:date,contractLifecycleId:id,contractAmendmentId:id.nullable(),
+  engagementLifecycleId:id,engagementAmendmentId:id.nullable(),reason}).strict()});
+const line = z.union([tmLine, milestoneLine, fixedFeeLine, retainerLine,serviceLine,periodLine]);
 const cancellation = z
     .object({
       id: uuid,
@@ -179,7 +182,8 @@ const checkDetail = (
           l.batchId === x.id &&
           l.sequence === i + 1 &&
           l.currency === x.currency &&
-          ('sourceType' in l && l.sourceType==='MANAGED_SERVICE_UNIT'
+          ('sourceType' in l && l.sourceType==='MANAGED_SERVICE_PERIOD' ? l.evidence.engagementId===x.engagementId && l.evidence.startsOn<=l.evidence.endsOn
+            : 'sourceType' in l && l.sourceType==='MANAGED_SERVICE_UNIT'
             ? l.evidence.engagementId===x.engagementId && l.evidence.priceEffectiveFrom<=l.evidence.serviceDate
             : 'sourceType' in l && l.sourceType==='RETAINER_PERIOD'
             ? l.evidence.engagementId===x.engagementId && l.evidence.startsOn<=l.evidence.endsOn &&
@@ -376,9 +380,9 @@ export const invoiceDrafts = {
     if (!result.success) return bad();
     return result.data;
   },
-  availableRetainerCharges: async(batchId:string,c:RateContext|null,after?:string)=>{
-    if (!uuid.safeParse(batchId).success || !hasRatePermission('commercial.retainer_eligibility.issue')) return bad();
-    const data=await call('GET','/batches/'+batchId+'/available-retainer-charges'+(after?'?after='+encodeURIComponent(after):''),c,'view');
+  availablePeriodCharges: async(batchId:string,c:RateContext|null,after?:string,source:'retainer'|'period'='retainer')=>{
+    if (!uuid.safeParse(batchId).success || !hasRatePermission(source==='period'?'commercial.service_periods.issue':'commercial.retainer_eligibility.issue')) return bad();
+    const data=await call('GET','/batches/'+batchId+(source==='period'?'/available-period-charges':'/available-retainer-charges')+(after?'?after='+encodeURIComponent(after):''),c,'view');
     const result=z.object({...envelope,batchId:z.literal(batchId),nextAfter:uuid.nullable(),
       items:z.array(z.object({id:uuid,startsOn:date,endsOn:date,currency:z.string(),amount}).strict()).max(50)
     }).strict().safeParse(data);
@@ -796,6 +800,7 @@ export const invoiceDrafts = {
           currency: b.currency,
           periodStart: b.periodStart,
           periodEnd: b.periodEnd,
+          ...(def.sourceType!==undefined?{sourceType:b.sourceType}:{}),
           periodBasis: b.periodBasis,
           ownerUserId: b.ownerUserId,
           ownerRole: b.ownerRole,

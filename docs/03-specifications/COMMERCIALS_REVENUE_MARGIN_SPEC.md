@@ -255,3 +255,7 @@ At most one engagement may value a given approved contract-period review. The en
 ## Fixed-period charge eligibility
 
 An authorized finance operator can issue an independently approved period for a billable engagement with matching client, currency, contract and adopted terms throughout that period. The charge uses the exact contractual amount. The issue date must be open for financial activity. A single transaction retains the eligibility event, original decision and dates, contract and engagement lifecycle evidence, register item, operator reason and audit. A second engagement cannot register the same charge.
+
+## Reserve registered service-period charges
+
+Fixed-period drafts use a dedicated source and eligibility-date range. The preparer and owner require invoice and scoped period billing permissions. Each line must reference a whole, unoccupied approved-unbilled item with current approved-period evidence, matching engagement, contract, currency and eligibility date. Cancellation preserves the line and releases its occupancy.
