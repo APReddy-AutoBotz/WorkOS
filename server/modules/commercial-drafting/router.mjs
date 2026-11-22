@@ -1,3 +1,4 @@
+import {effortCostCommand,effortCostGrant,serviceEffortCost} from './service-effort-cost.mjs';
 import {reviewCommand as serviceReviewCommand,reviewGrant as serviceReviewGrant,reviewServiceUnits} from './service-unit-review.mjs';
 import {periodIssueGrant,servicePeriodRegister} from './service-period-eligibility.mjs';
 import {serviceIssueGrant,serviceIssueCommand,serviceUnitRegister} from './service-unit-eligibility.mjs';
@@ -47,7 +48,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if(error?.code==='RBE01')res.status(403).json({error:{code:'RETAINER_REGISTER_DENIED',message:'Current retainer billing authority is required.'}});
+      }else if(error?.code==='MEC01')res.status(403).json({error:{code:'SERVICE_COST_DENIED',message:'Current worker cost authority is required.'}});
+      else if(error?.code==='MEC02' || (permission===effortCostGrant && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_COST_CHANGED',message:'Review accepted effort, the adopted hourly cost and the financial period.'}});
+      else if(error?.code==='RBE01')res.status(403).json({error:{code:'RETAINER_REGISTER_DENIED',message:'Current retainer billing authority is required.'}});
       else if(error?.code==='RBE02' || (permission===retainerIssueGrant && error?.code==='CTM04') || error?.constraint==='retainer_period_billed_once')
         res.status(409).json({error:{code:'COMMERCIAL_REGISTER_CONFLICT',message:'Review source eligibility, financial period and existing charges.'}});
       else if(error?.code==='MSU05')res.status(403).json({error:{code:'SERVICE_REVIEW_DENIED',message:'Independent current worker identities are required.'}});
@@ -113,6 +116,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.get(serviceRegisterPath,handle(workspaceQuerySchema,false,(c,r)=>serviceUnitRegister(c,r)));
   router.post(serviceRegisterPath,handle(serviceIssueCommand,true,(c,r,input)=>serviceUnitRegister(c,r,input,audit),serviceIssueGrant));
   const servicePolicyPath='/engagements/:id/service-valuation-policy';
+  const effortCostPath='/engagements/:id/service-unit-evidence/:evidenceId/effort-cost';
+  router.get(effortCostPath,handle(workspaceQuerySchema,false,(c,r)=>serviceEffortCost(c,r)));
+  router.post(effortCostPath,handle(effortCostCommand,true,(c,r,input)=>serviceEffortCost(c,r,input,audit),effortCostGrant));
   const serviceValuePath='/engagements/:id/service-unit-evidence/:evidenceId/valuation';
   router.get(servicePolicyPath,handle(workspaceQuerySchema,false,(c,r)=>servicePolicy(c,r)));
   router.post(servicePolicyPath,handle(policyCommand,true,(c,r,input)=>servicePolicy(c,r,input,audit),policyGrant));

@@ -212,3 +212,7 @@ Inspect the retained export and select the original line. Request a full reversa
 ## Record effort for delivered service units
 
 In **Record delivered units**, enter **Your effort in hours (optional)** when the delivery has supporting time evidence. Enter actual hours for your own work on the service date, to four decimal places. The receipt and its review history retain the reported hours alongside the delivered quantity.
+
+## Retain worker cost for accepted service effort
+
+Open an accepted unit receipt and choose **Inspect effort cost**. Finance can retain a cost when one adopted hourly rate has the highest priority for that worker, service date and engagement currency. The snapshot shows the hours, rate, effective dates, priority and exact cost. Viewing and recording require separate permissions and access to that worker.

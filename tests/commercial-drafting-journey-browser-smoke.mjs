@@ -1,3 +1,4 @@
+import {adoptHourlyRate} from './support/adopt-hourly-rate.mjs';
 import {verifyRecoveredCredit} from './support/retainer-credit-recovery.mjs';
 import {INVOICE_EXPORT_EVENT_KEYS} from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
@@ -1275,6 +1276,76 @@ const verifyCommercialDrafting = async reversalScenario => {
       await serviceReviewer.context.close();
       const accepted=await reviewUnits(replay.body.id,'Accepted');assert.equal(accepted.status,201,JSON.stringify(accepted.body));
       assert.equal((await reviewUnits(replay.body.id,'Rejected')).status,409);
+      {
+        const path=capturePath+'/'+replay.body.id+'/effort-cost';
+        const captureCost=(body,identity=identities.manager)=>apiRequest(path,{identity,method:'POST',body});
+        const costPermission='commercial.service_cost.record';
+        assert.equal((await apiRequest(path)).status,403);
+        const costGrants=[costPermission,'commercial.service_cost.view','commercial.cost_candidates.manage','commercial.cost_candidates.view','commercial.cost_approvals.decide','employees.view','approvals.view'];
+        await pool.query("insert into role_permissions(role_name,permission_key,enabled) select 'Admin',k,true from unnest($1::text[]) k on conflict(role_name,permission_key) do update set enabled=true",[costGrants]);
+        await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin' on conflict do nothing",[finance.id]);
+        const costReader=()=>apiRequest(path);
+        assert.equal((await apiRequest(path,{scope:{...scope,legalEntityId:'synthetic-unassigned-entity'}})).status,403);
+        assert.deepEqual((await costReader()).body,{snapshot:null,preview:null});
+        assert.equal((await apiRequest(path,{identity:identities.reader})).status,403);
+        const rate=(amount,priority,currency='GBP',effectiveFrom=today)=>adoptHourlyRate({request:apiRequest,ids:{manager:identities.manager,second:{...finance,role:'Admin'}},
+          workerId:ownerId,today,end:future,currency,effectiveFrom},'cost',amount,priority);
+        await rate('20',1,'USD');
+        await rate('40',10,'GBP',future);
+        assert.deepEqual((await costReader()).body,{snapshot:null,preview:null});
+        const first=await rate('10',1);
+        const command={reviewId:accepted.body.id,adoptionId:first.id};
+        assert.equal((await costReader()).body.preview.amount,'6.25');
+        await rate('12',1);
+        assert.equal((await costReader()).body.preview,null);
+        assert.equal((await captureCost(command)).status,409);
+        const adopted=await rate('12.3457',2);
+        assert.equal((await captureCost({...command,adoptionId:adopted.id,amount:'1'})).status,400);
+        await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[costPermission]);
+        assert.equal((await costReader()).body.preview.amount,'7.7160625');
+        assert.equal((await captureCost({...command,adoptionId:adopted.id})).status,403);
+        await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key=$1",[costPermission]);
+        const locked=await pool.connect();
+        try {
+          await locked.query('begin');
+          await locked.query("update reporting_periods set status='Financially Locked' where id='syn-fixed-period'");
+          const id=crypto.randomUUID(),operation=crypto.randomUUID();
+          await locked.query("select set_config('workos.service_effort_cost',$1,true)",[JSON.stringify({id,actor:actorId,operation})]);
+          await assert.rejects(locked.query(`insert into commercial_service_effort_costs(id,organization_id,legal_entity_id,engagement_id,
+            evidence_id,review_id,adoption_id,actor_id,active_role,operation_id) values($1,$2,$3,$4,$5,$6,$7,$8,'Admin',$9)`,
+            [id,scope.organizationId,scope.legalEntityId,serviceEng.body.id,replay.body.id,accepted.body.id,adopted.id,actorId,operation]),err=>err.code==='CTM04');
+        } finally {await locked.query('rollback');locked.release();}
+        await pool.query("create trigger reject_effort_cost_audit before insert on audit_logs for each row when (new.entity_type='Managed Service Effort Cost') execute function reject_test_po_audit()");
+        const failed=await captureCost({...command,adoptionId:adopted.id});
+        assert(failed.status>=500,JSON.stringify(failed.body));
+        assert.equal((await costReader()).body.snapshot,null);
+        await pool.query('drop trigger reject_effort_cost_audit on audit_logs');
+        const operator=await createContext(identities.manager,['commercial.contracts.view',...costGrants]);
+        const costPage=operator.page;
+        await costPage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+        await costPage.getByRole('button',{name:'Inspect SYN-SERVICE',exact:true}).click();
+        await costPage.getByLabel('Service engagement').selectOption(serviceEng.body.id);
+        const costDesk=costPage.getByRole('region',{name:'Service effort cost'});
+        await costDesk.getByRole('button',{name:'Inspect effort cost'}).click();
+        await costDesk.getByText(/Estimated cost · GBP 7.7160625/).waitFor();
+        await costDesk.getByRole('button',{name:'Retain effort cost'}).click();
+        await costDesk.getByText(/Retained cost · GBP 7.7160625/).waitFor();
+        await operator.context.close();
+        const retained=(await costReader()).body.snapshot;
+        assert.deepEqual([retained.reviewId,retained.adoptionId,retained.hourlyRate,retained.hours,retained.amount],[accepted.body.id,adopted.id,'12.3457','0.625','7.7160625']);
+        await rate('35',3);
+        assert.deepEqual((await costReader()).body,{snapshot:retained,preview:null});
+        assert.equal((await captureCost({...command,adoptionId:adopted.id})).body.snapshot.id,retained.id);
+        assert.equal((await captureCost(command)).status,409);
+        assert.equal(retained.priority,2);
+        assert.equal(retained.resolutionRule,'worker-hourly-priority/1');
+        assert.equal((await pool.query("select 1 from audit_logs where entity_id=$1 and new_value ? 'amount'",[retained.id])).rowCount,0);
+        await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='employees.view'");
+        assert.equal((await costReader()).status,404);
+        await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='employees.view'");
+        await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.cost_candidates.view'");
+        assert.equal((await costReader()).status,403);
+      }
       const billPath=id=>capturePath+'/'+id+'/billing';
       const serviceBill=(id,reviewId,opts={})=>apiRequest(billPath(id),{method:'POST',identity:finance,body:{reviewId,reason:'Register verified support shift'},...opts});
       const issueKey='commercial.service_units.issue';

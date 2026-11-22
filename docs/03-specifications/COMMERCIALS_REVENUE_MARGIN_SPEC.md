@@ -275,3 +275,7 @@ Correction review and credit issuance require current permission for the origina
 ### Supporting effort on a service receipt
 
 A recorder may report their own effort on the service date, up to 24 hours with four decimal places. Omitted effort stays unknown. The receipt retains the hours with the verified recorder and worker identity. In receipt history, the active recorder with capture permission and scoped service reviewers can read the effort. A retry must match the original effort, including whether it was supplied. Approved timesheet hours, service valuation and billing keep their existing independent evidence sources.
+
+### Worker cost on accepted service effort
+
+The source rule `worker-hourly-priority/1` selects a single highest-priority adopted hourly cost for the recorded worker, the service date and the engagement currency. An accepted receipt with recorded effort and current recorder/reviewer identities is required for a new snapshot. The snapshot retains the candidate, adoption, review, rate, priority, effective dates, currency, hours and their exact product. No rounding is applied to this supporting input. Financial statements and period reports can apply their own governed presentation rules. The financial period must permit a new snapshot. A later adoption or rate tie preserves the original cost.

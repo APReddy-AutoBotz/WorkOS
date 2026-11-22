@@ -1,8 +1,18 @@
+import {z} from 'zod';
 import {validServiceEffort} from '../../shared/service-unit-effort.mjs';
-import {canonicalHours} from '../../shared/work-hours.mjs';
+import {canonicalHours,decimalQuantity,formatQuantity} from '../../shared/work-hours.mjs';
 import {authService} from './authService';
 import {api, ApiClientError, getOrganizationScope, getToken, type ApiRequestContext} from './apiClient';
 import {getEffectivePermissions} from './permissions';
+
+const costSource=z.object({
+  evidenceId:z.string().uuid(),reviewId:z.string().uuid(),adoptionId:z.string().uuid(),candidateId:z.string().uuid(),
+  effectiveFrom:z.string().date(),effectiveTo:z.string().date(),serviceDate:z.string().date(),currency:z.string().regex(/^[A-Z]{3}$/),
+  priority:z.number().int().min(0).max(1000),resolutionRule:z.literal('worker-hourly-priority/1'),
+  hours:z.string().refine(validServiceEffort),hourlyRate:z.string().regex(/^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/),
+  amount:z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,8})?$/),
+}).strict();
+const costState=z.object({snapshot:costSource.extend({id:z.string().uuid()}).nullable(),preview:costSource.nullable()}).strict();
 
 export const COMMERCIAL_CONTRACT_MODELS = ['time_and_materials', 'fixed_fee', 'milestone', 'retainer', 'managed_service'] as const;
 export const ENGAGEMENT_MODELS = [...COMMERCIAL_CONTRACT_MODELS, 'internal', 'pre_sales'] as const;
@@ -65,7 +75,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -87,6 +97,8 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
+    canRecordEffortCost:permissions.includes('commercial.service_cost.record'),
+    canViewEffortCost:['commercial.service_cost.view','commercial.cost_candidates.view','employees.view'].every(k=>permissions.includes(k)),
     canValueUnits: permissions.includes('commercial.service_units.value'),
     canValuePeriods: permissions.includes('commercial.service_periods.value'),
     canIssuePeriods: permissions.includes('commercial.service_periods.issue'),
@@ -383,6 +395,20 @@ export const commercialDraftingService = {
       policyId?{policyId}:undefined,v=>{
         if (policyId) return {valuation:receipt(v),policy:null};
         const r=object(v); return {valuation:r.valuation===null?null:receipt(r.valuation),policy:r.policy===null?null:unitPolicy(r.policy)};
+      },false);
+  },
+  effortCost(eng:string,id:string,reviewId:string,c:CommercialDraftingContext,adoptionId?:string) {
+    if (!assertCommercialDraftingContext(c).canViewEffortCost || (adoptionId && !c.canRecordEffortCost)) throw new ApiClientError('Worker cost access changed.',{status:403});
+    return request(c,adoptionId?'POST':'GET','/engagements/'+encodeURIComponent(eng)+'/service-unit-evidence/'+encodeURIComponent(id)+'/effort-cost',
+      adoptionId?{reviewId,adoptionId}:undefined,v=>{
+        const state=costState.parse(v),source=state.snapshot??state.preview;
+        if (state.snapshot && state.preview || adoptionId && state.snapshot?.adoptionId!==adoptionId) throw invalid();
+        if (source) {
+          const h=decimalQuantity(source.hours),r=decimalQuantity(source.hourlyRate);
+          if (source.evidenceId!==id || source.reviewId!==reviewId || source.effectiveFrom>source.serviceDate || source.effectiveTo<source.serviceDate ||
+              source.amount!==formatQuantity({units:h.units*r.units,scale:h.scale+r.scale})) throw invalid();
+        }
+        return state;
       },false);
   },
   servicePolicy(eng:string,c:CommercialDraftingContext) {
