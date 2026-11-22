@@ -1233,6 +1233,7 @@ const verifyCommercialDrafting = async reversalScenario => {
         const unitOwnerCheck=await pool.connect();
         try {
           await unitOwnerCheck.query('begin');
+          await unitOwnerCheck.query('set constraints all immediate');
           await unitOwnerCheck.query('update role_permissions set enabled=false where role_name=$1 and permission_key=$2',[reviewRole,issueKey]);
           await unitOwnerCheck.query('update role_permissions set enabled=true where role_name=$1 and permission_key=$2',[reviewRole,issueKey]);
           assert.equal((await unitOwnerCheck.query('select 1 from invoice_draft_owner_losses where batch_id=$1',[serviceBatchId])).rowCount,1);
