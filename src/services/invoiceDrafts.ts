@@ -118,7 +118,7 @@ const milestoneLine = z
     createdAt: instant,
   })
   .strict();
-const fixedFeeLine = milestoneLine.extend({
+export const fixedFeeLine = milestoneLine.extend({
   sourceType:z.literal('FIXED_FEE_INSTALLMENT'),
   evidence:z.object({sourceVersion:z.literal(1),contractVersionId:id,installment:z.number().int().min(1).max(120),
     dueOn:date,currency:z.string().regex(/^[A-Z]{3}$/),amount,engagementId:id,contractLifecycleId:id,

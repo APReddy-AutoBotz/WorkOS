@@ -1,4 +1,4 @@
-import {retainerInvoiceEvidence,serviceUnitInvoiceEvidence,servicePeriodInvoiceEvidence} from './invoiceDrafts';
+import {fixedFeeLine,retainerInvoiceEvidence,serviceUnitInvoiceEvidence,servicePeriodInvoiceEvidence} from './invoiceDrafts';
 import { milestoneInvoiceEvidence, milestoneEvidenceMatches } from './milestoneInvoiceContracts';
 import { z } from 'zod';
 import {
@@ -81,11 +81,12 @@ const milestoneLine = z
 const retainerLine=milestoneLine.extend({sourceType:z.literal('RETAINER_PERIOD'),evidence:retainerInvoiceEvidence});
 const serviceLine=milestoneLine.extend({sourceType:z.literal('MANAGED_SERVICE_UNIT'),evidence:serviceUnitInvoiceEvidence});
 const periodLine=milestoneLine.extend({sourceType:z.literal('MANAGED_SERVICE_PERIOD'),evidence:servicePeriodInvoiceEvidence});
-const line = z.union([tmLine, milestoneLine, retainerLine,serviceLine,periodLine]);
+const installmentLine=milestoneLine.extend({sourceType:z.literal('FIXED_FEE_INSTALLMENT'),evidence:fixedFeeLine.shape.evidence});
+const line = z.union([tmLine, milestoneLine, retainerLine,serviceLine,periodLine,installmentLine]);
 const sourceBase = z
   .object({
     id: uuid,
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT']).optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
     current: z.boolean(),
     currency: z.string().regex(/^[A-Z]{3}$/),
@@ -107,7 +108,7 @@ const standardSource=sourceBase.refine((v) => {
       return (
         v.lines.every((x) => ('sourceType' in x ? x.sourceType : undefined) === v.sourceType) &&
         (!v.sourceType ||
-          (v.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission(v.sourceType==='MANAGED_SERVICE_PERIOD'?'commercial.service_periods.issue':v.sourceType==='MANAGED_SERVICE_UNIT'?'commercial.service_units.issue':v.sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':'commercial.milestone_billing.view'))) &&
+          (v.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission(v.sourceType==='FIXED_FEE_INSTALLMENT'?'commercial.fixed_fee_eligibility.issue':v.sourceType==='MANAGED_SERVICE_PERIOD'?'commercial.service_periods.issue':v.sourceType==='MANAGED_SERVICE_UNIT'?'commercial.service_units.issue':v.sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':'commercial.milestone_billing.view'))) &&
         v.periodStart <= v.periodEnd &&
         sum.lineCount === v.lineCount &&
         canonicalHours(sum.amount) === canonicalHours(v.total) &&
@@ -115,7 +116,9 @@ const standardSource=sourceBase.refine((v) => {
           (x, n) =>
             x.sequence === n + 1 &&
             x.currency === v.currency &&
-            ('sourceType' in x && x.sourceType==='MANAGED_SERVICE_PERIOD' ? x.evidence.engagementId===v.engagementId && x.evidence.startsOn<=x.evidence.endsOn
+            ('sourceType' in x && x.sourceType==='FIXED_FEE_INSTALLMENT'
+              ? x.evidence.engagementId===v.engagementId && x.evidence.currency===v.currency && canonicalHours(x.evidence.amount)===canonicalHours(x.amount)
+              : 'sourceType' in x && x.sourceType==='MANAGED_SERVICE_PERIOD' ? x.evidence.engagementId===v.engagementId && x.evidence.startsOn<=x.evidence.endsOn
               : 'sourceType' in x && x.sourceType==='MANAGED_SERVICE_UNIT'
               ? x.evidence.engagementId===v.engagementId && x.evidence.priceEffectiveFrom<=x.evidence.serviceDate
               : 'sourceType' in x && x.sourceType==='RETAINER_PERIOD'

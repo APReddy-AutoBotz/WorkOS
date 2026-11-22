@@ -226,4 +226,6 @@ WOS-COM-010 now compares accepted service effort with approved work by reference
 
 WOS-COM-011 now retains managed-service calendar-month versions for approved hours, net registered billable value, supporting worker cost, gross margin and margin percentage. Missing evidence remains visible. Each version retains its source membership and exact amounts. Cross-engagement portfolio reporting, other models’ remaining policy coverage and launch acceptance remain open.
 
-WOS-COM-007 and WOS-INV-001/003 now require retained, distinct worker identities for fixed-fee installment registration, command retries and invoice reservations. The register exposes the identity status of historical charges. Named invoice-batch approval, export and correction for fixed-fee installments remain open.
+WOS-COM-007 and WOS-INV-001/003 now require retained, distinct worker identities for fixed-fee installment registration, command retries and invoice reservations. The register exposes the identity status of historical charges.
+
+Fixed-fee invoice batches now support named independent review under WOS-INV-002/003/006/008. Submission binds the exact reserved installment lines, amounts and effective policy. Each decision checks current identity, scope and original installment evidence. Fixed-fee export, downstream confirmation and correction remain open.
