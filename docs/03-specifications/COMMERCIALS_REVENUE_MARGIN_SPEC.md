@@ -299,3 +299,9 @@ Migration 095 classifies existing approvals using observed worker-link history. 
 ### Fixed-fee invoice-batch approval
 
 A fixed-fee invoice batch uses the engagement’s effective named-review policy and eligible-date basis. Policy managers, submitters, preparers, owners and named reviewers need authority over fixed-fee installments in the selected legal entity and the permissions for their respective invoice roles. Every reviewer represents an active worker independent from the requester, preparer, owner and other review stages. Submission pins the policy, line count, lineage, currency and total. Approval and rejection revalidate current worker identities and source reservations, including the author and approver of the underlying installments. Rejection preserves occupancy while returning the batch to Draft. Final approval advances the batch to Approved.
+
+### Fixed-fee installment export and confirmation
+
+Only a currently approved batch with occupied, verified installment lines may produce a fixed-fee artifact. The versioned schema `workos.invoice-fixed-fee-csv/2` carries the original contract version and full installment evidence in encoded text columns, the eligibility event and version, register item and version, batch line, eligible date, currency and amount. The exporter checks the pinned approval, reviewer identities, retained lines and total at commit. The download verifier checks the SHA-256 checksum, row order, schema, installment reference, due date, currency and exact amount against the control total.
+
+Creating and retrieving an artifact require their respective export permissions and current fixed-fee source access. A manual downstream confirmation requires the retained artifact ID, version, checksum, currency, total and the external billing reference. Successful export and confirmation keep each installment occupied.

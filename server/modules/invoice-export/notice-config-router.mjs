@@ -81,6 +81,7 @@ export const createInvoiceNoticeConfigRouter = (o) => {
         await assertCommercialAuthority(c,r,'commercial.service_periods.issue');
       }
     }
+    if (e?.model==='fixed_fee') await assertCommercialAuthority(c,r,'commercial.fixed_fee_eligibility.issue');
     if (e?.model==='retainer') await assertCommercialAuthority(c,r,'commercial.retainer_eligibility.issue');
     if (e?.model === 'milestone') await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
   };

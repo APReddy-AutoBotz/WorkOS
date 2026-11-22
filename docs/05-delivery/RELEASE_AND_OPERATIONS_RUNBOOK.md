@@ -766,3 +766,9 @@ Migration 095 preserves the original charges and records verifiable historical i
 ## Recover a fixed-fee batch review
 
 Inspect the named reviewer, engagement, reserved installments, expected total and current review state under **Invoice batch approvals**. If a review is stale, check each original installment’s identity status and the current worker links and grants for all participants. Inspect the existing decision after a lost acknowledgement before retrying. Rejection leaves the lines reserved for revision. During application rollback, suspend new fixed-fee review requests and decisions and preserve migration 096, the policy, review history and occupancy records.
+
+## Recover a fixed-fee export or confirmation
+
+Inspect the approved batch, verify its installment dates and amounts, and confirm the export notice policy for the engagement. Download the retained artifact after a lost acknowledgement. For downstream billing confirmation, use the reference from the billing system and check the retained file’s checksum, version, currency and total. An unavailable historical file requires verification of current fixed-fee and artifact-read permissions. Preserve financial history and reservations during recovery.
+
+Migration 097 adds fixed-fee export and confirmation support. On application rollback, suspend new fixed-fee exports and confirmations until a compatible version is restored. Preserve the migration, artifact bytes, checksums and confirmation receipts.

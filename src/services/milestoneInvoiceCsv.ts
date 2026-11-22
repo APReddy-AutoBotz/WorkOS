@@ -1,4 +1,4 @@
-import {retainerInvoiceEvidence,serviceUnitInvoiceEvidence,servicePeriodInvoiceEvidence} from './invoiceDrafts';
+import {fixedFeeLine,retainerInvoiceEvidence,serviceUnitInvoiceEvidence,servicePeriodInvoiceEvidence} from './invoiceDrafts';
 import { z } from 'zod';
 import { invoiceDraftTotal } from '../../shared/invoice-batch-draft.mjs';
 import { canonicalHours } from '../../shared/work-hours.mjs';
@@ -33,6 +33,7 @@ type ArtifactMetadata = {
 const contractFormats = {
   milestone: { schema: 'workos.invoice-milestone-csv/1', header, source: 'MILESTONE_ACCEPTANCE' },
   retainer: { schema: 'workos.invoice-retainer-csv/1', header: header.replace('milestone_id_b64', 'statement_id') + ',event_version', source: 'RETAINER_PERIOD' },
+  fixed_fee: {schema:'workos.invoice-fixed-fee-csv/2',header:header.replace('milestone_id_b64','contract_version_id_b64')+',event_version',source:'FIXED_FEE_INSTALLMENT'},
   service_period: { schema:'workos.invoice-service-period-csv/1', header: header.replace('milestone_id_b64','period_review_id')+',event_version', source:'MANAGED_SERVICE_PERIOD' },
   service_unit: { schema: 'workos.invoice-service-unit-csv/1', header: header.replace('milestone_id_b64', 'evidence_id') + ',event_version', source: 'MANAGED_SERVICE_UNIT' },
 } as const;
@@ -92,7 +93,11 @@ const verifyContractCsv = async (a: ArtifactMetadata, kind: keyof typeof contrac
     seen.add(c[4]);
     const rawEvidence=JSON.parse(field(c[9])),client=field(c[10]),contract=field(c[11]),engagement=field(c[12]);
     if (![client,contract,engagement].every(value=>id.safeParse(value).success)) throw Error('Invalid contract scope');
-    if (kind === 'service_period') {
+    if (kind === 'fixed_fee') {
+      const e=fixedFeeLine.shape.evidence.parse(rawEvidence);
+      if (e.contractVersionId!==field(c[8]) || e.engagementId!==engagement || e.dueOn>c[13] ||
+          e.currency!==c[14] || canonicalHours(e.amount)!==canonicalHours(c[15])) throw Error('Installment evidence mismatch');
+    } else if (kind === 'service_period') {
       const e=servicePeriodInvoiceEvidence.extend({contractualAmount:money,contractualCurrency:z.string().regex(/^[A-Z]{3}$/)}).parse(rawEvidence);
       if (e.reviewId!==c[8] || e.engagementId!==engagement || e.startsOn>e.endsOn || e.endsOn>=c[13] ||
           e.contractualCurrency!==c[14] || canonicalHours(e.contractualAmount)!==canonicalHours(c[15]))
@@ -130,4 +135,5 @@ export const verifyRetainerInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,
 
 export const verifyServiceInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,'service_unit');
 
+export const verifyFixedFeeInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,'fixed_fee');
 export const verifyPeriodInvoiceCsv=(a:ArtifactMetadata)=>verifyContractCsv(a,'service_period');
