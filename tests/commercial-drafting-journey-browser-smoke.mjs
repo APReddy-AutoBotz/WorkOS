@@ -485,7 +485,9 @@ const verifyCommercialDrafting = async reversalScenario => {
       const configPost=(path,body)=>apiRequest(notice+path,{method:'POST',identity:finance,body:{...body,expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),reason:'Synthetic export notice configuration'}});
       const route=await configPost('/routes',{routeKey:crypto.randomUUID(),expectedLatestId:null,label:'Synthetic export notices '+sourceType,active:true});
       assert.equal(route.status,201,JSON.stringify(route.body));
-      const notify=await configPost('/policies',{expectedLatestId:null,effectiveFrom:today,definition:{entityType:'InvoiceExport',engagementId:engagementId,
+      const policies=await apiRequest(notice+'/policies?engagementId='+engagementId,{identity:finance});
+      assert.equal(policies.status,200,JSON.stringify(policies.body));
+      const notify=await configPost('/policies',{expectedLatestId:policies.body.policies.at(-1)?.id??null,effectiveFrom:today,definition:{entityType:'InvoiceExport',engagementId:engagementId,
         financeOwner:{userId:finance.id,role:reviewRole},integrationAdmin:{userId:identities.manager.id,role:'Admin'},alertRouteId:route.body.route.id,
         locale:'en-US',templates:INVOICE_EXPORT_EVENT_KEYS.map(key=>({key,subject:'Invoice {{sourceRef}}',body:'Synthetic status {{sourceRef}}'})),completionInApp:true}});
       assert.equal(notify.status,201,JSON.stringify(notify.body));
@@ -528,25 +530,44 @@ const verifyCommercialDrafting = async reversalScenario => {
         [itemId,eventId,sourceId,reviewId,amount,'1']);
       assert.equal((await apiRequest(csv+'/artifacts/'+a.id,{identity:identities.reader})).status,403);
       assert.equal((await pool.query('select count(*)::int n from invoice_draft_occupancies where batch_id=$1',[batchId])).rows[0].n,1);
-      if (sourceType==='MANAGED_SERVICE_UNIT') {
+      if (['MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD'].includes(sourceType)) {
         const rejected=await csvBrowser.page.evaluate(async artifact=>{
-          const {verifyServiceInvoiceCsv}=window;
+          const period=artifact.schemaVersion==='workos.invoice-service-period-csv/1';
+          const verify=period?window.verifyPeriodInvoiceCsv:window.verifyServiceInvoiceCsv;
           const records=atob(artifact.payloadBase64).split('\r\n');
           const columns=records[1].split(',');
           const evidence=JSON.parse(atob(columns[9].slice(4)));
-          evidence.unitPrice='0.0001';
+          if(period) evidence.contractualAmount='0.0001';
+          else evidence.unitPrice='0.0001';
           columns[9]='b64:'+btoa(JSON.stringify(evidence));
           records[1]=columns.join(',');
           const payload=records.join('\r\n');
           const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(payload));
           const sha256=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
           const outcomes=await Promise.allSettled([
-            verifyServiceInvoiceCsv({...artifact,sha256:'0'.repeat(64)}),
-            verifyServiceInvoiceCsv({...artifact,payloadBase64:btoa(payload),sha256})
+            verify({...artifact,sha256:'0'.repeat(64)}),
+            verify({...artifact,payloadBase64:btoa(payload),sha256})
           ]);
           return outcomes.map(result=>result.status==='rejected'?result.reason.message:'accepted');
         },a);
-        assert.deepEqual(rejected,['Checksum mismatch','Service charge evidence mismatch']);
+        assert.deepEqual(rejected,['Checksum mismatch',sourceType==='MANAGED_SERVICE_PERIOD'?'Fixed-period contract evidence mismatch':'Service charge evidence mismatch']);
+      }
+      if (sourceType==='MANAGED_SERVICE_PERIOD') {
+        const connection=await pool.connect();
+        try {
+          await connection.query('begin');
+          const changed=await connection.query('update users set employee_record_id=null where id=(select author_id from commercial_service_period_reviews where id=$1) and id<>$2',[reviewId,finance.id]);
+          assert.equal(changed.rowCount,1);
+          const check=()=>connection.query(`select invoice_source_line_visible(l.organization_id,l.legal_entity_id,l.batch_id,l.item_id,$2,$3) as current,
+            invoice_source_historical_visible(l.organization_id,l.legal_entity_id,l,$2,$3) as historical from invoice_draft_lines l where l.batch_id=$1`,
+            [batchId,finance.id,reviewRole]);
+          assert.deepEqual((await check()).rows,[{current:false,historical:true}]);
+          await connection.query("update role_permissions set enabled=false where role_name=$1 and permission_key='commercial.service_periods.issue'",[reviewRole]);
+          assert.deepEqual((await check()).rows,[{current:false,historical:false}]);
+        } finally {
+          await connection.query('rollback');
+          connection.release();
+        }
       }
       const noticeEvents=await pool.query(
         "select id from invoice_export_notice_events where batch_id=$1 and artifact_id=$2 and event_key='invoice_batch.exported_or_billed_confirmed'",
@@ -1068,6 +1089,10 @@ const verifyCommercialDrafting = async reversalScenario => {
         periodApprovalId=instance;
         await approveServiceBatchInBrowser({reviewer,sourceGrant:periodIssueGrant,engagementId:serviceEng.body.id,instance,reviewId:periodReview.id});
         assert.equal((await call('/sources/'+serviceBatchId,finance)).body.batch.state,'Approved');
+        const delivery=await verifyInvoiceExport({engagementId:serviceEng.body.id,batchId:serviceBatchId,ownerKey:key,instance,
+          permissions:[issueGrant,periodIssueGrant],schema:'workos.invoice-service-period-csv/1',amount:'100.025',itemId:issuedPeriod.itemId,eventId:issuedPeriod.eventId,
+          sourceId:periodReview.id,reviewId:periodReview.id,sourceLabel:/fixed-period source/,sourceType:'MANAGED_SERVICE_PERIOD'});
+        await delivery.csvBrowser.context.close();
         await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[periodIssueGrant]);
       }
       await pool.query("update role_permissions set enabled=false where role_name='HR' and permission_key=$1",[periodIssueGrant]);

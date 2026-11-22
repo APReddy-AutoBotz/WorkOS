@@ -74,7 +74,13 @@ export const createInvoiceNoticeConfigRouter = (o) => {
         [...scope(r), engagementId],
       )
     ).rows[0];
-    if (e?.model==='managed_service') await assertCommercialAuthority(c,r,'commercial.service_units.issue');
+    if (e?.model==='managed_service') {
+      try { await assertCommercialAuthority(c,r,'commercial.service_units.issue'); }
+      catch (err) {
+        if (err.code!=='COMMERCIAL_PERMISSION_DENIED') throw err;
+        await assertCommercialAuthority(c,r,'commercial.service_periods.issue');
+      }
+    }
     if (e?.model==='retainer') await assertCommercialAuthority(c,r,'commercial.retainer_eligibility.issue');
     if (e?.model === 'milestone') await assertCommercialAuthority(c, r, 'commercial.milestone_billing.view');
   };

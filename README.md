@@ -200,3 +200,7 @@ In **Invoice-ready draft batches**, choose the engagement option labelled **fixe
 ## Approve a fixed-period invoice batch
 
 In **Invoice batch approvals**, select the engagement and inspect the draft. Submit its exact total and retained lines under the effective approval policy. Each named reviewer can inspect the contract version, period dates and original period decision before recording a decision.
+
+## Export and confirm an approved fixed-period batch
+
+Select the approved batch in **Invoice CSV export** and choose **Fixed-period CSV v1**. The downloaded CSV includes the period decision, original contract version, eligibility date and exact native-currency amount. After the downstream system accepts it, use **Invoice billing confirmation** to record its reference against the retained artifact.
