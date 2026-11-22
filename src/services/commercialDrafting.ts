@@ -75,7 +75,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -97,6 +97,9 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
+    canViewServiceMargin:!['Employee','TeamLead','ProjectManager','CountryDirector'].includes(user.role) &&
+      ['commercial.service_margin.view','commercial.service_cost.view','commercial.cost_candidates.view','employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
+    canRetainServiceMargin:permissions.includes('commercial.service_margin.record'),
     canReconcileEffort:['commercial.service_units.decide','employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
     canRecordEffortCost:permissions.includes('commercial.service_cost.record'),
     canViewEffortCost:['commercial.service_cost.view','commercial.cost_candidates.view','employees.view'].every(k=>permissions.includes(k)),
@@ -387,6 +390,24 @@ export const commercialDraftingService = {
           r.currency!==version.currency || canonical(amount)!==canonical(term.amount) || (command && (decision!==command.decision || reason!==command.reason.trim()))) throw invalid();
       return {id:text(r.id),decision,reason};
     },false);
+  },
+  serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string}={}) {
+    if (!assertCommercialDraftingContext(context).canViewServiceMargin || (options.expectedToken && !context.canRetainServiceMargin)) throw invalid();
+    const query=new URLSearchParams({monthStart});
+    if (options.version) query.set('version',String(options.version));
+    const path=serviceEngPath(eng)+'/service-period-margin';
+    return request(context,options.expectedToken?'POST':'GET',options.expectedToken?path:path+'?'+query,
+      options.expectedToken?{monthStart,expectedToken:options.expectedToken}:undefined,value=>{
+        const r=object(value), p=object(r.report);
+        if (r.engagementId!==eng || r.monthStart!==monthStart || p.calculationVersion!=='managed-service-month/1' ||
+          !/^[A-Z]{3}$/.test(text(p.currency)) || !/^[0-9a-f]{64}$/.test(text(r.token))) throw invalid();
+        const exact=(v:unknown)=>{const s=text(v);if (!/^-?(0|[1-9]\d*)(\.\d+)?$/.test(s)) throw invalid();return s;};
+        return {version:r.version===null?null:integer(r.version,1),latestVersion:integer(r.latestVersion),token:text(r.token),
+          currency:text(p.currency),billable:exact(p.billable),cost:exact(p.retainedCost),margin:p.margin===null?null:exact(p.margin),
+          percent:p.marginPercent===null?null:exact(p.marginPercent),hours:exact(p.approvedHours),entries:integer(p.approvedEntries),
+          verified:integer(p.verifiedEntries),pending:integer(p.pending),missing:integer(p.missingCosts),unresolved:integer(p.unresolvedReceipts),
+          receipts:z.array(z.unknown()).parse(p.receipts).length,billingEvents:z.array(z.string().uuid()).parse(p.billingEvents).length};
+      },false);
   },
   reconcileEffort(eng:string,id:string,c:CommercialDraftingContext) {
     if (!assertCommercialDraftingContext(c).canReconcileEffort) throw invalid();

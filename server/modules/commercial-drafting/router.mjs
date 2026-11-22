@@ -1,3 +1,4 @@
+import {marginQuery,marginCommand,marginRecordGrant,servicePeriodMargin} from './service-period-margin.mjs';
 import {reconcileServiceEffort} from './service-effort-reconciliation.mjs';
 import {effortCostCommand,effortCostGrant,serviceEffortCost} from './service-effort-cost.mjs';
 import {reviewCommand as serviceReviewCommand,reviewGrant as serviceReviewGrant,reviewServiceUnits} from './service-unit-review.mjs';
@@ -49,7 +50,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       if(begun)await client.query('rollback').catch(()=>{});
       if(error instanceof CommercialDraftError || ['ORG_SCOPE_DENIED','ORG_SCOPE_UNAVAILABLE','RATE_AUTHORITY'].includes(error?.code)){
         res.status(error.statusCode||403).json({error:{code:error.code,message:error.message}});
-      }else if(error?.code==='MEC01')res.status(403).json({error:{code:'SERVICE_COST_DENIED',message:'Current worker cost authority is required.'}});
+      }else if(error?.code==='MGM01')res.status(403).json({error:{code:'MARGIN_DENIED',message:'Current reporting authority is required.'}});
+      else if(error?.code==='MGM02')res.status(409).json({error:{code:'MARGIN_CHANGED',message:'Inspect the current period again.'}});
+      else if(error?.code==='MEC01')res.status(403).json({error:{code:'SERVICE_COST_DENIED',message:'Current worker cost authority is required.'}});
       else if(error?.code==='MEC02' || (permission===effortCostGrant && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_COST_CHANGED',message:'Review accepted effort, the adopted hourly cost and the financial period.'}});
       else if(error?.code==='RBE01')res.status(403).json({error:{code:'RETAINER_REGISTER_DENIED',message:'Current retainer billing authority is required.'}});
       else if(error?.code==='RBE02' || (permission===retainerIssueGrant && error?.code==='CTM04') || error?.constraint==='retainer_period_billed_once')
@@ -118,6 +121,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post(serviceRegisterPath,handle(serviceIssueCommand,true,(c,r,input)=>serviceUnitRegister(c,r,input,audit),serviceIssueGrant));
   const servicePolicyPath='/engagements/:id/service-valuation-policy';
   router.get('/engagements/:id/service-unit-evidence/:evidenceId/reconciliation',handle(workspaceQuerySchema,false,(c,r)=>reconcileServiceEffort(c,r,buildEmployeeScopeWhere)));
+  const marginPath='/engagements/:id/service-period-margin';
+  router.get(marginPath,handle(marginQuery,false,(c,r,input)=>servicePeriodMargin(c,r,input,buildEmployeeScopeWhere)));
+  router.post(marginPath,handle(marginCommand,true,(c,r,input)=>servicePeriodMargin(c,r,input,buildEmployeeScopeWhere,audit),marginRecordGrant,true));
   const effortCostPath='/engagements/:id/service-unit-evidence/:evidenceId/effort-cost';
   router.get(effortCostPath,handle(workspaceQuerySchema,false,(c,r)=>serviceEffortCost(c,r)));
   router.post(effortCostPath,handle(effortCostCommand,true,(c,r,input)=>serviceEffortCost(c,r,input,audit),effortCostGrant));

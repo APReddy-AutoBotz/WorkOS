@@ -1,3 +1,4 @@
+import {ServicePeriodMargin} from './ServicePeriodMargin';
 import {ServiceEffortCost} from './ServiceEffortCost';
 import {ServiceUnitBilling} from './ServiceUnitBilling';
 import {ServicePolicyEditor,ServiceValueReceipt} from './ServiceValuation';
@@ -107,5 +108,5 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
       {history.before && <button type="button" disabled={pending} onClick={()=>void loadHistory(engagementId,history.before)}>Older evidence</button>}
     </section>}
     {message && <p role="status">{message}</p>}
-  </form>{engagementId && context.canSetServicePolicy && <div key={engagementId}><ServicePolicyEditor context={context} engagement={engagementId} today={today}/></div>}</>;
+  </form>{engagementId && context.canViewServiceMargin && <div key={context.identityKey+engagementId}><ServicePeriodMargin context={context} engagement={engagementId} today={today}/></div>}{engagementId && context.canSetServicePolicy && <div key={engagementId}><ServicePolicyEditor context={context} engagement={engagementId} today={today}/></div>}</>;
 }

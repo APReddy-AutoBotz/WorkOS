@@ -1117,6 +1117,11 @@ const verifyCommercialDrafting = async reversalScenario => {
         await verifyCorrection({exported:delivery,engagementId:serviceEng.body.id,ownerKey:key,batchId:serviceBatchId,
           lineId:reservedPeriod.rebatched.body.line.id,policyId:periodPolicyId,original:issuedPeriod,sourceType:'MANAGED_SERVICE_PERIOD',amount:'100.025',act:call,
           reviewerKey:(await call('/sources/'+serviceBatchId,reviewer)).body.ownerKey,secondKey:(await call('/sources/'+serviceBatchId,alias)).body.ownerKey});
+        const periodReport=(await pool.query('select service_margin_report($1,$2,$3,$4) report',
+          [scope.organizationId,scope.legalEntityId,serviceEng.body.id,'2024-01-01'])).rows[0].report;
+        assert.equal(periodReport.billable,'0');
+        assert.equal(periodReport.billingEvents.length,2);
+        assert(periodReport.billingEvents.includes(issuedPeriod.eventId));
         await delivery.csvBrowser.context.close();
         await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key=$1",[periodIssueGrant]);
       }
@@ -1281,7 +1286,7 @@ const verifyCommercialDrafting = async reversalScenario => {
         const captureCost=(body,identity=identities.manager)=>apiRequest(path,{identity,method:'POST',body});
         const costPermission='commercial.service_cost.record';
         assert.equal((await apiRequest(path)).status,403);
-        const costGrants=[costPermission,decisionGrant,'reports.view_utilization','commercial.service_cost.view','commercial.cost_candidates.manage','commercial.cost_candidates.view','commercial.cost_approvals.decide','employees.view','approvals.view'];
+        const costGrants=[costPermission,decisionGrant,'commercial.service_margin.view','commercial.service_margin.record','reports.view_utilization','commercial.service_cost.view','commercial.cost_candidates.manage','commercial.cost_candidates.view','commercial.cost_approvals.decide','employees.view','approvals.view'];
         await pool.query("insert into role_permissions(role_name,permission_key,enabled) select 'Admin',k,true from unnest($1::text[]) k on conflict(role_name,permission_key) do update set enabled=true",[costGrants]);
         await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin' on conflict do nothing",[finance.id]);
         const costReader=()=>apiRequest(path);
@@ -1332,6 +1337,11 @@ const verifyCommercialDrafting = async reversalScenario => {
         await costDesk.getByText(/Estimated cost · GBP 7.7160625/).waitFor();
         await costDesk.getByRole('button',{name:'Retain effort cost'}).click();
         await costDesk.getByText(/Retained cost · GBP 7.7160625/).waitFor();
+        const margin=costPage.getByRole('region',{name:'Managed-service period margin'});
+        await margin.getByRole('button',{name:'Inspect month'}).click();
+        await margin.getByText(/Retained worker cost 7.7160625/).waitFor();
+        await margin.getByRole('button',{name:'Retain month'}).click();
+        await margin.getByText(/Retained version 1/).waitFor();
         await operator.context.close();
         const retained=(await costReader()).body.snapshot;
         assert.deepEqual([retained.reviewId,retained.adoptionId,retained.hourlyRate,retained.hours,retained.amount],[accepted.body.id,adopted.id,'12.3457','0.625','7.7160625']);
@@ -1412,6 +1422,11 @@ const verifyCommercialDrafting = async reversalScenario => {
         await verifyCorrection({exported,engagementId:serviceEng.body.id,ownerKey:key,batchId:serviceBatchId,lineId:rebatched.body.line.id,
           policyId:correctionPolicy.body.policy.id,original:billReceipt.body.receipt,sourceType:'MANAGED_SERVICE_UNIT',amount:'150',act:call,
           reviewerKey:(await call('/sources/'+serviceBatchId,reviewer)).body.ownerKey,secondKey:(await call('/sources/'+serviceBatchId,alias)).body.ownerKey});
+        const unitReport=(await pool.query('select service_margin_report($1,$2,$3,$4) report',
+          [scope.organizationId,scope.legalEntityId,serviceEng.body.id,today.slice(0,7)+'-01'])).rows[0].report;
+        assert.equal(unitReport.billable,'0');
+        assert.equal(unitReport.billingEvents.length,2);
+        assert(unitReport.billingEvents.includes(billReceipt.body.receipt.eventId));
         const unitOwnerCheck=await pool.connect();
         try {
           await unitOwnerCheck.query('begin');
