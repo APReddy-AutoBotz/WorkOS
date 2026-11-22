@@ -6,11 +6,13 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
   const [pending,setPending]=useState(false);
   const [message,setMessage]=useState('');
   const [engagementId,setEngagementId]=useState('');
+  const [selected,setSelected]=useState('');
+  const [reason,setReason]=useState('');
   const sequence=useRef(0);
   const [history,setHistory]=useState<Awaited<ReturnType<typeof commercialDraftingService.serviceUnitHistory>>|null>(null);
   const loadHistory=async (id:string,before:string|null=null)=>{
     const ticket=++sequence.current;
-    setHistory(null);
+    setHistory(null);setSelected('');setReason('');
     if (!id || !isCommercialDraftingContextCurrent(context)) return;
     try {
       const page=await commercialDraftingService.serviceUnitHistory(id,version.id,before,context);
@@ -19,10 +21,23 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
       if (ticket===sequence.current && isCommercialDraftingContextCurrent(context)) setMessage('Evidence history could not be loaded.');
     }
   };
+  const decide=async (id:string,decision:'Accepted'|'Rejected')=>{
+    if (busy.current || selected!==id || reason.trim().length<3 || !isCommercialDraftingContextCurrent(context)) return;
+    busy.current=true;setPending(true);setMessage('');
+    try {
+      await commercialDraftingService.reviewUnits(engagementId,id,decision,reason.trim(),context);
+      if (isCommercialDraftingContextCurrent(context)) {
+        setMessage('Service evidence '+decision.toLowerCase()+'.');
+        await loadHistory(engagementId);
+      }
+    } catch {
+      if (isCommercialDraftingContextCurrent(context)) setMessage('Decision could not be confirmed. Reload the evidence history and check independent review authority.');
+    } finally {busy.current=false;setPending(false);}
+  };
   if (!engagements.length) return null;
   return <form aria-label="Record delivered units" className="mt-3 space-y-2" onSubmit={async event=>{
     event.preventDefault();
-    if (busy.current || !context.canCaptureUnits || !isCommercialDraftingContextCurrent(context)) return;
+    if (busy.current || selected || !context.canCaptureUnits || !isCommercialDraftingContextCurrent(context)) return;
     const form=event.currentTarget;
     const fields=new FormData(form);
     const field=(key:string)=>String(fields.get(key)??'').trim();
@@ -54,9 +69,18 @@ export function ServiceUnitCapture({engagements,context,version,today}:{engageme
     {history && <section aria-label="Recorded service evidence">
       <h5>Recorded service evidence</h5>
       {history.records.length ? <ul>{history.records.map(row=><li key={row.id}>
-        {row.serviceDate} · {row.quantity} {row.dimensionCode} · {row.sourceReference}
+        <span>{row.serviceDate} · {row.quantity} {row.dimensionCode} · {row.sourceReference}</span>
+        {row.review ? <p>{row.review.decision} · {row.review.reason}</p> : <>
+          <p>Pending acceptance</p>
+          {context.canReviewUnits && (selected===row.id ? <fieldset disabled={pending}>
+            <label>Decision reason<textarea maxLength={1000} value={reason} onChange={e=>setReason(e.target.value)}/></label>
+            <button type="button" disabled={reason.trim().length<3} onClick={()=>void decide(row.id,'Accepted')}>Accept units</button>
+            <button type="button" disabled={reason.trim().length<3} onClick={()=>void decide(row.id,'Rejected')}>Reject units</button>
+            <button type="button" onClick={()=>{setSelected('');setReason('');}}>Cancel review</button>
+          </fieldset> : <button type="button" disabled={pending} onClick={()=>{setSelected(row.id);setReason('');}}>Review {row.sourceReference}</button>)}
+        </>}
       </li>)}</ul> : <p>No recorded units on this version.</p>}
-      {history.before && <button type="button" onClick={()=>void loadHistory(engagementId,history.before)}>Older evidence</button>}
+      {history.before && <button type="button" disabled={pending} onClick={()=>void loadHistory(engagementId,history.before)}>Older evidence</button>}
     </section>}
     {message && <p role="status">{message}</p>}
   </form>;

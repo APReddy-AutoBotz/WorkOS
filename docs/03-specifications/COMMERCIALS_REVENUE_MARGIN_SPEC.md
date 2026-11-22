@@ -221,3 +221,5 @@ After final independent reversal approval, a full retainer credit takes its curr
 Managed-service contract versions retain up to 50 quantity dimensions. Each has a unique uppercase code, a display label and zero to four decimal places. The empty list represents unconfigured terms. Omitting the dimensions from a revision carries them forward. An explicit empty list clears the new version. Service evidence must refer to the applicable contract version and dimension.
 
 A delivered quantity identifies its engagement, service date, adopted version, configured dimension and source reference. References are unique per engagement and dimension. Retrying an identical capture by the same actor and role returns its receipt. Capture has no approval or invoice effect.
+
+Each managed-service receipt may have one immutable acceptance or rejection with a reason. Both parties require distinct active worker identities in the entity. The recorder link must still match its retained generation, and the reviewer link must predate capture. Historical decisions remain visible.
