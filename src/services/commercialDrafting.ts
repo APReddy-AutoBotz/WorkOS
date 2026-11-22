@@ -63,7 +63,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -87,6 +87,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
     canValueUnits: permissions.includes('commercial.service_units.value'),
     canValuePeriods: permissions.includes('commercial.service_periods.value'),
+    canIssuePeriods: permissions.includes('commercial.service_periods.issue'),
     canReviewPeriods: permissions.includes('commercial.service_periods.decide'),
     canReviewUnits: permissions.includes('commercial.service_units.decide'),
     canCaptureUnits: permissions.includes('commercial.service_units.capture'),
@@ -341,8 +342,10 @@ const unitValue=(value:unknown,evidenceId:string)=>{
 const serviceEngPath=(id:string)=>'/engagements/'+encodeURIComponent(id);
 const serviceValuePath=(eng:string,id:string)=>serviceEngPath(eng)+'/service-unit-evidence/'+encodeURIComponent(id)+'/valuation';
 export const commercialDraftingService = {
-  serviceRegister(eng:string,id:string,reviewId:string,context:CommercialDraftingContext,command?:{reason:string}) {
-    return request(context,command?'POST':'GET',serviceEngPath(eng)+'/service-unit-evidence/'+encodeURIComponent(id)+'/billing',command && {reviewId,reason:command.reason},v=>{
+  serviceRegister(eng:string,id:string,reviewId:string,context:CommercialDraftingContext,command?:{reason:string},source:'unit'|'period'='unit') {
+    if(source==='period' && !assertCommercialDraftingContext(context).canIssuePeriods) throw invalid();
+    const collection=source==='period'?'/service-period-reviews/':'/service-unit-evidence/';
+    return request(context,command?'POST':'GET',serviceEngPath(eng)+collection+encodeURIComponent(id)+'/billing',command && {reviewId,reason:command.reason},v=>{
       const r=object(v);
       const charge=r.charge===null?null:object(r.charge),receipt=r.receipt===null?null:object(r.receipt);
       if ((charge && charge.reviewId!==reviewId) || (receipt && receipt.reviewId!==reviewId) || (charge && receipt)) throw invalid();

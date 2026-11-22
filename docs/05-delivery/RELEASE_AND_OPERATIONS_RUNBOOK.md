@@ -720,3 +720,7 @@ Revoke `commercial.service_periods.decide` to suspend new decisions. Retain migr
 ## Suspend approved-period valuation
 
 Revoke `commercial.service_periods.value` to suspend recording and access through the valuation endpoint. Schedule the disabled profile to stop valuing periods with an end date on or after its effective date. Preserve migration 086, policy versions and past snapshots during rollback.
+
+## Suspend fixed-period charge issuance
+
+Revoke `commercial.service_periods.issue` to suspend period-charge registration. The permission also governs access to protected receipts. Preserve the migration, eligibility events, register items and audit records on rollback. Reconcile the receipt against its contract version and approved period before downstream billing.

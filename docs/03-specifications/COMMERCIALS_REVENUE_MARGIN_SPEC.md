@@ -251,3 +251,7 @@ A scoped reviewer may approve or reject one closed period on its contract versio
 ## Approved-period valuation
 
 At most one engagement may value a given approved contract-period review. The engagement must cover the whole period under the reviewed terms in contract currency. PostgreSQL checks the retained author and reviewer worker links and the financial reporting period at the period end date. The approved-period profile effective on that date rounds the retained positive charge half up to its configured precision. The immutable snapshot pins the source amount, rounded amount, review, policy, contract version and engagement adoption evidence. Billing eligibility is independent.
+
+## Fixed-period charge eligibility
+
+An authorized finance operator can issue an independently approved period for a billable engagement with matching client, currency, contract and adopted terms throughout that period. The charge uses the exact contractual amount. The issue date must be open for financial activity. A single transaction retains the eligibility event, original decision and dates, contract and engagement lifecycle evidence, register item, operator reason and audit. A second engagement cannot register the same charge.

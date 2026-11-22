@@ -715,3 +715,7 @@ WOS-COM-010 and the approved fixed-period source for WOS-INV-001 use migration `
 ## Operational valuation of approved periods
 
 WOS-COM-010 and WOS-COM-011 use migration `086_wos06_service_period_valuation.sql`. The commercial drafting journey tests the effective profile, closed financial period, independent period approval, decimal rounding, audit rollback, replay and immutable snapshot for a fixed charge. WOS-INV-001 period-charge issuance remains pending.
+
+## Approved fixed-period billing registration
+
+WOS-INV-001 and WOS-COM-010 use migration `087_wos06_service_period_eligibility.sql`. The commercial drafting journey verifies contractual amount, issue-date locks, authorization, duplicate protection, audit rollback and issuance independent of management valuation. Invoice-batch reservation for this source remains pending.
