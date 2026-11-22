@@ -141,7 +141,7 @@ const standardSource=sourceBase.refine((v) => {
 const negativeMoney=z.string().regex(/^-(?:0|[1-9]\d*)(?:\.\d{1,4})?$/).refine(v=>/[1-9]/.test(v));
 const correctionEvidence=z.object({
   sourceVersion:z.literal(1),reviewId:uuid,policyId:uuid,requestId:uuid,decisionId:uuid,
-  originalSourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD']),originalEventId:uuid,originalEventVersion:z.literal(1),
+  originalSourceType:z.enum(['TM_SNAPSHOT','MILESTONE_ACCEPTANCE','RETAINER_PERIOD','MANAGED_SERVICE_UNIT','MANAGED_SERVICE_PERIOD','FIXED_FEE_INSTALLMENT']),originalEventId:uuid,originalEventVersion:z.literal(1),
   originalItemId:uuid,originalItemVersion:z.literal(1),originalLineId:uuid,originalBatchId:uuid,artifactId:uuid,
   artifactSha256:hash,confirmationId:uuid.nullable(),currency:z.string().regex(/^[A-Z]{3}$/),originalAmount:money,amount:negativeMoney,
 }).strict();
@@ -152,6 +152,7 @@ const correctionSource=sourceBase.extend({sourceType:z.literal('FULL_LINE_REVERS
   return v.periodStart<=v.periodEnd && v.lineCount===v.lines.length && new Set(v.lines.map(l=>l.itemId)).size===v.lines.length
     && v.lines.every((l,n)=>l.sequence===n+1 && l.currency===v.currency && l.evidence.currency===v.currency && l.amount===l.evidence.amount
       && l.amount==='-'+l.evidence.originalAmount && l.evidence.originalBatchId===first.originalBatchId && l.evidence.artifactSha256===first.artifactSha256
+      && (l.evidence.originalSourceType!=='FIXED_FEE_INSTALLMENT' || hasRatePermission('commercial.fixed_fee_eligibility.issue'))
       && (l.evidence.originalSourceType!=='MANAGED_SERVICE_PERIOD' || hasRatePermission('commercial.service_periods.issue'))
       && (l.evidence.originalSourceType!=='MANAGED_SERVICE_UNIT' || hasRatePermission('commercial.service_units.issue'))
       && (l.evidence.originalSourceType!=='RETAINER_PERIOD' || hasRatePermission('commercial.retainer_eligibility.issue')))

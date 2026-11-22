@@ -302,7 +302,7 @@ const verifyCommercialDrafting = async reversalScenario => {
     const cancelled=await cancelling;assert.equal(cancelled.status(),201,await cancelled.text());
     assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1',[registered.itemId])).rowCount,0);
     assert.equal((await pool.query('select 1 from invoice_draft_lines where id=$1 and event_id=$2',[fixedLine.id,registered.eventId])).rowCount,1);
-    await verifyFixedFeeBatchApproval({pool,apiRequest,createContext,baseUrl,identities,engagementId:engagement.result.id,today,draftGrants,
+    const fixedDelivery=await verifyFixedFeeBatchApproval({pool,apiRequest,createContext,baseUrl,identities,engagementId:engagement.result.id,today,draftGrants,
       grant,createCommand:created.request().postDataJSON(),lineCommand:original,registered,reversalScenario});
     const identityReceipt=await pool.query('select author_worker_id,reviewer_worker_id,origin from fixed_fee_installment_identities where event_id=$1',[registered.eventId]);
     assert.deepEqual(identityReceipt.rows,[{author_worker_id:ownerId,reviewer_worker_id:'syn-installment-reviewer',origin:'issue'}]);
@@ -654,7 +654,14 @@ const verifyCommercialDrafting = async reversalScenario => {
       const reverse=(path,body)=>apiRequest(reversalPath+path,{method:'POST',identity:finance,body});
       const requestBody={expectedOwnerKey:ownerKey,artifactId:a.id,sha256:a.sha256,inspectedState:'Billed/Confirmed',reason:'Reverse duplicate downstream charge'};
       assert.equal((await reverse('',{...requestBody,inspectedState:'Exported'})).status,409);
-      assert.equal((await apiRequest(reversalPath,{identity:identities.reader})).status,403);
+      const assertSourceAccessDenied=async path=>{
+        const employee=identities.reader;
+        const fixed=sourceType==='FIXED_FEE_INSTALLMENT';
+        if (fixed) await pool.query('update role_permissions set enabled=false where role_name=$1 and permission_key=$2',[employee.role,grant]);
+        try {assert.equal((await apiRequest(path,{identity:employee})).status,403);}
+        finally {if (fixed) await pool.query('update role_permissions set enabled=true where role_name=$1 and permission_key=$2',[employee.role,grant]);}
+      };
+      await assertSourceAccessDenied(reversalPath);
       await csvDesk.getByLabel('Invoice export engagement').selectOption(engagementId);
       await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
       await csvDesk.getByLabel('Invoice export batch').selectOption(batchId);
@@ -676,15 +683,15 @@ const verifyCommercialDrafting = async reversalScenario => {
         'select invoice_reversal_participants_valid(b.source_type,retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',
         [identities.manager.id,identities.manager.role,policyId,batchId]);
       assert.equal(selfReview.rows[0].ok,false,'The reversal requester cannot occupy a named review stage');
-      if (sourceType.startsWith('MANAGED_SERVICE_')) {
-        const sourceGrant=sourceType==='MANAGED_SERVICE_PERIOD'?'commercial.service_periods.issue':'commercial.service_units.issue';
+      if (sourceType.startsWith('MANAGED_SERVICE_') || sourceType==='FIXED_FEE_INSTALLMENT') {
+        const sourceGrant=sourceType==='FIXED_FEE_INSTALLMENT'?grant:sourceType==='MANAGED_SERVICE_PERIOD'?'commercial.service_periods.issue':'commercial.service_units.issue';
         const client=await pool.connect();
         try {
           await client.query('begin');
           const changeGrant=(permission,enabled)=>client.query("update role_permissions set enabled=$2 where role_name='Admin' and permission_key=$1",[permission,enabled]);
           const canReview=async()=>(await client.query('select invoice_reversal_participants_valid(b.source_type,retainer_reversal_participants(b,$1,$2,$3)) ok from invoice_draft_batches b where b.id=$4',[finance.id,reviewRole,policyId,batchId])).rows[0].ok;
           await changeGrant(sourceGrant,false);
-          assert.equal(await canReview(),false,'Retainer access cannot authorize a managed-service correction');
+          assert.equal(await canReview(),false,'Retainer access cannot authorize another source correction');
           await changeGrant(sourceGrant,true);
           await changeGrant(issueGrant,false);
           assert.equal(await canReview(),true,'The original charge permission is sufficient');
@@ -737,7 +744,7 @@ const verifyCommercialDrafting = async reversalScenario => {
           await staleCredit.query('rollback');
           staleCredit.release();
         }
-        assert.equal((await apiRequest(reversalPath+'/eligibility',{identity:identities.reader})).status,403);
+        await assertSourceAccessDenied(reversalPath+'/eligibility');
         await pool.query("create trigger fail_retainer_credit before insert on audit_logs for each row when(new.action='Issue Full Line Reversal') execute function reject_test_po_audit()");
         assert.equal((await reverse('/eligibility',issueBody)).status,503);
         assert.equal((await pool.query('select 1 from billing_eligibility_events where reverses_event_id=$1',[eligibility.source.originalEventId])).rowCount,0);
@@ -967,11 +974,23 @@ const verifyCommercialDrafting = async reversalScenario => {
     assert.equal(second.status,201,JSON.stringify(second.body));
     assert.equal((await act('/sources/'+batchId,finance)).body.batch.state,'Approved');
     const exported=await verifyInvoiceExport({
-      engagementId:eng.body.id,batchId,ownerKey,instance,permissions:[issueGrant],schema:'workos.invoice-retainer-csv/1',amount:'3500',
+      engagementId:eng.body.id,batchId,ownerKey,instance,permissions:[issueGrant,grant],schema:'workos.invoice-retainer-csv/1',amount:'3500',
       itemId:issued.body.receipt.itemId,eventId:issued.body.receipt.eventId,sourceId:retainerCommand.statementId,reviewId:retainerCommand.reviewId,
       sourceLabel:/retainer source/,sourceType:'RETAINER_PERIOD'});
     await verifyCorrection({exported,engagementId:eng.body.id,ownerKey,batchId,lineId:rebatched.body.line.id,policyId:stagedPolicy.body.policy.id,
       original:issued.body.receipt,sourceType:'RETAINER_PERIOD',amount:'3500',act,reviewerKey,secondKey});
+    if (fixedDelivery) {
+      const fixedEngagement=engagement.result.id;
+      for (const role of [finance.role,identities.manager.role]) await pool.query(
+        'insert into role_permissions(role_name,permission_key,enabled) values($1,$2,true) on conflict(role_name,permission_key) do update set enabled=true',[role,grant]);
+      const correctionPolicy=await act('/policies',finance,{expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),engagementId:fixedEngagement,
+        expectedLatestId:fixedDelivery.policyId,effectiveFrom:today,definition:{...policyInput,engagementId:fixedEngagement,
+          stages:[{userId:identities.manager.id,role:identities.manager.role},{userId:alias.id,role:alias.role}]},reason:'Review the installment credit'});
+      assert.equal(correctionPolicy.status,201,JSON.stringify(correctionPolicy.body));
+      await verifyCorrection({exported:{...exported,...fixedDelivery,attestationRequest:{...fixedDelivery.attestationRequest,expectedOwnerKey:ownerKey},
+        exportCmd:{...fixedDelivery.exportCmd,expectedOwnerKey:ownerKey}},engagementId:fixedEngagement,ownerKey,batchId:fixedDelivery.batchId,lineId:fixedDelivery.lineId,
+        policyId:correctionPolicy.body.policy.id,original:registered,sourceType:'FIXED_FEE_INSTALLMENT',amount:'12000',act,reviewerKey,secondKey});
+    }
     await exported.csvBrowser.context.close();
     await reviewBrowser.context.close();
 

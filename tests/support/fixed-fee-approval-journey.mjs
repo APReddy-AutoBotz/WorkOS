@@ -19,7 +19,7 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
   try {
     for (const role of roles) await change(role,access,true);
     const batch=ok(await post('batches',{...createCommand,requestId:randomUUID()})).batch;
-    ok(await post('batches/'+batch.id+'/lines',{...lineCommand,requestId:randomUUID()}));
+    const line=ok(await post('batches/'+batch.id+'/lines',{...lineCommand,requestId:randomUUID()}));
     if (reversalScenario==='approved credit') {
       const retained=async()=>(await pool.query(`select to_jsonb(b) batch,to_jsonb(l) line,to_jsonb(o) occupancy
         from invoice_draft_batches b join invoice_draft_lines l on l.batch_id=b.id join invoice_draft_occupancies o on o.line_id=l.id
@@ -77,9 +77,18 @@ export async function verifyFixedFeeBatchApproval({pool,apiRequest,createContext
       assert.equal(ok(await act('/sources/'+batch.id,preparer),200).batch.state,decision==='Approved'?'Approved':'Draft');
       if (decision==='Approved') {
         const prior=ok(await act('/sources/'+batch.id,preparer),200).batch;
-        assert.equal((await migrateCommercialDatabase(pool)).applied[0],'097_wos06_fixed_fee_invoice_export');
+        await withCommercialMigrationsThrough(97,async rootDir=>assert.deepEqual((await runMigrations({pool,rootDir,logger:{log(){}}})).applied,['097_wos06_fixed_fee_invoice_export']));
         assert.deepEqual(ok(await act('/sources/'+batch.id,preparer),200).batch,prior);
-        await verifyFixedFeeExport({apiRequest,pool,page,engagementId,batchId:batch.id,reviewer,preparer,today,reviewerKey,registered,instance,change,grant});
+        const delivery=await verifyFixedFeeExport({apiRequest,pool,page,engagementId,batchId:batch.id,reviewer,preparer,today,reviewerKey,registered,instance,change,grant});
+        const evidence=async()=>(await pool.query(`select to_jsonb(a) artifact,to_jsonb(o) occupancy,to_jsonb(l) line
+          from invoice_csv_artifacts a join invoice_draft_lines l on l.batch_id=a.batch_id
+          join invoice_draft_occupancies o on o.line_id=l.id where a.id=$1`,[delivery.a.id])).rows;
+        const before=await evidence();
+        assert.equal(before.length,1);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['098_wos06_fixed_fee_credit_corrections']);
+        assert.deepEqual(await evidence(),before);
+        assert.deepEqual((await migrateCommercialDatabase(pool)).applied,[]);
+        return {...delivery,batchId:batch.id,lineId:line.line.id,policyId:policy.id};
       }
       assert.equal((await pool.query('select 1 from invoice_draft_occupancies where item_id=$1 and batch_id=$2',[registered.itemId,batch.id])).rowCount,1);
     } finally {await browser.context.close();}
