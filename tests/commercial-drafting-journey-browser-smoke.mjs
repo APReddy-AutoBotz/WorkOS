@@ -2,6 +2,7 @@ import {verifyRecoveredCredit} from './support/retainer-credit-recovery.mjs';
 import {INVOICE_EXPORT_EVENT_KEYS} from '../shared/invoice-export-notification.mjs';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
+import {recordAuditEvent} from '../server/modules/audit/audit-record.mjs';
 import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {withCommercialDraftingApi} from './support/commercial-drafting-test.mjs';
 
@@ -940,7 +941,8 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await decidePeriod(finance,periodCommand)).status,503);
       assert.equal((await apiRequest(periodPath,{identity:finance})).body.review,null);
       await pool.query('drop trigger reject_period_review_audit on audit_logs');
-      const periodBrowser=await createContext(finance,['commercial.contracts.view',periodGrant]);
+      const valuePeriodGrant='commercial.service_periods.value';
+      const periodBrowser=await createContext(finance,['commercial.contracts.view',periodGrant,valuePeriodGrant]);
       await periodBrowser.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
       await periodBrowser.page.getByRole('button',{name:'Inspect SYN-SERVICE',exact:true}).click();
       const periodDesk=periodBrowser.page.getByRole('group',{name:'Fixed-period charge review'});
@@ -956,6 +958,48 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await decidePeriod(finance,periodCommand)).body.review.id,periodReview.id);
       assert.equal((await decidePeriod(finance,{...periodCommand,decision:'Rejected'})).status,409);
       assert.equal((await apiRequest(periodPath,{identity:finance})).body.review.id,periodReview.id);
+      const pvPath='/engagements/'+serviceEng.body.id+'/service-period-reviews/'+periodReview.id+'/valuation';
+      const periodValue=(body,who=finance)=>apiRequest(pvPath,body?{method:'POST',identity:who,body}:{identity:who});
+      assert.equal((await periodValue()).status,403);
+      await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('HR',$1,true),('HR','commercial.service_units.policy',true) on conflict(role_name,permission_key) do update set enabled=true",[valuePeriodGrant]);
+      assert.deepEqual((await periodValue()).body,{policy:null,valuation:null});
+      const historicPolicy=crypto.randomUUID(),policyOperation=crypto.randomUUID();
+      assert.equal((await periodValue({policyId:historicPolicy})).status,409);
+      // Install the historical policy under the same database guards and audit contract as a live write.
+      const historical=await pool.connect();
+      try {
+        await historical.query('begin');
+        await historical.query('create schema journey_period_clock');
+        await historical.query("create function journey_period_clock.now() returns timestamptz language sql stable as $$select timestamptz '2024-01-01 00:00:00+00'$$");
+        await historical.query('set local search_path=journey_period_clock,public,pg_catalog');
+        await historical.query("select set_config('workos.service_valuation',$1,true)",[JSON.stringify({id:historicPolicy,actor:finance.id,operation:policyOperation})]);
+        const policyReason='Value approved contract charges at period end';
+        await historical.query(`insert into commercial_service_unit_policies(id,organization_id,legal_entity_id,engagement_id,effective_from,profile,precision_digits,reason,actor_id,active_role,operation_id)
+          values($1,$2,$3,$4,'2024-01-01','approved_period',2,$5,$6,$7,$8)`,[historicPolicy,scope.organizationId,scope.legalEntityId,serviceEng.body.id,policyReason,finance.id,finance.role,policyOperation]);
+        await recordAuditEvent(historical,{user:{sub:finance.id,activeRole:finance.role},organizationScope:scope,operationId:policyOperation,correlationId:policyOperation},{
+          module:'Commercial Drafting',action:'Recorded',entityType:'Service Valuation Policy',entityId:historicPolicy,details:'Synthetic historical policy',source:'Web',
+          newValue:{engagementId:serviceEng.body.id,effectiveFrom:'2024-01-01',profile:'approved_period',precision:2,reason:policyReason}});
+        await historical.query('drop schema journey_period_clock cascade');
+        await historical.query('commit');
+      } catch(error){await historical.query('rollback');throw error;} finally {historical.release();}
+      assert.equal((await periodValue({policyId:historicPolicy})).status,409,'the source period must be open for financial reporting');
+      await pool.query(`insert into reporting_periods(id,organization_id,legal_entity_id,code,name,starts_on,ends_on,status,frequency)
+        values('syn-period-valuation',$1,$2,'SYN-PVAL','Synthetic service period end',$3,$3,'Open','Weekly')`,[scope.organizationId,scope.legalEntityId,periods[0].endsOn]);
+      assert.equal((await periodValue({policyId:historicPolicy,amount:'1'})).status,400);
+      await pool.query("create trigger reject_period_value_audit before insert on audit_logs for each row when(new.entity_type='Service Period Valuation') execute function reject_test_po_audit()");
+      assert.equal((await periodValue({policyId:historicPolicy})).status,503);
+      assert.equal((await periodValue()).body.valuation,null);
+      await pool.query('drop trigger reject_period_value_audit on audit_logs');
+      const valuationDesk=periodBrowser.page.getByRole('region',{name:'Fixed-period operational valuation'});
+      await valuationDesk.getByLabel('Period valuation engagement').selectOption(serviceEng.body.id);
+      await valuationDesk.getByRole('button',{name:'Inspect period valuation'}).click();
+      await valuationDesk.getByRole('button',{name:'Record period value'}).click();
+      await valuationDesk.getByText('Operational management value · GBP 100.03',{exact:true}).waitFor();
+      const retained=(await periodValue()).body.valuation;
+      assert.deepEqual([retained.sourceAmount,retained.amount,retained.policyId,retained.reviewId],['100.025','100.03',historicPolicy,periodReview.id]);
+      await pool.query("update reporting_periods set status='Financially Locked' where id='syn-period-valuation'");
+      assert.equal((await periodValue({policyId:historicPolicy})).body.id,retained.id);
+      await assert.rejects(pool.query('delete from commercial_service_period_valuations where id=$1',[retained.id]));
       const decideOther=(term,who,decision)=>apiRequest(periodPath.replace(periods[0].startsOn,term.startsOn),{method:'POST',identity:who,body:{decision,reason:'Reconcile service delivery exception'}});
       assert.equal((await decideOther(periods[2],finance,'Approved')).status,409);
       const stale=await pool.connect();
@@ -1107,7 +1151,9 @@ const verifyCommercialDrafting = async reversalScenario => {
       const valAccess=['commercial.service_units.policy','commercial.service_units.value'];
       assert.equal((await valueRead(valuationPath)).status,403);
       for(const k of valAccess) await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('HR',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[k]);
-      assert.deepEqual((await valueRead(valuationPath)).body,{policy:null,valuation:null});
+      const aheadOfUnitPolicy=(await valueRead(valuationPath)).body;
+      assert.equal(aheadOfUnitPolicy.valuation,null);assert.equal(aheadOfUnitPolicy.policy.id,historicPolicy);
+      assert.equal((await valuePost(valuationPath,{policyId:historicPolicy,reviewId:accepted.body.id})).status,409);
       assert.equal((await valuePost(valuationPath,{policyId:crypto.randomUUID(),reviewId:accepted.body.id})).status,409);
       const operator=await createContext(finance,['commercial.contracts.view',...valAccess]);
       const op=operator.page;await op.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');

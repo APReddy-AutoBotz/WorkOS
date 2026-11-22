@@ -247,3 +247,7 @@ A managed-service contract version may retain up to 120 fixed-period charges in 
 ## Independent fixed-period charge review
 
 A scoped reviewer may approve or reject one closed period on its contract version when the version was adopted and the contract stayed active throughout the period. A lifecycle transition or amendment inside the period requires reconciliation. Reviewer and version author must be distinct accounts and workers with current entity membership and stable links since version creation. The decision retains the effective lifecycle and amendment references, exact amount, currency and reason. Operational valuation and issuance each require separate controls.
+
+## Approved-period valuation
+
+At most one engagement may value a given approved contract-period review. The engagement must cover the whole period under the reviewed terms in contract currency. PostgreSQL checks the retained author and reviewer worker links and the financial reporting period at the period end date. The approved-period profile effective on that date rounds the retained positive charge half up to its configured precision. The immutable snapshot pins the source amount, rounded amount, review, policy, contract version and engagement adoption evidence. Billing eligibility is independent.

@@ -63,7 +63,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canIssueServiceUnits?:boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -86,6 +86,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
     canValueUnits: permissions.includes('commercial.service_units.value'),
+    canValuePeriods: permissions.includes('commercial.service_periods.value'),
     canReviewPeriods: permissions.includes('commercial.service_periods.decide'),
     canReviewUnits: permissions.includes('commercial.service_units.decide'),
     canCaptureUnits: permissions.includes('commercial.service_units.capture'),
@@ -325,7 +326,7 @@ const normalizeUnitReview=(value:unknown,evidenceId:string)=>{
   return {id:text(r.id),decision:model(r.decision,['Accepted','Rejected'] as const),reason:text(r.reason),createdAt:text(r.createdAt)};
 };
 const unitPolicy=(value:unknown)=>{
-  const r=object(value),profile=model(r.profile,['accepted_unit','disabled'] as const);
+  const r=object(value),profile=model(r.profile,['accepted_unit','approved_period','disabled'] as const);
   const precision=r.precision===null?null:integer(r.precision);
   if ((profile==='disabled')!==(precision===null) || (precision!==null && precision>4)) throw invalid();
   return {id:text(r.id),effectiveFrom:date(r.effectiveFrom),profile,precision,reason:text(r.reason),ownerId:text(r.ownerId)};
@@ -363,12 +364,28 @@ export const commercialDraftingService = {
       return {id:text(r.id),decision,reason};
     },false);
   },
+  periodValue(engagementId:string,reviewId:string,version:ContractTerms,term:ServicePeriodCharge,context:CommercialDraftingContext,policyId?:string) {
+    if (!assertCommercialDraftingContext(context).canValuePeriods) throw invalid();
+    const receipt=(value:unknown)=>{
+      const r=object(value);
+      if (r.reviewId!==reviewId || r.engagementId!==engagementId || r.versionId!==version.id || r.currency!==version.currency || r.endsOn!==term.endsOn ||
+        decimal(r.sourceAmount)!==term.amount.replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'') || (policyId && r.policyId!==policyId)) throw invalid();
+      const amount=text(r.amount);
+      if (!/^(0|[1-9]\d{0,14})(\.\d{1,4})?$/.test(amount)) throw invalid();
+      return {id:text(r.id),amount,currency:currency(r.currency),policyId:text(r.policyId)};
+    };
+    return request(context,policyId?'POST':'GET',serviceEngPath(engagementId)+'/service-period-reviews/'+encodeURIComponent(reviewId)+'/valuation',
+      policyId?{policyId}:undefined,v=>{
+        if (policyId) return {valuation:receipt(v),policy:null};
+        const r=object(v); return {valuation:r.valuation===null?null:receipt(r.valuation),policy:r.policy===null?null:unitPolicy(r.policy)};
+      },false);
+  },
   servicePolicy(eng:string,c:CommercialDraftingContext) {
     return request(c,'GET',serviceEngPath(eng)+'/service-valuation-policy',undefined,v=>{
       const r=object(v);return {latest:r.latest===null?null:unitPolicy(r.latest),effective:r.effective===null?null:unitPolicy(r.effective)};
     });
   },
-  setServicePolicy(eng:string,command:{previousId:string|null;profile:'accepted_unit'|'disabled';effectiveFrom:string;precision:number|null;reason:string},c:CommercialDraftingContext) {
+  setServicePolicy(eng:string,command:{previousId:string|null;profile:'accepted_unit'|'approved_period'|'disabled';effectiveFrom:string;precision:number|null;reason:string},c:CommercialDraftingContext) {
     return request(c,'POST',serviceEngPath(eng)+'/service-valuation-policy',command,unitPolicy,false);
   },
   inspectServiceValue(eng:string,id:string,c:CommercialDraftingContext) {

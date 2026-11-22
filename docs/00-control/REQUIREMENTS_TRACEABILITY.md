@@ -711,3 +711,7 @@ WOS-COM-010 and the fixed-period source prerequisite of WOS-INV-001 use migratio
 ## Closed managed-service charge decisions
 
 WOS-COM-010 and the approved fixed-period source for WOS-INV-001 use migration `085_wos06_service_period_reviews.sql`. The commercial drafting browser and PostgreSQL journey covers approval, independent worker identity, closed-period terms, replay and historical receipt inspection. Billing eligibility remains pending.
+
+## Operational valuation of approved periods
+
+WOS-COM-010 and WOS-COM-011 use migration `086_wos06_service_period_valuation.sql`. The commercial drafting journey tests the effective profile, closed financial period, independent period approval, decimal rounding, audit rollback, replay and immutable snapshot for a fixed charge. WOS-INV-001 period-charge issuance remains pending.
