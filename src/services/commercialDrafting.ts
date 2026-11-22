@@ -21,7 +21,7 @@ export const retainerPolicyLabels = {
   all_rollover: 'All approved hours · carry unused hours to the next service period',
 } as const;
 export type RetainerCapacityPolicy = keyof typeof retainerPolicyLabels;
-export type ServiceDimension = {code:string;label:string;precision:number};
+export type ServiceDimension = {code:string;label:string;precision:number;unitPrice?:string};
 export type RetainerPeriod = {startsOn: string; endsOn: string; includedHours: string; baseFee: string};
 export type ContractTermsInput = {
   name: string; model: ContractModel; startsOn: string; endsOn: string; effectiveFrom: string;
@@ -154,10 +154,11 @@ const normalizeServiceDimensions = (value:unknown, contractModel:unknown): Servi
   const seen=new Set<string>();
   return rows(value,entry=>{
     const unit=object(entry), code=text(unit.code), label=text(unit.label), precision=integer(unit.precision);
-    if (Object.keys(unit).length!==3 || !/^[A-Z][A-Z0-9_]{0,39}$/.test(code) || seen.has(code) ||
+    if (Object.keys(unit).some(key=>!['code','label','precision','unitPrice'].includes(key)) || !/^[A-Z][A-Z0-9_]{0,39}$/.test(code) || seen.has(code) ||
         !label || label!==label.trim() || [...label].length>80 || /[\u0000-\u001f\u007f-\u009f\u2028\u2029\ufeff]/u.test(label) || precision>4) throw invalid();
     seen.add(code);
-    return {code,label,precision};
+    if (unit.unitPrice!==undefined && (typeof unit.unitPrice!=='string' || !/^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/.test(unit.unitPrice))) throw invalid();
+    return {code,label,precision,...(typeof unit.unitPrice==='string'?{unitPrice:unit.unitPrice}:{})};
   });
 };
 const normalizeTerms = (value: unknown): ContractTerms => {
@@ -243,7 +244,7 @@ const termsBody = (input: ContractTermsInput) => ({name: input.name, model: inpu
   ...(input.retainerRounding !== undefined && {retainerRounding:input.retainerRounding}),
   ...(input.retainerOveragePolicy !== undefined && {retainerOveragePolicy:input.retainerOveragePolicy}),
   ...(input.retainerCapacityPolicy !== undefined && {retainerCapacityPolicy:input.retainerCapacityPolicy}),
-  ...(input.serviceDimensions && {serviceDimensions:input.serviceDimensions.map(({code,label,precision})=>({code,label,precision}))}),
+  ...(input.serviceDimensions && {serviceDimensions:input.serviceDimensions.map(({code,label,precision,unitPrice})=>({code,label,precision,...(unitPrice!==undefined?{unitPrice}:{})}))}),
   ...(input.retainerPeriods && {retainerPeriods: input.retainerPeriods.map(({startsOn, endsOn, includedHours, baseFee}) => ({startsOn, endsOn, includedHours, baseFee}))}),
   ...(input.installments && {installments: input.installments.map(({dueOn, amount}) => ({dueOn, amount}))}),
   billingTerms: input.billingTerms, documents: input.documents.map(document => ({name: document.name, url: document.url}))});

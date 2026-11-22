@@ -333,6 +333,8 @@ export const CommercialDraftingWorkspace = () => {
                     <Field label={`Unit ${index+1} decimal places`}><select className={inputClass} value={unit.precision}
                       onChange={e=>edit({serviceDimensions:draft.serviceDimensions.map((row,n)=>n===index?{...row,precision:Number(e.target.value)}:row)})}>
                       {[0,1,2,3,4].map(n=><option key={n} value={n}>{n}</option>)}</select></Field>
+                    <Field label={`Unit ${index+1} price (contract currency, optional)`}><input className={inputClass} inputMode="decimal"
+                      value={unit.unitPrice??''} onChange={e=>edit({serviceDimensions:draft.serviceDimensions.map((row,n)=>n===index?{...row,unitPrice:e.target.value || undefined}:row)})}/></Field>
                     <button type="button" className={buttonClass} onClick={()=>edit({serviceDimensions:draft.serviceDimensions.filter((_,n)=>n!==index)})}>Remove unit {index+1}</button>
                   </div>)}
                   <button type="button" className={buttonClass} disabled={draft.serviceDimensions.length>=50}
@@ -447,7 +449,7 @@ export const CommercialDraftingWorkspace = () => {
               <p className="mt-2 text-sm">Effective {version.effectiveFrom}. Coverage {version.startsOn} to {version.endsOn}. {modelLabel(version.model)}.</p>
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
               {version.serviceDimensions?.length ? <div><h4>Service quantity dimensions</h4>
-                <ul>{version.serviceDimensions.map(unit=><li key={unit.code}>{unit.label} · {unit.code} · {unit.precision} decimal places</li>)}</ul></div> : null}
+                <ul>{version.serviceDimensions.map(unit=><li key={unit.code}>{unit.label} · {unit.code} · {unit.precision} decimal places{unit.unitPrice!==undefined && ` · ${version.currency} ${unit.unitPrice} per unit`}</li>)}</ul></div> : null}
               {version.serviceDimensions?.length && state.context ? <ServiceUnitCapture
                 engagements={workspace.engagements.filter(e=>e.contractId===detail.id && e.model==='managed_service')}
                 context={state.context} version={version} today={workspace.asOf}/> : null}

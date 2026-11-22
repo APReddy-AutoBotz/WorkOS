@@ -160,3 +160,5 @@ In Invoice CSV export, inspect an exported or billed batch and retrieve its reta
 Managed-service engagements can record delivered quantities by service date and evidence reference against active contract and engagement terms. The service unit and decimal precision come from the adopted contract version.
 
 Independent reviewers can accept or reject a delivered quantity from its engagement history. Each receipt shows the decision and reason. Acceptance alone creates no monetary entry.
+
+Commercial managers can set a price per managed-service unit in contract currency. The version history shows the exact price, including explicit zero. A blank price leaves the unit unpriced.
