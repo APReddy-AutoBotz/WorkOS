@@ -75,7 +75,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -97,6 +97,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
+    canViewFixedFeeEffort:['employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
     canViewServiceMargin:!['Employee','TeamLead','ProjectManager','CountryDirector'].includes(user.role) &&
       ['commercial.service_margin.view','commercial.service_cost.view','commercial.cost_candidates.view','employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
     canRetainServiceMargin:permissions.includes('commercial.service_margin.record'),
@@ -389,6 +390,17 @@ export const commercialDraftingService = {
       if (r.contractId!==contractId || r.versionId!==version.id || r.startsOn!==term.startsOn || r.endsOn!==term.endsOn ||
           r.currency!==version.currency || canonical(amount)!==canonical(term.amount) || (command && (decision!==command.decision || reason!==command.reason.trim()))) throw invalid();
       return {id:text(r.id),decision,reason};
+    },false);
+  },
+  fixedFeeEffort(eng:string,monthStart:string,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canViewFixedFeeEffort) throw invalid();
+    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-effort?'+new URLSearchParams({monthStart}),undefined,value=>{
+      const r=object(value);
+      const count=(n:unknown)=>{if (typeof n!=='number' || !Number.isSafeInteger(n) || n<0) throw invalid();return n;};
+      const hours=(v:unknown)=>{const h=text(v);if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(h)) throw invalid();return h;};
+      if (r.engagementId!==eng || r.monthStart!==monthStart) throw invalid();
+      return {verifiedEntries:count(r.verifiedEntries),unresolvedEntries:count(r.unresolvedEntries),
+        billableHours:hours(r.billableHours),nonBillableHours:hours(r.nonBillableHours)};
     },false);
   },
   serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string}={}) {
