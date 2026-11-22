@@ -166,3 +166,5 @@ Commercial managers can set a price per managed-service unit in contract currenc
 Managed-service operators can retain an operational value for independently accepted units. A policy owner selects the effective date and rounding precision. Each valuation preserves the service-date policy, accepted quantity, versioned contract price and contract currency.
 
 Managed-service contract versions can authorize billing by accepted unit and specify the charge precision. Billing operators inspect an independently accepted receipt and record its contractual charge in the approved-unbilled register. The receipt retains the eligibility event and register item.
+
+Invoice preparers can reserve a whole approved managed-service charge in a draft for its engagement, currency and eligibility period. The line shows the accepted quantity and unit price and retains its review, event and register item. Cancelling the draft releases the item for another batch.

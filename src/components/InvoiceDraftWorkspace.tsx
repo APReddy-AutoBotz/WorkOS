@@ -18,12 +18,16 @@ type Choice = {
   clientId: string;
   contractId: string;
   currency: string;
-  sourceType?: 'MILESTONE_ACCEPTANCE' | 'FIXED_FEE_INSTALLMENT' | 'RETAINER_PERIOD';
+  sourceType?: 'MILESTONE_ACCEPTANCE' | 'FIXED_FEE_INSTALLMENT' | 'RETAINER_PERIOD' | 'MANAGED_SERVICE_UNIT';
 };
 type MilestoneItem = Awaited<ReturnType<typeof milestoneBilling.register>>['items'][number];
 type RegisterItem = Awaited<ReturnType<typeof tmBillingEligibility.register>>['items'][number];
-const isContractCharge=(source?:string)=>source==='RETAINER_PERIOD' || source==='FIXED_FEE_INSTALLMENT';
+const isContractCharge=(source?:string)=>source==='MANAGED_SERVICE_UNIT' || source==='RETAINER_PERIOD' || source==='FIXED_FEE_INSTALLMENT';
 async function availableCharges(batch:InvoiceDraft,context:RateContext|null,after?:string) {
+  if (batch.sourceType==='MANAGED_SERVICE_UNIT') {
+    const page=await invoiceDrafts.availableServiceCharges(batch.id,context,after);
+    return {nextAfter:page.nextAfter,items:page.items.map(x=>({id:x.id,value:'unit:'+x.id,label:`Service ${x.dimensionCode} · ${x.serviceDate} · ${x.currency} ${x.amount}`}))};
+  }
   if (batch.sourceType==='RETAINER_PERIOD') {
     const page=await invoiceDrafts.availableRetainerCharges(batch.id,context,after);
     return {nextAfter:page.nextAfter,items:page.items.map(x=>({id:x.id,value:'retainer:'+x.id,label:`Retainer ${x.startsOn} through ${x.endsOn} · ${x.currency} ${x.amount}`}))};
@@ -546,12 +550,14 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                       <li key={x.id}>
                         Item {x.itemId} version {x.itemVersion} · Event {x.eventId} ·{' '}
                         {'sourceType' in x
-                          ? x.sourceType==='RETAINER_PERIOD' ? `retainer ${x.evidence.startsOn} through ${x.evidence.endsOn}` : x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment}` : `milestone ${x.evidence.milestoneId}`
+                          ? x.sourceType==='MANAGED_SERVICE_UNIT' ? `service ${x.evidence.dimensionCode} · ${x.evidence.serviceDate}` : x.sourceType==='RETAINER_PERIOD' ? `retainer ${x.evidence.startsOn} through ${x.evidence.endsOn}` : x.sourceType==='FIXED_FEE_INSTALLMENT' ? `installment ${x.evidence.installment}` : `milestone ${x.evidence.milestoneId}`
                           : `snapshot ${x.snapshotId}`}{' '}
                         · {x.currency} {x.amount}
                         <details>
                           <summary>Supporting evidence</summary>
-                          {'sourceType' in x && x.sourceType==='RETAINER_PERIOD' ? (
+                          {'sourceType' in x && x.sourceType==='MANAGED_SERVICE_UNIT' ? (
+                            <p>Acceptance {x.evidence.reviewId} · {x.evidence.quantity} units at {x.evidence.unitPrice} · contract version {x.evidence.contractVersionId}</p>
+                          ) : 'sourceType' in x && x.sourceType==='RETAINER_PERIOD' ? (
                             <p>Statement {x.evidence.statementId} · revision {x.evidence.statementVersion} · review {x.evidence.reviewId} · base fee {x.evidence.periodPrice.baseFee} · overage {x.evidence.periodPrice.overage} · contract version {x.evidence.contractVersionId}</p>
                           ) : 'sourceType' in x && x.sourceType==='FIXED_FEE_INSTALLMENT' ? (
                             <p>Due {x.evidence.dueOn} · Contract version {x.evidence.contractVersionId} · Approval reason {x.evidence.approvalReason}</p>
@@ -618,7 +624,7 @@ export const InvoiceDraftWorkspace = ({ choices }: { choices: Choice[] }) => {
                         ? chargeNext && <button type="button" onClick={()=>void run(async c=>{
                           const page=await availableCharges(detail.batch,c,chargeNext);
                           setChargeItems(old=>[...old,...page.items]);setChargeNext(page.nextAfter);
-                        })}>{detail.batch.sourceType==='RETAINER_PERIOD'?'More available retainer charges':'More available installments'}</button>
+                        })}>{detail.batch.sourceType==='MANAGED_SERVICE_UNIT'?'More available service charges':detail.batch.sourceType==='RETAINER_PERIOD'?'More available retainer charges':'More available installments'}</button>
                         : detail.batch.sourceType === 'MILESTONE_ACCEPTANCE'
                         ? milestoneNext && (
                             <button type="button" onClick={moreMilestones}>

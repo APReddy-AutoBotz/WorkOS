@@ -695,3 +695,5 @@ WOS-COM-010, WOS-COM-011 pricing prerequisite. Migration 082u and the commercial
 WOS-COM-004, WOS-COM-010 and WOS-COM-011. Migration 082v, the commercial drafting API and real browser journey verify engagement policy selection, independent acceptance, service-date contract price, deterministic rounding, open-period enforcement and immutable managed-service valuation. Period-charge profiles, optional time/cost links, governed corrections and separate billing eligibility remain open.
 
 WOS-COM-010, WOS-INV-001. Migration 082w and the commercial drafting journey verify accepted-unit contractual eligibility, distinct billing and valuation precisions, explicit issuer grant, immutable register lineage, locked-period rejection and replay. Invoice batch handling of managed-service items remains open.
+
+WOS-INV-001 and WOS-INV-002 managed-service drafting. Migration 082x and the commercial drafting journey cover source-scoped draft creation, whole-item reservation and replay, exclusive occupancy across competing batches, cancellation and rebatching. Managed-service batch review, export and downstream confirmation remain open.
