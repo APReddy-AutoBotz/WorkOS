@@ -75,7 +75,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -97,6 +97,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
+    canReconcileEffort:['commercial.service_units.decide','employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
     canRecordEffortCost:permissions.includes('commercial.service_cost.record'),
     canViewEffortCost:['commercial.service_cost.view','commercial.cost_candidates.view','employees.view'].every(k=>permissions.includes(k)),
     canValueUnits: permissions.includes('commercial.service_units.value'),
@@ -353,6 +354,12 @@ const unitValue=(value:unknown,evidenceId:string)=>{
   if(!/^\d+(?:\.\d{1,4})?$/.test(amount)) throw invalid();
   return {id:text(r.id),reviewId:text(r.reviewId),policyId:text(r.policyId),versionId:text(r.versionId),quantity:text(r.quantity),unitPrice:decimal(r.unitPrice),currency:currency(r.currency),amount};
 };
+const effortReconciliationLabels:Record<string,string>={
+  matched:'Recorded effort matches approved work.', hours_differ:'Recorded and approved hours differ.',
+  no_recorded_effort:'No effort was recorded.', pending_review:'Service evidence awaits review.', rejected:'Service evidence was rejected.',
+  ambiguous_reference:'Multiple service receipts share this work reference.', no_approved_work:'No approved work has this reference.',
+  unverified_work:'Approved work could not be verified against the retained submission and contract terms.'
+};
 const serviceEngPath=(id:string)=>'/engagements/'+encodeURIComponent(id);
 const serviceValuePath=(eng:string,id:string)=>serviceEngPath(eng)+'/service-unit-evidence/'+encodeURIComponent(id)+'/valuation';
 export const commercialDraftingService = {
@@ -379,6 +386,18 @@ export const commercialDraftingService = {
       if (r.contractId!==contractId || r.versionId!==version.id || r.startsOn!==term.startsOn || r.endsOn!==term.endsOn ||
           r.currency!==version.currency || canonical(amount)!==canonical(term.amount) || (command && (decision!==command.decision || reason!==command.reason.trim()))) throw invalid();
       return {id:text(r.id),decision,reason};
+    },false);
+  },
+  reconcileEffort(eng:string,id:string,c:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(c).canReconcileEffort) throw invalid();
+    return request(c,'GET',serviceEngPath(eng)+'/service-unit-evidence/'+encodeURIComponent(id)+'/reconciliation',undefined,value=>{
+      const r=object(value);
+      const status=text(r.status);
+      if (r.evidenceId!==id || !Object.hasOwn(effortReconciliationLabels,status)) throw invalid();
+      const verified=status==='matched' || status==='hours_differ';
+      if (verified && !(Number.isInteger(r.entryCount) && Number(r.entryCount)>0 && Number(r.entryCount)<=100)) throw invalid();
+      if (!verified && (r.approvedHours!==null || r.entryCount!==null)) throw invalid();
+      return {label:effortReconciliationLabels[status],approvedHours:verified?decimal(r.approvedHours):null,entryCount:verified?Number(r.entryCount):null};
     },false);
   },
   periodValue(engagementId:string,reviewId:string,version:ContractTerms,term:ServicePeriodCharge,context:CommercialDraftingContext,policyId?:string) {

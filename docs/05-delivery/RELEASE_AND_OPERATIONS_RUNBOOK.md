@@ -748,3 +748,5 @@ Inspect the recorded service reference before retrying. Reuse its date, unit, qu
 ## Recover managed-service effort cost
 
 Use **Inspect effort cost** on the accepted receipt. Verify the adoption ID, effective dates, currency, hours and original cost before retrying a write. Finance needs current worker scope, cost-rate visibility and effort-cost viewing permission. Recording requires the additional recording grant. The audit log references the protected snapshot without disclosing its monetary values. Retain migration 093, the snapshot, its rate adoption and its audit entry on rollback.
+
+For a discrepancy in **Compare approved effort**, verify the service review, worker, service date and work reference against the approved timesheet and its pinned contract version. Check other service receipts for the same reference. Restrict the report using worker scope and service review and utilization grants. Reverting the application change removes the report. No data migration is required.

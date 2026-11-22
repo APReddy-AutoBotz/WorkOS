@@ -1281,7 +1281,7 @@ const verifyCommercialDrafting = async reversalScenario => {
         const captureCost=(body,identity=identities.manager)=>apiRequest(path,{identity,method:'POST',body});
         const costPermission='commercial.service_cost.record';
         assert.equal((await apiRequest(path)).status,403);
-        const costGrants=[costPermission,'commercial.service_cost.view','commercial.cost_candidates.manage','commercial.cost_candidates.view','commercial.cost_approvals.decide','employees.view','approvals.view'];
+        const costGrants=[costPermission,decisionGrant,'reports.view_utilization','commercial.service_cost.view','commercial.cost_candidates.manage','commercial.cost_candidates.view','commercial.cost_approvals.decide','employees.view','approvals.view'];
         await pool.query("insert into role_permissions(role_name,permission_key,enabled) select 'Admin',k,true from unnest($1::text[]) k on conflict(role_name,permission_key) do update set enabled=true",[costGrants]);
         await pool.query("insert into user_roles(user_id,role_id) select $1,id from roles where name='Admin' on conflict do nothing",[finance.id]);
         const costReader=()=>apiRequest(path);
@@ -1325,6 +1325,8 @@ const verifyCommercialDrafting = async reversalScenario => {
         await costPage.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
         await costPage.getByRole('button',{name:'Inspect SYN-SERVICE',exact:true}).click();
         await costPage.getByLabel('Service engagement').selectOption(serviceEng.body.id);
+        await costPage.getByRole('button',{name:'Compare approved effort'}).click();
+        await costPage.getByText('No approved work has this reference.').waitFor();
         const costDesk=costPage.getByRole('region',{name:'Service effort cost'});
         await costDesk.getByRole('button',{name:'Inspect effort cost'}).click();
         await costDesk.getByText(/Estimated cost · GBP 7.7160625/).waitFor();
