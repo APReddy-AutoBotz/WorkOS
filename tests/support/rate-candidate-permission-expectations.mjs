@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 const expected=[
+ {permission_key:'commercial.service_periods.decide',module:'Commercial',label:'Review fixed-period service charges',description:'Independently approve or reject a closed managed-service contract period.',protected:false},
  {permission_key:'commercial.service_units.issue',module:'Commercial',label:'Register accepted service units',description:'Record a contractual charge for independently accepted managed-service units.',protected:false},
  {permission_key:'commercial.service_units.value',module:'Commercial',label:'Value accepted service units',description:'Retain an operational management value for independently accepted service units.',protected:false},
  {permission_key:'commercial.service_units.policy',module:'Commercial',label:'Configure service valuation',description:'Select an effective operational valuation policy for managed-service engagements.',protected:false},

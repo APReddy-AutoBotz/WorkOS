@@ -206,7 +206,7 @@ await withCommercialDatabase(async ({ pool, databaseUrl }) => {
         newKeys = [
           'commercial.milestone_billing.view',
           'commercial.milestone_billing.manage',
-          'commercial.milestone_billing.decide', 'periods.financial_reopen','commercial.reversal_eligibility.create','commercial.purchase_orders.release','commercial.fixed_fee_eligibility.issue','commercial.service_units.policy','commercial.service_units.value','commercial.service_units.issue','commercial.service_units.decide','commercial.service_units.capture','commercial.retainer_statements.prepare','commercial.retainer_statements.decide','commercial.retainer_eligibility.issue',
+          'commercial.milestone_billing.decide', 'periods.financial_reopen','commercial.reversal_eligibility.create','commercial.purchase_orders.release','commercial.fixed_fee_eligibility.issue','commercial.service_units.policy','commercial.service_units.value','commercial.service_units.issue','commercial.service_periods.decide','commercial.service_units.decide','commercial.service_units.capture','commercial.retainer_statements.prepare','commercial.retainer_statements.decide','commercial.retainer_eligibility.issue',
           'commercial.tm_valuation.view',
           'commercial.tm_valuation.create',
           'commercial.tm_billing.view',
