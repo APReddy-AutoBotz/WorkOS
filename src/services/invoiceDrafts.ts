@@ -362,7 +362,36 @@ const reconciliationTotals = {
       .strict(),
   ),
 };
+const balanceAmount = z.string().max(40).regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,4})?$/);
+const balanceUnits = (value: string) => {
+  const [integer, fraction = ''] = value.split('.');
+  return BigInt(integer + fraction.padEnd(4, '0'));
+};
+const fixedFeeBalance = z.object({
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  status: z.enum(['Available', 'Reserved', 'Exported', 'Confirmed']),
+  installments: z.number().int().nonnegative(),
+  credits: z.number().int().nonnegative(),
+  gross: balanceAmount, adjustments: balanceAmount, net: balanceAmount,
+}).strict().refine(row => {
+  if (![row.gross,row.adjustments,row.net].every(value => balanceAmount.safeParse(value).success)) return false;
+  const gross = balanceUnits(row.gross), credits = balanceUnits(row.adjustments);
+  return row.installments + row.credits > 0 && gross >= 0n && credits <= 0n &&
+    (row.installments === 0) === (gross === 0n) && (row.credits === 0) === (credits === 0n) &&
+    gross + credits === balanceUnits(row.net);
+});
+export type FixedFeeBalance=z.infer<typeof fixedFeeBalance>;
 export const invoiceDrafts = {
+  fixedFeeBalances: async(engagementId:string,c:RateContext|null):Promise<FixedFeeBalance[]>=>{
+    const allowed=()=>hasRatePermission('commercial.fixed_fee_eligibility.issue') && hasRatePermission('commercial.invoice_export.view');
+    if (!allowed() || !id.safeParse(engagementId).success) return bad();
+    const raw=await call('GET','/reconciliation/fixed-fee?'+new URLSearchParams({engagementId}),c,'view');
+    const report=z.object({...envelope,engagementId:id,balances:z.array(fixedFeeBalance)}).strict().safeParse(raw);
+    if (!allowed() || !report.success || report.data.engagementId!==engagementId) return bad();
+    const keys=report.data.balances.map(row=>row.currency+row.status);
+    if (new Set(keys).size!==keys.length) return bad();
+    return report.data.balances;
+  },
   availableInstallments: async(batchId:string,c:RateContext|null,after?:string)=>{
     if (!uuid.safeParse(batchId).success || !hasRatePermission('commercial.fixed_fee_eligibility.issue')) return bad();
     const data=await call('GET','/batches/'+batchId+'/available-installments'+(after?'?after='+encodeURIComponent(after):''),c,'view');

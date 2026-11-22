@@ -650,6 +650,17 @@ const verifyCommercialDrafting = async reversalScenario => {
     };
     const verifyCorrection=async({exported,engagementId,ownerKey,batchId,lineId,policyId,original,sourceType,amount,act,reviewerKey,secondKey})=>{
       const {a,receipt,attest,attestationRequest,csv,sendExport,csvDesk,csvBrowser,exportCmd}=exported;
+      const installmentReport='/api/v1/invoice-drafts/reconciliation/fixed-fee?engagementId='+engagementId;
+      const checkInstallmentBalance=async status=>{
+        if (sourceType!=='FIXED_FEE_INSTALLMENT') return;
+        const result=await apiRequest(installmentReport,{identity:finance});
+        assert.equal(result.status,200,JSON.stringify(result.body));
+        const charge={currency:a.currency,status:'Confirmed',installments:1,credits:0,gross:amount,adjustments:'0',net:amount};
+        const credit={currency:a.currency,status,installments:0,credits:1,gross:'0',adjustments:'-'+amount,net:'-'+amount};
+        const expected=status==='Confirmed'?[{...charge,credits:1,adjustments:'-'+amount,net:'0'}]:status?[credit,charge]:[charge];
+        assert.deepEqual(result.body.balances,expected);
+      };
+      await checkInstallmentBalance(null);
       const reversalPath=csv+'/batches/'+batchId+'/lines/'+lineId+'/reversal-request';
       const reverse=(path,body)=>apiRequest(reversalPath+path,{method:'POST',identity:finance,body});
       const requestBody={expectedOwnerKey:ownerKey,artifactId:a.id,sha256:a.sha256,inspectedState:'Billed/Confirmed',reason:'Reverse duplicate downstream charge'};
@@ -662,6 +673,7 @@ const verifyCommercialDrafting = async reversalScenario => {
         finally {if (fixed) await pool.query('update role_permissions set enabled=true where role_name=$1 and permission_key=$2',[employee.role,grant]);}
       };
       await assertSourceAccessDenied(reversalPath);
+      if (sourceType==='FIXED_FEE_INSTALLMENT') await assertSourceAccessDenied(installmentReport);
       await csvDesk.getByLabel('Invoice export engagement').selectOption(engagementId);
       await csvDesk.getByRole('button',{name:'Load invoice export batches'}).click();
       await csvDesk.getByLabel('Invoice export batch').selectOption(batchId);
@@ -758,10 +770,12 @@ const verifyCommercialDrafting = async reversalScenario => {
         assert.equal(replayedCredit.replayed,true);
         const credit=replayedCredit.receipt;
         assert.equal(credit.amount,'-'+amount);
+        await checkInstallmentBalance('Available');
         const reservePath=csv+'/batches/'+batchId+'/correction-drafts';
         const reserveBody={expectedOwnerKey:ownerKey,requestId:crypto.randomUUID(),reason:'Reserve the service-period credit',itemIds:[credit.itemId]};
         const reserve=()=>apiRequest(reservePath,{method:'POST',identity:finance,body:reserveBody});
         const reserved=ok(await reserve()).receipt;
+        await checkInstallmentBalance('Reserved');
         assert.equal(reserved.total,credit.amount);
         assert.equal(ok(await reserve(),200).receipt.batchId,reserved.batchId);
         const proof=ok(await apiRequest(reservePath+'/'+reserved.batchId,{identity:finance}),200);
@@ -792,12 +806,23 @@ const verifyCommercialDrafting = async reversalScenario => {
         const creditArtifact=(await acceptedCredit.json()).artifact;
         await csvDesk.getByRole('region',{name:'Verified invoice CSV'}).waitFor();
         assert.equal(creditArtifact.total,credit.amount);
+        await checkInstallmentBalance('Exported');
         const creditConfirmation=ok(await attest({...attestationRequest,requestId:crypto.randomUUID(),batchId:reserved.batchId,artifactId:creditArtifact.id,
           artifactSha256:creditArtifact.sha256,total:credit.amount,reference:'Synthetic credit application',reason:'Matched applied service-period credit'})).confirmation;
         if (sourceType==='RETAINER_PERIOD') recoveryEvidence={finance, original:{artifact:a,confirmation:receipt,itemId:original.itemId},
           credit:{artifact:creditArtifact,confirmation:creditConfirmation,itemId:credit.itemId}};
         assert.equal(creditConfirmation.sourceType,'FULL_LINE_REVERSAL');
         assert.equal(creditConfirmation.total,credit.amount);
+        await checkInstallmentBalance('Confirmed');
+        if (sourceType==='FIXED_FEE_INSTALLMENT') {
+          await csvBrowser.page.reload();
+          const report=csvBrowser.page.getByRole('region',{name:'Billing reconciliation'});
+          await report.getByLabel('Reconciliation engagement').selectOption(engagementId);
+          await report.getByRole('button',{name:'Load billing reconciliation'}).click();
+          const row=report.getByRole('region',{name:'Fixed-fee billing balances'}).getByRole('row').nth(1);
+          await row.waitFor();
+          assert.deepEqual(await row.getByRole('cell').allTextContents(),[a.currency,'Confirmed','1','1',amount,'-'+amount,'0']);
+        }
         assert.equal(ok(await apiRequest(csv+'/confirmation-sources/'+batchId,{identity:finance}),200).confirmation.id,receipt.id);
         const csvText=Buffer.from(creditArtifact.payloadBase64,'base64').toString('utf8');
         for(const pinned of [a.id,a.sha256,lineId]) assert.ok(csvText.includes(pinned));

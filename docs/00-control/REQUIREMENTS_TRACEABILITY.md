@@ -733,3 +733,5 @@ WOS-INV-003, WOS-INV-004 and WOS-INV-006 through WOS-INV-008 use migration 091 f
 WOS-COM-010 uses migration 092 for optional supporting time on managed-service unit receipts. The commercial drafting browser journey checks capture and review history, absent effort, exact decimals, out-of-range values, conflicting retries, concurrent replay and protected audit evidence.
 
 WOS-COM-002, WOS-COM-003 and WOS-COM-010 use migration 093 for confidential worker-cost evidence on accepted managed-service receipts. The commercial drafting journey verifies scope and separate view/record grants, adopted source priority and ties, currency and date, period locking, exact multiplication, audit rollback, replay and historical readback after a newer rate adoption.
+
+WOS-COM-007, WOS-INV-008, WOS-RPT-003 and WOS-RPT-007 — Fixed-fee billing reconciliation aggregates each registered installment and linked full-line credit once, by engagement, currency and current billing state. The commercial drafting React/API/PostgreSQL journey verifies signed totals at issuance, reservation, export and confirmation, permission withdrawal and the final browser table.
