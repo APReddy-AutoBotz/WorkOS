@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -111,6 +111,8 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
     canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
     canIssueServiceUnits: permissions.includes('commercial.service_units.issue'),
+    canViewFixedFeeRisk:!['Employee','TeamLead','ProjectManager','CountryDirector'].includes(user.role) &&
+      ['employees.view','reports.view_utilization','commercial.cost_candidates.view','commercial.fixed_fee_cost.view'].every(k=>permissions.includes(k)),
     canViewFixedFeeCost:['employees.view','reports.view_utilization','commercial.cost_candidates.view','commercial.fixed_fee_cost.view'].every(k=>permissions.includes(k)),
     canRecordFixedFeeCost:permissions.includes('commercial.fixed_fee_cost.record'),
     canViewFixedFeeEffort:['employees.view','reports.view_utilization'].every(k=>permissions.includes(k)),
@@ -406,6 +408,22 @@ export const commercialDraftingService = {
       if (r.contractId!==contractId || r.versionId!==version.id || r.startsOn!==term.startsOn || r.endsOn!==term.endsOn ||
           r.currency!==version.currency || canonical(amount)!==canonical(term.amount) || (command && (decision!==command.decision || reason!==command.reason.trim()))) throw invalid();
       return {id:text(r.id),decision,reason};
+    },false);
+  },
+  fixedFeeRisk(eng:string,through:string,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canViewFixedFeeRisk) throw invalid();
+    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk?'+new URLSearchParams({through}),undefined,value=>{
+      const report=z.object({engagementId:z.literal(eng),through:z.literal(through),currency:z.string().regex(/^[A-Z]{3}$/),
+        contractVersionId:z.string().min(1),amendmentId:z.string().min(1).nullable(),allocation:costDecimal,retainedCost:costDecimal,
+        remainingAllocation:z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/),status:z.enum(['no_work','incomplete','remaining','exhausted','exceeded']),
+        approvedEntries:z.number().int().nonnegative(),costedEntries:z.number().int().nonnegative(),complete:z.boolean()}).strict().parse(value);
+      const a=decimalQuantity(report.allocation),c=decimalQuantity(report.retainedCost),scale=Math.max(a.scale,c.scale);
+      const difference=a.units*10n**BigInt(scale-a.scale)-c.units*10n**BigInt(scale-c.scale);
+      const expected=(difference<0n?'-':'')+formatQuantity({units:difference<0n?-difference:difference,scale});
+      const status=difference<0n?'exceeded':report.approvedEntries===0 && report.costedEntries===0?'no_work':!report.complete?'incomplete':difference===0n?'exhausted':'remaining';
+      if (report.remainingAllocation!==expected || report.status!==status ||
+        (report.complete && (report.approvedEntries===0 || report.costedEntries!==report.approvedEntries))) throw invalid();
+      return report;
     },false);
   },
   fixedFeeCosts(eng:string,monthStart:string,context:CommercialDraftingContext,cmd?:{entryId:string;adoptionId:string;decisionId:string}) {

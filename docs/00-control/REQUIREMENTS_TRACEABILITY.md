@@ -739,3 +739,5 @@ WOS-COM-007, WOS-INV-008, WOS-RPT-003 and WOS-RPT-007 — Fixed-fee billing reco
 WOS-COM-007 / WOS-RPT-003 — Monthly fixed-fee effort in Commercial drafting. The fixed-fee effort PostgreSQL and browser journey covers staged approval, exact hours, worker scope, report permission withdrawal and the rendered result.
 
 WOS-COM-007 / WOS-RPT-003 — Migration 099 and the fixed-fee effort PostgreSQL/API/browser journey cover scoped worker-cost previews, explicit retention, source priority, currency, dates, exact arithmetic, period locking, audit rollback, replay and reconciliation of retained monthly costs.
+
+WOS-COM-007 / WOS-RPT-004 — Fixed-fee allocation risk is available from Commercial drafting. The PostgreSQL/API/browser effort journey compares partial and complete labor costs, exercises engagement-level amendments and verifies denial for a worker-restricted viewer.

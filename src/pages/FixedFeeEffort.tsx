@@ -1,3 +1,4 @@
+import {FixedFeeRisk} from './FixedFeeRisk';
 import {useState} from 'react';
 import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
 
@@ -48,6 +49,7 @@ export function FixedFeeEffort({context,engagement,today}:{context:CommercialDra
       </div>)}
     </section>}
     {report && <p>{report.billableHours} billable hours · {report.nonBillableHours} non-billable hours · {report.verifiedEntries} verified entries · {report.unresolvedEntries} unresolved entries</p>}
+    {context.canViewFixedFeeRisk && <FixedFeeRisk context={context} engagement={engagement} today={today}/>}
     {message && <p role="status">{message}</p>}
   </section>;
 }

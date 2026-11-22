@@ -237,3 +237,5 @@ Fixed-fee engagements now expose registered installment and credit balances by o
 Fixed-fee engagement reporting now includes monthly approved effort within the viewer’s worker scope. It separates billable and non-billable hours and flags approved entries with unresolved evidence. Retained worker costs, margin risk, and effective-dated earned-management policies remain open.
 
 Fixed-fee worker costs now support adopted hourly source inspection and immutable cost retention per approved entry, with monthly retained totals by currency and visible coverage. Fixed-fee margin risk, forecasts and policy-governed earned-management valuation remain open.
+
+Finance can now inspect fixed-fee labor-cost exposure against the engagement allocation effective through a selected work date. Amended allocations and retained cost evidence determine the result. Approved cost budgets, remaining-cost forecasts, configurable thresholds and earned-management valuation remain separate delivery items.

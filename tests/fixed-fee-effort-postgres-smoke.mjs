@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {commercialFixture, withCommercialDatabase, withCommercialMigrationsThrough, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
-import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
+import {createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays, seedApplicableAmendmentVersion, amendmentWorkspace, amendmentInput, amendmentApply} from './support/commercial-amendments-test.mjs';
 await withCommercialDatabase(async ({pool,databaseUrl})=>{
   await withCommercialMigrationsThrough(98,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const {today,identities}=await seedWorkApproval(pool);
@@ -22,9 +22,9 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       assert.equal(r.status,status,JSON.stringify(r.body)); return r.body;
     };
     const end=addUtcDays(today,30);
-    const {project,engagement}=await createAmendmentHierarchy(request,'SYN-FIXED-EFFORT',{
-      contract:{model:'fixed_fee',startsOn:today,endsOn:end,effectiveFrom:today},
-      engagement:{startsOn:today,endsOn:end},project:{startsOn:today,endsOn:end}});
+    const {project,engagement,contract}=await createAmendmentHierarchy(request,'SYN-FIXED-EFFORT',{
+      contract:{model:'fixed_fee',startsOn:addUtcDays(today,-30),endsOn:end,effectiveFrom:addUtcDays(today,-30)},
+      engagement:{startsOn:today,endsOn:end,budget:'50'},project:{startsOn:today,endsOn:end,budgetAllocation:'40'}});
     const monthStart=today.slice(0,7)+'-01';
     const path='/engagements/'+engagement.id+'/fixed-fee-effort?monthStart='+monthStart;
     const read=async(identity=identities.manager)=>{
@@ -60,6 +60,17 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       'commercial.cost_candidates.view','commercial.cost_approvals.decide','employees.view','approvals.view'];
     await pool.query(`insert into role_permissions(role_name,permission_key,enabled) select 'Admin',k,true from unnest($1::text[]) k
       on conflict(role_name,permission_key) do update set enabled=true`,[grants]);
+    const riskPath='/engagements/'+engagement.id+'/fixed-fee-risk?through=';
+    const risk=async()=>{
+      const response=await request(riskPath+today);
+      assert.equal(response.status,200,JSON.stringify(response.body));return response.body;
+    };
+    assert.equal((await risk()).status,'incomplete');
+    assert.equal((await request(riskPath+addUtcDays(today,1))).status,404);
+    await pool.query(`insert into role_permissions(role_name,permission_key,enabled) select 'Employee',k,true from unnest($1::text[]) k
+      on conflict(role_name,permission_key) do update set enabled=true`,[['commercial.fixed_fee_cost.view','commercial.cost_candidates.view']]);
+    assert.equal((await request(riskPath+today,{identity:identities.reader})).status,403);
+    await pool.query("update role_permissions set enabled=false where role_name='Employee' and permission_key='commercial.fixed_fee_cost.view'");
     const costs=async()=>{
       const r=await inspect();assert.equal(r.status,200,JSON.stringify(r.body));return r.body.entries;
     };
@@ -113,6 +124,11 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       const costRow=report.getByText('Cost preview GBP 30.864 · Hourly rate 12.3456').locator('..');
       await costRow.getByRole('button',{name:'Retain worker cost'}).click();
       await report.getByText('Retained cost GBP 30.864 · Hourly rate 12.3456').waitFor();
+      const exposure=report.getByRole('region',{name:'Fixed-fee allocation risk'});
+      await exposure.getByLabel('Include work through').fill(today);
+      await exposure.getByRole('button',{name:'Check allocation risk'}).click();
+      await exposure.getByText('Engagement allocation GBP 50 · Retained labor cost 30.864 · Allocation less retained cost 19.136').waitFor();
+      await exposure.getByText('Some approved work still needs a verified cost.').waitFor();
     } finally {try {if (browser) await browser.close();} finally {await fixture.close();}}
     const saved=(await costs()).find(r=>r.entryId===entry.entryId);
     assert(saved.snapshotId);
@@ -132,6 +148,16 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const complete=(await inspect()).body;
     assert.equal(complete.complete,true);
     assert.deepEqual(complete.retainedTotals,[{currency:'GBP',amount:'70.864'}]);
+    const exceeded=await risk();
+    assert.deepEqual([exceeded.status,exceeded.complete,exceeded.remainingAllocation,exceeded.retainedCost,exceeded.approvedEntries,exceeded.costedEntries],
+      ['exceeded',true,'-20.864','70.864',3,3]);
+    const revision=await seedApplicableAmendmentVersion(pool,identities.manager,contract,today);
+    await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),revision));
+    assert.equal((await risk()).allocation,'50');
+    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{budget:'70.864'}));
+    const exhausted=await risk();
+    assert.deepEqual([exhausted.status,exhausted.allocation,exhausted.remainingAllocation,exhausted.contractVersionId,exhausted.amendmentId],
+      ['exhausted','70.864','0',revision.id,event.id]);
     await assert.rejects(pool.query("update timesheet_entries set remark='Synthetic changed evidence' where project_id=$1 and hours=2.5",[project.id]),e=>e.code==='WWP01');
     const historicalSheet=randomUUID();
     await pool.query(`insert into timesheets(id,employee_id,week_ending,status,total_hours,billable_hours,organization_id,legal_entity_id)
@@ -140,6 +166,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       values($1,$2,'Project Work',$3,1,'BILL',true)`,[historicalSheet,project.id,today]);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,unresolvedEntries:1,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.equal((await inspect()).body.complete,false);
+    const incomplete=await risk();
+    assert.deepEqual([incomplete.status,incomplete.complete],['incomplete',false]);
     await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='reports.view_utilization'");
     assert.equal((await request(path)).status,403);
   });
