@@ -1,3 +1,4 @@
+import {FixedFeeEffort} from './FixedFeeEffort';
 import {ServicePeriodReview} from './ServicePeriodReview';
 import {ServiceUnitCapture} from './ServiceUnitCapture';
 import {RetainerConsumption} from '../components/RetainerConsumption';
@@ -496,6 +497,8 @@ export const CommercialDraftingWorkspace = () => {
           {!workspace.engagements.length && <p>No {engagementPlural.toLowerCase()} returned for this scope.</p>}
           <ul className="space-y-3">{workspace.engagements.map(engagement => <li key={engagement.id} className="break-words rounded-xl border border-slate-200 p-3">
             <h3 className="font-bold">{engagement.code} · {engagement.name}</h3><p className="mt-1 text-sm">{modelLabel(engagement.model)} · {engagement.status} · {engagement.billable ? 'Commercial terms linked' : 'Non-billable'}.</p>
+            {engagement.model==='fixed_fee' && state.context?.canViewFixedFeeEffort &&
+              <div key={state.context.identityKey+engagement.id}><FixedFeeEffort context={state.context} engagement={engagement.id} today={workspace.asOf}/></div>}
             <p className="mt-1 text-sm">{engagement.startsOn} to {engagement.endsOn}. Budget {engagement.currency} {engagement.budget}.</p>
             {engagement.contractVersionId && <p className="mt-1 text-xs">Pinned terms ID: {engagement.contractVersionId}</p>}
           </li>)}</ul>

@@ -1,3 +1,4 @@
+import {effortMonth,fixedFeeEffort} from './fixed-fee-effort.mjs';
 import {marginQuery,marginCommand,marginRecordGrant,servicePeriodMargin} from './service-period-margin.mjs';
 import {reconcileServiceEffort} from './service-effort-reconciliation.mjs';
 import {effortCostCommand,effortCostGrant,serviceEffortCost} from './service-effort-cost.mjs';
@@ -121,6 +122,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   router.post(serviceRegisterPath,handle(serviceIssueCommand,true,(c,r,input)=>serviceUnitRegister(c,r,input,audit),serviceIssueGrant));
   const servicePolicyPath='/engagements/:id/service-valuation-policy';
   router.get('/engagements/:id/service-unit-evidence/:evidenceId/reconciliation',handle(workspaceQuerySchema,false,(c,r)=>reconcileServiceEffort(c,r,buildEmployeeScopeWhere)));
+  router.get('/engagements/:id/fixed-fee-effort',handle(effortMonth,false,(c,r,input)=>fixedFeeEffort(c,r,input,buildEmployeeScopeWhere)));
   const marginPath='/engagements/:id/service-period-margin';
   router.get(marginPath,handle(marginQuery,false,(c,r,input)=>servicePeriodMargin(c,r,input,buildEmployeeScopeWhere)));
   router.post(marginPath,handle(marginCommand,true,(c,r,input)=>servicePeriodMargin(c,r,input,buildEmployeeScopeWhere,audit),marginRecordGrant,true));
