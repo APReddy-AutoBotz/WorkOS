@@ -1,3 +1,4 @@
+import {fixedFeeCosts,fixedCostCommand,fixedCostGrant} from './fixed-fee-cost.mjs';
 import {effortMonth,fixedFeeEffort} from './fixed-fee-effort.mjs';
 import {marginQuery,marginCommand,marginRecordGrant,servicePeriodMargin} from './service-period-margin.mjs';
 import {reconcileServiceEffort} from './service-effort-reconciliation.mjs';
@@ -54,7 +55,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
       }else if(error?.code==='MGM01')res.status(403).json({error:{code:'MARGIN_DENIED',message:'Current reporting authority is required.'}});
       else if(error?.code==='MGM02')res.status(409).json({error:{code:'MARGIN_CHANGED',message:'Inspect the current period again.'}});
       else if(error?.code==='MEC01')res.status(403).json({error:{code:'SERVICE_COST_DENIED',message:'Current worker cost authority is required.'}});
-      else if(error?.code==='MEC02' || (permission===effortCostGrant && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_COST_CHANGED',message:'Review accepted effort, the adopted hourly cost and the financial period.'}});
+      else if(error?.code==='MEC02' || ([effortCostGrant,fixedCostGrant].includes(permission) && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_COST_CHANGED',message:'Review accepted effort, the adopted hourly cost and the financial period.'}});
       else if(error?.code==='RBE01')res.status(403).json({error:{code:'RETAINER_REGISTER_DENIED',message:'Current retainer billing authority is required.'}});
       else if(error?.code==='RBE02' || (permission===retainerIssueGrant && error?.code==='CTM04') || error?.constraint==='retainer_period_billed_once')
         res.status(409).json({error:{code:'COMMERCIAL_REGISTER_CONFLICT',message:'Review source eligibility, financial period and existing charges.'}});
@@ -123,6 +124,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   const servicePolicyPath='/engagements/:id/service-valuation-policy';
   router.get('/engagements/:id/service-unit-evidence/:evidenceId/reconciliation',handle(workspaceQuerySchema,false,(c,r)=>reconcileServiceEffort(c,r,buildEmployeeScopeWhere)));
   router.get('/engagements/:id/fixed-fee-effort',handle(effortMonth,false,(c,r,input)=>fixedFeeEffort(c,r,input,buildEmployeeScopeWhere)));
+  const fixedCostPath='/engagements/:id/fixed-fee-costs';
+  router.get(fixedCostPath,handle(effortMonth,false,(c,r,i)=>fixedFeeCosts(c,r,i,buildEmployeeScopeWhere)));
+  router.post(fixedCostPath,handle(fixedCostCommand,true,(c,r,i)=>fixedFeeCosts(c,r,i,buildEmployeeScopeWhere,audit),fixedCostGrant));
   const marginPath='/engagements/:id/service-period-margin';
   router.get(marginPath,handle(marginQuery,false,(c,r,input)=>servicePeriodMargin(c,r,input,buildEmployeeScopeWhere)));
   router.post(marginPath,handle(marginCommand,true,(c,r,input)=>servicePeriodMargin(c,r,input,buildEmployeeScopeWhere,audit),marginRecordGrant,true));
