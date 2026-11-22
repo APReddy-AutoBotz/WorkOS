@@ -413,16 +413,23 @@ export const commercialDraftingService = {
   fixedFeeRisk(eng:string,through:string,context:CommercialDraftingContext) {
     if (!assertCommercialDraftingContext(context).canViewFixedFeeRisk) throw invalid();
     return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk?'+new URLSearchParams({through}),undefined,value=>{
+      const signed=z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/);
+      const states=z.enum(['no_work','incomplete','remaining','exhausted','exceeded']);
       const report=z.object({engagementId:z.literal(eng),through:z.literal(through),currency:z.string().regex(/^[A-Z]{3}$/),
         contractVersionId:z.string().min(1),amendmentId:z.string().min(1).nullable(),allocation:costDecimal,retainedCost:costDecimal,
-        remainingAllocation:z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/),status:z.enum(['no_work','incomplete','remaining','exhausted','exceeded']),
+        remainingAllocation:signed,status:states,laborCostBudget:costDecimal.nullable(),remainingLaborBudget:signed.nullable(),laborBudgetStatus:states.nullable(),
         approvedEntries:z.number().int().nonnegative(),costedEntries:z.number().int().nonnegative(),complete:z.boolean()}).strict().parse(value);
-      const a=decimalQuantity(report.allocation),c=decimalQuantity(report.retainedCost),scale=Math.max(a.scale,c.scale);
-      const difference=a.units*10n**BigInt(scale-a.scale)-c.units*10n**BigInt(scale-c.scale);
-      const expected=(difference<0n?'-':'')+formatQuantity({units:difference<0n?-difference:difference,scale});
-      const status=difference<0n?'exceeded':report.approvedEntries===0 && report.costedEntries===0?'no_work':!report.complete?'incomplete':difference===0n?'exhausted':'remaining';
-      if (report.remainingAllocation!==expected || report.status!==status ||
-        (report.complete && (report.approvedEntries===0 || report.costedEntries!==report.approvedEntries))) throw invalid();
+      if (report.complete && (report.approvedEntries===0 || report.costedEntries!==report.approvedEntries)) throw invalid();
+      const check=(budget:string,remaining:string|null,state:string|null)=>{
+        const a=decimalQuantity(budget),c=decimalQuantity(report.retainedCost),scale=Math.max(a.scale,c.scale);
+        const difference=a.units*10n**BigInt(scale-a.scale)-c.units*10n**BigInt(scale-c.scale);
+        const expected=(difference<0n?'-':'')+formatQuantity({units:difference<0n?-difference:difference,scale});
+        const status=difference<0n?'exceeded':report.approvedEntries===0 && report.costedEntries===0?'no_work':!report.complete?'incomplete':difference===0n?'exhausted':'remaining';
+        if (remaining!==expected || state!==status) throw invalid();
+      };
+      check(report.allocation,report.remainingAllocation,report.status);
+      if (report.laborCostBudget!==null) check(report.laborCostBudget,report.remainingLaborBudget,report.laborBudgetStatus);
+      else if (report.remainingLaborBudget!==null || report.laborBudgetStatus!==null) throw invalid();
       return report;
     },false);
   },

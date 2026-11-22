@@ -31,6 +31,10 @@ export function FixedFeeRisk({context,engagement,today}:{context:CommercialDraft
     {report && <div>
       <p>{labels[report.status]}</p>
       <p>Engagement allocation {report.currency} {report.allocation} · Retained labor cost {report.retainedCost} · Allocation less retained cost {report.remainingAllocation}</p>
+      {report.laborCostBudget===null ? <p>No approved labor-cost budget for this date.</p> : <>
+        <p>Approved labor-cost budget {report.currency} {report.laborCostBudget} · Budget less retained labor cost {report.remainingLaborBudget}</p>
+        {report.laborBudgetStatus==='exceeded' && <p>Retained labor cost exceeds the approved labor-cost budget.</p>}
+      </>}
       <p>{report.costedEntries} retained costs · {report.approvedEntries} approved entries · Contract version {report.contractVersionId}{report.amendmentId && ' · Amendment '+report.amendmentId}</p>
     </div>}
     {message && <p role="status">{message}</p>}
