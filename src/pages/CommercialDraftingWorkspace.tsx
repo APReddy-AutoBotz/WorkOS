@@ -1,3 +1,4 @@
+import {ServiceUnitCapture} from './ServiceUnitCapture';
 import {RetainerConsumption} from '../components/RetainerConsumption';
 import {FixedFeeInstallmentRegister} from '../components/FixedFeeInstallmentRegister';
 import {PurchaseOrderReleasePanel} from '../components/PurchaseOrderReleasePanel';
@@ -447,6 +448,9 @@ export const CommercialDraftingWorkspace = () => {
               <p className="mt-1 text-sm">{version.currency} {version.value}</p>
               {version.serviceDimensions?.length ? <div><h4>Service quantity dimensions</h4>
                 <ul>{version.serviceDimensions.map(unit=><li key={unit.code}>{unit.label} · {unit.code} · {unit.precision} decimal places</li>)}</ul></div> : null}
+              {version.serviceDimensions?.length && state.context ? <ServiceUnitCapture
+                engagements={workspace.engagements.filter(e=>e.contractId===detail.id && e.model==='managed_service')}
+                context={state.context} version={version} today={workspace.asOf}/> : null}
               {version.retainerPeriods?.length ? <div><h4>Retainer service periods</h4>
                 {version.retainerRounding && <p>Base fee and overage round separately · {retainerRoundingModes[version.retainerRounding.mode]} · {version.retainerRounding.precision} decimal places</p>}
                 <p>{version.retainerOveragePolicy ? retainerOverageLabels[version.retainerOveragePolicy] : 'Excess-hour pricing unspecified'}</p>

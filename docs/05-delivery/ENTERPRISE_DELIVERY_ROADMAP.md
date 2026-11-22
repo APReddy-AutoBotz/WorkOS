@@ -214,4 +214,6 @@ Release CI now rehearses recovery of a populated billed retainer and applied cre
 
 Historical archive recovery covers 082p custom-format backups without access to the original database. The release rehearsal verifies scoped commercial reads and writes, retained workforce data, ledger upgrade, and rollback when the supplied archive has a different migration history.
 
-WOS-COM-010 now supports versioned managed-service quantity dimensions in Commercial drafting. Configure and inspect ticket, shift or buyer-defined units per contract version. Capturing service quantities, independent unit acceptance, operational valuation and billing eligibility remain open.
+WOS-COM-010 now supports versioned managed-service quantity dimensions in Commercial drafting. Configure and inspect ticket, shift or buyer-defined units per contract version.
+
+Managed-service quantity capture (WOS-COM-010) records dated, referenced delivery against active, independently adopted contract and engagement terms. Next priorities are independent acceptance, optional time/cost evidence links, operational valuation and billing eligibility.
