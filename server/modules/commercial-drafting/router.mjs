@@ -1,4 +1,5 @@
 import {reviewCommand as serviceReviewCommand,reviewGrant as serviceReviewGrant,reviewServiceUnits} from './service-unit-review.mjs';
+import {periodIssueGrant,servicePeriodRegister} from './service-period-eligibility.mjs';
 import {serviceIssueGrant,serviceIssueCommand,serviceUnitRegister} from './service-unit-eligibility.mjs';
 import {policyGrant,valueGrant,policyCommand,valueCommand,servicePolicy,serviceValue} from './service-unit-valuation.mjs';
 import {periodValueCommand,periodValueGrant,servicePeriodValue} from './service-period-valuation.mjs';
@@ -51,7 +52,7 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
         res.status(409).json({error:{code:'COMMERCIAL_REGISTER_CONFLICT',message:'Review source eligibility, financial period and existing charges.'}});
       else if(error?.code==='MSU05')res.status(403).json({error:{code:'SERVICE_REVIEW_DENIED',message:'Independent current worker identities are required.'}});
       else if(error?.code==='SBE01')res.status(403).json({error:{code:'SERVICE_BILLING_DENIED',message:'Service billing authority is required.'}});
-      else if(error?.code==='SBE02' || (permission===serviceIssueGrant && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_BILLING_UNAVAILABLE',message:'Check accepted evidence, billing terms and the issue period.'}});
+      else if(error?.code==='SBE02' || ([serviceIssueGrant,periodIssueGrant].includes(permission) && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_BILLING_UNAVAILABLE',message:'Check accepted evidence, billing terms and the issue period.'}});
       else if(error?.code==='MSV01')res.status(403).json({error:{code:'SERVICE_VALUE_DENIED',message:'Current service valuation authority is required.'}});
       else if(error?.code==='MSV02' || ([valueGrant,periodValueGrant].includes(permission) && error?.code==='CTM04'))res.status(409).json({error:{code:'SERVICE_VALUE_UNAVAILABLE',message:'Check effective policy, accepted priced evidence, current identities and financial period.'}});
       else if(error?.code==='MSP01')res.status(409).json({error:{code:'SERVICE_PERIOD_UNAVAILABLE',message:'Review requires a closed period with active terms throughout.'}});
@@ -102,6 +103,9 @@ export const createCommercialDraftingRouter = ({pool,requireDatabase,requireAuth
   const periodValuePath='/engagements/:id/service-period-reviews/:reviewId/valuation';
   router.get(periodValuePath,handle(workspaceQuerySchema,false,(c,r)=>servicePeriodValue(c,r)));
   router.post(periodValuePath,handle(periodValueCommand,true,(c,r,input)=>servicePeriodValue(c,r,input,audit),periodValueGrant));
+  const periodBillingPath='/engagements/:id/service-period-reviews/:reviewId/billing';
+  router.get(periodBillingPath,handle(workspaceQuerySchema,false,(c,r)=>servicePeriodRegister(c,r)));
+  router.post(periodBillingPath,handle(serviceIssueCommand,true,(c,r,input)=>servicePeriodRegister(c,r,input,audit),periodIssueGrant));
   const periodReviewPath='/contracts/:contractId/versions/:versionId/service-periods/:startsOn/review';
   router.get(periodReviewPath,handle(workspaceQuerySchema,false,(c,r)=>servicePeriodReview(c,r)));
   router.post(periodReviewPath,handle(periodDecision,true,(c,r,input)=>servicePeriodReview(c,r,input,audit),periodReviewGrant));

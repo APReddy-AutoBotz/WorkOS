@@ -188,3 +188,7 @@ Inspect a managed-service contract version and select a period under **Fixed-per
 ## Value a managed-service period
 
 Select the engagement in **Fixed-period operational valuation**. A policy owner can schedule the approved fixed-period profile and rounding precision. After independent period approval, finance can inspect the period-end policy and record the operational management value.
+
+## Register an approved fixed-period charge
+
+Inspect the decision on the contract version, select a billing engagement, and choose **Inspect billing eligibility**. Finance can register the whole contractual charge with a reason. The receipt identifies the approved-unbilled item, amount and UTC eligibility date.

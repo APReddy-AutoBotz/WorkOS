@@ -958,6 +958,61 @@ const verifyCommercialDrafting = async reversalScenario => {
       assert.equal((await decidePeriod(finance,periodCommand)).body.review.id,periodReview.id);
       assert.equal((await decidePeriod(finance,{...periodCommand,decision:'Rejected'})).status,409);
       assert.equal((await apiRequest(periodPath,{identity:finance})).body.review.id,periodReview.id);
+      const periodIssueGrant='commercial.service_periods.issue';
+      const periodBillPath='/engagements/'+serviceEng.body.id+'/service-period-reviews/'+periodReview.id+'/billing';
+      const issueBody={reviewId:periodReview.id,reason:'Issue the approved January fixed charge'};
+      const issuePeriod=(body,who=finance)=>apiRequest(periodBillPath,body?{method:'POST',identity:who,body}:{identity:who});
+      assert.equal((await issuePeriod()).status,403);
+      await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('HR',$1,true) on conflict(role_name,permission_key) do update set enabled=true",[periodIssueGrant]);
+      assert.equal((await issuePeriod()).body.charge.amount,'100.025');
+      assert.equal((await issuePeriod({...issueBody,amount:'100.03'})).status,400);
+      assert.equal((await issuePeriod({...issueBody,reviewId:crypto.randomUUID()})).status,409);
+      assert.equal((await apiRequest(periodBillPath,{identity:finance,scope:{...scope,legalEntityId:'synthetic-unassigned-entity'},method:'POST',body:issueBody})).status,403);
+      const lockedIssue=await pool.connect();
+      try {
+        await lockedIssue.query('begin');
+        await lockedIssue.query("update reporting_periods set status='Financially Locked' where id='syn-fixed-period'");
+        const op=crypto.randomUUID();
+        await lockedIssue.query("select set_config('workos.period_issue_operation',$1,true)",[op]);
+        await assert.rejects(lockedIssue.query(`insert into billing_eligibility_events(id,organization_id,legal_entity_id,client_id,contract_id,engagement_id,
+          source_type,version,eligible_on,currency,amount,billing_evidence,actor_id,active_role,operation_id,service_period_review_id)
+          select gen_random_uuid(),$1,$2,s.client_id,s.contract_id,$3,'MANAGED_SERVICE_PERIOD',1,(statement_timestamp() at time zone 'UTC')::date,s.currency,
+          s.amount,s.evidence||jsonb_build_object('reason',$5::text),$6,$7,$8,$4 from service_period_eligibility_source($1,$2,$3,$4) s`,
+          [scope.organizationId,scope.legalEntityId,serviceEng.body.id,periodReview.id,issueBody.reason,finance.id,finance.role,op]),err=>err.code==='CTM04');
+      } finally {await lockedIssue.query('rollback');lockedIssue.release();}
+      await pool.query("create trigger reject_period_billing before insert on audit_logs for each row when(new.action='Issue Service Period Charge') execute function reject_test_po_audit()");
+      assert.equal((await issuePeriod(issueBody)).status,503);
+      assert.equal((await issuePeriod()).body.receipt,null);
+      await pool.query('drop trigger reject_period_billing on audit_logs');
+      const billBrowser=await createContext(finance,['commercial.contracts.view',periodIssueGrant]);
+      await billBrowser.page.goto(baseUrl+'/tests/fixtures/commercial-drafting.html?live=1');
+      await billBrowser.page.getByRole('button',{name:'Inspect SYN-SERVICE',exact:true}).click();
+      const approvedDesk=billBrowser.page.getByRole('group',{name:'Fixed-period charge review'});
+      await approvedDesk.getByLabel('Service period').selectOption(periods[0].startsOn);
+      await approvedDesk.getByRole('button',{name:'Inspect period decision'}).click();
+      await billBrowser.page.getByLabel('Period billing engagement').selectOption(serviceEng.body.id);
+      const billDesk=billBrowser.page.getByRole('region',{name:'Fixed-period billing'});
+      await billDesk.getByRole('button',{name:'Inspect billing eligibility'}).click();
+      await billDesk.getByLabel('Billing decision reason').fill(issueBody.reason);
+      await billDesk.getByRole('button',{name:'Register approved-period charge'}).click();
+      await billDesk.getByText(/Approved unbilled · GBP 100.025/).waitFor();
+      const issuedPeriod=(await issuePeriod()).body.receipt;
+      assert.equal((await issuePeriod(issueBody)).body.receipt.itemId,issuedPeriod.itemId);
+      assert.equal((await issuePeriod({...issueBody,reason:'Changed decision'})).status,409);
+      assert.equal((await pool.query("select count(*)::int n from commercial_service_period_valuations where review_id=$1",[periodReview.id])).rows[0].n,0);
+      const entries=await pool.query(`select ev.billing_evidence,ev.amount::text from billing_eligibility_events ev join approved_unbilled_items i on i.event_id=ev.id
+        where ev.service_period_review_id=$1 and i.id=$2 and ev.source_type='MANAGED_SERVICE_PERIOD'`,[periodReview.id,issuedPeriod.itemId]);
+      assert.equal(entries.rowCount,1);assert.equal(entries.rows[0].billing_evidence.contractVersionId,serviceVersion);
+      assert.equal(entries.rows[0].billing_evidence.endsOn,periods[0].endsOn);
+      const sibling=await apiRequest('/engagements',{method:'POST',body:{...engagement.body,model:'managed_service',code:'SYN-SERVICE-PERIOD-SECOND',
+        name:'Synthetic second billing engagement',budget:'100',contractId:saved.result.id,contractVersionId:serviceVersion,startsOn:'2020-01-01',endsOn:'2099-12-31'}});
+      assert.equal(sibling.status,201,JSON.stringify(sibling.body));
+      await openHistoricalTerms(saved.result.id,serviceVersion,[['Engagement',sibling.body.id]]);
+      const siblingPath=periodBillPath.replace(serviceEng.body.id,sibling.body.id);
+      assert.deepEqual((await apiRequest(siblingPath,{identity:finance})).body,{charge:null,receipt:null});
+      assert.equal((await apiRequest(siblingPath,{identity:finance,method:'POST',body:issueBody})).status,409);
+      assert.equal((await pool.query('select count(*)::int n from billing_eligibility_events where service_period_review_id=$1',[periodReview.id])).rows[0].n,1);
+      await billBrowser.context.close();
       const pvPath='/engagements/'+serviceEng.body.id+'/service-period-reviews/'+periodReview.id+'/valuation';
       const periodValue=(body,who=finance)=>apiRequest(pvPath,body?{method:'POST',identity:who,body}:{identity:who});
       assert.equal((await periodValue()).status,403);
@@ -1036,6 +1091,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       const declined=await decideOther(periods[1],finance,'Rejected');
       assert.equal(declined.status,201,JSON.stringify(declined.body));
       assert.equal(declined.body.review.decision,'Rejected');
+      assert.equal((await apiRequest(periodBillPath.replace(periodReview.id,declined.body.review.id),{identity:finance})).status,404);
       assert.equal((await apiRequest(pvPath.replace(periodReview.id,declined.body.review.id),{identity:finance})).status,404);
       assert.equal((await decideOther(periods[1],finance,'Approved')).status,409);
       await periodBrowser.context.close();

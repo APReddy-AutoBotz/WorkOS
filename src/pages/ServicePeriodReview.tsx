@@ -1,3 +1,4 @@
+import {ServiceUnitBilling} from './ServiceUnitBilling';
 import {ServicePeriodValuation} from './ServicePeriodValuation';
 import {useRef,useState} from 'react';
 import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext,type ContractTerms,type Engagement} from '../services/commercialDrafting';
@@ -6,6 +7,7 @@ export function ServicePeriodReview({contractId,version,context,today,engagement
   const [start,setStart]=useState(''), [reason,setReason]=useState(''), [inspected,setInspected]=useState(false);
   const [receipt,setReceipt]=useState<Awaited<ReturnType<typeof commercialDraftingService.servicePeriodReview>>>(null);
   const [busy,setBusy]=useState(false), [message,setMessage]=useState('');
+  const [billingEng,setBillingEng]=useState('');
   const active=useRef(false);
   const terms=version.servicePeriodCharges??[], selected=terms.find(t=>t.startsOn===start);
   async function run(decision?:'Approved'|'Rejected') {
@@ -31,6 +33,12 @@ export function ServicePeriodReview({contractId,version,context,today,engagement
           <button type="button" disabled={reason.trim().length<3} onClick={()=>run('Rejected')}>Reject period charge</button></>}</>)}
     {message && <p role="alert">{message}</p>}
   </fieldset>
+    {inspected && receipt?.decision==='Approved' && context.canIssuePeriods && <section aria-label="Bill an approved service period">
+      <label>Period billing engagement <select value={billingEng} onChange={e=>setBillingEng(e.target.value)}>
+        <option value="">Select an engagement</option>{engagements.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
+      </select></label>
+      {billingEng && <div key={billingEng+receipt.id}><ServiceUnitBilling context={context} engagement={billingEng} evidenceId={receipt.id} reviewId={receipt.id} source="period"/></div>}
+    </section>}
     {(context.canSetServicePolicy || context.canValuePeriods) && <div key={start+(receipt?.id??'')}><ServicePeriodValuation context={context} version={version} engagements={engagements} today={today} term={selected} reviewId={inspected && receipt?.decision==='Approved'?receipt.id:undefined}/></div>}
   </>;
 }
