@@ -63,7 +63,7 @@ const batch = z
     reason,
     createdAt: instant,
     ownerCurrent: z.boolean(),
-    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD']).optional(),
+    sourceType: z.enum(['MILESTONE_ACCEPTANCE','FIXED_FEE_INSTALLMENT','RETAINER_PERIOD','MANAGED_SERVICE_UNIT']).optional(),
     state: z.enum(['Draft', 'Under Review', 'Approved', 'Exported', 'Billed/Confirmed', 'Cancelled']),
   })
   .strict()
@@ -71,7 +71,7 @@ const batch = z
     (x) =>
       x.periodStart <= x.periodEnd &&
       (!x.sourceType ||
-        (x.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission(x.sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':x.sourceType==='FIXED_FEE_INSTALLMENT'?'commercial.fixed_fee_eligibility.issue':'commercial.milestone_billing.view'))),
+        (x.periodBasis === 'ELIGIBLE_DATE' && hasRatePermission(x.sourceType==='MANAGED_SERVICE_UNIT'?'commercial.service_units.issue':x.sourceType==='RETAINER_PERIOD'?'commercial.retainer_eligibility.issue':x.sourceType==='FIXED_FEE_INSTALLMENT'?'commercial.fixed_fee_eligibility.issue':'commercial.milestone_billing.view'))),
   );
 const tmLine = z
   .object({
@@ -131,7 +131,14 @@ const retainerLine=milestoneLine.extend({
   sourceType:z.literal('RETAINER_PERIOD'),
   evidence:retainerInvoiceEvidence,
 });
-const line = z.union([tmLine, milestoneLine, fixedFeeLine, retainerLine]);
+const serviceLine=milestoneLine.extend({
+  sourceType:z.literal('MANAGED_SERVICE_UNIT'),
+  evidence:z.object({evidenceId:uuid,reviewId:uuid,contractVersionId:id,engagementId:id,priceEffectiveFrom:date,serviceDate:date,
+    dimensionCode:z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/),quantity:z.string().regex(/^(?:0|[1-9]\d{0,11})(?:\.\d{1,4})?$/),
+    unitPrice:z.string().regex(/^(?:0|[1-9]\d{0,13})(?:\.\d{1,4})?$/),billingPrecision:z.number().int().min(0).max(4),rounding:z.literal('HALF_UP'),
+    contractLifecycleId:id,engagementLifecycleId:id,contractAmendmentId:id.nullable(),engagementAmendmentId:id.nullable(),reason}).strict(),
+});
+const line = z.union([tmLine, milestoneLine, fixedFeeLine, retainerLine,serviceLine]);
 const cancellation = z
     .object({
       id: uuid,
@@ -174,7 +181,9 @@ const checkDetail = (
           l.batchId === x.id &&
           l.sequence === i + 1 &&
           l.currency === x.currency &&
-          ('sourceType' in l && l.sourceType==='RETAINER_PERIOD'
+          ('sourceType' in l && l.sourceType==='MANAGED_SERVICE_UNIT'
+            ? l.evidence.engagementId===x.engagementId && l.evidence.priceEffectiveFrom<=l.evidence.serviceDate
+            : 'sourceType' in l && l.sourceType==='RETAINER_PERIOD'
             ? l.evidence.engagementId===x.engagementId && l.evidence.startsOn<=l.evidence.endsOn &&
               canonicalHours(l.evidence.periodPrice.total)===canonicalHours(l.amount)
             : 'sourceType' in l && l.sourceType==='FIXED_FEE_INSTALLMENT'
@@ -356,6 +365,15 @@ export const invoiceDrafts = {
     const data=await call('GET','/batches/'+batchId+'/available-installments'+(after?'?after='+encodeURIComponent(after):''),c,'view');
     const result=z.object({...envelope,batchId:z.literal(batchId),nextAfter:uuid.nullable(),
       items:z.array(z.object({id:uuid,installment:z.number().int().positive(),dueOn:date,currency:z.string(),amount}).strict()).max(50)
+    }).strict().safeParse(data);
+    if (!result.success) return bad();
+    return result.data;
+  },
+  availableServiceCharges: async(batchId:string,c:RateContext|null,after?:string)=>{
+    if (!uuid.safeParse(batchId).success || !hasRatePermission('commercial.service_units.issue')) return bad();
+    const data=await call('GET','/batches/'+batchId+'/available-service-charges'+(after?'?after='+encodeURIComponent(after):''),c,'view');
+    const result=z.object({...envelope,batchId:z.literal(batchId),nextAfter:uuid.nullable(),
+      items:z.array(z.object({id:uuid,serviceDate:date,dimensionCode:id,currency:z.string().regex(/^[A-Z]{3}$/),amount}).strict()).max(50)
     }).strict().safeParse(data);
     if (!result.success) return bad();
     return result.data;
