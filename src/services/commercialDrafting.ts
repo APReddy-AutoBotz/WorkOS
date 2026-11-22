@@ -61,7 +61,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -81,6 +81,8 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
   const permissions = getEffectivePermissions(user);
   if (!permissions.includes('commercial.contracts.view')) return null;
   return {request: {scope: {...scope}, token: getToken()}, identityKey: identityKey()!,
+    canSetServicePolicy: permissions.includes('commercial.service_units.policy'),
+    canValueUnits: permissions.includes('commercial.service_units.value'),
     canReviewUnits: permissions.includes('commercial.service_units.decide'),
     canCaptureUnits: permissions.includes('commercial.service_units.capture'),
     canIssueInstallment: permissions.includes('commercial.fixed_fee_eligibility.issue'),
@@ -302,7 +304,40 @@ const normalizeUnitReview=(value:unknown,evidenceId:string)=>{
   if(r.evidenceId!==evidenceId) throw invalid();
   return {id:text(r.id),decision:model(r.decision,['Accepted','Rejected'] as const),reason:text(r.reason),createdAt:text(r.createdAt)};
 };
+const unitPolicy=(value:unknown)=>{
+  const r=object(value),profile=model(r.profile,['accepted_unit','disabled'] as const);
+  const precision=r.precision===null?null:integer(r.precision);
+  if ((profile==='disabled')!==(precision===null) || (precision!==null && precision>4)) throw invalid();
+  return {id:text(r.id),effectiveFrom:date(r.effectiveFrom),profile,precision,reason:text(r.reason),ownerId:text(r.ownerId)};
+};
+const unitValue=(value:unknown,evidenceId:string)=>{
+  const r=object(value);
+  if(r.evidenceId!==evidenceId) throw invalid();
+  const amount=text(r.amount);
+  if(!/^\d+(?:\.\d{1,4})?$/.test(amount)) throw invalid();
+  return {id:text(r.id),reviewId:text(r.reviewId),policyId:text(r.policyId),versionId:text(r.versionId),quantity:text(r.quantity),unitPrice:decimal(r.unitPrice),currency:currency(r.currency),amount};
+};
+const serviceEngPath=(id:string)=>'/engagements/'+encodeURIComponent(id);
+const serviceValuePath=(eng:string,id:string)=>serviceEngPath(eng)+'/service-unit-evidence/'+encodeURIComponent(id)+'/valuation';
 export const commercialDraftingService = {
+  servicePolicy(eng:string,c:CommercialDraftingContext) {
+    return request(c,'GET',serviceEngPath(eng)+'/service-valuation-policy',undefined,v=>{
+      const r=object(v);return {latest:r.latest===null?null:unitPolicy(r.latest),effective:r.effective===null?null:unitPolicy(r.effective)};
+    });
+  },
+  setServicePolicy(eng:string,command:{previousId:string|null;profile:'accepted_unit'|'disabled';effectiveFrom:string;precision:number|null;reason:string},c:CommercialDraftingContext) {
+    return request(c,'POST',serviceEngPath(eng)+'/service-valuation-policy',command,unitPolicy,false);
+  },
+  inspectServiceValue(eng:string,id:string,c:CommercialDraftingContext) {
+    return request(c,'GET',serviceValuePath(eng,id),undefined,v=>{
+      const r=object(v);return {policy:r.policy===null?null:unitPolicy(r.policy),valuation:r.valuation===null?null:unitValue(r.valuation,id)};
+    });
+  },
+  recordServiceValue(eng:string,id:string,reviewId:string,policyId:string,c:CommercialDraftingContext) {
+    return request(c,'POST',serviceValuePath(eng,id),{reviewId,policyId},v=>{
+      const result=unitValue(v,id);if (result.reviewId!==reviewId || result.policyId!==policyId) throw invalid();return result;
+    },false);
+  },
   reviewUnits(engagementId:string,evidenceId:string,decision:UnitDecision,reason:string,context:CommercialDraftingContext) {
     if (!assertCommercialDraftingContext(context).canReviewUnits) throw new ApiClientError('Service review access changed.',{status:403});
     return request(context,'POST','/engagements/'+encodeURIComponent(engagementId)+'/service-unit-evidence/'+encodeURIComponent(evidenceId)+'/review',

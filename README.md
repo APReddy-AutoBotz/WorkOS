@@ -162,3 +162,5 @@ Managed-service engagements can record delivered quantities by service date and 
 Independent reviewers can accept or reject a delivered quantity from its engagement history. Each receipt shows the decision and reason. Acceptance alone creates no monetary entry.
 
 Commercial managers can set a price per managed-service unit in contract currency. The version history shows the exact price, including explicit zero. A blank price leaves the unit unpriced.
+
+Managed-service operators can retain an operational value for independently accepted units. A policy owner selects the effective date and rounding precision. Each valuation preserves the service-date policy, accepted quantity, versioned contract price and contract currency.
