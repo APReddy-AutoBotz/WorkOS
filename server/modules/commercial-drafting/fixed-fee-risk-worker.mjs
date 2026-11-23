@@ -82,7 +82,7 @@ async function dispatchNext(client) {
   return true;
 }
 
-async function processOne(pool,work) {
+export async function processRiskTransaction(pool,work) {
   const client=await pool.connect();
   try {
     await client.query('begin isolation level repeatable read');
@@ -108,8 +108,8 @@ export async function processFixedFeeWarnings(pool,limit=10) {
         =(a.organization_id,a.legal_entity_id,a.entity_id)) group by a.organization_id,a.legal_entity_id,a.entity_id
     order by min(a.effective_on),a.entity_id limit 100 on conflict do nothing`);
   for (let n=0;n<limit;n++) {
-    const scanned=await processOne(pool,scanNext);
-    const dispatched=await processOne(pool,dispatchNext);
+    const scanned=await processRiskTransaction(pool,scanNext);
+    const dispatched=await processRiskTransaction(pool,dispatchNext);
     if (!scanned && !dispatched) break;
   }
 }

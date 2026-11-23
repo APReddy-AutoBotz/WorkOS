@@ -295,6 +295,6 @@ In the commercial workspace, use **Check purchase-order risks** to review releas
 
 ### Purchase-order alert assignments
 
-A commercial reviewer can assign engagements from the same contract to a released purchase order before its first use. Finance can filter the purchase-order risk register for orders missing assignments or a current owner with inbox access. Assignment revisions retain the reviewer and reason. New commitments retain their before and after balances for threshold and exhaustion review. Older commitments have no reconstructed balance evidence.
+Once a purchase order is released, open **Review alert assignments** and select the engagements that use it. A shared order can have several engagement owners. Finance can filter the risk register for missing assignments or unavailable owners before the first commitment.
 
-WOS-CTR-002, WOS-COM-013 and WOS-INT-002 remain in progress. Automatic purchase-order notification delivery and retry evidence remain pending. During an application rollback, retain migrations 110 and 111 and their evidence.
+In **Review purchase-order risk recipients**, an authorized administrator selects the commercial manager, finance/billing owner and buyer notice template. The governed inbox alerts the current recipients when the order expires, crosses its warning threshold or runs out of available value. **Check order alert deliveries** shows pending retries and evidence of delivery.
