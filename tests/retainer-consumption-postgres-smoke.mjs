@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {commercialFixture, withCommercialDatabase, migrateCommercialDatabase, withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
-import {amendmentTransition, createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
+import {amendmentContractInput, amendmentTransition, createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays} from './support/commercial-amendments-test.mjs';
 
 const historyEntries=Array.from({length:103},(_,entryId)=>({entryId}));
 const paged={periods:[{entries:historyEntries.slice(0,97)},{entries:historyEntries.slice(97)}]};
@@ -136,6 +136,23 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal(interrupted.status,200);
     assert.deepEqual(interrupted.body.findings.filter(row=>row.versionId===pin),
       [{contractId:contract.id,number:contract.number,versionId:pin,version:1,kind:'review_terms',startsOn:today,endsOn:today}]);
+    const missingPolicies=[];
+    for (let i=0;i<10;i++) {
+      const added=await post('/contracts',amendmentContractInput('SYN-RISK-PAGE-'+i,{model:'retainer',startsOn:today,
+        endsOn:end,effectiveFrom:today,retainerPeriods:periods}));
+      const versionId=added.versions[0].id;
+      await amendmentTransition(request,'Contract',added.id,0,versionId);
+      missingPolicies.push(versionId);
+    }
+    const firstPage=(await request(register)).body;
+    assert.equal(firstPage.scannedVersions,10);
+    assert(firstPage.nextAfter);
+    const secondPage=(await request(register+'?after='+encodeURIComponent(firstPage.nextAfter))).body;
+    assert.equal(secondPage.scannedVersions,1);
+    assert.equal(secondPage.nextAfter,null);
+    const all=[...firstPage.findings,...secondPage.findings];
+    assert.deepEqual(all.filter(row=>row.kind==='missing_policy').map(row=>row.versionId).sort(),missingPolicies.sort());
+    assert.equal(new Set(all.map(row=>row.versionId)).size,11);
   });
 });
 console.log('Retainer consumption passed pending and final approval, decimal totals, period, version and worker scope.');
