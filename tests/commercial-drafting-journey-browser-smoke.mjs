@@ -1480,6 +1480,9 @@ const verifyCommercialDrafting = async reversalScenario => {
         await margin.getByText(/Retained worker cost 7.7160625/).waitFor();
         await margin.getByRole('button',{name:'Retain month'}).click();
         await margin.getByText(/Retained version 1/).waitFor();
+        await margin.getByLabel('Comparison threshold (%)').fill('10');
+        await margin.getByRole('button',{name:'Compare retained margin'}).click();
+        await margin.getByRole('status').filter({hasText:/10%/}).waitFor();
         await operator.context.close();
         const retained=(await costReader()).body.snapshot;
         assert.deepEqual([retained.reviewId,retained.adoptionId,retained.hourlyRate,retained.hours,retained.amount],[accepted.body.id,adopted.id,'12.3457','0.625','7.7160625']);

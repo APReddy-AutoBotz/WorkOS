@@ -650,10 +650,11 @@ export const commercialDraftingService = {
         billableHours:hours(r.billableHours),nonBillableHours:hours(r.nonBillableHours)};
     },false);
   },
-  serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string}={}) {
+  serviceMargin(eng:string,monthStart:string,context:CommercialDraftingContext,options:{version?:number;expectedToken?:string;thresholdPercent?:string}={}) {
     if (!assertCommercialDraftingContext(context).canViewServiceMargin || (options.expectedToken && !context.canRetainServiceMargin)) throw invalid();
     const query=new URLSearchParams({monthStart});
     if (options.version) query.set('version',String(options.version));
+    if (options.thresholdPercent!==undefined) query.set('thresholdPercent',options.thresholdPercent);
     const path=serviceEngPath(eng)+'/service-period-margin';
     return request(context,options.expectedToken?'POST':'GET',options.expectedToken?path:path+'?'+query,
       options.expectedToken?{monthStart,expectedToken:options.expectedToken}:undefined,value=>{
@@ -662,6 +663,7 @@ export const commercialDraftingService = {
           !/^[A-Z]{3}$/.test(text(p.currency)) || !/^[0-9a-f]{64}$/.test(text(r.token))) throw invalid();
         const exact=(v:unknown)=>{const s=text(v);if (!/^-?(0|[1-9]\d*)(\.\d+)?$/.test(s)) throw invalid();return s;};
         return {version:r.version===null?null:integer(r.version,1),latestVersion:integer(r.latestVersion),token:text(r.token),
+          comparison:options.thresholdPercent===undefined?null:z.object({thresholdPercent:z.literal(options.thresholdPercent),status:z.enum(['Unavailable','Below','AtOrAbove'])}).strict().parse(r.thresholdComparison),
           currency:text(p.currency),billable:exact(p.billable),cost:exact(p.retainedCost),margin:p.margin===null?null:exact(p.margin),
           percent:p.marginPercent===null?null:exact(p.marginPercent),hours:exact(p.approvedHours),entries:integer(p.approvedEntries),
           verified:integer(p.verifiedEntries),pending:integer(p.pending),missing:integer(p.missingCosts),unresolved:integer(p.unresolvedReceipts),

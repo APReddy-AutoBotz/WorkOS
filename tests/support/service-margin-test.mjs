@@ -37,9 +37,14 @@ export async function verifyServiceMargin({pool,request,post,capture,review,rece
   const [a,b]=await Promise.all([retain(preview.token),retain(preview.token)]);
   assert.equal(a.version,2);assert.deepEqual(a,b);
   assert.deepEqual((await read('&version=1')).report,v1.report);
+  for (const [version,threshold,status] of [[1,'90','Unavailable'],[2,'44.45','Below'],[2,'44.44','AtOrAbove'],[2,'-2.5','AtOrAbove']]) {
+    assert.deepEqual((await read('&version='+version+'&thresholdPercent='+threshold)).thresholdComparison,{thresholdPercent:threshold,status});
+  }
+  assert.equal((await request(query+'&thresholdPercent=50')).status,400);
+  assert.equal((await request(query+'&version=2&thresholdPercent=44.444')).status,400);
   assert.deepEqual((await read()).report,p);
   assert.equal((await pool.query('select count(*)::int n from commercial_service_margin_versions')).rows[0].n,2);
   await assert.rejects(pool.query('delete from commercial_service_margin_versions'));
   await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.cost_candidates.view'");
-  assert.equal((await request(query+'&version=1')).status,403);
+  assert.equal((await request(query+'&version=1&thresholdPercent=50')).status,403);
 }

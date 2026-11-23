@@ -2,6 +2,8 @@
 
 Updated 2026-11-23. Owner direction: review the complete code, improve WorkOS into a premium enterprise utilization/operations product, keep vision/plan/README current, and merge eligible changes. This authorizes integration work; it does not waive repository acceptance gates or authorize production deployment. PRODUCT_REQUIREMENTS.md remains authoritative. No new commercial policy or unapproved product category is introduced.
 
+Managed-service reporting supports a read-only comparison of a retained monthly margin percentage with a user-entered threshold (WOS-RPT-004). An unavailable percentage stays unavailable. Automated margin alerts remain pending.
+
 ## Delivery priorities
 
 Timesheet desk decisions now check the reviewed work version under the database lock. Direct integrations can pass the same precondition on the legacy status endpoint. Retirement of unconditional legacy calls requires a separate compatibility decision.

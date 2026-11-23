@@ -2,6 +2,8 @@
 
 WorkOS is a buyer-owned professional-services operations platform that connects resource planning, approved work, effective capacity and commercial control. Its direction is an enterprise utilization product where every percentage has an explicit period, denominator, inclusion rule and authorized source.
 
+Managed-service reporting supports a read-only comparison of a retained monthly margin percentage with a user-entered threshold (WOS-RPT-004). An unavailable percentage stays unavailable. Automated margin alerts remain pending.
+
 For verified delivery status, remaining launch work and buyer acceptance gates, see the [implementation status](docs/00-control/IMPLEMENTATION_STATUS.md).
 
 > **Naming note:** WorkOS is the temporary product working name. Runtime branding and buyer terminology must remain configuration-driven.
