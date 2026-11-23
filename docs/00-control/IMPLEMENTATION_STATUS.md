@@ -1,5 +1,9 @@
 # WorkOS implementation status
 
+## Managed-service margin policy
+
+The governed engagement amendment workflow supports an optional standing threshold, dated adoption and explicit disablement. The [margin portfolio](https://github.com/APReddy-AutoBotz/WorkOS/pull/349) remains available for ad hoc comparisons. Historical alert evaluation and mandatory delivery are open.
+
 ## Commercial reporting checkpoint on 24 November 2026
 
 On main at `1f45ddd49a56df67296b1f12130804135f167262`, finance can compare an individual retained managed-service monthly margin with an entered threshold. [Reporting PR](https://github.com/APReddy-AutoBotz/WorkOS/pull/348) and [validation run](https://github.com/APReddy-AutoBotz/WorkOS/actions/runs/45250489157).

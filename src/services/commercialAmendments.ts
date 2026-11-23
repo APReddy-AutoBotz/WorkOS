@@ -25,7 +25,7 @@ export const assertCommercialAmendmentContext = (context: CommercialAmendmentCon
   return owner;
 };
 
-export type AmendmentTerms = {contractVersionId: string; startsOn: string; endsOn: string; budget: string; laborCostBudget?:string; expenseBudget?:string; budgetHours?:string; budgetWarningPercent?:string; elapsedTimePolicy?:string; effortPolicy?:string};
+export type AmendmentTerms = {contractVersionId: string; startsOn: string; endsOn: string; budget: string; laborCostBudget?:string; expenseBudget?:string; budgetHours?:string; marginThresholdPercent?:string; budgetWarningPercent?:string; elapsedTimePolicy?:string; effortPolicy?:string};
 export type AmendmentEvent = AmendmentTerms & {
   id: string; sequence: number; effectiveOn: string; reason: string; approvalReference: string;
   actorId: string; activeRole: string; correlationId: string; operationId: string;
@@ -77,6 +77,11 @@ const unique = <T extends {id: string}>(items: T[]) => {
   if (new Set(items.map(item => item.id)).size !== items.length) throw invalid(); return items;
 };
 const token = (value: unknown) => {const result = text(value); if (!/^[a-f0-9]{64}$/.test(result)) throw invalid(); return result;};
+function marginThreshold(value:unknown) {
+  const percent=text(value);
+  if (!/^(?:disabled|-?(?:0|[1-9]\d{0,11})(?:\.\d{1,2})?)$/.test(percent)) throw invalid();
+  return percent;
+}
 function warningPercent(value:unknown) {
   const percent=text(value);
   if (!/^(?:disabled|[1-9]\d?|100)$/.test(percent)) throw invalid();
@@ -88,6 +93,7 @@ export const normalizeAmendmentTerms = (value: unknown): AmendmentTerms => {
   return {contractVersionId: text(item.contractVersionId), startsOn, endsOn, budget: decimal(item.budget),
     ...(item.effortPolicy===undefined?{}:{effortPolicy:member(item.effortPolicy,['disabled','0','1','2','3','4'] as const)}),
     ...(item.elapsedTimePolicy===undefined?{}:{elapsedTimePolicy:member(item.elapsedTimePolicy,['disabled','0','1','2','3','4'] as const)}),
+    ...(item.marginThresholdPercent===undefined?{}:{marginThresholdPercent:marginThreshold(item.marginThresholdPercent)}),
     ...(item.budgetWarningPercent===undefined?{}:{budgetWarningPercent:warningPercent(item.budgetWarningPercent)}),
     ...(item.budgetHours===undefined?{}:{budgetHours:decimal(item.budgetHours)}),
     ...(item.expenseBudget===undefined?{}:{expenseBudget:decimal(item.expenseBudget)}),
@@ -96,6 +102,7 @@ export const normalizeAmendmentTerms = (value: unknown): AmendmentTerms => {
 const amountKey = (value: string) => {const [whole, fraction = ''] = value.split('.'); return `${whole}.${fraction.padEnd(4, '0')}`;};
 export const sameAmendmentTerms = (left: AmendmentTerms, right: AmendmentTerms) => left.contractVersionId === right.contractVersionId
   && left.startsOn === right.startsOn && left.endsOn === right.endsOn && amountKey(left.budget) === amountKey(right.budget)
+  && left.marginThresholdPercent===right.marginThresholdPercent
   && left.budgetWarningPercent===right.budgetWarningPercent
   && left.effortPolicy===right.effortPolicy
   && left.elapsedTimePolicy===right.elapsedTimePolicy
@@ -127,7 +134,9 @@ export const normalizeCommercialAmendmentWorkspace = (value: unknown): Amendment
   // History is newest first, with strictly later effective dates at the top.
   if (lifecycle.effectiveOn > asOf || lifecycle.contractVersionId !== activationTerms.contractVersionId || history.length !== sequence
     || history.some((event, index) => event.sequence !== sequence - index || (index > 0 && event.effectiveOn >= history[index - 1].effectiveOn))) throw invalid();
-  if (activationTerms.budgetWarningPercent!==undefined || activationTerms.effortPolicy!==undefined || activationTerms.elapsedTimePolicy!==undefined || activationTerms.budgetHours!==undefined || activationTerms.laborCostBudget!==undefined || activationTerms.expenseBudget!==undefined ||
+  if (activationTerms.marginThresholdPercent!==undefined ||
+    ((entityType!=='Engagement' || normalizedIdentity.model!=='managed_service') && [currentTerms,...history].some(terms=>terms.marginThresholdPercent!==undefined)) ||
+    activationTerms.budgetWarningPercent!==undefined || activationTerms.effortPolicy!==undefined || activationTerms.elapsedTimePolicy!==undefined || activationTerms.budgetHours!==undefined || activationTerms.laborCostBudget!==undefined || activationTerms.expenseBudget!==undefined ||
     ((entityType==='Contract' || normalizedIdentity.model!=='fixed_fee') && [currentTerms,...history].some(terms=>terms.expenseBudget!==undefined)) ||
     ((entityType!=='Engagement' || normalizedIdentity.model!=='fixed_fee') &&
       [currentTerms,...history].some(terms=>terms.budgetWarningPercent!==undefined || terms.effortPolicy!==undefined || terms.elapsedTimePolicy!==undefined || terms.budgetHours!==undefined || terms.laborCostBudget!==undefined))) throw invalid();
@@ -169,7 +178,7 @@ const entityPath = (type: LifecycleEntityType, id: string) => {
 // client-provided scope, identity, model, currency, billing state or audit data.
 const commandBody = (input: AmendmentInput) => ({expectedSequence: input.expectedSequence, expectedLifecycleSequence: input.expectedLifecycleSequence,
   expectedContractVersion: input.expectedContractVersion, contractVersionId: input.contractVersionId, effectiveOn: input.effectiveOn,
-  startsOn: input.startsOn, endsOn: input.endsOn, budget: input.budget, ...(input.budgetWarningPercent===undefined?{}:{budgetWarningPercent:input.budgetWarningPercent}), ...(input.effortPolicy===undefined?{}:{effortPolicy:input.effortPolicy}), ...(input.elapsedTimePolicy===undefined?{}:{elapsedTimePolicy:input.elapsedTimePolicy}), ...(input.budgetHours===undefined?{}:{budgetHours:input.budgetHours}), ...(input.expenseBudget===undefined?{}:{expenseBudget:input.expenseBudget}), ...(input.laborCostBudget===undefined?{}:{laborCostBudget:input.laborCostBudget}), reason: input.reason, approvalReference: input.approvalReference});
+  startsOn: input.startsOn, endsOn: input.endsOn, budget: input.budget, ...(input.marginThresholdPercent===undefined?{}:{marginThresholdPercent:input.marginThresholdPercent}), ...(input.budgetWarningPercent===undefined?{}:{budgetWarningPercent:input.budgetWarningPercent}), ...(input.effortPolicy===undefined?{}:{effortPolicy:input.effortPolicy}), ...(input.elapsedTimePolicy===undefined?{}:{elapsedTimePolicy:input.elapsedTimePolicy}), ...(input.budgetHours===undefined?{}:{budgetHours:input.budgetHours}), ...(input.expenseBudget===undefined?{}:{expenseBudget:input.expenseBudget}), ...(input.laborCostBudget===undefined?{}:{laborCostBudget:input.laborCostBudget}), reason: input.reason, approvalReference: input.approvalReference});
 export const commercialAmendmentService = {
   getWorkspace: (type: LifecycleEntityType, id: string, context: CommercialAmendmentContext | null) =>
     request(context, 'GET', entityPath(type, id), undefined, value => {

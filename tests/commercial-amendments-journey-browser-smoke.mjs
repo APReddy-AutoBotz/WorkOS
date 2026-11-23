@@ -4,7 +4,7 @@ import {startFixtureServer} from './support/compiled-fixture-server.mjs';
 import {commercialFixture as f,withCommercialDatabase,migrateCommercialDatabase,seedCommercialReferences,seedCommercialLegacyWork,
   seedCommercialIdentities,withCommercialApi} from './support/commercial-drafting-test.mjs';
 import {amendmentPermissions,amendmentScope,amendmentMarker,amendmentSnapshot,amendmentCounts,amendmentToday,addUtcDays,
-  amendmentInput,amendmentContractInput,amendmentPost,amendmentTransition,grantAmendmentPermissions,createAmendmentHierarchy,
+  amendmentApply,amendmentInput,amendmentContractInput,amendmentPost,amendmentTransition,grantAmendmentPermissions,createAmendmentHierarchy,
   seedApplicableAmendmentVersion,amendmentWorkspace} from './support/commercial-amendments-test.mjs';
 
 // Hosted-only real React -> HTTP API -> randomized disposable PostgreSQL gate.
@@ -192,6 +192,44 @@ await withCommercialDatabase(async({pool,databaseUrl})=>{
       for(const value of [reason,approvalReference,hostile,'https://example.test/synthetic-amendment.pdf','30000.0002'])assert(!JSON.stringify(audit).includes(value));
       assert(writes.every(write=>write.method==='POST'&&write.path.startsWith(amendmentPrefix)));
       assert(reads.every(read=>read.path.startsWith(amendmentPrefix)||read.path===`${prefix}/lifecycle/workspace`));
+      const service=await createAmendmentHierarchy(apiRequest,'SYN-MARGIN-THRESHOLD',{contract:{model:'managed_service'}});
+      const next=await seedApplicableAmendmentVersion(pool,identities.manager,service.contract,today);
+      const contractInput=amendmentInput(await amendmentWorkspace(apiRequest,'Contract',service.contract.id),next);
+      const wrongModel=await apiRequest('/amendments/Contract/'+service.contract.id+'/preview',
+        {method:'POST',body:{...contractInput,marginThresholdPercent:'15'}});
+      assert.equal(wrongModel.status,422);assert.equal(wrongModel.body.error.code,'COMMERCIAL_MARGIN_MODEL');
+      await amendmentApply(apiRequest,'Contract',service.contract.id,contractInput);
+      const endpoint=amendmentPrefix+'/Engagement/'+service.engagement.id;
+      const command=amendmentInput(await amendmentWorkspace(apiRequest,'Engagement',service.engagement.id),next);
+      const previewRoute='/amendments/Engagement/'+service.engagement.id+'/preview';
+      assert.equal((await apiRequest(previewRoute,{method:'POST',body:{...command,marginThresholdPercent:'0.001'}})).status,400);
+      assert.equal((await apiRequest(previewRoute,{identity:identities.reader,method:'POST',body:{...command,marginThresholdPercent:'10'}})).status,403);
+      await open(); await select('Engagement',service.engagement.id);
+      await page.getByLabel('Target contract version',{exact:true}).selectOption(next.id);
+      await page.getByLabel('Standing margin threshold (%)',{exact:true}).fill('-2.25');
+      await page.getByLabel('Reason for amendment',{exact:true}).fill(reason);
+      await page.getByLabel('Approval reference',{exact:true}).fill(approvalReference);
+      for (const [action,suffix] of [['Preview amendment','/preview'],['Confirm and apply amendment','']]) {
+        const pending=page.waitForResponse(r=>new URL(r.url()).pathname===endpoint+suffix && r.request().method()==='POST');
+        await button(action).click();
+        const response=await pending;assert.equal(response.status(),201,await response.text());
+      }
+      const policy=await amendmentWorkspace(apiRequest,'Engagement',service.engagement.id);
+      assert.equal(policy.currentTerms.marginThresholdPercent,'-2.25');
+      assert.equal(policy.activationTerms.marginThresholdPercent,undefined);
+      assert.equal(policy.history[0].after.terms.marginThresholdPercent,'-2.25');
+      assert.equal(policy.history[0].approvalReference,approvalReference);
+      await page.getByRole('region',{name:'Protected amendment history'}).getByText(/Margin threshold -2.25%/).first().waitFor();
+      const later=await seedApplicableAmendmentVersion(pool,identities.manager,{...service.contract,latestVersion:2},future);
+      await amendmentApply(apiRequest,'Contract',service.contract.id,amendmentInput(await amendmentWorkspace(apiRequest,'Contract',service.contract.id),later));
+      const revision=amendmentInput(policy,later);
+      const carried=await apiRequest(previewRoute,{method:'POST',body:revision});
+      assert.equal(carried.status,201,JSON.stringify(carried.body));assert.equal(carried.body.after.marginThresholdPercent,'-2.25');
+      await amendmentApply(apiRequest,'Engagement',service.engagement.id,{...revision,marginThresholdPercent:'disabled'});
+      const futurePolicy=await amendmentWorkspace(apiRequest,'Engagement',service.engagement.id);
+      assert.equal(futurePolicy.currentTerms.marginThresholdPercent,'-2.25');
+      assert.equal(futurePolicy.history[0].marginThresholdPercent,'disabled');
+      assert.equal(futurePolicy.history[1].marginThresholdPercent,'-2.25');
       assert.deepEqual(errors,[]);assert.deepEqual(external,[]);await reader.context.close();await denied.context.close();await manager.context.close();
       console.log('Commercial amendments real React/API/PostgreSQL journey passed: exact preview confirmation, explicit parent-to-child adoption, no cascade, lifecycle-stale conflict/reload, On Hold preservation, pending/current distinction, immutable activation/history, escaped private evidence, scope/token/permission invalidation and read-only/denied privacy.');
     }finally{try{if(browser)await browser.close();}finally{await fixtureServer.close();}}

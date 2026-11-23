@@ -4,6 +4,8 @@ All notable WorkOS changes will be recorded here. The project follows semantic v
 
 ## [Unreleased]
 
+- Managed-service engagements can adopt an effective-dated standing margin threshold through the commercial amendment workflow.
+
 - CI retains the tested container with its source revision, image ID, checksums and runtime inventories for buyer verification.
 
 - Finance can compare retained managed-service margins across engagements for a selected month and distinguish missing evidence from margins below an entered threshold.
