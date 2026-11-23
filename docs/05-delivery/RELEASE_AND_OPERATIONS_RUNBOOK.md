@@ -806,3 +806,5 @@ When the forecast revenue comparison is unavailable, check the applicable, missi
 Migration 102 registers commercial.fixed_fee_margin.view without assigning it to any role. Review finance access before granting it. Withdrawing the grant suspends calculated margin reporting across all fixed-fee forecast views. Preserve migration 102 and the margin permission check when reverting the comparison UI or API.
 
 To suspend effort valuation recording, withdraw commercial.fixed_fee_progress.record. End the policy with an approved engagement amendment selecting Disabled or another authorized profile. Preserve migration 103, retained sources, snapshots and audit references. Keep the policy-aware amendment handler when rolling back the reporting UI.
+
+For an unavailable effort-based forecast, inspect the progress evidence for the same work-through date. Resolve outstanding work approvals or retain a replacement after reviewing a source change. Historical cumulative values remain available. Reverting the policy-aware forecast API and UI together requires no data conversion.

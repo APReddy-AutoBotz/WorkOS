@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {policyRevenue} from '../../server/modules/commercial-drafting/fixed-fee-earned-revenue.mjs';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {startFixtureServer} from './compiled-fixture-server.mjs';
@@ -21,9 +22,14 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   const {report,token}=await get();
   assert.deepEqual([report.policyVersion,report.billableHours,report.nonBillableHours,report.verifiedHours,report.amount],[event.id,'3.75','0.75','4.5','60']);
   assert.equal((await request(path.replace('progress','elapsed')+'?serviceDay='+today)).body.report,null);
+  const forecastPath='/engagements/'+engagement.id+'/fixed-fee-forecast';
+  const live=async()=>{const r=await request(forecastPath+'?through='+today+'&view=policy_revenue');assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};
+  assert.deepEqual((await live()).revenue,{profile:'effort',status:'missing',snapshotId:null,version:null,earnedAmount:null,remainingRevenue:null});
+  assert.equal((await request(forecastPath+'?through='+today+'&view=policy_margin')).status,403);
   const cmd={through:today,expectedVersion:0,expectedToken:token};
   assert.equal((await request(path,{method:'POST',body:cmd})).status,403);
-  grants.push('commercial.fixed_fee_progress.record');
+  grants.push('commercial.fixed_fee_progress.record','commercial.fixed_fee_forecast.record');
+  await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_forecast.record',true) on conflict(role_name,permission_key) do update set enabled=true");
   await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_progress.record',true) on conflict(role_name,permission_key) do update set enabled=true");
   assert.equal((await request(path,{method:'POST',body:{...cmd,amount:'200'}})).status,400);
   assert.equal((await request(path+'?through='+today,{identity:identities.reader})).status,403);
@@ -61,6 +67,15 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     await progress.getByText('Cumulative effort value: GBP 60').waitFor();
     await progress.getByRole('button',{name:'Retain progress value'}).click();
     await progress.getByText('Retained progress version 1 · GBP 60 · 4.5 verified hours').waitFor();
+    const forecast=exposure.getByRole('region',{name:'Fixed-fee completion forecast'});
+    await forecast.getByRole('button',{name:'Inspect completion forecast'}).click();
+    await forecast.getByText('Reconciled delivery-effort revenue through '+today+': GBP 60').waitFor();
+    await forecast.getByLabel('Remaining forecast hours').fill('0.75');
+    await forecast.getByLabel('Remaining labor cost (GBP)').fill('5');
+    await forecast.getByLabel('Expected total revenue at completion (GBP, optional)').fill('70');
+    await forecast.getByLabel('Forecast assumptions').fill('Synthetic progress forecast');
+    await forecast.getByRole('button',{name:'Record completion forecast'}).click();
+    await forecast.getByText('Remaining forecast revenue after reconciled delivery-effort value: GBP 10').waitFor();
   } finally {try {if(browser) await browser.close();} finally {await fixture.close();}}
   const results=await Promise.all([post(path,cmd),post(path,cmd)]);
   assert.deepEqual(results[0].saved,results[1].saved);
@@ -71,13 +86,16 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   await amendmentTransition(request,'Project',project.id,1,contract.versions[0].id,'On Hold');
   await amendmentTransition(request,'Engagement',engagement.id,1,contract.versions[0].id,'On Hold');
   assert.equal((await get()).report,null);
+  assert.equal((await live()).revenue.status,'inactive');
   await amendmentTransition(request,'Engagement',engagement.id,2,contract.versions[0].id);
   const changed=await get();
   assert.notEqual(changed.token,token);
+  assert.deepEqual([(await live()).revenue.status,(await live()).revenue.earnedAmount],['stale',null]);
   assert.equal((await request(path,{method:'POST',body:cmd})).status,409);
   const replacement={...cmd,expectedVersion:1,expectedToken:changed.token};
   const [second,replay]=await Promise.all([post(path,replacement),post(path,replacement)]);
   assert.equal(second.saved.version,2);
+  assert.deepEqual((await live()).revenue,{profile:'effort',status:'matched',snapshotId:second.saved.id,version:2,earnedAmount:'60',remainingRevenue:'10'});
   assert.deepEqual(second.saved,replay.saved);
   assert.equal((await pool.query("select count(*)::int n from audit_logs where entity_type='Fixed Fee Progress Value'")).rows[0].n,2);
   assert.deepEqual((await get(1)).saved,results[0].saved);
@@ -86,6 +104,15 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     values($1,$2,$3,'Approved',1,1,$4,$5)`,[sheet,commercialFixture.ownerId,addUtcDays(today,7),commercialFixture.organizationId,commercialFixture.legalEntityId]);
   await pool.query("insert into timesheet_entries(timesheet_id,project_id,work_type,work_date,hours,category_code,billable) values($1,$2,'Project Work',$3,1,'BILL',true)",[sheet,project.id,today]);
   const incomplete=await get();
+  assert.deepEqual([(await live()).revenue.status,(await live()).revenue.remainingRevenue],['incomplete',null]);
   assert.deepEqual([incomplete.report.unresolved,incomplete.report.amount],[1,null]);
   assert.equal((await request(path,{method:'POST',body:{...cmd,expectedToken:incomplete.token,expectedVersion:2}})).status,409);
+  const tomorrow=addUtcDays(today,1);
+  const next=await seedApplicableAmendmentVersion(pool,identities.manager,{...contract,latestVersion:2},tomorrow);
+  await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),next));
+  await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),next,
+    {endsOn:end,effortPolicy:'disabled',elapsedTimePolicy:'2'}));
+  assert.equal((await live()).revenue.profile,'effort');
+  const future=await policyRevenue(pool,null,null,[commercialFixture.organizationId,commercialFixture.legalEntityId,engagement.id,tomorrow],'GBP','70');
+  assert.deepEqual(future,{profile:'transition',earnedAmount:null,remainingRevenue:null});
 }

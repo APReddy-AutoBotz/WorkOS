@@ -1,5 +1,27 @@
 import {decimalDifference} from '../../../shared/work-hours.mjs';
 
+import {inspectProgressEvidence} from './fixed-fee-progress.mjs';
+
+export async function policyRevenue(client,req,scope,args,currency,expectedRevenue) {
+  const {rows:[history]}=await client.query(`select (array_agg(active order by sequence desc))[1] current,bool_or(active) previous
+    from (select sequence,coalesce(after_value->'terms'->>'effortPolicy','disabled')<>'disabled' active
+      from commercial_amendments where organization_id=$1 and legal_entity_id=$2 and entity_type='Engagement'
+        and entity_id=$3 and effective_on<=$4::date) amendments`,args);
+  if (history.current) {
+    const {report,token,latest}=await inspectProgressEvidence(client,req,{through:args[3]},scope);
+    let status='matched';
+    if (!report) status='inactive';
+    else if (report.amount===null) status='incomplete';
+    else if (!latest) status='missing';
+    else if (latest.source_token!==token || latest.report.currency!==currency || latest.report.amount!==report.amount) status='stale';
+    const earnedAmount=status==='matched'?latest.report.amount:null;
+    return {profile:'effort',status,version:latest?.version??null,snapshotId:latest?.id??null,earnedAmount,
+      remainingRevenue:earnedAmount!==null && expectedRevenue!=null?decimalDifference(expectedRevenue,earnedAmount):null};
+  }
+  if (history.previous) return {profile:'transition',earnedAmount:null,remainingRevenue:null};
+  return {profile:'elapsed',...await earnedRevenue(client,args,currency,expectedRevenue)};
+}
+
 // An elapsed policy can change coverage only at a term or lifecycle boundary.
 // Count applicable days by interval, and verify each retained daily value separately.
 export async function earnedRevenue(client,args,currency,expectedRevenue) {

@@ -260,3 +260,5 @@ In the fixed-fee completion forecast, inspect a work-through date to see reconci
 Grant **View fixed-fee margins** to finance users who need actual, remaining and forecast margin after labor cost. Actual margin uses reconciled elapsed-time revenue and complete labor costs through the review date. Remaining margin uses the selected forecast’s remaining revenue and labor cost when its reviewed evidence is current. Percentages require positive revenue.
 
 For effort-based fixed-fee engagements, select **Approved delivery hours** and the currency precision in the engagement amendment. Set a positive hours budget. In **Inspect approved delivery progress**, finance users can see billable and non-billable verified hours and the cumulative earned-management amount. Recording a version requires the separate progress recording permission.
+
+The fixed-fee forecast follows the approved effort profile on its work-through date. Retain a matching cumulative progress version for that exact date to compare earned and remaining revenue. The forecast shows the retained version and whether its evidence still matches.

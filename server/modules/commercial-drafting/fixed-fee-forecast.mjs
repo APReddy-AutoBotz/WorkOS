@@ -4,11 +4,11 @@ import {calculateLaborMargin} from '../../../shared/labor-margin.mjs';
 import {z} from 'zod';
 import {decimalAmount,fail} from './contracts.mjs';
 import {assertElapsedReadScope} from './fixed-fee-elapsed.mjs';
-import {earnedRevenue} from './fixed-fee-earned-revenue.mjs';
+import {earnedRevenue,policyRevenue} from './fixed-fee-earned-revenue.mjs';
 import {fixedFeeRisk,riskQuery} from './fixed-fee-risk.mjs';
 
 export const forecastGrant='commercial.fixed_fee_forecast.record';
-const forecastView=riskQuery.extend({view:z.enum(['labor_margin','budget_comparison','revenue_reconciliation','margin_reconciliation']).optional()});
+const forecastView=riskQuery.extend({view:z.enum(['labor_margin','budget_comparison','revenue_reconciliation','margin_reconciliation','policy_revenue','policy_margin']).optional()});
 export const forecastQuery=forecastView.extend({version:z.coerce.number().int().positive().max(2147483647).optional()}).strict();
 export const forecastCommand=forecastView.extend({expectedVersion:z.number().int().nonnegative().max(2147483646),
   expectedToken:z.string().regex(/^[0-9a-f]{64}$/),requestId:z.string().uuid(),remainingHours:decimalAmount,remainingCost:decimalAmount,
@@ -19,11 +19,13 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
   const {organizationId,legalEntityId}=req.organizationScope;
   const engagementId=req.params.id,through=input.through;
   const args=[organizationId,legalEntityId,engagementId,through];
-  const includeRevenue=['revenue_reconciliation','margin_reconciliation'].includes(input.view);
+  const usePolicy=['policy_revenue','policy_margin'].includes(input.view);
+  const includeMargin=['margin_reconciliation','policy_margin'].includes(input.view);
+  const includeRevenue=usePolicy || ['revenue_reconciliation','margin_reconciliation'].includes(input.view);
   const marginAllowed=input.view && !['Employee','TeamLead','CountryDirector','ProjectManager'].includes(req.user.activeRole) &&
     (await client.query("select invoice_notice_actor_has($1,$2,$3,$4,'commercial.fixed_fee_margin.view') allowed",
       [organizationId,legalEntityId,req.user.sub,req.user.activeRole])).rows[0].allowed===true;
-  if (input.view==='margin_reconciliation' && !marginAllowed) fail(403,'MARGIN_DENIED','Fixed-fee margin access is required.');
+  if (includeMargin && !marginAllowed) fail(403,'MARGIN_DENIED','Fixed-fee margin access is required.');
   if (includeRevenue) await assertElapsedReadScope(client,req,scope);
   const risk=await fixedFeeRisk(client,req,{through},scope,true);
   const {verifiedHours,unresolved,workToken,costToken}=risk.forecastEvidence;
@@ -51,8 +53,9 @@ export async function fixedFeeForecast(client,req,input,scope,audit) {
         laborCost:report?.budgetCost!=null && report.estimatedCost!=null ? decimalDifference(report.estimatedCost,report.budgetCost) : null,
       };
     }
-    if (includeRevenue) result.revenue=await earnedRevenue(client,args,baseline.currency,saved?.report.expectedTotalRevenue);
-    if (input.view==='margin_reconciliation') {
+    if (usePolicy) result.revenue=await policyRevenue(client,req,scope,args,baseline.currency,saved?.report.expectedTotalRevenue);
+    else if (includeRevenue) result.revenue=await earnedRevenue(client,args,baseline.currency,saved?.report.expectedTotalRevenue);
+    if (includeMargin) {
       const {earnedAmount,remainingRevenue}=result.revenue;
       const actual=earnedAmount!==null && baseline.hoursComplete && baseline.costComplete
         ? calculateLaborMargin(earnedAmount,baseline.actualCost) : null;

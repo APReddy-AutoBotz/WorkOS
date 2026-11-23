@@ -35,8 +35,12 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
         <p>Actuals through {through}: {data.baseline.actualHours} verified hours · {data.baseline.currency} {data.baseline.actualCost} retained labor cost</p>
         {!data.baseline.hoursComplete && <p>Hours at completion require verified approval evidence for every entry.</p>}
         {!data.baseline.costComplete && <p>Cost at completion requires retained cost for every approved entry.</p>}
-        <p>Reconciled elapsed-time revenue through {through}: {data.revenue.earnedAmount===null?'Unavailable':data.baseline.currency+' '+data.revenue.earnedAmount}</p>
-        <p>{data.revenue.applicableDays} applicable days · {data.revenue.missingDays} missing · {data.revenue.staleDays} stale</p>
+        <p>Reconciled {data.revenue.profile==='elapsed'?'elapsed-time':data.revenue.profile==='effort'?'delivery-effort':'management'} revenue through {through}: {data.revenue.earnedAmount===null?'Unavailable':data.baseline.currency+' '+data.revenue.earnedAmount}</p>
+        {
+          data.revenue.profile==='elapsed'?<p>{data.revenue.applicableDays} applicable days · {data.revenue.missingDays} missing · {data.revenue.staleDays} stale</p>:
+          data.revenue.profile==='effort'?<p>Delivery-effort evidence: {data.revenue.status}{data.revenue.version!==null?' · Retained version '+data.revenue.version:''}</p>:
+          <p>Review the change from effort-based valuation before comparing earned revenue across policies.</p>
+        }
         {data.marginComparison && <p>Actual margin after labor cost: {marginText(data.marginComparison.actual,data.baseline.currency)}</p>}
         {saved && <div><p>Forecast version {saved.version} · {saved.reason}</p>
           <p>Budget at review: {saved.report.budgetHours??'Unset'} hours · Labor cost {saved.report.budgetCost??'Unset'} {saved.report.currency}</p>
@@ -46,7 +50,7 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
           <p>Forecast hours versus budget: {budgetComparison(data.budgetVariance.hours,'hours')}</p>
           <p>Forecast labor cost versus budget: {budgetComparison(data.budgetVariance.laborCost,saved.report.currency)}</p>
           <p>Expected total revenue at completion: {saved.report.expectedTotalRevenue===undefined ? 'Unspecified' : saved.report.currency+' '+saved.report.expectedTotalRevenue}</p>
-          <p>Remaining forecast revenue after reconciled elapsed-time value: {data.revenue.remainingRevenue===null?'Unavailable':saved.report.currency+' '+data.revenue.remainingRevenue}</p>
+          <p>Remaining forecast revenue after reconciled {data.revenue.profile==='effort'?'delivery-effort':data.revenue.profile==='elapsed'?'elapsed-time':'management'} value: {data.revenue.remainingRevenue===null?'Unavailable':saved.report.currency+' '+data.revenue.remainingRevenue}</p>
           {data.marginComparison && <>
             <p>Remaining margin after labor cost: {marginText(data.marginComparison.remaining,saved.report.currency)}</p>
             {!data.marginComparison.forecastCurrent && <p>Record a forecast against current evidence to compare remaining margin.</p>}
