@@ -820,3 +820,7 @@ Check the affected entity’s weekly, monthly and fiscal reporting periods. Supp
 ### Retrieve or correct a signed management statement
 
 Grant commercial.fixed_fee_statement.sign to designated finance signers. Inspect the reporting period ending on the selected date and resolve any unavailable boundary evidence before signing. When the closing value has decreased, explain the reduction separately from the sign-off reason. Use Previous signed statement to retrieve earlier versions. Correct a signed result through the audited reporting-period reopening, reinspection and a new lock and signature. Withdraw the signing grant to suspend new statements and retain migration 106 and the statement ledger during application rollback.
+
+### Review fixed-fee expense budgets
+
+Use the scoped engagement amendment to enter the expense budget and review its approval reference and effective date. To revise a budget, adopt later terms and retain the preceding amendment. The allocation report uses the approved terms effective on the selected work date.

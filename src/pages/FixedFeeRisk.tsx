@@ -40,6 +40,7 @@ export function FixedFeeRisk({context,engagement,today}:{context:CommercialDraft
         {report.effortBudget.unresolvedEntries>0 && <p>Unresolved effort entries {report.effortBudget.unresolvedEntries}</p>}
         {report.effortBudget.status==='exceeded' && <p>Verified effort exceeds the approved hours budget.</p>}
       </div>}
+      <p>{report.expenseBudget?'Approved expense budget '+report.currency+' '+report.expenseBudget.amount+' · Effective '+report.expenseBudget.effectiveOn:'No approved expense budget for this date.'}</p>
       {report.laborCostBudget===null ? <p>No approved labor-cost budget for this date.</p> : <>
         <p>Approved labor-cost budget {report.currency} {report.laborCostBudget} · Budget less retained labor cost {report.remainingLaborBudget}</p>
         {report.laborBudgetStatus==='exceeded' && <p>Retained labor cost exceeds the approved labor-cost budget.</p>}

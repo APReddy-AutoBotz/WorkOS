@@ -5,9 +5,9 @@ import {z} from 'zod';
 import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
-export const riskQuery=z.object({through:z.string().date()}).strict();
+export const riskQuery=z.object({through:z.string().date(),view:z.literal('expense_budget').optional()}).strict();
 
-export async function fixedFeeRisk(client,req,{through},buildEmployeeScopeWhere,forecast=false) {
+export async function fixedFeeRisk(client,req,{through,view},buildEmployeeScopeWhere,forecast=false) {
   for (const grant of ['employees.view','reports.view_utilization','commercial.fixed_fee_cost.view','commercial.cost_candidates.view']) {
     await assertCommercialAuthority(client,req,grant);
   }
@@ -18,9 +18,9 @@ export async function fixedFeeRisk(client,req,{through},buildEmployeeScopeWhere,
   const context={organizationId,legalEntityId,actorId:req.user.sub,activeRole:req.user.activeRole};
   const {rows:[row]}=await client.query(`with terms as (
     select e.id, e.currency, coalesce(a.contract_version_id,e.contract_version_id) version_id,
-      a.id amendment_id,coalesce(a.budget,e.budget) allocation,a.labor_budget,a.budget_hours
+      a.id amendment_id,coalesce(a.budget,e.budget) allocation,a.labor_budget,a.expense_budget,a.effective_on,a.budget_hours
     from commercial_engagements e left join lateral (
-      select id,contract_version_id,budget,(after_value->'terms'->>'laborCostBudget')::numeric labor_budget,(after_value->'terms'->>'budgetHours')::numeric budget_hours from commercial_amendments
+      select id,contract_version_id,budget,effective_on,(after_value->'terms'->>'expenseBudget')::numeric expense_budget,(after_value->'terms'->>'laborCostBudget')::numeric labor_budget,(after_value->'terms'->>'budgetHours')::numeric budget_hours from commercial_amendments
       where organization_id=$1 and legal_entity_id=$2 and entity_type='Engagement' and entity_id=e.id and effective_on<=$4::date
       order by sequence desc limit 1
     ) a on true where e.organization_id=$1 and e.legal_entity_id=$2 and e.id=$3 and e.model='fixed_fee'
@@ -48,7 +48,7 @@ export async function fixedFeeRisk(client,req,{through},buildEmployeeScopeWhere,
     trim_scale(a.retained)::text "retainedCost",trim_scale(t.allocation-a.retained)::text "remainingAllocation",
     case when a.retained>t.allocation then 'exceeded' when a.approved=0 and a.costed=0 then 'no_work'
       when a.unmatched>0 then 'incomplete' when a.retained=t.allocation then 'exhausted' else 'remaining' end status,
-    trim_scale(t.budget_hours)::text "budgetHours",trim_scale(t.labor_budget)::text "laborCostBudget",trim_scale(t.labor_budget-a.retained)::text "remainingLaborBudget",
+    t.effective_on::text as "effectiveOn",trim_scale(t.expense_budget)::text as "expenseAmount",trim_scale(t.budget_hours)::text "budgetHours",trim_scale(t.labor_budget)::text "laborCostBudget",trim_scale(t.labor_budget-a.retained)::text "remainingLaborBudget",
     case when t.labor_budget is null then null when a.retained>t.labor_budget then 'exceeded'
       when a.approved=0 and a.costed=0 then 'no_work' when a.unmatched>0 then 'incomplete'
       when a.retained=t.labor_budget then 'exhausted' else 'remaining' end "laborBudgetStatus"
@@ -56,7 +56,8 @@ export async function fixedFeeRisk(client,req,{through},buildEmployeeScopeWhere,
   if (!row) fail(404,'FIXED_RISK_UNAVAILABLE','An activated fixed-fee engagement and a current or historical date are required.');
   if (row.visible===false) fail(403,'FIXED_RISK_DENIED','Engagement-wide cost visibility is required.');
   if (row.currency_matches===false) fail(409,'FIXED_RISK_CURRENCY','Retained costs must reconcile in the allocation currency.');
-  const {visible,currency_matches,cost_token,budgetHours,...report}=row;
+  const {visible,currency_matches,cost_token,budgetHours,expenseAmount,effectiveOn,...report}=row;
+  if (view==='expense_budget') report.expenseBudget=expenseAmount===null?null:{amount:expenseAmount,effectiveOn,amendmentId:report.amendmentId};
   report.effortBudget=null;
   if (budgetHours!==null || forecast) {
     const evidence=forecast?createHash('sha256'):null;

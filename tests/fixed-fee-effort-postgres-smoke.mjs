@@ -66,6 +66,8 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
       on conflict(role_name,permission_key) do update set enabled=true`,[grants]);
     if (profile!=='elapsed') return verifyFixedFeeProgress({reduction:profile==='reduction',databaseUrl,pool,request,post,baseUrl,tokenFor,identities,contract,engagement,project,today,end,grants});
     const riskPath='/engagements/'+engagement.id+'/fixed-fee-risk?through=';
+    const expenseRisk=()=>request(riskPath+today+'&view=expense_budget');
+    assert.equal((await expenseRisk()).body.expenseBudget,null);
     const risk=async()=>{
       const response=await request(riskPath+today);
       assert.equal(response.status,200,JSON.stringify(response.body));return response.body;
@@ -205,9 +207,14 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     const revision=await seedApplicableAmendmentVersion(pool,identities.manager,contract,today);
     const invalidBudget=amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),revision,{laborCostBudget:'55'});
     assert.equal((await request('/amendments/Contract/'+contract.id+'/preview',{method:'POST',body:invalidBudget})).status,422);
-    await amendmentApply(request,'Contract',contract.id,amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),revision));
+    const contractTerms=amendmentInput(await amendmentWorkspace(request,'Contract',contract.id),revision);
+    assert.equal((await request('/amendments/Contract/'+contract.id+'/preview',{method:'POST',body:{...contractTerms,expenseBudget:'9.1234'}})).status,422);
+    await amendmentApply(request,'Contract',contract.id,contractTerms);
+    const expenseTerms=amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{endsOn:end});
+    for (const invalid of ['-1','1.00001']) assert.equal((await request('/amendments/Engagement/'+engagement.id+'/preview',
+      {method:'POST',body:{...expenseTerms,expenseBudget:invalid}})).status,400);
     assert.equal((await risk()).allocation,'50');
-    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{endsOn:end,budget:'70.864',laborCostBudget:'60.5',budgetHours:'5.25',elapsedTimePolicy:'2'}));
+    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{endsOn:end,budget:'70.864',expenseBudget:'9.1234',laborCostBudget:'60.5',budgetHours:'5.25',elapsedTimePolicy:'2'}));
     const {rows:[fractions]}=await pool.query(`select array(select fixed_fee_elapsed_amount(1,2,i,3)::text from generate_series(1,3) i) thirds,
       fixed_fee_elapsed_amount(0.01,2,1,2)::text tie, fixed_fee_elapsed_amount(0.01,2,2,2)::text residual,
       fixed_fee_elapsed_amount(123.4567,3,1,1)::text single_day,
@@ -318,10 +325,15 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.equal((await request('/amendments/Engagement/'+engagement.id+'/preview',{method:'POST',body:unchecked})).status,422);
     const inherited=await amendmentPreview(request,'Engagement',engagement.id,next);
     assert.deepEqual([inherited.before.budgetHours,inherited.after.budgetHours],['5.25','5.25']);
+    assert.deepEqual([inherited.before.expenseBudget,inherited.after.expenseBudget],['9.1234','9.1234']);
+    assert.equal((await request('/amendments/Engagement/'+engagement.id,{method:'POST',body:{...next,expenseBudget:'1',previewToken:inherited.previewToken}})).status,409);
     assert.deepEqual([inherited.before.laborCostBudget,inherited.after.laborCostBudget],['60.5','60.5']);
     const tampered=await request('/amendments/Engagement/'+engagement.id,{method:'POST',body:{...next,budgetHours:'0',previewToken:inherited.previewToken}});
     assert.equal(tampered.status,409);
-    const futureBudget=await amendmentApply(request,'Engagement',engagement.id,{...next,laborCostBudget:'0',budgetHours:'0'});
+    const futureBudget=await amendmentApply(request,'Engagement',engagement.id,{...next,expenseBudget:'0',laborCostBudget:'0',budgetHours:'0'});
+    assert.equal(futureBudget.expenseBudget,'0');
+    assert.deepEqual((await expenseRisk()).body.expenseBudget,{amount:'9.1234',amendmentId:event.id,effectiveOn:today});
+    assert.equal((await request(riskPath+today+'&view=expense_budget',{identity:identities.reader})).status,403);
     assert.equal(futureBudget.laborCostBudget,'0');
     assert.equal(futureBudget.budgetHours,'0');
     assert.equal((await risk()).laborCostBudget,'60.5');

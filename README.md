@@ -274,3 +274,7 @@ Before retaining a daily elapsed value or cumulative effort value, verify weekly
 ### Sign a fixed-fee period statement
 
 Choose the end date of a weekly, monthly or fiscal reporting period in the fixed-fee engagement. In **Inspect period statement**, finance can compare the verified opening and closing management balances and inspect their source records. A designated signer can enter a reason and sign once the reporting period is financially locked or closed. If the closing balance is lower, enter a separate reduction explanation before signing the negative movement. After an audited reopening and a new lock, a new signed version preserves the original.
+
+### Approved fixed-fee expense budgets
+
+In Commercial amendments, enter the expense budget in the engagement currency. Preview and apply the amendment with its approval reference. Check allocation risk on the applicable date to see the approved amount and effective date. An explicit zero is supported.
