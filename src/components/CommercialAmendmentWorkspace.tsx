@@ -29,7 +29,7 @@ const records = (workspace: LifecycleWorkspace | undefined, type: LifecycleEntit
   type === 'Contract' ? workspace?.contracts || [] : type === 'Engagement' ? workspace?.engagements || [] : workspace?.projects || [];
 const latestDate = (...dates: string[]) => dates.reduce((latest, value) => value > latest ? value : latest, '');
 const nextDate = (value: string) => {const date = new Date(`${value}T00:00:00.000Z`); date.setUTCDate(date.getUTCDate() + 1); return date.toISOString().slice(0, 10);};
-const termsText = (terms: AmendmentTerms, currency: string) => `${terms.startsOn} to ${terms.endsOn} · ${currency} ${terms.budget}${terms.laborCostBudget===undefined?'':' · Labor-cost budget '+currency+' '+terms.laborCostBudget}`;
+const termsText = (terms: AmendmentTerms, currency: string) => `${terms.startsOn} to ${terms.endsOn} · ${currency} ${terms.budget}${terms.budgetHours===undefined?'':' · Budgeted hours '+terms.budgetHours}${terms.laborCostBudget===undefined?'':' · Labor-cost budget '+currency+' '+terms.laborCostBudget}`;
 const commandError = (error: unknown, applying: boolean) => {
   if ([400, 404, 422].includes(errorStatus(error))) return 'Not saved. Check the selected immutable version, effective date, preserved start date, budget, reason and approval reference. The server also validates parent adoption and dependencies.';
   if (applying) return 'The amendment outcome could not be confirmed. Do not submit again. Reload and inspect protected history before deciding what to do next.';
@@ -163,7 +163,7 @@ export const CommercialAmendmentWorkspace = ({selectionWorkspace}: {selectionWor
   const inputFor = (owner: WorkspaceState): AmendmentInput => ({expectedSequence: owner.detail!.sequence,
     expectedLifecycleSequence: owner.detail!.lifecycle.sequence, expectedContractVersion: owner.detail!.latestContractVersion,
     contractVersionId: owner.draft!.contractVersionId, effectiveOn: owner.draft!.effectiveOn, startsOn: owner.draft!.startsOn,
-    endsOn: owner.draft!.endsOn, budget: owner.draft!.budget, ...(owner.draft!.laborCostBudget?{laborCostBudget:owner.draft!.laborCostBudget}:{}), reason: owner.draft!.reason.trim(), approvalReference: owner.draft!.approvalReference.trim()});
+    endsOn: owner.draft!.endsOn, budget: owner.draft!.budget, ...(owner.draft!.budgetHours?{budgetHours:owner.draft!.budgetHours}:{}), ...(owner.draft!.laborCostBudget?{laborCostBudget:owner.draft!.laborCostBudget}:{}), reason: owner.draft!.reason.trim(), approvalReference: owner.draft!.approvalReference.trim()});
   const preview = async (event: FormEvent) => {
     event.preventDefault(); const owner = live.current;
     if (!canEdit(owner) || owner.draft!.lease !== state.draft?.lease || !owner.draft!.contractVersionId) return;
@@ -264,9 +264,12 @@ export const CommercialAmendmentWorkspace = ({selectionWorkspace}: {selectionWor
             <Field label="Amended ends on"><input className={inputClass} type="date" required min={latestDate(draft.startsOn, draft.effectiveOn)} readOnly={contract} value={draft.endsOn} onChange={event => edit({endsOn: event.target.value})} /></Field>
             <Field label="Amended budget (decimal)"><input className={inputClass} required inputMode="decimal" pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" maxLength={19} readOnly={contract} value={draft.budget} onChange={event => edit({budget: event.target.value})} /></Field>
             {detail.entityType==='Engagement' && detail.identity.model==='fixed_fee' &&
+              <><Field label="Budgeted hours"><input className={inputClass} inputMode="decimal" maxLength={19}
+                required={detail.currentTerms.budgetHours!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.budgetHours??''}
+                onChange={event=>edit({budgetHours:event.target.value})}/></Field>
               <Field label="Labor-cost budget"><input className={inputClass} inputMode="decimal" maxLength={19}
                 required={detail.currentTerms.laborCostBudget!==undefined} pattern="(0|[1-9]\d{0,13})(\.\d{1,4})?" value={draft.laborCostBudget??''}
-                onChange={event=>edit({laborCostBudget:event.target.value})}/></Field>}
+                onChange={event=>edit({laborCostBudget:event.target.value})}/></Field></>}
             <Field label="Approval reference"><input className={inputClass} required maxLength={200} value={draft.approvalReference} onChange={event => edit({approvalReference: event.target.value})} /></Field>
             <div className="md:col-span-2"><Field label="Reason for amendment"><textarea className={inputClass} required minLength={3} maxLength={1000} rows={3} value={draft.reason} onChange={event => edit({reason: event.target.value})} /></Field></div>
             <p className="text-sm text-slate-600 md:col-span-2">{contract ? 'Contract dates and budget must exactly match the selected immutable version.' : 'The historical start date stays unchanged. Explicitly enter the amended end date and budget, and select a version already adopted by the parent for this effective date.'} Only newer compatible contract versions are offered. Amounts remain decimal strings; no browser financial totals are calculated.</p>

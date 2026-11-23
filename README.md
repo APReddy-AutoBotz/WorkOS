@@ -240,3 +240,5 @@ In a fixed-fee engagement’s approved-effort report, **Inspect worker costs** s
 Choose **Check allocation risk** on a fixed-fee engagement to compare its effective contract allocation with retained labor costs through a work date. The report covers the whole engagement, so it requires entity-wide worker and cost visibility. It shows the remaining allocation and flags missing cost evidence. A negative balance means retained labor alone already exceeds the allocation.
 
 When adopting new terms for a fixed-fee engagement in **Commercial amendments**, enter its approved **Labor-cost budget** in the engagement currency. Preview and confirm the amendment with its approval reference. **Check allocation risk** shows the effective labor budget, retained labor cost and remaining labor budget alongside the contract allocation. Existing engagements show an unset budget until one is approved.
+
+Use **Budgeted hours** when amending a fixed-fee engagement to approve an effort budget. **Check allocation risk** compares the effective hours budget with verified billable and non-billable work through your chosen date. Unresolved approved time is counted separately.

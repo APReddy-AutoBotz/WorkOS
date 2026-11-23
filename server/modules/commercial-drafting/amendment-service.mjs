@@ -10,6 +10,7 @@ const today=async client=>(await client.query("select (clock_timestamp() at time
 const units=value=>{const [whole,fraction='']=value.split('.');return BigInt(whole)*10000n+BigInt(fraction.padEnd(4,'0'));};
 const eventDto=row=>({id:row.id,sequence:row.sequence,effectiveOn:row.effective_on,contractVersionId:row.contract_version_id,
  startsOn:row.starts_on,endsOn:row.ends_on,budget:row.budget,
+ ...(row.after_value?.terms?.budgetHours!==undefined?{budgetHours:row.after_value.terms.budgetHours}:{}),
  ...(row.after_value?.terms?.laborCostBudget!==undefined?{laborCostBudget:row.after_value.terms.laborCostBudget}:{}),reason:row.reason,approvalReference:row.approval_reference,
  actorId:row.actor_id,activeRole:row.active_role,correlationId:row.correlation_id,operationId:row.operation_id,
  before:row.before_value,after:row.after_value});
@@ -110,10 +111,11 @@ const validate=async(client,req,type,id,input)=>{
  const projectIds=type==='Project'?[id]:dependencies.projects.map(x=>x.project_id);
  const blocked=(await client.query(`select exists(select 1 from project_allocations where organization_id=$1 and legal_entity_id=$2 and project_id=any($3::text[]) and end_date>$4 and end_date>=$5 and status<>'Completed') or exists(select 1 from timesheet_entries e join timesheets t on t.id=e.timesheet_id where t.organization_id=$1 and t.legal_entity_id=$2 and e.project_id=any($3::text[]) and e.work_date>$4 and e.work_date>=$5) blocked`,[...scope(req),projectIds,input.endsOn,input.effectiveOn])).rows[0];
  if(blocked.blocked)fail(409,'COMMERCIAL_AMENDMENT_DEPENDENCIES','Existing future assignments or work extend beyond the proposed remaining term.');
- if (input.laborCostBudget!==undefined && (type!=='Engagement' || root.model!=='fixed_fee'))
-  fail(422,'COMMERCIAL_TERMS_MISMATCH','A labor-cost budget requires a fixed-fee engagement.');
+ if ((input.laborCostBudget!==undefined || input.budgetHours!==undefined) && (type!=='Engagement' || root.model!=='fixed_fee'))
+  fail(422,'COMMERCIAL_TERMS_MISMATCH','Labor and effort budgets require a fixed-fee engagement.');
  const laborCostBudget=input.laborCostBudget??before.laborCostBudget;
- const after={...(laborCostBudget===undefined?{}:{laborCostBudget}),contractVersionId:input.contractVersionId,startsOn:input.startsOn,endsOn:input.endsOn,budget:input.budget};
+ const budgetHours=input.budgetHours??before.budgetHours;
+ const after={...(budgetHours===undefined?{}:{budgetHours}),...(laborCostBudget===undefined?{}:{laborCostBudget}),contractVersionId:input.contractVersionId,startsOn:input.startsOn,endsOn:input.endsOn,budget:input.budget};
  const preview={asOf:date,entityType:type,entityId:id,before,after,effectiveOn:input.effectiveOn,dependencies:{projects:dependencies.projects.length},
   warnings:['No child terms, immutable activation pin, accepted work, valuation, PO consumption or billing is changed. Work-date and assignment-policy enforcement is a separate workstream.']};
  const token=createHash('sha256').update(JSON.stringify({scope:scope(req),actor:req.user.sub,role:req.user.activeRole,input,preview,lifecycle,parent,dependencies,contractVersion:contract.latestVersion,target})).digest('hex');
