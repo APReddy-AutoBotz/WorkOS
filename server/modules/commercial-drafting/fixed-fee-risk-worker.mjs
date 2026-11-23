@@ -42,6 +42,8 @@ async function scanNext(client) {
       next_check=case when through_date<(now() at time zone 'UTC')::date then now() else now()+interval '5 minutes' end,
       through_date=least(through_date+1,(now() at time zone 'UTC')::date)
       where organization_id=$1 and legal_entity_id=$2 and engagement_id=$3`,scope);
+    // Validate all pending writes while this evaluation can still be rolled back independently.
+    await client.query('set constraints all immediate');
   } catch {
     await client.query('rollback to savepoint risk_evaluation');
     await client.query(`update fixed_fee_risk_scans set failure='EVALUATION_UNAVAILABLE',next_check=now()+interval '1 minute'
@@ -70,6 +72,8 @@ async function dispatchNext(client) {
     }
     await client.query('update fixed_fee_risk_dispatch set attempts=attempts+1,policy_id=$2,delivered_at=clock_timestamp(),failure=null where event_id=$1',
       [event.id,policy.id]);
+    // The receipt-set constraint requires the final dispatch row and every recipient.
+    await client.query('set constraints all immediate');
   } catch {
     await client.query('rollback to savepoint risk_delivery');
     await client.query(`update fixed_fee_risk_dispatch set attempts=attempts+1,failure=$2,
