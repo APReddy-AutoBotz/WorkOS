@@ -26,7 +26,6 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   grants.push('commercial.fixed_fee_progress.record');
   await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_progress.record',true) on conflict(role_name,permission_key) do update set enabled=true");
   assert.equal((await request(path,{method:'POST',body:{...cmd,amount:'200'}})).status,400);
-  assert.equal((await request(path,{method:'POST',body:{...cmd,expectedToken:'0'.repeat(64)}})).status,409);
   assert.equal((await request(path+'?through='+today,{identity:identities.reader})).status,403);
   const {rows:[math]}=await pool.query(`select fixed_fee_progress_amount(70,14,5,2)::text capped,fixed_fee_progress_amount(0.01,1,2,2)::text tie,
     fixed_fee_progress_amount(99999999999999.9999,1,1,4)::text maximum,fixed_fee_progress_amount(5,0,5,2)::text zero, fixed_fee_progress_amount(5,1,0,2) invalid`);
@@ -75,6 +74,7 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
   await amendmentTransition(request,'Engagement',engagement.id,2,contract.versions[0].id);
   const changed=await get();
   assert.notEqual(changed.token,token);
+  assert.equal((await request(path,{method:'POST',body:cmd})).status,409);
   const replacement={...cmd,expectedVersion:1,expectedToken:changed.token};
   const [second,replay]=await Promise.all([post(path,replacement),post(path,replacement)]);
   assert.equal(second.saved.version,2);
