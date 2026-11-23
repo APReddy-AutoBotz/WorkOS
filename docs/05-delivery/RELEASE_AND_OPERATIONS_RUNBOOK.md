@@ -794,3 +794,5 @@ Apply migration 100 and assign the opt-in fixed-fee forecast recording permissio
 To suspend fixed-fee revenue outlook recording, withdraw the forecast recording grant. Retain the updated forecast reader when reverting the writing path so operators can inspect versions containing the optional revenue amount. Preserve the immutable forecast reports and their audit records.
 
 The optional labor_margin view of the fixed-fee forecast API derives its values from the requested immutable version under the existing financial permissions and worker-scope checks. To roll back, deploy the previous forecast UI and API together. Forecast records require no conversion.
+
+The budget_comparison forecast view adds signed hours and labor-cost variances to the scoped financial report. Reverting the UI and API together preserves all recorded versions. No data migration is required.
