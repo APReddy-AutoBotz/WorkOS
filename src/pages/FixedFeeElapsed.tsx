@@ -28,5 +28,5 @@ export function FixedFeeElapsed({context,engagement,serviceDay}:{context:Commerc
         {data.saved.version>1 && <button type="button" onClick={()=>void inspect(data.saved!.version-1)}>Previous daily value</button>}</>}
     </>}
   </fieldset>{message && <p role="status">{message}</p>}
-    <FixedFeeElapsedPeriod key={data?.saved?.id??engagement} context={context} engagement={engagement} through={serviceDay}/></section>;
+    <div key={data?.saved?.id??engagement}><FixedFeeElapsedPeriod context={context} engagement={engagement} through={serviceDay}/></div></section>;
 }
