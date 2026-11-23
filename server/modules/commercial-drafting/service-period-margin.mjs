@@ -4,7 +4,13 @@ import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
 const monthStart=z.string().date().regex(/-01$/);
-export const marginQuery=z.object({monthStart,version:z.coerce.number().int().positive().max(2147483647).optional()}).strict();
+const thresholdPercent=z.string().regex(/^-?(?:0|[1-9]\d{0,11})(?:\.\d{1,2})?$/);
+function hundredths(value) {
+  const [whole,fraction='']=value.replace(/^-/, '').split('.');
+  const magnitude=BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0'));
+  return value.startsWith('-')?-magnitude:magnitude;
+}
+export const marginQuery=z.object({monthStart,version:z.coerce.number().int().positive().max(2147483647).optional(),thresholdPercent:thresholdPercent.optional()}).strict().refine(input=>input.thresholdPercent===undefined || input.version!==undefined);
 export const marginCommand=z.object({monthStart,expectedToken:z.string().regex(/^[0-9a-f]{64}$/)}).strict();
 export const marginRecordGrant='commercial.service_margin.record';
 export async function servicePeriodMargin(client,req,input,buildEmployeeScopeWhere,audit) {
@@ -28,6 +34,11 @@ export async function servicePeriodMargin(client,req,input,buildEmployeeScopeWhe
   if (!scope.visible) fail(403,'MARGIN_DENIED','Current access to all contributing workers is required.');
   const token=createHash('sha256').update(JSON.stringify([...args,report])).digest('hex');
   const data={engagementId:req.params.id,monthStart:input.monthStart,report,token};
+  if (input.thresholdPercent!==undefined) {
+    const actual=report.marginPercent;
+    const status=actual===null?'Unavailable':hundredths(actual)<hundredths(input.thresholdPercent)?'Below':'AtOrAbove';
+    data.thresholdComparison={thresholdPercent:input.thresholdPercent,status};
+  }
   if (input.expectedToken && input.expectedToken!==token) fail(409,'MARGIN_CHANGED','Financial evidence changed. Inspect the period again.');
   if (saved && JSON.stringify(saved.report)===JSON.stringify(report)) return {...data,version:saved.version,latestVersion:saved.latest};
   if (!input.expectedToken) return {...data,version:null,latestVersion:saved?.version??0};
