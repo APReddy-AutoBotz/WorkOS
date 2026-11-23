@@ -205,6 +205,12 @@ const verifyCommercialDrafting = async reversalScenario => {
       const assignmentReplay=await assign(desired);
       assert.equal(assignmentReplay.status,201,JSON.stringify(assignmentReplay.body));
       assert.deepEqual(assignmentReplay.body.assignments.map(a=>a.engagementId),desired.engagementIds);
+      await pool.query('update users set employee_record_id=null where id=$1',[identities.manager.id]);
+      const unresolved=await apiRequest(assignmentPath,{identity:identities.reader});
+      assert.deepEqual(unresolved.body.assignments,[{engagementId:engagement.result.id,ownerAvailable:false}]);
+      const flagged=await apiRequest(riskPath+'&view=routing',{identity:identities.reader});
+      assert(flagged.body.orders.some(row=>row.id===po.result.id && row.unavailableOwners===1));
+      await pool.query('update users set employee_record_id=$1 where id=$2',[ownerId,identities.manager.id]);
       assert.equal((await assign({...desired,engagementIds:[]})).status,409);
       assert.equal((await assign({...desired,expectedVersion:1,engagementIds:[]})).body.version,2);
       assert.equal((await pool.query('select count(*)::int n from po_risk_engagement_assignments where purchase_order_id=$1',[po.result.id])).rows[0].n,2);
@@ -1357,7 +1363,7 @@ const verifyCommercialDrafting = async reversalScenario => {
       await captureForm.getByText(/Service evidence recorded/).waitFor();
       await captureForm.getByText(today+' · 1.25 SHIFT · SYN-SHIFT-1').waitFor();
       await captureForm.getByText('Recorded effort · 0.625 hours').waitFor();
-      const replay=await capture(serviceInput);assert.equal(assignmentReplay.status,201,JSON.stringify(assignmentReplay.body));
+      const replay=await capture(serviceInput);assert.equal(replay.status,201,JSON.stringify(replay.body));
       assert.equal(replay.body.effortHours,'0.625');
       const equivalent=await capture({...serviceInput,effortHours:'0.625'});
       assert.equal(equivalent.body.id,replay.body.id);

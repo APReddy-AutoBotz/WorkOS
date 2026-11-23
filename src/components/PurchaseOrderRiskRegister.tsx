@@ -17,7 +17,7 @@ export function PurchaseOrderRiskRegister({context,today}:{context:CommercialDra
     setBusy(true);setError('');
     if (!after) setResult(null);
     try {
-      const page=await commercialDraftingService.purchaseOrderRisks(expiresBy,after,context,routing);
+      const page=await commercialDraftingService.purchaseOrderRisks(routing?today:expiresBy,after,context,routing);
       if (!isCommercialDraftingContextCurrent(context)) return;
       if (after && result?.asOf!==page.asOf) {
         setResult(null);
@@ -32,10 +32,10 @@ export function PurchaseOrderRiskRegister({context,today}:{context:CommercialDra
   return <fieldset disabled={busy}>
     <legend>Released purchase-order risks</legend>
     <label><input type="checkbox" checked={routing} onChange={e=>{setRouting(e.target.checked);setResult(null);setError('');}}/> Show orders missing alert assignments or owners</label>
-    <label>Include orders expiring through <input type="date" min={today} value={expiresBy} onChange={e=>{
+    <label>Include orders expiring through <input type="date" disabled={routing} min={today} value={expiresBy} onChange={e=>{
       setExpiresBy(e.target.value);setResult(null);setError('');
     }}/></label>
-    <button type="button" disabled={!expiresBy || expiresBy<today} onClick={()=>void load(null)}>Check purchase-order risks</button>
+    <button type="button" disabled={!routing && (!expiresBy || expiresBy<today)} onClick={()=>void load(null)}>Check purchase-order risks</button>
     {error && <p role="alert">{error}</p>}
     {result && <div>
       <p>Balances as of {result.asOf} UTC</p>

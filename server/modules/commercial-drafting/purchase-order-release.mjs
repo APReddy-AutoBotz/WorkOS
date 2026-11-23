@@ -69,7 +69,7 @@ export async function purchaseOrderRisks(client,req,{expiresBy,after,view}) {
   await assertCommercialAuthority(client,req,'commercial.purchase_orders.release');
   const {organizationId,legalEntityId}=req.organizationScope;
   const asOf=(await client.query("select (now() at time zone 'UTC')::date::text today")).rows[0].today;
-  if (expiresBy<asOf) fail(400,'PO_RISK_DATE','Choose today or a future expiry date.');
+  if (!view && expiresBy<asOf) fail(400,'PO_RISK_DATE','Choose today or a future expiry date.');
   const {rows}=await client.query(`select p.id,p.number,p.ends_on::text "endsOn",p.currency,p.contract_version_id "contractVersionId",
     b.committed::text committed,b.consumed::text consumed,b.remaining::text remaining,b.warning,
     b.remaining<=0 exhausted,p.ends_on<$4::date expired,p.ends_on between $4::date and $3::date as "expiresInWindow"
