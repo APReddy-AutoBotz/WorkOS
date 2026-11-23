@@ -271,8 +271,10 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,-1))).body.report,null);
     assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,1))).body.report,null);
     await assert.rejects(pool.query('update commercial_fixed_fee_elapsed_values set version=2 where id=$1',[firstDay.saved.id]));
+    assert.deepEqual((await request(riskPath+today+'&view=budget_warning_sources')).body.budgetWarning.sourceAmendments,{effort:event.id,laborCost:event.id});
     assert.deepEqual((await warnings()).body.budgetWarning,{percent:'80',effectiveOn:today,amendmentId:event.id,effort:'reached',laborCost:'reached'});
     assert.equal((await request(riskPath+today+'&view=budget_warnings',{identity:identities.reader})).status,403);
+    assert.equal((await request(riskPath+today+'&view=budget_warning_sources',{identity:identities.reader})).status,403);
     const exhausted=await risk();
     assert.deepEqual(exhausted.effortBudget,{budgetHours:'5.25',verifiedHours:'4.5',remainingHours:'0.75',unresolvedEntries:0,status:'remaining'});
     assert.deepEqual([exhausted.laborCostBudget,exhausted.remainingLaborBudget,exhausted.laborBudgetStatus],['60.5','-10.364','exceeded']);

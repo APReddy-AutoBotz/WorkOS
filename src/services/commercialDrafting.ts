@@ -539,7 +539,7 @@ export const commercialDraftingService = {
   },
   fixedFeeRisk(eng:string,through:string,context:CommercialDraftingContext) {
     if (!assertCommercialDraftingContext(context).canViewFixedFeeRisk) throw invalid();
-    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk?'+new URLSearchParams({through,view:'budget_warnings'}),undefined,value=>{
+    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk?'+new URLSearchParams({through,view:'budget_warning_sources'}),undefined,value=>{
       const signed=z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/);
       const warningState=z.enum(['reached','below','incomplete','unbudgeted']);
       const states=z.enum(['no_work','incomplete','remaining','exhausted','exceeded']);
@@ -547,7 +547,7 @@ export const commercialDraftingService = {
         contractVersionId:z.string().min(1),amendmentId:z.string().min(1).nullable(),allocation:costDecimal,retainedCost:costDecimal,
         effortBudget:z.object({budgetHours:costDecimal,verifiedHours:costDecimal,remainingHours:signed,
           unresolvedEntries:z.number().int().nonnegative(),status:states}).strict().nullable(),
-        budgetWarning:z.object({percent:z.string().regex(/^(?:[1-9]\d?|100)$/),effectiveOn:z.string().date(),amendmentId:z.string().min(1),effort:warningState,laborCost:warningState}).strict().nullable(),
+        budgetWarning:z.object({sourceAmendments:z.object({effort:z.string().min(1).nullable(),laborCost:z.string().min(1).nullable()}).strict(),percent:z.string().regex(/^(?:[1-9]\d?|100)$/),effectiveOn:z.string().date(),amendmentId:z.string().min(1),effort:warningState,laborCost:warningState}).strict().nullable(),
         projectExpenses:z.object({projects:z.number().int().nonnegative(),budgeted:z.number().int().nonnegative(),allocated:costDecimal,unallocated:signed.nullable()}).strict(),
         expenseBudget:z.object({amount:costDecimal,effectiveOn:z.string().date(),amendmentId:z.string().min(1)}).strict().nullable(),
         remainingAllocation:signed,status:states,laborCostBudget:costDecimal.nullable(),remainingLaborBudget:signed.nullable(),laborBudgetStatus:states.nullable(),

@@ -39,6 +39,8 @@ export function FixedFeeRisk({context,engagement,today}:{context:CommercialDraft
       {report.budgetWarning && <div aria-label="Approved budget warning">
         <p>Budget warning at {report.budgetWarning.percent}% used · Effective {report.budgetWarning.effectiveOn}</p>
         <p>Delivery hours: {warningLabels[report.budgetWarning.effort]} · Labor cost: {warningLabels[report.budgetWarning.laborCost]}</p>
+        {report.budgetWarning.sourceAmendments.effort && <p>Hours warning approval {report.budgetWarning.sourceAmendments.effort}</p>}
+        {report.budgetWarning.sourceAmendments.laborCost && <p>Labor cost warning approval {report.budgetWarning.sourceAmendments.laborCost}</p>}
       </div>}
       {report.effortBudget && <div>
         <p>Budgeted hours {report.effortBudget.budgetHours} · Verified hours {report.effortBudget.verifiedHours} · Remaining hours {report.effortBudget.remainingHours}</p>

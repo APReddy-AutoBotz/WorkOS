@@ -268,4 +268,4 @@ Approved project expense allocations now reconcile to the dated engagement budge
 
 ### Buyer-configured fixed-fee budget warnings
 
-Finance can inspect dated warning states for effort and labor-cost budgets. Outstanding work includes delivery of mandatory risk notifications to the engagement owner, scoped commercial manager and finance or billing owner.
+Finance can inspect dated warning states for effort and labor-cost budgets. The [notification work package](../tasks/WOS-06-FIXED-FEE-RISK-NOTICES.md) tracks source identity, current recipient authority, atomic delivery and recovery. Outstanding work includes delivery of mandatory risk notifications to the engagement owner, scoped commercial manager and finance or billing owner.

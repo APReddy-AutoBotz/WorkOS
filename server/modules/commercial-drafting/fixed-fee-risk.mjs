@@ -5,7 +5,7 @@ import {z} from 'zod';
 import {assertCommercialAuthority} from './service.mjs';
 import {fail} from './contracts.mjs';
 
-export const riskQuery=z.object({through:z.string().date(),view:z.enum(['expense_budget','project_expenses','budget_warnings']).optional()}).strict();
+export const riskQuery=z.object({through:z.string().date(),view:z.enum(['expense_budget','project_expenses','budget_warnings','budget_warning_sources']).optional()}).strict();
 
 export function budgetWarningStatus(actual,budget,percent,complete) {
   if (budget==null) return 'unbudgeted';
@@ -65,7 +65,8 @@ export async function fixedFeeRisk(client,req,{through,view},buildEmployeeScopeW
   if (row.currency_matches===false) fail(409,'FIXED_RISK_CURRENCY','Retained costs must reconcile in the allocation currency.');
   const {visible,currency_matches,cost_token,budgetHours,expenseAmount,effectiveOn,warning_percent,...report}=row;
   if (view!==undefined) report.expenseBudget=expenseAmount===null?null:{amount:expenseAmount,effectiveOn,amendmentId:report.amendmentId};
-  if (view==='project_expenses' || view==='budget_warnings') {
+  const showWarnings=view==='budget_warnings' || view==='budget_warning_sources';
+  if (view==='project_expenses' || showWarnings) {
     const {rows:[projects]}=await client.query(`with budgets as (
       select (a.after_value->'terms'->>'expenseBudget')::numeric amount from commercial_project_bindings b
       left join lateral(select after_value,starts_on,ends_on from commercial_amendments
@@ -98,13 +99,27 @@ export async function fixedFeeRisk(client,req,{through,view},buildEmployeeScopeW
       report.effortBudget={budgetHours,verifiedHours,unresolvedEntries:unresolved,...variance};
     }
   }
-  if (view==='budget_warnings') {
+  if (showWarnings) {
     report.budgetWarning=null;
     if (warning_percent && warning_percent!=='disabled') {
       const effort=report.effortBudget;
       report.budgetWarning={percent:warning_percent,effectiveOn,amendmentId:report.amendmentId,
         effort:budgetWarningStatus(effort?.verifiedHours,budgetHours,warning_percent,effort?.unresolvedEntries===0),
         laborCost:budgetWarningStatus(report.retainedCost,report.laborCostBudget,warning_percent,report.complete || (report.approvedEntries===0 && report.costedEntries===0))};
+      if (view==='budget_warning_sources') {
+        // A carried-forward term keeps its source when an unrelated amendment takes effect.
+        const {rows:[sources]}=await client.query(`select
+          (array_agg(id order by sequence desc) filter (where percent_changed or hours_changed))[1] as effort,
+          (array_agg(id order by sequence desc) filter (where percent_changed or cost_changed))[1] as "laborCost"
+          from (select id, sequence,
+            (before_value->'terms'->>'budgetWarningPercent') is distinct from (after_value->'terms'->>'budgetWarningPercent') as percent_changed,
+            (before_value->'terms'->>'budgetHours')::numeric is distinct from (after_value->'terms'->>'budgetHours')::numeric as hours_changed,
+            (before_value->'terms'->>'laborCostBudget')::numeric is distinct from (after_value->'terms'->>'laborCostBudget')::numeric as cost_changed
+            from commercial_amendments where organization_id=$1 and legal_entity_id=$2 and entity_type='Engagement'
+              and entity_id=$3 and effective_on<=$4::date) changes`,[organizationId,legalEntityId,req.params.id,through]);
+        report.budgetWarning.sourceAmendments={effort:budgetHours===null?null:sources.effort,
+          laborCost:report.laborCostBudget===null?null:sources.laborCost};
+      }
     }
   }
   return {engagementId:req.params.id,through,...report};

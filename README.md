@@ -287,4 +287,4 @@ After the engagement has adopted an expense budget, select a fixed-fee project i
 
 ### Fixed-fee budget warnings
 
-In Commercial amendments, set **Budget warning (% used)** to a whole percentage from 1 to 100. After approval, **Check allocation risk** shows whether verified delivery hours or retained labor costs have reached that share of their respective budgets. Clear the field in a later amendment to disable the warning.
+In Commercial amendments, set **Budget warning (% used)** to a whole percentage from 1 to 100. After approval, **Check allocation risk** shows whether verified delivery hours or retained labor costs have reached that share of their respective budgets. Clear the field in a later amendment to disable the warning. The budget warning API identifies the approval that last changed the percentage or the corresponding budget separately for hours and cost.
