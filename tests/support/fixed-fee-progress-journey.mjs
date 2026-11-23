@@ -86,6 +86,8 @@ export async function verifyFixedFeeProgress({pool,request,post,baseUrl,tokenFor
     await exposure.getByLabel('Include work through').fill(today);
     await exposure.getByRole('button',{name:'Check allocation risk'}).click();
     await exposure.getByText('Delivery hours: Below threshold · Labor cost: No approved budget').waitFor();
+    await exposure.getByText(/^Hours warning approval amendment-/).waitFor();
+    assert.equal(await exposure.getByText(/^Labor cost warning approval/).count(),0);
     const progress=exposure.getByRole('region',{name:'Fixed-fee delivery progress'});
     await progress.getByRole('button',{name:'Inspect approved delivery progress'}).click();
     await progress.getByText('Cumulative effort value: GBP 60').waitFor();

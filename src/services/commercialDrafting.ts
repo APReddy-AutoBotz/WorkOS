@@ -89,7 +89,7 @@ export type CommercialWorkspace = {
 };
 
 export type CommercialDraftingContext = Readonly<{
-  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
+  request: ApiRequestContext; identityKey: string; canManage: boolean; canSetServicePolicy?:boolean; canValueUnits?:boolean; canViewEffortCost?:boolean; canRecordEffortCost?:boolean; canReconcileEffort?:boolean; canViewServiceMargin?:boolean; canViewFixedFeeEffort?:boolean; canViewFixedFeeCost?:boolean; canViewFixedFeeRisk?:boolean; canRecordFixedFeeProgress?:boolean; canRecordFixedFeeElapsed?:boolean; canViewFixedFeeMargin?:boolean; canRecordFixedFeeForecast?:boolean; canApproveFixedFeeTransition?:boolean; canConfigureRiskNotices?:boolean; canSignFixedFeeStatement?:boolean; canRecordFixedFeeCost?:boolean; canRetainServiceMargin?:boolean; canIssueServiceUnits?:boolean; canValuePeriods?: boolean; canIssuePeriods?: boolean; canReviewPeriods?: boolean; canReviewUnits?: boolean; canCaptureUnits?: boolean; canReleasePurchaseOrder?: boolean; canIssueInstallment?: boolean; isCurrent: () => boolean;
 }>;
 const currentSession = () => {
   // Do not enter authService's legacy localStorage fallback for this workspace.
@@ -114,6 +114,7 @@ export const captureCommercialDraftingContext = (isCurrent = () => true): Commer
     canRecordFixedFeeProgress:permissions.includes('commercial.fixed_fee_progress.record'),
     canRecordFixedFeeElapsed:permissions.includes('commercial.fixed_fee_elapsed.record'),
     canViewFixedFeeMargin:permissions.includes('commercial.fixed_fee_margin.view'),
+    canConfigureRiskNotices:permissions.includes('commercial.fixed_fee_risk.configure'),
     canSignFixedFeeStatement:permissions.includes('commercial.fixed_fee_statement.sign'),
     canApproveFixedFeeTransition:permissions.includes('commercial.fixed_fee_transition.approve'),
     canRecordFixedFeeForecast:permissions.includes('commercial.fixed_fee_forecast.record'),
@@ -440,6 +441,28 @@ export const commercialDraftingService = {
       return data;
     },false);
   },
+  riskDeliveryStatus(eng:string,context:CommercialDraftingContext) {
+    if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
+    const scan=z.object({scanDate:z.string().date(),scanFailure:z.literal('EVALUATION_UNAVAILABLE').nullable()}).strict();
+    const history=z.object({attempt:z.number().int().positive(),at:z.string().datetime({offset:true}),
+      failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable()}).strict();
+    const event=z.object({history:z.array(history).max(5),metric:z.enum(['effort','laborCost']),through:z.string().date(),sourceAmendmentId:z.string(),
+      attempts:z.number().int().nonnegative(),failure:z.enum(['POLICY_UNAVAILABLE','RECIPIENTS_UNAVAILABLE','DELIVERY_UNAVAILABLE']).nullable(),
+      deliveredAt:z.string().datetime().nullable(),nextAttempt:z.string().datetime().nullable()}).strict();
+    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk-deliveries',undefined,
+      value=>z.object({engagementId:z.literal(eng),scan:scan.nullable(),events:z.array(event).max(20)}).strict().parse(value),false);
+  },
+  riskNoticePolicy(eng:string,context:CommercialDraftingContext,command?:{
+    expectedVersion:number;effectiveFrom:string;locale:string;title:string;body:string;reason:string;
+    manager:{userId:string;role:string};finance:{userId:string;role:string}
+  }) {
+    if (!assertCommercialDraftingContext(context).canConfigureRiskNotices) throw invalid();
+    const recipient=z.object({userId:z.string().uuid(),role:z.string().min(1)}).strict();
+    const policy=z.object({id:z.string().uuid(),version:z.number().int().positive(),effectiveFrom:z.string().date(),
+      manager:recipient,finance:recipient,locale:z.string(),title:z.string(),body:z.string()}).strict();
+    return request(context,command?'POST':'GET',serviceEngPath(eng)+'/fixed-fee-risk-notice-policy',command,
+      value=>z.object({engagementId:z.literal(eng),latest:policy.nullable()}).strict().parse(value),false);
+  },
   fixedFeeStatement(eng:string,through:string,frequency:'Weekly'|'Monthly'|'Fiscal',context:CommercialDraftingContext,
     options:{version?:number;command?:{expectedToken:string;reason:string;reductionExplanation?:string}}={}) {
     const current=assertCommercialDraftingContext(context),cmd=options.command;
@@ -539,7 +562,7 @@ export const commercialDraftingService = {
   },
   fixedFeeRisk(eng:string,through:string,context:CommercialDraftingContext) {
     if (!assertCommercialDraftingContext(context).canViewFixedFeeRisk) throw invalid();
-    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk?'+new URLSearchParams({through,view:'budget_warnings'}),undefined,value=>{
+    return request(context,'GET',serviceEngPath(eng)+'/fixed-fee-risk?'+new URLSearchParams({through,view:'budget_warning_sources'}),undefined,value=>{
       const signed=z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/);
       const warningState=z.enum(['reached','below','incomplete','unbudgeted']);
       const states=z.enum(['no_work','incomplete','remaining','exhausted','exceeded']);
@@ -547,7 +570,7 @@ export const commercialDraftingService = {
         contractVersionId:z.string().min(1),amendmentId:z.string().min(1).nullable(),allocation:costDecimal,retainedCost:costDecimal,
         effortBudget:z.object({budgetHours:costDecimal,verifiedHours:costDecimal,remainingHours:signed,
           unresolvedEntries:z.number().int().nonnegative(),status:states}).strict().nullable(),
-        budgetWarning:z.object({percent:z.string().regex(/^(?:[1-9]\d?|100)$/),effectiveOn:z.string().date(),amendmentId:z.string().min(1),effort:warningState,laborCost:warningState}).strict().nullable(),
+        budgetWarning:z.object({sourceAmendments:z.object({effort:z.string().min(1).nullable(),laborCost:z.string().min(1).nullable()}).strict(),percent:z.string().regex(/^(?:[1-9]\d?|100)$/),effectiveOn:z.string().date(),amendmentId:z.string().min(1),effort:warningState,laborCost:warningState}).strict().nullable(),
         projectExpenses:z.object({projects:z.number().int().nonnegative(),budgeted:z.number().int().nonnegative(),allocated:costDecimal,unallocated:signed.nullable()}).strict(),
         expenseBudget:z.object({amount:costDecimal,effectiveOn:z.string().date(),amendmentId:z.string().min(1)}).strict().nullable(),
         remainingAllocation:signed,status:states,laborCostBudget:costDecimal.nullable(),remainingLaborBudget:signed.nullable(),laborBudgetStatus:states.nullable(),

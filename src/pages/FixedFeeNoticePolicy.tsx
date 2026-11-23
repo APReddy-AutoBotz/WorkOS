@@ -1,0 +1,73 @@
+import {useState,type FormEvent} from 'react';
+import {commercialDraftingService,isCommercialDraftingContextCurrent,type CommercialDraftingContext} from '../services/commercialDrafting';
+
+type Policy = Awaited<ReturnType<typeof commercialDraftingService.riskNoticePolicy>>['latest'];
+
+export function FixedFeeNoticePolicy({context,engagement,today}:{context:CommercialDraftingContext;engagement:string;today:string}) {
+  const [policy,setPolicy]=useState<Policy|undefined>(undefined);
+  const [delivery,setDelivery]=useState<Awaited<ReturnType<typeof commercialDraftingService.riskDeliveryStatus>>|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [message,setMessage]=useState('');
+  async function read() {
+    setBusy(true);setMessage('');setPolicy(undefined);
+    try {
+      const result=await commercialDraftingService.riskNoticePolicy(engagement,context);
+      if (isCommercialDraftingContextCurrent(context)) setPolicy(result.latest);
+    } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not load the engagement notice policy.');}
+    finally {setBusy(false);}
+  }
+  async function inspectDelivery() {
+    setBusy(true);setMessage('');setDelivery(null);
+    try {
+      const result=await commercialDraftingService.riskDeliveryStatus(engagement,context);
+      if (isCommercialDraftingContextCurrent(context)) setDelivery(result);
+    } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not load warning delivery status.');}
+    finally {setBusy(false);}
+  }
+  async function save(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (policy===undefined || busy) return;
+    const fields=new FormData(event.currentTarget);
+    const text=(name:string)=>String(fields.get(name)??'').trim();
+    setBusy(true);setMessage('');
+    try {
+      const result=await commercialDraftingService.riskNoticePolicy(engagement,context,{
+        expectedVersion:policy?.version??0,effectiveFrom:text('date'),locale:text('locale'),title:text('title'),
+        body:text('body'),reason:text('reason'),manager:{userId:text('manager'),role:text('managerRole')},
+        finance:{userId:text('finance'),role:text('financeRole')}
+      });
+      if (isCommercialDraftingContextCurrent(context)) {setPolicy(result.latest);setMessage('Notice policy saved.');}
+    } catch {if (isCommercialDraftingContextCurrent(context)) setMessage('Could not save. Check the recipient accounts, held roles and effective date, then reload the policy.');}
+    finally {setBusy(false);}
+  }
+  return <section aria-label="Budget warning recipients">
+    <button type="button" disabled={busy} onClick={()=>void read()}>Review budget warning recipients</button>
+    <button type="button" disabled={busy} onClick={()=>void inspectDelivery()}>Check warning deliveries</button>
+    {delivery && <div aria-label="Warning delivery status">
+      {delivery.scan?.scanFailure && <p>Budget evaluation needs a retry.</p>}
+      {delivery.events.length===0 && <p>No recorded budget alerts.</p>}
+      {delivery.events.map(row=><div key={row.metric+row.sourceAmendmentId}><p>
+        {row.metric==='effort'?'Delivery hours':'Labor cost'} · {row.through} · {row.deliveredAt?'Delivered '+row.deliveredAt:
+          row.failure==='RECIPIENTS_UNAVAILABLE'?'Check recipient access':row.failure==='POLICY_UNAVAILABLE'?'Configure a notice policy':
+          row.failure?'Delivery needs a retry':'Pending'}{row.nextAttempt && ' · Next attempt '+row.nextAttempt}
+      </p>{row.history.length>0 && <details><summary>Recent delivery attempts ({row.attempts} total)</summary>
+        <ol>{row.history.map(h=><li key={h.attempt}>Attempt {h.attempt} · {h.at} · {h.failure===null?'Delivered':
+          h.failure==='POLICY_UNAVAILABLE'?'Policy unavailable':h.failure==='RECIPIENTS_UNAVAILABLE'?'Recipients unavailable':'Delivery unavailable'}</li>)}</ol>
+      </details>}</div>)}
+    </div>}
+    {policy!==undefined && <form key={policy?.id??'new'} onSubmit={save}><fieldset disabled={busy}>
+      <legend>{policy?'Notice policy version '+policy.version+' · Effective '+policy.effectiveFrom:'Configure budget warning recipients'}</legend>
+      <label>Effective from <input type="date" name="date" min={today.slice(0,10)} required defaultValue={policy && policy.effectiveFrom>today.slice(0,10)?policy.effectiveFrom:today.slice(0,10)}/></label>
+      <label>Commercial manager user ID <input name="manager" required defaultValue={policy?.manager.userId}/></label>
+      <label>Commercial manager role <input name="managerRole" required defaultValue={policy?.manager.role}/></label>
+      <label>Finance or billing owner user ID <input name="finance" required defaultValue={policy?.finance.userId}/></label>
+      <label>Finance or billing owner role <input name="financeRole" required defaultValue={policy?.finance.role}/></label>
+      <label>Template locale <input name="locale" required defaultValue={policy?.locale} placeholder="en-GB"/></label>
+      <label>Notification title <input name="title" maxLength={200} required defaultValue={policy?.title}/></label>
+      <label>Notification body <textarea name="body" maxLength={2000} required defaultValue={policy?.body}/></label>
+      <label>Reason for change <input name="reason" minLength={3} maxLength={1000} required/></label>
+      <button>Save notice policy</button>
+    </fieldset></form>}
+    {message && <p role="status">{message}</p>}
+  </section>;
+}

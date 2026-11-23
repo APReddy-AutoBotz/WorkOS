@@ -1,3 +1,5 @@
+import {verifyRiskDelivery} from './support/fixed-fee-risk-delivery-journey.mjs';
+import {verifyRiskNoticePolicy} from './support/fixed-fee-risk-policy-journey.mjs';
 import {budgetWarningStatus} from '../server/modules/commercial-drafting/fixed-fee-risk.mjs';
 import {verifyFeeStatement} from './support/fixed-fee-statement-journey.mjs';
 import {withLockedFeeDate,assertFeePeriodConflict} from './support/fixed-fee-period-authority.mjs';
@@ -63,7 +65,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access','103_wos06_fixed_fee_progress_values','104_wos06_fixed_fee_transition_approval','105_wos06_fixed_fee_valuation_periods','106_wos06_fixed_fee_period_statements','107_wos06_fixed_fee_risk_notice_policies','108_wos06_fixed_fee_risk_delivery','109_wos06_risk_delivery_attempt_history']);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
@@ -73,6 +75,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     await pool.query(`insert into role_permissions(role_name,permission_key,enabled) select 'Admin',k,true from unnest($1::text[]) k
       on conflict(role_name,permission_key) do update set enabled=true`,[grants]);
     if (profile!=='elapsed') return verifyFixedFeeProgress({reduction:profile==='reduction',databaseUrl,pool,request,post,baseUrl,tokenFor,identities,contract,engagement,project,today,end,grants});
+    await verifyRiskNoticePolicy({pool,request,identities,engagement,today});
     const riskPath='/engagements/'+engagement.id+'/fixed-fee-risk?through=';
     const warnings=()=>request(riskPath+today+'&view=budget_warnings');
     assert.equal((await warnings()).body.budgetWarning,null);
@@ -150,7 +153,7 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
         sessionStorage.setItem('workos_organization_scope',JSON.stringify(scope));
         sessionStorage.setItem('workos_api_token',token);
       },{session:{id:identities.manager.id,userName:identities.manager.username,name:'Synthetic effort reviewer',role:'Admin',permissionRole:'Admin',
-        permissions:['commercial.contracts.view','employees.view','reports.view_utilization',...grants]},scope:{organizationId,legalEntityId},token:tokenFor(identities.manager)});
+        permissions:['commercial.contracts.view','employees.view','reports.view_utilization','commercial.fixed_fee_risk.configure',...grants]},scope:{organizationId,legalEntityId},token:tokenFor(identities.manager)});
       await page.goto(fixture.url+'/tests/fixtures/commercial-drafting.html?live=1');
       const report=page.getByRole('listitem').filter({has:page.getByRole('heading',{name:new RegExp(engagement.code)})}).getByRole('region',{name:'Fixed-fee approved effort'});
       await report.getByLabel('Effort month').fill(today.slice(0,7));
@@ -161,6 +164,13 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
       await costRow.getByRole('button',{name:'Retain worker cost'}).click();
       await report.getByText('Retained cost GBP 30.864 · Hourly rate 12.3456').waitFor();
       const exposure=report.getByRole('region',{name:'Fixed-fee allocation risk'});
+      const policyDesk=exposure.getByRole('region',{name:'Budget warning recipients'});
+      await policyDesk.getByRole('button',{name:'Review budget warning recipients'}).click();
+      await policyDesk.getByText('Notice policy version 1 · Effective '+today).waitFor();
+      await policyDesk.getByLabel('Reason for change').fill('Synthetic template revision');
+      await policyDesk.getByLabel('Notification title').fill('Check budget usage');
+      await policyDesk.getByRole('button',{name:'Save notice policy'}).click();
+      await policyDesk.getByText('Notice policy version 2 · Effective '+today).waitFor();
       await exposure.getByLabel('Include work through').fill(today);
       await exposure.getByRole('button',{name:'Check allocation risk'}).click();
       await exposure.getByText('Engagement allocation GBP 50 · Retained labor cost 30.864 · Allocation less retained cost 19.136').waitFor();
@@ -271,8 +281,11 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,-1))).body.report,null);
     assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,1))).body.report,null);
     await assert.rejects(pool.query('update commercial_fixed_fee_elapsed_values set version=2 where id=$1',[firstDay.saved.id]));
+    assert.deepEqual((await request(riskPath+today+'&view=budget_warning_sources')).body.budgetWarning.sourceAmendments,{effort:event.id,laborCost:event.id});
     assert.deepEqual((await warnings()).body.budgetWarning,{percent:'80',effectiveOn:today,amendmentId:event.id,effort:'reached',laborCost:'reached'});
     assert.equal((await request(riskPath+today+'&view=budget_warnings',{identity:identities.reader})).status,403);
+    assert.equal((await request(riskPath+today+'&view=budget_warning_sources',{identity:identities.reader})).status,403);
+    await verifyRiskDelivery({pool,request,identities,engagement,today,baseUrl,tokenFor});
     const exhausted=await risk();
     assert.deepEqual(exhausted.effortBudget,{budgetHours:'5.25',verifiedHours:'4.5',remainingHours:'0.75',unresolvedEntries:0,status:'remaining'});
     assert.deepEqual([exhausted.laborCostBudget,exhausted.remainingLaborBudget,exhausted.laborBudgetStatus],['60.5','-10.364','exceeded']);

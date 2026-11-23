@@ -12,12 +12,27 @@ export async function fixedFeeWorkRows(client,req,{monthStart,through,after,star
   const args=[organizationId,legalEntityId,req.params.id];
   const engagement=await client.query("select id from commercial_engagements where organization_id=$1 and legal_entity_id=$2 and id=$3 and model='fixed_fee'",args);
   if (!engagement.rowCount) fail(404,'COMMERCIAL_NOT_FOUND','Fixed-fee engagement unavailable.');
+  return workPage(client,args,{monthStart,through,after,startsOn},params=>buildEmployeeScopeWhere(req,params,'worker'));
+}
+
+// Internal worker scope is established by the database-owned engagement scan row.
+export async function fixedFeeScanHours(client,scope,through) {
+  let after=null,hours='0';
+  do {
+    const page=await workPage(client,[...scope],{after,through},()=>'worker.organization_id=$1 and worker.legal_entity_id=$2');
+    hours=sumHours([hours,...page.verified.map(row=>row.hours)]);
+    after=page.next;
+  } while (after);
+  return hours;
+}
+
+async function workPage(client,args,{through,monthStart,startsOn,after},employeeScope) {
   args.push(through??monthStart);
   if (through) args.push(after??null);
   const dates=through ? 'entry.work_date <= $4::date and ($5::uuid is null or entry.id>$5::uuid)'
     : "entry.work_date >= $4::date and entry.work_date < $4::date + interval '1 month'";
   const from=through && startsOn?' and entry.work_date >= $'+args.push(startsOn)+'::date':'';
-  const visible=buildEmployeeScopeWhere(req,args,'worker');
+  const visible=employeeScope(args);
   const {rows}=await client.query(`select entry.*,entry.work_date::text,sheet.employee_id,sheet.status,sub.id submission_id,decision.id decision_id,retained.entries,decision.status as decision,retained.pinned
     from commercial_engagements eng join commercial_project_bindings b on b.organization_id=eng.organization_id
       and b.legal_entity_id=eng.legal_entity_id and b.engagement_id=eng.id and b.model=eng.model
