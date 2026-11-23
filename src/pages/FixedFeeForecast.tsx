@@ -7,6 +7,11 @@ function budgetComparison(delta:string|null, unit:string) {
   return delta.startsWith('-') ? delta.slice(1)+' '+unit+' under budget' : delta+' '+unit+' over budget';
 }
 
+function marginText(margin:{amount:string;percent:string|null}|null,currency:string) {
+  if (!margin) return 'Unavailable';
+  return currency+' '+margin.amount+(margin.percent===null?' · Percentage unavailable': ' · '+margin.percent+'%');
+}
+
 export function FixedFeeForecast({context,engagement,through}:{context:CommercialDraftingContext;engagement:string;through:string}) {
   const [data,setData]=useState<Awaited<ReturnType<typeof commercialDraftingService.fixedFeeForecast>>|null>(null);
   const [hours,setHours]=useState(''),[cost,setCost]=useState(''),[revenue,setRevenue]=useState(''),[reason,setReason]=useState('');
@@ -32,6 +37,7 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
         {!data.baseline.costComplete && <p>Cost at completion requires retained cost for every approved entry.</p>}
         <p>Reconciled elapsed-time revenue through {through}: {data.revenue.earnedAmount===null?'Unavailable':data.baseline.currency+' '+data.revenue.earnedAmount}</p>
         <p>{data.revenue.applicableDays} applicable days · {data.revenue.missingDays} missing · {data.revenue.staleDays} stale</p>
+        {data.marginComparison && <p>Actual margin after labor cost: {marginText(data.marginComparison.actual,data.baseline.currency)}</p>}
         {saved && <div><p>Forecast version {saved.version} · {saved.reason}</p>
           <p>Budget at review: {saved.report.budgetHours??'Unset'} hours · Labor cost {saved.report.budgetCost??'Unset'} {saved.report.currency}</p>
           <p>Actuals at review: {saved.report.actualHours} hours · Labor cost {saved.report.actualCost} {saved.report.currency}</p>
@@ -41,8 +47,11 @@ export function FixedFeeForecast({context,engagement,through}:{context:Commercia
           <p>Forecast labor cost versus budget: {budgetComparison(data.budgetVariance.laborCost,saved.report.currency)}</p>
           <p>Expected total revenue at completion: {saved.report.expectedTotalRevenue===undefined ? 'Unspecified' : saved.report.currency+' '+saved.report.expectedTotalRevenue}</p>
           <p>Remaining forecast revenue after reconciled elapsed-time value: {data.revenue.remainingRevenue===null?'Unavailable':saved.report.currency+' '+data.revenue.remainingRevenue}</p>
-          <p>Forecast margin after labor cost: {data.laborMargin ? saved.report.currency+' '+data.laborMargin.amount : 'Unavailable'}
-            {data.laborMargin && (data.laborMargin.percent===null ? ' · Percentage unavailable for zero revenue' : ' · '+data.laborMargin.percent+'%')}</p>
+          {data.marginComparison && <>
+            <p>Remaining margin after labor cost: {marginText(data.marginComparison.remaining,saved.report.currency)}</p>
+            {!data.marginComparison.forecastCurrent && <p>Record a forecast against current evidence to compare remaining margin.</p>}
+            <p>Forecast margin after labor cost: {marginText(data.laborMargin,saved.report.currency)}</p>
+          </>}
           {saved.version>1 && <button type="button" onClick={()=>void inspect(saved.version-1)}>Previous forecast version</button>}
         </div>}
         {context.canRecordFixedFeeForecast && (!saved || saved.version===data.latestVersion) &&

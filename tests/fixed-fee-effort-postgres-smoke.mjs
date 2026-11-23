@@ -52,7 +52,7 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     assert.deepEqual(await read(identities.first),empty);
     assert.equal((await request(path.replace(monthStart,monthStart.slice(0,8)+'02'))).status,400);
-    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values']);
+    assert.deepEqual((await migrateCommercialDatabase(pool)).applied,['099_wos06_fixed_fee_work_costs','100_wos06_fixed_fee_completion_forecasts','101_wos06_fixed_fee_elapsed_values','102_wos06_fixed_fee_margin_access']);
     assert.deepEqual(await read(),{...empty,verifiedEntries:3,billableHours:'3.75',nonBillableHours:'0.75'});
     const costPath='/engagements/'+engagement.id+'/fixed-fee-costs';
     const inspect=()=>request(costPath+'?monthStart='+monthStart);
@@ -86,7 +86,10 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     const record=body=>request(forecastPath,{method:'POST',body});
     assert.equal((await record(firstCmd)).status,403);
     assert.equal((await request(forecastPath+'?through='+today,{identity:identities.reader})).status,403);
-    grants.push('commercial.fixed_fee_forecast.record');
+    const comparisonPath=forecastPath+'?through='+today+'&view=margin_reconciliation';
+    assert.equal((await request(comparisonPath)).status,403);
+    grants.push('commercial.fixed_fee_forecast.record','commercial.fixed_fee_margin.view');
+    await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_margin.view',true) on conflict(role_name,permission_key) do update set enabled=true");
     await pool.query("insert into role_permissions(role_name,permission_key,enabled) values('Admin','commercial.fixed_fee_forecast.record',true) on conflict(role_name,permission_key) do update set enabled=true");
     const costs=async()=>{
       const r=await inspect();assert.equal(r.status,200,JSON.stringify(r.body));return r.body.entries;
@@ -168,6 +171,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
       await desk.getByRole('button',{name:'Record completion forecast'}).click();
       await desk.getByText('Forecast hours versus budget: Unavailable').waitFor();
       await desk.getByText('Forecast labor cost versus budget: Unavailable').waitFor();
+      await desk.getByText('Actual margin after labor cost: Unavailable').waitFor();
+      await desk.getByText('Remaining margin after labor cost: Unavailable').waitFor();
       await desk.getByText('Forecast margin after labor cost: Unavailable').waitFor();
       await desk.getByText('Expected total revenue at completion: GBP 130.1234').waitFor();
       await desk.getByText('Estimate at completion: 10.75 hours · Labor cost Unavailable GBP').waitFor();
@@ -279,6 +284,19 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     assert.equal(positive.status,201);
     assert.deepEqual(positive.body.laborMargin,{amount:'29.0869',percent:'22.35'});
     assert.deepEqual(await marginAt(3),positive.body.laborMargin);
+    const split=async version=>(await request(comparisonPath+'&version='+version)).body.marginComparison;
+    const aligned=await split(3);
+    assert.equal(aligned.forecastCurrent,true);
+    assert.deepEqual(aligned.actual,{amount:'-68.574',percent:'-2994.50'});
+    assert.deepEqual(aligned.remaining,{amount:'97.6609',percent:'76.40'});
+    assert.deepEqual((await split(2)).remaining,{amount:'-32.4625',percent:null});
+    const priorBasis=await split(1);
+    assert.deepEqual(priorBasis,{actual:aligned.actual,remaining:null,forecastCurrent:false});
+    await pool.query("update role_permissions set enabled=false where role_name='Admin' and permission_key='commercial.fixed_fee_margin.view'");
+    assert.equal((await request(comparisonPath)).status,403);
+    assert.equal(await marginAt(3),null);
+    assert.equal((await revenue(3)).remainingRevenue,'127.8334');
+    await pool.query("update role_permissions set enabled=true where role_name='Admin' and permission_key='commercial.fixed_fee_margin.view'");
     assert.equal((await revenue(3)).remainingRevenue,'127.8334');
     const lower=await record({...makeCommand(await forecast()),view:'budget_comparison',remainingHours:'0',remainingCost:'0'});
     assert.equal(lower.status,201);
@@ -324,6 +342,8 @@ await withCommercialDatabase(async ({pool,databaseUrl})=>{
     await amendmentTransition(request,'Project',project.id,1,contract.versions[0].id,'On Hold');
     await amendmentTransition(request,'Engagement',engagement.id,1,contract.versions[0].id,'On Hold');
     assert.equal((await revenue(3)).remainingRevenue,null);
+    const incompleteSplit=await split(3);
+    assert.deepEqual([incompleteSplit.actual,incompleteSplit.remaining],[null,null]);
     const held=(await request(range)).body;
     assert.deepEqual([held.stale,held.amount,held.days[1].applicableAmount,held.days[1].retainedAmount],[1,null,null,'2.29']);
     await amendmentTransition(request,'Engagement',engagement.id,2,contract.versions[0].id);

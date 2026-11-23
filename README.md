@@ -256,3 +256,5 @@ For fixed-fee operational earned-management valuation, an authorized amendment o
 To reconcile fixed-fee elapsed-time values, select the final service day, enter the period start, and choose **Reconcile period**. Daily evidence shows the latest retained version and the currently approved amount. A total appears only when at least one day matches and all applicable days reconcile.
 
 In the fixed-fee completion forecast, inspect a work-through date to see reconciled operational earned-management revenue for the engagement through that date. Remaining revenue is the selected forecast version’s expected total less that earned amount. A negative balance means earned value exceeds the forecast. Missing or stale daily evidence withholds the balance.
+
+Grant **View fixed-fee margins** to finance users who need actual, remaining and forecast margin after labor cost. Actual margin uses reconciled elapsed-time revenue and complete labor costs through the review date. Remaining margin uses the selected forecast’s remaining revenue and labor cost when its reviewed evidence is current. Percentages require positive revenue.

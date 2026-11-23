@@ -802,3 +802,5 @@ To suspend daily valuation recording, withdraw commercial.fixed_fee_elapsed.reco
 A missing elapsed-time day requires review of the applicable service date. For a stale day, inspect the latest approval and retained version before retaining a replacement where permitted. A held or disabled day with historical value stays flagged for review. Reverting the period API and UI requires no data conversion.
 
 When the forecast revenue comparison is unavailable, check the applicable, missing and stale day counts. Inspect affected dates in the period reconciliation view. For a missing forecast amount, inspect the selected forecast version. Roll back the comparison UI and API together. The operation reads the existing valuation and forecast ledgers.
+
+Migration 102 registers commercial.fixed_fee_margin.view without assigning it to any role. Review finance access before granting it. Withdrawing the grant suspends calculated margin reporting across all fixed-fee forecast views. Preserve migration 102 and the margin permission check when reverting the comparison UI or API.
