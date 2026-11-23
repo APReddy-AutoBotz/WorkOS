@@ -284,3 +284,7 @@ In Commercial amendments, enter the expense budget in the engagement currency. P
 ### Project expense allocations
 
 After the engagement has adopted an expense budget, select a fixed-fee project in Commercial amendments and allocate part of that budget. Check allocation risk shows how many in-term projects have budgets, the total allocated and the amount still available.
+
+### Fixed-fee budget warnings
+
+In Commercial amendments, set **Budget warning (% used)** to a whole percentage from 1 to 100. After approval, **Check allocation risk** shows whether verified delivery hours or retained labor costs have reached that share of their respective budgets. Clear the field in a later amendment to disable the warning.

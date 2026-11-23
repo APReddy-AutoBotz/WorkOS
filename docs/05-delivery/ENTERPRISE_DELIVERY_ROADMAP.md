@@ -248,7 +248,7 @@ Fixed-fee forecasts retain reviewed estimates for hours, labor cost and total re
 
 For elapsed time, finance can retain daily values against the approved engagement allocation and service dates and reconcile them over a selected period. For delivery effort, finance can retain the cumulative value of verified billable and non-billable hours against the approved effort budget, capped at 100%. The forecast uses the approved policy and retained evidence for the selected date.
 
-Buyer-configured risk thresholds and alert routing remain open.
+Approved effort and labor-cost warning percentages are supported. Delivery to named risk recipients remains open.
 
 ### Fixed-fee transition review
 
@@ -265,3 +265,7 @@ Commercial managers can adopt an expense budget with the engagement amendment. F
 ### Fixed-fee project expense allocation
 
 Approved project expense allocations now reconcile to the dated engagement budget. Actual expense evidence and inclusion in margin remain open.
+
+### Buyer-configured fixed-fee budget warnings
+
+Finance can inspect dated warning states for effort and labor-cost budgets. Outstanding work includes delivery of mandatory risk notifications to the engagement owner, scoped commercial manager and finance or billing owner.

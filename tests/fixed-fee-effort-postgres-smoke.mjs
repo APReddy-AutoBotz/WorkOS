@@ -1,3 +1,4 @@
+import {budgetWarningStatus} from '../server/modules/commercial-drafting/fixed-fee-risk.mjs';
 import {verifyFeeStatement} from './support/fixed-fee-statement-journey.mjs';
 import {withLockedFeeDate,assertFeePeriodConflict} from './support/fixed-fee-period-authority.mjs';
 import {verifyFixedFeeProgress} from './support/fixed-fee-progress-journey.mjs';
@@ -12,6 +13,13 @@ import {commercialFixture, withCommercialDatabase, withCommercialMigrationsThrou
 import {seedWorkApproval, adoptStagedPolicy, submitStagedWork, readApprovalOwner, WORK_APPROVAL_BASE} from './support/work-approval-test.mjs';
 import {actualCatalog} from './support/actual-work-test.mjs';
 import {amendmentTransition,createAmendmentHierarchy, grantAmendmentPermissions, addUtcDays, seedApplicableAmendmentVersion, amendmentWorkspace, amendmentInput, amendmentPreview, amendmentApply} from './support/commercial-amendments-test.mjs';
+// Threshold decisions compare exact quantities before any presentation rounding.
+assert.equal(budgetWarningStatus('0.008','0.01','80',true),'reached');
+assert.equal(budgetWarningStatus('0.007999','0.01','80',false),'incomplete');
+assert.equal(budgetWarningStatus('0.007999','0.01','80',true),'below');
+assert.equal(budgetWarningStatus('0.0001','0','100',false),'reached');
+assert.equal(budgetWarningStatus('0','0','100',true),'below');
+assert.equal(budgetWarningStatus('0',null,'75',false),'unbudgeted');
 const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUrl})=>{
   await withCommercialMigrationsThrough(98,rootDir=>runMigrations({pool,rootDir,logger:{log(){}}}));
   const {today,identities}=await seedWorkApproval(pool);
@@ -66,6 +74,8 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
       on conflict(role_name,permission_key) do update set enabled=true`,[grants]);
     if (profile!=='elapsed') return verifyFixedFeeProgress({reduction:profile==='reduction',databaseUrl,pool,request,post,baseUrl,tokenFor,identities,contract,engagement,project,today,end,grants});
     const riskPath='/engagements/'+engagement.id+'/fixed-fee-risk?through=';
+    const warnings=()=>request(riskPath+today+'&view=budget_warnings');
+    assert.equal((await warnings()).body.budgetWarning,null);
     const expenseRisk=()=>request(riskPath+today+'&view=expense_budget');
     assert.equal((await expenseRisk()).body.expenseBudget,null);
     const risk=async()=>{
@@ -211,10 +221,13 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.equal((await request('/amendments/Contract/'+contract.id+'/preview',{method:'POST',body:{...contractTerms,expenseBudget:'9.1234'}})).status,422);
     await amendmentApply(request,'Contract',contract.id,contractTerms);
     const expenseTerms=amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{endsOn:end});
+    for (const invalid of ['0','101','80.5']) assert.equal((await request('/amendments/Engagement/'+engagement.id+'/preview',
+      {method:'POST',body:{...expenseTerms,budgetWarningPercent:invalid}})).status,400);
+    assert.equal((await request('/amendments/Engagement/'+engagement.id+'/preview',{method:'POST',body:{...expenseTerms,budgetWarningPercent:'75'}})).status,422);
     for (const invalid of ['-1','1.00001']) assert.equal((await request('/amendments/Engagement/'+engagement.id+'/preview',
       {method:'POST',body:{...expenseTerms,expenseBudget:invalid}})).status,400);
     assert.equal((await risk()).allocation,'50');
-    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{endsOn:end,budget:'70.864',expenseBudget:'9.1234',laborCostBudget:'60.5',budgetHours:'5.25',elapsedTimePolicy:'2'}));
+    const event=await amendmentApply(request,'Engagement',engagement.id,amendmentInput(await amendmentWorkspace(request,'Engagement',engagement.id),revision,{endsOn:end,budget:'70.864',expenseBudget:'9.1234',budgetWarningPercent:'80',laborCostBudget:'60.5',budgetHours:'5.25',elapsedTimePolicy:'2'}));
     const {rows:[fractions]}=await pool.query(`select array(select fixed_fee_elapsed_amount(1,2,i,3)::text from generate_series(1,3) i) thirds,
       fixed_fee_elapsed_amount(0.01,2,1,2)::text tie, fixed_fee_elapsed_amount(0.01,2,2,2)::text residual,
       fixed_fee_elapsed_amount(123.4567,3,1,1)::text single_day,
@@ -258,6 +271,8 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,-1))).body.report,null);
     assert.equal((await request(elapsedPath+'?serviceDay='+addUtcDays(today,1))).body.report,null);
     await assert.rejects(pool.query('update commercial_fixed_fee_elapsed_values set version=2 where id=$1',[firstDay.saved.id]));
+    assert.deepEqual((await warnings()).body.budgetWarning,{percent:'80',effectiveOn:today,amendmentId:event.id,effort:'reached',laborCost:'reached'});
+    assert.equal((await request(riskPath+today+'&view=budget_warnings',{identity:identities.reader})).status,403);
     const exhausted=await risk();
     assert.deepEqual(exhausted.effortBudget,{budgetHours:'5.25',verifiedHours:'4.5',remainingHours:'0.75',unresolvedEntries:0,status:'remaining'});
     assert.deepEqual([exhausted.laborCostBudget,exhausted.remainingLaborBudget,exhausted.laborBudgetStatus],['60.5','-10.364','exceeded']);
@@ -330,7 +345,9 @@ const runFixedFeeJourney=profile=>withCommercialDatabase(async ({pool,databaseUr
     assert.deepEqual([inherited.before.laborCostBudget,inherited.after.laborCostBudget],['60.5','60.5']);
     const tampered=await request('/amendments/Engagement/'+engagement.id,{method:'POST',body:{...next,budgetHours:'0',previewToken:inherited.previewToken}});
     assert.equal(tampered.status,409);
-    const futureBudget=await amendmentApply(request,'Engagement',engagement.id,{...next,expenseBudget:'0',laborCostBudget:'0',budgetHours:'0'});
+    const futureBudget=await amendmentApply(request,'Engagement',engagement.id,{...next,budgetWarningPercent:'disabled',expenseBudget:'0',laborCostBudget:'0',budgetHours:'0'});
+    assert.equal(futureBudget.budgetWarningPercent,'disabled');
+    assert.equal((await warnings()).body.budgetWarning.percent,'80');
     assert.equal(futureBudget.expenseBudget,'0');
     assert.deepEqual((await expenseRisk()).body.expenseBudget,{amount:'9.1234',amendmentId:event.id,effectiveOn:today});
     assert.equal((await request(riskPath+today+'&view=expense_budget',{identity:identities.reader})).status,403);
